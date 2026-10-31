@@ -1,13 +1,25 @@
 # esp_Net-Core
 
-Net-Core 的 C / ESP-IDF 版本。
+Net-Core 的 C / ESP-IDF 版本（ESP-IDF v6.0.3）。
 
 ## 文件
 
-- [重寫計劃](docs/rewrite-plan.md)
-- [架構流程](docs/architecture-flow.md)
-- [三層分區與 component 佈局](docs/component-layout.md)
+入口：[docs/README.md](docs/README.md)（依「你是誰」分三類）
+
+- **協議層** — [通道支援範圍](docs/01_protocol/transports.md)
+- **使用教學** — [測試方法與結果](docs/02_guides/testing.md)
+- **筆記** — [重寫計劃](docs/03_notes/rewrite-plan.md) · [執行期流程](docs/03_notes/architecture-flow.md) · [component 佈局](docs/03_notes/component-layout.md) · [記憶體管理](docs/03_notes/memory.md)
+
+## 工具
+
+```bash
+tools/flash.sh      # 燒錄（需要一次 download mode）
+tools/ota.py        # 之後都用這個更新，不需要按鍵
+tools/nc4.py        # 送單一指令
+tools/nc4_test.py   # 解碼器一致性測試
+```
 
 ## 狀態
 
-Planning / bootstrap.
+Phase A：USB composite（MSC + CDC）已通；NC4 解碼器 / 通道框架 / OTA / 記憶體原語已完成並在板上驗證。
+下一步：OTA rollback、第二條 CDC（NC4 與 log 分離）、多通道轉接頭。

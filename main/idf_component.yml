@@ -1,0 +1,4 @@
+## IDF Component Manager Manifest File
+dependencies:
+  espressif/esp_tinyusb: ^3.0.0
+  espressif/cjson: '*'

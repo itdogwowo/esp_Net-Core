@@ -1,0 +1,28 @@
+{
+  "version": 1,
+  "_comment": "出廠預置。燒進去之後這份屬於使用者；缺檔時 firmware 用內建預設，不可因此進不了 RUN。",
+  "System": {
+    "hostname": "",
+    "frame_interval_ms": 20,
+    "num_pixels": 0
+  },
+  "Buffer": {
+    "frame": {
+      "block": 512,
+      "count": 4
+    },
+    "assets": {
+      "size": 65536
+    }
+  },
+  "Network": {
+    "wifi": {
+      "enable": 0,
+      "ssid": "",
+      "ssid_pw": ""
+    }
+  },
+  "Pixel": {
+    "enable": 0
+  }
+}

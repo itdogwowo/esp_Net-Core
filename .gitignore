@@ -1,0 +1,18 @@
+# ESP-IDF
+build/
+sdkconfig
+sdkconfig.old
+managed_components/
+dependencies.lock
+.devcontainer/
+
+# 用戶管理的檔案系統鏡像（見 docs/03_notes/component-layout.md §8）
+# 只忽略根目錄的 data/；ports/<board>/data/ 是「出廠預置」，要進 git
+/data/
+
+# Python
+__pycache__/
+*.pyc
+
+# macOS
+.DS_Store

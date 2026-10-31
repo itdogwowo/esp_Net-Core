@@ -1,0 +1,21 @@
+cmake_minimum_required(VERSION 3.16)
+
+# ── 專案層（ports/）：晶片 = 一個 build，板子 = 一份 JSON ──
+set(PORT "S3/ESP32-S3-N16R8" CACHE STRING "Board port under ports/")
+set(PORT_DIR "${CMAKE_CURRENT_LIST_DIR}/ports/${PORT}")
+
+if(NOT EXISTS "${PORT_DIR}")
+    message(FATAL_ERROR "port not found: ${PORT_DIR}")
+endif()
+
+# 共通預設 → 板子覆蓋（後者勝）
+set(SDKCONFIG_DEFAULTS "${CMAKE_CURRENT_LIST_DIR}/sdkconfig.defaults")
+if(EXISTS "${PORT_DIR}/sdkconfig.defaults")
+    list(APPEND SDKCONFIG_DEFAULTS "${PORT_DIR}/sdkconfig.defaults")
+endif()
+
+set(EXTRA_COMPONENT_DIRS "${CMAKE_CURRENT_LIST_DIR}/components/sys"
+                          "${CMAKE_CURRENT_LIST_DIR}/components/app")
+
+include($ENV{IDF_PATH}/tools/cmake/project.cmake)
+project(esp_net_core)
