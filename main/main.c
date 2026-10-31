@@ -26,6 +26,7 @@
 #include "esp_chip_info.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
+#include "esp_ota_ops.h"
 #include "esp_partition.h"
 #include "esp_system.h"
 #include "esp_timer.h"
@@ -370,6 +371,77 @@ static void on_bench(nc4_ctx_t *ctx, const nc4_frame_t *f)
 
     int64_t t0;
     int64_t dt;
+
+    if (mode == 3 || mode == 4) {
+        // mode 3：先擦好 N 個 sector，再量「只寫」的時間
+        // mode 4：量 64 KB block erase（對照 4 KB sector erase）
+        const esp_partition_t *part = esp_ota_get_next_update_partition(NULL);
+        if (part == NULL) {
+            reply_json(ctx, NC4_CMD_BENCH_RSP, "{\"err\":\"no partition\"}");
+            free(payload); free(frame); nc4_decoder_destroy(dec);
+            return;
+        }
+        const size_t unit = (mode == 4) ? 0x10000 : 4096;
+        const size_t off = part->size - unit * 2;
+        char j[192];
+
+        if (mode == 4) {
+            esp_partition_erase_range(part, off, unit);
+            t0 = esp_timer_get_time();
+            for (uint32_t i = 0; i < iters; i++) {
+                esp_partition_erase_range(part, off, unit);
+            }
+            dt = esp_timer_get_time() - t0;
+            snprintf(j, sizeof(j),
+                     "{\"mode\":\"erase64k\",\"iters\":%u,\"us_per_op\":%.1f}",
+                     (unsigned)iters, (double)dt / (double)iters);
+        } else {
+            uint32_t n = iters > 8 ? 8 : iters;
+            esp_partition_erase_range(part, off, 4096 * n);   // 先擦乾淨
+            t0 = esp_timer_get_time();
+            for (uint32_t i = 0; i < n; i++) {
+                esp_partition_write(part, off + 4096 * i, payload, 4096);
+            }
+            dt = esp_timer_get_time() - t0;
+            snprintf(j, sizeof(j),
+                     "{\"mode\":\"write\",\"iters\":%u,\"us_per_op\":%.1f}",
+                     (unsigned)n, (double)dt / (double)n);
+        }
+        reply_json(ctx, NC4_CMD_BENCH_RSP, j);
+        free(payload); free(frame); nc4_decoder_destroy(dec);
+        return;
+    }
+
+    if (mode == 2) {
+        // 量 flash sector erase：對「非執行中的」OTA 分區反覆擦同一個 4KB sector
+        const esp_partition_t *part = esp_ota_get_next_update_partition(NULL);
+        if (part == NULL) {
+            reply_json(ctx, NC4_CMD_BENCH_RSP, "{\"err\":\"no partition\"}");
+            free(payload);
+            free(frame);
+            nc4_decoder_destroy(dec);
+            return;
+        }
+        const size_t off = part->size - 4096;
+        esp_partition_erase_range(part, off, 4096);   // 暖機
+        t0 = esp_timer_get_time();
+        for (uint32_t i = 0; i < iters; i++) {
+            esp_partition_erase_range(part, off, 4096);
+        }
+        dt = esp_timer_get_time() - t0;
+
+        char j[160];
+        snprintf(j, sizeof(j),
+                 "{\"mode\":\"erase\",\"size\":4096,\"iters\":%u,"
+                 "\"us_per_op\":%.1f,\"kb_s\":%.2f}",
+                 (unsigned)iters, (double)dt / (double)iters,
+                 4096.0 * (double)iters / (double)dt);
+        reply_json(ctx, NC4_CMD_BENCH_RSP, j);
+        free(payload);
+        free(frame);
+        nc4_decoder_destroy(dec);
+        return;
+    }
 
     if (mode == 1) {
         // pack：只量組包（CRC + 兩次複製），不經解碼
