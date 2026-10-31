@@ -11,7 +11,7 @@
 | **02_guides** 使用教學 | 要 build / 燒錄 / 跑測試的人 | 工具怎麼用、測試怎麼跑、數字怎麼判讀 |
 | **03_notes** 筆記 | 維護者 / 想了解設計脈絡的人 | 計劃、架構、分層、記憶體設計 |
 
-**數量**：`01_protocol` 1 份、`02_guides` 1 份、`03_notes` 4 份。
+**數量**：`01_protocol` 1 份、`02_guides` 2 份、`03_notes` 5 份。
 
 ---
 
@@ -30,9 +30,8 @@
 
 | 文件 | 內容 |
 |---|---|
+| [build_and_flash.md](02_guides/build_and_flash.md) | **建置與燒錄**：IDF v6.0.3 安裝、macOS 26 的兩個地雷（libexpat / pip truststore）、`app-flash` vs `flash`、疑難排解 |
 | [testing.md](02_guides/testing.md) | **測試方法與結果**：環境、9 個解碼器 case、benchmark 怎麼打、OTA 怎麼推、怎麼重跑、未測清單、紀錄表 |
-
-> 待補：`build_and_flash.md`（IDF v6 安裝、`app-flash` vs `flash`、data 分區的注意事項）。
 
 ---
 
@@ -43,7 +42,8 @@
 | [rewrite-plan.md](03_notes/rewrite-plan.md) | **重寫計劃**：背景、已定案、非目標、Phase 0–5、開放決策 |
 | [architecture-flow.md](03_notes/architecture-flow.md) | **執行期流程**：mode 決策、NC4 檔案編輯、frame pipeline、ownership matrix |
 | [component-layout.md](03_notes/component-layout.md) | **三層分區與 component 佈局**：hw/sys/sw/action/tasks/ui/schema 七區、`ports/` 專案層、依賴方向 |
-| [memory.md](03_notes/memory.md) | **記憶體管理**：pool / arena 兩種壽命、三種 heap class、為什麼熱路徑不 malloc、緩衝能不能靠 config 改 |
+| [memory.md](03_notes/memory.md) | **記憶體原語**：pool / arena 兩種壽命、三種 heap class、為什麼熱路徑不 malloc、緩衝能不能靠 config 改 |
+| [buffer-manager.md](03_notes/buffer-manager.md) | **緩衝管理器（設計定案、未實作）**：三階段 declare→commit→take、四種機制、三層 tier、撇除規則、S3 記憶體圖、P0–P4 分期、待決事項。**接手實作先讀這份** |
 
 ---
 

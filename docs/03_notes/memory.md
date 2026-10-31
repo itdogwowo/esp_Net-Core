@@ -1,7 +1,12 @@
-# 記憶體管理
+# 記憶體管理（原語層）
 
 > 原則：**熱路徑不 malloc。** 會隨時間反覆發生的東西（幀、封包、DMA 緩衝）用 pool；
 > 一次配、一次放的東西（assets、config、解析結果）用 arena。
+
+> 📌 **本文件只講兩個原語（pool / arena）與它們的壽命。**
+> 完整的「緩衝管理器」設計（宣告 → 提交 → 撇除 → token、四種機制、三層 tier、S3 記憶體圖、分期計畫）
+> 在 **[buffer-manager.md](buffer-manager.md)**。兩者的關係：
+> `memory.md` 是「記憶體怎麼持有」，`buffer-manager.md` 是「誰在什麼時候拿到哪一塊」。
 
 ---
 
@@ -34,16 +39,21 @@
 
 ## 3. 燈效為什麼一定要 pool
 
-一幀 = `px × 3 B`。676 px ≈ 2 KB。管線需要同時存在：
+**canonical 幀 = `px × 4 B`（R, G, B, W）。** 676 px = 2,704 B ≈ 2.6 KB。
+（3 B/px 是 WS2812 的**線材格式**，在輸出階段才轉；canonical 一律 4 B，這樣同一塊緩衝可以餵
+WS2812 / APA102 / PCA9685，換面板時上層不用改。）
 
-| 用途 | 塊數 |
+管線需要同時存在：
+
+| 角色 | 塊數 |
 |---|---|
-| compute 正在寫的 N+1 | 1 |
-| output 正在送的 N | 1 |
-| 上一幀（重播用） | 1 |
-| 餘裕 | 1 |
+| compute 正在寫的（BACK） | 1 |
+| 算完待送（READY） | 1 |
+| output 正在送（FRONT） | 1 |
+| 上一幀（LAST，逾時重播用） | 1 |
 
-→ `nc_mem_pool_create("frame", NC_MEM_DMA, 676*3, 4)`，之後每幀只是 `get` / `put`，**一次配置都沒有**。
+→ `nc_mem_pool_create("frame", NC_MEM_DMA, px*4, 4)`，之後每幀只是指標轉手，**一次配置都沒有**。
+四個角色的狀態機見 [buffer-manager.md](buffer-manager.md) §6。
 
 而 effect 的參數、mapping、mode 表屬於「reload 才換」的東西 → `arena`，`ASSET_RELOAD` 時整塊 reset，不用逐項 free（也就不會漏）。
 
@@ -59,14 +69,28 @@
 
 ---
 
-## 5. 現況
+## 5. 現況（2026-10-31）
 
 | 元件 | 狀態 |
 |---|---|
 | `nc_mem_pool_create / get / put / stats` | ✅ 已實作 |
 | `nc_mem_arena_create / alloc / reset` | ✅ 已實作 |
+| `nc_mem_cfg`（從 config.json 讀 Buffer 段、夾上限） | ✅ 已實作 |
 | 開機煙霧測試 | ✅ main 取一塊再還回去，印 count/used/peak |
-| 幀 pool 的實際尺寸 | ⏳ 等每節點像素數拍板 |
+| 計劃／宣告／撇除／token | ❌ 未實作 → [buffer-manager.md](buffer-manager.md) |
+| handoff / ring / queue / snapshot | ❌ 未實作 |
+| lease / baseline verify | ❌ 未實作 |
+
+### 已知問題（要修）
+
+| # | 問題 | 後果 |
+|---|---|---|
+| 1 | `frame.block` 預設 **512 B** | 一幀 2,704 B，**這個 pool 連一幀都放不下** |
+| 2 | `pool_get(pool, ms)` 內部 `vTaskDelay(1ms)` | 熱路徑用非 0 timeout → 掉幀變多毫秒卡頓 |
+| 3 | 沒有 owner / generation | 忘 `put` → 「跑幾分鐘 pool 空了」，查不出是誰 |
+| 4 | `Buffer.frame.block` 與 `System.num_pixels` 是兩套來源 | 改 px 不會改 block → 靜默壞掉 |
+| 5 | `block_size` 只 4-byte 對齊 | DMA / cache line 建議 32 |
+| 6 | cJSON 解析發生在 carve 之前 | 吃掉一點 `largest_free_block`（量小） |
 
 ---
 
