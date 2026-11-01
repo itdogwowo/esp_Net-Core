@@ -1,0 +1,13 @@
+{
+  "_comment": "硬體事實。改這裡 = 要重新 build；runtime 可改的（gpio、服務開關）放 data/config.json。",
+  "name": "ESP32-S3-N16R8",
+  "chip": "esp32s3",
+  "flash": { "size_mb": 16, "freq_mhz": 80, "mode": "dio" },
+  "psram": { "size_mb": 8, "mode": "octal", "speed_mhz": 80 },
+  "cpu_mhz": 160,
+  "console": "usb-serial-jtag",
+  "profiles": [],
+  "features": { "eth": null, "wifi": true, "usb": true },
+  "verified": "2026-11-02",
+  "notes": "Phase A：USB composite（MSC + CDC）。S3 的 USB-OTG 與 USB-Serial-JTAG 共用同一個 PHY，只能二選一。"
+}

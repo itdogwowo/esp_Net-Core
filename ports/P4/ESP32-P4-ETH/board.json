@@ -1,0 +1,13 @@
+{
+  "_comment": "硬體事實。改這裡 = 要重新 build；runtime 可改的（gpio、服務開關）放 data/config.json。",
+  "name": "ESP32-P4-ETH",
+  "chip": "esp32p4",
+  "flash": { "size_mb": 32, "freq_mhz": 40, "mode": "dio" },
+  "psram": { "size_mb": 32, "mode": "hex", "speed_mhz": 200 },
+  "cpu_mhz": 360,
+  "console": "uart0",
+  "profiles": ["eth-rmii", "nc4-ws", "nc4-udp"],
+  "features": { "eth": "rmii-ip101", "wifi": false, "usb": false },
+  "verified": "2026-11-02",
+  "notes": "rev1.3 / ECO2 樣品。flash 只能 40 MHz、CPU 上限 360 MHz（400 → 開機迴圈）。console 必須 UART0，USB-Serial/JTAG console 會讓 bootloader 卡死。"
+}

@@ -1,0 +1,5 @@
+# 能力碎片：NC4 over WebSocket
+#
+# 沒有這個 CONFIG，transport/ws_nc4.c 會編成 stub（回 ESP_ERR_NOT_SUPPORTED），
+# 不會編不過——但 WS 通道就不能用。
+CONFIG_HTTPD_WS_SUPPORT=y

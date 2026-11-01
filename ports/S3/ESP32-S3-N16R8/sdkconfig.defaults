@@ -1,0 +1,21 @@
+# ESP32-S3-N16R8 — 硬體事實（改這裡要重新 build）
+# 對應 board.json；tools/board.py check 會驗證兩者一致。
+# 這塊板子沒有啟用任何能力碎片（no ETH / no WS / no UDP）。
+
+# ── flash（N16R8 = 16 MB）──
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+CONFIG_ESPTOOLPY_FLASHFREQ_80M=y
+CONFIG_ESPTOOLPY_FLASHMODE_DIO=y
+
+# ── PSRAM（N16R8 = Octal 8 MB @ 80 MHz）──
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_OCT=y
+CONFIG_SPIRAM_SPEED_80M=y
+
+# ── CPU ──
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_160=y
+
+# ── console：bring-up 走 USB-Serial-JTAG ──
+# S3 的 USB-OTG 與它共用同一個 PHY，只能二選一；
+# 要改成 TinyUSB CDC console 時換成 CONFIG_ESP_CONSOLE_USB_CDC=y。
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y

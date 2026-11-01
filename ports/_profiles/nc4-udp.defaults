@@ -1,0 +1,6 @@
+# 能力碎片：NC4 over UDP
+#
+# 預設 6 則的 recv mailbox 在 burst 時會掉包。
+# 注意：**不要**開 IP 分段/重組（實測 8 KB datagram 會吃光 pbuf pool，
+# 讓整個 UDP 收發崩掉，見 docs/02_guides/testing.md §2.16）。datagram 請留在 MTU 以內。
+CONFIG_LWIP_UDP_RECVMBOX_SIZE=32
