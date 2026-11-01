@@ -84,7 +84,7 @@ components/sys/
   config/         config.json → nc_net_cfg_t
 components/sys/tasks/
   net_task.c      （可選）用 nc_task 註冊引擎，取代 main.c 直接 xTaskCreate
-main/main.c       ← 只剩裝配：declare → commit → registry_add → decode_start
+firmware/main/main.c       ← 只剩裝配：declare → commit → registry_add → decode_start
 ```
 
 ### 4.2 API（新）— 全部用 ID，物件不進陣列
@@ -300,7 +300,7 @@ nc_plan_declare(&(nc_plan_decl_t){
 | **P4** | `0x1101 keys=net` + `nc_task` 分層（transport L0 / 引擎 L1） | 正式 status 看得到歸屬與 bus 清單 |
 | **P5** | S3 實機（CDC PULL）+ 10 分鐘 soak | 兩塊板都穩 |
 | **P6** | **slot 數／大小調參**：`slots ∈ {2,4,8}` × `slot_size ∈ {1K,4K,8K}` 各跑 16 MB，看吞吐／`copied`／`us_per_frame`／記憶體 | 產出一張「哪種線用幾格多大」的表，寫回本文件 |
-| ~~**P7**~~ | ✅ **WS 第一版已完成**（`components/sys/transport/ws_nc4.c`）：訊息即一幀、直接在 httpd buffer 上解析、`0x1101` 可查 | 10 項測試全過；吞吐 8K 4.05 MB/s（見 testing §2.15） |
+| ~~**P7**~~ | ✅ **WS 第一版已完成**（`firmware/components/sys/transport/ws_nc4.c`）：訊息即一幀、直接在 httpd buffer 上解析、`0x1101` 可查 | 10 項測試全過；吞吐 8K 4.05 MB/s（見 testing §2.15） |
 
 P0 是純結構重構：**不改任何行為、不改任何數字**。跑掉就退回。
 

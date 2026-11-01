@@ -6,6 +6,23 @@
 
 ---
 
+## 0. 先分清楚：哪些能寫進 config.json，哪些不能
+
+這份文件講的是 **L3（執行期）**。但在寫任何一行 config 之前，先確認它屬於哪一層：
+
+| 層 | 內容 | 能不能用 config.json 換 | 放哪 |
+|---|---|---|---|
+| **L1 硬體事實** | flash 大小 / 頻率 / 模式、PSRAM、CPU 頻率、有冇 Ethernet、console | ❌ **永遠不行**（bootloader / 記憶體初始化就決定了） | `ports/<chip>/<board>/board.json` + `sdkconfig.defaults` |
+| **L2 能力碎片** | ETH、NC4 over WS、NC4 over UDP | ❌ 要重新 build | `ports/_profiles/*.defaults` |
+| **L3 執行期** | gpio、服務開關、像素數、網路位址 | ✅ 同一份 binary | `data/config.json` |
+
+判準：**換了它，需不需要重新燒 firmware？** 需要 → L1/L2；不需要 → L3。
+`tools/board.py check` 會擋下「把 L1 寫進 config.json」。
+
+下面講的都是 L3 的 schema。板子層怎麼運作見 [ports/README.md](../../ports/README.md)。
+
+---
+
 ## 1. 兩個世界，不要混
 
 | 世界 | 是什麼 | 誰啟動 | 有生命週期嗎 |
@@ -156,7 +173,7 @@ for each link in Network.nc4.links:
 
 | 層 | 現在 | 目標 |
 |---|---|---|
-| config 載入 | ❌ 沒有（用程式常數 + NVS） | `components/sys/config/`：cJSON → `nc_cfg_t` |
+| config 載入 | ❌ 沒有（用程式常數 + NVS） | `firmware/components/sys/config/`：cJSON → `nc_cfg_t` |
 | 硬體 | `main.c` 直接寫死（ETH 的 GPIO、UART 腳位） | `ports/<board>` 提供預設，config 覆蓋 |
 | NC4 通道 | `main.c` 的 `tcp_nc4_*`（P4-only） | `sys/transport/` + `Network.nc4.links` |
 | 資源 | `nc_plan`（5 項）＋ 插槽 `calloc` | 全部走 plan（含 slots） |

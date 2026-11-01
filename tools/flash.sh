@@ -16,7 +16,8 @@
 set -euo pipefail
 
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-cd "$PROJECT_DIR"
+# ESP-IDF 工程本體在 firmware/
+cd "$PROJECT_DIR/firmware"
 
 : "${IDF_PATH:?請先 source \$IDF_PATH/export.sh}"
 command -v idf.py >/dev/null || { echo "找不到 idf.py"; exit 1; }

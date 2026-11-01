@@ -3,7 +3,7 @@
 > **用途**：esp_Net-Core 的緩衝區管理完整設計 —— 目標、現況、架構、四種機制、三層 tier、撇除規則、S3 記憶體實測、分期計畫、待決事項。
 > **對象**：要接手實作的人（含未來的自己）；要 review「為什麼不直接用 malloc」的人。
 > **狀態**：**設計定案、尚未實作**。現有程式碼只有 pool / arena 兩個原語（見 §2）。
-> **相關**：[memory.md](memory.md)（原語與壽命）、[architecture-flow.md](architecture-flow.md)（執行期流程）、[component-layout.md](component-layout.md)（分區）、[rewrite-plan.md](rewrite-plan.md)（分期）
+> **相關**：[memory.md](memory.md)（原語與壽命）、[architecture-flow.md](architecture-flow.md)（執行期流程）、[component-layout.md](component-layout.md)（分區）、[roadmap.md](../00_pm/roadmap.md)（分期）
 
 ---
 
@@ -13,7 +13,7 @@
 
 1. 定 `nc_mem_decl_t` / `nc_mem_token_t` / `nc_tier_t`
 2. 寫 `nc_mem_declare()` / `nc_mem_commit()`（含排序、加總、撇除、印表）
-3. 寫 `tools/plan_test`（host 編譯，餵 N 組 config，印總量）
+3. 寫 `tools/hosttest/plan_test`（host 編譯，餵 N 組 config，印總量）
 
 板上只要做一件事：`heap_caps_print_heap_info(MALLOC_CAP_INTERNAL)`，把 `free` / `largest` 貼回 §10，把 cap 填成實測值。
 
@@ -46,9 +46,9 @@ MicroPython 的「動態記憶體」是 GC heap，不是 buffer manager：大小
 
 | 檔案 | 內容 | 行數 |
 |---|---|---|
-| `components/sys/mem/nc_mem.c/h` | **POOL**：`create / get / put / stats`，free list + 臨界區，`heap_caps_aligned_alloc` 一次要 `block × count`<br>**ARENA**：`create / alloc / reset / used / size`，bump | ~213 |
-| `components/sys/mem/nc_mem_cfg.c/h` | 讀 `config.json` 的 `"Buffer"`：`frame.block` / `frame.count` / `assets.size`；clamp 32 KB / 8 / 512 KB | ~90 |
-| `main/main.c` | 建 frame pool（512 B × 4）＋ asset arena（64 KB PSRAM）＋ 開機煙霧測試 | — |
+| `firmware/components/sys/mem/nc_mem.c/h` | **POOL**：`create / get / put / stats`，free list + 臨界區，`heap_caps_aligned_alloc` 一次要 `block × count`<br>**ARENA**：`create / alloc / reset / used / size`，bump | ~213 |
+| `firmware/components/sys/mem/nc_mem_cfg.c/h` | 讀 `config.json` 的 `"Buffer"`：`frame.block` / `frame.count` / `assets.size`；clamp 32 KB / 8 / 512 KB | ~90 |
+| `firmware/main/main.c` | 建 frame pool（512 B × 4）＋ asset arena（64 KB PSRAM）＋ 開機煙霧測試 | — |
 
 三種 heap class 已分好：`NC_MEM_DMA` / `NC_MEM_INTERNAL` / `NC_MEM_PSRAM`。
 
@@ -349,7 +349,7 @@ if (want > have) { shed_until(want <= have); }
 
 | 階段 | 內容 | 估算 | 驗收 |
 |---|---|---|---|
-| **P0** | `nc_mem_decl_t` / `token` / `tier`；`declare / commit / shed / dump`；`tools/plan_test`（host） | ~330 行 | Mac 上跑 500 組 config（含邊界）全過；印出每組總量與撇除結果 |
+| **P0** | `nc_mem_decl_t` / `token` / `tier`；`declare / commit / shed / dump`；`tools/hosttest/plan_test`（host） | ~330 行 | Mac 上跑 500 組 config（含邊界）全過；印出每組總量與撇除結果 |
 | **P1** | `try_get`、`used()`、block header（magic/owner/seq）、32 B 對齊、carve | ~140 行 | 開機印 plan 表；1 小時 `fails=0` |
 | **P2** | `handoff`（4 角色）、`ring`、`lease` / `baseline` / `reaper` | ~370 行 | consumer 故意慢 10×：producer 不掉速、`dropped` 增加、canary 無撕裂；互換 core 行為不變 |
 | **P3** | `queue`（含關聯 ID）、`snapshot` | ~230 行 | 跨核請求/回覆不遺失；讀 config 不會讀到半套 |

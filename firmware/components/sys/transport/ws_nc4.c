@@ -274,7 +274,7 @@ size_t ws_nc4_json(char *buf, size_t cap)
 
 httpd_handle_t ws_nc4_httpd(void)
 {
-    return s_server;
+    return NULL;   /* 沒開 WS 支援時沒有可共用的 server */
 }
 
 esp_err_t ws_nc4_start(nc4_decoder_t *decoder, uint16_t port)

@@ -2,10 +2,10 @@
 """NC4 over WebSocket 全套測試
 
 用法:
-    tools/ws_nc4_test.py                 # 全部跑
-    tools/ws_nc4_test.py --suite basic   # 連線 / RTT / 連續指令
-    tools/ws_nc4_test.py --suite bench   # 吞吐（1K / 4K / 8K）
-    tools/ws_nc4_test.py --suite edge    # 碎片 / 垃圾 / 過大 / 重連 / 並存
+    tools/bench/ws_nc4_test.py                 # 全部跑
+    tools/bench/ws_nc4_test.py --suite basic   # 連線 / RTT / 連續指令
+    tools/bench/ws_nc4_test.py --suite bench   # 吞吐（1K / 4K / 8K）
+    tools/bench/ws_nc4_test.py --suite edge    # 碎片 / 垃圾 / 過大 / 重連 / 並存
 
 需要: pip install websocket-client
 """

@@ -12,9 +12,9 @@
 //   --bad  <module.wasm>   試著載入壞模組，驗證「被拒絕、舊的繼續跑」
 //
 // 用法：
-//   node tools/fx_poc/host.mjs tools/fx_poc/fx.wasm [--frames 240] [--ppm out.ppm]
-//   node tools/fx_poc/host.mjs tools/fx_poc/fx.wasm --swap tools/fx_poc/fx2.wasm --at 120
-//   node tools/fx_poc/host.mjs tools/fx_poc/fx.wasm --bad  tools/fx_poc/fxbad.wasm --at 120
+//   node tools/poc/fx_poc/host.mjs tools/poc/fx_poc/fx.wasm [--frames 240] [--ppm out.ppm]
+//   node tools/poc/fx_poc/host.mjs tools/poc/fx_poc/fx.wasm --swap tools/poc/fx_poc/fx2.wasm --at 120
+//   node tools/poc/fx_poc/host.mjs tools/poc/fx_poc/fx.wasm --bad  tools/poc/fx_poc/fxbad.wasm --at 120
 //
 // 這個檔案刻意零依賴（只用 node 內建的 WebAssembly）。
 

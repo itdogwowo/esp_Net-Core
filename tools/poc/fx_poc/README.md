@@ -1,25 +1,25 @@
 # fx_poc — 效果模組 ABI 的 host 參考實作
 
 在 Mac 上驗證「host ↔ 燈效模組」的呼叫約定，**不需要板子**。設計理由與選型見
-[docs/03_notes/effect-language.md](../../docs/03_notes/effect-language.md)。
+[docs/03_notes/effect-language.md](../../../docs/03_notes/effect-language.md)。
 
 ```bash
-node tools/fx_poc/host.mjs tools/fx_poc/fx.wasm --frames 120 --ppm /tmp/frame.ppm
+node tools/poc/fx_poc/host.mjs tools/poc/fx_poc/fx.wasm --frames 120 --ppm /tmp/frame.ppm
 ```
 
 ## 三個情境（就是「分離式固件」的三個必要條件）
 
 ```bash
 # ① 跑一個效果
-node tools/fx_poc/host.mjs tools/fx_poc/fx.wasm --frames 120
+node tools/poc/fx_poc/host.mjs tools/poc/fx_poc/fx.wasm --frames 120
 
 # ② 第 120 幀換成另一份檔案（不重啟、不重配記憶體、不重算佈局）
-node tools/fx_poc/host.mjs tools/fx_poc/fx.wasm --frames 240 \
-     --swap tools/fx_poc/fx2.wasm --at 120
+node tools/poc/fx_poc/host.mjs tools/poc/fx_poc/fx.wasm --frames 240 \
+     --swap tools/poc/fx_poc/fx2.wasm --at 120
 
 # ③ 換成壞檔案 → 被拒絕，舊的繼續跑（不變磚）
-node tools/fx_poc/host.mjs tools/fx_poc/fx.wasm --frames 240 \
-     --bad tools/fx_poc/fxbad.wasm --at 120
+node tools/poc/fx_poc/host.mjs tools/poc/fx_poc/fx.wasm --frames 240 \
+     --bad tools/poc/fx_poc/fxbad.wasm --at 120
 ```
 
 ![換檔前後](frame.png)
@@ -37,9 +37,9 @@ node tools/fx_poc/host.mjs tools/fx_poc/fx.wasm --frames 240 \
 重編 `.wasm`（只有改了 `.wat` 才需要）：
 
 ```bash
-npx wat2wasm tools/fx_poc/fx.wat   -o tools/fx_poc/fx.wasm
-npx wat2wasm tools/fx_poc/fx2.wat  -o tools/fx_poc/fx2.wasm
-npx wat2wasm tools/fx_poc/fxbad.wat -o tools/fx_poc/fxbad.wasm
+npx wat2wasm tools/poc/fx_poc/fx.wat   -o tools/poc/fx_poc/fx.wasm
+npx wat2wasm tools/poc/fx_poc/fx2.wat  -o tools/poc/fx_poc/fx2.wasm
+npx wat2wasm tools/poc/fx_poc/fxbad.wat -o tools/poc/fx_poc/fxbad.wasm
 ```
 
 ## ABI v0

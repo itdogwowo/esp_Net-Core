@@ -1,0 +1,19 @@
+{
+  "_comment": "make.py 的預設設定。所有值都可以被命令列覆蓋。",
+  "default_board": null,
+  "build": {
+    "jobs": null,
+    "archive": true,
+    "doctor": true,
+    "output_dir": "artifacts",
+    "keep": 10
+  },
+  "idf": {
+    "path": null,
+    "per_chip": {}
+  },
+  "serial": {
+    "port": null,
+    "baud": 115200
+  }
+}

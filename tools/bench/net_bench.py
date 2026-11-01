@@ -5,8 +5,8 @@
 上傳（ESP→PC, port 5001/5002）：PC 送 "GO <bytes>"，裝置全力送出
 
 用法:
-  python3 tools/net_bench.py --host 10.10.1.50 --dl 16 --ul 16
-  python3 tools/net_bench.py --host 10.10.1.50 --dual 16     # 兩條上傳同時跑
+  python3 tools/bench/net_bench.py --host 10.10.1.50 --dl 16 --ul 16
+  python3 tools/bench/net_bench.py --host 10.10.1.50 --dual 16     # 兩條上傳同時跑
 """
 import argparse, socket, threading, time
 

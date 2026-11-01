@@ -1,8 +1,12 @@
 # esp_Net-Core — 分層、component 與專案佈局
 
-> 狀態：定案（對應 `rewrite-plan.md` Phase 1 的專案骨架）
+> 狀態：定案（對應 `../00_pm/roadmap.md` Phase 1 的專案骨架）
 > 原則：**程式分七區、專案分 ports；箭頭只能向下。**
-> 相關：`architecture-flow.md`（執行期流程）、`rewrite-plan.md`（分期）
+> 相關：`architecture-flow.md`（執行期流程）、`../00_pm/roadmap.md`（分期）
+
+> ⚠️ **這份寫的是終點，不是現況。** 目前只落地 `sys/` 與 `app/` 兩區；
+> `hw` / `sw` / `action` / `tasks` / `ui` / `schema` 尚未建立，指令 handler 仍在
+> `firmware/main/main.c`。看目錄時請以 §3 的 ✅ / ⬜ 標記為準。
 
 ---
 
@@ -47,24 +51,31 @@ schema ──► sys/nc4
 
 ## 3. 目錄
 
+✅ = 已落地　⬜ = 目標，還沒建立
+
 ```text
 esp_Net-Core/
-├─ CMakeLists.txt
-├─ main/main.c                     # 只讀起來像裝配清單
-├─ components/
-│  ├─ hw/      apa102/  pca9685/  motor_uart/  tft/  touch/  xl9555/
-│  ├─ sys/     nc4/  config/  store/  bus/  transport/  pipeline/  log/  time/
-│  ├─ sw/      effect_core/  pixel_math/  pixel_layout/  pixel_controller/
-│  ├─ action/  file_cmds/  pixel_cmds/  sys_cmds/  status_cmds/  ...
-│  ├─ tasks/   pixel_task/  net_task/  schedule_task/
-│  ├─ ui/      pages/
-│  └─ schema/  （生成物）
-├─ ports/                          # 專案層（見 §4）
-│  ├─ S3/ESP32-S3-Matrix/{data/, sdkconfig.defaults?, partitions.csv?}
-│  ├─ P4/…  C6/…
-├─ data/                           # 不進 git：用戶 FS 的鏡像（見 §8）
-└─ tools/                          # 主機端：golden vectors、PC client
-   └─ fixtures/                    # 進 git：測試樣本
+├─ docs/                              # 文件層：00_pm / 01_protocol / 02_guides / 03_notes
+├─ firmware/                          # ★ ESP-IDF 工程根（idf.py 在這裡跑）
+│  ├─ CMakeLists.txt                  #   PORT 選擇、sdkconfig 疊層、EXTRA_COMPONENT_DIRS
+│  ├─ main/main.c                     #   ✅ 目前 = 裝配 + 尚未拆出的 handler
+│  ├─ components/
+│  │  ├─ sys/                         # ✅ nc4/ mem/ tasks/ transport/
+│  │  ├─ app/                         # ✅ ota/
+│  │  ├─ hw/                          # ⬜ apa102/ pca9685/ motor_uart/ tft/ touch/ xl9555/
+│  │  ├─ sw/                          # ⬜ effect_core/ pixel_math/ pixel_layout/ pixel_controller/
+│  │  ├─ action/                      # ⬜ file_cmds/ pixel_cmds/ sys_cmds/ status_cmds/ …
+│  │  ├─ tasks/                       # ⬜ pixel_task/ net_task/ schedule_task/
+│  │  ├─ ui/                          # ⬜ pages/
+│  │  └─ schema/                      # ⬜ （生成物）
+│  ├─ sdkconfig.defaults              #   晶片層建置配置
+│  └─ partitions.csv                  #   分割表
+├─ ports/                             # 專案層（見 §4）
+│  ├─ S3/ESP32-S3-N16R8/              #   data/config.json
+│  └─ P4/ESP32-P4-ETH/                #   sdkconfig.defaults、data/config.json
+├─ tools/                             # 主機端：board.sh、clients、bench/、hosttest/、poc/
+│  └─ poc/fx_poc/                     #   效果模組 ABI 的 host 參考實作
+└─ data/                              # 不進 git：用戶 FS 的鏡像（見 §8）
 ```
 
 ---
@@ -109,7 +120,7 @@ fatfs_create_partition_image(data ${CMAKE_CURRENT_LIST_DIR}/data FLASH_IN_PROJEC
 | 既有 | C 版 |
 |---|---|
 | `lib/hw/` | `components/hw/` |
-| `lib/sys/` | `components/sys/` |
+| `lib/sys/` | `firmware/components/sys/` |
 | `lib/sw/` | `components/sw/` |
 | `action/` | `components/action/` |
 | `tasks/` | `components/tasks/` |

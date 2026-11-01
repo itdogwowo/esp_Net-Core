@@ -241,7 +241,7 @@ fx->ops->render(fid, t_us, 0, px);
 | # | 做什麼 | 驗收 | 時間 |
 |---|---|---|---|
 | **M1** | `.fxe` 格式 + `tools/fx.py pack`（host 端） | `fx.py pack` 產出檔，`fx.py dump` 印得出欄位 | 0.5 天 |
-| **M2** | host 端載入器（node，就是 `tools/fx_poc/`） | 換檔、壞檔拒絕，兩個 checksum 不同 | 已做 |
+| **M2** | host 端載入器（node，就是 `tools/poc/fx_poc/`） | 換檔、壞檔拒絕，兩個 checksum 不同 | 已做 |
 | **M3** | 板上載入器（C + WAMR interp） | 同一個 `.wasm` 上板，checksum 與 host 相同 | 2–3 天 |
 | **M4** | 交換語義（原子指標 + 兩幀後釋放） | 邊跑邊換 20 次，不掉幀、不漏記憶體 | 1 天 |
 | **M5** | AOT（wamrc + target 檢查） | 同畫面、≤ 2 ms/幀 | 1 天 |

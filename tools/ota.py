@@ -2,8 +2,8 @@
 """把 firmware 透過 NC4 OTA（0x22xx）推上板子 —— 不需要 download mode、不需要按鍵。
 
 用法：
-    tools/ota.py --port /dev/cu.usbmodem* build/esp_net_core.bin
-    tools/ota.py --port /dev/cu.usbmodem* build/esp_net_core.bin --no-apply   # 只驗證不切換
+    tools/ota.py --port /dev/cu.usbmodem* firmware/build/esp_net_core.bin
+    tools/ota.py --port /dev/cu.usbmodem* firmware/build/esp_net_core.bin --no-apply   # 只驗證不切換
 
 流程照 slave/schema/ota.json：
     0x2201 OTA_BEGIN  image_size(u32) chunk_size(u16) sha256(32B) fw_ver(str)

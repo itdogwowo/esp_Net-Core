@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """一次跑完所有性能測試（P4 乙太網 + NC4）
 
-    tools/bench_all.py                 # 只量現在的設定
-    tools/bench_all.py --mode push     # 改成 PUSH + 零複製 → 重開機 → 量
-    tools/bench_all.py --mode pull     # 改成 PULL（同核）
-    tools/bench_all.py --mode push-slot# PUSH 但走舊的兩次複製
-    tools/bench_all.py --mb 16 --json out.json
+    tools/bench/bench_all.py                 # 只量現在的設定
+    tools/bench/bench_all.py --mode push     # 改成 PUSH + 零複製 → 重開機 → 量
+    tools/bench/bench_all.py --mode pull     # 改成 PULL（同核）
+    tools/bench/bench_all.py --mode push-slot# PUSH 但走舊的兩次複製
+    tools/bench/bench_all.py --mb 16 --json out.json
 
 會依序量：
     A. 純 TCP：下載單/雙、上傳單/雙、全雙工

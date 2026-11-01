@@ -2,9 +2,9 @@
 """0xF007 NC4 上傳（打包 + 送出）量測 —— device → PC
 
 用法:
-    tools/nc4_tx_bench.py                       # 2000 × 8 KB，同核（預設）
-    tools/nc4_tx_bench.py --mode split          # 分核：core1 打包、core0 送出
-    tools/nc4_tx_bench.py --frames 2000 --size 8192 --repeat 3
+    tools/bench/nc4_tx_bench.py                       # 2000 × 8 KB，同核（預設）
+    tools/bench/nc4_tx_bench.py --mode split          # 分核：core1 打包、core0 送出
+    tools/bench/nc4_tx_bench.py --frames 2000 --size 8192 --repeat 3
 
 每跑一次，裝置會「打包 N 幀並全部送出」，PC 端收完 N × (13+size) bytes 後
 才會收到 0xF004 的統計。兩邊的速率都會印出來：

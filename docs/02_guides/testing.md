@@ -298,7 +298,7 @@ reader: read_begin  → 驗 counter 與 canary 一致 → read_end
 回覆（`0xF004`）除了 `iters/read/us/per_sec/torn`，另外帶 `w`（commit 次數）、`w_full`、
 `r_null`、`exit`（1=完成 2=逾時 3=等不到 start）—— `read=0` 時靠這幾個欄位分辨是哪一邊沒動。
 
-工具：`tools/hub_bench.py --iters N [--repeat N] [--late]`。
+工具：`tools/bench/hub_bench.py --iters N [--repeat N] [--late]`。
 
 ### 結果：S3（2026-11-01，HZ=100）
 
@@ -451,7 +451,7 @@ UART 灌 3000 幀（231 KB @ 3 Mbaud，線路時間約 0.77 s），同時每 ~10
 
 ## 2.11 ESP32-P4 乙太網吞吐（純 TCP，不含 NC4）
 
-詳見 [p4-bringup.md](../03_notes/p4-bringup.md)。工具：`tools/net_bench.py`。
+詳見 [p4-bringup.md](../03_notes/p4-bringup.md)。工具：`tools/bench/net_bench.py`。
 
 | 項目 | 數值 |
 |---|---|
@@ -469,7 +469,7 @@ UART 灌 3000 幀（231 KB @ 3 Mbaud，線路時間約 0.77 s），同時每 ~10
 
 ## 2.12 NC4 over 乙太網（ESP32-P4）
 
-工具：`tools/nc4_tcp.py --host <ip>`（port 6000）。兩種收斂模式（NVS `net/rx_split`）：
+工具：`tools/bench/nc4_tcp.py --host <ip>`（port 6000）。兩種收斂模式（NVS `net/rx_split`）：
 
 | 模式 | 誰讀 socket | 解析 |
 |---|---|---|
@@ -618,7 +618,7 @@ RX task（core1）              decode task（core0）
 - 表頭不合法 → 9 B 視窗滑 1 byte 重新對齊（每次 9 B memmove）。
 - 新 API：`nc4_header_total()`、`nc4_parser_frame()`、`nc4_bus_frame_begin/end()`、`nc4_bus_kick()`。
 - 開關：NVS `net/frame_align`（預設 1）。
-- 統計：`0xF008 BUS_STATS`（`tools/nc4_stats.py`），`copied` 就是「為了交給 parser 做的 memcpy」。
+- 統計：`0xF008 BUS_STATS`（`tools/bench/nc4_stats.py`），`copied` 就是「為了交給 parser 做的 memcpy」。
 
 ### 效果（同一份韌體、16 MB、8 KB 幀）
 
@@ -642,7 +642,7 @@ decode task 原本在 hub 剛好空的那一刻 `vTaskDelay(10ms)`。生產者�
 
 同一個修法也把 `STATUS` RTT 從 **10.1 ms → 3.6 ms**（原本每一次命令都在等那個輪詢）。
 
-### 邊界測試（`tools/nc4_stats.py --edge`，必跑）
+### 邊界測試（`tools/bench/nc4_stats.py --edge`，必跑）
 
 | # | 測什麼 | 結果 |
 |---|---|---|
@@ -675,7 +675,7 @@ WS 本身就是**訊息導向**，所以這條線不需要插槽、不需要 RX 
                                                    ◄── WS binary message（回覆）
 ```
 
-- 檔案：`components/sys/transport/ws_nc4.c`；URI `ws://<ip>:8080/nc4`。
+- 檔案：`firmware/components/sys/transport/ws_nc4.c`；URI `ws://<ip>:8080/nc4`。
 - **零複製**：解析直接在 httpd 給的緩衝上做（跟 TCP 的 frame 模式同一條 `nc4_parser_frame()`）。
 - 回覆走 `httpd_ws_send_frame_async()`，外部加 mutex（slow_worker 也可能回覆）。
 - S3 沒有開 `CONFIG_HTTPD_WS_SUPPORT` → 編成 stub（回 `ESP_ERR_NOT_SUPPORTED`），不影響 S3 build。
@@ -690,7 +690,7 @@ WS 本身就是**訊息導向**，所以這條線不需要插槽、不需要 RX 
 | subprotocol | 無 | 之後要接瀏覽器 client 再加 |
 | 執行位置 | **httpd 的 task**（不是 decode engine） | 慢 handler 會佔住 httpd；dispatch mutex 仍保護共用狀態 |
 
-### 測試（`tools/ws_nc4_test.py`）
+### 測試（`tools/bench/ws_nc4_test.py`）
 
 | # | 測什麼 | 結果 |
 |---|---|---|
@@ -823,10 +823,10 @@ FreeRTOS HZ=1000、PC = macOS、每筆 ≈ 16 MB、TCP RTT ≈ 8–10 ms。
 
 | 工具 | 通道 |
 |---|---|
-| `tools/nc4_tcp.py`（下載）、`tools/nc4_tx_bench.py`（上傳） | TCP |
-| `tools/ws_nc4_test.py`（RTT／吞吐／邊界 10 項） | WS |
-| `tools/udp_nc4_test.py`（RTT／吞吐／掉包） | UDP |
-| `tools/bench_all.py`（TCP 全表）、`tools/nc4_stats.py`（零複製驗證） | 全部 |
+| `tools/bench/nc4_tcp.py`（下載）、`tools/bench/nc4_tx_bench.py`（上傳） | TCP |
+| `tools/bench/ws_nc4_test.py`（RTT／吞吐／邊界 10 項） | WS |
+| `tools/bench/udp_nc4_test.py`（RTT／吞吐／掉包） | UDP |
+| `tools/bench/bench_all.py`（TCP 全表）、`tools/bench/nc4_stats.py`（零複製驗證） | 全部 |
 
 ---
 
@@ -835,8 +835,8 @@ FreeRTOS HZ=1000、PC = macOS、每筆 ≈ 16 MB、TCP RTT ≈ 8–10 ms。
 ### 方法
 
 ```bash
-tools/ota.py --port /dev/cu.usbmodem* build/esp_net_core.bin --no-apply   # 只驗證
-tools/ota.py --port /dev/cu.usbmodem* build/esp_net_core.bin               # 驗證 + 切換
+tools/ota.py --port /dev/cu.usbmodem* firmware/build/esp_net_core.bin --no-apply   # 只驗證
+tools/ota.py --port /dev/cu.usbmodem* firmware/build/esp_net_core.bin               # 驗證 + 切換
 ```
 
 流程照 `slave/schema/ota.json`：`0x2201 BEGIN` → 逐塊 `0x2202 WRITE`（等 `0x2204 ACK`）→
@@ -873,7 +873,7 @@ idf.py build
 tools/flash.sh
 
 # 之後都用 OTA
-tools/ota.py --port /dev/cu.usbmodem* build/esp_net_core.bin
+tools/ota.py --port /dev/cu.usbmodem* firmware/build/esp_net_core.bin
 
 # 解碼器一致性
 tools/nc4_test.py --port /dev/cu.usbmodem*

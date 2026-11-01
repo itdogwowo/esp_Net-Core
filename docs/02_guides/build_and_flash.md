@@ -2,17 +2,30 @@
 
 > **用途**：從零把這台機器弄成「能 build esp_Net-Core」的狀態，並說明燒錄的三種模式。
 > **對象**：第一次在這台機器 build 的人；或 IDF / Python 被升級後壞掉的人。
-> **最後驗證**：2026-10-31，macOS 26.2 (arm64)，建置成功（`build/esp_net_core.bin` 322 KB）。
+> **最後驗證**：2026-11-02，macOS 26.2 (arm64)，從乾淨的 `build/` 重建通過
+> （P4 `0x9b830` ≈ 623 KB、S3 `0x57050` ≈ 349 KB）。
+
+> ⚠️ **指令在哪一層跑**：ESP-IDF 工程根是 **`firmware/`**（`firmware/CMakeLists.txt`）。
+> 下面的 `idf.py ...` 全部要在 `firmware/` 下執行；`tools/*` 則在 repo 根執行（它們會自己找路徑）。
 
 ---
 
 ## 0. 一句話
 
 ```bash
+# 推薦：一支搞定（自動處理 target 切換、產物備份、環境健檢）
+python3 make.py doctor              # IDF / esptool / 板子設定 / 磁碟
+python3 make.py build p4            # 板子名 / 晶片名都可以
+python3 make.py flash p4
+
+# 手動等價
 . ~/esp/esp-idf/export.sh
-idf.py build
-tools/flash.sh          # 或 tools/ota.py（之後都用 OTA）
+cd firmware
+idf.py -DPORT=P4/ESP32-P4-ETH -DIDF_TARGET=esp32p4 build
 ```
+
+建置成功的 image 會在 `artifacts/<板子>_<時間>.bin`（附 `.json` 側錄），
+`firmware/build/esp_net_core.bin` 是最新的那一份。
 
 前提是第 2 節裝好了、第 3 節的地雷修過了。
 
@@ -116,21 +129,24 @@ curl -sSLo /tmp/pip2431.whl \
 
 ```bash
 . ~/esp/esp-idf/export.sh
-cd ~/Documents/code/git/esp_Net-Core
+cd <repo>/firmware            # ← ESP-IDF 工程根（沒有 firmware/ 這層的 CMakeLists 就找不到專案）
 
-idf.py set-target esp32s3      # 產生 sdkconfig、抓 managed_components（只需一次）
-idf.py build
+idf.py -DPORT=S3/ESP32-S3-N16R8 -DIDF_TARGET=esp32s3 set-target esp32s3   # 產生 sdkconfig、抓 managed_components（只需一次）
+idf.py -DPORT=S3/ESP32-S3-N16R8 -DIDF_TARGET=esp32s3 build
 ```
 
-成功的樣子：
+`PORT` 相對於 repo 根的 `ports/`（CMakeLists 用 `../ports/${PORT}` 找）。
+
+成功的樣子（2026-11-02，乾淨重建）：
 
 ```text
-Project build complete.
-esp_net_core.bin binary size 0x50630 bytes. Smallest app partition is 0x400000 bytes.
+P4  esp_net_core.bin binary size 0x9b830 bytes. Smallest app partition is 0x400000 bytes.
+S3  esp_net_core.bin binary size 0x57050 bytes. Smallest app partition is 0x400000 bytes.
 ```
 
 `sdkconfig`、`build/`、`managed_components/`、`dependencies.lock` 都在 `.gitignore` 裡，
-**不會污染 repo**。要重建乾淨環境就是 `rm -rf build sdkconfig && idf.py set-target esp32s3`。
+**不會污染 repo**——它們全部生成在 `firmware/` 下。要重建乾淨環境就是
+`rm -rf firmware/build firmware/sdkconfig && tools/board.sh build <board>`。
 
 > ⚠️ 改 `sdkconfig.defaults` **不會**套用到已存在的 `sdkconfig`。
 > 例如 `CONFIG_TINYUSB_CDC_RX_BUFSIZE` 改了卻沒生效，就是這個原因 —— 必須 `rm sdkconfig` 再 build。
@@ -155,8 +171,8 @@ tools/board.sh list            # 偵測現在插的是哪塊
 
 > 驗證方式（兩邊都要能編）：
 > ```bash
-> tools/board.sh build s3   # 期望 IDF_TARGET=esp32s3、image ≈ 355 KB
-> tools/board.sh build p4   # 期望 IDF_TARGET=esp32p4、image ≈ 570 KB
+> tools/board.sh build s3   # 期望 IDF_TARGET=esp32s3、image ≈ 349 KB（0x57050）
+> tools/board.sh build p4   # 期望 IDF_TARGET=esp32p4、image ≈ 623 KB（0x9b830，含 WS/UDP/HTTP）
 > ```
 
 ---
@@ -188,7 +204,7 @@ tools/flash.sh --erase      # 全清
 之後更新 firmware 不需要 download mode，直接用 OTA：
 
 ```bash
-tools/ota.py --port /dev/cu.usbmodem* build/esp_net_core.bin
+tools/ota.py --port /dev/cu.usbmodem* firmware/build/esp_net_core.bin
 ```
 
 ---
@@ -200,7 +216,7 @@ tools/ota.py --port /dev/cu.usbmodem* build/esp_net_core.bin
 | `install.sh` 在 ensurepip / venv 失敗 | 3.1 的 libexpat | 套用 3.1 的修法 |
 | `pip` 報 truststore ValueError | 同上 | 同上 |
 | `idf.py` 找不到 | 沒 source export.sh | `. ~/esp/esp-idf/export.sh` |
-| 改了 `sdkconfig.defaults` 沒生效 | 已存在的 `sdkconfig` 不會被覆蓋 | `rm sdkconfig && idf.py build` |
+| 改了 `sdkconfig.defaults` 沒生效 | 已存在的 `firmware/sdkconfig` 不會被覆蓋 | `rm firmware/sdkconfig && tools/board.sh build <board>` |
 | `idf.py flash` 找不到埠 | app 佔著 TinyUSB | 用 `tools/flash.sh`（會等 ROM 埠） |
 | 燒完板子沒反應 | hard-reset 對 USB-JTAG 無效 | `tools/flash.sh` 已用 watchdog-reset 處理 |
 | `esp_tinyusb` 抓不到 | component manager 沒網路 | 檢查 `dependencies.lock` 與網路 |
@@ -211,4 +227,4 @@ tools/ota.py --port /dev/cu.usbmodem* build/esp_net_core.bin
 
 - `docs/02_guides/testing.md` §0 環境表（本文件是它的展開）
 - `tools/flash.sh` / `tools/ota.py` / `tools/nc4.py` / `tools/selftest.py`
-- `sdkconfig.defaults`（晶片層）與 `ports/<chip>/<board>/sdkconfig.defaults`（板子層，後者覆蓋前者）
+- `firmware/sdkconfig.defaults`（晶片層）與 `ports/<chip>/<board>/sdkconfig.defaults`（板子層，後者覆蓋前者）

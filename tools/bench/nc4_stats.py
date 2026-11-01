@@ -2,10 +2,10 @@
 """0xF008 匯流排統計 + 零複製驗證
 
 用法:
-    tools/nc4_stats.py --reset          # 歸零計數
-    tools/nc4_stats.py                  # 讀統計
-    tools/nc4_stats.py --run 16         # 歸零 → 灌 16 MB → 讀統計
-    tools/nc4_stats.py --edge           # 碎片 + 垃圾位元組的重同步測試
+    tools/bench/nc4_stats.py --reset          # 歸零計數
+    tools/bench/nc4_stats.py                  # 讀統計
+    tools/bench/nc4_stats.py --run 16         # 歸零 → 灌 16 MB → 讀統計
+    tools/bench/nc4_stats.py --edge           # 碎片 + 垃圾位元組的重同步測試
 
 看什麼:
     copied        為了把 payload 交給 parser 而做的 memcpy bytes

@@ -10,7 +10,7 @@
 
 用法：
     tools/selftest.py --port /dev/cu.usbmodem*
-    tools/selftest.py --port ... --image build/esp_net_core.bin
+    tools/selftest.py --port ... --image firmware/build/esp_net_core.bin
     tools/selftest.py --port ... --skip-ota
 """
 import argparse
@@ -131,7 +131,7 @@ def burst(ser, rd, n):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--port", required=True)
-    ap.add_argument("--image", default="build/esp_net_core.bin")
+    ap.add_argument("--image", default="firmware/build/esp_net_core.bin")
     ap.add_argument("--skip-ota", action="store_true")
     args = ap.parse_args()
 

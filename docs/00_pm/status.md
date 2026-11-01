@@ -58,12 +58,12 @@ ESP32-P4（另有 S3 port）上的 **NC4 通訊核心**：多條傳輸通道 →
 
 | 主題 | 一句話 | 文件 |
 |---|---|---|
-| **System vs Service** | 硬體/driver/NC4 通道是 System（固定順序）；效果/UI 才是 Service（有生命週期） | [config-layers.md](03_notes/config-layers.md) |
+| **System vs Service** | 硬體/driver/NC4 通道是 System（固定順序）；效果/UI 才是 Service（有生命週期） | [config-layers.md](../03_notes/config-layers.md) |
 | **開機順序** | 硬體 → driver → **宣告（看實際硬體）** → carve → 通道 → 服務 → 任務 | 同上 |
-| **服務生命週期** | `declare() → start(res) →（task loop）→ stop()`；服務只宣告，管理器負責取 | [writing-a-service.md](03_notes/writing-a-service.md) |
-| **資源管理器** | `nc_plan`：declare → commit → get（目前沒有 release） | [buffer-manager.md](03_notes/buffer-manager.md) |
-| **收/解路徑** | 傳輸總線（ID 註冊表）→ 解碼引擎（可換核/可多實例）→ 執行 | [rx-architecture.md](03_notes/rx-architecture.md) |
-| **配置分層** | System / Hardware / Driver / Network / Tasks / Effects / UI | [config-layers.md](03_notes/config-layers.md) |
+| **服務生命週期** | `declare() → start(res) →（task loop）→ stop()`；服務只宣告，管理器負責取 | [writing-a-service.md](../03_notes/writing-a-service.md) |
+| **資源管理器** | `nc_plan`：declare → commit → get（目前沒有 release） | [buffer-manager.md](../03_notes/buffer-manager.md) |
+| **收/解路徑** | 傳輸總線（ID 註冊表）→ 解碼引擎（可換核/可多實例）→ 執行 | [rx-architecture.md](../03_notes/rx-architecture.md) |
+| **配置分層** | System / Hardware / Driver / Network / Tasks / Effects / UI | [config-layers.md](../03_notes/config-layers.md) |
 
 **現況**：`main.c` 已有 `s_sys_parts[]`（System 固定順序）＋ `nc_service`（應用服務）；
 config.json 還沒接（目前用程式預設 + NVS）；slots 還沒走 plan。
@@ -81,7 +81,7 @@ config.json 還沒接（目前用程式預設 + NVS）；slots 還沒走 plan。
 | 服務失敗 | 逐項失敗，該服務不啟動、其他照跑 | ✅ |
 | USB 不支援 | 走 HTTP / USB-JTAG 替代 | 🟡 HTTP 已做 |
 
-詳細：[failure-policy.md](03_notes/failure-policy.md)。
+詳細：[failure-policy.md](../03_notes/failure-policy.md)。
 
 ---
 
@@ -98,7 +98,7 @@ config.json 還沒接（目前用程式預設 + NVS）；slots 還沒走 plan。
 | P4 console 腳位 | GPIO37/38（不是 S3 的 43/44） |
 | ESP↔ESP 不能用 USB 對接 | 兩個都是 device，沒有 host；VBUS 還會互灌 → 請走 UART1/2 |
 
-USB 的完整分析：[failure-policy.md §4](03_notes/failure-policy.md)。
+USB 的完整分析：[failure-policy.md §4](../03_notes/failure-policy.md)。
 
 ---
 
@@ -107,12 +107,12 @@ USB 的完整分析：[failure-policy.md §4](03_notes/failure-policy.md)。
 | 工具 | 用途 |
 |---|---|
 | `tools/board.sh` | 建置/燒錄（會自動切 target） |
-| `tools/bench_all.py` | TCP 全表：純 TCP / NC4 上下傳 / CPU / hub |
-| `tools/nc4_tcp.py` / `nc4_tx_bench.py` | TCP 下載 / 上傳 |
-| `tools/ws_nc4_test.py` | WS：RTT / 吞吐 / 碎片 / 重連 / 並存（10 項） |
-| `tools/udp_nc4_test.py` | UDP：RTT / 吞吐 / 掉包 |
-| `tools/nc4_stats.py` | 零複製驗證（`copied` 應為 0）+ 邊界測試 |
-| `tools/hub_bench.py` | `0xF003` 雙核 hub 交換 |
+| `tools/bench/bench_all.py` | TCP 全表：純 TCP / NC4 上下傳 / CPU / hub |
+| `tools/bench/nc4_tcp.py` / `nc4_tx_bench.py` | TCP 下載 / 上傳 |
+| `tools/bench/ws_nc4_test.py` | WS：RTT / 吞吐 / 碎片 / 重連 / 並存（10 項） |
+| `tools/bench/udp_nc4_test.py` | UDP：RTT / 吞吐 / 掉包 |
+| `tools/bench/nc4_stats.py` | 零複製驗證（`copied` 應為 0）+ 邊界測試 |
+| `tools/bench/hub_bench.py` | `0xF003` 雙核 hub 交換 |
 | `curl http://10.10.1.50:8080/config.json` | 讀寫設定（GET/PUT） |
 
 ---
@@ -150,7 +150,7 @@ USB 的完整分析：[failure-policy.md §4](03_notes/failure-policy.md)。
 
 | 類別 | 文件 |
 |---|---|
-| 協議 | [commands.md](01_protocol/commands.md)、[transports.md](01_protocol/transports.md) |
-| 教學 | [build_and_flash.md](02_guides/build_and_flash.md)、[testing.md](02_guides/testing.md)（§2.13–2.16 是量測總表） |
-| 筆記 | [config-layers.md](03_notes/config-layers.md)、[writing-a-service.md](03_notes/writing-a-service.md)、[rx-architecture.md](03_notes/rx-architecture.md)、[failure-policy.md](03_notes/failure-policy.md)、[p4-bringup.md](03_notes/p4-bringup.md)、[buffer-manager.md](03_notes/buffer-manager.md)、[memory.md](03_notes/memory.md)、[component-layout.md](03_notes/component-layout.md)、[architecture-flow.md](03_notes/architecture-flow.md)、[rewrite-plan.md](03_notes/rewrite-plan.md) |
-| 研究 | [effect-language.md](03_notes/effect-language.md)、[extension-architecture.md](03_notes/extension-architecture.md)、[fx-loader.md](03_notes/fx-loader.md) |
+| 協議 | [commands.md](../01_protocol/commands.md)、[transports.md](../01_protocol/transports.md) |
+| 教學 | [build_and_flash.md](../02_guides/build_and_flash.md)、[testing.md](../02_guides/testing.md)（§2.13–2.16 是量測總表） |
+| 筆記 | [config-layers.md](../03_notes/config-layers.md)、[writing-a-service.md](../03_notes/writing-a-service.md)、[rx-architecture.md](../03_notes/rx-architecture.md)、[failure-policy.md](../03_notes/failure-policy.md)、[p4-bringup.md](../03_notes/p4-bringup.md)、[buffer-manager.md](../03_notes/buffer-manager.md)、[memory.md](../03_notes/memory.md)、[component-layout.md](../03_notes/component-layout.md)、[architecture-flow.md](../03_notes/architecture-flow.md)、[rewrite-plan.md](roadmap.md) |
+| 研究 | [effect-language.md](../03_notes/effect-language.md)、[extension-architecture.md](../03_notes/extension-architecture.md)、[fx-loader.md](../03_notes/fx-loader.md) |

@@ -225,7 +225,7 @@ Pixelblaze（ElectroMage）是同一領域的商業產品：自製的小型 JS �
 
 直覺會以為「原生＝最精簡」，其實相反：**wasm 為了「傳輸」優化（小），AOT 為了「執行」優化（快），兩個目標不同，不會同時最小。**
 
-用 `tools/fx_poc/fx.wasm`（367 B）裡的一段當例子：
+用 `tools/poc/fx_poc/fx.wasm`（367 B）裡的一段當例子：
 
 ```wat
 local.get $d2      ; 2 bytes   (0x20 + 索引)
@@ -488,17 +488,17 @@ S3 則是 0x3FC88000 起約 390 KB 的 DIRAM（你文件裡已量過），可用
 ```bash
 # ① 效果原始碼 → wasm（TinyGo；target 名依版本，wasm-unknown 或 wasm）
 tinygo build -target=wasm-unknown -gc=leaking -scheduler=none \
-             -o build/fire26.wasm ./effects/fire26
+             -o firmware/build/fire26.wasm ./effects/fire26
 
 # ② wasm → AOT（可選，見 §4.4.4；每個 target 各一份，P4 必須 ilp32f）
-wamrc --target=riscv32 --target-abi=ilp32f -o build/fire26.p4.aot build/fire26.wasm
-wamrc --target=xtensa                      -o build/fire26.s3.aot build/fire26.wasm
+wamrc --target=riscv32 --target-abi=ilp32f -o firmware/build/fire26.p4.aot firmware/build/fire26.wasm
+wamrc --target=xtensa                      -o firmware/build/fire26.s3.aot firmware/build/fire26.wasm
 
 # ③ 打包 + 上傳（走既有 NC4 file service）
 tools/fx.py pack --manifest effects/fire26.json \
-                 --wasm build/fire26.wasm --aot build/fire26.p4.aot \
-                 -o build/fire26.fxe
-tools/fx.py push build/fire26.fxe --port /dev/cu.usbmodem...
+                 --wasm firmware/build/fire26.wasm --aot firmware/build/fire26.p4.aot \
+                 -o firmware/build/fire26.fxe
+tools/fx.py push firmware/build/fire26.fxe --port /dev/cu.usbmodem...
 ```
 
 **② 不是必須的**：第一版只出 `.wasm`（§4.4.4）。等你某個效果實測 > 8 ms/幀，再為它單獨產 `.aot`，`.fxe` 的 flag 會自動選用。
@@ -526,7 +526,7 @@ tools/fx.py push build/fire26.fxe --port /dev/cu.usbmodem...
 | # | 要驗什麼 | 怎麼驗 | 過 |
 |---|---|---|---|
 | 1 | WAMR component 在 **IDF v6.0.3 + P4** 編得過 | `idf.py add-dependency espressif/wasm-micro-runtime^2.4.0`，build | 編得過、跑得起 `test_wasm.h` |
-| 2 | 跑 `tools/fx_poc/fx.wasm`（interp） | 板上載入、跑 120 幀 | **checksum 與 host 相同**（§10） |
+| 2 | 跑 `tools/poc/fx_poc/fx.wasm`（interp） | 板上載入、跑 120 幀 | **checksum 與 host 相同**（§10） |
 | 3 | `wamrc` 產 P4 可用的 AOT | `--target=riscv32 --target-abi=ilp32f` | 載入 + 執行成功 |
 | 4 | 真實速度 | 676 px 效果，interp vs AOT | AOT ≤ 2 ms/幀；interp ≤ 10 ms/幀 |
 | 5 | AOT code 放哪 | `heap_caps_malloc(MALLOC_CAP_EXEC)`，印 free | 至少 64 KB 可執行記憶體 |
@@ -540,12 +540,12 @@ tools/fx.py push build/fire26.fxe --port /dev/cu.usbmodem...
 
 ## 10. 已經做出來的：ABI 的 host 參考實作
 
-`tools/fx_poc/` 是一個零依賴的 PoC，在 Mac 上把 §6 的 ABI 跑起來（不需要板子）。它做四件事：算佈局 → 寫 descriptor → `fx_init` → 每幀 `fx_render` 並讀回 fb。
+`tools/poc/fx_poc/` 是一個零依賴的 PoC，在 Mac 上把 §6 的 ABI 跑起來（不需要板子）。它做四件事：算佈局 → 寫 descriptor → `fx_init` → 每幀 `fx_render` 並讀回 fb。
 
 ### 10.1 基本：一個模組跑 120 幀
 
 ```text
-$ node tools/fx_poc/host.mjs tools/fx_poc/fx.wasm --frames 120
+$ node tools/poc/fx_poc/host.mjs tools/poc/fx_poc/fx.wasm --frames 120
 layout      px=676 26x26  fb=64+2704  scratch=2784+2704  total=5488 B (memory 65536 B)
 module A    fx.wasm (367 B wasm, abi 0)  fx_init ok
 phase A     120 幀  avg 3.5 us  checksum 0x143b0b06
@@ -555,22 +555,22 @@ scratch[0]  120 次  (fx.wasm 被呼叫 120 次)
 ### 10.2 熱替換：第 120 幀換一份檔案（這就是「分離式固件」）
 
 ```text
-$ node tools/fx_poc/host.mjs tools/fx_poc/fx.wasm --frames 240 \
-       --swap tools/fx_poc/fx2.wasm --at 120
+$ node tools/poc/fx_poc/host.mjs tools/poc/fx_poc/fx.wasm --frames 240 \
+       --swap tools/poc/fx_poc/fx2.wasm --at 120
 swap @120   fx2.wasm → fx_init ok（496 us）；同一個 descriptor、同一組 offset，host 沒有重算佈局
 phase A     120 幀  avg 3.4 us  checksum 0x143b0b06
 phase B     120 幀  avg 2.4 us  checksum 0x22cd5444  (fx2.wasm)
 ```
 
-![換檔前後（左：徑向脈衝；右：斜向掃描）](../../tools/fx_poc/frame.png)
+![換檔前後（左：徑向脈衝；右：斜向掃描）](../../tools/poc/fx_poc/frame.png)
 
 左邊是 A（徑向脈衝）、右邊是 B（斜向掃描）。**中間沒有重新啟動、沒有重配記憶體、沒有重算佈局** —— 只是把 `render` 的函式指標換掉。
 
 ### 10.3 壞檔：被拒絕，舊的繼續跑
 
 ```text
-$ node tools/fx_poc/host.mjs tools/fx_poc/fx.wasm --frames 240 \
-       --bad tools/fx_poc/fxbad.wasm --at 120
+$ node tools/poc/fx_poc/host.mjs tools/poc/fx_poc/fx.wasm --frames 240 \
+       --bad tools/poc/fx_poc/fxbad.wasm --at 120
 swap @120   拒絕載入 fxbad.wasm（fx_init 回 1）→ 繼續用 fx.wasm，畫面不中斷
 phase B     —（換檔被拒絕，全程都是 fx.wasm，沒有中斷）
 ```
@@ -596,7 +596,7 @@ phase B     —（換檔被拒絕，全程都是 fx.wasm，沒有中斷）
 | **P3 AOT** | wamrc 進 build、`.fxe` 帶 aot、版本檢查 | ~150 行 | 同畫面、≤ 2 ms/幀 |
 | **P4 IR tier** | 12 個節點 + 圖求值器 | ~800 行 | 用 IR 重寫 3 個現有效果；與 wasm 效果並存 |
 
-**順序的理由**：P1 是純 host、不需要板子（跟你 `tools/plan_test` 的做法一樣）；P2 才需要硬體；IR（P4）**可以跟 P0–P3 平行**，因為它不依賴 wasm。
+**順序的理由**：P1 是純 host、不需要板子（跟你 `tools/hosttest/plan_test` 的做法一樣）；P2 才需要硬體；IR（P4）**可以跟 P0–P3 平行**，因為它不依賴 wasm。
 
 ---
 

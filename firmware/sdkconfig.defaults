@@ -1,18 +1,14 @@
-# esp_Net-Core — 共通預設（晶片層）
-# 板子差異放 ports/<chip>/<board>/sdkconfig.defaults（後者覆蓋前者）
-# 執行期可改的東西不屬於這裡 —— 那是 data/config.json
-
-# ── flash / PSRAM（N16R8：16MB flash + 8MB Octal PSRAM）──
-# 板子不是 16MB 或沒有 Octal PSRAM → 在 port 覆蓋這三行
-CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
-CONFIG_SPIRAM=y
-CONFIG_SPIRAM_MODE_OCT=y
-CONFIG_SPIRAM_SPEED_80M=y
-
-# ── console ──
-# bring-up 走 USB-Serial-JTAG。S3 的 USB-OTG 與它共用同一個 PHY，只能二選一；
-# 之後接上 esp_tinyusb 時改成 CONFIG_ESP_CONSOLE_USB_CDC=y。
-CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+# esp_Net-Core — 共通預設
+#
+# 【規則】這裡只放「與板子無關」的東西。
+#   L1 硬體事實（flash 大小/頻率/模式、PSRAM、CPU、console、有冇 Ethernet）
+#        → ports/<chip>/<board>/sdkconfig.defaults（由 board.json 描述）
+#   L2 能力碎片（ETH / WS / UDP）
+#        → ports/_profiles/*.defaults，由 tools/board.py sync 組合
+#   L3 執行期可變（gpio、服務開關、數量）
+#        → ports/<chip>/<board>/data/config.json
+#
+# tools/board.py check 會擋下任何「偷渡板子事實」到這份檔案的行為。
 
 # ── 分割表 ──
 CONFIG_PARTITION_TABLE_CUSTOM=y

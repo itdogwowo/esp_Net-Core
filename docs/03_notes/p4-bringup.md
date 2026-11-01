@@ -186,7 +186,7 @@ writer 一啟動就做 `!start && expired()`，而 deadline 還是 0 → 一律�
 S3 沒撞上是因為 core1 當時還有別的 task 擋著，不是程式正確。
 
 修法：deadline 移到開 task 之前；task 結束原因寫進 `exit`。
-`0xF003` 加 `mode=1`（`tools/hub_bench.py --late`）**故意用舊順序**。
+`0xF003` 加 `mode=1`（`tools/bench/hub_bench.py --late`）**故意用舊順序**。
 它重現的是 race：PULL/idle 下 4/4 次都是 `read=0 / exit=[3,1]`；
 PUSH 下 core1 有 RX task 插隊，writer 反而贏了競爭（`read=20000`）。
 所以它是舉證工具，不是必然失敗的斷言。
@@ -272,7 +272,7 @@ PUSH 下 core1 有 RX task 插隊，writer 反而贏了競爭（`read=20000`）�
 ### 7.8 上傳（打包＋送出）也量了 —— 分核沒有好處
 
 新增 `0xF007 TX_BENCH`：裝置打包 N 幀、全部送出，PC 只收。`mode 0` 同核、`mode 1` 分核
-（core1 打包 → 插槽 → core0 送出）。工具 `tools/nc4_tx_bench.py`。
+（core1 打包 → 插槽 → core0 送出）。工具 `tools/bench/nc4_tx_bench.py`。
 
 | 方向 | 核心 | 1 KB | 4 KB | 8 KB |
 |---|---|---|---|---|
@@ -309,14 +309,14 @@ decode task 用 `nc4_parser_frame()` 在插槽上原地驗 CRC + dispatch。中�
   延遲（不再有 8 KB memcpy 關中斷）與 1 KB 以下的固定成本（見下）。
 - soak：10 輪 × 16.4 MB → 20,020 幀全到、`copied=0`、`resync=0`。
 - 邊界：一幀拆 3 段、37 B 垃圾後重同步、假表頭（plen=65535）、8 KB 幀後接指令 —— 全過
-  （`tools/nc4_stats.py --edge`）。
+  （`tools/bench/nc4_stats.py --edge`）。
 
 > 坑：第一版用 `MSG_PEEK` 看表頭，分段送時第二次 peek 之後看不到新 bytes，
 > 2 秒後被判「表頭不完整」而關線。改成「先讀 9 B、不合法滑 1 byte」才對。
 > **peek 不能拿來做 framing。**
 
 新增 API：`nc4_header_total()` / `nc4_parser_frame()` / `nc4_bus_frame_begin|end()`；
-開關 NVS `net/frame_align`（預設 1）；統計 `0xF008`（`tools/nc4_stats.py`）。
+開關 NVS `net/frame_align`（預設 1）；統計 `0xF008`（`tools/bench/nc4_stats.py`）。
 
 **還沒清的尾巴**：frame 模式下 plan 仍宣告 16,410 B 的 `tcp.rx`（給舊的 ring 用），現在沒人用；
 CDC/UART 的 PULL 路徑還是走 ring（`nc4_parser_feed`），零複製只套用在 TCP/PUSH。
@@ -349,14 +349,14 @@ WS 是訊息導向，所以它**不需要插槽**：一則 WS 訊息 = 一個 NC
 
 | 項目 | 值 |
 |---|---|
-| 檔案 / URI | `components/sys/transport/ws_nc4.c`，`ws://<ip>:8080/nc4` |
+| 檔案 / URI | `firmware/components/sys/transport/ws_nc4.c`，`ws://<ip>:8080/nc4` |
 | 同時連線 | 1（第二條在第一則資料幀被拒） |
 | 訊息上限 | **24 KB**（一則可塞多個 NC4 幀） |
 | RTT 中位 | 6.87 ms（TCP 3.6） |
 | 吞吐 1K / 4K / 8K（batch=1） | 1.33 / 3.25 / 4.35 MB/s |
 | 吞吐 1K / 4K / 8K（多幀 batch） | **4.30 / 5.72 / 5.26 MB/s**（TCP 5.65 / 7.13 / 7.40） |
 | httpd task | core1 / prio 10（預設 prio5 + 不指定核 → 慢 11%） |
-| 測試 | `tools/ws_nc4_test.py`（10 項全過：碎片、垃圾、過大、重連、第二條被拒、與 TCP 並存） |
+| 測試 | `tools/bench/ws_nc4_test.py`（10 項全過：碎片、垃圾、過大、重連、第二條被拒、與 TCP 並存） |
 
 > 每則 WS 訊息固定成本 ≈ 0.7 ms（httpd 對每則做 4–6 次小 `recv`，每次都過 lwIP netconn）。
 > 解法是「一則訊息塞多幀」（batching）：1K 從 1.33 → 4.30 MB/s。要高吞吐仍以 TCP 為主；

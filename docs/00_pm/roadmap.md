@@ -2,7 +2,7 @@
 
 > 狀態：架構定案，準備分期實作
 > 原則：**一個 command layer（NC4）、一個 FS owner（device）、一個 frame clock**
-> 架構圖：`docs/architecture-flow.md`
+> 架構圖：`docs/03_notes/architecture-flow.md`
 
 ---
 

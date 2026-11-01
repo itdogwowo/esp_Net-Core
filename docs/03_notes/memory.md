@@ -190,5 +190,5 @@ tools/nc4.py --port ... raw 0x1101 <str>   # keys：空=全部、?=目錄、mem 
 
 ### Host 測試
 
-`tools/plan_test/run.sh`（gcc，零依賴、不需要板子）：6 個場景，含容量充足、
+`tools/hosttest/plan_test/run.sh`（gcc，零依賴、不需要板子）：6 個場景，含容量充足、
 超預算拒絕、超預算撇除、決定性（倒序宣告結果相同）、窗口關閉、重名。

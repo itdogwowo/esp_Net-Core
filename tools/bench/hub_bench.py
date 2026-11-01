@@ -2,9 +2,9 @@
 """0xF003 雙核 hub 交換量測（writer core1 / reader core0）
 
 用法:
-    tools/hub_bench.py                           # 20000 次，正常模式
-    tools/hub_bench.py --iters 100000 --repeat 3
-    tools/hub_bench.py --iters 20000 --late      # 重現舊版順序（deadline 太晚）
+    tools/bench/hub_bench.py                           # 20000 次，正常模式
+    tools/bench/hub_bench.py --iters 100000 --repeat 3
+    tools/bench/hub_bench.py --iters 20000 --late      # 重現舊版順序（deadline 太晚）
 
 回應（0xF004）欄位:
     iters    要求的交換次數

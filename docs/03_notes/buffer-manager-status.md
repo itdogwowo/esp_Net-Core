@@ -67,8 +67,8 @@
 
 | 測試 | 位置 | 結果 |
 |---|---|---|
-| plan：容量充足 / 拒絕 / 撇除 / 決定性 / 窗口關閉 / 重名 | `tools/plan_test/run.sh` | 6 場景全過 |
-| hub：N=1 / N=3 / 輪替 / 自動歸還 | `tools/hub_test/run.sh` | 全過 |
+| plan：容量充足 / 拒絕 / 撇除 / 決定性 / 窗口關閉 / 重名 | `tools/hosttest/plan_test/run.sh` | 6 場景全過 |
+| hub：N=1 / N=3 / 輪替 / 自動歸還 | `tools/hosttest/hub_test/run.sh` | 全過 |
 | 雙核交換（board） | `0xF003` | S3 **138k 次/秒、7.2 µs/次**；P4 **501k 次/秒、2.0 µs/次**；torn=0（P4 詳見 [p4-bringup](p4-bringup.md) §7） |
 
 ---

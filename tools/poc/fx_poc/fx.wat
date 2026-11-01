@@ -1,6 +1,6 @@
 ;; fx.wat — 測試替身（test double），不是給人寫燈效的語言。
 ;;
-;; 用途：在 Mac 上驗證 host ↔ 效果模組的 ABI（tools/fx_poc/host.mjs 會載入它）。
+;; 用途：在 Mac 上驗證 host ↔ 效果模組的 ABI（tools/poc/fx_poc/host.mjs 會載入它）。
 ;; 真正寫燈效時，這個 .wasm 由 TinyGo / Rust / C 產出，ABI 不變。
 ;;
 ;; ABI v0（全部 little-endian）：

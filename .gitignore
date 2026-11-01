@@ -1,4 +1,5 @@
-# ESP-IDF
+# ── 生成物：由 idf.py / 組件管理器產生，永遠不進 git ──
+# 位置在 firmware/ 下；路徑不寫死深度，所以任何子目錄都適用
 build/
 sdkconfig
 sdkconfig.old
@@ -6,13 +7,18 @@ managed_components/
 dependencies.lock
 .devcontainer/
 
-# 用戶管理的檔案系統鏡像（見 docs/03_notes/component-layout.md §8）
-# 只忽略根目錄的 data/；ports/<board>/data/ 是「出廠預置」，要進 git
+# ── 建置產物：make.py 的時間戳備份與日誌 ──
+# 想保留某一顆就自己複製出去；歷史不進 git
+artifacts/
+
+# ── 用戶管理的檔案系統鏡像 ──
+# 只忽略根目錄的 data/；ports/<chip>/<board>/data/ 是「出廠預置」，要進 git
+# （原因見 docs/03_notes/component-layout.md §8）
 /data/
 
-# Python
+# ── Python ──
 __pycache__/
 *.pyc
 
-# macOS
+# ── macOS ──
 .DS_Store
