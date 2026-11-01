@@ -15,7 +15,7 @@ idf_component_register(
     SRCS "main.c"
     INCLUDE_DIRS "."
     PRIV_REQUIRES fatfs esp_timer esp_partition esp_driver_gpio esp_driver_uart wear_levelling esp_eth esp_netif lwip esp_event esp_psram nvs_flash
-                   espressif__esp_tinyusb nc4 mem ota tasks transport
+                   espressif__esp_tinyusb nc4 mem ota tasks transport store file_cmds
     ${_preset_embed}
 )
 

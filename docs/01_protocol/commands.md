@@ -30,6 +30,21 @@
 | `0x1813` | BENCH_RESULT | bench.json | ✅ |
 | `0x1814` | BENCH_REPORT | bench.json | ✅ |
 | `0x2201`–`0x2220` | OTA 子集（BEGIN/WRITE/END/ABORT/ACK/VERSION/CAPS/PROGRESS/STATE/ERROR/APPLY） | ota.json | ✅ |
+| `0x2005` | FILE_QUERY（path → 存在/sha256/size/free/pending） | file.json | ✅ 唯讀 |
+| `0x2006` | FILE_QUERY_RSP | file.json | ✅ |
+| `0x2010` | FILE_ERROR_RSP（`err_busy=1` = FAT 目前在 host 手上） | file.json | ✅ |
+| `0x1103` | STATUS_SET（目前只認 `System.file_mode`：0=交還 host、1=裝置接管） | status.json | ✅ 子集 |
+| `0x1104` | STATUS_ACK（`ok` + `message`） | status.json | ✅ |
+
+### FAT 為什麼不用新指令
+
+換 FAT 的擁有者不需要新指令號 —— 那是「一個具名的狀態」，走既有的
+`0x1103 STATUS_SET`：`{"System":{"file_mode":1}}`。
+
+讀取（`0x2005`）**任何模式都答得到**：主機擁有 FAT 時走唯讀視圖（`/ro`），
+回覆的 `pending=1` 表示「可能過期或半截」；裝置接管時走 `/data`，`pending=0` 是真值。
+只有**寫入**才需要 `file_mode=1`。設計與實測見
+[../03_notes/fat-ownership.md](../03_notes/fat-ownership.md)。
 
 ### 測試專用（`0xFxxx`，可隨時刪）
 

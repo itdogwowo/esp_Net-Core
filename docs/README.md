@@ -10,7 +10,7 @@
 | **00_pm** 項目管理 | 想知道「做到哪、接下來做什麼」的人 | 現況、路線圖、決策與待辦 | 3 |
 | **01_protocol** 協議層 | 對接方 / 寫 transport / 寫 PC 工具的人 | NC4 在哪些通道上跑、每個通道要自己做什麼 | 2 |
 | **02_guides** 使用教學 | 要 build / 燒錄 / 跑測試的人 | 工具怎麼用、測試怎麼跑、數字怎麼判讀 | 2 |
-| **03_notes** 設計筆記 | 維護者 / 想了解設計脈絡的人 | 架構、分層、記憶體、研究、上板紀錄 | 13 |
+| **03_notes** 設計筆記 | 維護者 / 想了解設計脈絡的人 | 架構、分層、記憶體、研究、上板紀錄 | 14 |
 
 > **趕時間先看**：[00_pm/status.md](00_pm/status.md) —— 一頁涵蓋「已驗證的數字、已定案的架構、還沒做的事、要測的場景」。
 
@@ -51,6 +51,7 @@
 |---|---|
 | [architecture-flow.md](03_notes/architecture-flow.md) | **執行期流程**：mode 決策、NC4 檔案編輯、frame pipeline、ownership matrix |
 | [component-layout.md](03_notes/component-layout.md) | **三層分區與 component 佈局（目標架構）**：hw/sys/sw/action/tasks/ui/schema 七區、`ports/` 專案層、依賴方向。⚠️ 目前只落地 `sys/` 與 `app/` |
+| [fat-ownership.md](03_notes/fat-ownership.md) | **FAT 擁有者（互斥模型）**：為什麼不能同時掛碟與讀檔、為什麼只切 mount_point 不夠、LUN 拆建＋USB 重新列舉、實測數據 |
 | [config-layers.md](03_notes/config-layers.md) | **配置分層與開機順序**：System（硬體→driver→NC4 通道）vs Service；config.json 的七層；NC4 link 的 core/slots/slot_size 怎麼寫 |
 | [p4-bringup.md](03_notes/p4-bringup.md) | **ESP32-P4 上板紀錄**：IDF 版本、console/PSRAM 陷阱、乙太網吞吐調校（1.1 → 8 MB/s） |
 | [failure-policy.md](03_notes/failure-policy.md) | **失敗處理**：config 壞掉/超範圍、PHY 協商失敗、拔線、USB MSC 不支援時的替代路徑（HTTP/NC4 file） |

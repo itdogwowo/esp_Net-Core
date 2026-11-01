@@ -29,6 +29,10 @@ def _board_of(cfg: dict, args: argparse.Namespace) -> str | None:
 
 
 def cmd_build(cfg: dict, args: argparse.Namespace) -> int:
+    if args.all:
+        return builder.build_all(cfg, minimal=args.minimal, jobs=args.jobs,
+                                 clean=args.clean, fresh=args.fresh,
+                                 do_archive=False if args.no_archive else None)
     return builder.build(
         cfg, _board_of(cfg, args),
         minimal=args.minimal, jobs=args.jobs,
@@ -164,6 +168,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--fresh", action="store_true", help="先清 build/ 與 sdkconfig（重新套用 defaults）")
     p.add_argument("--no-doctor", action="store_true", help="跳過建置前健檢")
     p.add_argument("--no-archive", action="store_true", help="不複製到 artifacts/")
+    p.add_argument("--all", action="store_true", help="建置全部板子（依序，每塊各自切 target）")
     p.set_defaults(fn=cmd_build)
 
     p = sub.add_parser("flash", help="燒錄")
@@ -236,9 +241,11 @@ def main(argv: list[str] | None = None) -> int:
     try:
         return args.fn(cfg, args)
     except SystemExit as e:
-        if e.code not in (None, 0):
-            print(f"✘ {e}")
-        return int(e.code or 1)
+        code = e.code
+        if isinstance(code, str):
+            print(f"✘ {code}")
+            return 1
+        return int(code or 0)
     except KeyboardInterrupt:
         print("\n中止")
         return 130

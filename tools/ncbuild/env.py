@@ -73,18 +73,27 @@ def artifacts_dir(cfg: dict) -> Path:
 
 # ───────────────────────── 板子 ─────────────────────────
 
-def resolve_board(query: str | None) -> tuple[Path, dict, str, str]:
-    """回傳 (port 目錄, board.json, idf target, 晶片目錄名如 P4)。"""
+def resolve_board(query: str | None, *, require: bool = True
+                  ) -> tuple[Path, dict, str, str]:
+    """回傳 (port 目錄, board.json, idf target, 晶片目錄名如 P4)。
+
+    require=True 且沒有指定板子 → 報錯（不要默默挑第一塊，那遲早燒錯板）。
+    """
     import board as boardmod   # tools/board.py
 
-    if not query:
-        query = None
     try:
         dirs = boardmod.find_boards(query) if query else boardmod.board_dirs()
     except SystemExit as e:
         raise SystemExit(str(e))
     if not dirs:
         raise SystemExit("ports/ 下沒有任何 board.json —— 先 python3 tools/board.py new …")
+    if query is None and require:
+        names = "、".join(boardmod.load_board(d).get("name", d.name) for d in dirs)
+        raise SystemExit(
+            f"沒有指定板子（目前有：{names}）\n"
+            f"  → python3 make.py build <板子>   或   make.py build --all\n"
+            f"  → 常用的那塊可寫進 make_config.json 的 default_board"
+        )
     d = dirs[0]
     b = boardmod.load_board(d)
     chip = b["chip"]

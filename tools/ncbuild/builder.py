@@ -130,6 +130,39 @@ def build(cfg: dict, board_query: str | None, *, minimal: bool = False,
     return 0
 
 
+def build_all(cfg: dict, *, minimal: bool = False, jobs: int | None = None,
+              clean: bool = False, fresh: bool = False,
+              do_archive: bool | None = None) -> int:
+    """依序建置 ports/ 下每一塊板子（CI / 回歸用）。每塊各自切 target。"""
+    import board as boardmod
+
+    dirs = boardmod.board_dirs()
+    if not dirs:
+        print("ports/ 下沒有任何 board.json")
+        return 1
+
+    print(f"→ 建置全部 {len(dirs)} 塊板子（每塊都會重設 target，會慢）\n")
+    results: list[tuple[str, int]] = []
+    for i, d in enumerate(dirs, 1):
+        b = boardmod.load_board(d)
+        name = b.get("name", d.name)
+        print(f"── [{i}/{len(dirs)}] {name} ─────────────────────────────")
+        rc = build(cfg, env.port_name(d), minimal=minimal, jobs=jobs,
+                   clean=clean, fresh=fresh, do_doctor=(i == 1),
+                   do_archive=do_archive)
+        results.append((name, rc))
+        if rc != 0:
+            print(f"✘ {name} 失敗，停止（後面的板子沒建）")
+            break
+        print()
+
+    print("─" * 60)
+    for name, rc in results:
+        print(f"{'✔' if rc == 0 else '✘'} {name}")
+    failed = [n for n, rc in results if rc != 0]
+    return 1 if failed else 0
+
+
 # ───────────────────────── 燒錄 / 監看 ─────────────────────────
 
 def flash(cfg: dict, board_query: str | None, *, port: str | None = None,

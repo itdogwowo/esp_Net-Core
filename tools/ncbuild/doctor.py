@@ -59,7 +59,7 @@ def run_checks(cfg: dict, board_query: str | None = None, quick: bool = False) -
 
     # 2) 選一塊板子當代表（決定要檢查哪個 IDF）
     try:
-        d, b, chip, chip_dir = env.resolve_board(board_query)
+        d, b, chip, chip_dir = env.resolve_board(board_query, require=False)
         board_label = f"{b.get('name', d.name)} ({chip})"
     except SystemExit as e:
         checks.append(Check("板子", FAIL, str(e), "python3 tools/board.py new …"))

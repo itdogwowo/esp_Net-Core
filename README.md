@@ -115,8 +115,9 @@ tools/ota.py --port /dev/cu.usbmodem* artifacts/ESP32-P4-ETH_20261102_022530.bin
 tools/selftest.py --port /dev/cu.usbmodem*     # 一鍵自測：STATUS / 解碼 / OTA
 ```
 
-每次建置成功會在 `artifacts/` 留一顆帶時間戳的 image 加一份 `.json` 側錄
-（git / IDF / sha256 / 尺寸），OTA 回滾測試直接拿它。細節見 [tools/README.md](tools/README.md)。
+`artifacts/<板子>.bin` 永遠是最新那顆；再建一次時，上一顆才退成帶時間戳的歷史檔
+（附 `.json` 側錄：git / IDF / sha256 / 尺寸）。要建全部板子：`python3 make.py build --all`。
+細節見 [tools/README.md](tools/README.md)。
 
 直接操作 IDF 時，`idf.py` 要在 `firmware/` 下跑：
 

@@ -38,6 +38,7 @@ tools/ncbuild/
 | `make.py build s3 --minimal` | — | 最小映像（只印心跳），新板 bring-up 用 |
 | `make.py build p4 --fresh` | — | 先刪 `sdkconfig` 再建（改了 defaults 才需要） |
 | `make.py build p4 --jobs 4` | — | 限制平行編譯 |
+| `make.py build --all` | — | 依序建置**全部**板子（CI / 回歸用；每塊都會切 target，慢） |
 | `make.py doctor` | — | 環境健檢：IDF / idf.py / esptool / pyserial / 板子設定 / 磁碟 / git |
 | `make.py flash p4 [--full\|--erase]` | ✅ | 建置 + 燒錄（預設 `app-flash`，不動碟上的使用者資料） |
 | `make.py monitor p4` | ✅ | 序列埠監看 |
@@ -48,17 +49,22 @@ tools/ncbuild/
 
 ### 產物（`artifacts/`）
 
-每次建置成功會複製一顆帶時間戳的 image，並附一份 `.json` 側錄：
+命名規則跟 `mp_Make-Tools` 一致：**只有撞名才加時間戳**。
 
 ```text
-artifacts/
-├─ ESP32-P4-ETH_20261102_022530.bin
-├─ ESP32-P4-ETH_20261102_022530.json    ← board / chip / git / idf / sha256 / 尺寸
-└─ logs/ESP32-P4-ETH_20261102_022530.log
+第一次  build → artifacts/ESP32-P4-ETH.bin
+第二次  build → artifacts/ESP32-P4-ETH.bin                       ← 最新那顆，永遠是這個名字
+                artifacts/ESP32-P4-ETH_2026_11_02_02_25_30.bin   ← 上一顆退成歷史檔
+                artifacts/ESP32-P4-ETH_2026_11_02_02_25_30.json  ← board / chip / git / idf / sha256
+第三次  還是撞 → ..._1.bin
 ```
 
-出貨或 OTA 回滾測試時直接拿這個檔案，不用回頭挖 `firmware/build/`。
-`--no-archive` 可關掉；`outputs --prune 3` 只留每塊板子最近 3 顆。
+> ⚠️ 與 `mp_Make-Tools` 的差異：它的時間戳貼在**新**產物上（`NAME.bin` 一直是最舊那顆）；
+> 這裡貼在**舊**產物上。理由是 `NAME.bin` 必須永遠是最新的一顆 —— 否則
+> `ota.py artifacts/<board>.bin` 會安靜地燒到第一次建置的舊韌體。
+
+出貨或 OTA 回滾測試直接拿 `artifacts/<board>.bin`，不用回頭挖 `firmware/build/`。
+`--no-archive` 可關掉；`make.py outputs --prune 3` 只留每塊板子最近 3 顆。
 
 ### 設定檔
 
@@ -94,6 +100,7 @@ python3 tools/board.py new --chip S3 --board ESP32-S3-Matrix --flash 16 --psram 
 | `nc4.py --port … reboot\|raw\|listen` | ✅ | 送單一 NC4 指令 / 監看輸出 |
 | `ota.py --port … <image>` | ✅ | NC4 OTA 推 firmware，**不需要按鍵、不需要 download mode** |
 | `selftest.py --port …` | ✅ | 一鍵自測：STATUS / 解碼器 9 case / 效能 / 突發 / OTA（會匯入同層的 `ota.py`） |
+| `nc4_file.py --port … status\|query <path>\|claim\|release` | ✅ | 檔案查詢（0x2005）與儲存狀態（0x1103/0x1101）。讀取任何模式都通；只有寫入才要 claim，見 [fat-ownership](../docs/03_notes/fat-ownership.md) |
 | `nc4_test.py --port …` | ✅ | 解碼器一致性測試：正常幀 / 黏包 / 拆包 / 壞 CRC / 假 SOF / 錯 addr / 超大 LEN / 錯版本 |
 
 firmware image 在 `firmware/build/esp_net_core.bin`（先 build 才有）。

@@ -60,6 +60,8 @@
 #include "ws_nc4.h"
 #include "udp_nc4.h"
 #include "http_cfg.h"
+#include "store.h"
+#include "file_cmds.h"
 
 #include "tinyusb.h"
 #include "tinyusb_cdc_acm.h"
@@ -139,30 +141,8 @@ static volatile uint32_t s_rx_frames;        // 成功收到的幀數
 extern const uint8_t preset_config_start[] asm("_binary_config_json_start");
 extern const uint8_t preset_config_end[]   asm("_binary_config_json_end");
 
-static wl_handle_t s_wl = WL_INVALID_HANDLE;
-static tinyusb_msc_storage_handle_t s_msc = NULL;
 
 // ── MSC 事件 ──
-static void msc_event_cb(tinyusb_msc_storage_handle_t handle, tinyusb_msc_event_t *event, void *arg)
-{
-    (void)handle;
-    (void)arg;
-    switch (event->id) {
-    case TINYUSB_MSC_EVENT_MOUNT_COMPLETE:
-        ESP_LOGI(TAG, "[msc] mount complete (→%s)",
-                 event->mount_point == TINYUSB_MSC_STORAGE_MOUNT_USB ? "USB" : "APP");
-        break;
-    case TINYUSB_MSC_EVENT_MOUNT_FAILED:
-        ESP_LOGE(TAG, "[msc] mount failed");
-        break;
-    case TINYUSB_MSC_EVENT_FORMAT_REQUIRED:
-        ESP_LOGW(TAG, "[msc] 需要格式化");
-        break;
-    default:
-        break;
-    }
-}
-
 static const esp_partition_t *find_data_partition(void)
 {
     return esp_partition_find_first(ESP_PARTITION_TYPE_DATA,
@@ -222,26 +202,9 @@ static esp_err_t storage_init(void)
     ESP_LOGI(TAG, "data 分區: offset 0x%08" PRIx32 ", size %" PRIu32 " KB",
              part->address, (uint32_t)(part->size / 1024));
 
-    ESP_RETURN_ON_ERROR(wl_mount(part, &s_wl), TAG, "wl_mount 失敗");
-
-    tinyusb_msc_driver_config_t drv_cfg = { .callback = msc_event_cb };
-    ESP_RETURN_ON_ERROR(tinyusb_msc_install_driver(&drv_cfg), TAG, "MSC driver 安裝失敗");
-
-    tinyusb_msc_storage_config_t storage_cfg = {
-        .medium.wl_handle = s_wl,
-        // 先讓 device 自己擁有，才有機會寫預置；寫完再交給 host
-        .mount_point = TINYUSB_MSC_STORAGE_MOUNT_APP,
-        .fat_fs = {
-            .base_path = NULL,      // 預設 /data
-            .config = {
-                .format_if_mount_failed = true,   // ★ 不需要人手動格式化
-                .max_files = 5,
-            },
-            .do_not_format = false,
-        },
-    };
-    ESP_RETURN_ON_ERROR(tinyusb_msc_new_storage_spiflash(&storage_cfg, &s_msc),
-                        TAG, "MSC storage 建立失敗");
+    // WL / FatFS / MSC 的整個生命週期都由 store 管 —— 它有辦法在 claim 時
+    // 把 LUN 拆掉，否則主機在 APP 模式仍然寫得進同一塊 flash。
+    ESP_RETURN_ON_ERROR(store_init(part), TAG, "store 初始化失敗");
 
     seed_preset_if_missing();
     ensure_volume_label();
@@ -264,10 +227,9 @@ static esp_err_t usb_init(void)
 
 static esp_err_t storage_hand_over_to_usb(void)
 {
-    if (s_msc == NULL) {
-        return ESP_ERR_INVALID_STATE;
-    }
-    return tinyusb_msc_set_storage_mount_point(s_msc, TINYUSB_MSC_STORAGE_MOUNT_USB);
+    // 交出去之後裝置只剩唯讀視圖（/ro）；要拿回來請把 System.file_mode 設成 1
+    //（store 會把 LUN 拆掉，主機的碟會消失、再出現）。
+    return store_release_usb();
 }
 
 static esp_err_t cdc_send(void *arg, const uint8_t *frame, size_t len)
@@ -316,6 +278,13 @@ static void on_reboot(nc4_ctx_t *ctx, const nc4_frame_t *f)
 // ── 0x1101 STATUS_GET → 0x1102 STATUS_RSP ──
 // keys 語義照 mp 版：空 = 全部、"? "= 目錄、其餘逗號分隔
 static uint32_t s_bench_ok;
+
+static void status_put_storage(char *buf, size_t cap)
+{
+    // FAT 現在在誰手上、裝置能不能直接讀
+    snprintf(buf, cap, "\"storage\":{\"mode\":\"%s\",\"app_ready\":%d}",
+             store_mode_name(), store_app_ready() ? 1 : 0);
+}
 
 static void status_put_sys(char *buf, size_t cap)
 {
@@ -392,7 +361,8 @@ static void on_status_get(nc4_ctx_t *ctx, const nc4_frame_t *f)
     }
 
     if (strcmp(keys, "?") == 0) {
-        reply_json(ctx, NC4_CMD_STATUS_RSP, "{\"keys\":[\"sys\",\"mem\",\"task\"]}");
+        reply_json(ctx, NC4_CMD_STATUS_RSP,
+                   "{\"keys\":[\"sys\",\"mem\",\"task\",\"svc\",\"storage\"]}");
         return;
     }
 
@@ -413,6 +383,11 @@ static void on_status_get(nc4_ctx_t *ctx, const nc4_frame_t *f)
     }
     if (keys_want(keys, "task")) {
         status_put_task(part, sizeof(part));
+        off += snprintf(json + off, sizeof(json) - off, "%s%s", first ? "" : ",", part);
+        first = false;
+    }
+    if (keys_want(keys, "storage")) {
+        status_put_storage(part, sizeof(part));
         off += snprintf(json + off, sizeof(json) - off, "%s%s", first ? "" : ",", part);
         first = false;
     }
@@ -2136,6 +2111,7 @@ void app_main(void)
         nc4_decoder_on(s_decoder, NC4_CMD_SYS_TASK_QUERY, on_sys_task_query);
         node_identity_init();
         ota_register(s_decoder);
+        file_cmds_register(s_decoder);   // 0x2005 FILE_QUERY / 0x1103 STATUS_SET
 #if CONFIG_IDF_TARGET_ESP32P4
         if (s_eth_ok) {
             // NC4 over WebSocket（訊息即一幀；直接解析，不經 bus）
