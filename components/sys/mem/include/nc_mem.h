@@ -39,6 +39,10 @@ typedef struct nc_mem_pool nc_mem_pool_t;
 nc_mem_pool_t *nc_mem_pool_create(const char *name, nc_mem_class_t cls,
                                   size_t block_size, size_t count);
 
+// 在「外部已配好的區域」上建 pool（plan 給的記憶體走這條，不再向系統要）
+nc_mem_pool_t *nc_mem_pool_init(void *region, size_t region_bytes, const char *name,
+                                nc_mem_class_t cls, size_t block_size, size_t count);
+
 // 取一塊；timeout_ms 內拿不到就回 NULL（0 = 不等）
 void *nc_mem_pool_get(nc_mem_pool_t *pool, uint32_t timeout_ms);
 
@@ -58,6 +62,10 @@ void nc_mem_pool_stats(const nc_mem_pool_t *pool, nc_mem_pool_stats_t *out);
 // ───────────────────────── ARENA ─────────────────────────
 
 typedef struct nc_mem_arena nc_mem_arena_t;
+
+// 在「外部已配好的區域」上建 arena（plan 給的記憶體走這條）
+nc_mem_arena_t *nc_mem_arena_init(void *region, size_t region_bytes, const char *name,
+                                  nc_mem_class_t cls);
 
 // 建立時就把整塊要下來，之後不再向系統要記憶體
 nc_mem_arena_t *nc_mem_arena_create(const char *name, nc_mem_class_t cls, size_t size);

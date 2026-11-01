@@ -6,15 +6,6 @@
     "frame_interval_ms": 20,
     "num_pixels": 0
   },
-  "Buffer": {
-    "frame": {
-      "block": 512,
-      "count": 4
-    },
-    "assets": {
-      "size": 65536
-    }
-  },
   "Network": {
     "wifi": {
       "enable": 0,

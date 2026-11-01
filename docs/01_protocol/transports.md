@@ -9,7 +9,8 @@
 
 | 模式 | 誰主動 | 適用 |
 |---|---|---|
-| **PULL** | 解碼任務呼叫 `read()` | 有 RX 佇列、隨時可讀：USB CDC、UART、TCP/WS |
+| **PULL** | 解碼任務呼叫 `read()` | 有 RX 佇列、隨時可讀：USB CDC、UART、TCP |
+| **訊息導向** | transport 自己把「一則訊息」交給解析器 | WS（一則 WS 訊息 = 一個 NC4 幀，直接原地解析，不經 bus） |
 | **PUSH** | transport 呼叫 `nc4_bus_push()` | 事件式：I2C/SPI slave、CAN RX、ESP-NOW |
 
 兩者共用同一組 `nc4_parser` / `nc4_decoder`，差別只在「位元組怎麼進來」。
@@ -35,7 +36,9 @@ nc4_bus_add(decoder, &cfg, &can);
 |---|---|---|---|---|---|
 | **USB CDC** | slave | 串流 | PULL | 任意 | 無（已接） |
 | **UART / RS485** | peer | 串流 | PULL | 任意 | 無（DE 腳位屬 driver） |
-| **TCP / WS** | peer | 串流 | PULL | 任意 | 無 |
+| **TCP** | peer | 串流 | PULL / PUSH（可選零複製） | 任意 | 無 |
+| **WS** | peer | **訊息** | 訊息導向（直接解析） | 一則訊息 ≤ 24 KB（可多幀） | 需要 `CONFIG_HTTPD_WS_SUPPORT` |
+| **UDP** | peer | **datagram** | 訊息導向（直接解析） | ≤ MTU（~1400 B）；不要切 IP 片段 | 無重傳／無排序 |
 | **ESP-NOW** | peer | 250 B/則 | PUSH | 任意 | 分段／重組 |
 | **I2C slave** | slave | 一次 transaction | PUSH | **同一 transaction 內** | 預先備好 TX + 跨 transaction 重組 |
 | **SPI slave** | slave | ≤ DMA 段 | PUSH | **同一 transaction 內** | 同上，DMA done → push |

@@ -82,10 +82,31 @@ uint16_t nc4_reply_addr(const nc4_ctx_t *ctx);
 // max_frame = 這條通道的 parser 緩衝大小；0 → NC4_MAX_FRAME
 nc4_parser_t *nc4_parser_create(nc4_decoder_t *decoder, nc4_send_fn send, void *send_arg,
                                 const char *source, size_t max_frame);
+
+// 在「外部已配好的區域」上建 parser（plan 給的記憶體走這條）
+nc4_parser_t *nc4_parser_create_in(void *region, size_t region_bytes,
+                                   nc4_decoder_t *decoder, nc4_send_fn send,
+                                   void *send_arg, const char *source);
 void nc4_parser_destroy(nc4_parser_t *parser);
 
 // 丟入任意長度的位元組流；處理黏包／拆包／錯位重同步
 esp_err_t nc4_parser_feed(nc4_parser_t *parser, const uint8_t *data, size_t len);
+
+// ── 零複製（frame-aligned）──
+// 看 9 B 表頭判斷整幀長度；不是合法表頭（SOF/VER/plen）回 0。
+// transport 可以「先 peek 表頭、再 recv 剛好一整幀」，於是 parser 不必有 ring。
+size_t nc4_header_total(const uint8_t *hdr);
+
+// 直接解析一個完整 frame：buf 必須從 SOF 開始，len == 13 + plen。
+// 不複製、不進 ring；handler 執行期間 frame.data 指向 buf+9，回傳後失效。
+// 回傳 ESP_OK / ESP_ERR_INVALID_SIZE（不是一幀）/ ESP_ERR_INVALID_CRC。
+esp_err_t nc4_parser_frame(nc4_parser_t *parser, const uint8_t *buf, size_t len);
+
+// 清掉「半個 frame」的殘留。
+// TCP 斷線時若正好停在一幀中間，parser 會留著那個殘幀等後續 bytes；
+// 下一條連線的資料會被接在它後面，於是小指令全被吞掉（看起來像「卡住」）。
+// 新連線 = 新位元組流 → 這條一定要呼叫。
+void nc4_parser_reset(nc4_parser_t *parser);
 
 // ── 打包（給 transport 當 send 用；也可給 handler 產生回覆）──
 // 回傳實際長度；容量不足回 -1（不寫、不 raise）

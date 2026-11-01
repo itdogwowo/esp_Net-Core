@@ -135,6 +135,30 @@ esp_net_core.bin binary size 0x50630 bytes. Smallest app partition is 0x400000 b
 > ⚠️ 改 `sdkconfig.defaults` **不會**套用到已存在的 `sdkconfig`。
 > 例如 `CONFIG_TINYUSB_CDC_RX_BUFSIZE` 改了卻沒生效，就是這個原因 —— 必須 `rm sdkconfig` 再 build。
 
+### 兩塊板子共用一棵樹：`tools/board.sh`
+
+```bash
+tools/board.sh build s3        # 板子 + 晶片都是從 ports/<chip>/<board> 決定
+tools/board.sh flash p4
+tools/board.sh list            # 偵測現在插的是哪塊
+```
+
+**踩過的坑（2026-11-02 已修）**：`-DPORT` 只換板子目錄，**不會換晶片**——
+晶片來自 `sdkconfig` 裡的 `CONFIG_IDF_TARGET`。所以在 P4 之後跑 `board.sh build s3`，
+其實是用 S3 的設定去建一份 **P4** image（大小、目標全錯），而且 S3 的程式碼根本沒被編到。
+（同一時間還發現：`main.c` 的 TCP bus 區塊沒有用 `#if CONFIG_IDF_TARGET_ESP32P4` 包起來，
+所以 **S3 從那個區塊進來之後就一直編不過**，只是沒有人真的用 S3 target 建置過。）
+
+現在的 `board.sh` 會比對 `sdkconfig` 的 target，不同就自動 `set-target` 重建
+（等同 `rm sdkconfig build`）。代價是所有可調值都必須寫在 `sdkconfig.defaults` /
+`ports/<board>/sdkconfig.defaults`，不能只留在 menuconfig 的 sdkconfig 裡。
+
+> 驗證方式（兩邊都要能編）：
+> ```bash
+> tools/board.sh build s3   # 期望 IDF_TARGET=esp32s3、image ≈ 355 KB
+> tools/board.sh build p4   # 期望 IDF_TARGET=esp32p4、image ≈ 570 KB
+> ```
+
 ---
 
 ## 5. 燒錄：三種模式

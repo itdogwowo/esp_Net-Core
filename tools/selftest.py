@@ -33,8 +33,10 @@ CMD_VERSION_QUERY = 0x2206
 CMD_VERSION_RSP = 0x2207
 CMD_CAPS_QUERY = 0x2210
 CMD_CAPS_RSP = 0x2211
-CMD_BENCH = 0x1801
-CMD_REBOOT = 0x100F
+CMD_BENCH_READY = 0x1811
+CMD_BENCH_DATA = 0x1812
+CMD_BENCH_RESULT = 0x1813
+CMD_BENCH_REPORT = 0x1814
 
 def pack(cmd, payload=b"", addr=ota.ADDR_BROADCAST, ver=ota.VERSION, decl_len=None):
     body = struct.pack("<BHHH", ver, addr, cmd,
@@ -112,7 +114,7 @@ def framing_cases(ser, rd):
 
 
 def burst(ser, rd, n):
-    frame = pack(CMD_STATUS_GET, b"\x00\x00")
+    frame = pack(CMD_STATUS_GET, ota.str_u16("sys"))
     rd.buf.clear()
     ser.reset_input_buffer()
     time.sleep(0.2)
@@ -168,19 +170,30 @@ def main():
             mc = struct.unpack_from("<H", f[1], 0)[0]
             print(f"        max_chunk={mc}")
 
+        ser.write(pack(CMD_STATUS_GET, ota.str_u16("mem")))
+        f = rd.wait_for({CMD_STATUS_RSP}, timeout=3)
+        record("STATUS_GET keys=mem", f is not None)
+        if f:
+            body = s16(f[1])
+            record("  含 plan 與 hub", "\"plan\"" in body and "\"hub\"" in body)
+            record("  plan 有 nc4.rx 且成功", "nc4.rx" in body and "\"fail\":0" in body)
+            record("  hub 有 probe", "probe" in body)
+
         print("\n[解碼器]")
         framing_cases(ser, rd)
 
-        print("\n[效能]")
-        for size, iters in ((8192, 100), (64, 1000)):
-            mb, us = bench(ser, rd, size, iters, 0)
-            record(f"decode {size} B", mb is not None, f"{mb} MB/s")
-            if mb:
-                print(f"        {us:.1f} us/frame, {mb:.2f} MB/s")
-            mb, us = bench(ser, rd, size, iters, 1)
-            record(f"pack   {size} B", mb is not None, f"{mb} MB/s")
-            if mb:
-                print(f"        {us:.1f} us/frame, {mb:.2f} MB/s")
+        print("\n[bench 域]")
+        ser.write(pack(CMD_BENCH_READY))
+        f = rd.wait_for({CMD_BENCH_REPORT}, timeout=3)
+        record("BENCH_READY → ok=0", f is not None and struct.unpack_from("<I", f[1], 0)[0] == 0)
+        n = 5
+        for _ in range(n):
+            ser.write(pack(CMD_BENCH_DATA, b"x" * 64))
+            time.sleep(0.01)
+        ser.write(pack(CMD_BENCH_RESULT))
+        f = rd.wait_for({CMD_BENCH_REPORT}, timeout=3)
+        got = struct.unpack_from("<I", f[1], 0)[0] if f else -1
+        record(f"BENCH {n} 包全數計入", got == n, f"ok={got}")
 
         print("\n[突發]")
         for n in (128, 256):

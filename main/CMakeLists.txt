@@ -14,7 +14,12 @@ endif()
 idf_component_register(
     SRCS "main.c"
     INCLUDE_DIRS "."
-    PRIV_REQUIRES fatfs esp_timer esp_partition esp_driver_gpio wear_levelling nvs_flash
-                   espressif__esp_tinyusb nc4 mem ota tasks
+    PRIV_REQUIRES fatfs esp_timer esp_partition esp_driver_gpio esp_driver_uart wear_levelling esp_eth esp_netif lwip esp_event esp_psram nvs_flash
+                   espressif__esp_tinyusb nc4 mem ota tasks transport
     ${_preset_embed}
 )
+
+# 最小映像（只印心跳，不碰 USB/MSC/ETH）：用來確認新板子的基礎能不能跑
+if(NETCORE_MINIMAL)
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE NETCORE_MINIMAL=1)
+endif()

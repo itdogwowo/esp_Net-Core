@@ -5,6 +5,29 @@
 
 #include "esp_log.h"
 #include "esp_rom_crc.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
+
+// handler 互斥：兩核各有 decode task，但 handler 的狀態是共用的。
+// 用 mutex（可讓出 CPU）而不是 spinlock —— handler 可能較慢（OTA 寫 flash）。
+static SemaphoreHandle_t s_dispatch_mutex;
+
+static inline void dispatch_lock(void)
+{
+    if (s_dispatch_mutex == NULL) {
+        s_dispatch_mutex = xSemaphoreCreateMutex();
+    }
+    if (s_dispatch_mutex != NULL) {
+        xSemaphoreTake(s_dispatch_mutex, portMAX_DELAY);
+    }
+}
+
+static inline void dispatch_unlock(void)
+{
+    if (s_dispatch_mutex != NULL) {
+        xSemaphoreGive(s_dispatch_mutex);
+    }
+}
 
 static const char *TAG = "nc4";
 
@@ -23,6 +46,7 @@ struct nc4_decoder {
 
 struct nc4_parser {
     uint8_t *buf;
+    bool external;      // true = buf 由外部提供，destroy 不 free
     size_t cap;
     size_t start;
     size_t end;
@@ -177,13 +201,113 @@ nc4_parser_t *nc4_parser_create(nc4_decoder_t *decoder, nc4_send_fn send, void *
     return p;
 }
 
+nc4_parser_t *nc4_parser_create_in(void *region, size_t region_bytes,
+                                   nc4_decoder_t *decoder, nc4_send_fn send,
+                                   void *send_arg, const char *source)
+{
+    if (region == NULL || decoder == NULL || region_bytes < NC4_HDR_LEN + NC4_CRC_LEN) {
+        return NULL;
+    }
+    nc4_parser_t *p = calloc(1, sizeof(*p));
+    if (p == NULL) {
+        return NULL;
+    }
+    p->buf = region;            // 外部區域：destroy 不會 free
+    p->cap = region_bytes;
+    p->external = true;
+    p->ctx.decoder = decoder;
+    p->ctx.send = send;
+    p->ctx.send_arg = send_arg;
+    p->ctx.source = source ? source : "?";
+    return p;
+}
+
 void nc4_parser_destroy(nc4_parser_t *parser)
 {
     if (parser == NULL) {
         return;
     }
-    free(parser->buf);
+    if (!parser->external) {
+        free(parser->buf);
+    }
     free(parser);
+}
+
+// 幀已驗過 CRC：ADDR 過濾後 dispatch。
+// base = 幀起點（SOF），plen 已驗證 ≤ NC4_MAX_PAYLOAD。
+// 只借用呼叫端的緩衝，不複製 —— handler 回傳後 frame.data 即失效。
+static void parser_dispatch(nc4_parser_t *parser, const uint8_t *base, uint16_t plen)
+{
+    nc4_frame_t f = {
+        .addr = (uint16_t)(base[3] | (base[4] << 8)),
+        .cmd = (uint16_t)(base[5] | (base[6] << 8)),
+        .data = base + NC4_HDR_LEN,
+        .len = plen,
+    };
+
+    // ADDR 過濾：只收廣播或定址到本機 cid 的幀（與 mp 版 app.handle_stream 一致）
+    const uint16_t my_cid = parser->ctx.decoder->cid;
+    if (f.addr != NC4_ADDR_BROADCAST && f.addr != my_cid) {
+        parser->ctx.decoder->dropped_addr++;
+        return;
+    }
+
+    nc4_handler_t h = decoder_lookup(parser->ctx.decoder, f.cmd);
+    if (h != NULL) {
+        dispatch_lock();
+        h(&parser->ctx, &f);
+        dispatch_unlock();
+    } else {
+        ESP_LOGD(TAG, "[%s] 未註冊的 cmd 0x%04X (len=%u)", parser->ctx.source, f.cmd, f.len);
+    }
+}
+
+void nc4_parser_reset(nc4_parser_t *parser)
+{
+    if (parser != NULL) {
+        parser->start = 0;
+        parser->end = 0;
+    }
+}
+
+// 看 9 B 表頭判斷整幀長度；不是合法表頭回 0。
+// 給「先看表頭、再決定這次要 recv 多少」的傳輸層用（frame-aligned 收包）。
+size_t nc4_header_total(const uint8_t *hdr)
+{
+    if (hdr == NULL || hdr[0] != NC4_SOF_0 || hdr[1] != NC4_SOF_1 ||
+        hdr[2] != NC4_VERSION) {
+        return 0;
+    }
+    const uint16_t plen = (uint16_t)(hdr[7] | (hdr[8] << 8));
+    if (plen > NC4_MAX_PAYLOAD) {
+        return 0;
+    }
+    return NC4_HDR_LEN + (size_t)plen + NC4_CRC_LEN;
+}
+
+// 直接解析「一個完整 frame」：buf 從 SOF 開始、len 必須等於 13+plen。
+// **零複製**：不進 ring、不 memcpy；dispatch 時 frame.data 指向 buf+9。
+// 呼叫端（frame-aligned 的 transport）負責提供連續且完整的一幀。
+esp_err_t nc4_parser_frame(nc4_parser_t *parser, const uint8_t *buf, size_t len)
+{
+    if (parser == NULL || buf == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    const size_t total = nc4_header_total(buf);
+    if (total == 0 || len != total) {
+        return ESP_ERR_INVALID_SIZE;
+    }
+    const uint16_t plen = (uint16_t)(total - NC4_HDR_LEN - NC4_CRC_LEN);
+
+    // CRC32（esp_rom_crc32_le(0,…) 與 MP 版 binascii.crc32(x,0) 等價）
+    const uint32_t want = rd_u32le(buf + NC4_HDR_LEN + plen);
+    const uint32_t got = esp_rom_crc32_le(0, buf + 2, NC4_HDR_LEN - 2 + plen);
+    if (want != got) {
+        return ESP_ERR_INVALID_CRC;
+    }
+
+    parser_dispatch(parser, buf, plen);
+    return ESP_OK;
 }
 
 esp_err_t nc4_parser_feed(nc4_parser_t *parser, const uint8_t *data, size_t len)
@@ -254,30 +378,7 @@ esp_err_t nc4_parser_feed(nc4_parser_t *parser, const uint8_t *data, size_t len)
             continue;
         }
 
-        nc4_frame_t f = {
-            .addr = (uint16_t)(base[3] | (base[4] << 8)),
-            .cmd = (uint16_t)(base[5] | (base[6] << 8)),
-            .data = base + NC4_HDR_LEN,
-            .len = plen,
-        };
-
-        // ADDR 過濾：只收廣播或定址到本機 cid 的幀（與 mp 版 app.handle_stream 一致）
-        const uint16_t my_cid = parser->ctx.decoder->cid;
-        if (f.addr != NC4_ADDR_BROADCAST && f.addr != my_cid) {
-            parser->ctx.decoder->dropped_addr++;
-            parser->start += total;
-            if (parser->start == parser->end) {
-                parser->start = parser->end = 0;
-            }
-            continue;
-        }
-
-        nc4_handler_t h = decoder_lookup(parser->ctx.decoder, f.cmd);
-        if (h != NULL) {
-            h(&parser->ctx, &f);
-        } else {
-            ESP_LOGD(TAG, "[%s] 未註冊的 cmd 0x%04X (len=%u)", parser->ctx.source, f.cmd, f.len);
-        }
+        parser_dispatch(parser, base, plen);
 
         parser->start += total;
         if (parser->start == parser->end) {

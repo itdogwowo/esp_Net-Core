@@ -27,6 +27,7 @@ static uint32_t caps_for(nc_mem_class_t cls)
 struct nc_mem_pool {
     const char *name;
     uint8_t *base;
+    bool owns;
     size_t block_size;
     size_t count;
     size_t used;
@@ -59,6 +60,7 @@ nc_mem_pool_t *nc_mem_pool_create(const char *name, nc_mem_class_t cls,
         free(p);
         return NULL;
     }
+    p->owns = true;
 
     p->name = name;
     p->block_size = block_size;
@@ -76,6 +78,37 @@ nc_mem_pool_t *nc_mem_pool_create(const char *name, nc_mem_class_t cls,
     ESP_LOGI(TAG, "pool %-8s %u x %u B（%u KB），內部剩 %u KB",
              name, (unsigned)count, (unsigned)block_size,
              (unsigned)(block_size * count / 1024), (unsigned)(free_heap / 1024));
+    return p;
+}
+
+nc_mem_pool_t *nc_mem_pool_init(void *region, size_t region_bytes, const char *name,
+                                nc_mem_class_t cls, size_t block_size, size_t count)
+{
+    (void)cls;
+    if (region == NULL || count == 0 || block_size < sizeof(void *)) {
+        return NULL;
+    }
+    if (block_size * count > region_bytes) {
+        ESP_LOGE(TAG, "pool %s: 區域太小（要 %u，給 %u）", name,
+                 (unsigned)(block_size * count), (unsigned)region_bytes);
+        return NULL;
+    }
+    nc_mem_pool_t *p = calloc(1, sizeof(*p));
+    if (p == NULL) {
+        return NULL;
+    }
+    p->base = region;
+    p->owns = false;
+    p->name = name;
+    p->block_size = block_size;
+    p->count = count;
+    p->mux = (portMUX_TYPE)portMUX_INITIALIZER_UNLOCKED;
+    for (size_t i = 0; i < count; i++) {
+        void *blk = p->base + i * block_size;
+        *(void **)blk = p->free_list;
+        p->free_list = blk;
+    }
+    ESP_LOGI(TAG, "pool %-8s %u x %u B（外部區域）", name, (unsigned)count, (unsigned)block_size);
     return p;
 }
 
@@ -150,6 +183,7 @@ void nc_mem_pool_stats(const nc_mem_pool_t *pool, nc_mem_pool_stats_t *out)
 struct nc_mem_arena {
     const char *name;
     uint8_t *base;
+    bool owns;
     size_t size;
     size_t used;
 };
@@ -163,6 +197,7 @@ nc_mem_arena_t *nc_mem_arena_create(const char *name, nc_mem_class_t cls, size_t
     if (a == NULL) {
         return NULL;
     }
+    a->owns = true;
     a->base = heap_caps_aligned_alloc(16, size, caps_for(cls));
     if (a->base == NULL) {
         ESP_LOGW(TAG, "arena %s: 要不到 %u KB（class=%d）", name,
@@ -173,6 +208,25 @@ nc_mem_arena_t *nc_mem_arena_create(const char *name, nc_mem_class_t cls, size_t
     a->name = name;
     a->size = size;
     ESP_LOGI(TAG, "arena %-8s %u KB", name, (unsigned)(size / 1024));
+    return a;
+}
+
+nc_mem_arena_t *nc_mem_arena_init(void *region, size_t region_bytes, const char *name,
+                                  nc_mem_class_t cls)
+{
+    (void)cls;
+    if (region == NULL || region_bytes == 0) {
+        return NULL;
+    }
+    nc_mem_arena_t *a = calloc(1, sizeof(*a));
+    if (a == NULL) {
+        return NULL;
+    }
+    a->base = region;
+    a->owns = false;
+    a->name = name;
+    a->size = region_bytes;
+    ESP_LOGI(TAG, "arena %-8s %u KB（外部區域）", name, (unsigned)(region_bytes / 1024));
     return a;
 }
 

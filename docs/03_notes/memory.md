@@ -136,3 +136,59 @@ USB 起來、碟交給 host
 ```
 
 config 從 `/data` 讀，所以**必須**在 storage 之後、USB 之前 —— 這個順序不能顛倒。
+
+---
+
+## 8. Plan：宣告 → 一次配置 → 查詢
+
+`nc_plan` 是「系統級」的那一層：它不認得任何子系統，只認得**宣告**。
+
+```c
+nc_plan_declare(&(nc_plan_decl_t){
+    .name = "pixel.frame", .group = "pixel", .level = 2,
+    .mech = NC_MECH_HANDOFF, .cls = NC_PLAN_DMA,
+    .bytes = 2704 * 4,
+});
+nc_plan_commit(avail, allow_shed);
+void *mem = nc_plan_get("pixel.frame");
+```
+
+### 三條規則
+
+| 規則 | 行為 |
+|---|---|
+| 宣告窗口在 commit 關閉 | 之後再宣告回 `ESP_ERR_INVALID_STATE`（不是 assert） |
+| 撇除以 group 為單位 | 按 level 大到小、同 level 按 group 名排序 → **與宣告順序無關** |
+| level 0 永不撇除 | 撇完仍不夠 → `ESP_ERR_NO_MEM`，不靜默啟動 |
+
+`allow_shed` 是 policy：開發期 `false`（大聲拒絕），量產可 `true`。
+
+### 查詢指令（重用既有的 STATUS 域）
+
+```bash
+tools/nc4.py --port ... raw 0x1101 <str>   # keys：空=全部、?=目錄、mem / sys / task
+```
+
+`keys="mem"` 回 plan + buf；`keys="?"` 列出可用名稱。**沒有新增指令碼** ——
+0x1101 / 0x1102 是 `slave/schema/status.json` 就有的。
+
+```json
+{"plan":{"committed":true,"decl":2,"shed":0,
+         "bytes":{"dma":2048,"int":0,"psram":65536},
+         "items":[{"n":"pixel.frame","g":"pixel","lvl":2,"b":2048,"shed":false},
+                  {"n":"assets","g":"assets","lvl":3,"b":65536,"shed":false}]},
+ "buf":[{"n":"probe","blk":256,"depth":8,"used":0,"peak":2,"drops":0,"starve":0}]}
+```
+
+### 這個查詢立刻抓到一個 bug
+
+上面 `pixel.frame` 的 `b` 是 **2048** —— 也就是 4 槽 × **512 B**。
+一幀 676 px × 4（RGBW）是 **2704 B**，這個 pool 連一幀都放不下。
+（`Buffer.frame.block` 預設 512 是舊值，該由 `System.num_pixels` 推導。）
+
+**看得見才修得掉** —— 這就是查詢指令存在的理由，不是為了好看。
+
+### Host 測試
+
+`tools/plan_test/run.sh`（gcc，零依賴、不需要板子）：6 個場景，含容量充足、
+超預算拒絕、超預算撇除、決定性（倒序宣告結果相同）、窗口關閉、重名。

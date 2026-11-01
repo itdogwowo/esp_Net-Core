@@ -3,7 +3,6 @@
 
 用法：
     tools/nc4.py --port /dev/cu.usbmodem* reboot
-    tools/nc4.py --port /dev/cu.usbmodem* dfu          # 進 ROM download mode
     tools/nc4.py --port /dev/cu.usbmodem* raw 0x100F 00000000
     tools/nc4.py --port /dev/cu.usbmodem* listen       # 只監看輸出
 
@@ -22,7 +21,6 @@ VERSION = 4
 ADDR_BROADCAST = 0xFFFF
 
 CMD_REBOOT = 0x100F
-CMD_RESET_TO_DOWNLOAD = 0x1019
 
 
 def pack(cmd: int, payload: bytes = b"", addr: int = ADDR_BROADCAST) -> bytes:
@@ -38,7 +36,7 @@ def main() -> int:
     ap.add_argument("--addr", type=lambda v: int(v, 0), default=ADDR_BROADCAST)
     sub = ap.add_subparsers(dest="action", required=True)
     sub.add_parser("reboot")
-    sub.add_parser("dfu")
+
     raw = sub.add_parser("raw")
     raw.add_argument("cmd", type=lambda v: int(v, 0))
     raw.add_argument("payload_hex", nargs="?", default="")
@@ -57,12 +55,6 @@ def main() -> int:
             frame = pack(CMD_REBOOT, struct.pack("<I", 0), args.addr)
             s.write(frame)
             print(f"→ REBOOT (0x100F) 已送出 {len(frame)} bytes")
-            time.sleep(1.0)
-
-        elif args.action == "dfu":
-            frame = pack(CMD_RESET_TO_DOWNLOAD, b"", args.addr)
-            s.write(frame)
-            print(f"→ RESET_TO_DOWNLOAD (0x1019) 已送出 {len(frame)} bytes")
             time.sleep(1.0)
 
         elif args.action == "raw":

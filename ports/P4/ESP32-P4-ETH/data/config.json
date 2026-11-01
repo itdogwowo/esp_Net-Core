@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "System": {
+    "hostname": "p4-netcore",
+    "frame_interval_ms": 33,
+    "num_pixels": 676
+  },
+  "Network": {
+    "lan": {
+      "enable": 1,
+      "driver": "RMII",
+      "phy_addr": 1,
+      "phy_type": "IP101",
+      "GPIO": { "mdc": 31, "mdio": 52, "ref_clk": 50 }
+    }
+  }
+}

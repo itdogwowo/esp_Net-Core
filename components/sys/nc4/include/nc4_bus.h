@@ -60,11 +60,22 @@ typedef struct {
     nc4_send_fn send;
     void *send_arg;
 
+    // 這條 bus 由哪個核心的 decode task 服務（0 / 1）
+    int core;
+
+    // 外部提供的 parser 緩衝（plan 給的記憶體）；NULL = 自己配
+    void *rx_region;
+    size_t rx_region_bytes;
+
     // ── 以下留 0 = 用框架預設 ──
     size_t max_frame;         // 這條 bus 的 parser 緩衝（預設 NC4_MAX_FRAME）
     size_t read_chunk;        // 每輪最多讀多少 byte（預設 256）
     uint32_t budget_per_pass; // 每輪最多讀幾次，防單一 bus 餓死其他（預設 8）
-    size_t rx_ring_size;      // PUSH 模式的 ring（預設 2048）
+    size_t rx_ring_size;      // PUSH 模式：每個插槽大小（預設 2048）；零複製要 ≥ 最大幀
+    int    rx_slots;          // PUSH 模式：插槽數量（預設 4）
+    // 零複製：producer 一次 commit「剛好一整幀」，consumer 直接在插槽上解析
+    // （不經 slot_pop、不進 parser ring）。RING 大小要 ≥ NC4_MAX_FRAME。
+    uint8_t frame_aligned;
 } nc4_bus_cfg_t;
 
 // 註冊一條通道（建立 parser / ring）。handle 可為 NULL（不需 push 時）。
@@ -75,7 +86,32 @@ esp_err_t nc4_bus_add(nc4_decoder_t *decoder, const nc4_bus_cfg_t *cfg,
 // 回傳 ESP_ERR_NO_MEM 表示 ring 滿 —— 呼叫端決定丟棄或重試。
 esp_err_t nc4_bus_push(nc4_bus_handle_t bus, const uint8_t *data, size_t len);
 
+// 零複製推送：先取得可寫指標（直接 recv 進去），再 commit。
+// 回傳 NULL = 目前沒有空插槽（呼叫端應該稍後再試，不要丟資料）。
+uint8_t *nc4_bus_push_begin(nc4_bus_handle_t bus, size_t want);
+esp_err_t nc4_bus_push_commit(nc4_bus_handle_t bus, size_t len);
+// 放棄這次寫入（例如 recv 回 EAGAIN）：把插槽還回去，避免漏格
+esp_err_t nc4_bus_push_abort(nc4_bus_handle_t bus);
+
+// 清掉 parser 的半幀殘留（新連線／重連時呼叫；PUSH 模式順便丟掉所有 READY 插槽，
+// 因為那些是上一條連線的資料，接在新 parser 後面只會讓它更難同步）
+esp_err_t nc4_bus_reset(nc4_bus_handle_t bus);
+
+// ── 零複製（frame_aligned=1 時給 consumer 用）──
+// 取下一格整幀（不複製）；解析完呼叫 end 歸還。沒有資料回 NULL。
+uint8_t *nc4_bus_frame_begin(nc4_bus_handle_t bus, size_t *len);
+void nc4_bus_frame_end(nc4_bus_handle_t bus);
+
+// producer commit 之後呼叫：叫醒服務這條 bus 的 decode task（不用等輪詢）
+void nc4_bus_kick(nc4_bus_handle_t bus);
+
+// 每條 bus 的統計（JSON 陣列）：frames / mb / copied / parse_ms / us_per_frame
+// copied = 為了把 payload 交給 parser 而做的 memcpy bytes（零複製模式應為 0）
+size_t nc4_bus_stats_json(char *buf, size_t cap);
+void nc4_bus_stats_reset(void);
+
 // 解碼任務本體（公開給任務註冊表使用；也可用 nc4_bus_start 直接建立）
+// arg 必須轉型成 int 傳入「這個 task 負責的 core」
 void nc4_bus_task_entry(void *arg);
 
 // 啟動解碼任務（掃描所有已註冊通道）。等於自行建立上面那個 task。
