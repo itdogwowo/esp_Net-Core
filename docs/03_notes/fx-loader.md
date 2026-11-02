@@ -288,15 +288,28 @@ typedef struct {
 ### 10.3 開機接線（全部用你現有的東西）
 
 ```c
+// ① 宣告期（nc_plan_commit 之前）
 storage_init();                     // 隨身碟（/data 掛載）
 nc_plan_declare(&(nc_plan_decl_t){
     .service = "fx", .name = "fx.arena", .level = 4,
     .cls = NC_PLAN_PSRAM, .bytes = NC_FX_ARENA_MAX });
-nc_plan_commit(avail, /*allow_shed*/ true);
-nc_fx_init(nc_plan_get("fx.arena"));          // WAMR init，只有一次
+
+// ② commit 全域只有一次，由 main 統一呼叫（不是 fx 自己呼叫）
+nc_plan_commit(avail, /*allow_shed*/ false);
+
+// ③ 啟動期：拿 plan 給的指標 → 掃目錄（此時 FAT 仍歸裝置）
+nc_fx_init(nc_plan_get("fx.arena"), NC_FX_ARENA_MAX);
+nc_fx_scan("/data/fx");
+
+// ④ 任務註冊：必須在 nc_tasks_boot() 之前
 nc_task_register(&(nc_task_def_t){
-    .name = "fx", .fn = nc_fx_task, .core = 1, .layer = 3, ... });
+    .name = "fx", .fn = nc_fx_task, .stack = 4096, .prio = 3,
+    .core = 1, .layer = 3 });
 ```
+
+> ⚠️ 這是**修正後**的接線。草稿版把 `nc_plan_commit` 寫在 fx 裡面 —— 那會回
+> `ESP_ERR_INVALID_STATE`：commit 是單次、全域的，而且 commit 之後
+> `nc_plan_declare` 一律失敗。實際程式在 `main.c` 的 ⑤ 宣告期 / ② commit / ③ 啟動期三段。
 
 `nc_plan_decl_t` 本來就有 `service` 欄位（「誰要的」）—— **服務這個概念在你的 C code 裡已經存在了**，只是還沒有對應的 API 介面。這一步不是發明，是把欄位補上行為。
 
@@ -348,6 +361,67 @@ nc_task_register(&(nc_task_def_t){
 | 5 | WAMR 自己也要 heap（module heap / stack） | 跑到一半 OOM | 從 plan 要一塊 `fx.runtime`（DMA 不要，INTERNAL 即可） |
 
 ---
+
+### 10.7 實作現況（2026-11-02 驗證）
+
+骨架已落地：`firmware/components/app/fx/`（`nc_fx.c` + `include/nc_fx.h`）。
+
+| 項目 | 狀態 |
+|---|---|
+| `nc_plan_declare` 拿 PSRAM arena | ✅ 板上實測 524,288 B |
+| `.fxe` 48 B 檔頭驗證（magic / abi / 長度 / crc32） | ✅ |
+| 實例表（8 個，不是服務） | ✅ |
+| `nc_fx_scan("/data/fx")` —— 檔案系統就是註冊表 | ✅ 開機自動載入 |
+| `select` / `unload` + 兩幀後釋放 | ✅（等真正 renderer 才看得出效果） |
+| `nc_fx_task`（100 Hz 佔位，之後由 FrameClock 驅動） | ✅ frames 持續增加 |
+| `STATUS_GET "fx"` | ✅ 見下 |
+| 兩種 payload 格式（wasm / aot） | ✅ 錯架構的 AOT 在載入前被擋 |
+| host 測試（不需要板子） | ✅ `tools/hosttest/fx_test/run.sh`，13 組 case / 49 斷言 |
+| **WAMR 執行引擎** | ⬜ 未接（見 §10.8） |
+
+板上實測（S3，`/data/fx/fire26.fxe`，payload 367 B）：
+
+```json
+{"fx":{"arena":524288,"used":367,"live":"fire26","frames":1606,
+       "backend":"none","modules":[{"name":"fire26","bytes":367,"ok":0}]}}
+```
+
+`ok:0` 是刻意的：**沒有執行引擎時「載入成功但不能跑」**，不要假裝能跑。
+
+### 10.8 WAMR 相容性（實測：目前編不過）
+
+在 `/tmp` 的乾淨副本加了 `espressif/wasm-micro-runtime ^2.4.0`，用同一份 sdkconfig 建 S3：
+
+```
+Note: Successfully added dependency "espressif/wasm-micro-runtime": "^2.4.0"
+...
+FAILED: .../espressif__wasm-micro-runtime/.../espidf_file.c.obj
+  error: 'struct stat' declared inside parameter list ...
+  error: implicit declaration of function 'S_ISBLK'
+```
+
+**結論：component 解得到（版本與 target 都對），但原始碼對 IDF v6.0.3 編不過。**
+這是 component 自己的問題，與本專案的三層設計無關。
+
+原因與修法：
+
+| 問題 | 說明 |
+|---|---|
+| `struct stat` 未宣告 | `espidf_file.c` 漏了 `#include <sys/stat.h>`；IDF 6 的標頭收緊了 |
+| `S_ISBLK` 未定義 | IDF 的 newlib 沒有 block device 概念 |
+| `-Werror` | ESP-IDF 預設把警告當錯，所以「只是警告」也變成建置失敗 |
+
+可能的路（未驗，依成本排序）：
+
+1. **patch component**：補 include、把 `S_ISBLK` 用空巨集蓋掉（WASI 的檔案路徑我們本來就不用）。
+2. **排除 `espidf_file.c`**：需要改 component 的 CMakeLists（它用 glob 收檔案，沒有對外開關）。
+3. **等上游修**：回報 issue，或用 `WAMR_BUILD_LIBC_WASI=0` 的版本（本次試過在專案
+   CMakeLists 設變數，component 沒收到，仍會編）。
+4. **降 IDF 或用別家 fork**：成本最高。
+
+> 所以「檔案的容器與載入器」是我們能控制的，「執行引擎」不是 —— 這正好印證
+> [effect-language.md](effect-language.md) 那句：**執行引擎是別人的**。WAMR 接不上時，
+> `nc_fx_ops_t` 的 backend 插槽讓它可以整個換掉，上層（arena / 實例表 / task / 狀態）不動。
 
 ## 11. 決策記錄
 

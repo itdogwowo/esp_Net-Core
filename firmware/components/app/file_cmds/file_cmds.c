@@ -138,7 +138,10 @@ static uint32_t free_bytes(void)
     if (f_getfree(drv, &nclst, &fs) != FR_OK || fs == NULL) {
         return 0;
     }
-    return (uint32_t)nclst * (uint32_t)fs->csize * 512u;
+    // 注意：磁區大小是 fs->ssize，不是 512 —— WL 的 sector 是 4 KB，
+    // 寫死 512 會把可用空間少報 8 倍（實測 211 KiB vs 真正的 1688 KiB）。
+    const uint32_t cluster = (uint32_t)fs->csize * (uint32_t)fs->ssize;
+    return (uint32_t)nclst * cluster;
 }
 
 // ── 0x2010 FILE_ERROR_RSP（順序與 schema 相同）──

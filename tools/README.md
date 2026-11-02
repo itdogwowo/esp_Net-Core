@@ -127,6 +127,7 @@ P4 預設靜態 IP `10.10.1.50/16`，量測前先確認連得到。
 ```bash
 tools/hosttest/hub_test/run.sh     # nc_hub.c：格子交換 / 自動歸還
 tools/hosttest/plan_test/run.sh    # nc_plan.c：宣告 / commit / 重名
+tools/hosttest/fx_test/run.sh      # nc_fx.c：載入 / 選 / 兩幀釋放 / trap / 超支
 ```
 
 兩支都會印 `ALL PASS`。改動 `components/sys/mem/` 之後先跑這個。

@@ -399,9 +399,9 @@ fx_render(frame_id: i32, time_us: i64, span_off: i32, span_len: i32)
 ```c
 // 開機（在 nc_plan_commit 之前）
 nc_plan_declare(&(nc_plan_decl_t){
-    .name = "fx.arena", .group = "fx", .level = 4,     // L4 = 最先被撇除
-    .mech = NC_MECH_OWNED, .cls = NC_PLAN_PSRAM,
-    .bytes = NC_FX_ARENA_MAX,                          // config 決定，例如 256 KB
+    // 實際欄位見 nc_plan.h：service / name / level / cls / bytes / align
+    .service = "fx", .name = "fx.arena", .level = 4,   // L4 = 最先被撇除
+    .cls = NC_PLAN_PSRAM, .bytes = NC_FX_ARENA_MAX,     // 例如 512 KB
 });
 ```
 

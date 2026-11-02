@@ -62,6 +62,7 @@
 #include "http_cfg.h"
 #include "store.h"
 #include "file_cmds.h"
+#include "nc_fx.h"
 
 #include "tinyusb.h"
 #include "tinyusb_cdc_acm.h"
@@ -362,7 +363,7 @@ static void on_status_get(nc4_ctx_t *ctx, const nc4_frame_t *f)
 
     if (strcmp(keys, "?") == 0) {
         reply_json(ctx, NC4_CMD_STATUS_RSP,
-                   "{\"keys\":[\"sys\",\"mem\",\"task\",\"svc\",\"storage\"]}");
+                   "{\"keys\":[\"sys\",\"mem\",\"task\",\"svc\",\"storage\",\"fx\"]}");
         return;
     }
 
@@ -383,6 +384,11 @@ static void on_status_get(nc4_ctx_t *ctx, const nc4_frame_t *f)
     }
     if (keys_want(keys, "task")) {
         status_put_task(part, sizeof(part));
+        off += snprintf(json + off, sizeof(json) - off, "%s%s", first ? "" : ",", part);
+        first = false;
+    }
+    if (keys_want(keys, "fx")) {
+        nc_fx_status_json(part, sizeof(part));
         off += snprintf(json + off, sizeof(json) - off, "%s%s", first ? "" : ",", part);
         first = false;
     }
@@ -2053,6 +2059,7 @@ void app_main(void)
     nc_service_add(&s_probe_service);
     nc_service_declare_all();       // 應用服務宣告
     sys_declare_all();              // System 宣告（硬體/driver/NC4 通道的緩衝）
+    nc_fx_declare();                // 效果 arena（PSRAM）；宣告窗口在 commit 關閉
 
     // ── ② 探測可用量，一次 commit（每 class 一次 carve）──
     size_t avail[NC_PLAN_CLASSES] = {0};
@@ -2066,6 +2073,11 @@ void app_main(void)
         ESP_LOGI(TAG, "plan(%s): %s", esp_err_to_name(perr), pj);
     }
 
+
+    // ── 效果：arena 已由 plan 配好；此時 /data 仍歸裝置，正好掃目錄 ──
+    if (nc_fx_init(nc_plan_get("fx.arena"), NC_FX_ARENA_MAX) == ESP_OK) {
+        nc_fx_scan("/data/fx");
+    }
 
     // ── ③ System 啟動（NC4 通道）→ 應用服務啟動 ──
     sys_start_all();
@@ -2209,6 +2221,12 @@ void app_main(void)
                 .stack = 4096, .prio = 2, .core = 0, .layer = 2,
             });
         }
+        // 效果 render：L3、core 1（RX 在 core1，render 也放 core1 只作佔位；
+        // 等 FrameClock 落地再依實際負載重排）
+        nc_task_register(&(nc_task_def_t){
+            .name = "fx", .fn = nc_fx_task, .arg = NULL,
+            .stack = 4096, .prio = 3, .core = 1, .layer = 3,
+        });
         nc_tasks_boot();
     }
 
