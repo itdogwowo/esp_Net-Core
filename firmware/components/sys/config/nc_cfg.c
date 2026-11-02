@@ -1,0 +1,197 @@
+#include "nc_cfg.h"
+
+#include <unistd.h>
+
+#include "nc_cfg_patch.h"
+
+#include <stdio.h>
+#include <ctype.h>
+#include <stdlib.h>
+#include <string.h>
+
+#include "esp_log.h"
+
+static const char *TAG = "nc_cfg";
+
+#define CFG_DIR   "/data/config"
+#define CFG_MAX   (16 * 1024)
+
+struct cfg_file {
+    cJSON *root;
+};
+
+static bool path_of(const char *layer, char *out, size_t cap, const char *suffix)
+{
+    if (layer == NULL || out == NULL || cap == 0) {
+        return false;
+    }
+    const int n = snprintf(out, cap, CFG_DIR "/%s.json%s", layer, suffix ? suffix : "");
+    return n > 0 && (size_t)n < cap;
+}
+
+cfg_file_t *nc_cfg_open(const char *layer)
+{
+    char path[64];
+    if (!path_of(layer, path, sizeof(path), NULL)) {
+        return NULL;
+    }
+
+    FILE *f = fopen(path, "rb");
+    if (f == NULL) {
+        return NULL;    // 缺檔 = 用預設
+    }
+    char *buf = malloc(CFG_MAX);
+    if (buf == NULL) {
+        fclose(f);
+        return NULL;
+    }
+    const size_t n = fread(buf, 1, CFG_MAX - 1, f);
+    fclose(f);
+    buf[n] = '\0';
+
+    cJSON *root = cJSON_Parse(buf);
+    free(buf);
+    if (root == NULL) {
+        ESP_LOGW(TAG, "%s 不是合法 JSON → 用預設", path);
+        return NULL;
+    }
+
+    cfg_file_t *cfg = calloc(1, sizeof(*cfg));
+    if (cfg == NULL) {
+        cJSON_Delete(root);
+        return NULL;
+    }
+    cfg->root = root;
+    return cfg;
+}
+
+void nc_cfg_close(cfg_file_t *cfg)
+{
+    if (cfg == NULL) {
+        return;
+    }
+    cJSON_Delete(cfg->root);
+    free(cfg);
+}
+
+const cJSON *nc_cfg_root(const cfg_file_t *cfg)
+{
+    return cfg ? cfg->root : NULL;
+}
+
+const char *nc_cfg_str(const cJSON *root, const char *key, const char *def)
+{
+    if (root == NULL || key == NULL) {
+        return def;
+    }
+    const cJSON *v = cJSON_GetObjectItemCaseSensitive(root, key);
+    if (cJSON_IsString(v) && v->valuestring != NULL) {
+        return v->valuestring;
+    }
+    return def;
+}
+
+int nc_cfg_int(const cJSON *root, const char *key, int def)
+{
+    if (root == NULL || key == NULL) {
+        return def;
+    }
+    const cJSON *v = cJSON_GetObjectItemCaseSensitive(root, key);
+    if (cJSON_IsNumber(v)) {
+        return v->valueint;
+    }
+    return def;
+}
+
+
+bool nc_cfg_set_string(const char *layer, const char *key, const char *value)
+{
+    char path[64], tmp[72], bak[80];
+    if (key == NULL || value == NULL ||
+        !path_of(layer, path, sizeof(path), NULL) ||
+        !path_of(layer, tmp, sizeof(tmp), ".tmp") ||
+        !path_of(layer, bak, sizeof(bak), ".bak")) {
+        return false;
+    }
+
+    // 先試「只換值」：保留使用者的縮排、鍵順序、_comment 位置
+    char *text = NULL;
+    size_t text_len = 0;
+    bool patched = false;
+    bool from_cjson = false;
+    FILE *rf = fopen(path, "rb");
+    if (rf != NULL) {
+        char *src = malloc(CFG_MAX);
+        if (src != NULL) {
+            const size_t got = fread(src, 1, CFG_MAX - 1, rf);
+            src[got] = '\0';
+            char *dst = malloc(CFG_MAX);
+            if (dst != NULL && nc_cfg_patch_value(src, key, value, dst, CFG_MAX, &text_len)) {
+                text = dst;
+                patched = true;
+            } else {
+                free(dst);
+            }
+            if (!patched) {
+                free(src);
+            }
+        }
+        fclose(rf);
+    }
+
+    if (!patched) {
+        // fallback：沒有這個鍵（或檔案不存在）→ cJSON 建/改後整份重印
+        cfg_file_t *cfg = nc_cfg_open(layer);
+        cJSON *root = cfg ? cfg->root : cJSON_CreateObject();
+        if (root == NULL) {
+            return false;
+        }
+        cJSON_DeleteItemFromObjectCaseSensitive(root, key);
+        cJSON_AddStringToObject(root, key, value);
+        text = cJSON_Print(root);
+        text_len = text ? strlen(text) : 0;
+        from_cjson = true;
+        if (cfg != NULL) {
+            cfg->root = NULL;      // root 由這裡釋放
+            nc_cfg_close(cfg);
+        }
+        cJSON_Delete(root);
+    }
+
+    bool ok = false;
+    if (text != NULL) {
+        FILE *f = fopen(tmp, "wb");
+        if (f != NULL) {
+            ok = fwrite(text, 1, text_len, f) == text_len;
+            if (ok) {
+                fsync(fileno(f));   // 舊專案 os.sync() 的教訓：reset 前要落盤
+            }
+            fclose(f);
+        }
+        if (from_cjson) {
+            cJSON_free(text);
+        } else {
+            free(text);
+        }
+    }
+
+    if (ok) {
+        remove(bak);
+        rename(path, bak);
+        if (rename(tmp, path) != 0) {
+            rename(bak, path);
+            ok = false;
+        }
+    }
+    if (!ok) {
+        remove(tmp);
+    }
+
+    if (ok) {
+        ESP_LOGI(TAG, "%s.%s = \"%s\"（已寫回，%s）", layer, key, value,
+                 patched ? "保留原排版" : "重印");
+    } else {
+        ESP_LOGW(TAG, "%s.%s 寫回失敗（記憶體值仍生效）", layer, key, value);
+    }
+    return ok;
+}

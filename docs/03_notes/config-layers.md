@@ -1,203 +1,300 @@
-# 配置分層與開機順序（System / Driver / Service）
+# 配置分層：一個層一個檔案
 
-> **狀態**：設計（程式目前只有「System 宣告 + 服務管理器」，config.json 還沒接）
-> **參考**：mp_Net-Core 的 `config.json`（System / Buffer / Network / SPI / I2C / UART / TFT / WS2812 …）
-> **相關**：[writing-a-service.md](writing-a-service.md)、[rx-architecture.md](rx-architecture.md)、[architecture-flow.md](architecture-flow.md)
+> **狀態**：重新規劃（2026-11-02）。程式目前只有程式常數 + NVS，還沒有 config loader。
+> **參考**：mp_Net-Core 的 `config.json`（一個檔 24 個 section：System / Buffer / SPI / I2C / UART / TFT / WS2812 …）
+> **相關**：[decode-routes.md](decode-routes.md)、[writing-a-task.md](writing-a-task.md)、[component-layout.md](component-layout.md)
 
 ---
 
-## 0. 先分清楚：哪些能寫進 config.json，哪些不能
+## 0. 先分清楚：能不能換 binary
 
-這份文件講的是 **L3（執行期）**。但在寫任何一行 config 之前，先確認它屬於哪一層：
-
-| 層 | 內容 | 能不能用 config.json 換 | 放哪 |
+| 層 | 內容 | 換它要重 build？ | 放哪 |
 |---|---|---|---|
-| **L1 硬體事實** | flash 大小 / 頻率 / 模式、PSRAM、CPU 頻率、有冇 Ethernet、console | ❌ **永遠不行**（bootloader / 記憶體初始化就決定了） | `ports/<chip>/<board>/board.json` + `sdkconfig.defaults` |
-| **L2 能力碎片** | ETH、NC4 over WS、NC4 over UDP | ❌ 要重新 build | `ports/_profiles/*.defaults` |
-| **L3 執行期** | gpio、服務開關、像素數、網路位址 | ✅ 同一份 binary | `data/config.json` |
+| **L1 硬體事實** | flash 大小/頻率、PSRAM、CPU 頻率、有沒有 ETH、console | ✅ 一定要 | `ports/<chip>/<board>/board.json` + `sdkconfig.defaults` |
+| **L2 能力碎片** | ETH、NC4 over WS、NC4 over UDP | ✅ 要 | `ports/_profiles/*.defaults` |
+| **L3 執行期** | 腳位覆蓋、通道與解碼路線、IP、任務參數、效果開關 | ❌ 同一份 binary | **隨身碟 `config/*.json`** |
 
-判準：**換了它，需不需要重新燒 firmware？** 需要 → L1/L2；不需要 → L3。
-`tools/board.py check` 會擋下「把 L1 寫進 config.json」。
-
-下面講的都是 L3 的 schema。板子層怎麼運作見 [ports/README.md](../../ports/README.md)。
+判準：**換了它需不需要重燒 firmware？** 需要 → L1/L2；不需要 → L3。
 
 ---
 
-## 1. 兩個世界，不要混
+## 1. 為什麼分檔，而不是一個大 config.json
 
-| 世界 | 是什麼 | 誰啟動 | 有生命週期嗎 |
+舊專案是一個 5.8 KB 的 `config.json`，24 個 section。那在 MicroPython 行得通，因為
+`ConfigManager` 是唯一的讀寫者，所有模組共用一個 bus。C 版不行，理由有三個：
+
+1. **每個層的讀取時機不同**：硬體要腳位才能 init；NC4 分配要等硬體起來才知道有哪些通道。
+   一個檔會逼所有人同步在同一個時間點讀。
+2. **一個壞檔不該拖垮全部**：現在 `json.loads` 失敗就整個檔沒了。分檔之後，
+   `network.json` 壞掉只影響 IP，效果照跑。
+3. **擁有者要清楚**：`hardware.json` 只有硬體層讀；`system.json` 只有系統層讀。
+   改網路的人不會碰到像素設定，也不用怕存檔時重排別人的 section。
+
+還有一個好處：**firmware 只讀不寫**（只有第一次開機寫預置）。
+使用者用隨身碟改，firmware 不會跟使用者搶檔案。
+
+---
+
+## 2. 檔案清單
+
+```text
+/data/                       ← 隨身碟（FAT，卷標 NETCORE）
+├─ config/
+│  ├─ hardware.json          腳位與 bus（硬體層 init 前讀）
+│  ├─ driver.json            PHY / DMA / TFT / USB 參數（driver init 前讀）
+│  ├─ system.json            身份、開機、NC4 通道與解碼路線（硬體起來後讀）
+│  ├─ network.json           IP / mask / gw / DHCP
+│  └─ tasks.json             任務 core / prio / stack 覆蓋
+└─ pixel/                    ★ 效果自己的樹（見 §5.1）
+```
+
+| 檔案 | 擁有者 | 讀的時機 | 缺檔 / 壞檔 |
 |---|---|---|---|
-| **System（核心）** | 硬體、driver、**NC4 通道**、log/status | 固定順序的開機流程 | ❌ 沒有；它就是系統 |
-| **Service（應用）** | 效果、UI、慢工作、自測 | `nc_service` 管理器 | ✅ declare → start → stop |
-
-**NC4 通道屬於 System**：它跟「這顆晶片有幾條網路、幾個 UART」是同一件事，
-不該由應用服務管理器去宣告、啟動、停止。應用服務是「可有可無的功能」。
-
-```
-                    ┌──────────── System（固定順序）────────────┐
-  config.json ──►   │ Hardware → Driver → Network / NC4 通道    │ ──► log / status
-                    └───────────────────┬───────────────────────┘
-                                        │ 提供 bus / hub / handle
-                    ┌───────────────────▼───────────────────────┐
-                    │ Service（可選）：effects / UI / jobs / …   │
-                    └───────────────────┬───────────────────────┘
-                                        │ nc_task_register
-                    ┌───────────────────▼───────────────────────┐
-                    │ Tasks：誰跑在哪一核、哪一層、多少 stack    │
-                    └───────────────────────────────────────────┘
-```
+| `hardware.json` | 硬體層 | **硬體 init 之前** | 用 `board.json` 的板級預設 |
+| `driver.json` | driver 層 | driver init 之前 | 用 driver 內建預設 |
+| `system.json` | 系統層（main） | **硬體起來之後**（分配要看實際硬體） | 只啟動硬體實際支援的通道 |
+| `network.json` | 網路層 | ETH/WiFi 起來前 | 用內建 IP 或 DHCP |
+| `tasks.json` | 任務管理器 | 任務登記前 | 用程式裡宣告的 core/prio |
+| `pixel/`（目錄） | fx | 掃描 `pixel/effects/` | 不啟用效果 |
 
 ---
 
-## 2. config.json 的層（照舊專案延伸）
+## 3. 讀取規則（每層自己讀，不中央統一載入）
+
+```c
+#include "nc_cfg.h"
+
+nc_cfg_t *cfg = nc_cfg_open("system");     // /data/config/system.json
+if (cfg == NULL) {
+    use_defaults();                        // 缺檔 → 預設，不是錯誤
+    return ESP_OK;
+}
+const cJSON *root = nc_cfg_root(cfg);
+int ver = nc_cfg_version(cfg, 1);          // 版本不符 → 預設 + warning
+...
+nc_cfg_close(cfg);
+```
+
+規則：
+
+1. **缺檔 → 預設**，不是錯誤。使用者刪掉任何一個檔都要能開機。
+2. **壞檔 → log + 預設**，該層停用或退化，其他層照跑。
+3. `_comment` 一律忽略；`version` 不符 → 預設。
+4. 一個層只讀自己那個檔，**不跨檔讀別人的 section**。
+5. firmware **不寫**（第一次開機寫預置除外）；唯一例外是「補值」——
+   例如 `cID` 空的就填 MAC 推導值，寫回時**只換那一個值**（token patch），
+   你的縮排、鍵順序、`_comment` 位置都不會被動，舊檔留 `.bak`。
+
+---
+
+## 4. 開機順序（誰在什麼時候讀）
+
+```text
+① NVS init
+② hardware.json → 硬體 init（GPIO/SPI/I2C/UART/ETH PHY；缺檔用 board.json）
+③ driver.json   → driver init（ETH DMA、USB、TFT…）
+④ 硬體起來了，讀分配：
+     system.json  → NC4 decode[] / links[]
+     network.json → IP
+     tasks.json   → 任務覆蓋
+⑤ 宣告（記帳）  看②③的實際結果 + ④的分配
+⑥ 資源 carve    nc_plan_commit(當下可用量)
+⑦ NC4 通道啟動  建 transport → 建 bus → 掛 decode 引擎
+⑧ 任務啟動     nc_task_start_all() → nc_task_boot() 依 layer
+⑨ pixel/（掃 `pixel/effects/*.fxe`，attach 時才載入）
+```
+
+**為什麼 ④ 在 ②③ 之後**：分配是「把通道/引擎/緩衝放到實際存在的硬體上」。
+ETH PHY 沒 link、UART 沒接，就不該照 config 硬開一條 link。
+**為什麼 ② 之前就有 config**：腳位是 init 的輸入，所以 `hardware.json` 由硬體層自己讀，
+不跟 ④ 的分配混在一起。
+
+---
+
+## 5. 各檔 schema
+
+### `system.json`（System 層）
 
 ```jsonc
 {
-  "System": {
-    "hostname": "p4-netcore",
-    "cID": 0xF5F9,
-    "debug_level": 3,
-    "frame_interval_ms": 33,
-    "boot_strict": 1
-  },
+  "version": 1,
+  "_comment": "身份、開機行為、NC4 通道與解碼路線。CPU 與緩衝是系統資源。",
+  "cID": "0xF5F9",
+  "debug_level": 3,
+  "frame_interval_ms": 33,
+  "boot_strict": 1,
 
-  // ── 硬體：腳位、匯流排、裝置（跟舊專案一樣按 bus 分）──
-  "Hardware": {
-    "PIN":    { "enable": 1, "list": [ ... ] },
-    "SPI":    { "enable": 1, "list": [ { "id": 0, "mosi": 11, "sclk": 12, ... } ] },
-    "I2C":    { "enable": 1, "list": [ { "id": 0, "sda": 8, "scl": 9, "freq": 400000 } ] },
-    "UART":   { "enable": 1, "list": [ { "id": 1, "tx": 7, "rx": 8, "baud": 921600 } ] },
-    "ETH":    { "enable": 1, "mdc": 31, "mdio": 52, "ref_clk": 50, "phy_addr": 1 }
-  },
-
-  // ── driver：不屬於硬體、屬於「怎麼用」的參數 ──
-  "Driver": {
-    "ETH":  { "phy_type": "IP101", "dma_buf": 1600, "rx_desc": 16, "tx_desc": 16 },
-    "USB":  { "enable": 0, "msc": 1, "cdc": 1 },
-    "TFT":  { "enable": 0, "driver": "st7789", "width": 240, "height": 320 }
-  },
-
-  // ── 網路 + NC4 通道（這一段就是「走什麼通道、哪一核、幾格、多大」）──
-  "Network": {
-    "lan": { "ip": "10.10.1.50", "mask": "255.255.0.0", "gw": "10.10.1.1" },
-    "nc4": {
-      "links": [
-        { "name": "TCP", "kind": "tcp", "port": 6000,
-          "rx": { "mode": "push_frame", "core": 1, "slots": 4, "slot_size": 8205 } },
-        { "name": "WS",  "kind": "ws",  "port": 8080,
-          "rx": { "mode": "message", "core": 1, "max_msg": 24576 } },
-        { "name": "UDP", "kind": "udp", "port": 6001,
-          "rx": { "mode": "datagram", "core": 1, "max_msg": 1472 } }
-      ],
-      "decode": [
-        { "name": "decode0", "core": 0, "prio": 4, "budget": 8 },
-        { "name": "decode1", "core": 1, "prio": 4, "budget": 8 }
-      ]
-    }
-  },
-
-  // ── 任務：誰跑在哪（可由 config 覆蓋；缺就用程式預設）──
-  "Tasks": {
-    "override": [
-      { "name": "decode0", "core": 0, "prio": 4, "stack": 6144 },
-      { "name": "tcp_nc4_rx", "core": 1, "prio": 10 }
+  "nc4": {
+    "decode": [
+      { "name": "decode0", "core": 0, "prio": 4, "budget": 8 },
+      { "name": "decode1", "core": 1, "prio": 4, "budget": 8 }
+    ],
+    "links": [
+      { "name": "CDC",  "kind": "cdc",  "rx": { "decode": "decode0" } },
+      { "name": "UART", "kind": "uart", "rx": { "decode": "decode1" } },
+      { "name": "TCP",  "kind": "tcp", "port": 6000,
+        "rx": { "mode": "push_frame", "decode": "decode0", "slots": 4, "slot_size": 8205 } },
+      { "name": "WS",   "kind": "ws",  "port": 8080,
+        "rx": { "mode": "message", "decode": "decode1", "max_msg": 24576 } },
+      { "name": "UDP",  "kind": "udp", "port": 6001,
+        "rx": { "mode": "datagram", "decode": "decode1", "max_msg": 1472 } }
     ]
-  },
-
-  // ── 應用層（Service）──
-  "Effects": { "enable": 0, "list": [] },
-  "UI":      { "enable": 0 }
+  }
 }
 ```
 
-### 為什麼這樣分
+### `hardware.json`（硬體層）
 
-| 層 | 判斷標準 | 例子 |
+```jsonc
+{
+  "version": 1,
+  "PIN":  { "list": [ { "id": 16, "mode": "out", "level": 0 } ] },
+  "SPI":  { "list": [ { "id": 0, "mosi": 11, "sclk": 12, "miso": 13 } ] },
+  "I2C":  { "list": [ { "id": 0, "sda": 8, "scl": 9, "freq": 400000 } ] },
+  "UART": { "list": [ { "id": 1, "tx": 7, "rx": 8, "baud": 921600 } ] },
+  "ETH":  { "mdc": 31, "mdio": 52, "ref_clk": 50 }
+}
+```
+
+### `driver.json`
+
+```jsonc
+{
+  "version": 1,
+  "ETH": { "phy_type": "IP101", "dma_buf": 1600, "rx_desc": 16, "tx_desc": 16 },
+  "USB": { "enable": 1, "msc": 1, "cdc": 1 },
+  "TFT": { "enable": 0, "driver": "st7789", "width": 240, "height": 320 }
+}
+```
+
+### `network.json`
+
+四種連線方式並列：**有線（lan）/ 無線（wifi）/ 藍牙（bt）/ ESP-NOW**。
+`priority` 決定同時啟用時誰先（照舊專案）。
+
+```jsonc
+{
+  "version": 1,
+  "_comment": "Network 層：有線 / 無線 / 藍牙 / ESP-NOW。只放連線參數，不決定誰來解碼。",
+  "hostname": "",                        // DHCP 主機名 / mDNS；空 = 用 cID 推導（待實作）
+  "priority": ["lan", "wifi"],           // 同時啟用時的偏好順序
+
+  "lan": {
+    "enable": 1, "driver": "RMII", "phy_type": "IP101", "phy_addr": 1,
+    "gpio": { "mdc": 31, "mdio": 52, "ref_clk": 50 },
+    "ip": { "mode": "static", "addr": "10.10.1.50", "mask": "255.255.0.0", "gw": "10.10.1.1" }
+  },
+
+  "wifi": {
+    "enable": 0, "mode": "sta",          // sta | ap | apsta
+    "ssid": "", "ssid_pw": "", "timeout_s": 300,
+    "ip": { "mode": "dhcp" }             // dhcp | static
+  },
+
+  "bt": {
+    "enable": 0, "mode": "ble",          // ble | classic | both
+    "name": "",                          // 空 = 用 hostname
+    "pin": "",                           // 空 = Just Works（雙方免輸入）；有內容 = 取前 4 位數字當 PIN
+    "bonding": 1                         // 記住金鑰：配一次，之後自動重連
+  },
+
+  "espnow": {
+    "enable": 0, "channel": 0,           // 0 = 跟隨 WiFi
+    "encrypt": 0, "pmk": "",
+    "peers": [ { "mac": "AA:BB:CC:DD:EE:FF", "lmk": "" } ]
+  }
+}
+```
+
+**能力是 build-time 決定的**：config 只能「打開」這個 build 已經編進去的東西。
+- WiFi / BT / ESP-NOW 要靠 `ports/_profiles/*.defaults`（例如 `wifi`、`bt`、`espnow`）編進 image；
+  沒有那塊能力時，`enable: 1` 只會在 log 說「這個 build 不支援」。
+- **ESP-NOW 依賴 WiFi radio**（P4 沒有 WiFi，所以 P4 的 `espnow` 永遠不可用）。
+- **BT 與 WiFi 共用 radio**，同時開要開 coex（見 profile）。
+- `ssid_pw` / `pmk` / `lmk` / `pin` 是秘密：之後照舊專案的做法搬到 NVS，JSON 只留空字串。
+
+**PIN 的解析規則**（沒有 `pairing` 欄位，模式由 `pin` 決定）：
+
+| `pin` 的內容 | 結果 |
+|---|---|
+| `""` | **Just Works**：雙方都不用輸入（手機 OS 可能仍跳一次配對確認） |
+| `"1234"` | 4 位 → 照用 `1234` |
+| `"12345"` / `"123456"` | 5／6 位 → 照用 |
+| `"12-34"` | 只取數字 → `1234` |
+| `"dfgd321fgjf55"` | 數字 `32155`（5 位）→ **自動寫回 `"32155"`** |
+| `"1234567"` | 多於 6 位 → 取前 6 位 `123456` |
+| `"12"`（不足 4 位） | 視為沒設定 → 寫回 `""` + log 警告 |
+| `"abcd"`（沒有數字） | 視為沒設定 → 寫回 `""` + log 警告 |
+
+- **正規化**：每次開機讀到 `pin` 就整理一次，結果和原字串不同就寫回檔案
+  （`bet.pin` 的路徑用 token patch，排版不動）。不足 4 位會寫回 `""`。
+- **Classic（SPP）**：legacy PIN 就是這 4 位。
+- **BLE**：passkey 是 **6 位**數字，韌體把 4／5 位的 PIN 左補 0 到 6 位
+  （例：`"1234"` → 對端輸入 `001234`；`"123456"` → 直接 6 位）。
+  這是 BLE 協定的固定寬度，不是我們多存了什麼。
+
+### `tasks.json`
+
+```jsonc
+{
+  "version": 1,
+  "override": [
+    { "name": "decode0", "core": 0, "prio": 4, "stack": 6144 },
+    { "name": "tcp_nc4_rx", "core": 1, "prio": 10 }
+  ]
+}
+```
+
+### 5.1 `pixel/`：效果自己的樹
+
+效果不是「一個設定檔」——它是**資產**（程式 + 映射 + 模式），所以自己一棵樹：
+
+```text
+/data/pixel/
+├─ effects/          效果檔 *.fxe（載入器掃這個目錄）
+├─ map/              像素映射（實體排列 → 邏輯索引）
+└─ modes/            模式 / 預設（開機跑哪個、參數）
+```
+
+規則：
+
+- **檔案系統就是註冊表**：`ls pixel/effects/` 就知道有哪些效果，沒有另一張總表。
+- 每個 `.fxe` 自帶 manifest（kind / core / fps / px / cmds），載入器驗它，不靠外部設定。
+- `map/`、`modes/` 的 schema 等效果引擎落地再定；現在只載入 + 驗證。
+- **UI 暫時不做**（本來要放 `ui.json`，取消）。
+
+>`pixel/` 的檔案由使用者用隨身碟管理；firmware 只讀，`ASSET_RELOAD` 才重新掃描。
+
+---
+
+## 6. 程式對應
+
+| 東西 | 位置 | 狀態 |
 |---|---|---|
-| **Hardware** | 「這顆晶片/板子上有這個腳位或裝置嗎」 | SPI0 的 MOSI/SCLK、ETH 的 MDC/MDIO、UART1 的 TX/RX |
-| **Driver** | 「同一個硬體，用什麼方式驅動」 | PHY 型號、DMA 緩衝大小、TFT 驅動 IC、USB 是否啟用 |
-| **Network / NC4** | 「通道怎麼開、跑哪一核、多少緩衝」 | link 陣列、decode 引擎的 core/prio/budget |
-| **Tasks** | 「任務的排程參數」 | core / prio / stack |
-| **Service（Effects/UI）** | 「功能，可開可關」 | 燈效、UI 頁面 |
+| `nc_cfg_open/root/version/close` | `firmware/components/sys/config/` | ❌ 還沒有 |
+| 各層自己的 parser | 各 component（`sys/store`、`sys/transport`、`main`） | ❌ 還沒有 |
+| 出廠預置（每個檔一份） | `ports/<chip>/<board>/data/config/*.json` | ❌ 現在只有一個 `config.json`（321 B，只有 System + Network.lan） |
+| 效果樹 | `/data/pixel/`（`effects/`、`map/`、`modes/`） | 🟡 載入器掃 `pixel/effects/`（路徑本輪改） |
+| NVS 覆蓋 | `net/rx_core`、`net/rx_split`、`cid` … | ✅ 已有（優先於 config） |
 
-**舊專案的 `Buffer`（u8_rx_slots 等）在這裡被拆掉**：每一條 link 自己寫 `slots` / `slot_size`，
-因為 TCP 的 8 KB 幀與 UART 的 1 KB 幀需求差很多（見 testing §2.13）。
-
----
-
-## 3. 開機順序（System 固定，Service 可選）
-
-```
- ① NVS init
- ② config.json 載入（/data/config.json → 找不到就用出廠預置）
- ③ 硬體初始化      Hardware.*   （GPIO/SPI/I2C/UART/ETH PHY）
- ④ Driver 初始化   Driver.*     （ETH DMA、USB、TFT…）
- ⑤ 宣告（記帳）    ← ★ 在 ③④ 之後：**看硬體實際存不存在才決定要宣告什麼**
-      · System：ETH 起來才宣告 tcp.rx；UART 存在才宣告 uart.rx…
-      · Service：每個服務的 declare()
- ⑥ 資源 carve      nc_plan_commit(目前可用量)   ← 也在硬體之後量，才不會高估
- ⑦ NC4 通道啟動    Network.nc4 （建 transport → 建 bus → 掛 decode 引擎）
- ⑧ 應用服務啟動    nc_service_start_all()（效果、UI、自測…）
- ⑨ 任務啟動        nc_tasks_boot() 依 layer（L0 transport → L1 decode → L2 app）
-```
-
-**為什麼 ⑤ 在 ③④ 之後（而不是之前）**：
-宣告的內容**取決於偵測到的硬體**。config 寫「ETH enable=1」不代表 PHY 真的 link 起來；
-link 不起來就不該宣告 tcp.rx，否則會白白占掉 16 KB，而且通道建了也不能用。
-程式裡的做法：`net_eth_start()` 成功才把 `s_eth_ok` 設起來，`svc_net_declare()` 才把 `tcp.rx` 加進去。
-
-**為什麼 ⑥ 也在 ③④ 之後**：硬體/driver 會先吃掉 DMA 與 heap（ETH 16×1600×2 ≈ 51 KB）。
-先量再 carve，才不會「宣告時看起來夠、真的要的時候不夠」。
-
-**為什麼 ⑦ 在 ⑥ 之後**：通道的 slots/parser 是 carve 出來的，沒有 ⑥ 就沒有記憶體。
+**優先序**：NVS（執行期指令寫的）> `config/*.json`（使用者編的）> 程式預設。
 
 ---
 
-## 4. NC4 通道初始化（System 的第 ⑦ 步）
-
-```
-for each link in Network.nc4.links:
-    transport = tcp_ws_udp_create(kind, port)          // 只開 socket / 握手
-    bus       = nc4_bus_create(link.name, rx.mode, rx.slots, rx.slot_size)
-    bus->slots = plan_get("<link.name>.slots")         // ⑥ 已經 carve 好
-    decode    = decode_engine_by(link.rx.core 或 decode 表)
-    decode_attach(decode, bus)
-    transport_start(transport, bus)                    // 起 RX task / httpd / udp task
-```
-
-`decode` 引擎本身也是 System 的一部分（它在 L1 起），不是 Service。
-
----
-
-## 5. 程式對應（現況 vs 目標）
-
-| 層 | 現在 | 目標 |
-|---|---|---|
-| config 載入 | ❌ 沒有（用程式常數 + NVS） | `firmware/components/sys/config/`：cJSON → `nc_cfg_t` |
-| 硬體 | `main.c` 直接寫死（ETH 的 GPIO、UART 腳位） | `ports/<board>` 提供預設，config 覆蓋 |
-| NC4 通道 | `main.c` 的 `tcp_nc4_*`（P4-only） | `sys/transport/` + `Network.nc4.links` |
-| 資源 | `nc_plan`（5 項）＋ 插槽 `calloc` | 全部走 plan（含 slots） |
-| Service | `nc_service`（4 項，含系統） | 只剩應用服務；System 走自己的順序 |
-
-**這輪已經改的**：
-- 開機順序改成「硬體 → 宣告 → carve → 通道」，宣告看實際硬體（`s_eth_ok`）。
-- `nc_service` 管理器上板（declare → start，逐項失敗）。
-- **System / Service 已經分開**：`main.c` 的 `s_sys_parts[]`（nc4 / net / core）走固定順序，
-  `nc_service` 只剩應用服務（目前是 `probe` 示範）。`0x1101 keys=svc` 只看得到應用服務；
-  `keys=mem` 的 plan 看得到全部（含 System）。
-
-**還沒改**：config.json 載入、slots 走 plan、硬體/Driver 段接手 main.c 的寫死值。
-
----
-
-## 6. 遷移步驟
+## 7. 遷移步驟
 
 | 步 | 做什麼 | 驗收 |
 |---|---|---|
-| C0 | 把 `net`（UART/TCP 緩衝）從 `nc_service` 移到 System 宣告/啟動 | `keys=svc` 只剩應用服務；bench 不變 |
-| C1 | `sys/config` 讀 `data/config.json`（cJSON），先只支援 `Network.nc4.links` | 改 link 的 slots/port 重開機生效 |
-| C2 | 硬體/Driver 段接手 `main.c` 的寫死值（ETH 先） | 拔掉 config 仍用內建預設 |
-| C3 | slots 走 plan（`net.<link>.slots`） | `keys=mem` 看得到、`copied=0` |
-| C4 | `Tasks.override`（core/prio/stack） | 改 config 的 core 重開機生效 |
+| C0 | 建 `sys/config`：開檔 → cJSON → 關檔；缺檔/壞檔回 NULL | host test：三種檔案狀態 |
+| C1 | `system.json` 的 `nc4.links` 先接（唯讀） | 改 `slots` 重開機生效 |
+| C2 | `hardware.json` / `driver.json` 接掉 `main.c` 的寫死值 | 換腳位不用改 code |
+| C3 | `network.json` / `tasks.json` | IP 與 core 可由檔案覆蓋 |
+| C4 | 出廠預置改成多檔（`ports/<board>/data/config/`） | 新板首次開機長出 `config/` 目錄 |
+| C5 | `pixel/` 樹（`effects/`、`map/`、`modes/`） | 拖拉 `.fxe` 進 `pixel/effects/` 就生效 |
 
-> 原則：**程式裡永遠有預設值**；config 壞掉或欄位缺 → 用預設，不要讓系統起不來。
+---
+
+## 8. 一個原則
+
+**每一層只讀自己的檔案、只用自己懂的欄位、缺檔就用預設。**
+中央不解析、不轉發、不幫別人驗證 —— 這樣任何一個檔壞掉，都只是那一層退化。

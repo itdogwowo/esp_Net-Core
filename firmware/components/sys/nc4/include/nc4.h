@@ -14,6 +14,7 @@
 
 #pragma once
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -65,7 +66,23 @@ typedef struct nc4_parser nc4_parser_t;
 // ── decoder：指令表（全域一個）──
 nc4_decoder_t *nc4_decoder_create(void);
 void nc4_decoder_destroy(nc4_decoder_t *decoder);
+
+// 註冊指令。舊式（owner = NULL）＝ 核心自己註冊，不會被任何模組收回。
 esp_err_t nc4_decoder_on(nc4_decoder_t *decoder, uint16_t cmd, nc4_handler_t handler);
+
+// 帶擁有權的註冊：owner 通常是模組名。模組卸載時整批收回（off_owner）。
+// 同一條 cmd 被不同 owner 覆寫 → 印警告（帳本應該在開機就擋下這種衝突）。
+esp_err_t nc4_decoder_on_owner(nc4_decoder_t *decoder, uint16_t cmd,
+                               nc4_handler_t handler, const char *owner);
+
+// 收回某個 owner 的全部指令；回傳移除幾條。
+int nc4_decoder_off_owner(nc4_decoder_t *decoder, const char *owner);
+
+// 給帳本／狀態用：目前註冊了幾條、第 i 條是誰的、某條 cmd 有沒有主人
+size_t nc4_decoder_count(const nc4_decoder_t *decoder);
+bool nc4_decoder_at(const nc4_decoder_t *decoder, size_t i, uint16_t *cmd,
+                    const char **owner, nc4_handler_t *handler);
+bool nc4_decoder_has(const nc4_decoder_t *decoder, uint16_t cmd);
 
 // ── 位址模型（與 mp 版 §5 一致）──
 // cid        我自己（協議層 2B）；未設定 = 0xFFFF = 什麼都收

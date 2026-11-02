@@ -29,9 +29,12 @@ firmware/
 ├─ components/
 │  ├─ sys/nc4/             NC4 framing、解碼器、通道框架（nc4.c / nc4_bus.c）
 │  ├─ sys/mem/             記憶體原語：pool / arena / plan / 跨核 hub
-│  ├─ sys/tasks/           service 生命週期、task 配置
+│  ├─ sys/tasks/           任務管理器：登記 / 資源 / 開 loop / 量測 / 狀態
 │  ├─ sys/transport/       TCP 之外的通道：UDP、WebSocket、HTTP 設定端點
-│  └─ app/ota/             OTA 指令（0x22xx）
+│  ├─ sys/store/           FAT 擁有權仲裁（USB ↔ APP、唯讀視圖）
+│  ├─ action/ota_action/   OTA 指令（0x22xx）
+│  ├─ action/file_action/  檔案查詢與 STATUS_SET（0x2005 / 0x1103）
+│  └─ app/fx/              效果載入器（.fxe + manifest + 實例表）
 ├─ sdkconfig.defaults      共通建置配置（晶片層）
 ├─ partitions.csv          分割表（factory / ota_0 / ota_1 / data / nvs）
 └─ build/  managed_components/  sdkconfig  dependencies.lock   ← 生成物，不進 git
@@ -71,7 +74,7 @@ python3 ../tools/board.py check   # board.json ↔ sdkconfig 一致性 + 抓放�
 
 ## 出廠預置怎麼進裝置
 
-`main/CMakeLists.txt` 會把 `../ports/<board>/data/config.json` 用 `EMBED_FILES` 嵌進 firmware，
+`main/CMakeLists.txt` 會把 `../ports/<board>/data/config/*.json` 用 `EMBED_FILES` 嵌進 firmware，
 開機時寫進 `data` 分區。**不走** `fatfs_create_partition_image`——MSC 用 wear levelling，
 預先燒的 FAT 映像會被 WL 的 metadata 擠歪，導致碟顯示「沒有檔案系統」。
 

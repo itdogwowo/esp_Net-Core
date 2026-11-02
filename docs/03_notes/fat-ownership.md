@@ -1,7 +1,7 @@
 # FAT 的擁有者（讀寫分離模型）
 
 > **狀態**：已實作並在 S3 上實測（2026-11-02）
-> **程式**：`firmware/components/sys/store/`（仲裁 + 唯讀視圖）、`firmware/components/app/file_cmds/`（指令）
+> **程式**：`firmware/components/sys/store/`（仲裁 + 唯讀視圖）、`firmware/components/action/file_action/`（指令）
 > **相關**：[commands.md](../01_protocol/commands.md)（指令表）、[component-layout.md](component-layout.md) §8（資產）
 
 ---
@@ -117,5 +117,5 @@
 - `0x2001/0x2002/0x2003`（FILE_BEGIN/CHUNK/END）、`0x2007`（FILE_READ）、
   `0x2009`（DELETE）、`0x200D`（MOVE）—— 讀取骨架已就位，寫入路徑還沒接。
 - `pending` 目前只當「唯讀視圖」旗標用；真正的 `.bak`/delta 機制未做。
-- `0x1103` 目前只實作 `System.file_mode` 一個 key，放在 `file_cmds` 裡；
+- `0x1103` 目前只實作 `System.file_mode` 一個 key，放在 `file_action` 裡；
   等 config tree 落地要搬到獨立的 status 元件。

@@ -2,9 +2,9 @@
 """NC4 over UDP 測試（device :6001）
 
 用法:
-    tools/bench/udp_nc4_test.py                  # 全部
-    tools/bench/udp_nc4_test.py --suite basic    # RTT / 連續指令
-    tools/bench/udp_nc4_test.py --suite bench    # 吞吐（1K/4K/8K，batch 1 與多幀）
+    tools/bench/nc4_udp_test.py                  # 全部
+    tools/bench/nc4_udp_test.py --suite basic    # RTT / 連續指令
+    tools/bench/nc4_udp_test.py --suite bench    # 吞吐（1K/4K/8K，batch 1 與多幀）
 
 UDP 沒有連線：回覆會送到「最後一則 datagram 的來源」。
 """

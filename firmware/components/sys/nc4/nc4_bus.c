@@ -411,13 +411,15 @@ size_t nc4_bus_stats_json(char *buf, size_t cap)
             else st_cnt[3]++;
         }
         off += snprintf(buf + off, cap - off,
-                        "%s{\"name\":\"%s\",\"mode\":\"%s\",\"frame\":%u,"
+                        "%s{\"name\":\"%s\",\"mode\":\"%s\",\"core\":%d,"
+                        "\"frame\":%u,"
                         "\"frames\":%u,\"mb\":%.2f,\"copied\":%llu,"
                         "\"parse_ms\":%.1f,\"us_per_frame\":%.1f,"
                         "\"slots\":[%d,%d,%d,%d]}",
                         first ? "" : ",", b->cfg.name ? b->cfg.name : "?",
                         b->cfg.mode == NC4_BUS_PULL ? "pull"
                                                     : (b->frame_mode ? "push-frame" : "push-slot"),
+                        b->cfg.core,
                         (unsigned)((b->cfg.mode == NC4_BUS_PUSH && b->frame_mode) ? 1 : 0),
                         (unsigned)b->st_frames, mb,
                         (unsigned long long)b->st_copied,

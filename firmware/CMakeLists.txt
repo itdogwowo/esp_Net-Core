@@ -16,7 +16,8 @@ if(EXISTS "${PORT_DIR}/sdkconfig.defaults")
 endif()
 
 set(EXTRA_COMPONENT_DIRS "${CMAKE_CURRENT_LIST_DIR}/components/sys"
-                          "${CMAKE_CURRENT_LIST_DIR}/components/app")
+                          "${CMAKE_CURRENT_LIST_DIR}/components/app"
+                          "${CMAKE_CURRENT_LIST_DIR}/components/action")
 
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 project(esp_net_core)

@@ -85,6 +85,15 @@ def build(ui): ...
 
 所以答案是：**不要新建框架，把這六個影子收斂成一個。**
 
+> **進度（2026-11-02）**：C 版已經收了前四軸 —— 任務管理器（`nc_task_t`）一份宣告同時管
+> 記憶體（`mem[]`）、迴圈與核心（`loops[]`）、接線（`claims[]`）、
+> 生命週期（`start/stop` + `attach/detach`），並在開機印一張帳本表。
+> `claims[]` 目前只做「exclusive 衝突檢查」，還沒有 `shared:cs` 那種共用模式；
+> `display` owner stack 仍未做。
+> **另外刻意沒搬過來**：mp 的 `hw=("lcd",)` → 強制 core0。IDF 上 flash 與 TinyUSB
+> 都沒有「必須某一核」的硬性要求（細節見 [nc_task.h](../../firmware/components/sys/tasks/include/nc_task.h) 的註解），
+> 所以 C 版的 core 完全由宣告決定，不強制改寫。見 [writing-a-task.md](writing-a-task.md)。
+
 ---
 
 ## 3. 抽象：Component 的四個面

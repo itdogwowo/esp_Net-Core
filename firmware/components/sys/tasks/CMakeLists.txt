@@ -1,6 +1,5 @@
 idf_component_register(
-    SRCS "nc_task.c" "nc_service.c"
+    SRCS "nc_task.c" "nc_task_loop.c"
     INCLUDE_DIRS "include"
-    REQUIRES freertos
-    PRIV_REQUIRES mem esp_timer
+    REQUIRES freertos mem esp_timer
 )

@@ -675,7 +675,7 @@ WS 本身就是**訊息導向**，所以這條線不需要插槽、不需要 RX 
                                                    ◄── WS binary message（回覆）
 ```
 
-- 檔案：`firmware/components/sys/transport/ws_nc4.c`；URI `ws://<ip>:8080/nc4`。
+- 檔案：`firmware/components/sys/transport/nc4_ws.c`；URI `ws://<ip>:8080/nc4`。
 - **零複製**：解析直接在 httpd 給的緩衝上做（跟 TCP 的 frame 模式同一條 `nc4_parser_frame()`）。
 - 回覆走 `httpd_ws_send_frame_async()`，外部加 mutex（slow_worker 也可能回覆）。
 - S3 沒有開 `CONFIG_HTTPD_WS_SUPPORT` → 編成 stub（回 `ESP_ERR_NOT_SUPPORTED`），不影響 S3 build。
@@ -690,7 +690,7 @@ WS 本身就是**訊息導向**，所以這條線不需要插槽、不需要 RX 
 | subprotocol | 無 | 之後要接瀏覽器 client 再加 |
 | 執行位置 | **httpd 的 task**（不是 decode engine） | 慢 handler 會佔住 httpd；dispatch mutex 仍保護共用狀態 |
 
-### 測試（`tools/bench/ws_nc4_test.py`）
+### 測試（`tools/bench/nc4_ws_test.py`）
 
 | # | 測什麼 | 結果 |
 |---|---|---|
@@ -824,8 +824,8 @@ FreeRTOS HZ=1000、PC = macOS、每筆 ≈ 16 MB、TCP RTT ≈ 8–10 ms。
 | 工具 | 通道 |
 |---|---|
 | `tools/bench/nc4_tcp.py`（下載）、`tools/bench/nc4_tx_bench.py`（上傳） | TCP |
-| `tools/bench/ws_nc4_test.py`（RTT／吞吐／邊界 10 項） | WS |
-| `tools/bench/udp_nc4_test.py`（RTT／吞吐／掉包） | UDP |
+| `tools/bench/nc4_ws_test.py`（RTT／吞吐／邊界 10 項） | WS |
+| `tools/bench/nc4_udp_test.py`（RTT／吞吐／掉包） | UDP |
 | `tools/bench/bench_all.py`（TCP 全表）、`tools/bench/nc4_stats.py`（零複製驗證） | 全部 |
 
 ---

@@ -16,7 +16,7 @@ ESP32-P4（另有 S3 port）上的 **NC4 通訊核心**：多條傳輸通道 →
 | 網路 | 100 Mbps full duplex（RMII + IP101），靜態 IP `10.10.1.50/16` |
 | 通道 | TCP :6000、UDP :6001、WS :8080/nc4、HTTP :8080（設定） |
 | 解碼 | 分核、零複製（一格一整幀）、task notification |
-| 架構 | System（硬體→driver→通道）＋ Service（生命週期）已分層 |
+| 架構 | 系統任務（硬體→driver→通道）＋ 一般任務（生命週期）已分層，兩者同一套任務管理器 |
 
 ---
 
@@ -58,15 +58,17 @@ ESP32-P4（另有 S3 port）上的 **NC4 通訊核心**：多條傳輸通道 →
 
 | 主題 | 一句話 | 文件 |
 |---|---|---|
-| **System vs Service** | 硬體/driver/NC4 通道是 System（固定順序）；效果/UI 才是 Service（有生命週期） | [config-layers.md](../03_notes/config-layers.md) |
-| **開機順序** | 硬體 → driver → **宣告（看實際硬體）** → carve → 通道 → 服務 → 任務 | 同上 |
-| **服務生命週期** | `declare() → start(res) →（task loop）→ stop()`；服務只宣告，管理器負責取 | [writing-a-service.md](../03_notes/writing-a-service.md) |
-| **資源管理器** | `nc_plan`：declare → commit → get（目前沒有 release） | [buffer-manager.md](../03_notes/buffer-manager.md) |
+| **系統任務 vs 一般任務** | 硬體/driver/NC4 通道是 `kind=system`（固定順序、不可卸載）；效果/UI 是 `kind=normal`（有生命週期）。**service 與 task 是同一件事** | [config-layers.md](../03_notes/config-layers.md) |
+| **開機順序** | 硬體 → driver → **宣告（看實際硬體）** → carve → 通道 → 模組 → 任務 | 同上 |
+| **任務模型** | 一份宣告寫完身份/接線/執行/生命：`kind`（system·normal·effect）、`level`、`mem[]`、`claims[]`、`provides[]`、`loops[]`、`on_start/on_stop`；管理器負責排序、開 loop、量測。**指令是 action，不在任務上** | [writing-a-task.md](../03_notes/writing-a-task.md) |
+| **帳本** | 開機檢查重名 / 指令重複 / 接線獨占衝突 → 印一張表；衝突逐項擋，其他人照跑 | 同上 |
+| **資源管理器** | `nc_plan`：declare → commit → get（沒有 release；runtime 模組改用父層 arena） | [buffer-manager.md](../03_notes/buffer-manager.md) |
 | **收/解路徑** | 傳輸總線（ID 註冊表）→ 解碼引擎（可換核/可多實例）→ 執行 | [rx-architecture.md](../03_notes/rx-architecture.md) |
 | **配置分層** | System / Hardware / Driver / Network / Tasks / Effects / UI | [config-layers.md](../03_notes/config-layers.md) |
 
-**現況**：`main.c` 已有 `s_sys_parts[]`（System 固定順序）＋ `nc_service`（應用服務）；
-config.json 還沒接（目前用程式預設 + NVS）；slots 還沒走 plan。
+**現況**：`main.c` 只剩一張任務表（`nc4` / `net` / `core` / `probe` / `fx`）＋ 一個 `actions_register()`
+＋ 六行生命週期呼叫（register → declare → start → boot）。service 與 task 已合併成同一個 `nc_task_t`。
+`config/*.json` 還沒接（目前用程式預設 + NVS）；slots 還沒走 plan。
 
 ---
 
@@ -109,10 +111,12 @@ USB 的完整分析：[failure-policy.md §4](../03_notes/failure-policy.md)。
 | `tools/board.sh` | 建置/燒錄（會自動切 target） |
 | `tools/bench/bench_all.py` | TCP 全表：純 TCP / NC4 上下傳 / CPU / hub |
 | `tools/bench/nc4_tcp.py` / `nc4_tx_bench.py` | TCP 下載 / 上傳 |
-| `tools/bench/ws_nc4_test.py` | WS：RTT / 吞吐 / 碎片 / 重連 / 並存（10 項） |
-| `tools/bench/udp_nc4_test.py` | UDP：RTT / 吞吐 / 掉包 |
+| `tools/bench/nc4_ws_test.py` | WS：RTT / 吞吐 / 碎片 / 重連 / 並存（10 項） |
+| `tools/bench/nc4_udp_test.py` | UDP：RTT / 吞吐 / 掉包 |
 | `tools/bench/nc4_stats.py` | 零複製驗證（`copied` 應為 0）+ 邊界測試 |
 | `tools/bench/hub_bench.py` | `0xF003` 雙核 hub 交換 |
+| `tools/fx.py pack / dump` | 打包 / 檢視 `.fxe`（header + manifest + payload + 指令表） |
+| `tools/hosttest/*/run.sh` | 不用板子的 C 測試：hub / plan / fx / **fxm** / **task** |
 | `curl http://10.10.1.50:8080/config.json` | 讀寫設定（GET/PUT） |
 
 ---
@@ -127,8 +131,9 @@ USB 的完整分析：[failure-policy.md §4](../03_notes/failure-policy.md)。
 | 4 | **USB-Serial-JTAG 指令通道** | P4 就能用 USB 送指令（不用 TinyUSB） |
 | 5 | UART0 救援視窗（開機 1.5 s） | 所有路徑都壞時的最後一條 |
 | 6 | HTTP `/fs/`（列表/上傳）+ NC4 file service | 沒有 MSC 時換 assets |
-| 7 | slots 走 plan、`nc_task_stop` | 生命週期完整 |
-| 8 | S3 實機重燒 + 長時 soak | 迴歸 |
+| 7 | slots 走 plan | 讓通道緩衝也由宣告決定（`nc_task_stop` 已完成） |
+| 8 | 硬體管理器（**等真的有共享才做**） | 現在一裝置一 owner、人工分配就夠；觸發條件見 [hardware-bus.md](../03_notes/hardware-bus.md) |
+| 9 | S3 實機重燒 + 長時 soak | 迴歸 |
 
 ---
 
@@ -141,7 +146,7 @@ USB 的完整分析：[failure-policy.md §4](../03_notes/failure-policy.md)。
 | 拔線 / 插線 | link down→up 後通道是否自動恢復 | 可插拔的網路線 |
 | ESP↔ESP（UART1/2） | 下載模式是否還會發生 | 兩塊板、只共地、不接 USB |
 | 同一條 UART0 收指令 | console 與資料共存是否穩定 | USB 拔掉、只剩 UART0 RX |
-| 壞 config | 開機是否仍能起來 | 手動改壞 `/data/config.json` |
+| 壞 config | 開機是否仍能起來 | 手動改壞 `/data/config/{system,network}.json` |
 | 電源不穩 | 是否 brownout | 可調電源 |
 
 ---
@@ -152,5 +157,5 @@ USB 的完整分析：[failure-policy.md §4](../03_notes/failure-policy.md)。
 |---|---|
 | 協議 | [commands.md](../01_protocol/commands.md)、[transports.md](../01_protocol/transports.md) |
 | 教學 | [build_and_flash.md](../02_guides/build_and_flash.md)、[testing.md](../02_guides/testing.md)（§2.13–2.16 是量測總表） |
-| 筆記 | [config-layers.md](../03_notes/config-layers.md)、[writing-a-service.md](../03_notes/writing-a-service.md)、[rx-architecture.md](../03_notes/rx-architecture.md)、[failure-policy.md](../03_notes/failure-policy.md)、[p4-bringup.md](../03_notes/p4-bringup.md)、[buffer-manager.md](../03_notes/buffer-manager.md)、[memory.md](../03_notes/memory.md)、[component-layout.md](../03_notes/component-layout.md)、[architecture-flow.md](../03_notes/architecture-flow.md)、[rewrite-plan.md](roadmap.md) |
+| 筆記 | [config-layers.md](../03_notes/config-layers.md)、[writing-a-task.md](../03_notes/writing-a-task.md)、[rx-architecture.md](../03_notes/rx-architecture.md)、[failure-policy.md](../03_notes/failure-policy.md)、[p4-bringup.md](../03_notes/p4-bringup.md)、[buffer-manager.md](../03_notes/buffer-manager.md)、[memory.md](../03_notes/memory.md)、[component-layout.md](../03_notes/component-layout.md)、[architecture-flow.md](../03_notes/architecture-flow.md)、[rewrite-plan.md](roadmap.md) |
 | 研究 | [effect-language.md](../03_notes/effect-language.md)、[extension-architecture.md](../03_notes/extension-architecture.md)、[fx-loader.md](../03_notes/fx-loader.md) |

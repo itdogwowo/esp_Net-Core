@@ -8,6 +8,7 @@ cc -std=c11 -Wall -Wextra -Werror -D_POSIX_C_SOURCE=200809L \
    -I "$ROOT/tools/hosttest/fx_test/include" \
    -I "$ROOT/firmware/components/app/fx/include" \
    "$ROOT/firmware/components/app/fx/nc_fx.c" \
+   "$ROOT/firmware/components/app/fx/nc_fx_manifest.c" \
    "$ROOT/tools/hosttest/fx_test/fx_host.c" \
    "$ROOT/tools/hosttest/fx_test/main.c" \
    -o "$OUT"

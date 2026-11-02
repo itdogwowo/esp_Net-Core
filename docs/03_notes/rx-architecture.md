@@ -200,29 +200,32 @@ nc4_decode_start(e1);   // 只配 UART 的（PULL 只有 chunk）
 ## 5. 設定（config.json）
 
 ```json
-"Network": {
-  "lan": { "...": "既有" },
+"System": {
   "nc4": {
-    "links": [
-      { "name": "TCP", "kind": "tcp", "port": 6000,
-        "mode": "push_frame", "decoder": 0,
-        "slots": 4, "slot_size": 8205, "stall_timeout_ms": 2000 },
-      { "name": "TCP2", "kind": "tcp", "port": 6001,
-        "mode": "push_frame", "decoder": 1,
-        "slots": 4, "slot_size": 8205 },
-      { "name": "CDC", "kind": "cdc",
-        "mode": "pull", "decoder": 0, "chunk": 1024 }
-    ],
     "decode": [
       { "name": "decode0", "core": 0, "prio": 4, "budget": 8 },
       { "name": "decode1", "core": 1, "prio": 4, "budget": 8 }
+    ],
+    "links": [
+      { "name": "TCP", "kind": "tcp", "port": 6000,
+        "rx": { "mode": "push_frame", "decode": "decode0",
+                "slots": 4, "slot_size": 8205, "stall_timeout_ms": 2000 } },
+      { "name": "TCP2", "kind": "tcp", "port": 6001,
+        "rx": { "mode": "push_frame", "decode": "decode1",
+                "slots": 4, "slot_size": 8205 } },
+      { "name": "CDC", "kind": "cdc",
+        "rx": { "mode": "pull", "decode": "decode0", "chunk": 1024 } }
     ]
   }
-}
+},
+"Network": { "lan": { "...": "既有" } }
 ```
 
+> **層級**：NC4 通道與解碼路線屬於 **System**（CPU 與緩衝是系統資源）；
+> `Network` 只放 IP / mask / gw。link 用 `rx.decode` 指到引擎名，不重複寫 core。
+
 - **`links` 是陣列，不限條數**：想開幾個 port 就寫幾個；程式不設上限，配不到記憶體的那一條
-  會標記失敗（見 §4.3）。沒寫 `decoder` 就是 0（core0）。
+  會標記失敗（見 §4.3）。沒寫 `rx.decode` 就掛 `decode0`。
 - `mode`：`pull` / `push_slot` / `push_frame`。
 - `slots` / `slot_size` 每條可以不同（大幀線少格、小幀線多格）。
 - 讀不到／欄位缺 → 程式預設（config 壞掉不能讓收包停擺）。
@@ -300,7 +303,7 @@ nc_plan_declare(&(nc_plan_decl_t){
 | **P4** | `0x1101 keys=net` + `nc_task` 分層（transport L0 / 引擎 L1） | 正式 status 看得到歸屬與 bus 清單 |
 | **P5** | S3 實機（CDC PULL）+ 10 分鐘 soak | 兩塊板都穩 |
 | **P6** | **slot 數／大小調參**：`slots ∈ {2,4,8}` × `slot_size ∈ {1K,4K,8K}` 各跑 16 MB，看吞吐／`copied`／`us_per_frame`／記憶體 | 產出一張「哪種線用幾格多大」的表，寫回本文件 |
-| ~~**P7**~~ | ✅ **WS 第一版已完成**（`firmware/components/sys/transport/ws_nc4.c`）：訊息即一幀、直接在 httpd buffer 上解析、`0x1101` 可查 | 10 項測試全過；吞吐 8K 4.05 MB/s（見 testing §2.15） |
+| ~~**P7**~~ | ✅ **WS 第一版已完成**（`firmware/components/sys/transport/nc4_ws.c`）：訊息即一幀、直接在 httpd buffer 上解析、`0x1101` 可查 | 10 項測試全過；吞吐 8K 4.05 MB/s（見 testing §2.15） |
 
 P0 是純結構重構：**不改任何行為、不改任何數字**。跑掉就退回。
 
@@ -330,10 +333,10 @@ typedef struct {
 
     // ① 宣告：讀 config 決定要多少（開機一次，commit 之前）
     //    靜態需求就回固定表；動態（N 條 bus）就在這裡算出來。
-    int (*plan)(const nc_cfg_t *cfg, nc_res_req_t *out, int max);
+    int (*plan)(const nc_cfg_t *cfg, nc_task_res_t *out, int max);
 
     // ② 啟動：資源指標由管理器交進來（不是服務自己去 get）
-    esp_err_t (*start)(const nc_res_view_t *res);
+    esp_err_t (*start)(const nc_task_res_view_t *res);
 
     // ③ 停止：管理器在 stop 之後才 release
     void (*stop)(void);
@@ -341,6 +344,12 @@ typedef struct {
 
 esp_err_t nc_service_register(const nc_service_t *svc);   // 只登記
 ```
+
+> **已落地（2026-11-02）**：實作時名字叫 `nc_task_t`，而且多長了兩個面 ——
+> `loops[]`（跑哪一核、哪一層、多久一次）。指令後來的結論是「不屬於任務」：
+> 它們是 decoder 的 action 表，開機註冊一次（見 `writing-a-task.md` §3.2）。
+> 原本的 `plan()` 改名 `declare()`，`start()` 多了資源數量參數。
+> 見 [writing-a-task.md](writing-a-task.md)。
 
 ### 11.3 開機順序（服務管理器驅動）
 

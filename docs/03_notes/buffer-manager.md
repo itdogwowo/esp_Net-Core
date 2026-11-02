@@ -171,7 +171,7 @@ _Atomic uint32_t pub;      // writer 只寫，reader 只讀
 _Atomic uint32_t in_use;   // reader 標記持有的 slot
 ```
 
-- writer：挑 `in_use` 未標的 slot → 寫 → `__atomic_store_n(&pub, …, RELEASE)`
+- writer：挑 `in_use` 未標的 slot → 寫 → `__atomic_nc_store_n(&pub, …, RELEASE)`
 - reader：`__atomic_load_n(&pub, ACQUIRE)` → seq 變了才取 → DMA 完成後清 bit
 
 **沒有鎖、沒有環繞運算、沒有 `%`、沒有狀態陣列。** 一次交易約 20–30 cycles（< 0.15 µs）。
@@ -380,4 +380,4 @@ if (want > have) { shed_until(want <= have); }
 | `u8_rx_slots`（config） | `nc_ring_depth`（config） | 概念相同 |
 | `num_buffers=10`（硬編碼） | 4（handoff）/ 2–4（stream） | 舊幀沒有保留價值 |
 | GC | 不存在 | 全部 pool / arena |
-| `TaskManager` 的 layer | `nc_task_def_t.layer` | 已實作 |
+| `TaskManager` 的 layer | `nc_task_loop_t.layer` | 已實作 |

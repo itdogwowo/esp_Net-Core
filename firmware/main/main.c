@@ -15,6 +15,7 @@
 // 量測：心跳印「絕對 µs + 間隔」。複製大檔時看 dt，若出現 ~900ms 缺口就是 async IO 沒生效。
 
 #include <inttypes.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -40,6 +41,7 @@
 #include "esp_timer.h"
 #include "esp_private/esp_clk.h"
 #include "esp_psram.h"
+#include <ctype.h>
 #include <errno.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -55,13 +57,15 @@
 #include "nc_mem.h"
 #include "nc_plan.h"
 #include "nc_hub.h"
-#include "nc_service.h"
-#include "ota_cmds.h"
-#include "ws_nc4.h"
-#include "udp_nc4.h"
-#include "http_cfg.h"
-#include "store.h"
-#include "file_cmds.h"
+#include "nc_task.h"
+#include "nc_ota_action.h"
+#include "nc4_ws.h"
+#include "nc4_udp.h"
+#include "nc_cfg.h"
+#include "cJSON.h"
+#include "nc4_http.h"
+#include "nc_store.h"
+#include "nc_file_action.h"
 #include "nc_fx.h"
 
 #include "tinyusb.h"
@@ -96,8 +100,13 @@ static volatile uint32_t s_rx_frames;        // 成功收到的幀數
 
 #define BOOT_BUTTON_GPIO   GPIO_NUM_0
 #define MSC_MOUNT_POINT    "/data"
-#define PRESET_CONFIG_PATH MSC_MOUNT_POINT "/config.json"
-#define VOLUME_LABEL       "NETCORE"
+#define PRESET_DIR          MSC_MOUNT_POINT "/config"
+#define PRESET_SYSTEM_PATH  PRESET_DIR "/system.json"
+#define PRESET_NETWORK_PATH PRESET_DIR "/network.json"
+// 卷標 = 品牌縮寫 + "-" + 16-bit CID（FAT 卷標上限 11 字元）：
+//   "NC-" + "A57C" → "NC-A57C"
+// 不能寫成 Net-Core_A57C（14 字元，f_setlabel 會回 FR_INVALID_NAME）。
+#define VOLUME_PREFIX      "NC-"
 
 // UART 測試迴路（IO7 / IO8 外部短接）：速度動態可調
 #define UART_TEST_PORT     UART_NUM_1
@@ -138,9 +147,11 @@ static volatile uint32_t s_rx_frames;        // 成功收到的幀數
 #define NC4_CMD_SYS_TASK_QUERY 0x1005
 #define NC4_CMD_SYS_TASK_RSP   0x1006
 
-// ports/<board>/data/config.json 由 EMBED_FILES 嵌進 firmware
-extern const uint8_t preset_config_start[] asm("_binary_config_json_start");
-extern const uint8_t preset_config_end[]   asm("_binary_config_json_end");
+// ports/<board>/data/config/*.json 由 EMBED_FILES 嵌進 firmware（一個層一個檔）
+extern const uint8_t preset_system_start[]  asm("_binary_preset_system_json_start");
+extern const uint8_t preset_system_end[]    asm("_binary_preset_system_json_end");
+extern const uint8_t preset_network_start[] asm("_binary_preset_network_json_start");
+extern const uint8_t preset_network_end[]   asm("_binary_preset_network_json_end");
 
 
 // ── MSC 事件 ──
@@ -151,26 +162,107 @@ static const esp_partition_t *find_data_partition(void)
 }
 
 // ── 出廠預置：缺檔才寫，不覆蓋使用者改過的內容 ──
-static void seed_preset_if_missing(void)
+static void seed_file(const char *path, const uint8_t *start, const uint8_t *end)
 {
     struct stat st;
-    if (stat(PRESET_CONFIG_PATH, &st) == 0) {
-        ESP_LOGI(TAG, "預置已存在（%d B），不動它", (int)st.st_size);
+    if (stat(path, &st) == 0) {
+        ESP_LOGI(TAG, "預置已存在（%s, %d B），不動它", path, (int)st.st_size);
         return;
     }
 
-    size_t len = (size_t)(preset_config_end - preset_config_start);
-    FILE *f = fopen(PRESET_CONFIG_PATH, "wb");
+    FILE *f = fopen(path, "wb");
     if (f == NULL) {
-        ESP_LOGE(TAG, "寫入預置失敗：開不了 %s", PRESET_CONFIG_PATH);
+        ESP_LOGE(TAG, "寫入預置失敗：開不了 %s", path);
         return;
     }
-    size_t written = fwrite(preset_config_start, 1, len, f);
+    const size_t len = (size_t)(end - start);
+    const size_t written = fwrite(start, 1, len, f);
     fclose(f);
-    ESP_LOGI(TAG, "已寫入出廠預置 %s（%u B）", PRESET_CONFIG_PATH, (unsigned)written);
+    ESP_LOGI(TAG, "已寫入預置 %s（%u B）", path, (unsigned)written);
+}
+
+// 目錄結構也是「出廠內容」的一部分：config/ 與 pixel/effects/ 先建好，
+// 使用者插上隨身碟就看得到該把東西放哪裡。
+static void seed_dirs(void)
+{
+    static const char *const dirs[] = {
+        PRESET_DIR,
+        MSC_MOUNT_POINT "/pixel",
+        MSC_MOUNT_POINT "/pixel/effects",
+    };
+    for (size_t i = 0; i < sizeof(dirs) / sizeof(dirs[0]); i++) {
+        if (mkdir(dirs[i], 0777) != 0 && errno != EEXIST) {
+            ESP_LOGW(TAG, "建目錄失敗 %s（errno %d）", dirs[i], errno);
+        }
+    }
+}
+
+static void seed_presets(void)
+{
+    seed_dirs();
+    seed_file(PRESET_SYSTEM_PATH, preset_system_start, preset_system_end);
+    seed_file(PRESET_NETWORK_PATH, preset_network_start, preset_network_end);
 }
 
 // ── 卷標：預設叫 NETCORE，不是 NO NAME ──
+// 這個卷標是不是「我們自己產生的」（可以隨 cID 更新）。
+// 使用者自己取的名字（例如 "MYBOARD"）一律不動。
+static bool label_is_ours(const char *label)
+{
+    if (label == NULL || label[0] == '\0') {
+        return true;
+    }
+    if (strcmp(label, "NO NAME") == 0 || strcmp(label, "NETCORE") == 0) {
+        return true;
+    }
+    const size_t plen = strlen(VOLUME_PREFIX);
+    if (strncmp(label, VOLUME_PREFIX, plen) != 0) {
+        return false;
+    }
+    const char *p = label + plen;
+    for (int i = 0; i < 4; i++) {
+        if (!isxdigit((unsigned char)p[i])) {
+            return false;
+        }
+    }
+    return p[4] == '\0';
+}
+
+// ── 設定正規化：把「只有人能讀」的寫法整理成機器用的值，並寫回檔案 ──
+// 目前只有一個：bt.pin 只取數字，合法長度 4–6 位（PIN 規格）：
+//   "1234" → "1234"；"123456" → "123456"；"dfgd321fgjf55" → "32155"；
+//   多於 6 位取前 6 位；不足 4 位或沒有數字 → 清成 ""（Just Works）。
+static void config_sanitize(void)
+{
+    cfg_file_t *cfg = nc_cfg_open("network");
+    if (cfg == NULL) {
+        return;
+    }
+    const cJSON *bt = cJSON_GetObjectItemCaseSensitive(nc_cfg_root(cfg), "bt");
+    const cJSON *pin = cJSON_GetObjectItemCaseSensitive(bt, "pin");
+    const char *raw = (cJSON_IsString(pin) && pin->valuestring != NULL) ? pin->valuestring : NULL;
+    if (raw != NULL && raw[0] != '\0') {
+        char norm[7] = {0};    // 4–6 位 + NUL
+        int n = 0;
+        for (const char *q = raw; *q != '\0' && n < 6; q++) {
+            if (*q >= '0' && *q <= '9') {
+                norm[n++] = *q;
+            }
+        }
+        if (n < 4) {
+            norm[0] = '\0';
+        }
+        if (strcmp(norm, raw) != 0) {
+            if (nc_cfg_set_string("network", "bt.pin", norm)) {
+                ESP_LOGI(TAG, "bt.pin 正規化：\"%s\" → \"%s\"", raw, norm);
+            } else {
+                ESP_LOGW(TAG, "bt.pin 正規化失敗（記憶體值仍用 \"%s\"）", norm);
+            }
+        }
+    }
+    nc_cfg_close(cfg);
+}
+
 static void ensure_volume_label(void)
 {
 #if FF_USE_LABEL
@@ -180,13 +272,28 @@ static void ensure_volume_label(void)
         ESP_LOGW(TAG, "讀不到卷標");
         return;
     }
-    if (strcmp(label, VOLUME_LABEL) == 0) {
+    char want[12] = {0};
+    if (s_cid != NC4_ADDR_BROADCAST) {
+        snprintf(want, sizeof(want), "%s%04X", VOLUME_PREFIX, (unsigned)s_cid);  // ≤11 字元
+    } else {
+        snprintf(want, sizeof(want), "%s", VOLUME_PREFIX);
+    }
+
+    if (strcmp(label, want) == 0) {
         return;
     }
-    if (f_setlabel("0:" VOLUME_LABEL) == FR_OK) {
-        ESP_LOGI(TAG, "卷標: \"%s\" → \"%s\"", label, VOLUME_LABEL);
+    // 使用者自己命名過就不覆寫；我們自己產生的（空白 / NO NAME / NETCORE / NC-XXXX）可以更新
+    if (!label_is_ours(label)) {
+        ESP_LOGI(TAG, "卷標 \"%s\" 由使用者命名，不動", label);
+        return;
+    }
+
+    char cmd[16];
+    snprintf(cmd, sizeof(cmd), "0:%s", want);
+    if (f_setlabel(cmd) == FR_OK) {
+        ESP_LOGI(TAG, "卷標: \"%s\" → \"%s\"", label, want);
     } else {
-        ESP_LOGW(TAG, "設定卷標失敗（原 \"%s\"）", label);
+        ESP_LOGW(TAG, "設定卷標失敗（原 \"%s\" → \"%s\"）", label, want);
     }
 #else
     ESP_LOGW(TAG, "CONFIG_FATFS_USE_LABEL 未開，卷標會停在 NO NAME");
@@ -205,10 +312,9 @@ static esp_err_t storage_init(void)
 
     // WL / FatFS / MSC 的整個生命週期都由 store 管 —— 它有辦法在 claim 時
     // 把 LUN 拆掉，否則主機在 APP 模式仍然寫得進同一塊 flash。
-    ESP_RETURN_ON_ERROR(store_init(part), TAG, "store 初始化失敗");
+    ESP_RETURN_ON_ERROR(nc_store_init(part), TAG, "store 初始化失敗");
 
-    seed_preset_if_missing();
-    ensure_volume_label();
+    seed_presets();
     return ESP_OK;
 }
 
@@ -230,7 +336,7 @@ static esp_err_t storage_hand_over_to_usb(void)
 {
     // 交出去之後裝置只剩唯讀視圖（/ro）；要拿回來請把 System.file_mode 設成 1
     //（store 會把 LUN 拆掉，主機的碟會消失、再出現）。
-    return store_release_usb();
+    return nc_store_release_usb();
 }
 
 static esp_err_t cdc_send(void *arg, const uint8_t *frame, size_t len)
@@ -284,7 +390,7 @@ static void status_put_storage(char *buf, size_t cap)
 {
     // FAT 現在在誰手上、裝置能不能直接讀
     snprintf(buf, cap, "\"storage\":{\"mode\":\"%s\",\"app_ready\":%d}",
-             store_mode_name(), store_app_ready() ? 1 : 0);
+             nc_store_mode_name(), nc_store_app_ready() ? 1 : 0);
 }
 
 static void status_put_sys(char *buf, size_t cap)
@@ -306,11 +412,11 @@ static void status_put_mem(char *buf, size_t cap)
     snprintf(buf, cap, "\"mem\":{\"plan\":%s,\"hub\":%s}", plan, hubs);
 }
 
-static void status_put_svc(char *buf, size_t cap)
+static void status_put_provides(char *buf, size_t cap)
 {
-    static char svc[700];
-    nc_service_json(svc, sizeof(svc));
-    snprintf(buf, cap, "\"svc\":%s", svc);
+    static char prov[900];
+    nc_provide_list_json(prov, sizeof(prov));
+    snprintf(buf, cap, "\"provides\":%s", prov);
 }
 
 #if CONFIG_IDF_TARGET_ESP32P4
@@ -320,17 +426,18 @@ static void status_put_net(char *buf, size_t cap)
     static char ws[200];
     static char udp[200];
     nc4_bus_stats_json(buses, sizeof(buses));
-    ws_nc4_json(ws, sizeof(ws));
-    udp_nc4_json(udp, sizeof(udp));
+    nc4_ws_json(ws, sizeof(ws));
+    nc4_udp_json(udp, sizeof(udp));
     snprintf(buf, cap, "\"net\":{\"bus\":%s,\"ws\":%s,\"udp\":%s}", buses, ws, udp);
 }
 #endif
 
-static void status_put_task(char *buf, size_t cap)
+// 任務表（含每個 loop 的核心、量測）。"task" / "modules" / "svc" 都是舊名，照樣接受。
+static void status_put_tasks(char *buf, size_t cap)
 {
-    static char tasks[400];
-    nc_tasks_status_json(tasks, sizeof(tasks));
-    snprintf(buf, cap, "\"task\":%s", tasks);
+    static char tasks[1800];
+    nc_task_json(tasks, sizeof(tasks));
+    snprintf(buf, cap, "\"tasks\":%s", tasks);
 }
 
 static bool keys_want(const char *keys, const char *name)
@@ -350,6 +457,25 @@ static bool keys_want(const char *keys, const char *name)
     return false;
 }
 
+// 有界的 JSON append：snprintf 回的是「本來想寫多少」，off 可能超過 cap；
+// 直接拿 cap - off 下去會 size_t 下溢。所有 status 區塊都走這裡。
+static void jappend(char *buf, size_t cap, size_t *off, const char *fmt, ...)
+{
+    if (*off >= cap) {
+        return;
+    }
+    va_list ap;
+    va_start(ap, fmt);
+    const int n = vsnprintf(buf + *off, cap - *off, fmt, ap);
+    va_end(ap);
+    if (n > 0) {
+        *off += (size_t)n;
+        if (*off >= cap) {
+            *off = cap - 1;      // 截斷：保住 NUL，不要再往後寫
+        }
+    }
+}
+
 static void on_status_get(nc4_ctx_t *ctx, const nc4_frame_t *f)
 {
     // keys 是 str_u16len：2B 長度 + 內容
@@ -363,49 +489,50 @@ static void on_status_get(nc4_ctx_t *ctx, const nc4_frame_t *f)
 
     if (strcmp(keys, "?") == 0) {
         reply_json(ctx, NC4_CMD_STATUS_RSP,
-                   "{\"keys\":[\"sys\",\"mem\",\"task\",\"svc\",\"storage\",\"fx\"]}");
+                   "{\"keys\":[\"sys\",\"mem\",\"tasks\",\"provides\","
+                   "\"storage\",\"fx\"]}");
         return;
     }
 
-    static char json[1900];
+    static char json[2600];
     size_t off = 0;
-    off += snprintf(json + off, sizeof(json) - off, "{");
+    jappend(json, sizeof(json), &off, "{");
     bool first = true;
-    static char part[1300];
+    static char part[1900];
     if (keys_want(keys, "sys")) {
         status_put_sys(part, sizeof(part));
-        off += snprintf(json + off, sizeof(json) - off, "%s", part);
+        jappend(json, sizeof(json), &off, "%s", part);
         first = false;
     }
     if (keys_want(keys, "mem")) {
         status_put_mem(part, sizeof(part));
-        off += snprintf(json + off, sizeof(json) - off, "%s%s", first ? "" : ",", part);
+        jappend(json, sizeof(json), &off, "%s%s", first ? "" : ",", part);
         first = false;
     }
-    if (keys_want(keys, "task")) {
-        status_put_task(part, sizeof(part));
-        off += snprintf(json + off, sizeof(json) - off, "%s%s", first ? "" : ",", part);
+    if (keys_want(keys, "task") || keys_want(keys, "tasks")) {
+        status_put_tasks(part, sizeof(part));
+        jappend(json, sizeof(json), &off, "%s%s", first ? "" : ",", part);
         first = false;
     }
     if (keys_want(keys, "fx")) {
         nc_fx_status_json(part, sizeof(part));
-        off += snprintf(json + off, sizeof(json) - off, "%s%s", first ? "" : ",", part);
+        jappend(json, sizeof(json), &off, "%s%s", first ? "" : ",", part);
         first = false;
     }
     if (keys_want(keys, "storage")) {
         status_put_storage(part, sizeof(part));
-        off += snprintf(json + off, sizeof(json) - off, "%s%s", first ? "" : ",", part);
+        jappend(json, sizeof(json), &off, "%s%s", first ? "" : ",", part);
         first = false;
     }
-    if (keys_want(keys, "svc")) {
-        status_put_svc(part, sizeof(part));
-        off += snprintf(json + off, sizeof(json) - off, "%s%s", first ? "" : ",", part);
+    if (keys_want(keys, "provides")) {
+        status_put_provides(part, sizeof(part));
+        jappend(json, sizeof(json), &off, "%s%s", first ? "" : ",", part);
         first = false;
     }
 #if CONFIG_IDF_TARGET_ESP32P4
     if (keys_want(keys, "net")) {
         status_put_net(part, sizeof(part));
-        off += snprintf(json + off, sizeof(json) - off, "%s%s", first ? "" : ",", part);
+        jappend(json, sizeof(json), &off, "%s%s", first ? "" : ",", part);
         first = false;
     }
 #endif
@@ -881,6 +1008,10 @@ static void slow_worker(void *arg)
 {
     (void)arg;
     for (;;) {
+        if (s_job_hub == NULL) {      // hub 沒配到 → 這個 loop 沒有工作可做
+            vTaskDelay(pdMS_TO_TICKS(100));
+            continue;
+        }
         slow_job_t *job = nc_hub_read_begin(s_job_hub);
         if (job == NULL) {
             vTaskDelay(1);
@@ -1167,7 +1298,7 @@ static void on_sys_task_query(nc4_ctx_t *ctx, const nc4_frame_t *f)
 {
     (void)f;
     char json[768];
-    nc_tasks_status_json(json, sizeof(json));
+    nc_task_json(json, sizeof(json));
     reply_json(ctx, NC4_CMD_SYS_TASK_RSP, json);
 }
 
@@ -1209,26 +1340,53 @@ static void node_identity_init(void)
 {
     nvs_boot_init();
 
-    nvs_handle_t h = 0;
-    uint16_t cid = NC4_ADDR_BROADCAST, master = NC4_ADDR_BROADCAST;
-    if (nvs_open("node", NVS_READWRITE, &h) == ESP_OK) {
-        if (nvs_get_u16(h, "cid", &cid) != ESP_OK) {
-            cid = derive_cid_from_mac();
-            nvs_set_u16(h, "cid", cid);
+    // cID 的真相在 config/system.json，每次開機都讀：
+    //   有值 → 用使用者的；空的/缺的 → 用 MAC 末 2 bytes 推導，並寫回 config。
+    uint16_t cid = NC4_ADDR_BROADCAST;
+    bool present = false;
+
+    cfg_file_t *cfg = nc_cfg_open("system");
+    if (cfg != NULL) {
+        const cJSON *v = cJSON_GetObjectItemCaseSensitive(nc_cfg_root(cfg), "cID");
+        if (cJSON_IsString(v) && v->valuestring != NULL && v->valuestring[0] != '\0') {
+            char *endp = NULL;
+            const unsigned long x = strtoul(v->valuestring, &endp, 16);
+            if (endp != NULL && *endp == '\0') {
+                cid = (uint16_t)x;
+                present = true;
+            }
+        } else if (cJSON_IsNumber(v)) {
+            cid = (uint16_t)v->valueint;
+            present = true;
         }
+        nc_cfg_close(cfg);
+    }
+
+    if (!present) {
+        cid = derive_cid_from_mac();
+        char hex[8];
+        snprintf(hex, sizeof(hex), "%04X", (unsigned)cid);
+        nc_cfg_set_string("system", "cID", hex);   // 寫回失敗不影響這次的值
+    }
+
+    // master_cid 是「我跟誰」，不是「我是誰」→ 仍然放 NVS
+    uint16_t master = NC4_ADDR_BROADCAST;
+    nvs_handle_t h = 0;
+    if (nvs_open("node", NVS_READWRITE, &h) == ESP_OK) {
         if (nvs_get_u16(h, "master_cid", &master) != ESP_OK) {
             master = NC4_ADDR_BROADCAST;
             nvs_set_u16(h, "master_cid", master);
+            nvs_commit(h);
         }
-        nvs_commit(h);
         nvs_close(h);
     }
+
     s_cid = cid;
     if (s_decoder != NULL) {
         nc4_decoder_set_cid(s_decoder, cid);
         nc4_decoder_set_master_cid(s_decoder, master);
     }
-    ESP_LOGI(TAG, "cid=0x%04X  master_cid=0x%04X", cid, master);
+    ESP_LOGI(TAG, "cid=0x%04X（config） master_cid=0x%04X（NVS）", cid, master);
 }
 
 static void on_set_master(nc4_ctx_t *ctx, const nc4_frame_t *f)
@@ -1291,7 +1449,7 @@ static int cdc_read(void *arg, uint8_t *buf, size_t cap)
     return (int)n;
 }
 
-// ── 服務：自己宣告、自己啟動（透過 nc_service 管理器）──
+// ── 資源宣告（模組在宣告期寫「我要多少」，main 不介入）──
 // 收/解是否分核（NVS: net/rx_split, net/rx_core；預設 0 / 1）
 static bool s_eth_ok;              // 硬體/驅動真的起來了才宣告網路資源
 static bool s_rx_split = false;   // 預設走已驗證的 PULL；零複製插槽待修
@@ -1325,19 +1483,44 @@ static void *s_uart_rx_region;
 static void *s_tcp_rx_region;
 static nc_hub_t *s_probe_hub;
 
+// ── 對外提供（provides）──
+// claims[] 是「我要什麼」，provides[] 是「我給什麼」。
+// 查詢端一律走 nc_provide_*；提供者 stop/detach 之後就查不到，不會拿到懸空指標。
+static bool prov_nc4_rx(void **ptr, size_t *bytes)
+{
+    if (s_nc4_rx_region == NULL) {
+        return false;
+    }
+    *ptr = s_nc4_rx_region;
+    *bytes = s_nc4_rx_bytes;
+    return true;
+}
+
+static const nc_task_provide_t s_nc4_provides[] = {
+    { .name = "nc4.rx", .kind = NC_PROVIDE_BUF, .desc = "CDC parser 緩衝",
+      .buf = prov_nc4_rx },
+    { .name = "nc4.busstats", .kind = NC_PROVIDE_JSON, .desc = "每條通道的 frames/copied",
+      .json = nc4_bus_stats_json },
+};
+
+static const nc_task_provide_t s_fx_provides[] = {
+    { .name = "fx.info", .kind = NC_PROVIDE_JSON, .desc = "live 效果 / arena / 每個實例",
+      .json = nc_fx_info_json },
+};
+
 // ── nc4：CDC 那條線的 parser 緩衝（P4 目前沒開 USB，先留著）──
-static int svc_nc4_declare(nc_res_req_t *out, int max)
+static int task_nc4_declare(nc_task_res_t *out, int max)
 {
     if (max < 1) {
         return 0;
     }
-    out[0] = (nc_res_req_t){
+    out[0] = (nc_task_res_t){
         .name = "nc4.rx", .bytes = NC4_MAX_FRAME, .cls = NC_PLAN_INTERNAL, .align = 32,
     };
     return 1;
 }
 
-static esp_err_t svc_nc4_start(const nc_res_view_t *res, int n)
+static esp_err_t task_nc4_start(const nc_task_res_view_t *res, int n)
 {
     (void)n;
     s_nc4_rx_region = res[0].ptr;
@@ -1347,18 +1530,18 @@ static esp_err_t svc_nc4_start(const nc_res_view_t *res, int n)
 }
 
 // ── net：UART / TCP 的 parser 緩衝（TCP 只在 P4）──
-static int svc_net_declare(nc_res_req_t *out, int max)
+static int task_net_declare(nc_task_res_t *out, int max)
 {
     int n = 0;
     if (n < max) {
-        out[n++] = (nc_res_req_t){
+        out[n++] = (nc_task_res_t){
             .name = "uart.rx", .bytes = 1024, .cls = NC_PLAN_INTERNAL, .align = 32,
         };
     }
 #if CONFIG_IDF_TARGET_ESP32P4
     // ★ 只有「ETH 真的起來」才宣告 TCP 的緩衝 —— 宣告是照硬體決定，不是照 config
     if (s_eth_ok && n < max) {
-        out[n++] = (nc_res_req_t){
+        out[n++] = (nc_task_res_t){
             // 2 幀：跨讀時需要餘裕
             .name = "tcp.rx", .bytes = 16410, .cls = NC_PLAN_INTERNAL, .align = 32,
         };
@@ -1367,7 +1550,7 @@ static int svc_net_declare(nc_res_req_t *out, int max)
     return n;
 }
 
-static esp_err_t svc_net_start(const nc_res_view_t *res, int n)
+static esp_err_t task_net_start(const nc_task_res_view_t *res, int n)
 {
     s_uart_rx_region = res[0].ptr;
 #if CONFIG_IDF_TARGET_ESP32P4
@@ -1380,18 +1563,18 @@ static esp_err_t svc_net_start(const nc_res_view_t *res, int n)
 }
 
 // ── core.jobs：慢工作佇列 ──
-static int svc_jobs_declare(nc_res_req_t *out, int max)
+static int task_core_declare(nc_task_res_t *out, int max)
 {
     if (max < 1) {
         return 0;
     }
-    out[0] = (nc_res_req_t){
+    out[0] = (nc_task_res_t){
         .name = "jobs", .bytes = 8 * sizeof(slow_job_t), .cls = NC_PLAN_INTERNAL, .align = 32,
     };
     return 1;
 }
 
-static esp_err_t svc_jobs_start(const nc_res_view_t *res, int n)
+static esp_err_t task_core_start(const nc_task_res_view_t *res, int n)
 {
     (void)n;
     s_job_hub = nc_hub_create_in(res[0].ptr, res[0].len, "jobs",
@@ -1400,18 +1583,18 @@ static esp_err_t svc_jobs_start(const nc_res_view_t *res, int n)
 }
 
 // ── probe：開機自測（hub 交換 4 格）──
-static int svc_probe_declare(nc_res_req_t *out, int max)
+static int task_probe_declare(nc_task_res_t *out, int max)
 {
     if (max < 1) {
         return 0;
     }
-    out[0] = (nc_res_req_t){
+    out[0] = (nc_task_res_t){
         .name = "probe.hub", .bytes = 4 * 128, .cls = NC_PLAN_INTERNAL, .align = 32,
     };
     return 1;
 }
 
-static esp_err_t svc_probe_start(const nc_res_view_t *res, int n)
+static esp_err_t task_probe_start(const nc_task_res_view_t *res, int n)
 {
     (void)n;
     s_probe_hub = nc_hub_create_in(res[0].ptr, res[0].len, "probe", 128, 4, 32);
@@ -1432,66 +1615,147 @@ static esp_err_t svc_probe_start(const nc_res_view_t *res, int n)
     return ok ? ESP_OK : ESP_FAIL;
 }
 
-// ── System（固定順序）：硬體/driver/NC4 通道屬於這裡，不進服務管理器 ──
-// 服務管理器只管「應用服務」（效果、UI、自測…）。
-typedef struct {
-    const char *name;
-    int level;
-    int (*declare)(nc_res_req_t *out, int max);
-    esp_err_t (*start)(const nc_res_view_t *res, int n);
-} sys_part_t;
+// ── 任務宣告（裝配層）──
+//
+// 這裡是「誰存在、誰先起、誰吃什麼、誰擁有哪條指令」的唯一答案。
+// 任務管理器（nc_task）負責：宣告記憶體 → 帳本檢查 → 依 level 啟動 →
+// 註冊指令（帶擁有權）→ 開 loop。main 只回答「有哪些任務」。
+//
+// 三種 kind 的分工：
+//   system  = 硬體 / driver / 通道（固定順序、不可卸載）
+//   normal  = 一般任務（以前的 service 就是這個；fx 政策層、probe）
+//   effect  = 由 .fxe 載入的任務（在 nc_fx_load 裡 attach，不在這張表）
 
-static const sys_part_t s_sys_parts[] = {
-    { "nc4",  0, svc_nc4_declare,  svc_nc4_start  },
-    { "net",  1, svc_net_declare,  svc_net_start  },
-    { "core", 1, svc_jobs_declare, svc_jobs_start },
+// ① nc4（System L0）：CDC parser 緩衝 + 兩核的解碼任務
+static const nc_task_loop_t s_nc4_loops[] = {
+    { .name = "decode0", .fn = nc4_bus_task_entry, .arg = (void *)0,
+      .stack = 6144, .prio = 4, .core = 0, .layer = 1 },
+    { .name = "decode1", .fn = nc4_bus_task_entry, .arg = (void *)1,
+      .stack = 6144, .prio = 4, .core = 1, .layer = 1 },
 };
-#define SYS_PART_COUNT (sizeof(s_sys_parts) / sizeof(s_sys_parts[0]))
 
-static nc_res_req_t s_sys_req[SYS_PART_COUNT][NC_SERVICE_MAX_RES];
-static int s_sys_nreq[SYS_PART_COUNT];
+static const nc_task_t s_task_nc4 = {
+    .name = "nc4", .kind = NC_TASK_SYSTEM, .level = 0,
+    .declare = task_nc4_declare, .on_start = task_nc4_start,
+    .loops = s_nc4_loops, .nloops = sizeof(s_nc4_loops) / sizeof(s_nc4_loops[0]),
+    .provides = s_nc4_provides,
+    .nprovides = sizeof(s_nc4_provides) / sizeof(s_nc4_provides[0]),
+};
 
-static void sys_declare_all(void)
+// ② net（System L1）：UART / TCP 的 parser 緩衝（照實際硬體宣告）
+static const nc_task_t s_task_net = {
+    .name = "net", .kind = NC_TASK_SYSTEM, .level = 1,
+    .declare = task_net_declare, .on_start = task_net_start,
+};
+
+// ③ core（System L1）：慢工作 hub + 唯一的 worker loop
+static const nc_task_loop_t s_core_loops[] = {
+    { .name = "slow_worker", .fn = slow_worker, .arg = NULL,
+      .stack = 4096, .prio = 2, .core = 0, .layer = 2 },
+};
+
+static const nc_task_t s_task_core = {
+    .name = "core", .kind = NC_TASK_SYSTEM, .level = 1,
+    .declare = task_core_declare, .on_start = task_core_start,
+    .loops = s_core_loops, .nloops = sizeof(s_core_loops) / sizeof(s_core_loops[0]),
+};
+
+// ④ Action：NC4 指令（核心執行能力，不屬於任何任務）
+//
+// 指令是 decoder 的表；開機時註冊一次，之後 decode task 只負責收發與分派。
+// 任務不擁有指令 —— 任務只是把「已經存在的執行能力」恆常化、排程化。
+typedef struct {
+    uint16_t cmd;
+    nc4_handler_t fn;
+} core_action_t;
+
+static const core_action_t s_core_actions[] = {
+    { NC4_CMD_REBOOT,            on_reboot },
+    { NC4_CMD_STATUS_GET,        on_status_get },
+    { NC4_CMD_DEV_BENCH,         on_dev_bench },
+    { NC4_CMD_HUB_BENCH,         on_hub_bench },
+    { NC4_CMD_TX_BENCH,          on_tx_bench },
+    { NC4_CMD_BUS_STATS,         on_bus_stats },
+    { NC4_CMD_DEV_SLOW,          on_dev_slow },
+    { NC4_CMD_NET_TUNE,          on_net_tune },
+    { NC4_CMD_UART_BENCH,        on_uart_bench },
+    { NC4_CMD_BENCH_READY,       on_bench_ready },
+    { NC4_CMD_BENCH_DATA,        on_bench_data },
+    { NC4_CMD_BENCH_RESULT,      on_bench_result },
+    { NC4_CMD_SET_MASTER,        on_set_master },
+    { NC4_CMD_SYS_TASK_QUERY,    on_sys_task_query },
+};
+
+// 開機把三組 action 註冊進 decoder：core（上面這張）、ota（0x22xx）、file（0x2005/0x1103）。
+// 沒有任務參與 —— 這就是「指令是核心、任務是表面」的實際長相。
+static void actions_register(nc4_decoder_t *dec)
 {
-    for (size_t i = 0; i < SYS_PART_COUNT; i++) {
-        const int n = s_sys_parts[i].declare(s_sys_req[i], NC_SERVICE_MAX_RES);
-        s_sys_nreq[i] = n < 0 ? 0 : (n > NC_SERVICE_MAX_RES ? NC_SERVICE_MAX_RES : n);
-        for (int k = 0; k < s_sys_nreq[i]; k++) {
-            const nc_res_req_t *r = &s_sys_req[i][k];
-            nc_plan_declare(&(nc_plan_decl_t){
-                .service = s_sys_parts[i].name, .name = r->name,
-                .level = s_sys_parts[i].level, .cls = r->cls,
-                .bytes = r->bytes, .align = r->align,
-            });
-        }
+    if (dec == NULL) {
+        return;
     }
+    for (size_t i = 0; i < sizeof(s_core_actions) / sizeof(s_core_actions[0]); i++) {
+        nc4_decoder_on_owner(dec, s_core_actions[i].cmd, s_core_actions[i].fn, "core");
+    }
+    // cid / master_cid 已在開機最前面初始化（卷標要用）
+    nc_ota_action_register(dec);             // 0x22xx
+    nc_file_action_register(dec);       // 0x2005 FILE_QUERY / 0x1103 STATUS_SET
+    ESP_LOGI(TAG, "actions：core %u 條 + ota + file 已註冊（decoder 共 %u 條）",
+             (unsigned)(sizeof(s_core_actions) / sizeof(s_core_actions[0])),
+             (unsigned)nc4_decoder_count(dec));
 }
 
-static void sys_start_all(void)
+// ⑤ probe（Normal L3）：開機自測（hub 交換 4 格）
+static const nc_task_t s_task_probe = {
+    .name = "probe", .kind = NC_TASK_NORMAL, .level = 3,
+    .declare = task_probe_declare, .on_start = task_probe_start,
+};
+
+// ⑥ fx（Normal L4）：政策層 —— arena + 實例表 + 唯一的 render task
+#define NC_FX_TASK_CORE 1
+#define NC_FX_TASK_PRIO 3
+
+static esp_err_t task_fx_start(const nc_task_res_view_t *res, int n)
 {
-    for (size_t i = 0; i < SYS_PART_COUNT; i++) {
-        nc_res_view_t view[NC_SERVICE_MAX_RES];
-        bool ok = true;
-        for (int k = 0; k < s_sys_nreq[i]; k++) {
-            view[k].ptr = nc_plan_get(s_sys_req[i][k].name);
-            view[k].len = s_sys_req[i][k].bytes;
-            if (view[k].ptr == NULL) {
-                ESP_LOGE(TAG, "[sys %s] 資源 %s 拿不到", s_sys_parts[i].name,
-                         s_sys_req[i][k].name);
-                ok = false;
-                break;
-            }
-        }
-        if (ok) {
-            s_sys_parts[i].start(view, s_sys_nreq[i]);
-        }
+    if (n < 1 || res[0].ptr == NULL) {
+        return ESP_ERR_NO_MEM;
     }
+    nc_fx_set_task_placement(NC_FX_TASK_CORE, NC_FX_TASK_PRIO);
+    const esp_err_t e = nc_fx_init(res[0].ptr, res[0].len);
+    if (e != ESP_OK) {
+        return e;
+    }
+    // 掃目錄不在這裡做：載入 .fxe = attach 租戶 = 會插入 registry，
+    // 而此刻 nc_task_start_all() 正在走同一張表（插入會搬動它）。
+    // main 在 start_all 之後呼叫 nc_fx_scan("/data/pixel/effects")。
+    return ESP_OK;
 }
 
-// 應用服務：probe（示範用；真正的應用會是 effects / UI / jobs …）
-static const nc_service_t s_probe_service = {
-    .name = "probe", .level = 3,
-    .declare = svc_probe_declare, .start = svc_probe_start, .stop = NULL,
+static const nc_task_loop_t s_fx_loops[] = {
+    { .name = "fx", .fn = nc_fx_task, .arg = NULL,
+      .stack = 4096, .prio = NC_FX_TASK_PRIO, .core = NC_FX_TASK_CORE,
+      // period_ms = 0：幀週期由 manifest 的 fps 決定，nc_fx_task 自己延遲。
+      // 兩邊都延遲會變成兩倍週期。
+      .layer = 3, .period_ms = 0, .budget_us = 16000 },
+};
+
+static int task_fx_declare(nc_task_res_t *out, int max)
+{
+    if (max < 1) {
+        return 0;
+    }
+    out[0] = (nc_task_res_t){
+        .name = "fx.arena", .bytes = NC_FX_ARENA_MAX,
+        .cls = NC_PLAN_PSRAM, .align = 32,
+    };
+    return 1;
+}
+
+static const nc_task_t s_task_fx = {
+    .name = "fx", .kind = NC_TASK_NORMAL, .level = 4,
+    .declare = task_fx_declare, .on_start = task_fx_start,
+    .loops = s_fx_loops, .nloops = sizeof(s_fx_loops) / sizeof(s_fx_loops[0]),
+    .provides = s_fx_provides,
+    .nprovides = sizeof(s_fx_provides) / sizeof(s_fx_provides[0]),
 };
 
 #if CONFIG_IDF_TARGET_ESP32P4
@@ -2030,13 +2294,15 @@ void app_main(void)
              (unsigned)(esp_clk_apb_freq() / 1000000),
              (unsigned)(esp_clk_xtal_freq() / 1000000));
 
-    // ── /data 掛載（預置、卷標；不讀應用設定）──
+    // ── NVS → /data 掛載 → 身份（cID 在 config）→ 卷標（用 cid）──
+    nvs_boot_init();        // ★ 一定要比任何 nvs_open 早
     esp_err_t err = storage_init();
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "storage 初始化失敗: %s", esp_err_to_name(err));
     }
-
-    nvs_boot_init();     // ★ 一定要比任何 nvs_open 早
+    config_sanitize();
+    node_identity_init();
+    ensure_volume_label();
     load_net_tuning();
 
     // ── ③④ 硬體 / Driver：先確認「有沒有這個硬體」──
@@ -2055,11 +2321,25 @@ void app_main(void)
 #endif
 
     // ── ⑤ 宣告（照「實際存在的硬體」決定）──
+    // 這個 registry 管兩件事：記憶體（nc_plan）、迴圈（nc_task）。
+    // 指令不在這裡 —— 它是 decoder 的表，下面 actions_register() 一次註冊完。
     nc_plan_reset();
-    nc_service_add(&s_probe_service);
-    nc_service_declare_all();       // 應用服務宣告
-    sys_declare_all();              // System 宣告（硬體/driver/NC4 通道的緩衝）
-    nc_fx_declare();                // 效果 arena（PSRAM）；宣告窗口在 commit 關閉
+    nc_task_reset();
+
+    s_decoder = nc4_decoder_create();
+    if (s_decoder != NULL) {
+        actions_register(s_decoder);       // 核心執行能力先就位（不需要任何任務）
+    } else {
+        ESP_LOGE(TAG, "解碼器建立失敗 → 裝置收不到任何指令");
+    }
+
+    nc_task_register(&s_task_nc4);     // L0：parser 緩衝 + decode0/1
+    nc_task_register(&s_task_net);     // L1：UART / TCP 緩衝（照 ETH 是否起來）
+    nc_task_register(&s_task_core);    // L1：慢工作 hub + worker
+    nc_task_register(&s_task_probe);   // L3：開機自測
+    nc_task_register(&s_task_fx);      // L4：效果 arena + render task
+
+    nc_task_declare_all();       // → nc_plan_declare + 帳本檢查
 
     // ── ② 探測可用量，一次 commit（每 class 一次 carve）──
     size_t avail[NC_PLAN_CLASSES] = {0};
@@ -2073,15 +2353,20 @@ void app_main(void)
         ESP_LOGI(TAG, "plan(%s): %s", esp_err_to_name(perr), pj);
     }
 
+    // ── ③ 任務啟動：資源 → on_start → 指令 → 準備 loop（還不開）──
+    nc_task_start_all();
 
-    // ── 效果：arena 已由 plan 配好；此時 /data 仍歸裝置，正好掃目錄 ──
-    if (nc_fx_init(nc_plan_get("fx.arena"), NC_FX_ARENA_MAX) == ESP_OK) {
-        nc_fx_scan("/data/fx");
+    // ④ 效果租戶：載入 .fxe → 解碼 manifest → attach 到 registry
+    //    （放在 start_all 之後：attach 會插入 registry，不能跟 start_all 同時走）
+    if (nc_task_started("fx")) {
+        nc_fx_scan("/data/pixel/effects");
     }
 
-    // ── ③ System 啟動（NC4 通道）→ 應用服務啟動 ──
-    sys_start_all();
-    nc_service_start_all();
+    {
+        static char ledger[900];
+        nc_task_ledger(ledger, sizeof(ledger));
+        ESP_LOGI(TAG, "帳本：\n%s", ledger);
+    }
 
 #if CONFIG_IDF_TARGET_ESP32P4
     // 診斷結論（2026-11-02）：這塊板子的 USB-C 只接 USB-Serial-JTAG，沒有接 USB-OTG。
@@ -2105,33 +2390,17 @@ void app_main(void)
     ESP_LOGI(TAG, "碟交給 host: %s", esp_err_to_name(err));
 #endif
 
-    s_decoder = nc4_decoder_create();
+    // 解碼器已在 ⑤ 宣告期建立；核心指令由 cmds 模組註冊（帶擁有權）。
+    // 這裡只掛「需要硬體」的通道。
     if (s_decoder != NULL) {
-        nc4_decoder_on(s_decoder, NC4_CMD_REBOOT, on_reboot);
-        nc4_decoder_on(s_decoder, NC4_CMD_STATUS_GET, on_status_get);
-        nc4_decoder_on(s_decoder, NC4_CMD_DEV_BENCH, on_dev_bench);
-        nc4_decoder_on(s_decoder, NC4_CMD_HUB_BENCH, on_hub_bench);
-        nc4_decoder_on(s_decoder, NC4_CMD_TX_BENCH, on_tx_bench);
-        nc4_decoder_on(s_decoder, NC4_CMD_BUS_STATS, on_bus_stats);
-        nc4_decoder_on(s_decoder, NC4_CMD_DEV_SLOW, on_dev_slow);
-        nc4_decoder_on(s_decoder, NC4_CMD_NET_TUNE, on_net_tune);
-        nc4_decoder_on(s_decoder, NC4_CMD_UART_BENCH, on_uart_bench);
-        nc4_decoder_on(s_decoder, NC4_CMD_BENCH_READY, on_bench_ready);
-        nc4_decoder_on(s_decoder, NC4_CMD_BENCH_DATA, on_bench_data);
-        nc4_decoder_on(s_decoder, NC4_CMD_BENCH_RESULT, on_bench_result);
-        nc4_decoder_on(s_decoder, NC4_CMD_SET_MASTER, on_set_master);
-        nc4_decoder_on(s_decoder, NC4_CMD_SYS_TASK_QUERY, on_sys_task_query);
-        node_identity_init();
-        ota_register(s_decoder);
-        file_cmds_register(s_decoder);   // 0x2005 FILE_QUERY / 0x1103 STATUS_SET
 #if CONFIG_IDF_TARGET_ESP32P4
         if (s_eth_ok) {
             // NC4 over WebSocket（訊息即一幀；直接解析，不經 bus）
-            esp_err_t werr = ws_nc4_start(s_decoder, 8080);
+            esp_err_t werr = nc4_ws_start(s_decoder, 8080);
             ESP_LOGW(TAG, "NC4 over WS: %s", esp_err_to_name(werr));
-            esp_err_t uerr = udp_nc4_start(s_decoder, 6001);
+            esp_err_t uerr = nc4_udp_start(s_decoder, 6001);
             ESP_LOGW(TAG, "NC4 over UDP: %s", esp_err_to_name(uerr));
-            http_cfg_register(ws_nc4_httpd());
+            nc4_http_register(nc4_ws_httpd());
         } else {
             ESP_LOGW(TAG, "沒有乙太網 → WS / UDP 通道不啟動");
         }
@@ -2205,29 +2474,9 @@ void app_main(void)
 #endif
         ESP_LOGI(TAG, "NC4 通道: %s", esp_err_to_name(berr));
 
-        // 任務註冊表：L1 起解碼（core 0），L2 起按鍵監看
-        // 6144：reply_json 的 frame 就吃掉 2.1 KB，4096 對「大回覆」太緊
-        nc_task_register(&(nc_task_def_t){
-            .name = "decode0", .fn = nc4_bus_task_entry, .arg = (void *)0,
-            .stack = 6144, .prio = 4, .core = 0, .layer = 1,
-        });
-        nc_task_register(&(nc_task_def_t){
-            .name = "decode1", .fn = nc4_bus_task_entry, .arg = (void *)1,
-            .stack = 6144, .prio = 4, .core = 1, .layer = 1,
-        });
-        if (s_job_hub != NULL) {
-            nc_task_register(&(nc_task_def_t){
-                .name = "slow_worker", .fn = slow_worker, .arg = NULL,
-                .stack = 4096, .prio = 2, .core = 0, .layer = 2,
-            });
-        }
-        // 效果 render：L3、core 1（RX 在 core1，render 也放 core1 只作佔位；
-        // 等 FrameClock 落地再依實際負載重排）
-        nc_task_register(&(nc_task_def_t){
-            .name = "fx", .fn = nc_fx_task, .arg = NULL,
-            .stack = 4096, .prio = 3, .core = 1, .layer = 3,
-        });
-        nc_tasks_boot();
+        // 任務已經由各模組在 start 時登記（decode0/1、slow_worker、fx）；
+        // 這裡只負責「依 layer 啟動」，不再手動 xTaskCreate 任何 loop。
+        nc_task_boot();
     }
 
     const TickType_t period = pdMS_TO_TICKS(1000);

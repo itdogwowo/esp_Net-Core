@@ -10,7 +10,7 @@ tools/
 ├─ board.py                     ① 板子清單 / 設定檢查 / 新增板子
 ├─ board.sh                     ① 薄殼 → make.py（相容用）
 ├─ flash.sh                     ① 逃生門燒錄
-├─ nc4.py  ota.py selftest.py nc4_test.py   ② 對設備說話
+├─ nc4.py  ota.py selftest.py nc4_test.py fx.py   ② 對設備說話 / 打包 .fxe
 ├─ bench/                       ③ 量測（要板子）
 ├─ hosttest/                    ④ 主機端 C 測試（不需要板子）
 └─ poc/                         ⑤ 原型驗證
@@ -97,11 +97,12 @@ python3 tools/board.py new --chip S3 --board ESP32-S3-Matrix --flash 16 --psram 
 
 | 工具 | 需要板子 | 做什麼 |
 |---|---|---|
-| `nc4.py --port … reboot\|raw\|listen` | ✅ | 送單一 NC4 指令 / 監看輸出 |
+| `nc4.py --port … reboot\|status\|raw\|listen` | ✅ | 送單一 NC4 指令 / **查狀態（keys 可選）** / 監看輸出 |
 | `ota.py --port … <image>` | ✅ | NC4 OTA 推 firmware，**不需要按鍵、不需要 download mode** |
 | `selftest.py --port …` | ✅ | 一鍵自測：STATUS / 解碼器 9 case / 效能 / 突發 / OTA（會匯入同層的 `ota.py`） |
 | `nc4_file.py --port … status\|query <path>\|claim\|release` | ✅ | 檔案查詢（0x2005）與儲存狀態（0x1103/0x1101）。讀取任何模式都通；只有寫入才要 claim，見 [fat-ownership](../docs/03_notes/fat-ownership.md) |
 | `nc4_test.py --port …` | ✅ | 解碼器一致性測試：正常幀 / 黏包 / 拆包 / 壞 CRC / 假 SOF / 錯 addr / 超大 LEN / 錯版本 |
+| `fx.py pack / dump` | ❌ | **打包 `.fxe`**（header + manifest + payload + 指令表）與檢視；manifest 欄位＝模組的 kind/core/layer/fps/px/預算。`pack` 會先擋掉裝置端一定會拒的值 |
 
 firmware image 在 `firmware/build/esp_net_core.bin`（先 build 才有）。
 
@@ -112,8 +113,8 @@ firmware image 在 `firmware/build/esp_net_core.bin`（先 build 才有）。
 | `bench_all.py` | 一次跑完 A–F 六組：純 TCP / NC4 下載 / NC4 上傳 / 純 CPU / 雙核 hub / 匯流排統計 |
 | `net_bench.py` | 純 TCP 吞吐（port 5000/5001/5002），驗網卡上限 |
 | `nc4_tcp.py` | NC4 over TCP 吞吐與延遲（port 6000） |
-| `ws_nc4_test.py` | NC4 over WS 全套：RTT / 吞吐 / 碎片 / 重連 / 並存 |
-| `udp_nc4_test.py` | NC4 over UDP：RTT / 吞吐 / 掉包 |
+| `nc4_ws_test.py` | NC4 over WS 全套：RTT / 吞吐 / 碎片 / 重連 / 並存 |
+| `nc4_udp_test.py` | NC4 over UDP：RTT / 吞吐 / 掉包 |
 | `nc4_stats.py` | 0xF008 匯流排統計（`copied` 應為 0）＋ 碎片/垃圾重同步邊界 |
 | `nc4_tx_bench.py` | 0xF007 上傳（打包＋送出），同核 / 分核 |
 | `hub_bench.py` | 0xF003 雙核 hub 交換量測 |
@@ -128,9 +129,13 @@ P4 預設靜態 IP `10.10.1.50/16`，量測前先確認連得到。
 tools/hosttest/hub_test/run.sh     # nc_hub.c：格子交換 / 自動歸還
 tools/hosttest/plan_test/run.sh    # nc_plan.c：宣告 / commit / 重名
 tools/hosttest/fx_test/run.sh      # nc_fx.c：載入 / 選 / 兩幀釋放 / trap / 超支
+tools/hosttest/fxm_test/run.sh     # .fxe manifest：解碼 / 範圍 / 指令表
+tools/hosttest/task_test/run.sh  # 任務管理器：level 排序 / 帳本 / attach / detach / provides
 ```
 
-兩支都會印 `ALL PASS`。改動 `components/sys/mem/` 之後先跑這個。
+Windows（MSVC）用同目錄的 `run.bat`（需要 Visual Studio Build Tools）。
+
+全部都會印 `ALL PASS`。改了 `sys/mem/`、`sys/tasks/`、`app/fx/` 之後先跑對應那支。
 
 ## ⑤ `poc/` — 原型驗證
 
@@ -148,5 +153,4 @@ node tools/poc/fx_poc/host.mjs tools/poc/fx_poc/fx.wasm --frames 120
 
 文件提到但**目前不存在**，屬於計劃產物，不要當成壞掉的路徑：
 
-- `tools/fx.py` — 效果模組打包 / 上傳工具（[fx-loader.md](../docs/03_notes/fx-loader.md) M1、[effect-language.md](../docs/03_notes/effect-language.md) P1 的產物）
 - `tools/fixtures/` — 測試樣本（[component-layout.md](../docs/03_notes/component-layout.md) §8 規劃）

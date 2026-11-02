@@ -349,14 +349,14 @@ WS 是訊息導向，所以它**不需要插槽**：一則 WS 訊息 = 一個 NC
 
 | 項目 | 值 |
 |---|---|
-| 檔案 / URI | `firmware/components/sys/transport/ws_nc4.c`，`ws://<ip>:8080/nc4` |
+| 檔案 / URI | `firmware/components/sys/transport/nc4_ws.c`，`ws://<ip>:8080/nc4` |
 | 同時連線 | 1（第二條在第一則資料幀被拒） |
 | 訊息上限 | **24 KB**（一則可塞多個 NC4 幀） |
 | RTT 中位 | 6.87 ms（TCP 3.6） |
 | 吞吐 1K / 4K / 8K（batch=1） | 1.33 / 3.25 / 4.35 MB/s |
 | 吞吐 1K / 4K / 8K（多幀 batch） | **4.30 / 5.72 / 5.26 MB/s**（TCP 5.65 / 7.13 / 7.40） |
 | httpd task | core1 / prio 10（預設 prio5 + 不指定核 → 慢 11%） |
-| 測試 | `tools/bench/ws_nc4_test.py`（10 項全過：碎片、垃圾、過大、重連、第二條被拒、與 TCP 並存） |
+| 測試 | `tools/bench/nc4_ws_test.py`（10 項全過：碎片、垃圾、過大、重連、第二條被拒、與 TCP 並存） |
 
 > 每則 WS 訊息固定成本 ≈ 0.7 ms（httpd 對每則做 4–6 次小 `recv`，每次都過 lwIP netconn）。
 > 解法是「一則訊息塞多幀」（batching）：1K 從 1.33 → 4.30 MB/s。要高吞吐仍以 TCP 為主；

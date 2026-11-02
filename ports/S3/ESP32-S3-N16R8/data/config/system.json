@@ -1,0 +1,43 @@
+{
+  "version": 1,
+  "_comment": "System 層：身份、開機、NC4 通道與解碼路線。cID 空白會自動填入並寫回。",
+  "cID": "",
+  "frame_interval_ms": 20,
+  "num_pixels": 0,
+  "nc4": {
+    "decode": [
+      {
+        "name": "decode0",
+        "core": 0,
+        "prio": 4,
+        "budget": 8
+      },
+      {
+        "name": "decode1",
+        "core": 1,
+        "prio": 4,
+        "budget": 8
+      }
+    ],
+    "links": [
+      {
+        "name": "CDC",
+        "kind": "cdc",
+        "rx": {
+          "decode": "decode0"
+        }
+      },
+      {
+        "name": "TCP",
+        "kind": "tcp",
+        "port": 6000,
+        "rx": {
+          "mode": "push_frame",
+          "decode": "decode0",
+          "slots": 4,
+          "slot_size": 8205
+        }
+      }
+    ]
+  }
+}

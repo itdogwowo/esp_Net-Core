@@ -10,7 +10,7 @@
 | **00_pm** 項目管理 | 想知道「做到哪、接下來做什麼」的人 | 現況、路線圖、決策與待辦 | 3 |
 | **01_protocol** 協議層 | 對接方 / 寫 transport / 寫 PC 工具的人 | NC4 在哪些通道上跑、每個通道要自己做什麼 | 2 |
 | **02_guides** 使用教學 | 要 build / 燒錄 / 跑測試的人 | 工具怎麼用、測試怎麼跑、數字怎麼判讀 | 2 |
-| **03_notes** 設計筆記 | 維護者 / 想了解設計脈絡的人 | 架構、分層、記憶體、研究、上板紀錄 | 16 |
+| **03_notes** 設計筆記 | 維護者 / 想了解設計脈絡的人 | 架構、分層、記憶體、研究、上板紀錄 | 19 |
 
 > **趕時間先看**：[00_pm/status.md](00_pm/status.md) —— 一頁涵蓋「已驗證的數字、已定案的架構、還沒做的事、要測的場景」。
 
@@ -50,20 +50,23 @@
 | 文件 | 內容 |
 |---|---|
 | [architecture-flow.md](03_notes/architecture-flow.md) | **執行期流程**：mode 決策、NC4 檔案編輯、frame pipeline、ownership matrix |
+| [decode-routes.md](03_notes/decode-routes.md) | **解碼路線與接收緩衝（現況）**：五條通道各自跑在哪一核、用哪塊緩衝、分派路徑；「執行完才能收下一個」對一半；heap/BSS 的隱形緩衝清單與優先序 |
+| [naming.md](03_notes/naming.md) | **命名慣例**：一個子系統一個前綴（`nc4_`/`nc_plan_`/`nc_task_`/`nc_store_`/`nc4_ws_`/`nc_fx_`）、**`<域>_task` 與 `<域>_action` 後綴**（同名域不混淆，例 pixel）、檔名＝前綴＋角色、型別與列舉規則、新舊對照 |
 | [component-layout.md](03_notes/component-layout.md) | **三層分區與 component 佈局（目標架構）**：hw/sys/sw/action/tasks/ui/schema 七區、`ports/` 專案層、依賴方向。⚠️ 目前只落地 `sys/` 與 `app/` |
 | [file-write-path.md](03_notes/file-write-path.md) | **分段寫入可行性**：mp 版 `.tmp`→`sha256`→`.bak`→rename 演算法、空間預算（覆蓋要 2×）、實測 141 KB/s、斷電恢復、四個必做條件 |
 | [fat-ownership.md](03_notes/fat-ownership.md) | **FAT 擁有者（互斥模型）**：為什麼不能同時掛碟與讀檔、為什麼只切 mount_point 不夠、LUN 拆建＋USB 重新列舉、實測數據 |
-| [config-layers.md](03_notes/config-layers.md) | **配置分層與開機順序**：System（硬體→driver→NC4 通道）vs Service；config.json 的七層；NC4 link 的 core/slots/slot_size 怎麼寫 |
+| [config-layers.md](03_notes/config-layers.md) | **配置分層（一個層一個檔案）**：`config/hardware.json`→`driver`→`system`→`network`→`tasks`→`effects`→`ui`；每層自己讀、缺檔用預設、壞檔只退化該層；開機順序（硬體先起來才讀分配）；`system.json` 的 `nc4.decode[]` / `links[].rx.decode` 怎麼寫 |
 | [p4-bringup.md](03_notes/p4-bringup.md) | **ESP32-P4 上板紀錄**：IDF 版本、console/PSRAM 陷阱、乙太網吞吐調校（1.1 → 8 MB/s） |
 | [failure-policy.md](03_notes/failure-policy.md) | **失敗處理**：config 壞掉/超範圍、PHY 協商失敗、拔線、USB MSC 不支援時的替代路徑（HTTP/NC4 file） |
-| [writing-a-service.md](03_notes/writing-a-service.md) | **怎麼寫一個 Service（C）**：declare→start→run→stop 生命週期、跟平常 FreeRTOS 的差異、完整範例、檢查清單、目前限制 |
+| [writing-a-task.md](03_notes/writing-a-task.md) | **怎麼寫一個 Task（C）**：`nc_task_register()` 之後全交給管理器（plan 宣告 / 開 loop / 量測 / 狀態）；身份（kind）/接線（mem·claims·**provides**）/執行（loops：core·layer·節奏）/生命（on_start·on_stop·attach·detach）；**§3.2 指令＝action，不是任務的財產** |
+| [hardware-bus.md](03_notes/hardware-bus.md) | **硬體歸屬（設計紀錄，未實作）**：現在是裝配層人工分配（一裝置一 owner）、為什麼不需要執行期仲裁、哪天要做時的形狀與位置（task 層），以及三個觸發條件 |
 | [rx-architecture.md](03_notes/rx-architecture.md) | **收／解路徑正式架構（規劃）**：分核／零複製的能力邊界、缺什麼、component 切法、config 與記憶體、P0–P5 遷移 |
 | [buffer-manager-status.md](03_notes/buffer-manager-status.md) | **緩衝管理器實作現況**：三個原語、N 的語義、不變量、測試結果、已知缺陷 |
 | [buffer-manager.md](03_notes/buffer-manager.md) | **緩衝管理器（設計定案、未實作）**：三階段 declare→commit→take、四種機制、三層 tier、撇除規則、S3 記憶體圖、P0–P4 分期、待決事項。**接手實作先讀這份** |
 | [memory.md](03_notes/memory.md) | **記憶體原語**：pool / arena 兩種壽命、三種 heap class、為什麼熱路徑不 malloc、緩衝能不能靠 config 改 |
 | [extension-architecture.md](03_notes/extension-architecture.md) | **擴充架構（兩個插槽、一個帳本、三個仲裁）**：為什麼 TFT 吃 config、LVGL 必須是 code；把 gpio_claim / hw=("lcd") / nc_plan 收斂成一個 ledger；接線 / 排程 / 畫面三個仲裁；六個現在就存在的衝突；P0–P5 計劃 |
 | [fx-contract.md](03_notes/fx-contract.md) | **fx 模組契約**：安全邊界（模組只能碰自己的線性記憶體）、交接緩衝區佈局與時序、ABI 表、失敗模型、狀態機、P0–P4 計劃 |
-| [fx-loader.md](03_notes/fx-loader.md) | **效果載入器實作**：`.fxe` 48 B 檔頭、載入六步 C 骨架、原子指標交換、八種失敗模式對照表、資料驅動替代方案、M1–M5 里程碑、**§10 服務化（三層：wasm / fx / module）與「彈性」的邊界** |
+| [fx-loader.md](03_notes/fx-loader.md) | **效果載入器實作**：`.fxe` 48 B 檔頭、**§3.1 manifest（模組自我宣告：kind / core / layer / fps / px / 預算 / 指令）**、載入六步 C 骨架、原子指標交換、八種失敗模式對照表、資料驅動替代方案、M1–M5 里程碑、**§10 服務化（三層：wasm / fx / module）與「彈性」的邊界** |
 | [effect-language.md](03_notes/effect-language.md) | **分離式固件與燈效語言**：什麼進固件、什麼是檔案（+ 什麼時候才要再燒一次）、六條路線比較（params / IR / 自訂 DSL / WASM AOT / 原生 ELF / mpy）、為什麼選 WAMR + TinyGo、**效果模組 ABI v0**、記憶體放哪裡、P0 spike 清單 |
 
 ---
@@ -78,4 +81,5 @@
 | [../ports/README.md](../ports/README.md) | 板子配置：怎麼加一塊新板子 |
 | `firmware/components/sys/nc4/` | NC4 framing + 解碼器 + 通道框架 |
 | `firmware/components/sys/mem/` | pool / arena + config 驅動的尺寸 |
-| `firmware/components/app/ota/` | OTA 0x22xx handler |
+| `firmware/components/action/ota_action/` | OTA 0x22xx（action） |
+| `firmware/components/action/file_action/` | 檔案查詢 / STATUS_SET（action） |

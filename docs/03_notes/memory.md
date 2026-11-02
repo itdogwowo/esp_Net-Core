@@ -128,7 +128,7 @@ assets 上限 512 KB）。壞 JSON → 整段用預設，不影響開機。
 ```
 storage_init()   /data 掛載、自動格式化、寫預置、設卷標
       ↓
-讀 /data/config.json → 覆寫 buffer 參數
+讀 /data/config/*.json → 覆寫 buffer 參數
       ↓
 建立 frame pool / asset arena
       ↓

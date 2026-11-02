@@ -3,6 +3,8 @@
 
 用法：
     tools/nc4.py --port /dev/cu.usbmodem* reboot
+    tools/nc4.py --port /dev/cu.usbmodem* status            # STATUS_GET 全部
+    tools/nc4.py --port /dev/cu.usbmodem* status tasks      # 只看任務表
     tools/nc4.py --port /dev/cu.usbmodem* raw 0x100F 00000000
     tools/nc4.py --port /dev/cu.usbmodem* listen       # 只監看輸出
 
@@ -12,6 +14,7 @@ wire 格式與 mp_Net-Core 相同：
 """
 import argparse
 import binascii
+import json
 import struct
 import sys
 import time
@@ -21,12 +24,45 @@ VERSION = 4
 ADDR_BROADCAST = 0xFFFF
 
 CMD_REBOOT = 0x100F
+CMD_STATUS_GET = 0x1101
+CMD_STATUS_RSP = 0x1102
 
 
 def pack(cmd: int, payload: bytes = b"", addr: int = ADDR_BROADCAST) -> bytes:
     body = struct.pack("<BHHH", VERSION, addr, cmd, len(payload)) + payload
     crc = binascii.crc32(body, 0) & 0xFFFFFFFF
     return SOF + body + struct.pack("<I", crc)
+
+
+def parse_frames(buf: bytes):
+    """從位元組流裡挑出完整幀：[(cmd, payload), ...]"""
+    out = []
+    i = 0
+    while True:
+        j = buf.find(SOF, i)
+        if j < 0 or len(buf) - j < 9:
+            break
+        ver = buf[j + 2]
+        _addr, cmd, plen = struct.unpack_from("<HHH", buf, j + 3)
+        end = j + 9 + plen + 4
+        if ver != VERSION or end > len(buf):
+            i = j + 2
+            continue
+        out.append((cmd, buf[j + 9:j + 9 + plen]))
+        i = end
+    return out
+
+
+def wait_for(ser, want_cmd: int, seconds: float):
+    """等一個指定的回覆幀；回傳 payload 或 None。"""
+    end = time.time() + seconds
+    buf = b""
+    while time.time() < end:
+        buf += ser.read(4096)
+        for cmd, payload in parse_frames(buf):
+            if cmd == want_cmd:
+                return payload
+    return None
 
 
 def main() -> int:
@@ -36,6 +72,9 @@ def main() -> int:
     ap.add_argument("--addr", type=lambda v: int(v, 0), default=ADDR_BROADCAST)
     sub = ap.add_subparsers(dest="action", required=True)
     sub.add_parser("reboot")
+
+    st = sub.add_parser("status", help="STATUS_GET（keys 空白 = 全部，? = 目錄）")
+    st.add_argument("keys", nargs="?", default="")
 
     raw = sub.add_parser("raw")
     raw.add_argument("cmd", type=lambda v: int(v, 0))
@@ -57,6 +96,23 @@ def main() -> int:
             print(f"→ REBOOT (0x100F) 已送出 {len(frame)} bytes")
             time.sleep(1.0)
 
+        elif args.action == "status":
+            kb = args.keys.encode()
+            payload = struct.pack("<H", len(kb)) + kb      # str_u16len
+            s.write(pack(CMD_STATUS_GET, payload, args.addr))
+            resp = wait_for(s, CMD_STATUS_RSP, 3.0)
+            if resp is None:
+                print("沒有收到 STATUS_RSP（裝置沒開？還是這條通道不支援回覆）",
+                      file=sys.stderr)
+                return 1
+            n = struct.unpack_from("<H", resp)[0]
+            text = resp[2:2 + n].decode("utf-8", "replace")
+            try:
+                print(json.dumps(json.loads(text), indent=2, ensure_ascii=False))
+            except json.JSONDecodeError:
+                print(text)
+            return 0
+
         elif args.action == "raw":
             payload = bytes.fromhex(args.payload_hex) if args.payload_hex else b""
             frame = pack(args.cmd, payload, args.addr)
@@ -72,13 +128,17 @@ def main() -> int:
             sys.stdout.write(buf.decode("utf-8", "replace"))
             return 0
 
-        # 順便印一下裝置回吐的 log
-        out = s.read(4096)
-        if out:
-            sys.stdout.write(out.decode("utf-8", "replace"))
+        # 順便印一下裝置回吐的 log（reboot 後埠可能已經消失）
+        try:
+            out = s.read(4096)
+            if out:
+                sys.stdout.write(out.decode("utf-8", "replace"))
+        except (serial.SerialException, OSError):
+            pass
 
     return 0
 
 
 if __name__ == "__main__":
     raise SystemExit(main())
+

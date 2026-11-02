@@ -69,7 +69,7 @@
 | 28 | 4 | `mem_bytes` | 這個效果要多少線性記憶體 |
 | 32 | 4 | `px` | 它假設的像素數（跟 config 不符就拒絕） |
 | 36 | 4 | `fps` | 建議幀率（給排程參考） |
-| 40 | 4 | `manifest_off` | JSON 的位移（0 = 沒有） |
+| 40 | 4 | `manifest_off` | manifest 的位移（0 = 沒有）；內容見 §3.1 |
 | 44 | 4 | `manifest_size` | |
 
 ```c
@@ -81,6 +81,55 @@ _Static_assert(sizeof(nc_fxe_hdr_t) == 48, "fxe header must stay 48 B");
 **為什麼要 `target_id`**：同一份 `.wasm` 可以在 P4 與 S3 跑（interp），但 `.aot` 綁架構。檔頭寫清楚，載入器才不會把 riscv32 的機器碼載進 S3。
 
 **為什麼要 `mem_bytes`**：載入前就要知道要跟 arena 要多少，不能「先載入再說」。
+
+### 3.1 manifest（模組自我宣告，40 B）
+
+檔頭只回答「這個 payload 怎麼載入」；**manifest 回答「這個模組怎麼活在系統裡」** ——
+類型、跑哪一核、哪一層、優先權、要多少線性記憶體、幾 px、每幀預算、擁有哪幾條指令。
+
+```c
+// firmware/components/app/fx/include/nc_fx_manifest.h（純 C，可 host 測試）
+#define NC_FXM_MAGIC   0x314D5846u   // 'F','X','M','1'
+#define NC_FXM_VERSION 1
+
+typedef struct {
+    uint8_t  kind;        // 1=service 2=task 3=effect（0=system 一律拒絕）
+    int8_t   core;        // -1 = 不限；0 / 1
+    uint8_t  layer;       // 0–7
+    uint8_t  prio;        // 1–24
+    uint16_t fps;         // 0 = 不排程
+    uint16_t px;          // 0 = 非效果
+    uint32_t stack;       // 0 = 預設 4096
+    uint32_t budget_us;   // 每幀預算
+    uint32_t mem_bytes;   // 0 = 用檔頭
+    uint32_t cmds_off;    // u16[] 在檔案裡的位移
+    uint16_t ncmds;
+} nc_fxm_t;
+```
+
+規則（全部在 `nc_fxm_parse()` 裡，`tools/hosttest/fxm_test/` 有 8 組 case）：
+
+| 規則 | 理由 |
+|---|---|
+| **一份真相**：manifest 的 `px` / `mem_bytes` / `fps` 若有寫，必須等於檔頭 | 兩處不一致 = 工具鏈壞了，寧可拒絕 |
+| `kind = 0`（system）→ 拒絕 | 載入的檔案不能自稱「不可卸載」的那一層 |
+| `core` 只能 -1 / 0 / 1；`kind=effect` 且 `core ≠ -1` 時必須等於 fx task 的核 | 效果跑在 fx task 上，宣告別核 = 排程設定錯 |
+| `layer ≤ 7`、`1 ≤ prio ≤ 24`、`stack ∈ {0} ∪ [1024, 32K]` | 直接擋掉會讓 FreeRTOS 起不來的值 |
+| `px ≤ 4096`、`mem ≤ 128 KB`、`fps ≤ 240`、`budget ≤ 100 ms` | 上限是 ABI 的，不是檔案的 |
+| 指令表必須落在檔案內、同一模組內不得重複、不得已被別人註冊 | 指令有主人（見 [writing-a-task.md](writing-a-task.md) §2.2） |
+
+沒有 manifest 的 `.fxe` 仍然可以載入 —— 當成「純效果」：kind=effect、core 不限、
+px/fps 取檔頭、預算用 ABI 預設。**manifest 是加值，不是必要條件。**
+
+載入後它會變成 registry 裡的一個租戶（`nc_task_attach`），狀態查得到：
+
+```json
+{"name":"fire26","kind":"effect","core":1,"layer":3,"prio":3,"fps":30,
+ "px":676,"budget_us":8000,"manifest":1,"cmds":0,"task":""}
+```
+
+> 目前沒有執行引擎，所以 `ok=0`、`task` 是空的 —— 宣告先落地，WAMR 接上時
+> 這些欄位就直接變成排程參數（fx task 的週期已經在吃 `fps`）。
 
 ---
 
@@ -240,7 +289,7 @@ fx->ops->render(fid, t_us, 0, px);
 
 | # | 做什麼 | 驗收 | 時間 |
 |---|---|---|---|
-| **M1** | `.fxe` 格式 + `tools/fx.py pack`（host 端） | `fx.py pack` 產出檔，`fx.py dump` 印得出欄位 | 0.5 天 |
+| **M1** | `.fxe` 格式 + `tools/fx.py pack`（host 端） | `fx.py pack` 產出檔，`fx.py dump` 印得出欄位 | ✅ 完成（含 manifest v1） |
 | **M2** | host 端載入器（node，就是 `tools/poc/fx_poc/`） | 換檔、壞檔拒絕，兩個 checksum 不同 | 已做 |
 | **M3** | 板上載入器（C + WAMR interp） | 同一個 `.wasm` 上板，checksum 與 host 相同 | 2–3 天 |
 | **M4** | 交換語義（原子指標 + 兩幀後釋放） | 邊跑邊換 20 次，不掉幀、不漏記憶體 | 1 天 |
@@ -299,10 +348,10 @@ nc_plan_commit(avail, /*allow_shed*/ false);
 
 // ③ 啟動期：拿 plan 給的指標 → 掃目錄（此時 FAT 仍歸裝置）
 nc_fx_init(nc_plan_get("fx.arena"), NC_FX_ARENA_MAX);
-nc_fx_scan("/data/fx");
+nc_fx_scan("/data/pixel/effects");
 
-// ④ 任務註冊：必須在 nc_tasks_boot() 之前
-nc_task_register(&(nc_task_def_t){
+// ④ 任務註冊：必須在 nc_task_boot() 之前
+nc_task_register(&(nc_task_loop_t){
     .name = "fx", .fn = nc_fx_task, .stack = 4096, .prio = 3,
     .core = 1, .layer = 3 });
 ```
@@ -316,12 +365,12 @@ nc_task_register(&(nc_task_def_t){
 ### 10.4 檔案系統就是效果的註冊表
 
 ```
-/data/fx/fire26.fxe
-/data/fx/plasma.fxe
-/data/fx/rainbow.fxe
+/data/pixel/effects/fire26.fxe
+/data/pixel/effects/plasma.fxe
+/data/pixel/effects/rainbow.fxe
 ```
 
-- 「有哪些效果」= `ls /data/fx/`，不需要另一張表
+- 「有哪些效果」= `ls /data/pixel/effects/`，不需要另一張表
 - 「上傳一個新效果」= NC4 FILE_* 寫進去（staging → validate → rename）
 - 「刪掉」= unlink
 - 「壞掉的」= 開機掃一遍，載入失敗的標記、不啟用（不刪，留給你看）
@@ -334,7 +383,7 @@ nc_task_register(&(nc_task_def_t){
 
 | 可動態 | 怎麼做 |
 |---|---|
-| 有哪些效果 | 檔案放進 `/data/fx/` |
+| 有哪些效果 | 檔案放進 `/data/pixel/effects/` |
 | 哪個在跑 | `nc_fx_select("fire26")` |
 | 參數 | descriptor 後的參數區 |
 | 開 / 關 | `enable/disable`，task 閒置不耗 CPU |
@@ -354,7 +403,7 @@ nc_task_register(&(nc_task_def_t){
 
 | # | 坑 | 症狀 | 對策 |
 |---|---|---|---|
-| 1 | init 順序錯（WAMR 在 plan commit 之前） | 拿不到記憶體，或 heap 被切碎 | 照 §10.3 的順序，寫進 `nc_tasks_boot` 的註解 |
+| 1 | init 順序錯（WAMR 在 plan commit 之前） | 拿不到記憶體，或 heap 被切碎 | 照 §10.3 的順序，寫進 `nc_task_boot` 的註解 |
 | 2 | `wasm_runtime_init` 被呼叫兩次（soft-reboot） | 第二次直接崩 | 用 flag 守；跟 mp 版「C 層沒清」同一個教訓 |
 | 3 | 兩個 task 同時呼叫同一個 instance | 隨機資料損毀 | 一個 `fx` task 跑全部效果；render 只有一個進入點 |
 | 4 | 卸載時 render 還在跑 | use-after-free | `frame_id + 2` 之後才 `deinstantiate` |
@@ -370,16 +419,20 @@ nc_task_register(&(nc_task_def_t){
 |---|---|
 | `nc_plan_declare` 拿 PSRAM arena | ✅ 板上實測 524,288 B |
 | `.fxe` 48 B 檔頭驗證（magic / abi / 長度 / crc32） | ✅ |
+| **manifest 解碼**（kind / core / layer / prio / fps / px / budget / cmds） | ✅ `nc_fx_manifest.c`，8 組 host case |
+| **登記成租戶**（`nc_task_attach` / `detach`） | ✅ `STATUS_GET keys=tasks` 看得到 |
+| **載入上限**（mem ≤ 128 KB、px ≤ 4096） | ✅ 超過在載入前拒絕（原本沒檢查） |
+| **arena 回收** | ✅ 卸載時把頂端退回；壞檔不再漏一塊（原本會漏） |
 | 實例表（8 個，不是服務） | ✅ |
-| `nc_fx_scan("/data/fx")` —— 檔案系統就是註冊表 | ✅ 開機自動載入 |
+| `nc_fx_scan("/data/pixel/effects")` —— 檔案系統就是註冊表 | ✅ 開機自動載入 |
 | `select` / `unload` + 兩幀後釋放 | ✅（等真正 renderer 才看得出效果） |
-| `nc_fx_task`（100 Hz 佔位，之後由 FrameClock 驅動） | ✅ frames 持續增加 |
+| `nc_fx_task`（節奏由 live 模組的 `fps` 決定；可被 `nc_task_stop` 停） | ✅ frames 持續增加 |
 | `STATUS_GET "fx"` | ✅ 見下 |
 | 兩種 payload 格式（wasm / aot） | ✅ 錯架構的 AOT 在載入前被擋 |
 | host 測試（不需要板子） | ✅ `tools/hosttest/fx_test/run.sh`，13 組 case / 49 斷言 |
 | **WAMR 執行引擎** | ⬜ 未接（見 §10.8） |
 
-板上實測（S3，`/data/fx/fire26.fxe`，payload 367 B）：
+板上實測（S3，`/data/pixel/effects/fire26.fxe`，payload 367 B）：
 
 ```json
 {"fx":{"arena":524288,"used":367,"live":"fire26","frames":1606,

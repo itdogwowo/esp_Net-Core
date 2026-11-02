@@ -120,7 +120,7 @@
 ```text
 Host                          Device
  tools/fx.py build             NC4 file service
-   tinygo → .wasm              FILE_BEGIN("fx/fire26.fxe", size, crc)
+   tinygo → .wasm              FILE_BEGIN("pixel/effects/fire26.fxe", size, crc)
    wamrc  → .aot                 ...
    pack   → .fxe               FILE_END
         │                        validate: header / abi / 預算 / 記憶體宣告

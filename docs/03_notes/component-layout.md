@@ -60,19 +60,19 @@ esp_Net-Core/
 │  ├─ CMakeLists.txt                  #   PORT 選擇、sdkconfig 疊層、EXTRA_COMPONENT_DIRS
 │  ├─ main/main.c                     #   ✅ 目前 = 裝配 + 尚未拆出的 handler
 │  ├─ components/
-│  │  ├─ sys/                         # ✅ nc4/ mem/ tasks/ transport/
+│  │  ├─ sys/                         # ✅ nc4/ mem/ tasks/ module/ transport/
 │  │  ├─ app/                         # ✅ ota/
 │  │  ├─ hw/                          # ⬜ apa102/ pca9685/ motor_uart/ tft/ touch/ xl9555/
 │  │  ├─ sw/                          # ⬜ effect_core/ pixel_math/ pixel_layout/ pixel_controller/
-│  │  ├─ action/                      # ⬜ file_cmds/ pixel_cmds/ sys_cmds/ status_cmds/ …
+│  │  ├─ action/                      # 🟡 ota_action/ file_action/（其餘 cmd 仍在 main.c）
 │  │  ├─ tasks/                       # ⬜ pixel_task/ net_task/ schedule_task/
 │  │  ├─ ui/                          # ⬜ pages/
 │  │  └─ schema/                      # ⬜ （生成物）
 │  ├─ sdkconfig.defaults              #   晶片層建置配置
 │  └─ partitions.csv                  #   分割表
 ├─ ports/                             # 專案層（見 §4）
-│  ├─ S3/ESP32-S3-N16R8/              #   data/config.json
-│  └─ P4/ESP32-P4-ETH/                #   sdkconfig.defaults、data/config.json
+│  ├─ S3/ESP32-S3-N16R8/              #   data/config/*.json
+│  └─ P4/ESP32-P4-ETH/                #   sdkconfig.defaults、data/config/*.json
 ├─ tools/                             # 主機端：board.sh、clients、bench/、hosttest/、poc/
 │  └─ poc/fx_poc/                     #   效果模組 ABI 的 host 參考實作
 └─ data/                              # 不進 git：用戶 FS 的鏡像（見 §8）
@@ -88,9 +88,9 @@ esp_Net-Core/
 |---|---|
 | `sdkconfig.defaults` | 跟晶片預設不同時（PSRAM、flash 大小、USB 描述符） |
 | `partitions.csv` | 分割表跟晶片預設不同時 |
-| `data/` | 出廠預置內容（`config.json`、空的 `pixel/` 目錄） |
+| `data/` | 出廠預置內容（`config/*.json`） |
 
-**晶片 = 一個 build；板子 = 一份 JSON。** S3 的 N 塊板子共用同一個 binary，差異在 `data/config.json`。
+**晶片 = 一個 build；板子 = 一組 JSON。** S3 的 N 塊板子共用同一個 binary，差異在 `data/config/*.json`。
 
 ### 4.1 預置（「預先放一個進去」）
 
@@ -103,7 +103,7 @@ fatfs_create_partition_image(data ${CMAKE_CURRENT_LIST_DIR}/data FLASH_IN_PROJEC
 
 需求：分割表要有一個 `data` 分區（type data / subtype fat）。
 
-⚠️ **`idf.py flash` 每次都會重燒這個映像**，把使用者改過的 `config.json` 蓋回出廠版。所以：
+⚠️ **`idf.py flash` 每次都會重燒這個映像**，把使用者改過的 `config/*.json` 蓋回出廠版。所以：
 
 - 開發／日常 → `idf.py app-flash`（只燒 app，不動 data）
 - 出廠／要重置 → `idf.py flash`
@@ -111,7 +111,7 @@ fatfs_create_partition_image(data ${CMAKE_CURRENT_LIST_DIR}/data FLASH_IN_PROJEC
 ### 4.2 邊界
 
 - `ports/<board>/data/` 只放**出廠預設**。燒完之後那份內容屬於使用者。
-- 預置不是保證：使用者可以刪掉 `config.json`。**缺檔必須能開機**（用 firmware 內建的預設值），不能因此進不了 RUN。
+- 預置不是保證：使用者可以刪掉任何一個檔。**缺檔必須能開機**（該層用內建預設），不能因此進不了 RUN。
 
 ---
 
@@ -128,8 +128,8 @@ fatfs_create_partition_image(data ${CMAKE_CURRENT_LIST_DIR}/data FLASH_IN_PROJEC
 | `schema/*.json` | `components/schema/`（build 時轉 C 表） |
 | `pixel/` | **消失**：程式在 `sw/`，資料在 FAT |
 | `cores/` | 併入 `tasks/`（core pin 表） |
-| `ports/<chip>/<board>/config.json` | `ports/<chip>/<board>/data/config.json` ＋ 可選 `sdkconfig.defaults` |
-| `slave/config.json`（base） | firmware 內建預設值（找不到檔案時用） |
+| `ports/<chip>/<board>/config/*.json` | `ports/<chip>/<board>/data/config/*.json` ＋ 可選 `sdkconfig.defaults` |
+| `config/*.json`（base） | firmware 內建預設值（找不到檔案時用） |
 
 ---
 
@@ -176,7 +176,7 @@ fatfs_create_partition_image(data ${CMAKE_CURRENT_LIST_DIR}/data FLASH_IN_PROJEC
 | 分區 | 內容 | runtime 誰能寫 |
 |---|---|---|
 | `factory` / `ota_0` / `ota_1` | firmware（含 schema 表） | 只有 OTA |
-| `data`（FAT） | `config.json`、`pixel/` | host（MSC） |
+| `data`（FAT，卷標 `NETCORE`） | `config/*.json`（第一次開機寫入）、`pixel/effects/*.fxe`（選用） | host（MSC） |
 | `nvs` | cID、`master_cid`、`next_mode`、boots 計數 | 程式 |
 
 firmware 走 OTA 分區 → 舊版 `FILE_PROMOTE` 那套（`.bak` ＋ pending ＋ `boots>=3` 自動回滾）**只保留給 assets**。

@@ -1,0 +1,41 @@
+{
+  "version": 1,
+  "_comment": "Network 層：有線 / 無線 / 藍牙 / ESP-NOW。pin 只取前 4 位數字並自動寫回；其餘只放連線參數，不決定誰來解碼。",
+
+  "hostname": "",
+  "priority": ["lan"],
+
+  "lan": {
+    "enable": 1,
+    "driver": "RMII",
+    "phy_type": "IP101",
+    "phy_addr": 1,
+    "gpio": { "mdc": 31, "mdio": 52, "ref_clk": 50 },
+    "ip": { "mode": "static", "addr": "10.10.1.50", "mask": "255.255.0.0", "gw": "10.10.1.1" }
+  },
+
+  "wifi": {
+    "enable": 0,
+    "mode": "sta",
+    "ssid": "",
+    "ssid_pw": "",
+    "timeout_s": 300,
+    "ip": { "mode": "dhcp", "addr": "", "mask": "", "gw": "" }
+  },
+
+  "bt": {
+    "enable": 0,
+    "mode": "ble",
+    "name": "",
+    "pin": "",
+    "bonding": 1
+  },
+
+  "espnow": {
+    "enable": 0,
+    "channel": 0,
+    "encrypt": 0,
+    "pmk": "",
+    "peers": []
+  }
+}

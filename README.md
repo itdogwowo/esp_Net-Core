@@ -34,8 +34,8 @@ esp_Net-Core/
 │  └─ build/  managed_components/  sdkconfig  ← 生成物，不進 git
 │
 ├─ ports/                       ──【配置層】每塊板子的差異，不屬於程式 ──
-│  ├─ S3/ESP32-S3-N16R8/data/config.json
-│  └─ P4/ESP32-P4-ETH/{sdkconfig.defaults, data/config.json}
+│  ├─ S3/ESP32-S3-N16R8/data/config/*.json
+│  └─ P4/ESP32-P4-ETH/{sdkconfig.defaults, data/config/*.json}
 │
 └─ tools/                       ──【工具層】主機端，不會進 firmware image ──
    ├─ ncbuild/                  建置工具實作（make.py 的引擎）
@@ -80,7 +80,7 @@ esp_Net-Core/
 | 能力碎片（L2：ETH / WS / UDP） | `ports/_profiles/*.defaults` | 開發者手寫 | ✅ |
 | 共通建置設定 | `firmware/sdkconfig.defaults` | 開發者手寫（**不准放板子事實**） | ✅ |
 | 分割表 | `firmware/partitions.csv` | 開發者手寫 | ✅ |
-| 出廠執行期內容（L3） | `ports/<chip>/<board>/data/config.json` | 出廠預置；上機後屬使用者 | ✅ |
+| 出廠執行期內容（L3） | `ports/<chip>/<board>/data/config/*.json` | 出廠預置；上機後屬使用者 | ✅ |
 | 完整展開後的設定 | `firmware/sdkconfig` | **機器** | ❌ 生成物 |
 | 依賴鎖定 | `firmware/dependencies.lock` | 機器 | ❌ 生成物 |
 

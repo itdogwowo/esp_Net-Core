@@ -40,6 +40,8 @@
 | 96 + sc | `px_count × 4` | **framebuffer（canonical R,G,B,W）** | guest |
 
 上限：線性記憶體 ≤ 128 KB、px ≤ 4096（fb ≤ 16 KB）。超過 → **拒絕載入**，不是中途撇除。
+（2026-11-02 補上：這兩條現在真的在 `nc_fx_load()` 裡檢查了；先前只寫在文件與 `nc_fx_abi.h`，
+程式漏了 —— 所以 `px=10000` 的檔案會被照收。）
 
 **為什麼 fb 在 guest 裡**（`effect-language.md` §6.4）：S3 的 RMT DMA 不能指 PSRAM，
 所以輸出階段本來就要有一次 `px×4` 的 PSRAM → DMA 槽 copy（2.7 KB ≈ 68 µs，佔 33 ms 的 0.2%）。
@@ -136,7 +138,7 @@ guest 的寫入範圍由 wasm 邊界夾住，host 只需信任「fb 那一段在
 | 期 | 內容 | 驗收 |
 |---|---|---|
 | **P0** ✅ | 契約文件 + `nc_fx_abi.h` + 骨架（arena / 實例表 / select / 兩幀釋放 / scan / status） | 板上載入 `.fxe`、狀態查得到 |
-| **P1** ✅ | **host harness**：`tools/hosttest/fx_test/` —— `cc` 直接編 `nc_fx.c` + 假 backend，在 Mac 上跑狀態機 | ✅ 10 組 case 全過（壞檔×4 / trap / 超支 / 兩幀釋放 / arena 回收 / 掃目錄 / 實例表上限） |
+| **P1** ✅ | **host harness**：`tools/hosttest/fx_test/` —— `cc` 直接編 `nc_fx.c` + 假 backend，在 Mac 上跑狀態機 | ✅ 13 組 case 全過（壞檔×4 / trap / 超支 / 兩幀釋放 / arena 回收 / 掃目錄 / 實例表上限 / wasm·aot 格式） |
 | **P2** | WAMR patch：補 `#include <sys/stat.h>`、`S_ISBLK`；`fx_init`/`fx_render` 接起來 | 一個最小 `.wasm` 在板上跑出正確 fb |
 | **P3** | 輸出階段：fb → DMA 槽 copy + RMT；量幀預算 | 676 px 穩定 30 fps，render < 8 ms |
 | **P4** | NC4 file API 上傳 `.fxe` → staging → validate → rename → 熱載入 | 不重啟換效果，壞檔不會變磚 |
@@ -147,12 +149,11 @@ P1 的價值：**在沒有 WAMR 的情況下也能證明狀態機與邊界正確
 
 ## 9. 待決
 
-1. **`nc_plan_decl_t` 對不上**：`effect-language.md` §6.3 的範例用了 `.group` / `.mech`，
-   但程式裡只有 `service` / `name` / `level` / `cls` / `bytes` / `align`。文件要跟程式對齊
-   （或把 `group` 加進去）。
+1. ~~**`nc_plan_decl_t` 對不上**~~ → 已解決（2026-11-02）：`effect-language.md` §6.3 的範例改成
+   程式真的有的欄位（`service` / `name` / `level` / `cls` / `bytes` / `align`）。
 2. **scratch 大小**：manifest 宣告 vs 寫死 4 KB。
 3. **多模組同時 live**？目前設計是單一 live；若要「上層效果呼叫下層」需要 ABI v1。
-5. **AOT 與 runtime 版本綁定**：`wamrc 2.4.0` 產的 `.aot` 要配 runtime 2.4.0，
+4. **AOT 與 runtime 版本綁定**：`wamrc 2.4.0` 產的 `.aot` 要配 runtime 2.4.0，
    但 `.fxe` 檔頭沒有 runtime 版本欄位。目前靠 `abi` + `target_id` 擋一部分；
-   正式做法是把 `wamrc` 版本寫進 manifest（`manifest_off/size` 已經留了位置）。
+   正式做法是把 `wamrc` 版本寫進 manifest（`manifest_off/size` 已經用了，見 fx-loader.md §3.1）。
 4. **參數區更新時機**：host 寫入時 guest 可能正在 render → 需要「下一幀生效」的雙緩衝（64 B × 2）。

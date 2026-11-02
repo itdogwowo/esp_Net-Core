@@ -8,41 +8,40 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 
-// handler 互斥：兩核各有 decode task，但 handler 的狀態是共用的。
-// 用 mutex（可讓出 CPU）而不是 spinlock —— handler 可能較慢（OTA 寫 flash）。
-static SemaphoreHandle_t s_dispatch_mutex;
-
-static inline void dispatch_lock(void)
-{
-    if (s_dispatch_mutex == NULL) {
-        s_dispatch_mutex = xSemaphoreCreateMutex();
-    }
-    if (s_dispatch_mutex != NULL) {
-        xSemaphoreTake(s_dispatch_mutex, portMAX_DELAY);
-    }
-}
-
-static inline void dispatch_unlock(void)
-{
-    if (s_dispatch_mutex != NULL) {
-        xSemaphoreGive(s_dispatch_mutex);
-    }
-}
-
+// handler 的互斥**屬於 decoder，不是全域**：
+//   一個 decoder 一次執行一個 handler；多個 decoder（每核一個）可以同時各跑一個。
+// 這是「一個解碼器執行一個指令」的模型，也是 Network.nc4.decode[] 那張表的意思。
+// ⚠️ 要開第二個 decoder 之前，handler 必須是 reentrant（不能共寫 static 回覆緩衝）。
 static const char *TAG = "nc4";
 
 typedef struct {
     uint16_t cmd;
     nc4_handler_t handler;
+    const char *owner;     // 誰註冊的（模組名）；NULL = 核心或舊式註冊
 } nc4_entry_t;
 
 struct nc4_decoder {
     nc4_entry_t table[NC4_MAX_HANDLERS];
     size_t count;
+    SemaphoreHandle_t lock;   // 這個 decoder 的執行鎖（一個 decoder 一次一個 handler）
     uint16_t cid;          // 我自己（0xFFFF = 未設定）
     uint16_t master_cid;   // 我的上級（0xFFFF = 未設定）
     uint32_t dropped_addr; // 丟掉的「不是給我的」幀
 };
+
+static inline void decoder_lock(nc4_decoder_t *d)
+{
+    if (d != NULL && d->lock != NULL) {
+        xSemaphoreTake(d->lock, portMAX_DELAY);
+    }
+}
+
+static inline void decoder_unlock(nc4_decoder_t *d)
+{
+    if (d != NULL && d->lock != NULL) {
+        xSemaphoreGive(d->lock);
+    }
+}
 
 struct nc4_parser {
     uint8_t *buf;
@@ -58,9 +57,15 @@ struct nc4_parser {
 nc4_decoder_t *nc4_decoder_create(void)
 {
     nc4_decoder_t *d = calloc(1, sizeof(nc4_decoder_t));
-    if (d != NULL) {
-        d->cid = NC4_ADDR_BROADCAST;
-        d->master_cid = NC4_ADDR_BROADCAST;
+    if (d == NULL) {
+        return NULL;
+    }
+    d->cid = NC4_ADDR_BROADCAST;
+    d->master_cid = NC4_ADDR_BROADCAST;
+    d->lock = xSemaphoreCreateMutex();
+    if (d->lock == NULL) {
+        free(d);
+        return NULL;
     }
     return d;
 }
@@ -99,25 +104,104 @@ uint16_t nc4_reply_addr(const nc4_ctx_t *ctx)
 
 void nc4_decoder_destroy(nc4_decoder_t *decoder)
 {
+    if (decoder == NULL) {
+        return;
+    }
+    if (decoder->lock != NULL) {
+        vSemaphoreDelete(decoder->lock);
+    }
     free(decoder);
 }
 
 esp_err_t nc4_decoder_on(nc4_decoder_t *decoder, uint16_t cmd, nc4_handler_t handler)
+{
+    return nc4_decoder_on_owner(decoder, cmd, handler, NULL);
+}
+
+// owner 是「誰擁有這條指令」：模組卸載時用它整批收回（見 nc4_decoder_off_owner）。
+// 同名 owner 重複註冊同一條 cmd = 覆寫（後載入者勝）；不同 owner 蓋掉別人的 cmd
+// 會印警告 —— 那是帳本該在開機就擋下的衝突，不該到執行期才悄悄發生。
+esp_err_t nc4_decoder_on_owner(nc4_decoder_t *decoder, uint16_t cmd, nc4_handler_t handler,
+                               const char *owner)
 {
     if (decoder == NULL || handler == NULL) {
         return ESP_ERR_INVALID_ARG;
     }
     for (size_t i = 0; i < decoder->count; i++) {
         if (decoder->table[i].cmd == cmd) {
-            decoder->table[i].handler = handler;   // 覆寫（與 MP 版「後載入者勝」一致）
+            const char *prev = decoder->table[i].owner;
+            if (owner != NULL && prev != NULL && strcmp(owner, prev) != 0) {
+                ESP_LOGW(TAG, "cmd 0x%04X 被 %s 覆寫（原本是 %s）",
+                         (unsigned)cmd, owner, prev);
+            }
+            decoder->table[i].handler = handler;
+            decoder->table[i].owner = owner;
             return ESP_OK;
         }
     }
     if (decoder->count >= NC4_MAX_HANDLERS) {
         return ESP_ERR_NO_MEM;
     }
-    decoder->table[decoder->count++] = (nc4_entry_t){ .cmd = cmd, .handler = handler };
+    decoder->table[decoder->count++] = (nc4_entry_t){
+        .cmd = cmd, .handler = handler, .owner = owner,
+    };
     return ESP_OK;
+}
+
+int nc4_decoder_off_owner(nc4_decoder_t *decoder, const char *owner)
+{
+    if (decoder == NULL || owner == NULL) {
+        return 0;
+    }
+    int removed = 0;
+    for (size_t i = 0; i < decoder->count;) {
+        const char *o = decoder->table[i].owner;
+        if (o != NULL && strcmp(o, owner) == 0) {
+            memmove(&decoder->table[i], &decoder->table[i + 1],
+                    (decoder->count - i - 1) * sizeof(decoder->table[0]));
+            decoder->count--;
+            removed++;
+        } else {
+            i++;
+        }
+    }
+    return removed;
+}
+
+size_t nc4_decoder_count(const nc4_decoder_t *decoder)
+{
+    return decoder ? decoder->count : 0;
+}
+
+bool nc4_decoder_at(const nc4_decoder_t *decoder, size_t i, uint16_t *cmd,
+                    const char **owner, nc4_handler_t *handler)
+{
+    if (decoder == NULL || i >= decoder->count) {
+        return false;
+    }
+    if (cmd != NULL) {
+        *cmd = decoder->table[i].cmd;
+    }
+    if (owner != NULL) {
+        *owner = decoder->table[i].owner;
+    }
+    if (handler != NULL) {
+        *handler = decoder->table[i].handler;
+    }
+    return true;
+}
+
+bool nc4_decoder_has(const nc4_decoder_t *decoder, uint16_t cmd)
+{
+    if (decoder == NULL) {
+        return false;
+    }
+    for (size_t i = 0; i < decoder->count; i++) {
+        if (decoder->table[i].cmd == cmd) {
+            return true;
+        }
+    }
+    return false;
 }
 
 static nc4_handler_t decoder_lookup(nc4_decoder_t *decoder, uint16_t cmd)
@@ -254,9 +338,9 @@ static void parser_dispatch(nc4_parser_t *parser, const uint8_t *base, uint16_t 
 
     nc4_handler_t h = decoder_lookup(parser->ctx.decoder, f.cmd);
     if (h != NULL) {
-        dispatch_lock();
+        decoder_lock(parser->ctx.decoder);
         h(&parser->ctx, &f);
-        dispatch_unlock();
+        decoder_unlock(parser->ctx.decoder);
     } else {
         ESP_LOGD(TAG, "[%s] 未註冊的 cmd 0x%04X (len=%u)", parser->ctx.source, f.cmd, f.len);
     }

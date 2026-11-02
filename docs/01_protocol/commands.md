@@ -23,7 +23,7 @@
 | `0x1006` | SYS_TASK_RSP | sys.json | ✅ |
 | `0x100F` | REBOOT | sys.json | ✅ |
 | `0x1016` | SET_MASTER | sys.json | ✅ |
-| `0x1101` | STATUS_GET（keys：空 / `?` / sys,mem,task） | status.json | ✅ |
+| `0x1101` | STATUS_GET（keys：空 / `?` / sys,mem,task,modules,**provides**,storage,fx[,net]） | status.json | ✅ |
 | `0x1102` | STATUS_RSP（`status_json`） | status.json | ✅ |
 | `0x1811` | BENCH_READY | bench.json | ✅ |
 | `0x1812` | BENCH_DATA | bench.json | ✅ |
@@ -75,6 +75,8 @@
 |---|---|
 | 韌體更新 | `0x22xx OTA`（已實作） |
 | 查記憶體 plan / buffer 統計 | `0x1101 STATUS_GET keys=mem` |
+| 查模組（kind / 資源 / 指令 / 綁核） | `0x1101 STATUS_GET keys=tasks` |
+| 查「誰提供什麼」（buffer / JSON / 數值） | `0x1101 STATUS_GET keys=provides` |
 | 查任務與綁核 | `0x1005 SYS_TASK_QUERY` |
 | 改 master 位址 | `0x1016 SET_MASTER` |
 | 檔案上傳 | MSC（拖檔），不需要 `0x20xx` |
@@ -88,5 +90,5 @@
 |---|---|---|
 | `0x1007` | SYS_TASK_SET | 要執行期改 task 的 affinity |
 | `0x100D/0x100E` | IDENTIFY_REQ/RSP | 多節點掃描配對 |
-| `0x1103/0x1104` | STATUS_SET / STATUS_ACK | 要遠端改設定並落盤 |
+| `0x1103/0x1104` | STATUS_SET / STATUS_ACK | ~~要遠端改設定並落盤~~ → 已實作 `System.file_mode` 子集（見 §2） |
 | `0x2212`–`0x2217` | LAST / PARTITION_STATUS / VERIFY | 要 OTA 歷史與細節驗證 |

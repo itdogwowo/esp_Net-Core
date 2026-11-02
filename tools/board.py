@@ -2,18 +2,18 @@
 """板子清單與設定檢查（對應 ports/<chip>/<board>/）
 
 為什麼要有這支：
-    ESP-IDF 的板子差異分成三層，只有中間那層能靠 config.json 換：
+    ESP-IDF 的板子差異分成三層，只有 L3 能靠 config/*.json 換：
 
         L1 硬體事實（編譯期）  flash 大小/頻率/模式、PSRAM、CPU 頻率、有冇 Ethernet
                                → 一定要重新 build；寫在 ports/<board>/sdkconfig.defaults
         L2 能力碎片（編譯期）  ETH / WS / UDP 這種「功能包」
                                → ports/_profiles/*.defaults，由 board.json 組合
-        L3 執行期（同一 binary）gpio、服務開關、數量
-                               → ports/<board>/data/config.json
+        L3 執行期（同一 binary）gpio、服務開關、NC4 路線、數量
+                               → ports/<board>/data/config/<layer>.json（一層一個檔）
 
     這支工具就是讓 L1/L2 不會寫錯、不會跟 L3 搞混：
       list     所有板子與能力一覽
-      check    board.json ↔ sdkconfig.defaults 一致性；擋下「把 build-time 的東西寫進 config.json」
+      check    board.json ↔ sdkconfig.defaults 一致性；擋下「把 build-time 的東西寫進 config/*.json」
       sync     把 board.json 指定的能力碎片寫進 sdkconfig.defaults（marker 區塊）
       new      開一塊新板：建目錄 + 三個檔 + README 骨架
       resolve  給 tools/board.sh 用：查板子 → 目錄 / target / 晶片
@@ -60,8 +60,16 @@ CONSOLE_SYM = {
     "usb-cdc": "ESP_CONSOLE_USB_CDC",
     "usb_cdc": "ESP_CONSOLE_USB_CDC",
 }
-# 執行期 config.json 允許的頂層鍵（與 firmware 目前理解的 schema 對齊）
-RUNTIME_TOP_KEYS = {"version", "_comment", "System", "Network", "Pixel", "Buffer"}
+# 每個 config 檔允許的頂層鍵（檔名 → 允許的鍵）；一個層一個檔
+RUNTIME_KEYS_BY_FILE = {
+    "system.json":   {"version", "_comment", "cID", "debug_level",
+                      "frame_interval_ms", "boot_strict", "num_pixels", "nc4"},
+    "network.json":  {"version", "_comment", "hostname", "priority", "lan", "wifi", "bt", "espnow"},
+    "hardware.json": {"version", "_comment", "PIN", "SPI", "I2C", "UART", "ETH"},
+    "driver.json":   {"version", "_comment", "ETH", "USB", "TFT",
+                      "WS2812", "APA102", "PCA9685", "Audio"},
+    "tasks.json":    {"version", "_comment", "override"},
+}
 
 MARK_OPEN = "# >>> profile: {name}"
 MARK_CLOSE = "# <<< profile: {name}"
@@ -76,7 +84,7 @@ def board_dirs() -> list[Path]:
 
 
 def load_board(d: Path) -> dict:
-    return json.loads((d / "board.json").read_text())
+    return json.loads((d / "board.json").read_text(encoding="utf-8"))
 
 
 def parse_kconfig(path: Path) -> dict[str, str | None]:
@@ -84,7 +92,7 @@ def parse_kconfig(path: Path) -> dict[str, str | None]:
     out: dict[str, str | None] = {}
     if not path.exists():
         return out
-    for raw in path.read_text().splitlines():
+    for raw in path.read_text(encoding="utf-8").splitlines():
         line = raw.strip()
         m = re.match(r"^CONFIG_([A-Za-z0-9_]+)=(.*)$", line)
         if m:
@@ -184,7 +192,7 @@ def check_board(d: Path, cfg_common: dict, cfg_port: dict) -> Report:
         r.err("board.json 說沒有 Ethernet，但 sdkconfig 開了 CONFIG_ETH_ENABLED=y")
 
     # --- L2 能力碎片：宣告了就要同步、同步了就要一致 ---
-    text = (d / "sdkconfig.defaults").read_text() if (d / "sdkconfig.defaults").exists() else ""
+    text = (d / "sdkconfig.defaults").read_text(encoding="utf-8") if (d / "sdkconfig.defaults").exists() else ""
     declared = b.get("profiles") or []
     for prof in declared:
         src = PROFILES / f"{prof}.defaults"
@@ -194,29 +202,37 @@ def check_board(d: Path, cfg_common: dict, cfg_port: dict) -> Report:
         block = _extract_block(text, prof)
         if block is None:
             r.err(f"能力碎片 {prof!r} 還沒同步進 sdkconfig.defaults → 跑 tools/board.py sync")
-        elif block.strip() != src.read_text().strip():
+        elif block.strip() != src.read_text(encoding="utf-8").strip():
             r.err(f"能力碎片 {prof!r} 與 ports/_profiles/{prof}.defaults 不同步 → 跑 tools/board.py sync")
     for prof in _blocks_in(text):
         if prof not in declared:
             r.warn(f"sdkconfig.defaults 有 {prof!r} 的區塊，但 board.json 沒宣告（sync 會移除）")
 
-    # --- L3 config.json：不准放 L1 的東西 ---
-    cfg_json = d / "data" / "config.json"
-    if cfg_json.exists():
-        try:
-            data = json.loads(cfg_json.read_text())
-        except json.JSONDecodeError as e:
-            r.err(f"data/config.json 不是合法 JSON：{e}")
-            data = {}
-        for k in data:
-            if k not in RUNTIME_TOP_KEYS:
-                r.warn(f"data/config.json 有未知的頂層鍵 {k!r}（firmware 目前不讀）")
-        for bad in ("flash_size", "flash_freq", "flash_mode", "psram", "psram_size",
-                    "cpu_mhz", "chip", "partition_table"):
-            if bad in data:
-                r.err(f"data/config.json 出現 {bad!r} —— 這屬於 build-time，要寫在 board.json / sdkconfig.defaults")
+    # --- L3 config/*.json：一個層一個檔；不准放 L1 的東西 ---
+    cfg_dir = d / "data" / "config"
+    cfg_files = sorted(cfg_dir.glob("*.json")) if cfg_dir.is_dir() else []
+    if cfg_files:
+        for cfg_json in cfg_files:
+            try:
+                data = json.loads(cfg_json.read_text(encoding="utf-8"))
+            except json.JSONDecodeError as e:
+                r.err(f"data/config/{cfg_json.name} 不是合法 JSON：{e}")
+                continue
+            allowed = RUNTIME_KEYS_BY_FILE.get(cfg_json.name)
+            if allowed is None:
+                r.warn(f"data/config/{cfg_json.name} 不在已知層清單"
+                       f"（{'/'.join(sorted(RUNTIME_KEYS_BY_FILE))}）")
+                continue
+            for k in data:
+                if k not in allowed:
+                    r.warn(f"data/config/{cfg_json.name} 有未知的鍵 {k!r}")
+            for bad in ("flash_size", "flash_freq", "flash_mode", "psram", "psram_size",
+                        "cpu_mhz", "chip", "partition_table"):
+                if bad in data:
+                    r.err(f"data/config/{cfg_json.name} 出現 {bad!r}"
+                          f" —— 這屬於 build-time，要寫在 board.json / sdkconfig.defaults")
     else:
-        r.warn("沒有 data/config.json（P4 這類沒有 USB 的板子可以沒有，但 S3 會沒有出廠預置）")
+        r.warn("沒有 data/config/*.json（P4 這類沒有 USB 的板子可以沒有，但 S3 會沒有出廠預置）")
 
     # --- board.json 裡有沒有未處理的鍵 ---
     known = {"name", "chip", "flash", "psram", "cpu_mhz", "console", "profiles",
@@ -253,7 +269,7 @@ def sync_board(d: Path) -> None:
     declared = b.get("profiles") or []
     target = d / "sdkconfig.defaults"
 
-    text = target.read_text() if target.exists() else ""
+    text = target.read_text(encoding="utf-8") if target.exists() else ""
 
     # 砍掉舊的碎片區塊：從標頭開始整段丟掉（標頭之後只會有 marker 區塊）
     idx = text.find(MARK_HEAD.splitlines()[0])
@@ -271,11 +287,11 @@ def sync_board(d: Path) -> None:
             src = PROFILES / f"{name}.defaults"
             if not src.exists():
                 raise SystemExit(f"找不到能力碎片：ports/_profiles/{name}.defaults")
-            body = src.read_text().strip("\n")
+            body = src.read_text(encoding="utf-8").strip("\n")
             chunks.append(f"{MARK_OPEN.format(name=name)}\n{body}\n{MARK_CLOSE.format(name=name)}\n")
         text = text.rstrip() + "\n\n" + "".join(chunks)
 
-    target.write_text(text)
+    target.write_text(text, encoding="utf-8")
 
 
 # ─────────────────────────── 指令 ───────────────────────────
@@ -382,7 +398,7 @@ def cmd_new(args) -> int:
         profiles.append("nc4-udp")
 
     board = {
-        "_comment": "硬體事實。改這裡 = 要重新 build；runtime 可改的放 data/config.json。",
+        "_comment": "硬體事實。改這裡 = 要重新 build；runtime 可改的放 data/config/*.json。",
         "name": args.board,
         "chip": chip,
         "flash": {"size_mb": args.flash, "freq_mhz": args.flash_freq, "mode": args.flash_mode},
@@ -412,12 +428,16 @@ def cmd_new(args) -> int:
         + f"\n# ── CPU ──\nCONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_{args.cpu}=y\n"
         + f"\n# ── console ──\nCONFIG_{CONSOLE_SYM[args.console.lower()]}=y\n"
     )
-    (d / "data" / "config.json").write_text(json.dumps({
+    cfg_dir.mkdir(parents=True, exist_ok=True)
+    (cfg_dir / "system.json").write_text(json.dumps({
         "version": 1,
-        "_comment": "出廠預置。燒進去之後屬於使用者；缺檔時 firmware 用內建預設。",
-        "System": {"hostname": "", "frame_interval_ms": 20, "num_pixels": 0},
-        "Network": {"wifi": {"enable": 0, "ssid": "", "ssid_pw": ""}},
-        "Pixel": {"enable": 0},
+        "_comment": "System 層：身份、開機、NC4 通道與解碼路線。",
+        "hostname": "", "frame_interval_ms": 20, "num_pixels": 0,
+    }, ensure_ascii=False, indent=2) + "\n")
+    (cfg_dir / "network.json").write_text(json.dumps({
+        "version": 1,
+        "_comment": "Network 層：只放 IP / WiFi。",
+        "wifi": {"enable": 0, "ssid": "", "ssid_pw": ""},
     }, ensure_ascii=False, indent=2) + "\n")
     (d / "README.md").write_text(
         f"# {args.board}\n\n"

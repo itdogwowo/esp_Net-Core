@@ -15,7 +15,7 @@
 |---|---|---|---|
 | **L1 硬體事實** | flash 大小 / 頻率 / 模式、PSRAM 有冇與模式速度、CPU 頻率、有冇 Ethernet、console | ✅ 要 | `board.json` + `sdkconfig.defaults` |
 | **L2 能力碎片** | ETH、NC4 over WS、NC4 over UDP 這種「功能包」 | ✅ 要 | `board.json` 的 `profiles` → `ports/_profiles/` |
-| **L3 執行期** | gpio、服務開關、像素數、網路位址 | ❌ 同一 binary | `data/config.json` |
+| **L3 執行期** | gpio、服務開關、像素數、網路位址 | ❌ 同一 binary | `data/config/*.json` |
 
 > **PSRAM、flash 大小、flash 頻率永遠不可能用 config.json 換**——它們在 bootloader 與
 > 記憶體初始化階段就決定了。寫進 `config.json` 只會被 `tools/board.py check` 擋下來。
@@ -34,12 +34,16 @@ ports/
 ├─ S3/ESP32-S3-N16R8/
 │  ├─ board.json                   16 MB flash / 8 MB Octal PSRAM / console JTAG
 │  ├─ sdkconfig.defaults           L1 硬體事實（與 board.json 一致）
-│  └─ data/config.json             出廠執行期預置
+│  └─ data/config/                 出廠執行期預置（一層一個檔）
+│     ├─ system.json
+│     └─ network.json
 │
 └─ P4/ESP32-P4-ETH/
    ├─ board.json                   32 MB / HEX 32 MB / RMII + IP101 / UART0 console
    ├─ sdkconfig.defaults           L1 + 檔尾的 L2 碎片（由 sync 產生）
-   └─ data/config.json
+   └─ data/config/                 出廠執行期預置
+      ├─ system.json
+      └─ network.json
 ```
 
 ---
@@ -63,7 +67,7 @@ python3 tools/board.py new \
   --cpu 240 --console usb-serial-jtag --eth none --wifi --ws
 ```
 
-它會建好 `board.json` / `sdkconfig.defaults` / `data/config.json` / `README.md`，
+它會建好 `board.json` / `sdkconfig.defaults` / `data/config/*.json` / `README.md`，
 並把 `--ws` 這類能力對應的碎片同步進去。**不需要改任何 shell 腳本或 CMake。**
 
 ---
@@ -93,7 +97,7 @@ python3 tools/board.py new \
 - `board.json` 說有 PSRAM，`sdkconfig` 沒開 `CONFIG_SPIRAM`
 - `board.json` 說沒有 Ethernet，`sdkconfig` 卻開了 `CONFIG_ETH_ENABLED`
 - 宣告了能力碎片但沒 `sync`
-- 把 `flash_size` / `psram` 這種 build-time 的東西寫進 `data/config.json`
+- 把 `flash_size` / `psram` 這種 build-time 的東西寫進 `data/config/*.json`
 - 共通 `firmware/sdkconfig.defaults` 偷渡板子事實
 
 還有一個會靜默咬人的：**`firmware/sdkconfig` 存在的時候，改 `sdkconfig.defaults` 不生效**。
@@ -138,7 +142,7 @@ C 版**刻意不照抄**：
 |---|---|---|
 | `slave/` | `firmware/` | 一樣：乾淨基礎 |
 | port 可放 `*.py` 覆蓋程式 | ❌ 只能放設定 | 程式要編譯；per-board code = per-board build |
-| port 的 `config.json` 覆蓋 `slave/config.json` | `data/config.json` 是出廠預置，runtime 屬使用者 | 同一份 FAT，不疊層 |
+| port 的 `config.json` 覆蓋 `slave/config.json` | `data/config/*.json` 是出廠預置，runtime 屬使用者 | 同一份 FAT，不疊層 |
 | 15 塊板子並存 | 目前 2 塊，`board.py new` 隨時加 | 沒 driver 支撐的板子不要先開空殼 |
 
 MPY 那邊 15 個 port 有一半靠的是「同一個 Python 基礎 + 不同 config」；C 版把這件事
