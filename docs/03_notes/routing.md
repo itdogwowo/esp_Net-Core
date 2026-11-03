@@ -138,6 +138,27 @@ WS / UDP 是訊息導向，沒有 `region` / `chunk`；`max_msg` 就是一次收
 `out` 只接受兩種名字：`links[]` 的通道，或 `decodeN`（N = 核心編號）。
 `fxN` **不能**放進 `out`——它不吃幀，按自己的 fps 跑。
 
+### 2.0 一條線的「解」與「包」在同一核
+
+**`out: ["decode1"]` 同時決定兩件事**：這條線進來的幀由 **core 1** 解，
+這條線出去的幀也由 **core 1** 打包送出。不需要另一個欄位。
+
+```
+        ┌─────────────── core 1 ───────────────┐
+UART ──▶│ decode1（拆幀 → 執行）                │
+        │ pack1（執行結果 → 幀 → UART tx）      │
+        └──────────────────────────────────────┘
+```
+
+理由：**同一個 handler 在同一個核上跑，它產生的回覆自然也在那個核**。
+如果要「core 1 解、core 0 打包」，回覆就得跨核搬一次（複製或排隊），
+而搬過去的東西還要重新排隊等 tx —— 多一次同步、多一份緩衝，換不到任何好處。
+
+所以 `{ "in": "uart0", "out": ["decode1"] }` 的意思是
+「**uart0 建立在 core 1 的解碼器上，所以它走的時候也是透過 core 1 打包走**」。
+`out` 裡的 link（`{ "in": "outbound", "out": ["UART"] }`）只是「送去哪條線」，
+**不會**改變那條線的打包核 —— 打包核永遠跟著那條線的 `decodeN`。
+
 ### 2.1 本機發出的三條路（`exec` / `nctx` / `outbound`）
 
 「本機」不是一條通道，它是三種不同意圖。同一個 `in` 只能有一行，所以意圖要分開命名：
@@ -157,7 +178,9 @@ WS / UDP 是訊息導向，沒有 `region` / `chunk`；`max_msg` 就是一次收
 **`nctx` 與 `outbound` 永遠存在，而且排最前**（舊專案 `self` / `vbus` 也是開頭兩個）。
 沒寫就自動補：`nctx → ["decode0"]`、`outbound → []`（沒指定去哪就丟棄，開機表標 `default`）。
 
-> **狀態**：`outbound` 是提案，未進 config。等真的要做「本機外送」那天再加一行。
+> **狀態**：兩行都已經寫進 `ports/*/data/config/system.json`（`nctx → ["decode0"]`、
+> `outbound → []`）。`outbound` 目前是空表＝明確丟棄，因為「本機外送」還沒有實作；
+> 等真的要做那天，把它改成 `["TCP"]` 之類就有位置可寫。
 >
 > **為什麼叫 `outbound` 不叫 `emit`**：`emit` 是事件系統的字（JS EventEmitter、Qt `emit`、Vue `$emit`），
 > 在路由／網絡語境不慣用；那邊的慣用字是 ingress / egress、inbound / outbound。
@@ -222,6 +245,10 @@ route     TCP      → decode0, UART     config
 跟舊專案一樣。這是「用戶沒有機會知道」的補寫：新線路是程式建的，用戶不會知道要自己加 route。
 用戶寫過的值一律不動。
 
+> **現況**：上面這張表是**設計目標**。今日開機印的是 `nc4_router_json()` 的單行 JSON
+> （`{"set":1,"core0":3,"core1":1,"routes":[{"line":"CDC","core":0},…]}`），
+> 只有 `line → core`，沒有 `prio` / `src` / `fx` 那幾欄。要那張表得等 §7 的落差補完。
+
 ---
 
 ## 6. 優先權與配額
@@ -248,16 +275,30 @@ route     TCP      → decode0, UART     config
 
 ## 7. 與現況程式的落差
 
+**已經接上的部分**（開機 ④ 讀 `system.json` → `nc4_router_set()`）：
+
+- `routes[].in` → 每行**第一個** `decodeN` 決定「這條線由第 N 核解」。
+- `bus.core` 不再寫死：CDC / UART / TCP 三條 bus 都用 `nc4_router_core_or(名字, 預設)`
+  問 router（`main.c` 的 `s_task_net` 建立處）。
+- `decode0` / `decode1` 兩個任務的**存在與否**由 `nc4_router_core_used(N)` 決定
+  （`nc4_want_core0()` / `nc4_want_core1()`）；一條線都沒有的核，任務根本不建立。
+- 讀不到有效 `routes[]` 就退回板子預設表（`router_defaults()`），並印 `ESP_LOGW`。
+- `0x1105 ROUTE_GET` 可以線上查「板子實際吃了哪一份表」。
+
+**還沒接上的部分**：
+
 | # | 現況 | 要改成 |
 |---|---|---|
-| 1 | `main.c:2329` 只 `nc4_decoder_create()` 一次，兩核共用 | 每個被 routes 指到的 `decodeN` 一個 decoder、一份回覆緩衝 |
-| 2 | `bus.core` 寫死（CDC/TCP = 0、UART = 1） | 由 routes 推導：這條 bus 給 `decodeN`，就掛到第 N 核 |
+| 1 | `main.c:2564` 只 `nc4_decoder_create()` 一次，兩核共用同一個 decoder 與回覆緩衝 | 每個被 routes 指到的 `decodeN` 一個 decoder、一份回覆緩衝 |
+| 2 | `out` 裡的 **link**（轉發）完全被忽略 | 依 `out` 把幀送進對應 link 的 tx |
 | 3 | `tcp_accept`（9）、`tcp_rx`（10）、`nc4_udp`（10）是裸 `xTaskCreatePinnedToCore` | 收進 `tasks[]`，由任務管理器建立與管 |
 | 4 | `fx` 是一個固定 task（core 1、prio 3） | 依 manifest 的 `core` 分組，每一核一個 fx 引擎；`-1` → 預設核 |
 | 5 | WS / UDP 在 httpd / udp task 內直接解析 | 納入 `links[]`，各自宣告 rx 區域 |
 | 6 | 只有部分通道有 `send` | `out` 只能指向有 send 的 link |
 
-在這六件事做完之前，`routes[]` 只是格式；改它不會改變行為。
+> **所以今日的真相是**：`routes[]` 的 `in` 半邊**真的生效**（決定誰解、哪一核存在），
+> `out` 半邊只有 `decodeN` 生效，**link 轉發仍然是格式**。
+> 改 `in` 會改變行為；改 `out` 加一條 link 不會。
 
 ---
 

@@ -38,13 +38,15 @@
 
   "nc4": {
     "links": [
-      { "name": "CDC", "kind": "cdc", "cfg": { "rx": { "mode": "pull", "region": 8205, "chunk": 1024, "budget": 8 } } }
+      { "name": "CDC", "kind": "cdc", "cfg": { "rx": { "mode": "pull", "region": 8205, "chunk": 1024, "budget": 8 } } },
+      { "name": "UART", "kind": "uart", "cfg": { "rx": { "mode": "pull", "region": 1024, "chunk": 512, "budget": 8 } } }
     ],
 
     "routes": [
       { "in": "nctx",     "out": ["decode0"] },
       { "in": "outbound", "out": [] },
-      { "in": "CDC",      "out": ["decode0"] }
+      { "in": "CDC",      "out": ["decode0"] },
+      { "in": "UART",     "out": ["decode1"] }
     ]
   }
 }

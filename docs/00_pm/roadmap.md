@@ -1,6 +1,12 @@
 # esp_Net-Core — C / ESP-IDF 重寫計劃
 
-> 狀態：架構定案，準備分期實作
+> **狀態（2026-11-03 更新）**：Phase 0／1 大部分已落地 —— NC4 通道（CDC／UART／TCP／WS／UDP）、
+> 檔案查詢、FAT 擁有者（MSC 只做 recovery）、任務管理器、`tasks.json`、`.fxe` 掃描都已在板上跑過。
+> Phase 2（pixel pipeline）與 Phase 3（cross-chip sync）**還沒開始**。
+>
+> ⚠️ **近期要做什麼請看 [status.md §7](status.md)，不要照這份的 Phase 順序排** ——
+> 這份留的是產品級分期（燈效／同步／recovery），不是當前衝刺清單。
+>
 > 原則：**一個 command layer（NC4）、一個 FS owner（device）、一個 frame clock**
 > 架構圖：`docs/03_notes/architecture-flow.md`
 
@@ -47,7 +53,18 @@ C 版的目標不是「math 快 50%」，而是：
 
 ## 3. 分期
 
-### Phase 0 — Contract freeze（2–3 天）
+### Phase 0 — Contract freeze ✅（已完成；結論與原計劃不同）
+
+> **實際結果（不要把下面四條當成現況）**：
+> - **沒有做** `FILE_BEGIN` / `FILE_CHUNK` / `FILE_END` / `BUNDLE_*`。裝置端只有
+>   `FILE_QUERY`（`0x2005`）＋ `STATUS_SET`（`0x1103`）子集；寫檔走 MSC 或 HTTP `PUT`。
+>   見 [commands.md](../01_protocol/commands.md)。
+> - **`ASSET_RELOAD` 還沒做**（提案 `0x1019`）—— 現在改完檔案要重開機。
+> - FS 決定 **FAT**（MSC recovery 要能直接讀），見 [fat-ownership.md](../03_notes/fat-ownership.md)。
+> - golden case 沒有獨立 vector 檔，用 `tools/hosttest/` 與 `tools/bench/` 的實測代替。
+
+<details>
+<summary>原計劃（保留作記錄）</summary>
 
 - 凍結 NC4 file commands：`FILE_BEGIN`、`FILE_CHUNK`、`FILE_END`、`FILE_ABORT`、`BUNDLE_*`、`ASSET_RELOAD`。
 - 凍結 asset schema：effects／map／modes／registry；錯誤碼。
@@ -56,7 +73,17 @@ C 版的目標不是「math 快 50%」，而是：
 
 **交付**：`docs/nc4_file_protocol.md` + golden test vectors。
 
-### Phase 1 — C/IDF Foundation（1–2 週）
+</details>
+
+### Phase 1 — C/IDF Foundation 🟡（大部分完成）
+
+> 已落地：IDF 工程骨架（boot／NVS／FAT／WL／logging）、NC4 通道（CDC／UART／TCP／WS／UDP）、
+> 檔案查詢與 HTTP 設定讀寫、任務管理器、`tasks.json`、`.fxe` 掃描。
+> **未做**：asset loader（JSON schema 驗證）、`ASSET_RELOAD`、bundle commit。
+> 驗收項裡的「斷電 20 次」沒有正式跑過。
+
+<details>
+<summary>原計劃（保留作記錄）</summary>
 
 - ESP-IDF project skeleton：boot、NVS、partition、FS、logging。
 - NC4 transport：UART + Wi-Fi（TCP／WS）；CDC 可選 log。
@@ -71,7 +98,9 @@ C 版的目標不是「math 快 50%」，而是：
 - 斷電測試 20 次：要麼舊版完整，要麼新版完整，不能半寫入。
 - 無 pixel 時 CPU idle 正常；無 FS mount 泄漏。
 
-### Phase 2 — Pixel Pipeline（2–4 週）
+</details>
+
+### Phase 2 — Pixel Pipeline（2–4 週）⬜ 未開始
 
 - `FrameClock`：`esp_timer` 固定 period（例：20 ms）。
 - `RenderTask`：effects → back buffer；compute N+1 與 output N 重疊。
@@ -90,7 +119,7 @@ C 版的目標不是「math 快 50%」，而是：
 - Miss deadline：重播上一幀，`dropped` counter 增加，frame clock 不漂移。
 - CPU load、IRAM／DRAM、flash write stall 有量測數據。
 
-### Phase 3 — Cross-chip Sync（1–2 週）
+### Phase 3 — Cross-chip Sync（1–2 週）⬜ 未開始
 
 - `esp_timer_get_time()` µs timebase。
 - Master broadcast `T0_us` + `period_us`；slave schedule `T0 + n*period`。
@@ -126,19 +155,22 @@ C 版的目標不是「math 快 50%」，而是：
 
 ## 4. 開放決策
 
-1. **FS**：LittleFS（安全、無 MSC）vs FAT（MSC recovery 可直接用）。若 MSC 是 optional，LittleFS 較好。
-2. **MSC recovery**：要做嗎？不做可省 Phase 4。
+> **1 與 2 已經定了**（FAT、MSC 只做 recovery），3–5 仍然開放。
+
+1. ~~**FS**：LittleFS vs FAT~~ → **定案 FAT**（MSC recovery 要能直接讀），見 [fat-ownership.md](../03_notes/fat-ownership.md)。
+2. ~~**MSC recovery**：要做嗎~~ → **只做 recovery，不是日常編輯**（同上）。Phase 4 保留。
 3. **CDC**：只做 log，還是也做 NC4 transport？若做，ViperIDE 需要 native transport。
 4. **Target**：每 node max px、target FPS、sync tolerance（例：676 px／50 FPS／±1 ms）。
 5. **Hardware**：S3／P4；USB OTG pins；VBUS detect 有沒有。
 
 ---
 
-## 5. 第一批任務
+## 5. 第一批任務 ✅（已完成）
 
-1. 寫 `docs/nc4_file_protocol.md`：commands、CRC、bundle、錯誤碼、power-loss 行為。
-2. 寫 golden tests（PC 端）：正常／壞 CRC／半寫入／dangling ref。
-3. 建 ESP-IDF skeleton：FS + NC4 UART + `FILE_*`，先不接 pixel。
-4. 更新 `README.md` 與 `.gitignore`（build／sdkconfig 產物）。
-
-> 這四件事完成後，Phase 1 的範圍就固定，不會再被 USB／MSC 的討論拖住。
+> 已完成到「可以上板跑」的程度，與原定內容的差異：
+> 1. ~~`docs/nc4_file_protocol.md`~~ → 沒寫；協議現況集中在 [commands.md](../01_protocol/commands.md)。
+> 2. ~~golden tests~~ → 用 `tools/hosttest/`（hub／plan／fx／fxm／task／cfg）代替，沒有獨立 vector 檔。
+> 3. ✅ ESP-IDF skeleton + FS + NC4 UART（另加 CDC／TCP／WS／UDP）。
+> 4. ✅ `README.md` 與 `.gitignore`。
+>
+> **下一步不在這裡** —— 看 [status.md §7](status.md)。

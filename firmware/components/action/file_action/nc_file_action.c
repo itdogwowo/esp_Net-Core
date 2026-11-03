@@ -22,19 +22,27 @@ static const char *TAG = "nc_file_action";
 
 #define PATH_MAX_LOCAL    192
 
-static uint8_t s_tx[NC4_MAX_FRAME];
-
 // ───────────────────────── 小工具 ─────────────────────────
 
+// 回覆幀：**每次送出時才要**，所以用 heap 而不是 static。
+// 以前是 static uint8_t s_tx[NC4_MAX_FRAME]（8,205 B）—— 全域一份，
+// 兩個 decoder 同時回 FILE_READ 就會互相蓋掉對方正在送的幀。
+// 這裡的 send 是同步的（lwIP / UART / CDC 都會即刻複製），所以送完就可以 free。
 static void send_payload(nc4_ctx_t *ctx, uint16_t cmd, const uint8_t *p, size_t n)
 {
     if (ctx == NULL || ctx->send == NULL || n > NC4_MAX_PAYLOAD) {
         return;
     }
-    const int len = nc4_pack_into(s_tx, sizeof(s_tx), cmd, nc4_reply_addr(ctx), p, n);
-    if (len > 0) {
-        ctx->send(ctx->send_arg, s_tx, (size_t)len);
+    const size_t cap = (size_t)NC4_HDR_LEN + n + NC4_CRC_LEN;
+    uint8_t *frame = malloc(cap);
+    if (frame == NULL) {
+        return;
     }
+    const int len = nc4_pack_into(frame, cap, cmd, nc4_reply_addr(ctx), p, n);
+    if (len > 0) {
+        ctx->send(ctx->send_arg, frame, (size_t)len);
+    }
+    free(frame);
 }
 
 static size_t wr_u32(uint8_t *b, uint32_t v)
@@ -99,7 +107,9 @@ static void sha256_of(const char *path, uint8_t out[32], bool *ok)
         return;
     }
 
-    static uint8_t buf[2048];
+    // 2 KB 讀取緩衝放**棧**（decode 任務 6,144 B，這一層夠深）。
+    // 以前是 static：兩個 decoder 同時算 SHA-256 會互相蓋掉讀到的資料 → 算出錯的雜湊。
+    uint8_t buf[2048];
     psa_hash_operation_t op = PSA_HASH_OPERATION_INIT;
     bool started = (psa_hash_setup(&op, PSA_ALG_SHA_256) == PSA_SUCCESS);
 

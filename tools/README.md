@@ -130,12 +130,15 @@ tools/hosttest/hub_test/run.sh     # nc_hub.c：格子交換 / 自動歸還
 tools/hosttest/plan_test/run.sh    # nc_plan.c：宣告 / commit / 重名
 tools/hosttest/fx_test/run.sh      # nc_fx.c：載入 / 選 / 兩幀釋放 / trap / 超支
 tools/hosttest/fxm_test/run.sh     # .fxe manifest：解碼 / 範圍 / 指令表
-tools/hosttest/task_test/run.sh  # 任務管理器：level 排序 / 帳本 / attach / detach / provides
+tools/hosttest/task_test/run.sh    # 任務管理器：level 排序 / 帳本 / attach / detach / provides / config
+tools/hosttest/cfg_test/run.sh     # nc_cfg_patch：token patch（巢狀 / 陣列 / 轉義）
 ```
 
-Windows（MSVC）用同目錄的 `run.bat`（需要 Visual Studio Build Tools）。
+Windows（MSVC）用同目錄的 `run.bat`。注意：目前只有 `cfg_test` / `fxm_test` / `task_test`
+有 `run.bat`；`fx_test` 用到 `dirent.h` / `clock_gettime` 是 POSIX-only，
+`hub_test` / `plan_test` 只是還沒補腳本（純 C，補了就能跑）。
 
-全部都會印 `ALL PASS`。改了 `sys/mem/`、`sys/tasks/`、`app/fx/` 之後先跑對應那支。
+全部都會印 `ALL PASS`。改了 `sys/mem/`、`sys/task/`、`sys/task_manager/`、`sys/config/`、`app/fx/` 之後先跑對應那支。
 
 ## ⑤ `poc/` — 原型驗證
 

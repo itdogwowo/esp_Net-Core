@@ -595,7 +595,15 @@ int nc_fx_scan(const char *dir)
         if (n < 5 || strcmp(e->d_name + n - 4, ".fxe") != 0) {
             continue;
         }
-        snprintf(path, sizeof(path), "%s/%s", dir, e->d_name);
+        /* 砌路徑要**先確認放得落**：d_name 最長 255，加上 dir 隨時超過 80。
+         * 照截斷去開檔係最壞的情況 —— 會靜靜開到另一個（前綴相同的）檔。
+         * 所以寧願當「被拒」，計入 bad，上面個 log 會報數。 */
+        const int m = snprintf(path, sizeof(path), "%s/%s", dir, e->d_name);
+        if (m < 0 || (size_t)m >= sizeof(path)) {
+            ESP_LOGW(TAG, "路徑太長，跳過：%s/%s", dir, e->d_name);
+            bad++;
+            continue;
+        }
         if (nc_fx_load(path) == ESP_OK) {
             ok++;
         } else {
@@ -809,9 +817,19 @@ size_t nc_fx_info_json(char *buf, size_t cap)
                     (unsigned)nc_fx_period_ms(), s_task_core);
 
     bool first = true;
-    for (int i = 0; i < NC_FX_MAX_MODULES && off < cap - 1; i++) {
+    bool cut = false;
+    int n_used = 0;
+    for (int i = 0; i < NC_FX_MAX_MODULES; i++) {
         const nc_fx_t *m = &s_mods[i];
         if (!m->used) {
+            continue;
+        }
+        n_used++;
+        /* 每個模組大約 250 B。緩衝（main.c 的 part 是 1,900 B）放唔落 8 個係遲早的事，
+         * 所以這裡要主動截，唔可以寫到一半就交出去 —— 半截 JSON 主機一定 parse 失敗。
+         * 留 3 B 給 "]}": 唔夠就唔寫，最後走「精簡但合法」那條路。 */
+        if (off + 3 > cap) {
+            cut = true;
             continue;
         }
         const nc_fx_decl_t d = m->decl;
@@ -832,6 +850,18 @@ size_t nc_fx_info_json(char *buf, size_t cap)
                         d.has_manifest ? 1 : 0, (unsigned)d.ncmds,
                         m->attached ? 1 : 0);
         first = false;
+    }
+    if (cut) {
+        /* 放唔落：丟掉已寫的模組，重寫一個**合法**的精簡物件。
+         * "truncated":1 是給人看的訊號；"mods" 是表上實際有幾個。 */
+        return fx_append(buf, cap, 0,
+                         "{\"arena\":%u,\"used\":%u,\"live\":\"%s\","
+                         "\"frames\":%u,\"backend\":\"%s\",\"period_ms\":%u,"
+                         "\"truncated\":1,\"mods\":%d,\"modules\":[]}",
+                         (unsigned)s_arena_bytes, (unsigned)s_arena_used,
+                         s_live ? s_live->name : "", (unsigned)s_frame,
+                         s_backend ? s_backend->name : "none",
+                         (unsigned)nc_fx_period_ms(), n_used);
     }
     return fx_append(buf, cap, off, "]}");
 }

@@ -50,6 +50,10 @@ struct nc4_parser {
     size_t start;
     size_t end;
     nc4_ctx_t ctx;
+
+    // 壞幀統計：以前 CRC 錯了只會靜靜前移 1 byte，外面完全看不出來。
+    uint32_t n_crc_err;     // CRC32 對不上
+    uint32_t n_bad_hdr;     // VER 不對 / LEN 超上限
 };
 
 // ───────────────────────── decoder ─────────────────────────
@@ -240,7 +244,9 @@ int nc4_pack_into(uint8_t *buf, size_t cap, uint16_t cmd, uint16_t addr,
     wr_u16(buf + 5, cmd);
     wr_u16(buf + 7, (uint16_t)payload_len);
     if (payload_len) {
-        memcpy(buf + NC4_HDR_LEN, payload, payload_len);
+        // memmove 而不是 memcpy：容許就地打包（payload 指向 buf + NC4_HDR_LEN，
+        // 也就是把 DATA 直接砌在自己的幀裡，省掉一塊獨立的工作緩衝）。
+        memmove(buf + NC4_HDR_LEN, payload, payload_len);
     }
 
     const uint32_t crc = esp_rom_crc32_le(0, buf + 2, NC4_HDR_LEN - 2 + payload_len);
@@ -318,15 +324,15 @@ void nc4_parser_destroy(nc4_parser_t *parser)
 }
 
 // 幀已驗過 CRC：ADDR 過濾後 dispatch。
-// base = 幀起點（SOF），plen 已驗證 ≤ NC4_MAX_PAYLOAD。
+// base = 幀起點（SOF），dlen 已驗證 ≤ NC4_MAX_PAYLOAD。
 // 只借用呼叫端的緩衝，不複製 —— handler 回傳後 frame.data 即失效。
-static void parser_dispatch(nc4_parser_t *parser, const uint8_t *base, uint16_t plen)
+static void parser_dispatch(nc4_parser_t *parser, const uint8_t *base, uint16_t dlen)
 {
     nc4_frame_t f = {
         .addr = (uint16_t)(base[3] | (base[4] << 8)),
         .cmd = (uint16_t)(base[5] | (base[6] << 8)),
         .data = base + NC4_HDR_LEN,
-        .len = plen,
+        .len = dlen,
     };
 
     // ADDR 過濾：只收廣播或定址到本機 cid 的幀（與 mp 版 app.handle_stream 一致）
@@ -354,6 +360,16 @@ void nc4_parser_reset(nc4_parser_t *parser)
     }
 }
 
+void nc4_parser_errors(const nc4_parser_t *parser, uint32_t *crc_err, uint32_t *bad_hdr)
+{
+    if (crc_err != NULL) {
+        *crc_err = (parser != NULL) ? parser->n_crc_err : 0;
+    }
+    if (bad_hdr != NULL) {
+        *bad_hdr = (parser != NULL) ? parser->n_bad_hdr : 0;
+    }
+}
+
 // 看 9 B 表頭判斷整幀長度；不是合法表頭回 0。
 // 給「先看表頭、再決定這次要 recv 多少」的傳輸層用（frame-aligned 收包）。
 size_t nc4_header_total(const uint8_t *hdr)
@@ -362,14 +378,14 @@ size_t nc4_header_total(const uint8_t *hdr)
         hdr[2] != NC4_VERSION) {
         return 0;
     }
-    const uint16_t plen = (uint16_t)(hdr[7] | (hdr[8] << 8));
-    if (plen > NC4_MAX_PAYLOAD) {
+    const uint16_t dlen = (uint16_t)(hdr[7] | (hdr[8] << 8));
+    if (dlen > NC4_MAX_PAYLOAD) {
         return 0;
     }
-    return NC4_HDR_LEN + (size_t)plen + NC4_CRC_LEN;
+    return NC4_HDR_LEN + (size_t)dlen + NC4_CRC_LEN;
 }
 
-// 直接解析「一個完整 frame」：buf 從 SOF 開始、len 必須等於 13+plen。
+// 直接解析「一個完整 frame」：buf 從 SOF 開始、len 必須等於 13+dlen。
 // **零複製**：不進 ring、不 memcpy；dispatch 時 frame.data 指向 buf+9。
 // 呼叫端（frame-aligned 的 transport）負責提供連續且完整的一幀。
 esp_err_t nc4_parser_frame(nc4_parser_t *parser, const uint8_t *buf, size_t len)
@@ -381,16 +397,17 @@ esp_err_t nc4_parser_frame(nc4_parser_t *parser, const uint8_t *buf, size_t len)
     if (total == 0 || len != total) {
         return ESP_ERR_INVALID_SIZE;
     }
-    const uint16_t plen = (uint16_t)(total - NC4_HDR_LEN - NC4_CRC_LEN);
+    const uint16_t dlen = (uint16_t)(total - NC4_HDR_LEN - NC4_CRC_LEN);
 
     // CRC32（esp_rom_crc32_le(0,…) 與 MP 版 binascii.crc32(x,0) 等價）
-    const uint32_t want = rd_u32le(buf + NC4_HDR_LEN + plen);
-    const uint32_t got = esp_rom_crc32_le(0, buf + 2, NC4_HDR_LEN - 2 + plen);
+    const uint32_t want = rd_u32le(buf + NC4_HDR_LEN + dlen);
+    const uint32_t got = esp_rom_crc32_le(0, buf + 2, NC4_HDR_LEN - 2 + dlen);
     if (want != got) {
+        parser->n_crc_err++;
         return ESP_ERR_INVALID_CRC;
     }
 
-    parser_dispatch(parser, buf, plen);
+    parser_dispatch(parser, buf, dlen);
     return ESP_OK;
 }
 
@@ -442,27 +459,29 @@ esp_err_t nc4_parser_feed(nc4_parser_t *parser, const uint8_t *data, size_t len)
 
         // 2. 標頭（不合就前移 1 byte 重找 —— 與 MP 版一致的寬鬆重同步）
         const uint8_t ver = base[2];
-        const uint16_t plen = (uint16_t)(base[7] | (base[8] << 8));
+        const uint16_t dlen = (uint16_t)(base[7] | (base[8] << 8));
 
-        if (ver != NC4_VERSION || plen > NC4_MAX_PAYLOAD) {
+        if (ver != NC4_VERSION || dlen > NC4_MAX_PAYLOAD) {
+            parser->n_bad_hdr++;
             parser->start += 1;
             continue;
         }
 
-        const size_t total = NC4_HDR_LEN + plen + NC4_CRC_LEN;
+        const size_t total = NC4_HDR_LEN + dlen + NC4_CRC_LEN;
         if (avail < total) {
             return ESP_OK;   // 等更多資料
         }
 
         // 3. CRC32（esp_rom_crc32_le(0,…) 與 MP 版 binascii.crc32(x,0) 等價）
-        const uint32_t want = rd_u32le(base + NC4_HDR_LEN + plen);
-        const uint32_t got = esp_rom_crc32_le(0, base + 2, NC4_HDR_LEN - 2 + plen);
+        const uint32_t want = rd_u32le(base + NC4_HDR_LEN + dlen);
+        const uint32_t got = esp_rom_crc32_le(0, base + 2, NC4_HDR_LEN - 2 + dlen);
         if (want != got) {
+            parser->n_crc_err++;
             parser->start += 1;
             continue;
         }
 
-        parser_dispatch(parser, base, plen);
+        parser_dispatch(parser, base, dlen);
 
         parser->start += total;
         if (parser->start == parser->end) {

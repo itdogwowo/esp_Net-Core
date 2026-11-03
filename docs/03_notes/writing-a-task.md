@@ -85,6 +85,9 @@ nc_task_register(&my_task);
 **為什麼 `start` 和 `boot` 分開**：`on_start()` 必須在「所有任務的資源都配好」之後、
 「任何 loop 開始跑」之前完成。例：`fx` 要先拿到 arena，render loop 才能開。
 
+> 每一步管理器實際做什麼、失敗會怎樣、資源怎麼加總、停止時誰歸還什麼 ——
+> 全部在 [task-lifecycle.md](task-lifecycle.md)。這節只講「你要知道的四步」。
+
 停止方向相反：
 
 ```text
@@ -154,7 +157,7 @@ static int my_declare(nc_task_res_t *out, int max)
 |---|---|---|
 | **decoder + dispatch 表** | 位元組 → frame → 查表 → 呼叫 handler | `sys/nc4`（每條通道一個 parser，一張全域表） |
 | **action** | 一條指令做的事：驗參數、選機制、回結果 | `components/action/*`（`ota_action` / `file_action` …）與 `main.c` |
-| **task** | 把能力恆常化：收發迴圈、渲染迴圈、節拍 | `components/sys/tasks` 管理，宣告在 `main.c` |
+| **task** | 把能力恆常化：收發迴圈、渲染迴圈、節拍 | `components/sys/task`（型別＋loop）／`sys/task_manager`（管理器）；每個任務一個 component，在 `components/app/tasks/<name>/` |
 
 **handler 跑在哪一核**：跟著**解碼任務**跑。`decode0`/`decode1` 各綁一核，
 哪個核收到這一幀，handler 就在那核執行。而且 `nc4.c` 呼叫 handler 時拿
@@ -315,8 +318,13 @@ nc_task_enable("my", false);     // 暫停：loop 還活著，只是不呼叫 fn
 nc_task_enable("my", true);
 nc_task_stop("my", 500);         // 停 loop（合作式，等它返回）
 nc_task_start("my");             // 再開（on_start 不會重跑）
-nc_task_set_core("my", 1);       // 換核：停 → 改 → 起
 ```
+
+> **冇「換核」**。跑哪一核在**開機時**就定死（宣告的 `affinity`，`decodeN` 則由 router 決定），
+> 之後改不了。原本的 `nc_task_set_core()` 已刪 —— 它是「停 → 改 → 起」的執行期換核，
+> 同「核心在開機時決定」這個前提直接矛盾，而且 0 呼叫者。
+> 要支援換核，先要處理「換核之後它的緩衝、DMA 綁定、對外連線怎麼算」，
+> 那是比一個 setter 大得多的事。
 
 `kind=EFFECT` 的任務另外有：
 

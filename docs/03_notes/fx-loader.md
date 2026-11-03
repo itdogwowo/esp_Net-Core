@@ -1,8 +1,9 @@
-# 效果載入器：怎麼開發「改檔案就換行為」
+# FXE 引擎：容器格式與載入流程
 
 > **用途**：回答「我要怎麼**做**這個機制」—— 不是選哪個格式，而是自己動手時要寫哪幾段、檔案長什麼樣、失敗時會怎樣。
 > **對象**：要動手寫 `nc_fx_*` 的人。
-> **狀態**：設計未實作。格式與載入流程可直接照抄。
+> **狀態**：容器、驗證、arena、attach、tick、預算**已實作**；執行引擎（WAMR）未接。
+> **先讀**：[fxe-engine.md](fxe-engine.md) —— 引擎是什麼、不是什麼、名詞怎麼用。這份只講格式與流程。
 > **相關**：[effect-language.md](effect-language.md)（為什麼選 wasm）· [buffer-manager.md](buffer-manager.md)（記憶體從哪來）· [extension-architecture.md](extension-architecture.md)（Component 與帳本）
 
 ---

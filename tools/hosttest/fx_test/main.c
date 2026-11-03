@@ -146,7 +146,9 @@ static const nc_fx_backend_t FAKE = {
 
 static int count_modules(void)
 {
-    char buf[1024];
+    /* 每個模組大約 250 B 的 JSON，8 個就 2,000 B —— 用 1,024 會截斷，
+     * 於是「數到 5 個」其實是緩衝不夠，不是固件少收了。 */
+    char buf[4096];
     nc_fx_status_json(buf, sizeof(buf));
     int n = 0;
     for (const char *p = buf; (p = strstr(p, "\"name\":")) != NULL; p++) {
@@ -186,9 +188,12 @@ static void unload_all(void)
 int main(void)
 {
     static unsigned char arena[64 * 1024];
-    char dir[256];
+    /* dir 刻意只開 200：gcc 的 -Wformat-truncation 是看「陣列宣告大小」去估上限，
+     * 開 256 的話 "%s/xxx.fxe" 砌入 char[256] 就「可能」截斷，-Werror 直接當錯。
+     * 200 之後所有 256 的目標都證明放得落（199 + 最長 17 + 1）。 */
+    char dir[200];
     const char *tmp = getenv("TMPDIR");
-    snprintf(dir, sizeof(dir), "%s/fx_test_mods", tmp ? tmp : "/tmp");
+    snprintf(dir, sizeof(dir), "%.180s/fx_test_mods", tmp ? tmp : "/tmp");
     char cmd[600];
     snprintf(cmd, sizeof(cmd), "rm -rf '%s' && mkdir -p '%s'", dir, dir);
     if (system(cmd) != 0) {

@@ -114,6 +114,9 @@ typedef struct {
     uint32_t period_ms;      // >0 = 管理器每輪幫你延遲；0 = loop 自己阻塞
     uint32_t budget_us;      // 每輪預算（0 = 不統計超支）
     bool run_once;           // 只跑一次（開機自測那種）
+    // 房東自己話事嘅開關：回 false = 呢個 loop 唔建立（連棧都唔配置）。
+    // NULL = 永遠開。config 管唔到 —— 呢個係固件宣告嘅一部分。
+    bool (*enabled)(void);
 } nc_task_loop_t;
 
 // ── 一個任務的完整宣告 ──
@@ -177,7 +180,9 @@ esp_err_t nc_task_detach(const char *name);
 esp_err_t nc_task_start(const char *name);                 // 開這個任務的所有 loop
 esp_err_t nc_task_stop(const char *name, uint32_t wait_ms);// 合作式停止（等它自己返回）
 esp_err_t nc_task_enable(const char *name, bool on);       // 暫停/恢復（loop 還活著，只是不呼叫）
-esp_err_t nc_task_set_core(const char *name, int core);    // 換核：停 → 改 → 起
+// 冇 nc_task_set_core()：**跑在哪個核是開機時決定的**（宣告的 affinity ＋ router），
+// 執行期換核會同 router 的決定打架，而且「停 → 改 → 起」中間的狀態極難收拾。
+// 要換核就改宣告／改 config，然後重開機。
 bool      nc_task_exit_requested(void);                    // loop 裡查：有人請你結束
 
 // ── 查詢 / 狀態 ──

@@ -27,8 +27,11 @@ extern "C" {
 #define NC4_SOF_0            0x4E   // 'N'
 #define NC4_SOF_1            0x43   // 'C'
 #define NC4_VERSION          4
-#define NC4_HDR_LEN          9
-#define NC4_CRC_LEN          4
+#define NC4_HDR_LEN          9      // SOF(2) + VER(1) + ADDR(2) + CMD(2) + LEN(2)
+#define NC4_CRC_LEN          4      // CRC32：覆蓋 VER..DATA，不含 SOF
+// 單幀 DATA 上限。**經驗參數（magic number），不是協議限制** ——
+// 協議的 LEN 是 uint16，最大 65535。8192 = 上游實測甜蜜點再加少少出界餘量。
+// 它的作用是配 parser 緩衝（NC4_MAX_FRAME = 8205）。改它要同步上游 proto.py 的 MAX_PAYLOAD。
 #define NC4_MAX_PAYLOAD      8192
 #define NC4_MAX_FRAME        (NC4_HDR_LEN + NC4_MAX_PAYLOAD + NC4_CRC_LEN)
 #define NC4_MAX_HANDLERS     32
@@ -110,11 +113,11 @@ void nc4_parser_destroy(nc4_parser_t *parser);
 esp_err_t nc4_parser_feed(nc4_parser_t *parser, const uint8_t *data, size_t len);
 
 // ── 零複製（frame-aligned）──
-// 看 9 B 表頭判斷整幀長度；不是合法表頭（SOF/VER/plen）回 0。
+// 看 9 B 表頭判斷整幀長度；不是合法表頭（SOF/VER/LEN）回 0。
 // transport 可以「先 peek 表頭、再 recv 剛好一整幀」，於是 parser 不必有 ring。
 size_t nc4_header_total(const uint8_t *hdr);
 
-// 直接解析一個完整 frame：buf 必須從 SOF 開始，len == 13 + plen。
+// 直接解析一個完整 frame：buf 必須從 SOF 開始，len == 13 + LEN。
 // 不複製、不進 ring；handler 執行期間 frame.data 指向 buf+9，回傳後失效。
 // 回傳 ESP_OK / ESP_ERR_INVALID_SIZE（不是一幀）/ ESP_ERR_INVALID_CRC。
 esp_err_t nc4_parser_frame(nc4_parser_t *parser, const uint8_t *buf, size_t len);
@@ -124,6 +127,12 @@ esp_err_t nc4_parser_frame(nc4_parser_t *parser, const uint8_t *buf, size_t len)
 // 下一條連線的資料會被接在它後面，於是小指令全被吞掉（看起來像「卡住」）。
 // 新連線 = 新位元組流 → 這條一定要呼叫。
 void nc4_parser_reset(nc4_parser_t *parser);
+
+// 壞幀統計（指標可為 NULL）。以前 CRC 錯了只會靜靜前移 1 byte，
+// 外面完全看不出來 —— 現在至少數得到。
+//   crc_err：CRC32 對不上（雜訊 / 撕裂 / 對端算錯）
+//   bad_hdr：VER 不對或 LEN 超上限（多半是根本沒對上 SOF）
+void nc4_parser_errors(const nc4_parser_t *parser, uint32_t *crc_err, uint32_t *bad_hdr);
 
 // ── 打包（給 transport 當 send 用；也可給 handler 產生回覆）──
 // 回傳實際長度；容量不足回 -1（不寫、不 raise）

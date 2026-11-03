@@ -1,6 +1,14 @@
 # 配置分層：一個層一個檔案
 
-> **狀態**：重新規劃（2026-11-02）。程式目前只有程式常數 + NVS，還沒有 config loader。
+> **狀態（2026-11-03 更新）**：`nc_cfg`（`sys/config`）已上線，但**只接了三個檔**：
+> `tasks.json`（任務管理器讀 level / affinity，並會補寫）、`system.json`（只讀 `cID`）、
+> `network.json`（只讀 `bt.pin`）。
+>
+> ⚠️ **`hardware.json` / `driver.json` 還沒有接**：`ports/*/data/config/` 有這兩個出廠檔，
+> 但 `firmware/main/CMakeLists.txt` 只 embed `system / network / tasks`，而且 firmware
+> 沒有任何程式讀它們 —— 插上隨身碟你看不到這兩個檔，改了也不會生效。
+> 下面 §2–§4 寫的是**目標設計**，不是現況。
+>
 > **參考**：mp_Net-Core 的 `config.json`（一個檔 24 個 section：System / Buffer / SPI / I2C / UART / TFT / WS2812 …）
 > **相關**：[decode-routes.md](decode-routes.md)、[writing-a-task.md](writing-a-task.md)、[component-layout.md](component-layout.md)
 
@@ -15,6 +23,53 @@
 | **L3 執行期** | 腳位覆蓋、通道與解碼路線、IP、任務參數、效果開關 | ❌ 同一份 binary | **隨身碟 `config/*.json`** |
 
 判準：**換了它需不需要重燒 firmware？** 需要 → L1/L2；不需要 → L3。
+
+---
+
+## 0.5 三層預設：內建最小 → 板級出廠 → 用戶
+
+**一句話：房東保證「就算用戶一個 config 都沒有，板子仍然開得機、收得到指令」；
+config 只能管租戶。** 但「冇 config 都開得機」不等於「config 目錄可以不存在」——
+使用者插上隨身碟要**看得到**該改哪個檔，所以每個層檔都必須存在，而且要 parse 得成功。
+
+同一個層檔，內容可能來自三個地方（優先序由下往上）：
+
+| 層 | 來源 | 誰決定 | 內容 | 什麼時候用 |
+|---|---|---|---|---|
+| ① **內建最小預設** | 編在 firmware 裡的常數字串 | 韌體 | 只有 `version` + 最少必需欄位（骨架） | 該層**完全沒有**任何來源時 |
+| ② **板級出廠預置** | `ports/<chip>/<board>/data/config/<layer>.json`（build 時 `EMBED_FILES`） | 這塊板子 | 實際值：腳位、PHY、IP、任務清單 | 檔案不存在、而且這塊板有出廠檔 |
+| ③ **用戶檔** | 隨身碟上的 `/data/config/<layer>.json` | 使用者 | 使用者改過的值 | 永遠最高優先（存在就不動） |
+
+**建立規則**（`seed_file()`，`main.c`）：
+
+```text
+開機 → 掛上 FAT → 對每一個層檔：
+    檔案存在？ ── 是 ──► 不動它（印「預置已存在」）
+        │
+        否
+        ▼
+    這個板有出廠預置？ ── 有 ──► 寫入板級預置
+        │
+        否
+        ▼
+    寫入內建最小預設（保證檔案一定存在）
+```
+
+三條不變量：
+
+1. **只建立、不覆蓋**：檔案存在就永遠不動（連 `version` 都不改）。使用者刪掉 → 下次開機重建。
+2. **建立後行為與「冇檔」一致**：內建最小預設的內容 = 「全部用程式預設」，
+   所以「第一次開機」和「刪掉檔案」跑出來的行為一樣，不會出現「重開機才生效」。
+3. **核心不讀 config 也能開機**：`nc4` / `net` / `core` / FXE 引擎都是 `NC_TASK_SYSTEM`，
+   照 C 宣告跑；`tasks.json` 只影響租戶。所以 ③ 全冇、② 也冇，板子仍然收得到指令。
+
+> ⚠️ **現況缺口**：目前只有第 ② 層（而且只有 `system` / `network` / `tasks` 三個檔）。
+> 第 ① 層**不存在** —— 如果某塊板冇 `ports/<board>/data/config/tasks.json`，
+> `NETCORE_HAS_PRESET_TASKS=0`，`tasks.json` 就**永遠不會被建立**（`nc_task` 只會補條目，
+> 不會建檔）。`hardware.json` / `driver.json` 更完全沒有 embed（見開頭警告）。
+>
+> 要補的東西：在 `main.c` 加三個內建最小字串（`system` / `network` / `tasks`），
+> 讓 `seed_presets()` 在「冇板級預置」時用它們。內容只要 `{"version":1}` 這種骨架即可。
 
 ---
 
@@ -98,7 +153,7 @@ nc_cfg_close(cfg);
 ② hardware.json → 硬體 init（GPIO/SPI/I2C/UART/ETH PHY；缺檔用 board.json）
 ③ driver.json   → driver init（ETH DMA、USB、TFT…）
 ④ 硬體起來了，讀分配：
-     system.json  → engines[] / services[] / nc4.links[] / routes[]
+     system.json  → nc4.links[] / routes[]（引擎由 routes 推導，不寫 engines[]）
      network.json → IP
      tasks.json   → 任務覆蓋
 ⑤ 宣告（記帳）  看②③的實際結果 + ④的分配
@@ -147,6 +202,11 @@ ETH PHY 沒 link、UART 沒接，就不該照 config 硬開一條 link。
 `out: ["self"]` 同一個語意（新專案的本機來源叫 `nctx`）；`decodeN` 有人指向才開（N = 核心編號），**不需要宣告引擎**。
 `fxN` 由 `.fxe` manifest 的 `core` 推導，也不能放進 `out`（它不吃幀）。
 完整規則見 [routing.md](routing.md)。
+
+> **現況（已接）**：開機 ④ 真的會讀 `routes[]`，每行**第一個** `decodeN` 決定那條線由第 N 核解；
+> `decode0` / `decode1` 任務的存在與否、以及 CDC / UART / TCP 三條 bus 掛哪一核，都由此推導。
+> 讀不到有效 `routes[]` 就退回板子預設表並印警告。`0x1105 ROUTE_GET` 可線上查實際生效的表。
+> **未接**：`out` 裡的 link（轉發）仍然被忽略；兩核仍然共用同一個 decoder。
 
 ### `hardware.json`（硬體層）
 
@@ -364,7 +424,7 @@ DMA 大小（1600）與環數（16/16）**不在 config**——那是 build-time
 | 步 | 做什麼 | 驗收 |
 |---|---|---|
 | C0 | 建 `sys/config`：開檔 → cJSON → 關檔；缺檔/壞檔回 NULL | host test：三種檔案狀態 |
-| C1 | `system.json` 的 `nc4.links` 先接（唯讀）；`routes[]` 等兩個 decoder 落地才生效 | 改 `slots` 重開機生效 |
+| C1 | `system.json` 的 `nc4.links` 先接（唯讀）；`routes[]` 的 `in → decodeN` 已生效（決定哪一核解、哪一核存在），`out` 的 link 轉發未做 | 改 `slots` 重開機生效；改 `routes[].in` 的 `decodeN` 會換核 |
 | C2 | `hardware.json` / `driver.json` 接掉 `main.c` 的寫死值 | 換腳位不用改 code |
 | C3 | `network.json` / `tasks.json` | IP 與 core 可由檔案覆蓋 |
 | C4 | 出廠預置改成多檔（`ports/<board>/data/config/`） | 新板首次開機長出 `config/` 目錄 |

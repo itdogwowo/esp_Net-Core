@@ -6,7 +6,9 @@
 #   改成：firmware 內嵌 → 第一次開機自動格式化 → 寫入預置 → 交給 host。
 #   使用者不需要手動格式化；換預置只要改 ports/<board>/data/config/*.json 再 build。
 #
-# 一個層一個檔：目前只嵌 system / network；缺的層由 firmware 的預設補。
+# 一個層一個檔：目前嵌 system / network / tasks（存在才嵌）；缺的層由 firmware 的預設補。
+# 注意：ports/<board>/data/config/ 下的 hardware.json / driver.json 目前**沒有** embed，
+#       firmware 也還沒讀它們 —— 別以為改了那兩個檔會生效。
 
 set(_preset_embed)
 foreach(_cfg system network tasks)

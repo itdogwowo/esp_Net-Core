@@ -91,7 +91,7 @@ def build(ui): ...
 > `claims[]` 目前只做「exclusive 衝突檢查」，還沒有 `shared:cs` 那種共用模式；
 > `display` owner stack 仍未做。
 > **另外刻意沒搬過來**：mp 的 `hw=("lcd",)` → 強制 core0。IDF 上 flash 與 TinyUSB
-> 都沒有「必須某一核」的硬性要求（細節見 [nc_task.h](../../firmware/components/sys/tasks/include/nc_task.h) 的註解），
+> 都沒有「必須某一核」的硬性要求（細節見 [nc_task.h](../../firmware/components/sys/task/include/nc_task.h) 的註解），
 > 所以 C 版的 core 完全由宣告決定，不強制改寫。見 [writing-a-task.md](writing-a-task.md)。
 
 ---

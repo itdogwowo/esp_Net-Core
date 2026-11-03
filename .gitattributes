@@ -1,0 +1,15 @@
+# 行尾（EOL）規則。
+#
+# 背景：這台機器是 Windows，但 build 與 host 測試都在 WSL 跑。
+# 只要有人用 Windows 編輯器開過一次 .sh，整個檔就變成 CRLF，
+# 之後在 WSL / Linux 直接跑就會見到 `$'\r': command not found` 這類 syntax error
+# （實際踩過：tools/hosttest/{fx,hub,plan}_test/run.sh 三支全掛）。
+#
+# 所以：shell 腳本一律 LF，Windows 批次檔一律 CRLF。
+# 這裡**刻意不寫 `* text=auto`** —— 那會令 repo 內大量既有檔案一次過被重新正規化，
+# 產生一個沒人看得懂的巨大 diff。只鎖真正會壞掉的兩類檔案。
+
+*.sh    text eol=lf
+*.bash  text eol=lf
+*.bat   text eol=crlf
+*.cmd   text eol=crlf

@@ -410,11 +410,15 @@ size_t nc4_bus_stats_json(char *buf, size_t cap)
             else if (stt == 2) st_cnt[2]++;
             else st_cnt[3]++;
         }
+        uint32_t crc_err = 0;
+        uint32_t bad_hdr = 0;
+        nc4_parser_errors(b->parser, &crc_err, &bad_hdr);
         off += snprintf(buf + off, cap - off,
                         "%s{\"name\":\"%s\",\"mode\":\"%s\",\"core\":%d,"
                         "\"frame\":%u,"
                         "\"frames\":%u,\"mb\":%.2f,\"copied\":%llu,"
                         "\"parse_ms\":%.1f,\"us_per_frame\":%.1f,"
+                        "\"crc_err\":%u,\"bad_hdr\":%u,"
                         "\"slots\":[%d,%d,%d,%d]}",
                         first ? "" : ",", b->cfg.name ? b->cfg.name : "?",
                         b->cfg.mode == NC4_BUS_PULL ? "pull"
@@ -425,6 +429,7 @@ size_t nc4_bus_stats_json(char *buf, size_t cap)
                         (unsigned long long)b->st_copied,
                         (double)b->st_parse_us / 1000.0,
                         b->st_frames ? (double)b->st_parse_us / (double)b->st_frames : 0.0,
+                        (unsigned)crc_err, (unsigned)bad_hdr,
                         st_cnt[0], st_cnt[1], st_cnt[2], st_cnt[3]);
         first = false;
     }

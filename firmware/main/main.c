@@ -50,6 +50,7 @@
 #include "ff.h"
 #include "nc4.h"
 #include "nc4_bus.h"
+#include "nc4_router.h"
 #include "nc_task.h"
 #include "nc_hello.h"
 #include "nvs.h"
@@ -148,6 +149,10 @@ static volatile uint32_t s_rx_frames;        // 成功收到的幀數
 #define NC4_CMD_SET_MASTER 0x1016
 #define NC4_CMD_SYS_TASK_QUERY 0x1005
 #define NC4_CMD_SYS_TASK_RSP   0x1006
+
+// status 域：0x1101–0x1104 已用（GET / RSP / SET / ACK），路由器由 0x1105 開始
+#define NC4_CMD_ROUTE_GET 0x1105
+#define NC4_CMD_ROUTE_RSP 0x1106
 
 // ports/<board>/data/config/*.json 由 EMBED_FILES 嵌進 firmware（一個層一個檔）
 extern const uint8_t preset_system_start[]  asm("_binary_preset_system_json_start");
@@ -359,25 +364,68 @@ static esp_err_t cdc_send(void *arg, const uint8_t *frame, size_t len)
 }
 
 // str_u16len 編碼（與 schema 的 str_u16len 一致：2B 長度前綴 + UTF-8）
+//
+// 回覆直接砌入 TX 幀：DATA = [len u16][json]，中間冇獨立工作區。
+// 所以這塊緩衝**跟任務棧走**（每個 decode 任務私有），兩核同時回覆不會撞。
+// 之前那塊 static payload[2102] 是全域一份，正是「不能開第二個 decoder」的原因。
+//
+// 2,600 而不是 2,100：完整的 STATUS_GET（sys+mem+tasks+provides+storage+fx）
+// 大約 2.4 KB，用 2,100 會**靜靜截斷**成無效 JSON。
+#define NC4_REPLY_JSON_MAX 2600
+
+// 回覆建構器：整塊幀在呼叫者棧上。
+//   nc4_reply_t r; char *j = reply_open(&r, ctx, CMD); …寫 j…; reply_send(&r, len);
+// 兩個 decoder 各自一份，所以「砌 JSON」這件事本身不再需要全域鎖。
+typedef struct {
+    nc4_ctx_t *ctx;
+    uint16_t cmd;
+    uint8_t frame[NC4_HDR_LEN + 2 + NC4_REPLY_JSON_MAX + NC4_CRC_LEN];
+} nc4_reply_t;
+
+// 回傳可寫的 JSON 區（容量 NC4_REPLY_JSON_MAX + 1，已清空）
+static char *reply_open(nc4_reply_t *r, nc4_ctx_t *ctx, uint16_t cmd)
+{
+    r->ctx = ctx;
+    r->cmd = cmd;
+    char *json = (char *)r->frame + NC4_HDR_LEN + 2;
+    json[0] = '\0';
+    return json;
+}
+
+static void reply_send(nc4_reply_t *r, size_t len)
+{
+    if (r->ctx == NULL || r->ctx->send == NULL) {
+        return;
+    }
+    if (len > NC4_REPLY_JSON_MAX) {
+        len = NC4_REPLY_JSON_MAX;
+    }
+    uint8_t *data = r->frame + NC4_HDR_LEN;   // DATA 區：2B 長度前綴 + JSON
+    data[0] = (uint8_t)len;
+    data[1] = (uint8_t)(len >> 8);
+
+    // 就地打包：payload 指向 frame 自己的 DATA 區（pack_into 用 memmove，安全）
+    const int total = nc4_pack_into(r->frame, sizeof(r->frame), r->cmd,
+                                    nc4_reply_addr(r->ctx), data, 2 + len);
+    if (total > 0) {
+        r->ctx->send(r->ctx->send_arg, r->frame, (size_t)total);
+    }
+}
+
+// 舊介面：已經有現成字串的（多數 handler）走這條
 static void reply_json(nc4_ctx_t *ctx, uint16_t cmd, const char *json)
 {
     if (ctx->send == NULL) {
         return;
     }
-    static uint8_t payload[2 + 2100];
+    nc4_reply_t r;
+    char *dst = reply_open(&r, ctx, cmd);
     size_t n = strlen(json);
-    if (n > 2100) {
-        n = 2100;
+    if (n > NC4_REPLY_JSON_MAX) {
+        n = NC4_REPLY_JSON_MAX;
     }
-    payload[0] = (uint8_t)n;
-    payload[1] = (uint8_t)(n >> 8);
-    memcpy(payload + 2, json, n);
-
-    uint8_t frame[NC4_HDR_LEN + sizeof(payload) + NC4_CRC_LEN];
-    int total = nc4_pack_into(frame, sizeof(frame), cmd, nc4_reply_addr(ctx), payload, 2 + n);
-    if (total > 0) {
-        ctx->send(ctx->send_arg, frame, (size_t)total);
-    }
+    memcpy(dst, json, n);
+    reply_send(&r, n);
 }
 
 static void on_reboot(nc4_ctx_t *ctx, const nc4_frame_t *f)
@@ -396,58 +444,122 @@ static void on_reboot(nc4_ctx_t *ctx, const nc4_frame_t *f)
 // keys 語義照 mp 版：空 = 全部、"? "= 目錄、其餘逗號分隔
 static uint32_t s_bench_ok;
 
-static void status_put_storage(char *buf, size_t cap)
+// ── 有界 JSON append ──
+// snprintf 回的是「本來想寫多少」，off 可能超過 cap；直接拿 cap - off 下去會 size_t 下溢。
+// 所有 status 區塊都走這裡。
+static void jappend(char *buf, size_t cap, size_t *off, const char *fmt, ...)
 {
+    if (*off >= cap) {
+        return;
+    }
+    va_list ap;
+    va_start(ap, fmt);
+    const int n = vsnprintf(buf + *off, cap - *off, fmt, ap);
+    va_end(ap);
+    if (n > 0) {
+        *off += (size_t)n;
+        if (*off >= cap) {
+            *off = cap - 1;      // 截斷：保住 NUL，不要再往後寫
+        }
+    }
+}
+
+// 把子系統的 JSON 直接接到 buf + *off。
+// 這些函式（nc_plan_json / nc_task_json / nc_fx_status_json …）都回傳「實際寫了幾多」，
+// 所以**不需要中間緩衝**——這正是以前那些 static char plan[700] 存在的原因。
+typedef size_t (*nc_json_fn)(char *buf, size_t cap);
+
+static void jchain(char *buf, size_t cap, size_t *off, nc_json_fn fn)
+{
+    if (*off >= cap) {
+        return;
+    }
+    *off += fn(buf + *off, cap - *off);
+    if (*off >= cap) {
+        *off = cap - 1;
+    }
+}
+
+// 把一個 status 區塊接上去（自動補逗號）。以前是「砌入 part[] 再 jappend("%s")」，
+// 現在直接接在同一個緩衝，少一次複製、少一塊 static。
+static void status_add(char *buf, size_t cap, size_t *off, bool *first, nc_json_fn fn)
+{
+    if (*off >= cap) {
+        return;
+    }
+    if (!*first) {
+        jappend(buf, cap, off, ",");
+    }
+    jchain(buf, cap, off, fn);
+    *first = false;
+}
+
+// ── status 的各區塊 ──
+// 全部改成「寫入呼叫者給的緩衝並回傳長度」：沒有 static，所以兩個 decoder 同時
+// 問 STATUS_GET 也不會互相踩（以前那 ~10 KB static 正是「開第二個 decoder」的硬阻塞）。
+
+static size_t status_put_storage(char *buf, size_t cap)
+{
+    size_t off = 0;
     // FAT 現在在誰手上、裝置能不能直接讀
-    snprintf(buf, cap, "\"storage\":{\"mode\":\"%s\",\"app_ready\":%d}",
-             nc_store_mode_name(), nc_store_app_ready() ? 1 : 0);
+    jappend(buf, cap, &off, "\"storage\":{\"mode\":\"%s\",\"app_ready\":%d}",
+            nc_store_mode_name(), nc_store_app_ready() ? 1 : 0);
+    return off;
 }
 
-static void status_put_sys(char *buf, size_t cap)
+static size_t status_put_sys(char *buf, size_t cap)
 {
-    snprintf(buf, cap,
-             "\"sys\":{\"fw\":\"%s\",\"heap\":%u,\"up_s\":%lld,\"idf\":\"%s\",\"cid\":%u}",
-             FW_VERSION,
-             (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
-             (long long)(esp_timer_get_time() / 1000000),
-             esp_get_idf_version(), (unsigned)s_cid);
+    size_t off = 0;
+    jappend(buf, cap, &off,
+            "\"sys\":{\"fw\":\"%s\",\"heap\":%u,\"up_s\":%lld,\"idf\":\"%s\",\"cid\":%u}",
+            FW_VERSION,
+            (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+            (long long)(esp_timer_get_time() / 1000000),
+            esp_get_idf_version(), (unsigned)s_cid);
+    return off;
 }
 
-static void status_put_mem(char *buf, size_t cap)
+static size_t status_put_mem(char *buf, size_t cap)
 {
-    static char plan[700];
-    static char hubs[320];
-    nc_plan_json(plan, sizeof(plan));
-    nc_hub_registry_json(hubs, sizeof(hubs));
-    snprintf(buf, cap, "\"mem\":{\"plan\":%s,\"hub\":%s}", plan, hubs);
+    size_t off = 0;
+    jappend(buf, cap, &off, "\"mem\":{\"plan\":");
+    jchain(buf, cap, &off, nc_plan_json);
+    jappend(buf, cap, &off, ",\"hub\":");
+    jchain(buf, cap, &off, nc_hub_registry_json);
+    jappend(buf, cap, &off, "}");
+    return off;
 }
 
-static void status_put_provides(char *buf, size_t cap)
+static size_t status_put_provides(char *buf, size_t cap)
 {
-    static char prov[900];
-    nc_provide_list_json(prov, sizeof(prov));
-    snprintf(buf, cap, "\"provides\":%s", prov);
+    size_t off = 0;
+    jappend(buf, cap, &off, "\"provides\":");
+    jchain(buf, cap, &off, nc_provide_list_json);
+    return off;
 }
 
 #if CONFIG_IDF_TARGET_ESP32P4
-static void status_put_net(char *buf, size_t cap)
+static size_t status_put_net(char *buf, size_t cap)
 {
-    static char buses[640];
-    static char ws[200];
-    static char udp[200];
-    nc4_bus_stats_json(buses, sizeof(buses));
-    nc4_ws_json(ws, sizeof(ws));
-    nc4_udp_json(udp, sizeof(udp));
-    snprintf(buf, cap, "\"net\":{\"bus\":%s,\"ws\":%s,\"udp\":%s}", buses, ws, udp);
+    size_t off = 0;
+    jappend(buf, cap, &off, "\"net\":{\"bus\":");
+    jchain(buf, cap, &off, nc4_bus_stats_json);
+    jappend(buf, cap, &off, ",\"ws\":");
+    jchain(buf, cap, &off, nc4_ws_json);
+    jappend(buf, cap, &off, ",\"udp\":");
+    jchain(buf, cap, &off, nc4_udp_json);
+    jappend(buf, cap, &off, "}");
+    return off;
 }
 #endif
 
 // 任務表（含每個 loop 的核心、量測）。"task" / "modules" / "svc" 都是舊名，照樣接受。
-static void status_put_tasks(char *buf, size_t cap)
+static size_t status_put_tasks(char *buf, size_t cap)
 {
-    static char tasks[1800];
-    nc_task_json(tasks, sizeof(tasks));
-    snprintf(buf, cap, "\"tasks\":%s", tasks);
+    size_t off = 0;
+    jappend(buf, cap, &off, "\"tasks\":");
+    jchain(buf, cap, &off, nc_task_json);
+    return off;
 }
 
 static bool keys_want(const char *keys, const char *name)
@@ -467,25 +579,8 @@ static bool keys_want(const char *keys, const char *name)
     return false;
 }
 
-// 有界的 JSON append：snprintf 回的是「本來想寫多少」，off 可能超過 cap；
-// 直接拿 cap - off 下去會 size_t 下溢。所有 status 區塊都走這裡。
-static void jappend(char *buf, size_t cap, size_t *off, const char *fmt, ...)
-{
-    if (*off >= cap) {
-        return;
-    }
-    va_list ap;
-    va_start(ap, fmt);
-    const int n = vsnprintf(buf + *off, cap - *off, fmt, ap);
-    va_end(ap);
-    if (n > 0) {
-        *off += (size_t)n;
-        if (*off >= cap) {
-            *off = cap - 1;      // 截斷：保住 NUL，不要再往後寫
-        }
-    }
-}
-
+// ── 0x1101 STATUS_GET → 0x1102 STATUS_RSP ──
+// keys 語義照 mp 版：空 = 全部、"? "= 目錄、其餘逗號分隔
 static void on_status_get(nc4_ctx_t *ctx, const nc4_frame_t *f)
 {
     // keys 是 str_u16len：2B 長度 + 內容
@@ -504,52 +599,52 @@ static void on_status_get(nc4_ctx_t *ctx, const nc4_frame_t *f)
         return;
     }
 
-    static char json[2600];
+    // 整份 JSON 砌在**回覆幀的 DATA 區**（呼叫者棧上），冇 static、冇中間 part 緩衝。
+    nc4_reply_t r;
+    char *json = reply_open(&r, ctx, NC4_CMD_STATUS_RSP);
+    const size_t cap = NC4_REPLY_JSON_MAX + 1;
     size_t off = 0;
-    jappend(json, sizeof(json), &off, "{");
     bool first = true;
-    static char part[1900];
+
+    // 由便宜排到貴：真係放唔落的時候，至少前面幾項係完整嘅。
+    // （全部 key 加埋大約 5.8 KB，一個 2.6 KB 的幀一定裝唔落 —— 所以「空 keys」係
+    //   「盡量裝」，唔係「保證全部」。要齊就分批問。）
+    jappend(json, cap, &off, "{");
     if (keys_want(keys, "sys")) {
-        status_put_sys(part, sizeof(part));
-        jappend(json, sizeof(json), &off, "%s", part);
-        first = false;
-    }
-    if (keys_want(keys, "mem")) {
-        status_put_mem(part, sizeof(part));
-        jappend(json, sizeof(json), &off, "%s%s", first ? "" : ",", part);
-        first = false;
-    }
-    if (keys_want(keys, "task") || keys_want(keys, "tasks")) {
-        status_put_tasks(part, sizeof(part));
-        jappend(json, sizeof(json), &off, "%s%s", first ? "" : ",", part);
-        first = false;
-    }
-    if (keys_want(keys, "fx")) {
-        nc_fx_status_json(part, sizeof(part));
-        jappend(json, sizeof(json), &off, "%s%s", first ? "" : ",", part);
-        first = false;
+        status_add(json, cap, &off, &first, status_put_sys);
     }
     if (keys_want(keys, "storage")) {
-        status_put_storage(part, sizeof(part));
-        jappend(json, sizeof(json), &off, "%s%s", first ? "" : ",", part);
-        first = false;
+        status_add(json, cap, &off, &first, status_put_storage);
+    }
+    if (keys_want(keys, "mem")) {
+        status_add(json, cap, &off, &first, status_put_mem);
     }
     if (keys_want(keys, "provides")) {
-        status_put_provides(part, sizeof(part));
-        jappend(json, sizeof(json), &off, "%s%s", first ? "" : ",", part);
-        first = false;
+        status_add(json, cap, &off, &first, status_put_provides);
+    }
+    if (keys_want(keys, "task") || keys_want(keys, "tasks")) {
+        status_add(json, cap, &off, &first, status_put_tasks);
+    }
+    if (keys_want(keys, "fx")) {
+        status_add(json, cap, &off, &first, nc_fx_status_json);
     }
 #if CONFIG_IDF_TARGET_ESP32P4
     if (keys_want(keys, "net")) {
-        status_put_net(part, sizeof(part));
-        jappend(json, sizeof(json), &off, "%s%s", first ? "" : ",", part);
-        first = false;
+        status_add(json, cap, &off, &first, status_put_net);
     }
 #endif
-    if (off < sizeof(json) - 1) {
-        snprintf(json + off, sizeof(json) - off, "}");
+    if (off >= cap - 1) {
+        // 放唔落：**唔可以送半截 JSON 出去**（主機一定 parse 失敗）。
+        // 寧願回一個合法、講清楚發生咩事的物件，叫主機分批問。
+        off = 0;
+        jappend(json, cap, &off,
+                "{\"truncated\":1,\"cap\":%u,"
+                "\"tips\":\"keys=sys,storage,mem,provides,tasks,fx 分批問\"}",
+                (unsigned)NC4_REPLY_JSON_MAX);
+    } else {
+        jappend(json, cap, &off, "}");
     }
-    reply_json(ctx, NC4_CMD_STATUS_RSP, json);
+    reply_send(&r, off);
 }
 
 // ── 0x1811~0x1814 bench 域（照 slave/schema/bench.json）──
@@ -916,16 +1011,31 @@ static void on_bus_stats(nc4_ctx_t *ctx, const nc4_frame_t *f)
         s_rx_fill_us = 0;
         s_rx_frames = 0;
     }
-    static char st[640];
-    nc4_bus_stats_json(st, sizeof(st));
-    char json[720];
-    snprintf(json, sizeof(json),
-             "{\"bus\":%s,\"resync\":%u,\"rx\":{\"f\":%u,\"hub_full\":%u,"
-             "\"sel\":%u,\"sel_to\":%u,\"us\":%llu}}",
-             st, (unsigned)s_rx_resync, (unsigned)s_rx_frames, (unsigned)s_rx_hub_full,
-             (unsigned)s_rx_sel, (unsigned)s_rx_sel_to,
-             (unsigned long long)s_rx_fill_us);
-    reply_json(ctx, NC4_CMD_BUS_RSP, json);
+    nc4_reply_t r;
+    char *json = reply_open(&r, ctx, NC4_CMD_BUS_RSP);
+    const size_t cap = NC4_REPLY_JSON_MAX + 1;
+    size_t off = 0;
+    jappend(json, cap, &off, "{\"bus\":");
+    jchain(json, cap, &off, nc4_bus_stats_json);
+    jappend(json, cap, &off,
+            ",\"resync\":%u,\"rx\":{\"f\":%u,\"hub_full\":%u,"
+            "\"sel\":%u,\"sel_to\":%u,\"us\":%llu}}",
+            (unsigned)s_rx_resync, (unsigned)s_rx_frames, (unsigned)s_rx_hub_full,
+            (unsigned)s_rx_sel, (unsigned)s_rx_sel_to,
+            (unsigned long long)s_rx_fill_us);
+    reply_send(&r, off);
+}
+
+// ── 0x1105 ROUTE_GET → 0x1106 ROUTE_RSP ──
+// 查「邊條線去邊個核」。表本身在 nc4_router，開機時由 system.json 的 nc4.routes[] 填。
+// 以前只有開機 log 印一次，出貨之後查唔到；現在可以隨時問。
+static void on_route_get(nc4_ctx_t *ctx, const nc4_frame_t *f)
+{
+    (void)f;
+    nc4_reply_t r;
+    char *json = reply_open(&r, ctx, NC4_CMD_ROUTE_RSP);
+    const size_t n = nc4_router_json(json, NC4_REPLY_JSON_MAX + 1);
+    reply_send(&r, n);
 }
 
 // ── 慢工作佇列：decode task 只「轉交」，不在這裡做 ──
@@ -1461,7 +1571,10 @@ static int cdc_read(void *arg, uint8_t *buf, size_t cap)
 
 // ── 資源宣告（模組在宣告期寫「我要多少」，main 不介入）──
 // 收/解是否分核（NVS: net/rx_split, net/rx_core；預設 0 / 1）
+#if CONFIG_IDF_TARGET_ESP32P4
+// 只有 P4 有 ETH；S3 上呢兩個永遠冇人讀，唔 guard 就會 -Wunused-variable
 static bool s_eth_ok;              // 硬體/驅動真的起來了才宣告網路資源
+#endif
 static bool s_rx_split = false;   // 預設走已驗證的 PULL；零複製插槽待修
 static uint8_t s_rx_core = 1;
 
@@ -1490,7 +1603,9 @@ static void load_net_tuning(void)
 static void *s_nc4_rx_region;
 static size_t s_nc4_rx_bytes;
 static void *s_uart_rx_region;
-static void *s_tcp_rx_region;
+#if CONFIG_IDF_TARGET_ESP32P4
+static void *s_tcp_rx_region;      // 同上：S3 冇 TCP 通道
+#endif
 static nc_hub_t *s_probe_hub;
 
 // ── 對外提供（provides）──
@@ -1632,16 +1747,28 @@ static esp_err_t task_probe_start(const nc_task_res_view_t *res, int n)
 // 註冊指令（帶擁有權）→ 開 loop。main 只回答「有哪些任務」。
 //
 // 三種 kind 的分工：
-//   system  = 硬體 / driver / 通道（固定順序、不可卸載）
-//   normal  = 一般任務（以前的 service 就是這個；fx 政策層、probe）
+//   system  = 硬體 / driver / 通道 / fx 載入器（固定順序、不可卸載、唔入 tasks.json）
+//   normal  = 一般任務（以前的 service 就是這個；probe、hello）
 //   effect  = 由 .fxe 載入的任務（在 nc_fx_load 裡 attach，不在這張表）
+//
+// 租戶（normal / effect）的 level / affinity 由 /data/config/tasks.json 決定；
+// 未設定 = (0,0) = 唔跑。核心（system）永遠照這裡的宣告跑。
 
 // ① nc4（System L0）：CDC parser 緩衝 + 兩核的解碼任務
+//
+// decode0 / decode1 開唔開，由路由器答：冇線去嗰核就索性唔建立，
+// 6 KB 棧同 parser 緩衝由頭到尾都唔存在。呢個開關係固件宣告，
+// config 改唔到（SYSTEM 任務唔讀 tasks.json，見 nc_task.c 的 load_cfg）。
+static bool nc4_want_core0(void) { return nc4_router_core_used(0); }
+static bool nc4_want_core1(void) { return nc4_router_core_used(1); }
+
 static const nc_task_loop_t s_nc4_loops[] = {
     { .name = "decode0", .fn = nc4_bus_task_entry, .arg = (void *)0,
-      .stack = 6144, .prio = 4, .core = 0, .layer = 1 },
+      .stack = 6144, .prio = 4, .core = 0, .layer = 1,
+      .enabled = nc4_want_core0 },
     { .name = "decode1", .fn = nc4_bus_task_entry, .arg = (void *)1,
-      .stack = 6144, .prio = 4, .core = 1, .layer = 1 },
+      .stack = 6144, .prio = 4, .core = 1, .layer = 1,
+      .enabled = nc4_want_core1 },
 };
 
 static const nc_task_t s_task_nc4 = {
@@ -1682,6 +1809,7 @@ typedef struct {
 static const core_action_t s_core_actions[] = {
     { NC4_CMD_REBOOT,            on_reboot },
     { NC4_CMD_STATUS_GET,        on_status_get },
+    { NC4_CMD_ROUTE_GET,         on_route_get },
     { NC4_CMD_DEV_BENCH,         on_dev_bench },
     { NC4_CMD_HUB_BENCH,         on_hub_bench },
     { NC4_CMD_TX_BENCH,          on_tx_bench },
@@ -1712,6 +1840,79 @@ static void actions_register(nc4_decoder_t *dec)
     ESP_LOGI(TAG, "actions：core %u 條 + ota + file 已註冊（decoder 共 %u 條）",
              (unsigned)(sizeof(s_core_actions) / sizeof(s_core_actions[0])),
              (unsigned)nc4_decoder_count(dec));
+}
+
+// ── 路由器：張表由邊度嚟 ──
+//
+// 真相在 `config/system.json` 的 `nc4.routes[]`（一列一個來源）。這裡只讀「這一列喺邊個核」：
+// `out` 裡第一個 `decodeN` 就是它。冇 `decodeN`（只轉發／丟棄）→ 唔需要本地 decoder，跳過。
+//
+// 今日只實作 `in → decodeN` 這一段；`out` 裡的 link（轉發）同 `outbound` 未實作。
+//
+// 一條 link 的 **RX 解碼核同時就係它的 TX 打包核**：decode 任務收幀、解幀、回覆／打包
+// 都在同一個核上做，所以 `out:["decode1"]` 一次決定兩個方向，唔需要另外寫。
+static int router_from_cfg(nc4_route_t *out, int max)
+{
+    cfg_file_t *cfg = nc_cfg_open("system");
+    if (cfg == NULL) {
+        return 0;
+    }
+    const cJSON *nc4 = cJSON_GetObjectItemCaseSensitive(nc_cfg_root(cfg), "nc4");
+    const cJSON *rows = cJSON_GetObjectItemCaseSensitive(nc4, "routes");
+    int n = 0;
+    const cJSON *row = NULL;
+    cJSON_ArrayForEach(row, rows) {
+        if (n >= max) {
+            break;
+        }
+        const cJSON *in = cJSON_GetObjectItemCaseSensitive(row, "in");
+        if (!cJSON_IsString(in)) {
+            continue;
+        }
+        int core = NC4_ROUTE_NONE;
+        const cJSON *o = NULL;
+        cJSON_ArrayForEach(o, cJSON_GetObjectItemCaseSensitive(row, "out")) {
+            if (!cJSON_IsString(o)) {
+                continue;
+            }
+            const char *s = o->valuestring;
+            if (strncmp(s, "decode", 6) == 0 && (s[6] == '0' || s[6] == '1') && s[7] == '\0') {
+                core = s[6] - '0';
+                break;
+            }
+        }
+        if (core == NC4_ROUTE_NONE) {
+            continue;
+        }
+        out[n].line = in->valuestring;   // router 會複製，指標生命週期唔緊要
+        out[n].core = core;
+        n++;
+    }
+    nc_cfg_close(cfg);
+    if (n > 0) {
+        ESP_LOGI(TAG, "router：由 system.json 讀到 %d 列", n);
+    }
+    return n;
+}
+
+// 冇 config（或 config 冇有效列）時的預設表：照「實際探測到的硬體」決定。
+static int router_defaults(nc4_route_t *out, int max)
+{
+    int n = 0;
+#if !CONFIG_IDF_TARGET_ESP32P4
+    if (n < max) out[n++] = (nc4_route_t){ .line = "CDC", .core = 0 };
+    if (n < max) out[n++] = (nc4_route_t){ .line = "UART", .core = 1 };
+#else
+    if (s_eth_ok) {
+        if (n < max) out[n++] = (nc4_route_t){ .line = "TCP", .core = 0 };
+        if (n < max) out[n++] = (nc4_route_t){ .line = "UART", .core = 1 };
+    } else {
+        // 冇乙太網 → core0 閒置，UART 搬去 core0；core1 索性唔開，
+        // 省一個 6 KB 棧同一個 parser 緩衝。
+        if (n < max) out[n++] = (nc4_route_t){ .line = "UART", .core = 0 };
+    }
+#endif
+    return n;
 }
 
 // ⑤ probe（Normal L3）：開機自測（hub 交換 4 格）
@@ -2331,6 +2532,29 @@ void app_main(void)
     }
 #endif
 
+    // ── 路由器：邊條線由邊個核服務（探測完硬體才決定）──
+    // 呢張表係「線 → 核」唯一嘅決定處；bus 只係查表，唔自己諗。
+    // 冇線去某一核 → 嗰核嘅 decode 任務連棧都唔會建立（見 s_nc4_loops）。
+    {
+        nc4_route_t routes[NC4_ROUTE_MAX];
+        int n = router_from_cfg(routes, NC4_ROUTE_MAX);
+        if (n <= 0) {
+            n = router_defaults(routes, NC4_ROUTE_MAX);
+            ESP_LOGW(TAG, "router：system.json 冇有效 routes[] → 用預設表（%d 列）", n);
+        }
+        const esp_err_t rerr = nc4_router_set(routes, n);
+        if (rerr != ESP_OK) {
+            ESP_LOGE(TAG, "路由表無效: %s → 只保留 core0", esp_err_to_name(rerr));
+            nc4_router_reset();
+        }
+        if (!nc4_router_core_used(0) && !nc4_router_core_used(1)) {
+            nc4_router_keep(0);   // 一條線都冇：至少留一個 decode 任務答「點解冇線」
+        }
+        char rj[256];
+        nc4_router_json(rj, sizeof(rj));
+        ESP_LOGI(TAG, "router: %s", rj);
+    }
+
     // ── ⑤ 宣告（照「實際存在的硬體」決定）──
     // 這個 registry 管兩件事：記憶體（nc_plan）、迴圈（nc_task）。
     // 指令不在這裡 —— 它是 decoder 的表，下面 actions_register() 一次註冊完。
@@ -2425,7 +2649,7 @@ void app_main(void)
         const nc4_bus_cfg_t cdc_bus = {
             .name = "CDC",
             .mode = NC4_BUS_PULL,
-            .core = 0,
+            .core = nc4_router_core_or("CDC", 0),
             .read = cdc_read,
             .send = cdc_send,
             .rx_region = s_nc4_rx_region,     // plan 給的緩衝；NULL = 自己配
@@ -2444,7 +2668,7 @@ void app_main(void)
             const nc4_bus_cfg_t uart_bus = {
                 .name = "UART",
                 .mode = NC4_BUS_PULL,
-                .core = 1,
+                .core = nc4_router_core_or("UART", 1),
                 .read = uart_bus_read,
                 .rx_region = s_uart_rx_region,
                 .rx_region_bytes = 1024,
@@ -2462,7 +2686,7 @@ void app_main(void)
             const nc4_bus_cfg_t tcp_bus = {
                 .name = "TCP",
                 .mode = s_rx_split ? NC4_BUS_PUSH : NC4_BUS_PULL,
-                .core = 0,
+                .core = nc4_router_core_or("TCP", 0),
                 .read = tcp_nc4_read,          // 只在 PULL 模式使用
                 .rx_ring_size = 8205,      // 每格剛好一幀
                 .rx_slots = 8,

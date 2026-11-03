@@ -1,12 +1,14 @@
 // 任務管理器的 host 測試（不需要板子、不需要 IDF）
 //
 // 驗的是「一個 registry 管完全部」那張表：
-//   登記順序（level） / 重名 / 記憶體宣告 / 指令擁有權與衝突 /
-//   attach（runtime 任務） / detach / 不可卸載的 kind / 停止 / provides
+//   登記順序（level） / 重名 / 記憶體宣告 / 接線獨占衝突 /
+//   attach（runtime 任務） / detach / 不可卸載的 kind / 停止 / provides /
+//   config（未設定 = (0,0)、affinity 搬核、補寫）
 #include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
 
+#include "cfg_stub.h"
 #include "nc4.h"
 #include "nc_task.h"
 
@@ -15,6 +17,7 @@ int      mod_stub_plan_count(void);
 const char *mod_stub_plan_name(int i);
 void     mod_stub_plan_dump(void);
 bool     mod_stub_loop_running(const char *name);
+void     mod_stub_loop_reset(void);
 const char *mod_stub_decoder_owner(const nc4_decoder_t *decoder, uint16_t cmd);
 size_t   mod_stub_decoder_count(const nc4_decoder_t *decoder);
 
@@ -146,6 +149,49 @@ static const nc_task_t s_mod_system_attach = {
     .name = "sneaky", .kind = NC_TASK_SYSTEM, .level = 5,
 };
 
+// ── 一個帶 loop 的租戶任務：驗 config 的 level / affinity ──
+static const nc_task_loop_t s_tenant_loops[] = {
+    { .name = "tenant_loop", .fn = loop_fn, .stack = 2048, .prio = 2,
+      .core = 0, .layer = 1 },
+};
+static const nc_task_t s_mod_tenant = {
+    .name = "tenant", .kind = NC_TASK_NORMAL, .level = 1,
+    .loops = s_tenant_loops, .nloops = 1,
+};
+
+// 每個 case 一份假 tasks.json（aff = -1 代表 JSON 的 null）
+static const cfg_stub_task_t s_cfg_core0[] = {
+    { .name = "tenant", .level = 1, .has_level = true, .aff = { 1, 0 }, .has_aff = true },
+};
+static const cfg_stub_task_t s_cfg_core1[] = {
+    { .name = "tenant", .level = 1, .has_level = true, .aff = { 0, 1 }, .has_aff = true },
+};
+static const cfg_stub_task_t s_cfg_null1[] = {
+    { .name = "tenant", .level = 1, .has_level = true, .aff = { -1, 1 }, .has_aff = true },
+};
+static const cfg_stub_task_t s_cfg_null2[] = {
+    { .name = "tenant", .level = 1, .has_level = true, .aff = { -1, -1 }, .has_aff = true },
+};
+static const cfg_stub_task_t s_cfg_off[] = {
+    { .name = "tenant", .level = -1, .has_level = true, .aff = { 1, 0 }, .has_aff = true },
+};
+
+// 換一份 config，重跑一次完整開機（登記 → 宣告 → 啟動 → 開 loop）。
+static int tenant_boot(const cfg_stub_task_t *cfg, int n)
+{
+    nc_task_reset();
+    mod_stub_loop_reset();
+    if (cfg != NULL) {
+        cfg_stub_set(cfg, n);
+    } else {
+        cfg_stub_clear();
+    }
+    nc_task_register(&s_mod_tenant);
+    nc_task_declare_all();
+    nc_task_start_all();
+    return nc_task_boot();
+}
+
 int main(void)
 {
     static char json[4096];
@@ -238,6 +284,40 @@ int main(void)
     CHECK(!nc_task_kind_parse("bogus", &k), "未知 kind 回 false");
     CHECK(nc_task_kind_is_runtime(NC_TASK_EFFECT), "effect 可 runtime");
     CHECK(!nc_task_kind_is_runtime(NC_TASK_SYSTEM), "system 不可 runtime");
+
+    case_begin("config：未設定 → (0,0)，條目照報但 loop 唔開");
+    CHECK(tenant_boot(NULL, 0) == 0, "沒有任何 loop 被開");
+    CHECK(cfg_stub_appended_count() == 1, "缺條目 → 補寫 1 條（實際 %d）",
+          cfg_stub_appended_count());
+    CHECK(cfg_stub_appended(0) != NULL &&
+          strstr(cfg_stub_appended(0), "\"affinity\": [0, 0]") != NULL,
+          "補寫的條目是 (0,0)：%s", cfg_stub_appended(0) ? cfg_stub_appended(0) : "(null)");
+    CHECK(nc_task_started("tenant"), "on_start 照跑（started = 1）");
+    CHECK(!mod_stub_loop_running("tenant_loop"), "loop 沒開");
+
+    case_begin("config：affinity [1,0] → 跑 core 0");
+    CHECK(tenant_boot(s_cfg_core0, 1) == 1, "loop 開了");
+    CHECK(mod_stub_loop_running("tenant_loop"), "tenant_loop 在跑");
+    nc_task_json(json, sizeof(json));
+    CHECK(json_has(json, "tenant", "\"core\":0"), "跑在 core 0");
+
+    case_begin("config：affinity [0,1] → 搬到 core 1");
+    CHECK(tenant_boot(s_cfg_core1, 1) == 1, "loop 開了");
+    nc_task_json(json, sizeof(json));
+    CHECK(json_has(json, "tenant", "\"core\":1"), "宣告 core 0 → 實際 core 1");
+
+    case_begin("config：affinity [null,1] → 未寫的那格當 0");
+    CHECK(tenant_boot(s_cfg_null1, 1) == 1, "loop 開了");
+    nc_task_json(json, sizeof(json));
+    CHECK(json_has(json, "tenant", "\"core\":1"), "null 當 0 → (0,1) → core 1");
+
+    case_begin("config：affinity [null,null] → (0,0)，唔跑");
+    CHECK(tenant_boot(s_cfg_null2, 1) == 0, "沒有 loop 被開");
+    CHECK(!mod_stub_loop_running("tenant_loop"), "loop 沒開");
+
+    case_begin("config：level = -1 → 完全唔啟動");
+    CHECK(tenant_boot(s_cfg_off, 1) == 0, "沒有 loop 被開");
+    CHECK(!nc_task_started("tenant"), "沒有 started（唔 declare、唔啟動）");
 
     printf("\n%s（%d 個失敗）\n", s_fail ? "FAILED" : "ALL PASS", s_fail);
     return s_fail ? 1 : 0;

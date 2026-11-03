@@ -179,12 +179,22 @@ uint32_t nc_task_rt_wrap_avg_us(const nc_task_rt_t *rt)
 bool mod_stub_loop_running(const char *name)
 {
     for (int i = 0; i < LOOP_MAX; i++) {
-        if (s_running[i] != NULL && s_running[i]->def->name != NULL &&
+        if (s_running[i] != NULL && s_running[i]->def != NULL &&
+            s_running[i]->def->name != NULL &&
             strcmp(s_running[i]->def->name, name) == 0) {
             return true;
         }
     }
     return false;
+}
+
+// nc_task_reset() 之後 slot 會被清空，s_running 裡的指標就懸空了 —— 測試換 case
+// 時要先叫這個，否則下一次查詢會踩到已清空的 def。
+void mod_stub_loop_reset(void)
+{
+    for (int i = 0; i < LOOP_MAX; i++) {
+        s_running[i] = NULL;
+    }
 }
 
 // ── nc4 decoder ──

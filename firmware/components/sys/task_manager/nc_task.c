@@ -38,6 +38,7 @@ typedef struct {
     int nreq;
 
     int nclaims;
+    uint32_t claim_off;        // bit k = 第 k 條 claim 不算（獨占衝突，audit 之後有效）
     int nprov;
 
     nc_task_rt_t loops[NC_TASK_LOOPS_MAX];
@@ -358,40 +359,72 @@ static int declare_one(tm_slot_t *s)
 
     s->nclaims = (t->claims != NULL) ? (t->nclaims > NC_TASK_CLAIM_MAX
                                             ? NC_TASK_CLAIM_MAX : t->nclaims) : 0;
+    s->claim_off = 0;
     return declared;
 }
 
 // 帳本：重複的指令、衝突的接線。壞的一律「後者不算」。
+//
+// 以前的寫法在迴圈裡直接 `nclaims--`：外層 k 會跳過一條，而 nclaims 縮短之後
+// 尾段根本沒檢查到 —— 所以第二個衝突永遠不會被發現。而且「後者不算」應該是
+// 「這條 claim 不算」，不是「任務少一個 claim」。現在只記錄，不改 nclaims。
 static void audit(void)
 {
+    int conflicts = 0;
     for (int i = 0; i < s_count; i++) {
         const nc_task_t *ti = s_slots[i].def;
-        if (ti->claims == NULL) {
+        s_slots[i].claim_off = 0;
+        const int nk = s_slots[i].nclaims;
+        if (ti->claims == NULL || nk <= 0) {
             continue;
         }
-        for (int k = 0; k < s_slots[i].nclaims; k++) {
+        for (int k = 0; k < nk; k++) {
             const nc_task_claim_t *ci = &ti->claims[k];
-            if (!ci->exclusive) {
+            if (!ci->exclusive || ci->id == NULL) {
                 continue;
             }
-            for (int j = 0; j < i; j++) {
+            bool hit = false;
+            for (int j = 0; j < i && !hit; j++) {
                 const nc_task_t *tj = s_slots[j].def;
                 if (tj->claims == NULL) {
                     continue;
                 }
                 for (int q = 0; q < s_slots[j].nclaims; q++) {
+                    // 對方自己也被人擋掉的那條，不構成衝突
+                    if (s_slots[j].claim_off & (1u << q)) {
+                        continue;
+                    }
                     const nc_task_claim_t *cj = &tj->claims[q];
-                    if (cj->exclusive && strcmp(ci->id, cj->id) == 0) {
-                        ESP_LOGE(TAG, "CONFLICT %s：%s 與 %s 都要獨占 → %s 不算",
+                    if (cj->exclusive && cj->id != NULL &&
+                        strcmp(ci->id, cj->id) == 0) {
+                        ESP_LOGE(TAG, "CONFLICT %s：%s 與 %s 都要獨占 → %s 這條 claim 不算",
                                  ci->id, s_slots[j].name, s_slots[i].name, s_slots[i].name);
-                        s_slots[i].nclaims--;
-                        q = s_slots[j].nclaims;
+                        hit = true;
                         break;
                     }
                 }
             }
+            if (hit) {
+                s_slots[i].claim_off |= (1u << k);
+                conflicts++;
+            }
         }
     }
+    if (conflicts > 0) {
+        ESP_LOGE(TAG, "claim 衝突共 %d 條（上面逐條列出）", conflicts);
+    }
+}
+
+// 真正生效的 claim 數（被擋掉的不算）
+static int active_claims(const tm_slot_t *s)
+{
+    int n = 0;
+    for (int k = 0; k < s->nclaims; k++) {
+        if (!(s->claim_off & (1u << k))) {
+            n++;
+        }
+    }
+    return n;
 }
 
 // 讀 tasks.json：只取 level / affinity。名字對不上 → 用固件預設（cfg_seen = false）。
@@ -405,7 +438,8 @@ static void load_cfg(void)
         tm_slot_t *s = &s_slots[i];
         s->cfg_seen = false;
         s->cfg_level = s->def->level;
-        s->cfg_aff[0] = s->cfg_aff[1] = -1;
+        // 租戶：用戶未設定 = (0,0) = 唔跑。核心：-1 = 唔受 config 管（照 C 宣告）。
+        s->cfg_aff[0] = s->cfg_aff[1] = (s->def->kind == NC_TASK_SYSTEM) ? -1 : 0;
 
         // 核心（房東）不受租約約束：SYSTEM 任務永遠照 C 宣告跑，config 管不到它。
         if (s->def->kind == NC_TASK_SYSTEM) {
@@ -430,8 +464,9 @@ static void load_cfg(void)
             if (cJSON_IsArray(af) && cJSON_GetArraySize(af) == 2) {
                 const cJSON *a0 = cJSON_GetArrayItem(af, 0);
                 const cJSON *a1 = cJSON_GetArrayItem(af, 1);
-                s->cfg_aff[0] = cJSON_IsNumber(a0) ? a0->valueint : -1;
-                s->cfg_aff[1] = cJSON_IsNumber(a1) ? a1->valueint : -1;
+                // 非數字（null / 字串 / 缺）一律當 0：未設定 = 唔准跑嗰核。
+                s->cfg_aff[0] = cJSON_IsNumber(a0) ? a0->valueint : 0;
+                s->cfg_aff[1] = cJSON_IsNumber(a1) ? a1->valueint : 0;
             }
             break;
         }
@@ -449,6 +484,8 @@ static void load_cfg(void)
 
 // 固件有、config 沒有 → 補一條進 tasks.json（只加不改）。
 // 只做租戶（normal / effect）；核心（system）永遠唔寫入 config。
+// 補寫的條目一律 (0,0)：新任務預設關閉，要跑就自己改 tasks.json。
+// （與「未設定 = (0,0)」一致，所以補寫前後行為一樣，唔會「重開機先跑」。）
 static void append_missing_to_cfg(void)
 {
     for (int i = 0; i < s_count; i++) {
@@ -456,16 +493,10 @@ static void append_missing_to_cfg(void)
         if (!s->used || s->cfg_seen || s->def->kind == NC_TASK_SYSTEM) {
             continue;
         }
-        int a0 = 1, a1 = 0;
-        if (s->def->loops != NULL && s->def->nloops > 0) {
-            const int core = s->def->loops[0].core;
-            a0 = (core == 0) ? 1 : 0;
-            a1 = (core == 1) ? 1 : 0;
-        }
         char obj[160];
         snprintf(obj, sizeof(obj),
-                 "{ \"name\": \"%s\", \"level\": %d, \"affinity\": [%d, %d] }",
-                 s->name, s->cfg_level, a0, a1);
+                 "{ \"name\": \"%s\", \"level\": %d, \"affinity\": [0, 0] }",
+                 s->name, s->cfg_level);
         if (nc_cfg_append_obj("tasks", "tasks", obj)) {
             s->cfg_seen = true;          // 補過就唔好再補
             ESP_LOGI(TAG, "cfg 補寫 %s", s->name);
@@ -523,19 +554,35 @@ static void prepare_loops(tm_slot_t *s)
         if (d->name == NULL || d->fn == NULL) {
             continue;
         }
+        // layer 超出範圍 = 永遠不會被 nc_task_boot() 撿到（它只掃 0..LAYERS-1）。
+        // 以前係靜靜咁唔啟動，查半天；現在直接報錯，並且不建立這個 loop。
+        if (d->layer < 0 || d->layer >= NC_TASK_LAYERS) {
+            ESP_LOGE(TAG, "[%s/%s] layer=%d 超出 0..%d → 這個 loop 永遠不會啟動",
+                     s->name, d->name, d->layer, NC_TASK_LAYERS - 1);
+            continue;
+        }
         nc_task_rt_t *rt = &s->loops[s->nloops++];
         memset(rt, 0, sizeof(*rt));
         rt->def = d;
         rt->enabled = true;
         rt->core = d->core;      // 完全照宣告；框架不改你的核
         if (s->cfg_aff[0] >= 0 || s->cfg_aff[1] >= 0) {
-            const int a0 = (s->cfg_aff[0] < 0) ? 1 : s->cfg_aff[0];
-            const int a1 = (s->cfg_aff[1] < 0) ? 1 : s->cfg_aff[1];
+            // 未寫的那一格當 0（不是 1）：null / 缺欄位 = 唔准跑嗰核。
+            const int a0 = (s->cfg_aff[0] < 0) ? 0 : (s->cfg_aff[0] != 0);
+            const int a1 = (s->cfg_aff[1] < 0) ? 0 : (s->cfg_aff[1] != 0);
             if ((a0 + a1) == 0) {
-                rt->enabled = false;             // 兩核都唔要 → 唔跑
+                rt->enabled = false;             // (0,0) → 唔跑（on_start 照跑，只係 loop 唔開）
+            } else if (a0 && a1) {
+                ESP_LOGW(TAG, "[%s] affinity=(1,1) 唔合法（一個任務只跑一核）→ 照宣告 core %d",
+                         s->name, rt->core);
             } else if (!((rt->core == 0 && a0) || (rt->core == 1 && a1))) {
                 rt->core = a0 ? 0 : 1;           // 宣告的核唔准 → 搬去准嗰個
             }
+        }
+        // 固件自己話事嘅開關（房東用）。放喺 affinity 之後：租約管唔到呢個，
+        // 因為 SYSTEM 任務根本冇讀過 tasks.json（見 load_cfg）。
+        if (rt->enabled && d->enabled != NULL && !d->enabled()) {
+            rt->enabled = false;
         }
     }
 }
@@ -740,29 +787,6 @@ esp_err_t nc_task_enable(const char *name, bool on)
     return ESP_OK;
 }
 
-esp_err_t nc_task_set_core(const char *name, int core)
-{
-    tm_slot_t *s = find_slot(name);
-    if (s == NULL) {
-        return ESP_ERR_NOT_FOUND;
-    }
-    if (core != NC_TASK_CORE_ANY && core != 0 && core != 1) {
-        return ESP_ERR_INVALID_ARG;
-    }
-    for (int i = 0; i < s->nloops; i++) {
-        nc_task_rt_t *rt = &s->loops[i];
-        const bool was_running = rt->started;
-        if (was_running && nc_task_rt_stop(rt, 1000) != ESP_OK) {
-            return ESP_ERR_TIMEOUT;
-        }
-        rt->core = core;
-        if (was_running && nc_task_rt_start(rt) != ESP_OK) {
-            return ESP_FAIL;
-        }
-    }
-    return ESP_OK;
-}
-
 bool nc_task_exit_requested(void)
 {
     return nc_task_rt_exit_requested();
@@ -856,7 +880,7 @@ size_t nc_task_json(char *buf, size_t cap)
                       s->cfg_seen ? s->cfg_level : t->level,
                       s->cfg_seen ? 1 : 0, s->cfg_level,
                       s->started ? 1 : 0, s->runtime ? 1 : 0,
-                      s->nreq, s->nclaims, s->nprov);
+                      s->nreq, active_claims(s), s->nprov);
         first = false;
         for (int k = 0; k < s->nloops && off < cap - 1; k++) {
             const nc_task_rt_t *rt = &s->loops[k];

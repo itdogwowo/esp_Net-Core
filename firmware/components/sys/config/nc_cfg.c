@@ -248,12 +248,38 @@ bool nc_cfg_append_obj(const char *layer, const char *array_key, const char *obj
     }
     const size_t n = fread(src, 1, CFG_MAX - 1, f);
     src[n] = '\0';
+    // 檔案比 CFG_MAX-1 大：讀進來的只是前半段，JSON 一定不完整。
+    // 以前會照樣在殘缺的字串裡找 key，找到就據此寫出一份壞檔。
+    const bool too_big = (n == CFG_MAX - 1) && (fgetc(f) != EOF);
     fclose(f);
+    if (too_big) {
+        ESP_LOGE(TAG, "%s 超過 %d B 上限 → 不追加（請先縮細個檔）", path, CFG_MAX - 1);
+        free(src);
+        return false;
+    }
 
     char key[48];
     snprintf(key, sizeof(key), "\"%s\"", array_key);
-    const char *k = strstr(src, key);
-    const char *lb = (k != NULL) ? strchr(k, '[') : NULL;
+    // 要找的是「key 後面接 : 再接 [」那一個，不是第一個同名子串 ——
+    // 字串值裡出現 "tasks" 也會命中，以前的 strstr 就是這樣中招。
+    const char *lb = NULL;
+    for (const char *k = strstr(src, key); k != NULL; k = strstr(k + 1, key)) {
+        const char *p = k + strlen(key);
+        while (*p == ' ' || *p == '\t' || *p == '\r' || *p == '\n') {
+            p++;
+        }
+        if (*p != ':') {
+            continue;
+        }
+        p++;
+        while (*p == ' ' || *p == '\t' || *p == '\r' || *p == '\n') {
+            p++;
+        }
+        if (*p == '[') {
+            lb = p;
+            break;
+        }
+    }
     const char *rb = (lb != NULL) ? find_array_end(lb) : NULL;
     if (rb == NULL) {
         free(src);
