@@ -69,6 +69,7 @@
 #include "nc_store.h"
 #include "nc_file_action.h"
 #include "nc_fx.h"
+#include "nc_wifi.h"
 
 #include "tinyusb.h"
 #include "tinyusb_cdc_acm.h"
@@ -333,6 +334,12 @@ static esp_err_t storage_init(void)
     return ESP_OK;
 }
 
+// ── USB（TinyUSB）只在 S3 這版存在 ──
+// P4 的 USB-C 只接 USB-Serial-JTAG，沒有 OTG → 這幾個函式永遠不會被呼叫。
+// 但它們在初始器裡被取址（cdc_bus.read/.send），linker 就一路把 tinyusb
+// 拉進來：_cdcd_itf 12,532 + _mscd_epbuf 8,192 + _cdcd_epbuf 1,024 ≈ 21.7 KB。
+// 所以整個 P4 分支連「定義」都唔編 —— 唔單止唔呼叫。
+#if !CONFIG_IDF_TARGET_ESP32P4
 static esp_err_t usb_init(void)
 {
     tinyusb_config_t tusb_cfg = TINYUSB_DEFAULT_CONFIG();
@@ -362,6 +369,7 @@ static esp_err_t cdc_send(void *arg, const uint8_t *frame, size_t len)
     }
     return tinyusb_cdcacm_write_flush(TINYUSB_CDC_ACM_0, 0);
 }
+#endif   // !CONFIG_IDF_TARGET_ESP32P4
 
 // str_u16len 編碼（與 schema 的 str_u16len 一致：2B 長度前綴 + UTF-8）
 //
@@ -594,8 +602,12 @@ static void on_status_get(nc4_ctx_t *ctx, const nc4_frame_t *f)
 
     if (strcmp(keys, "?") == 0) {
         reply_json(ctx, NC4_CMD_STATUS_RSP,
-                   "{\"keys\":[\"sys\",\"mem\",\"tasks\",\"provides\","
-                   "\"storage\",\"fx\"]}");
+                   "{\"keys\":[\"sys\",\"storage\",\"mem\",\"provides\","
+                   "\"tasks\",\"fx\",\"wifi\""
+#if CONFIG_IDF_TARGET_ESP32P4
+                   ",\"net\""
+#endif
+                   "]}");
         return;
     }
 
@@ -627,6 +639,9 @@ static void on_status_get(nc4_ctx_t *ctx, const nc4_frame_t *f)
     }
     if (keys_want(keys, "fx")) {
         status_add(json, cap, &off, &first, nc_fx_status_json);
+    }
+    if (keys_want(keys, "wifi")) {
+        status_add(json, cap, &off, &first, nc_wifi_json);
     }
 #if CONFIG_IDF_TARGET_ESP32P4
     if (keys_want(keys, "net")) {
@@ -1267,11 +1282,20 @@ typedef struct {
     volatile int64_t deadline_us;
 } tx_bench_t;
 
+// 8 KB 填充內容由 PSRAM 出（第一次量測才配，之後重用）。
+// 以前係 static uint8_t payload[8192]：一個測試指令用唔到，卻長期佔住 SRAM。
+static uint8_t *s_tx_payload;
+
 static void tx_bench_packer(void *arg)
 {
     tx_bench_t *b = arg;
-    static uint8_t payload[NC4_MAX_PAYLOAD];   // 靜態：任務堆疊只有 4 KB
-    memset(payload, 0xA5, sizeof(payload));
+    uint8_t *payload = s_tx_payload;
+    if (payload == NULL) {                 // 呼叫端已擋；這裡再保險一次
+        b->exit = 3;
+        b->done = true;
+        vTaskDelete(NULL);
+        return;
+    }
     uint32_t spins = 0;
     for (uint32_t i = 0; i < b->frames; i++) {
         uint8_t *p = nc_hub_write_begin(b->hub);
@@ -1372,6 +1396,19 @@ static void on_tx_bench(nc4_ctx_t *ctx, const nc4_frame_t *f)
         b.size = size;
         b.total = total;
         b.deadline_us = esp_timer_get_time() + 10 * 1000 * 1000;
+        if (s_tx_payload == NULL) {
+            s_tx_payload = heap_caps_malloc(NC4_MAX_PAYLOAD, MALLOC_CAP_SPIRAM);
+            if (s_tx_payload == NULL) {
+                s_tx_payload = malloc(NC4_MAX_PAYLOAD);   // 冇 PSRAM 就照舊
+            }
+            if (s_tx_payload != NULL) {
+                memset(s_tx_payload, 0xA5, NC4_MAX_PAYLOAD);
+            }
+        }
+        if (s_tx_payload == NULL) {
+            reply_json(ctx, NC4_CMD_HUB_RSP, "{\"err\":\"oom\"}");
+            return;
+        }
         TaskHandle_t pk = NULL;
         xTaskCreatePinnedToCore(tx_bench_packer, "tx_pack", 4096, &b, 2, &pk, 1);
         if (pk == NULL) {
@@ -1559,6 +1596,7 @@ static esp_err_t uart_loop_init(uint32_t baud)
     return ESP_OK;
 }
 
+#if !CONFIG_IDF_TARGET_ESP32P4
 static int cdc_read(void *arg, uint8_t *buf, size_t cap)
 {
     (void)arg;
@@ -1568,6 +1606,7 @@ static int cdc_read(void *arg, uint8_t *buf, size_t cap)
     }
     return (int)n;
 }
+#endif
 
 // ── 資源宣告（模組在宣告期寫「我要多少」，main 不介入）──
 // 收/解是否分核（NVS: net/rx_split, net/rx_core；預設 0 / 1）
@@ -1633,39 +1672,91 @@ static const nc_task_provide_t s_fx_provides[] = {
       .json = nc_fx_info_json },
 };
 
-// ── nc4：CDC 那條線的 parser 緩衝（P4 目前沒開 USB，先留著）──
+// ── link 啟用狀態：config 是唯一真相 ──
+// system.json 的 nc4.links[] 每一條有 "enable"（缺省 = 1，向後相容）。
+// 開機讀到之後就決定「這條線存不存在」：
+//   冇啟用 → **唔宣告緩衝**（0 B）、唔建立 bus、路由表跳過嗰行
+//   要中途開啟 → 改 config 再重啟（runtime 開開關關正是碎片來源）
+//
+// 為什麼要喺宣告之前問：宣告就係「向 plan 要記憶體」，
+// 一旦要咗就開機到 reset 都收唔返。
+static bool link_enabled(const char *name)
+{
+    cfg_file_t *cfg = nc_cfg_open("system");
+    if (cfg == NULL) {
+        return true;                 // 讀不到 → 照硬體探測結果
+    }
+    const cJSON *nc4 = cJSON_GetObjectItemCaseSensitive(nc_cfg_root(cfg), "nc4");
+    const cJSON *links = cJSON_GetObjectItemCaseSensitive(nc4, "links");
+    bool en = true;
+    bool found = false;
+    const cJSON *it = NULL;
+    cJSON_ArrayForEach(it, links) {
+        const cJSON *nm = cJSON_GetObjectItemCaseSensitive(it, "name");
+        if (!cJSON_IsString(nm) || nm->valuestring == NULL ||
+            strcmp(nm->valuestring, name) != 0) {
+            continue;
+        }
+        found = true;
+        const cJSON *e = cJSON_GetObjectItemCaseSensitive(it, "enable");
+        en = cJSON_IsNumber(e) ? (e->valueint != 0)
+             : (cJSON_IsBool(e) ? cJSON_IsTrue(e) : true);
+        break;
+    }
+    nc_cfg_close(cfg);
+    if (!found) {
+        ESP_LOGW(TAG, "link %s：links[] 冇呢一條 → 當啟用（要關就寫 \"enable\": 0）", name);
+    }
+    return en;
+}
+
+// ── nc4：CDC 那條線的 parser 緩衝 ──
+// P4 冇 USB OTG → CDC 永遠唔會建立，所以**唔宣告**（以前照宣告 8,205 B，永遠冇人用）。
 static int task_nc4_declare(nc_task_res_t *out, int max)
 {
-    if (max < 1) {
+#if CONFIG_IDF_TARGET_ESP32P4
+    (void)out;
+    (void)max;
+    return 0;
+#else
+    if (max < 1 || !link_enabled("CDC")) {
         return 0;
     }
     out[0] = (nc_task_res_t){
         .name = "nc4.rx", .bytes = NC4_MAX_FRAME, .cls = NC_PLAN_INTERNAL, .align = 32,
     };
     return 1;
+#endif
 }
 
 static esp_err_t task_nc4_start(const nc_task_res_view_t *res, int n)
 {
+    (void)res;
     (void)n;
-    s_nc4_rx_region = res[0].ptr;
-    s_nc4_rx_bytes = res[0].len;
-    ESP_LOGI(TAG, "svc nc4: parser 緩衝 ok");
+    // 用 plan 名字取，不用 view 次序：冇宣告 / 被 shed 就係 NULL（天然嘅「冇就唔要」）
+    s_nc4_rx_region = nc_plan_get("nc4.rx");
+    s_nc4_rx_bytes = (s_nc4_rx_region != NULL) ? NC4_MAX_FRAME : 0;
+    if (s_nc4_rx_region != NULL) {
+        ESP_LOGI(TAG, "svc nc4: parser 緩衝 ok");
+    } else {
+        ESP_LOGW(TAG, "svc nc4: 冇 parser 緩衝（CDC 未啟用 / 本板冇 USB）");
+    }
     return ESP_OK;
 }
 
 // ── net：UART / TCP 的 parser 緩衝（TCP 只在 P4）──
+// 只宣告**真的會建立**嘅 bus；冇啟用就 0 B。
 static int task_net_declare(nc_task_res_t *out, int max)
 {
     int n = 0;
-    if (n < max) {
+    if (n < max && link_enabled("UART")) {
         out[n++] = (nc_task_res_t){
             .name = "uart.rx", .bytes = 1024, .cls = NC_PLAN_INTERNAL, .align = 32,
         };
     }
 #if CONFIG_IDF_TARGET_ESP32P4
-    // ★ 只有「ETH 真的起來」才宣告 TCP 的緩衝 —— 宣告是照硬體決定，不是照 config
-    if (s_eth_ok && n < max) {
+    // 兩個條件都要：硬體真的起來（ETH）＋ config 有啟用（TCP）
+    if (n < max && s_eth_ok && link_enabled("TCP")) {
         out[n++] = (nc_task_res_t){
             // 2 幀：跨讀時需要餘裕
             .name = "tcp.rx", .bytes = 16410, .cls = NC_PLAN_INTERNAL, .align = 32,
@@ -1677,13 +1768,20 @@ static int task_net_declare(nc_task_res_t *out, int max)
 
 static esp_err_t task_net_start(const nc_task_res_view_t *res, int n)
 {
-    s_uart_rx_region = res[0].ptr;
+    (void)res;
+    (void)n;
+    s_uart_rx_region = nc_plan_get("uart.rx");
 #if CONFIG_IDF_TARGET_ESP32P4
-    if (n > 1) {
-        s_tcp_rx_region = res[1].ptr;
-    }
+    s_tcp_rx_region = nc_plan_get("tcp.rx");
 #endif
-    ESP_LOGI(TAG, "svc net: UART/TCP parser 緩衝 ok");
+    ESP_LOGI(TAG, "svc net: parser 緩衝 uart=%s tcp=%s",
+             s_uart_rx_region ? "ok" : "-",
+#if CONFIG_IDF_TARGET_ESP32P4
+             s_tcp_rx_region ? "ok" : "-"
+#else
+             "-"
+#endif
+    );
     return ESP_OK;
 }
 
@@ -1867,6 +1965,13 @@ static int router_from_cfg(nc4_route_t *out, int max)
         }
         const cJSON *in = cJSON_GetObjectItemCaseSensitive(row, "in");
         if (!cJSON_IsString(in)) {
+            continue;
+        }
+        // 呢條 link 冇啟用 → 佢唔會存在，路由都唔應該令嗰個核「有嘢做」
+        const char *inname = in->valuestring;
+        if (strcmp(inname, "nctx") != 0 && strcmp(inname, "outbound") != 0 &&
+            !link_enabled(inname)) {
+            ESP_LOGW(TAG, "router：%s 未啟用（links[].enable=0）→ 跳過呢行", inname);
             continue;
         }
         int core = NC4_ROUTE_NONE;
@@ -2350,8 +2455,18 @@ static esp_err_t net_eth_start(void)
 static void tcp_src_task(void *arg)
 {
     const int port = (int)(intptr_t)arg;
-    static uint8_t txbuf[4096];   // 對齊 lwIP TCP_SND_BUF，避免 send 阻塞
-    memset(txbuf, 0x5A, sizeof(txbuf));
+    // 4 KB 送出緩衝由 PSRAM 出：這條 src 線只係吞吐測試用，
+    // 唔應該為咗量一次而長期霸住 SRAM。
+    uint8_t *txbuf = heap_caps_malloc(4096, MALLOC_CAP_SPIRAM);
+    if (txbuf == NULL) {
+        txbuf = malloc(4096);
+    }
+    if (txbuf == NULL) {
+        ESP_LOGE(TAG, "src%d：送出緩衝配唔到", port);
+        vTaskDelete(NULL);
+        return;
+    }
+    memset(txbuf, 0x5A, 4096);
 
     int ls = socket(AF_INET, SOCK_STREAM, 0);
     int yes = 1;
@@ -2390,8 +2505,8 @@ static void tcp_src_task(void *arg)
         size_t sent = 0;
         while (sent < total) {
             size_t want = total - sent;
-            if (want > sizeof(txbuf)) {
-                want = sizeof(txbuf);
+            if (want > 4096) {
+                want = 4096;
             }
             int w = send(c, txbuf, want, 0);
             if (w <= 0) {
@@ -2584,10 +2699,19 @@ void app_main(void)
     avail[NC_PLAN_PSRAM] = heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM);
     esp_err_t perr = nc_plan_commit(avail, false);
     {
-        static char pj[700];
-        nc_plan_json(pj, sizeof(pj));
-        ESP_LOGI(TAG, "plan(%s): %s", esp_err_to_name(perr), pj);
+        // 開機一次用：唔應該為咗印一行 log 長期佔住 700 B SRAM。
+        char *pj = malloc(700);
+        if (pj != NULL) {
+            nc_plan_json(pj, 700);
+            ESP_LOGI(TAG, "plan(%s): %s", esp_err_to_name(perr), pj);
+            free(pj);
+        }
     }
+
+    // ── Wi-Fi：兩道閘（編譯期 CONFIG_NETCORE_WIFI ＋ network.json wifi.enable）──
+    // 放在 plan commit 之後：核心通道先要記憶體，Wi-Fi 係可選項。
+    // 未啟用時 nc_wifi_boot() 只回報狀態，一個 byte 都唔配。
+    nc_wifi_boot();
 
     // ── ③ 任務啟動：資源 → on_start → 指令 → 準備 loop（還不開）──
     nc_task_start_all();
@@ -2601,9 +2725,12 @@ void app_main(void)
     }
 
     {
-        static char ledger[900];
-        nc_task_ledger(ledger, sizeof(ledger));
-        ESP_LOGI(TAG, "帳本：\n%s", ledger);
+        char *ledger = malloc(900);
+        if (ledger != NULL) {
+            nc_task_ledger(ledger, 900);
+            ESP_LOGI(TAG, "帳本：\n%s", ledger);
+            free(ledger);
+        }
     }
 
 #if CONFIG_IDF_TARGET_ESP32P4
@@ -2636,7 +2763,13 @@ void app_main(void)
             // NC4 over WebSocket（訊息即一幀；直接解析，不經 bus）
             esp_err_t werr = nc4_ws_start(s_decoder, 8080);
             ESP_LOGW(TAG, "NC4 over WS: %s", esp_err_to_name(werr));
-            esp_err_t uerr = nc4_udp_start(s_decoder, 6001);
+            // UDP 可以喺 config 關掉；WS 暫時唔提供關閉（同一個 httpd 亦係 HTTP 設定頁）
+            esp_err_t uerr = ESP_ERR_NOT_SUPPORTED;
+            if (link_enabled("UDP")) {
+                uerr = nc4_udp_start(s_decoder, 6001);
+            } else {
+                ESP_LOGW(TAG, "UDP：links[].enable=0 → 唔建立（0 B）");
+            }
             ESP_LOGW(TAG, "NC4 over UDP: %s", esp_err_to_name(uerr));
             nc4_http_register(nc4_ws_httpd());
         } else {
@@ -2646,22 +2779,28 @@ void app_main(void)
     }
 
     if (s_decoder != NULL) {
-        const nc4_bus_cfg_t cdc_bus = {
-            .name = "CDC",
-            .mode = NC4_BUS_PULL,
-            .core = nc4_router_core_or("CDC", 0),
-            .read = cdc_read,
-            .send = cdc_send,
-            .rx_region = s_nc4_rx_region,     // plan 給的緩衝；NULL = 自己配
-            .rx_region_bytes = s_nc4_rx_bytes,
-            .read_chunk = 1024,   // 一次多讀一點，配合加大的 TX/RX ring
-            // 其餘留 0 = 用框架預設；實際值之後從 config.json 餵
-        };
 #if CONFIG_IDF_TARGET_ESP32P4
-        esp_err_t berr = ESP_ERR_NOT_SUPPORTED;   // P4 這版還沒啟 USB
-        (void)cdc_bus;
+        // P4 冇 USB OTG：連 initializer 都唔要有 ——
+        // 一旦喺 initializer 取 cdc_read/cdc_send 的址，linker 就會拉入 tinyusb（21.7 KB）。
+        esp_err_t berr = ESP_ERR_NOT_SUPPORTED;
 #else
-        esp_err_t berr = nc4_bus_add(s_decoder, &cdc_bus, NULL);
+        esp_err_t berr = ESP_ERR_NOT_SUPPORTED;
+        if (link_enabled("CDC")) {
+            const nc4_bus_cfg_t cdc_bus = {
+                .name = "CDC",
+                .mode = NC4_BUS_PULL,
+                .core = nc4_router_core_or("CDC", 0),
+                .read = cdc_read,
+                .send = cdc_send,
+                .rx_region = s_nc4_rx_region,     // plan 給的緩衝；NULL = 自己配
+                .rx_region_bytes = s_nc4_rx_bytes,
+                .read_chunk = 1024,   // 一次多讀一點，配合加大的 TX/RX ring
+                // 其餘留 0 = 用框架預設；實際值之後從 config.json 餵
+            };
+            berr = nc4_bus_add(s_decoder, &cdc_bus, NULL);
+        } else {
+            ESP_LOGW(TAG, "CDC：links[].enable=0 → 唔建立（連緩衝都冇要）");
+        }
 #endif
 
         if (s_uart_rx_region != NULL) {
@@ -2678,6 +2817,8 @@ void app_main(void)
             };
             esp_err_t uerr = nc4_bus_add(s_decoder, &uart_bus, NULL);
             ESP_LOGI(TAG, "UART bus: %s", esp_err_to_name(uerr));
+        } else {
+            ESP_LOGW(TAG, "UART：未啟用（links[].enable=0）或冇緩衝 → 唔建立");
         }
 
 #if CONFIG_IDF_TARGET_ESP32P4
@@ -2715,6 +2856,19 @@ void app_main(void)
         // 任務已經由各模組在 start 時登記（decode0/1、slow_worker、fx）；
         // 這裡只負責「依 layer 啟動」，不再手動 xTaskCreate 任何 loop。
         nc_task_boot();
+    }
+
+    // ── 開機帳：所有初始化／任務都起完之後，實際仲剩幾多 ──
+    // 兩個數字要分開睇：
+    //   free     = 現在仲可以 malloc 幾多（會隨任務／連線變動）
+    //   largest  = 最大連續塊（決定「仲配唔配到一個大緩衝」）
+    {
+        const size_t in_free = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+        const size_t in_big = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL);
+        const size_t ps_free = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
+        const size_t ps_big = heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM);
+        ESP_LOGW(TAG, "開機剩餘：內部 %u B（最大連續 %u）｜PSRAM %u B（最大連續 %u）",
+                 (unsigned)in_free, (unsigned)in_big, (unsigned)ps_free, (unsigned)ps_big);
     }
 
     const TickType_t period = pdMS_TO_TICKS(1000);

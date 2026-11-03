@@ -240,3 +240,80 @@ xtensa-esp32s3-elf-size -A <idf>/components/esp_wifi/lib/esp32s3/libnet80211.a
 
 > 注意：`firmware/build/` 是**跨平台共用**的。Windows 上沒有 IDF，所以 build 一定要在 WSL 做；
 > 在 Windows 直接開 `build/` 只會看到上次 WSL build 的殘留。
+
+---
+
+## 9. 2026-11-04 實測更新（S3 ＋ P4）
+
+> 這節取代 §2／§4 的舊數字。量測方式：獨立 build 目錄、`idf.py size`，
+> IDF v6.0.3；WSL 的 6.1 可能差 1–2 KB。
+> 完整交接見 [../00_pm/handoff-2026-11-04.md](../00_pm/handoff-2026-11-04.md)。
+
+### 9.1 S3（同一個 build 前後對比）
+
+| 指標 | 改前 | 改後 |
+|---|---:|---:|
+| DIRAM 已用 | 107,721 | **97,929** |
+| DIRAM 剩餘 | 234,039 | **243,831** |
+| `.bss` | 42,288 | 32,496 |
+| `.data` | 23,246 | 23,246 |
+
+原因：`payload` 8,192（bench）、`pj` 700、`ledger` 900 移出 `.bss`。
+
+### 9.2 P4
+
+| 指標 | 改後 |
+|---|---:|
+| DIRAM 已用 | **129,023** |
+| DIRAM 剩餘 | **443,345** |
+| `.bss` / `.data` | 39,040 / 21,837 |
+
+移出 SRAM：WS `s_rx` 24,576、UDP `s_rx` 16,384、`txbuf` 4,096、`payload` 8,192、
+`pj` 700、`ledger` 900 → **54,848 B**（新增 3 個指標 12 B）。
+
+### 9.3 Wi-Fi 兩道閘
+
+| 狀態 | DIRAM 已用 | 剩餘 | flash |
+|---|---:|---:|---:|
+| 未編入（`CONFIG_NETCORE_WIFI=n`，預設） | 97,929 | **243,831** | 403,232 |
+| 編入、`wifi.enable=0` | 146,921 | 194,839 | 952,000 |
+| 編入、`wifi.enable=1` | 同上 | 再扣 90–120 KB heap | 同上 |
+
+- 編入但不用：**+48,992 B 靜態 ＋ 548,768 B flash**。
+- 因此「只用執行期 `enable`」不足以免費 —— 靜態成本在編譯期就已經付了。
+
+### 9.4 怎麼讀「剩幾多」
+
+同一池記憶體、三個時間點，不是三種 RAM：
+
+```text
+DIRAM 總量（P4 572,368 / S3 341,760）
+ ├─ 靜態（code in DRAM + .data + .bss）   P4 129,023 / S3 97,929   ← 拿不回來
+ └─ heap 上限                              P4 443,345 / S3 243,831
+     └─ 開機配置（plan／stack／task／lwIP／httpd）
+          └─ 實際剩餘                      P4 ≈ 333 KB / S3 ≈ 185–195 KB
+```
+
+- 「還能不能加功能」看 **heap 上限**。
+- 「現在真的還剩多少」看**開機帳 log**（`app_main` 尾新增那一行）。
+- 「配不配得到一塊大緩衝」看**最大連續塊**（同一行第二個數字）。
+
+### 9.5 仍然在 SRAM 的可回收項
+
+| 項目 | 大小 | 類型 | 備註 |
+|---|---:|---|---|
+| P4 測試 task（sink×2／src×2／accept） | ~30.7 KB | runtime | 只為 bench 存在 |
+| P4 tinyusb（`_cdcd_itf` ＋ epbuf） | 21,748 B | 靜態 | 由 `nc_store.c` 的 MSC 拉住 |
+| `s_slots`（任務表 20 格） | 7,680 B | 靜態 | → 12 格可省 ~3 KB |
+
+### 9.6 建置方式（不污染共用 build）
+
+```bash
+. ~/esp/esp-idf/export.sh
+cd <repo>/firmware
+idf.py -B /tmp/nc_build_s3 -DPORT=S3/ESP32-S3-N16R8 -DIDF_TARGET=esp32s3 \
+       -DSDKCONFIG=/tmp/nc_sdkconfig_s3 build
+idf.py -B /tmp/nc_build_s3 size
+```
+
+切換 `CONFIG_NETCORE_WIFI` 之後要 `reconfigure` 一次，否則 include path 可能仍舊。

@@ -1,0 +1,21 @@
+menu "esp_Net-Core"
+
+    config NETCORE_WIFI
+        bool "Wi-Fi 通道（會 link esp_wifi）"
+        default n
+        depends on SOC_WIFI_SUPPORTED
+        help
+            把 Wi-Fi 驅動編進影像。**預設關閉**：關閉時 esp_wifi 完全不會被
+            link，靜態 BSS 與 flash 都是 0。
+
+            即使編入，開機仍然會讀 network.json 的 wifi.enable 與 ssid：
+            未啟用（enable=0）或 ssid 空白時，**不會**呼叫 esp_wifi_init，
+            所以連執行期 heap（約 90–120 KB）都不會佔用。
+
+            兩層開關都要開才會真的用 Wi-Fi：
+              ① 這個選項（決定會不會 link）
+              ② network.json 的 wifi.enable（決定會不會初始化）
+
+            理由：只做②的話，一個永遠不用的功能仍然要付靜態 RAM 與 flash。
+
+endmenu

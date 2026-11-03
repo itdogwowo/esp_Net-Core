@@ -13,6 +13,7 @@
     "",
     "── nc4.links：收幀通道，只講怎麼收、不決定誰解碼 ──",
     "name：通道名；routes[].in / out 填的就是它",
+    "enable：0 = 呢條線開機唔建立（唔宣告緩衝、唔建 bus、路由跳過）；要開就改 1 再重啟",
     "cfg：這一種通道自己的參數（port、rx、將來的 tx）—— 每條 link 都是 name / kind / cfg 三層",
     "kind：cdc | uart | tcp | ws | udp",
     "port：tcp / ws / udp 的埠號",
@@ -38,9 +39,10 @@
 
   "nc4": {
     "links": [
-      { "name": "CDC", "kind": "cdc", "cfg": { "rx": { "mode": "pull", "region": 8205, "chunk": 1024, "budget": 8 } } },
-      { "name": "UART", "kind": "uart", "cfg": { "rx": { "mode": "pull", "region": 1024, "chunk": 512, "budget": 8 } } },
-      { "name": "TCP", "kind": "tcp", "cfg": { "port": 6000, "rx": { "mode": "push_frame", "region": 16410, "chunk": 8192, "budget": 8, "slots": 8, "slot_size": 8205 } } }
+      { "name": "CDC", "kind": "cdc", "enable": 0, "cfg": { "rx": { "mode": "pull", "region": 8205, "chunk": 1024, "budget": 8 } } },
+      { "name": "UART", "kind": "uart", "enable": 1, "cfg": { "rx": { "mode": "pull", "region": 1024, "chunk": 512, "budget": 8 } } },
+      { "name": "TCP", "kind": "tcp", "enable": 1, "cfg": { "port": 6000, "rx": { "mode": "push_frame", "region": 16410, "chunk": 8192, "budget": 8, "slots": 8, "slot_size": 8205 } } },
+      { "name": "UDP", "kind": "udp", "enable": 1, "cfg": { "port": 6001, "rx": { "mode": "datagram", "max_msg": 16384, "budget": 8 } } }
     ],
 
     "routes": [

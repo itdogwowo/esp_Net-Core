@@ -4,6 +4,7 @@
 #include <string.h>
 
 #include "esp_log.h"
+#include "esp_heap_caps.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
@@ -32,7 +33,8 @@ static volatile uint32_t s_trunc;
 
 // frame 模式的 parser 不需要 ring
 static uint8_t s_ring_stub[64];
-static uint8_t s_rx[UDP_MAX_MSG];
+// 16 KB 接收暫存：改由 PSRAM 出（start 時才配）。CPU copy，唔經 DMA。
+static uint8_t *s_rx;
 
 static esp_err_t udp_send(void *arg, const uint8_t *frame, size_t len)
 {
@@ -62,7 +64,7 @@ static void udp_task(void *arg)
     for (;;) {
         struct sockaddr_in from;
         socklen_t fl = sizeof(from);
-        const int n = recvfrom(s_sock, s_rx, sizeof(s_rx), 0,
+        const int n = recvfrom(s_sock, s_rx, UDP_MAX_MSG, 0,
                                (struct sockaddr *)&from, &fl);
         if (n < 0) {
             vTaskDelay(1);
@@ -71,7 +73,7 @@ static void udp_task(void *arg)
         if (n == 0) {
             continue;
         }
-        if (n == (int)sizeof(s_rx)) {
+        if (n == (int)UDP_MAX_MSG) {
             s_trunc++;                  // 可能被截斷（datagram 比 buffer 大）
         }
 
@@ -114,9 +116,21 @@ esp_err_t nc4_udp_start(nc4_decoder_t *decoder, uint16_t port)
         return ESP_ERR_INVALID_STATE;
     }
 
+    // 接收暫存：優先 PSRAM，拿不到退回內部 RAM（行為不變，位置不同）。
+    s_rx = heap_caps_malloc(UDP_MAX_MSG, MALLOC_CAP_SPIRAM);
+    if (s_rx == NULL) {
+        s_rx = malloc(UDP_MAX_MSG);
+    }
+    if (s_rx == NULL) {
+        ESP_LOGE(TAG, "UDP 接收暫存（%u B）配唔到", (unsigned)UDP_MAX_MSG);
+        return ESP_ERR_NO_MEM;
+    }
+
     s_parser = nc4_parser_create_in(s_ring_stub, sizeof(s_ring_stub), decoder,
                                     udp_send, NULL, "UDP");
     if (s_parser == NULL) {
+        free(s_rx);
+        s_rx = NULL;
         return ESP_ERR_NO_MEM;
     }
     s_tx_lock = xSemaphoreCreateMutex();
@@ -126,6 +140,8 @@ esp_err_t nc4_udp_start(nc4_decoder_t *decoder, uint16_t port)
         ESP_LOGE(TAG, "socket 失敗");
         nc4_parser_destroy(s_parser);
         s_parser = NULL;
+        free(s_rx);
+        s_rx = NULL;
         return ESP_FAIL;
     }
     int yes = 1;
@@ -144,6 +160,8 @@ esp_err_t nc4_udp_start(nc4_decoder_t *decoder, uint16_t port)
         s_sock = -1;
         nc4_parser_destroy(s_parser);
         s_parser = NULL;
+        free(s_rx);
+        s_rx = NULL;
         return ESP_FAIL;
     }
 
@@ -153,6 +171,8 @@ esp_err_t nc4_udp_start(nc4_decoder_t *decoder, uint16_t port)
         s_sock = -1;
         nc4_parser_destroy(s_parser);
         s_parser = NULL;
+        free(s_rx);
+        s_rx = NULL;
         return ESP_ERR_NO_MEM;
     }
 
@@ -174,6 +194,10 @@ void nc4_udp_stop(void)
     if (s_parser != NULL) {
         nc4_parser_destroy(s_parser);
         s_parser = NULL;
+    }
+    if (s_rx != NULL) {
+        free(s_rx);
+        s_rx = NULL;
     }
 }
 

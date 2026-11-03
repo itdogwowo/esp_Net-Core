@@ -183,9 +183,9 @@ ETH PHY 沒 link、UART 沒接，就不該照 config 硬開一條 link。
 
   "nc4": {
     "links": [                                  // 通道：只講怎麼收
-      { "name": "CDC", "kind": "cdc", "cfg": { "rx": { "mode": "pull", "region": 8205, "chunk": 1024, "budget": 8 } } },
-      { "name": "UART", "kind": "uart", "cfg": { "rx": { "mode": "pull", "region": 1024, "chunk": 512, "budget": 8 } } },
-      { "name": "TCP", "kind": "tcp", "cfg": { "port": 6000, "rx": { "mode": "push_frame", "region": 16410, "chunk": 8192, "budget": 8, "slots": 8, "slot_size": 8205 } } }
+      { "name": "CDC", "kind": "cdc", "enable": 1, "cfg": { "rx": { "mode": "pull", "region": 8205, "chunk": 1024, "budget": 8 } } },
+      { "name": "UART", "kind": "uart", "enable": 1, "cfg": { "rx": { "mode": "pull", "region": 1024, "chunk": 512, "budget": 8 } } },
+      { "name": "TCP", "kind": "tcp", "enable": 1, "cfg": { "port": 6000, "rx": { "mode": "push_frame", "region": 16410, "chunk": 8192, "budget": 8, "slots": 8, "slot_size": 8205 } } }
     ],
     "routes": [                                 // 誰解、要不要轉出去（router 永遠生效）
       { "in": "nctx",     "out": ["decode0"] },   // 本機 → 自己
@@ -207,6 +207,20 @@ ETH PHY 沒 link、UART 沒接，就不該照 config 硬開一條 link。
 > `decode0` / `decode1` 任務的存在與否、以及 CDC / UART / TCP 三條 bus 掛哪一核，都由此推導。
 > 讀不到有效 `routes[]` 就退回板子預設表並印警告。`0x1105 ROUTE_GET` 可線上查實際生效的表。
 > **未接**：`out` 裡的 link（轉發）仍然被忽略；兩核仍然共用同一個 decoder。
+
+#### `links[].enable`：通道存在與否（2026-11-04）
+
+`enable` 缺省 = 1（向後兼容）。開機讀一次之後就決定這條線存不存在：
+
+- **`0`**：不宣告緩衝（plan 裡面 0 B）、不建立 bus、`routes[]` 提到它那行直接跳過。
+  所以也不會因為一條死線而把某個 decode 核「撐」起來。
+- **中途要開啟**：改 config ＋ 重啟。plan 的宣告窗口在 `commit` 之後關閉，
+  runtime 沒有「後補宣告」的路徑 —— 這正是避免碎片與隱形佔用的設計。
+- **現況**：`CDC` / `UART` / `TCP` / `UDP` 都跟它。`WS` 暫時不提供關閉，
+  因為 `nc4_ws_start()` 同時 host 住 `/config.json` 的 HTTP server；
+  要拆開之後才可以獨立關。
+- **P4 特例**：本板沒有 USB OTG，所以 `CDC` 寫 `enable: 0`；
+  以前照樣宣告 8,205 B 的 parser 緩衝，永遠沒有人讀。
 
 ### `hardware.json`（硬體層）
 
@@ -326,9 +340,12 @@ DMA 大小（1600）與環數（16/16）**不在 config**——那是 build-time
 > 見 [connectivity.md](../02_guides/connectivity.md)。
 
 **能力是 build-time 決定的**：config 只能「打開」這個 build 已經編進去的東西。
-- WiFi / BT / ESP-NOW 要靠 `ports/_profiles/*.defaults`（例如 `wifi`、`bt`、`espnow`）編進 image；
-  沒有那塊能力時，`enable: 1` 只會在 log 說「這個 build 不支援」。
-  （這三個 profile 目前尚未建立。）
+- **Wi-Fi** 用 `CONFIG_NETCORE_WIFI`（`firmware/main/Kconfig.projbuild`，預設 **n**）編進 image。
+  未編入時 `wifi.enable: 1` 只會在 log 說「未編入」，而**靜態與 flash 都是 0**。
+  編入但 `enable: 0` 仍然要付 **48,992 B 靜態 ＋ 548,768 B flash**（S3 實測），
+  所以預設關閉 —— 兩道閘要同時開才會真的用 Wi-Fi。
+- BT / ESP-NOW 的 build-time 能力（`ports/_profiles/*.defaults`）尚未建立；
+  將來照同一個模式（Kconfig ＋ runtime `enable`）做。
 - **Classic / BTDM 只有初代 ESP32 有**：S3 與 C 系列只有 BLE，P4 連 radio 都沒有。
   所以「用哪個協定」不是使用者填的欄位，而是 `profile` ＋ 板子能力推導出來的。
 - **ESP-NOW 依賴 WiFi radio**（P4 沒有 WiFi，所以 P4 的 `espnow` 永遠不可用）。

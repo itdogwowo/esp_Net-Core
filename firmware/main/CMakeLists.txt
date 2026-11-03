@@ -28,11 +28,21 @@ else()
     set(_has_tasks_preset 0)
 endif()
 
+# esp_wifi 是「編譯期可得」的相依：P4 冇 radio 所以完全唔要；
+# 非 P4（S3）一定要有，否則 CONFIG_NETCORE_WIFI=y 時 nc_wifi.c 編唔過。
+# 真正決定「有冇 link 入 image」的是 CONFIG_NETCORE_WIFI：
+#   關閉 → nc_wifi.c 只編 stub，冇任何 esp_wifi 符號 → linker 唔會拉入（0 B）。
+set(_nc_priv_extra)
+if(NOT "${IDF_TARGET}" STREQUAL "esp32p4")
+    list(APPEND _nc_priv_extra esp_wifi)
+endif()
+
 idf_component_register(
-    SRCS "main.c"
+    SRCS "main.c" "nc_wifi.c"
     INCLUDE_DIRS "."
     PRIV_REQUIRES fatfs esp_timer esp_partition esp_driver_gpio esp_driver_uart wear_levelling esp_eth esp_netif lwip esp_event esp_psram nvs_flash
                    espressif__esp_tinyusb nc4 mem config ota_action task_manager transport store file_action fx hello
+                   ${_nc_priv_extra}
     ${_preset_args}
 )
 

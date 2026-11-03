@@ -19,6 +19,8 @@ ESP32-P4（另有 S3 port）上的 **NC4 通訊核心**：多條傳輸通道 →
 | 架構 | 系統任務（硬體→driver→通道）＋ 一般任務（生命週期）已分層，兩者同一套任務管理器 |
 | 任務模型 | **核心（房東）／任務（租戶）**：`tasks.json` 只管租戶；`level` / `affinity` 由 config 定，**未設定 = `[0,0]` = 唔跑**；缺的條目開機自動補寫（寫 `[0,0]`，預設關閉）（[task-model.md](../03_notes/task-model.md)） |
 | .fxe | 掃 `/data/pixel/effects/` 與 `/data/tasks/`，attach 成 runtime 任務；**WAMR 執行引擎未接** |
+| 通道存在性 | `system.json` 的 `links[].enable`（缺省 1）：未啟用 → **不宣告緩衝、不建 bus、路由跳過**；要開就改 config ＋ 重啟（2026-11-04） |
+| Wi-Fi | **兩道閘**：編譯期 `CONFIG_NETCORE_WIFI`（預設 n，不編入 = 0 B）＋ 執行期 `network.json` `wifi.enable`（不啟用 = 0 heap） |
 
 ---
 
@@ -70,6 +72,20 @@ ESP32-P4（另有 S3 port）上的 **NC4 通訊核心**：多條傳輸通道 →
 > 因為 `build/` 是舊的、ninja 沒有重新 configure，所以一直沒人發現 ——
 > **任何人 clone 之後第一次 build 都會撞**。已移除該行並在檔案內註明原因。
 > 記憶體細節見 [memory-budget.md](../03_notes/memory-budget.md)。
+
+### 建置驗證（2026-11-04，S3 ＋ P4；**最新數字以此為準**）
+
+| 項目 | S3 | P4 |
+|---|---:|---:|
+| DIRAM 已用（靜態） | **97,929 B** | **129,023 B** |
+| DIRAM 剩餘（heap 上限） | **243,831 B（238 KB）** | **443,345 B（433 KB）** |
+| `.bss` / `.data` | 32,496 / 23,246 | 39,040 / 21,837 |
+| flash `.bin` | 403,232（Wi-Fi 未編入） | 683,705 |
+| 開機後實際剩（估） | ~185–195 KB | ~333 KB |
+
+- 與 11-03 相比：S3 靜態 **−9,792 B**；P4 把 WS/UDP/測試殘留搬出 SRAM **≈ −54.8 KB**（逐符號計算）。
+- Wi-Fi 編入但 `enable=0`：S3 **+48,992 B 靜態 ＋ 548,768 B flash**；所以預設 `CONFIG_NETCORE_WIFI=n`。
+- 完整量測與「怎麼讀」見 [handoff-2026-11-04.md](handoff-2026-11-04.md) §2、[memory-budget.md](../03_notes/memory-budget.md) §9。
 
 ---
 
@@ -188,6 +204,18 @@ USB 的完整分析：[failure-policy.md §4](../03_notes/failure-policy.md)。
 | R | **FX 狀態 JSON 會送出半截** | ✅ 已修（2026-11-03） | 每個模組 ≈250 B 的 JSON，8 個 ≈2,000 B > 舊的 `part[1,900]` → 主機收到無效 JSON。現在偵測到放唔落就改寫一個**合法**的精簡物件（`"truncated":1` ＋ `"mods":N`） |
 | S | **`STATUS_GET` 完整回覆本身會爆** | ✅ 已修（2026-11-03） | 完整 status ≈2.4 KB，但 `NC4_REPLY_JSON_MAX` 只有 2,100 → **一直靜靜截斷**。已提到 2,600，並改成「砌入回覆幀」 |
 
+### 7.2 2026-11-04 追加（記憶體／通道閘）
+
+| # | 項目 | 狀態 | 影響 |
+|---|---|---|---|
+| T | **`router_from_cfg()` use-after-free** | ❌ **未修（P0）** | 存 `in->valuestring` → `nc_cfg_close()` → 之後才 `memcpy` 入 router。修好之前不要重構 routing |
+| U | **P4 測試 task 佔 ~30.7 KB runtime** | ❌ | `tcp_sink`×2 / `tcp_src`×2 / `accept` 各 6,144 B，只為 bench 存在；關掉 = +30.7 KB |
+| V | **P4 tinyusb 仍被 link（21,748 B）** | ❌ | 不是 main.c；`nc_store.c` 仍然建 MSC LUN。要 guard 整個 MSC 段 |
+| W | `NC_TASK_MAX` 20 格（`s_slots` 7,680 B） | ⚠️ | 縮到 12 格可省 ~3 KB |
+| X | **狀態管理器（三層：熱／冷／封存）** | 🟡 只定案未實作 | 三層、fast 區純數字、字典放 rodata＋PSRAM、`keys` 解析鏈。**不會省 RAM**（+256 B），價值在單一事實 |
+| Y | WS/UDP 改 PSRAM 後的吞吐 | ⚠️ 未量 | 要跑 `tools/bench/nc4_ws_test.py`；P4 的 PSRAM 較快，S3 沒 link 這兩條 |
+| Z | `ssid_pw` 明文在 FAT | ⚠️ | 上游搬 btree／NVS；我們應搬 NVS |
+
 ---
 
 ## 8. 待測場景（等使用者提供）
@@ -209,6 +237,7 @@ USB 的完整分析：[failure-policy.md §4](../03_notes/failure-policy.md)。
 | 類別 | 文件 |
 |---|---|
 | 協議 | [commands.md](../01_protocol/commands.md)、[transports.md](../01_protocol/transports.md)、[frame.md](../01_protocol/frame.md)（幀格式權威版） |
+| 交接 | [handoff-2026-11-04.md](handoff-2026-11-04.md)（2026-11-04：記憶體清理、link 閘、Wi-Fi 兩道閘、量測與待辦） |
 | 教學 | [build_and_flash.md](../02_guides/build_and_flash.md)、[testing.md](../02_guides/testing.md)（§2.13–2.16 是量測總表） |
 | 筆記 | [config-layers.md](../03_notes/config-layers.md)、[writing-a-task.md](../03_notes/writing-a-task.md)、[task-lifecycle.md](../03_notes/task-lifecycle.md)、[rx-architecture.md](../03_notes/rx-architecture.md)、[failure-policy.md](../03_notes/failure-policy.md)、[p4-bringup.md](../03_notes/p4-bringup.md)、[buffer-manager.md](../03_notes/buffer-manager.md)、[memory.md](../03_notes/memory.md)、[memory-budget.md](../03_notes/memory-budget.md)（SRAM 帳）、[decode-routes.md](../03_notes/decode-routes.md)、[naming.md](../03_notes/naming.md)、[component-layout.md](../03_notes/component-layout.md)、[architecture-flow.md](../03_notes/architecture-flow.md)、[rewrite-plan.md](roadmap.md) |
 | 研究 | [effect-language.md](../03_notes/effect-language.md)、[extension-architecture.md](../03_notes/extension-architecture.md)、[fx-loader.md](../03_notes/fx-loader.md) |

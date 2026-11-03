@@ -10,6 +10,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "esp_timer.h"
+#include "esp_heap_caps.h"
 
 static const char *TAG = "nc4_ws";
 
@@ -23,8 +24,10 @@ static SemaphoreHandle_t s_tx_lock;
 static volatile int      s_fd = -1;
 static uint16_t          s_port;
 
-// 收到的一整則訊息（碎片會先累積在這裡；單幀時就是直接解析）
-static uint8_t s_rx[WS_MAX_MSG];
+// 收到的一整則訊息（碎片會先累積在這裡；單幀時就是直接解析）。
+// 24 KB 改由 PSRAM 出（start 時才配）：這是 CPU copy 的目的地，唔經 DMA；
+// 代價是每則訊息多一次 PSRAM 寫入，好處是 P4 靜態 .bss 直接少 24 KB。
+static uint8_t *s_rx;
 static size_t  s_rx_len;
 
 // frame 模式下 parser 的 ring 用不到；給一個小區域就好（不會呼叫 feed）
@@ -119,7 +122,7 @@ static esp_err_t ws_handler(httpd_req_t *req)
         return ESP_OK;                      // control frame 由 httpd 處理
     }
 
-    if (pkt.len > sizeof(s_rx) - s_rx_len) {
+    if (pkt.len > WS_MAX_MSG - s_rx_len) {
         ESP_LOGW(TAG, "訊息太大（%u B，已累積 %u B）→ 關閉",
                  (unsigned)pkt.len, (unsigned)s_rx_len);
         s_bad++;
@@ -189,9 +192,23 @@ esp_err_t nc4_ws_start(nc4_decoder_t *decoder, uint16_t port)
         return ESP_ERR_INVALID_STATE;
     }
 
+    // 接收暫存：優先 PSRAM（P4 32 MB HEX 200 MHz），拿不到就退回內部 RAM。
+    // 這塊只是 recv 的目的地（CPU copy），唔係 DMA buffer。
+    s_rx = heap_caps_malloc(WS_MAX_MSG, MALLOC_CAP_SPIRAM);
+    if (s_rx == NULL) {
+        s_rx = malloc(WS_MAX_MSG);
+    }
+    if (s_rx == NULL) {
+        ESP_LOGE(TAG, "WS 接收暫存（%u B）配唔到", (unsigned)WS_MAX_MSG);
+        return ESP_ERR_NO_MEM;
+    }
+    s_rx_len = 0;
+
     s_parser = nc4_parser_create_in(s_ring_stub, sizeof(s_ring_stub), decoder,
                                     ws_send, NULL, "WS");
     if (s_parser == NULL) {
+        free(s_rx);
+        s_rx = NULL;
         return ESP_ERR_NO_MEM;
     }
     s_tx_lock = xSemaphoreCreateMutex();
@@ -213,6 +230,8 @@ esp_err_t nc4_ws_start(nc4_decoder_t *decoder, uint16_t port)
         ESP_LOGE(TAG, "httpd_start 失敗 %s", esp_err_to_name(err));
         nc4_parser_destroy(s_parser);
         s_parser = NULL;
+        free(s_rx);
+        s_rx = NULL;
         return err;
     }
 
@@ -232,6 +251,8 @@ esp_err_t nc4_ws_start(nc4_decoder_t *decoder, uint16_t port)
         s_server = NULL;
         nc4_parser_destroy(s_parser);
         s_parser = NULL;
+        free(s_rx);
+        s_rx = NULL;
         return err;
     }
 
@@ -250,6 +271,11 @@ void nc4_ws_stop(void)
         nc4_parser_destroy(s_parser);
         s_parser = NULL;
     }
+    if (s_rx != NULL) {
+        free(s_rx);
+        s_rx = NULL;
+    }
+    s_rx_len = 0;
     s_fd = -1;
 }
 
