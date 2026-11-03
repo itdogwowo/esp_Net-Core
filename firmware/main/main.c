@@ -51,6 +51,7 @@
 #include "nc4.h"
 #include "nc4_bus.h"
 #include "nc_task.h"
+#include "nc_hello.h"
 #include "nvs.h"
 #include "nvs_flash.h"
 #include "esp_mac.h"
@@ -103,6 +104,7 @@ static volatile uint32_t s_rx_frames;        // 成功收到的幀數
 #define PRESET_DIR          MSC_MOUNT_POINT "/config"
 #define PRESET_SYSTEM_PATH  PRESET_DIR "/system.json"
 #define PRESET_NETWORK_PATH PRESET_DIR "/network.json"
+#define PRESET_TASKS_PATH   PRESET_DIR "/tasks.json"
 // 卷標 = 品牌縮寫 + "-" + 16-bit CID（FAT 卷標上限 11 字元）：
 //   "NC-" + "A57C" → "NC-A57C"
 // 不能寫成 Net-Core_A57C（14 字元，f_setlabel 會回 FR_INVALID_NAME）。
@@ -153,6 +155,11 @@ extern const uint8_t preset_system_end[]    asm("_binary_preset_system_json_end"
 extern const uint8_t preset_network_start[] asm("_binary_preset_network_json_start");
 extern const uint8_t preset_network_end[]   asm("_binary_preset_network_json_end");
 
+#if NETCORE_HAS_PRESET_TASKS
+extern const uint8_t preset_tasks_start[]   asm("_binary_preset_tasks_json_start");
+extern const uint8_t preset_tasks_end[]     asm("_binary_preset_tasks_json_end");
+#endif
+
 
 // ── MSC 事件 ──
 static const esp_partition_t *find_data_partition(void)
@@ -202,6 +209,9 @@ static void seed_presets(void)
     seed_dirs();
     seed_file(PRESET_SYSTEM_PATH, preset_system_start, preset_system_end);
     seed_file(PRESET_NETWORK_PATH, preset_network_start, preset_network_end);
+#if NETCORE_HAS_PRESET_TASKS
+    seed_file(PRESET_TASKS_PATH, preset_tasks_start, preset_tasks_end);
+#endif
 }
 
 // ── 卷標：預設叫 NETCORE，不是 NO NAME ──
@@ -1751,7 +1761,8 @@ static int task_fx_declare(nc_task_res_t *out, int max)
 }
 
 static const nc_task_t s_task_fx = {
-    .name = "fx", .kind = NC_TASK_NORMAL, .level = 4,
+    // fx 是載入器／renderer，屬核心基建（房東），不是租戶：唔寫入 tasks.json。
+    .name = "fx", .kind = NC_TASK_SYSTEM, .level = 4,
     .declare = task_fx_declare, .on_start = task_fx_start,
     .loops = s_fx_loops, .nloops = sizeof(s_fx_loops) / sizeof(s_fx_loops[0]),
     .provides = s_fx_provides,
@@ -2338,6 +2349,7 @@ void app_main(void)
     nc_task_register(&s_task_core);    // L1：慢工作 hub + worker
     nc_task_register(&s_task_probe);   // L3：開機自測
     nc_task_register(&s_task_fx);      // L4：效果 arena + render task
+    nc_task_register(nc_hello_task());  // L6：最小框架自測（每秒 Hello World）
 
     nc_task_declare_all();       // → nc_plan_declare + 帳本檢查
 
@@ -2359,7 +2371,9 @@ void app_main(void)
     // ④ 效果租戶：載入 .fxe → 解碼 manifest → attach 到 registry
     //    （放在 start_all 之後：attach 會插入 registry，不能跟 start_all 同時走）
     if (nc_task_started("fx")) {
-        nc_fx_scan("/data/pixel/effects");
+        nc_fx_scan("/data/pixel/effects");   // 效果類（kind = effect）
+        nc_fx_scan("/data/tasks");           // 任務類（kind = normal）
+        nc_task_sync_cfg();                  // 掃到的 .fxe 也補進 tasks.json
     }
 
     {

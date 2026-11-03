@@ -65,10 +65,13 @@ RUNTIME_KEYS_BY_FILE = {
     "system.json":   {"version", "_comment", "cID", "debug_level",
                       "frame_interval_ms", "boot_strict", "num_pixels", "nc4"},
     "network.json":  {"version", "_comment", "hostname", "priority", "lan", "wifi", "bt", "espnow"},
-    "hardware.json": {"version", "_comment", "PIN", "SPI", "I2C", "UART", "ETH"},
-    "driver.json":   {"version", "_comment", "ETH", "USB", "TFT",
-                      "WS2812", "APA102", "PCA9685", "Audio"},
-    "tasks.json":    {"version", "_comment", "override"},
+    "hardware.json": {"version", "_comment", "_gpio_convention", "ETH",
+                      "PIN", "SPI", "I2C", "I80", "UART", "I2S", "PWM",
+                      "SDIO", "ENC", "XL9555"},
+    "driver.json":   {"version", "_comment", "USB", "TFT", "SDcard",
+                      "WS2812", "APA102", "PCA9685", "Audio", "PCM5102",
+                      "GT1151Q", "HUSB238", "uartMotor"},
+    "tasks.json":    {"version", "_comment", "tasks", "override"},
 }
 
 MARK_OPEN = "# >>> profile: {name}"

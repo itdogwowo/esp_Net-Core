@@ -31,7 +31,7 @@ WS 與 UDP 的核心不是宣告來的 —— WS 跟著 httpd、UDP 寫死 1。
   所以鎖的作用範圍＝引擎數，不是 CPU 數。
 - **但今天只開了一個 decoder。** `main.c` 只 `nc4_decoder_create()` 一次，
   兩條 decode task 共用它 → 實際上仍是「全域一次一個」。這是「還沒拆」，不是設計。
-  要拆成兩顆：`System.nc4.decode[]` 每個引擎一個 decoder、一份回覆緩衝，
+  要拆成兩顆：`engines[]` 每個 `kind: decode` 一個 decoder、一份回覆緩衝，
   handler 必須 reentrant（不能共寫 static）。
 - **接收層：不對。** 每條 bus 有自己的 parser/RX 區域，**另一核可以繼續收**。
   PUSH 模式更明顯：producer 把整幀寫進插槽（8 格），consumer 在忙時它們就排隊。
@@ -65,7 +65,8 @@ WS 與 UDP 的核心不是宣告來的 —— WS 跟著 httpd、UDP 寫死 1。
 1. **插槽進 plan**（TCP 65,640）—— 它是最大一塊，而且現在完全不可見。做法：`nc4_bus_cfg_t` 改成吃「plan 給的 slots 區域」（像 parser 的 `rx_region`），PUSH 模式不再 `calloc`。
 2. **WS / UDP 納入 bus 或至少納入計畫**：現在兩個 BSS 加起來 40 KB，core 也不是宣告來的。若要「配置解碼路線」，這兩個是缺口。
 3. **status JSON 緩衝收斂**：10 KB BSS 換成一塊共用（dispatch 已互斥）。
-4. 之後才是 `system.json` 的 `nc4.links[].rx.decode` —— 有上面三項，配置才有意義。
+4. 之後才是 `system.json` 的 `nc4.routes[].exec` —— 有上面三項，配置才有意義。
+   路由表的完整設計見 [routing.md](routing.md)。
 
 ---
 

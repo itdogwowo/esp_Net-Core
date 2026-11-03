@@ -152,6 +152,9 @@ void nc_task_reset(void);                                   // 清空（重開�
 // ① 登記一個任務（只登記，不啟動）。重名回 ESP_ERR_INVALID_STATE。
 esp_err_t nc_task_register(const nc_task_t *task);
 
+// 補寫：把「固件有／runtime attach 了、但 tasks.json 沒有」的租戶任務補進去。
+int nc_task_sync_cfg(void);
+
 // ② 宣告資源 → nc_plan（同時跑帳本檢查：重名 / 接線）
 int nc_task_declare_all(void);
 

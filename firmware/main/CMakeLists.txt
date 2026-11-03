@@ -9,7 +9,7 @@
 # 一個層一個檔：目前只嵌 system / network；缺的層由 firmware 的預設補。
 
 set(_preset_embed)
-foreach(_cfg system network)
+foreach(_cfg system network tasks)
     if(EXISTS "${PORT_DIR}/data/config/${_cfg}.json")
         configure_file("${PORT_DIR}/data/config/${_cfg}.json"
                        "${CMAKE_CURRENT_BINARY_DIR}/preset_${_cfg}.json" COPYONLY)
@@ -20,13 +20,21 @@ if(_preset_embed)
     set(_preset_args EMBED_FILES ${_preset_embed})
 endif()
 
+if(EXISTS "${PORT_DIR}/data/config/tasks.json")
+    set(_has_tasks_preset 1)
+else()
+    set(_has_tasks_preset 0)
+endif()
+
 idf_component_register(
     SRCS "main.c"
     INCLUDE_DIRS "."
     PRIV_REQUIRES fatfs esp_timer esp_partition esp_driver_gpio esp_driver_uart wear_levelling esp_eth esp_netif lwip esp_event esp_psram nvs_flash
-                   espressif__esp_tinyusb nc4 mem config ota_action tasks transport store file_action fx
+                   espressif__esp_tinyusb nc4 mem config ota_action task_manager transport store file_action fx hello
     ${_preset_args}
 )
+
+target_compile_definitions(${COMPONENT_LIB} PRIVATE NETCORE_HAS_PRESET_TASKS=${_has_tasks_preset})
 
 # 最小映像（只印心跳，不碰 USB/MSC/ETH）：用來確認新板子的基礎能不能跑
 if(NETCORE_MINIMAL)

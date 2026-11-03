@@ -195,3 +195,127 @@ bool nc_cfg_set_string(const char *layer, const char *key, const char *value)
     }
     return ok;
 }
+
+// 找 array 的結尾 ']'（跳過字串內容與巢狀），回傳指向 ']' 的指標。
+static const char *find_array_end(const char *lb)
+{
+    bool instr = false, esc = false;
+    int depth = 0;
+    for (const char *p = lb; *p != '\0'; p++) {
+        const char c = *p;
+        if (instr) {
+            if (esc) {
+                esc = false;
+            } else if (c == '\\') {
+                esc = true;
+            } else if (c == '"') {
+                instr = false;
+            }
+            continue;
+        }
+        if (c == '"') {
+            instr = true;
+        } else if (c == '[') {
+            depth++;
+        } else if (c == ']') {
+            depth--;
+            if (depth == 0) {
+                return p;
+            }
+        }
+    }
+    return NULL;
+}
+
+bool nc_cfg_append_obj(const char *layer, const char *array_key, const char *obj_json)
+{
+    char path[64], tmp[72], bak[80];
+    if (layer == NULL || array_key == NULL || obj_json == NULL ||
+        !path_of(layer, path, sizeof(path), NULL) ||
+        !path_of(layer, tmp, sizeof(tmp), ".tmp") ||
+        !path_of(layer, bak, sizeof(bak), ".bak")) {
+        return false;
+    }
+
+    FILE *f = fopen(path, "rb");
+    if (f == NULL) {
+        return false;
+    }
+    char *src = malloc(CFG_MAX);
+    if (src == NULL) {
+        fclose(f);
+        return false;
+    }
+    const size_t n = fread(src, 1, CFG_MAX - 1, f);
+    src[n] = '\0';
+    fclose(f);
+
+    char key[48];
+    snprintf(key, sizeof(key), "\"%s\"", array_key);
+    const char *k = strstr(src, key);
+    const char *lb = (k != NULL) ? strchr(k, '[') : NULL;
+    const char *rb = (lb != NULL) ? find_array_end(lb) : NULL;
+    if (rb == NULL) {
+        free(src);
+        return false;
+    }
+
+    // 插在最後一個非空白字元之後（保留 `  ]` 的縮排）
+    const char *ins = rb;
+    while (ins > lb && isspace((unsigned char)ins[-1])) {
+        ins--;
+    }
+    const bool empty = (ins == lb + 1);
+
+    char *out = malloc(CFG_MAX);
+    if (out == NULL) {
+        free(src);
+        return false;
+    }
+    size_t off = 0;
+    memcpy(out, src, (size_t)(ins - src));
+    off = (size_t)(ins - src);
+    if (!empty) {
+        out[off++] = ',';
+    }
+    const char *lead = "\n    ";
+    memcpy(out + off, lead, 5);
+    off += 5;
+    const size_t objlen = strlen(obj_json);
+    memcpy(out + off, obj_json, objlen);
+    off += objlen;
+    const size_t restlen = strlen(ins);
+    memcpy(out + off, ins, restlen);
+    off += restlen;
+    out[off] = '\0';
+    free(src);
+
+    bool ok = false;
+    FILE *w = fopen(tmp, "wb");
+    if (w != NULL) {
+        ok = fwrite(out, 1, off, w) == off;
+        if (ok) {
+            fsync(fileno(w));
+        }
+        fclose(w);
+    }
+    free(out);
+
+    if (ok) {
+        remove(bak);
+        rename(path, bak);
+        if (rename(tmp, path) != 0) {
+            rename(bak, path);
+            ok = false;
+        }
+    }
+    if (!ok) {
+        remove(tmp);
+    }
+    if (ok) {
+        ESP_LOGI(TAG, "%s.%s += %s", layer, array_key, obj_json);
+    } else {
+        ESP_LOGW(TAG, "%s.%s 補寫失敗", layer, array_key);
+    }
+    return ok;
+}

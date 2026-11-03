@@ -29,7 +29,8 @@ firmware/
 ├─ components/
 │  ├─ sys/nc4/             NC4 framing、解碼器、通道框架（nc4.c / nc4_bus.c）
 │  ├─ sys/mem/             記憶體原語：pool / arena / plan / 跨核 hub
-│  ├─ sys/tasks/           任務管理器：登記 / 資源 / 開 loop / 量測 / 狀態
+│  ├─ sys/task/            任務型別 + loop 執行層（建立 / 量測 / 停止）
+│  ├─ sys/task_manager/    任務管理器：登記 / 資源 / 開 loop / 狀態 / config 補寫
 │  ├─ sys/transport/       TCP 之外的通道：UDP、WebSocket、HTTP 設定端點
 │  ├─ sys/store/           FAT 擁有權仲裁（USB ↔ APP、唯讀視圖）
 │  ├─ action/ota_action/   OTA 指令（0x22xx）

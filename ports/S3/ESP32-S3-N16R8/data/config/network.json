@@ -1,6 +1,51 @@
 {
   "version": 1,
-  "_comment": "Network 層：有線 / 無線 / 藍牙 / ESP-NOW。pin 只取前 4 位數字並自動寫回；其餘只放連線參數，不決定誰來解碼。",
+
+  "_comment": [
+    "Network 層：lan / wifi / bt / espnow 四者並列，只放連線參數，不決定誰來解碼。",
+    "完整說明與怎麼選：docs/02_guides/connectivity.md",
+    "",
+    "── 共用 ──",
+    "hostname：DHCP 主機名／mDNS；空 = 用 cID 推導（待實作）",
+    "priority：多條連線都活著時，資料走哪條的偏好順序（不影響開機順序）",
+    "",
+    "── lan：有線（RMII + 外部 PHY）；本板沒有 PHY，整段保留但不會啟用 ──",
+    "lan.enable：0/1",
+    "lan.driver：目前只支援 RMII",
+    "lan.phy_type：PHY 型號（IP101 / LAN8720 / RTL8201…）",
+    "lan.phy_addr：PHY 在 MDIO 上的位址 0–31；link 不起來先查這個",
+    "lan.gpio.mdc / mdio：管理匯流排的兩根腳；-1 = 未接或用預設",
+    "lan.gpio.ref_clk：RMII 的 50 MHz 參考時鐘；-1 = 由 PHY 提供",
+    "lan.ip.mode：dhcp | static；static 時 addr / mask / gw 必填",
+    "",
+    "── wifi：2.4 GHz，與藍牙共用同一條 radio ──",
+    "wifi.enable：0/1",
+    "wifi.mode：sta（連 AP）| ap（自己當熱點）| apsta（兩者同時）",
+    "wifi.ssid / ssid_pw：要連的 AP 名稱與密碼；密碼最終要搬進 NVS",
+    "wifi.timeout_s：連不上時重試多久才放棄",
+    "wifi.ip.mode：dhcp | static",
+    "",
+    "── bt：藍牙，不是網路（沒有 IP）；本板只有 BLE ──",
+    "bt.enable：0/1",
+    "bt.profile：拿藍牙做什麼，六個值：",
+    "  none：不啟用（等於關掉）",
+    "  hid ：鍵盤 / 滑鼠 / 手把 —— 主機內建驅動，免 app",
+    "  spp ：Classic 無線序列埠，把藍牙當位元組管道（只有初代 ESP32）",
+    "  a2dp：Classic 單向音樂串流，手機 → 喇叭（只有初代 ESP32）",
+    "  hfp ：Classic 雙向通話含麥克風（只有初代 ESP32）",
+    "  gatt：自訂 BLE 服務 —— 最自由，但兩邊都要自己寫",
+    "bt.fast：0 = 省電（長間隔）| 1 = 低延遲（短間隔、2M PHY）；只有雙模（dual-mode）晶片才需要考慮 BLE/Classic 的取捨",
+    "bt.name：對外顯示的名稱；空 = 用 hostname",
+    "bt.pin：空 = Just Works；有內容取 4–6 位數字，開機會正規化並寫回",
+    "bt.bonding：1 = 記住金鑰自動重連；0 = 每次重新配對",
+    "",
+    "── espnow：Wi-Fi 廣播幀，不需要連 AP ──",
+    "espnow.enable：0/1（依賴 Wi-Fi radio）",
+    "espnow.channel：0 = 跟隨 Wi-Fi；兩端必須同頻道",
+    "espnow.encrypt：0 = 明文；1 = 用 peers[].lmk 加密",
+    "espnow.pmk：主金鑰",
+    "espnow.peers：允許通訊的對象清單，最多 20 個"
+  ],
 
   "hostname": "",
   "priority": ["lan", "wifi"],
@@ -10,8 +55,17 @@
     "driver": "RMII",
     "phy_type": "IP101",
     "phy_addr": 1,
-    "gpio": { "mdc": -1, "mdio": -1, "ref_clk": -1 },
-    "ip": { "mode": "dhcp", "addr": "", "mask": "", "gw": "" }
+    "gpio": {
+      "mdc": -1,
+      "mdio": -1,
+      "ref_clk": -1
+    },
+    "ip": {
+      "mode": "dhcp",
+      "addr": "",
+      "mask": "",
+      "gw": ""
+    }
   },
 
   "wifi": {
@@ -20,12 +74,18 @@
     "ssid": "",
     "ssid_pw": "",
     "timeout_s": 300,
-    "ip": { "mode": "dhcp", "addr": "", "mask": "", "gw": "" }
+    "ip": {
+      "mode": "dhcp",
+      "addr": "",
+      "mask": "",
+      "gw": ""
+    }
   },
 
   "bt": {
     "enable": 0,
-    "mode": "ble",
+    "profile": "none",
+    "fast": 0,
     "name": "",
     "pin": "",
     "bonding": 1

@@ -1,50 +1,54 @@
 {
   "version": 1,
-  "_comment": "System 層：身份、開機、NC4 通道與解碼路線。cID 空白會自動填入並寫回。",
+
+  "_comment": [
+    "System 層：身份、開機行為、NC4 通道與路由表。",
+    "引擎不用宣告：decodeN 由 routes[].out 推導（有人指向就開），fxN 由 .fxe manifest 的 core 推導。",
+    "任務清單在 tasks.json；設計與規則：docs/03_notes/routing.md",
+    "",
+    "── 身份 ──",
+    "cID：節點位址（4 位 hex）；空白 = 開機用 MAC 推導並寫回",
+    "frame_interval_ms：輸出幀間隔",
+    "num_pixels：燈效像素數",
+    "",
+    "── nc4.links：收幀通道，只講怎麼收、不決定誰解碼 ──",
+    "name：通道名；routes[].in / out 填的就是它",
+    "cfg：這一種通道自己的參數（port、rx、將來的 tx）—— 每條 link 都是 name / kind / cfg 三層",
+    "kind：cdc | uart | tcp | ws | udp",
+    "port：tcp / ws / udp 的埠號",
+    "rx.mode：pull | push_frame | message | datagram（cdc/uart 目前只實作 pull）",
+    "rx.region：parser 緩衝大小（會餵給 nc_plan 宣告）",
+    "rx.chunk：一次 read 最多拿多少 bytes",
+    "rx.budget：一條線一輪最多讀幾次（＝幾幀），讀完換下一條",
+    "rx.region / chunk / slots：量測值（預設），用戶唔使調；要改就要重新量過",
+    "rx.slots / rx.slot_size：push_frame 的插槽數與每格大小",
+    "rx.max_msg：message / datagram 的單則上限",
+    "",
+    "── nc4.routes：一列一個來源 ──",
+    "in：來源（link 名；nctx = 本機→自己，outbound = 本機→外）",
+    "nctx 與 outbound 是兩個永遠存在的預設列，排最前；冇寫就自動補",
+    "out：目的地；decodeN = 本地執行（N = 核心編號），link = 轉發；空 = 丟棄",
+    "例：out=[decode0] 只執行｜out=[TCP] 只轉發｜兩者一齊寫 = 兩樣都做｜out=[] 丟棄",
+    "decodeN 有人指向才開；冇人指向就唔存在"
+  ],
+
   "cID": "",
   "frame_interval_ms": 33,
   "num_pixels": 676,
+
   "nc4": {
-    "decode": [
-      {
-        "name": "decode0",
-        "core": 0,
-        "prio": 4,
-        "budget": 8
-      },
-      {
-        "name": "decode1",
-        "core": 1,
-        "prio": 4,
-        "budget": 8
-      }
-    ],
     "links": [
-      {
-        "name": "CDC",
-        "kind": "cdc",
-        "rx": {
-          "decode": "decode0"
-        }
-      },
-      {
-        "name": "UART",
-        "kind": "uart",
-        "rx": {
-          "decode": "decode1"
-        }
-      },
-      {
-        "name": "TCP",
-        "kind": "tcp",
-        "port": 6000,
-        "rx": {
-          "mode": "push_frame",
-          "decode": "decode0",
-          "slots": 4,
-          "slot_size": 8205
-        }
-      }
+      { "name": "CDC", "kind": "cdc", "cfg": { "rx": { "mode": "pull", "region": 8205, "chunk": 1024, "budget": 8 } } },
+      { "name": "UART", "kind": "uart", "cfg": { "rx": { "mode": "pull", "region": 1024, "chunk": 512, "budget": 8 } } },
+      { "name": "TCP", "kind": "tcp", "cfg": { "port": 6000, "rx": { "mode": "push_frame", "region": 16410, "chunk": 8192, "budget": 8, "slots": 8, "slot_size": 8205 } } }
+    ],
+
+    "routes": [
+      { "in": "nctx",     "out": ["decode0"] },
+      { "in": "outbound", "out": [] },
+      { "in": "CDC",      "out": ["decode0"] },
+      { "in": "UART",     "out": ["decode1"] },
+      { "in": "TCP",      "out": ["decode0"] }
     ]
   }
 }

@@ -509,6 +509,7 @@ esp_err_t nc_fx_load(const char *path)
     }
 
     // 效果只能跑在 fx task 那一核；manifest 寫別核 = 工具鏈設定錯，載入前就擋。
+    // 任務類（kind = normal）唔受此限：跑哪一核由 tasks.json 決定。
     if (slot->decl.kind == NC_FXM_KIND_EFFECT && slot->decl.core != -1 &&
         slot->decl.core != s_task_core) {
         ESP_LOGW(TAG, "%s：宣告 core=%d 但 fx task 在 core %d → 拒絕（先改排程）",

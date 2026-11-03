@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "_comment": [
+    "Tasks 層：只列「用戶任務」（租戶）。核心任務（nc4 / net / core / probe / fx）永遠照固件宣告跑，唔入呢個檔。",
+    "name：任務名（固件或 .fxe 宣告的名字）",
+    "level：-1 = 唔啟動；同一 level 內按註冊次序",
+    "affinity：[core0, core1]，只可以有一個 1；(0,0) = 唔跑",
+    "缺席的條目：固件或 .fxe 有、呢度冇 → 開機會自動補寫（只加不改）"
+  ],
+  "tasks": [
+    {
+      "name": "hello",
+      "level": 6,
+      "affinity": [
+        1,
+        0
+      ]
+    }
+  ]
+}

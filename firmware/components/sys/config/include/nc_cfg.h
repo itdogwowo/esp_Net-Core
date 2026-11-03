@@ -29,6 +29,10 @@ int nc_cfg_int(const cJSON *root, const char *key, int def);
 // 只用在「檔案缺這個值」的情況；會重排一次格式。
 bool nc_cfg_set_string(const char *layer, const char *key, const char *value);
 
+// 補條目：把一個 JSON 物件插進 array 的尾端（保留原排版，只加不改）。
+// 用於「固件有、config 沒有」的補寫：tasks.json 的 tasks[]、system.json 的 routes[]。
+bool nc_cfg_append_obj(const char *layer, const char *array_key, const char *obj_json);
+
 #ifdef __cplusplus
 }
 #endif

@@ -18,6 +18,8 @@
 #include <string.h>
 
 #include "esp_log.h"
+#include "nc_cfg.h"
+#include "cJSON.h"
 
 static const char *TAG = "tm";
 
@@ -40,6 +42,11 @@ typedef struct {
 
     nc_task_rt_t loops[NC_TASK_LOOPS_MAX];
     int nloops;
+
+    // tasks.json 的覆寫（開機讀一次）
+    bool cfg_seen;             // config 有這個名字
+    int  cfg_level;            // -1 = 不啟動
+    int  cfg_aff[2];           // [core0, core1]；-1 = 沒寫
 } tm_slot_t;
 
 // ── 對外提供 ──
@@ -387,11 +394,99 @@ static void audit(void)
     }
 }
 
+// 讀 tasks.json：只取 level / affinity。名字對不上 → 用固件預設（cfg_seen = false）。
+static void load_cfg(void)
+{
+    cfg_file_t *cfg = nc_cfg_open("tasks");
+    const cJSON *root = (cfg != NULL) ? nc_cfg_root(cfg) : NULL;
+    const cJSON *arr = (root != NULL) ? cJSON_GetObjectItemCaseSensitive(root, "tasks") : NULL;
+
+    for (int i = 0; i < s_count; i++) {
+        tm_slot_t *s = &s_slots[i];
+        s->cfg_seen = false;
+        s->cfg_level = s->def->level;
+        s->cfg_aff[0] = s->cfg_aff[1] = -1;
+
+        // 核心（房東）不受租約約束：SYSTEM 任務永遠照 C 宣告跑，config 管不到它。
+        if (s->def->kind == NC_TASK_SYSTEM) {
+            continue;
+        }
+        if (!cJSON_IsArray(arr)) {
+            continue;
+        }
+        const cJSON *it = NULL;
+        cJSON_ArrayForEach(it, arr) {
+            const cJSON *nm = cJSON_GetObjectItemCaseSensitive(it, "name");
+            if (!cJSON_IsString(nm) || nm->valuestring == NULL ||
+                strcmp(nm->valuestring, s->name) != 0) {
+                continue;
+            }
+            s->cfg_seen = true;
+            const cJSON *lv = cJSON_GetObjectItemCaseSensitive(it, "level");
+            if (cJSON_IsNumber(lv)) {
+                s->cfg_level = lv->valueint;
+            }
+            const cJSON *af = cJSON_GetObjectItemCaseSensitive(it, "affinity");
+            if (cJSON_IsArray(af) && cJSON_GetArraySize(af) == 2) {
+                const cJSON *a0 = cJSON_GetArrayItem(af, 0);
+                const cJSON *a1 = cJSON_GetArrayItem(af, 1);
+                s->cfg_aff[0] = cJSON_IsNumber(a0) ? a0->valueint : -1;
+                s->cfg_aff[1] = cJSON_IsNumber(a1) ? a1->valueint : -1;
+            }
+            break;
+        }
+    }
+    nc_cfg_close(cfg);
+
+    for (int i = 0; i < s_count; i++) {
+        tm_slot_t *s = &s_slots[i];
+        ESP_LOGI(TAG, "cfg %-10s %s level=%2d affinity=(%d,%d)%s",
+                 s->name, s->def->kind == NC_TASK_SYSTEM ? "core  " : "task  ",
+                 s->cfg_level, s->cfg_aff[0], s->cfg_aff[1],
+                 s->cfg_seen ? " config" : "");
+    }
+}
+
+// 固件有、config 沒有 → 補一條進 tasks.json（只加不改）。
+// 只做租戶（normal / effect）；核心（system）永遠唔寫入 config。
+static void append_missing_to_cfg(void)
+{
+    for (int i = 0; i < s_count; i++) {
+        tm_slot_t *s = &s_slots[i];
+        if (!s->used || s->cfg_seen || s->def->kind == NC_TASK_SYSTEM) {
+            continue;
+        }
+        int a0 = 1, a1 = 0;
+        if (s->def->loops != NULL && s->def->nloops > 0) {
+            const int core = s->def->loops[0].core;
+            a0 = (core == 0) ? 1 : 0;
+            a1 = (core == 1) ? 1 : 0;
+        }
+        char obj[160];
+        snprintf(obj, sizeof(obj),
+                 "{ \"name\": \"%s\", \"level\": %d, \"affinity\": [%d, %d] }",
+                 s->name, s->cfg_level, a0, a1);
+        if (nc_cfg_append_obj("tasks", "tasks", obj)) {
+            s->cfg_seen = true;          // 補過就唔好再補
+            ESP_LOGI(TAG, "cfg 補寫 %s", s->name);
+        }
+    }
+}
+
+// runtime 任務（掃 .fxe 之後 attach 的）也要補進 config。
+int nc_task_sync_cfg(void)
+{
+    append_missing_to_cfg();
+    return 0;
+}
+
 int nc_task_declare_all(void)
 {
+    load_cfg();
+    append_missing_to_cfg();
     int total = 0;
     for (int i = 0; i < s_count; i++) {
-        if (s_slots[i].used) {
+        if (s_slots[i].used && s_slots[i].cfg_level >= 0) {
             total += declare_one(&s_slots[i]);
         }
     }
@@ -433,6 +528,15 @@ static void prepare_loops(tm_slot_t *s)
         rt->def = d;
         rt->enabled = true;
         rt->core = d->core;      // 完全照宣告；框架不改你的核
+        if (s->cfg_aff[0] >= 0 || s->cfg_aff[1] >= 0) {
+            const int a0 = (s->cfg_aff[0] < 0) ? 1 : s->cfg_aff[0];
+            const int a1 = (s->cfg_aff[1] < 0) ? 1 : s->cfg_aff[1];
+            if ((a0 + a1) == 0) {
+                rt->enabled = false;             // 兩核都唔要 → 唔跑
+            } else if (!((rt->core == 0 && a0) || (rt->core == 1 && a1))) {
+                rt->core = a0 ? 0 : 1;           // 宣告的核唔准 → 搬去准嗰個
+            }
+        }
     }
 }
 
@@ -472,7 +576,8 @@ int nc_task_start_all(void)
 {
     int started = 0;
     for (int i = 0; i < s_count; i++) {
-        if (s_slots[i].used && start_slot(&s_slots[i], false) == ESP_OK) {
+        if (s_slots[i].used && s_slots[i].cfg_level >= 0 &&
+            start_slot(&s_slots[i], false) == ESP_OK) {
             started++;
         }
     }
@@ -486,12 +591,12 @@ int nc_task_boot(void)
     for (int layer = 0; layer < NC_TASK_LAYERS; layer++) {
         for (int i = 0; i < s_count; i++) {
             tm_slot_t *s = &s_slots[i];
-            if (!s->used || !s->started) {
+            if (!s->used || !s->started || s->cfg_level < 0) {
                 continue;
             }
             for (int k = 0; k < s->nloops; k++) {
                 nc_task_rt_t *rt = &s->loops[k];
-                if (rt->def->layer != layer || rt->started) {
+                if (rt->def->layer != layer || rt->started || !rt->enabled) {
                     continue;
                 }
                 if (nc_task_rt_start(rt) == ESP_OK) {
@@ -744,10 +849,13 @@ size_t nc_task_json(char *buf, size_t cap)
         const nc_task_t *t = s->def;
         off = jappend(buf, cap, off,
                       "%s{\"name\":\"%s\",\"kind\":\"%s\",\"level\":%d,"
+                      "\"cfg\":%d,\"cfg_level\":%d,"
                       "\"started\":%d,\"runtime\":%d,\"mem\":%d,"
                       "\"claims\":%d,\"provides\":%d,\"loops\":[",
                       first ? "" : ",", s->name, nc_task_kind_name(t->kind),
-                      t->level, s->started ? 1 : 0, s->runtime ? 1 : 0,
+                      s->cfg_seen ? s->cfg_level : t->level,
+                      s->cfg_seen ? 1 : 0, s->cfg_level,
+                      s->started ? 1 : 0, s->runtime ? 1 : 0,
                       s->nreq, s->nclaims, s->nprov);
         first = false;
         for (int k = 0; k < s->nloops && off < cap - 1; k++) {

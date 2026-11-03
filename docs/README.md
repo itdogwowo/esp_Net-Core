@@ -9,8 +9,8 @@
 |---|---|---|---|
 | **00_pm** 項目管理 | 想知道「做到哪、接下來做什麼」的人 | 現況、路線圖、決策與待辦 | 3 |
 | **01_protocol** 協議層 | 對接方 / 寫 transport / 寫 PC 工具的人 | NC4 在哪些通道上跑、每個通道要自己做什麼 | 2 |
-| **02_guides** 使用教學 | 要 build / 燒錄 / 跑測試的人 | 工具怎麼用、測試怎麼跑、數字怎麼判讀 | 2 |
-| **03_notes** 設計筆記 | 維護者 / 想了解設計脈絡的人 | 架構、分層、記憶體、研究、上板紀錄 | 19 |
+| **02_guides** 使用教學 | 要 build / 燒錄 / 跑測試 / 選連線的人 | 工具怎麼用、測試怎麼跑、連線怎麼選、數字怎麼判讀 | 3 |
+| **03_notes** 設計筆記 | 維護者 / 想了解設計脈絡的人 | 架構、分層、路由、任務模型、記憶體、研究、上板紀錄 | 22 |
 
 > **趕時間先看**：[00_pm/status.md](00_pm/status.md) —— 一頁涵蓋「已驗證的數字、已定案的架構、還沒做的事、要測的場景」。
 
@@ -42,6 +42,7 @@
 |---|---|
 | [build_and_flash.md](02_guides/build_and_flash.md) | **建置與燒錄**：IDF v6.0.3 安裝、macOS 26 的兩個地雷（libexpat / pip truststore）、`app-flash` vs `flash`、疑難排解 |
 | [testing.md](02_guides/testing.md) | **測試方法與結果**：環境、9 個解碼器 case、benchmark 怎麼打、OTA 怎麼推、怎麼重跑、未測清單、紀錄表 |
+| [connectivity.md](02_guides/connectivity.md) | **連線方式怎麼選**：`lan` / `wifi` / `bt` / `espnow` 的分別、每個參數的意思、能力矩陣（哪塊板支援什麼）、一起開會怎樣、藍牙專章 |
 
 ---
 
@@ -51,11 +52,14 @@
 |---|---|
 | [architecture-flow.md](03_notes/architecture-flow.md) | **執行期流程**：mode 決策、NC4 檔案編輯、frame pipeline、ownership matrix |
 | [decode-routes.md](03_notes/decode-routes.md) | **解碼路線與接收緩衝（現況）**：五條通道各自跑在哪一核、用哪塊緩衝、分派路徑；「執行完才能收下一個」對一半；heap/BSS 的隱形緩衝清單與優先序 |
+| [task-model.md](03_notes/task-model.md) | **任務模型（房東／租戶）**：核心 vs 任務的分界、三個 component、開機流程、`tasks.json` 格式與補寫規則、`.fxe` 怎麼變任務、已驗證清單 |
+| [task-fx-open-questions.md](03_notes/task-fx-open-questions.md) | **任務與 fx 的未定問題清單**：已定的 20 條、待決定、已移出的 fx 細節 |
+| [routing.md](03_notes/routing.md) | **解碼路由表（Router × 引擎 × 任務）**：舊專案 `self` / `vbus` 在分什麼、引擎為何不用宣告（decode 由 routes 推、fx 由 manifest 推）、`out` 四種組合、舊→新對照、優先權與配額、開機表、`.fxe` 與 manifest 兩個格式、與現況程式的六項落差 |
 | [naming.md](03_notes/naming.md) | **命名慣例**：一個子系統一個前綴（`nc4_`/`nc_plan_`/`nc_task_`/`nc_store_`/`nc4_ws_`/`nc_fx_`）、**`<域>_task` 與 `<域>_action` 後綴**（同名域不混淆，例 pixel）、檔名＝前綴＋角色、型別與列舉規則、新舊對照 |
 | [component-layout.md](03_notes/component-layout.md) | **三層分區與 component 佈局（目標架構）**：hw/sys/sw/action/tasks/ui/schema 七區、`ports/` 專案層、依賴方向。⚠️ 目前只落地 `sys/` 與 `app/` |
 | [file-write-path.md](03_notes/file-write-path.md) | **分段寫入可行性**：mp 版 `.tmp`→`sha256`→`.bak`→rename 演算法、空間預算（覆蓋要 2×）、實測 141 KB/s、斷電恢復、四個必做條件 |
 | [fat-ownership.md](03_notes/fat-ownership.md) | **FAT 擁有者（互斥模型）**：為什麼不能同時掛碟與讀檔、為什麼只切 mount_point 不夠、LUN 拆建＋USB 重新列舉、實測數據 |
-| [config-layers.md](03_notes/config-layers.md) | **配置分層（一個層一個檔案）**：`config/hardware.json`→`driver`→`system`→`network`→`tasks`→`effects`→`ui`；每層自己讀、缺檔用預設、壞檔只退化該層；開機順序（硬體先起來才讀分配）；`system.json` 的 `nc4.decode[]` / `links[].rx.decode` 怎麼寫 |
+| [config-layers.md](03_notes/config-layers.md) | **配置分層（一個層一個檔案）**：`config/hardware.json`→`driver`→`system`→`network`→`tasks`→`effects`→`ui`；每層自己讀、缺檔用預設、壞檔只退化該層；開機順序（硬體先起來才讀分配）；`system.json` 的 `links[]` / `routes[]` 與 `tasks.json` 怎麼寫 |
 | [p4-bringup.md](03_notes/p4-bringup.md) | **ESP32-P4 上板紀錄**：IDF 版本、console/PSRAM 陷阱、乙太網吞吐調校（1.1 → 8 MB/s） |
 | [failure-policy.md](03_notes/failure-policy.md) | **失敗處理**：config 壞掉/超範圍、PHY 協商失敗、拔線、USB MSC 不支援時的替代路徑（HTTP/NC4 file） |
 | [writing-a-task.md](03_notes/writing-a-task.md) | **怎麼寫一個 Task（C）**：`nc_task_register()` 之後全交給管理器（plan 宣告 / 開 loop / 量測 / 狀態）；身份（kind）/接線（mem·claims·**provides**）/執行（loops：core·layer·節奏）/生命（on_start·on_stop·attach·detach）；**§3.2 指令＝action，不是任務的財產** |

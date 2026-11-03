@@ -27,8 +27,8 @@ esp_Net-Core/
 │  ├─ CMakeLists.txt            IDF 工程根（idf.py 在這裡跑）
 │  ├─ main/                     裝配 + 目前還住在 main.c 的業務邏輯
 │  ├─ components/               可重用元件
-│  │  ├─ sys/                   nc4（framing/解碼/通道框架）、mem、tasks、transport
-│  │  └─ app/                   ota
+│  │  ├─ sys/                   nc4（framing/解碼）、mem、task（型別+loop）、task_manager、transport
+│  │  └─ app/                   fx（載入器）、tasks/<name>（每個任務一個）
 │  ├─ sdkconfig.defaults        共通建置配置（晶片層）
 │  ├─ partitions.csv            分割表
 │  └─ build/  managed_components/  sdkconfig  ← 生成物，不進 git
@@ -61,6 +61,7 @@ esp_Net-Core/
 | 有哪些通道、各自要實作什麼 | [docs/01_protocol/transports.md](docs/01_protocol/transports.md) |
 | 怎麼建置、怎麼燒、踩過哪些雷 | [docs/02_guides/build_and_flash.md](docs/02_guides/build_and_flash.md) |
 | 怎麼跑測試、數字怎麼判讀 | [docs/02_guides/testing.md](docs/02_guides/testing.md) |
+| 有線／無線／藍牙／ESP-NOW 怎麼選 | [docs/02_guides/connectivity.md](docs/02_guides/connectivity.md) |
 | 分層原則（七個程式分區） | [docs/03_notes/component-layout.md](docs/03_notes/component-layout.md) |
 | 實際的 C 程式 | `firmware/main/`、`firmware/components/` |
 | 這塊板子要什麼 | `ports/<chip>/<board>/` |
