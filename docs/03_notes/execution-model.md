@@ -4,7 +4,8 @@
 > **結論先講**：可以兼容，而且改裝不大（約 200 行、4 個檔），但**「小」不等於「無代價」**——
 > 有 5 個邊界條件一定要處理，否則會出現「停不掉、量不準、stack 不夠」的隱形 bug。
 >
-> 相關：[core-round.md](core-round.md)（大循環量測）、[task-lifecycle.md](task-lifecycle.md)、
+> 相關：[execution-rules.md](execution-rules.md)（搶佔條件、等待規則、核心隔離——**先讀這份**）、
+> [core-round.md](core-round.md)（大循環量測，已停用）、[task-lifecycle.md](task-lifecycle.md)、
 > [task-model.md](task-model.md)。
 
 ---
