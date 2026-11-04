@@ -11,7 +11,9 @@ cc -std=c11 -Wall -Wextra -Werror \
    -I "$ROOT/firmware/components/sys/config/include" \
    -I "$ROOT/firmware/components/sys/nc4/include" \
    -I "$ROOT/firmware/components/sys/mem/include" \
+   -I "$ROOT/firmware/components/sys/epoch/include" \
    "$ROOT/firmware/components/sys/task_manager/nc_task.c" \
+   "$ROOT/firmware/components/sys/epoch/nc_epoch.c" \
    "$ROOT/tools/hosttest/task_test/cfg_stub.c" \
    "$ROOT/tools/hosttest/task_test/stubs.c" \
    "$ROOT/tools/hosttest/task_test/main.c" \

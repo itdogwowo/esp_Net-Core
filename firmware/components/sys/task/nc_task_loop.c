@@ -4,8 +4,11 @@
 
 #include <string.h>
 
+#include "esp_cpu.h"
 #include "esp_log.h"
 #include "esp_timer.h"
+
+#include "nc_epoch.h"
 
 static const char *TAG = "task";
 
@@ -60,7 +63,8 @@ static void trampoline(void *arg)
         if (rt->enabled && d->fn != NULL) {
             const int64_t t0 = now_us();
             d->fn(d->arg);
-            const uint32_t dt = (uint32_t)(now_us() - t0);
+            const int64_t t1 = now_us();
+            const uint32_t dt = (uint32_t)(t1 - t0);
 
             rt->count++;
             rt->last_us = dt;
@@ -76,6 +80,16 @@ static void trampoline(void *arg)
             const uint32_t wrap = (uint32_t)(now_us() - iter0) - dt;
             rt->last_wrap_us = wrap;
             rt->total_wrap_us += wrap;
+
+            // 每核大循環：同一次 timestamp 餵埋量測，避免多一次 esp_timer。
+            if (rt->epoch_token >= 0) {
+                nc_epoch_mark(rt->core, rt->epoch_token, t1,
+                              (uint32_t)esp_cpu_get_cycle_count(), dt);
+            }
+        } else if (rt->epoch_token >= 0) {
+            // 停用的 loop 都要參與（exec=0），否則同核其他 loop 的大循環永遠等它。
+            nc_epoch_mark(rt->core, rt->epoch_token, now_us(),
+                          (uint32_t)esp_cpu_get_cycle_count(), 0);
         }
         if (d->run_once) {
             break;
@@ -87,6 +101,10 @@ static void trampoline(void *arg)
         }
     }
 
+    if (rt->epoch_token >= 0) {
+        nc_epoch_remove(rt->core, rt->epoch_token);
+        rt->epoch_token = -1;
+    }
     active_del(rt);
     rt->started = false;
     rt->exited = true;
@@ -125,8 +143,10 @@ esp_err_t nc_task_rt_start(nc_task_rt_t *rt)
         return ESP_ERR_NO_MEM;
     }
     rt->started = true;
+    rt->core = (int)xTaskGetCoreID(rt->handle);   // CORE_ANY 喺呢度定案
+    rt->epoch_token = nc_epoch_add(rt->core);
     ESP_LOGI(TAG, "loop [%s] L%d → core %d", rt->def->name, rt->def->layer,
-             xTaskGetCoreID(rt->handle));
+             rt->core);
     return ESP_OK;
 }
 

@@ -53,6 +53,7 @@
 #include "nc4_router.h"
 #include "nc_task.h"
 #include "nc_hello.h"
+#include "nc_bench.h"
 #include "nvs.h"
 #include "nvs_flash.h"
 #include "esp_mac.h"
@@ -70,6 +71,7 @@
 #include "nc_file_action.h"
 #include "nc_fx.h"
 #include "nc_wifi.h"
+#include "nc_epoch.h"
 
 #include "tinyusb.h"
 #include "tinyusb_cdc_acm.h"
@@ -603,7 +605,7 @@ static void on_status_get(nc4_ctx_t *ctx, const nc4_frame_t *f)
     if (strcmp(keys, "?") == 0) {
         reply_json(ctx, NC4_CMD_STATUS_RSP,
                    "{\"keys\":[\"sys\",\"storage\",\"mem\",\"provides\","
-                   "\"tasks\",\"fx\",\"wifi\""
+                   "\"tasks\",\"fx\",\"wifi\",\"epoch\""
 #if CONFIG_IDF_TARGET_ESP32P4
                    ",\"net\""
 #endif
@@ -627,6 +629,9 @@ static void on_status_get(nc4_ctx_t *ctx, const nc4_frame_t *f)
     }
     if (keys_want(keys, "storage")) {
         status_add(json, cap, &off, &first, status_put_storage);
+    }
+    if (keys_want(keys, "epoch")) {
+        status_add(json, cap, &off, &first, nc_epoch_json);
     }
     if (keys_want(keys, "mem")) {
         status_add(json, cap, &off, &first, status_put_mem);
@@ -2689,6 +2694,9 @@ void app_main(void)
     nc_task_register(&s_task_probe);   // L3：開機自測
     nc_task_register(&s_task_fx);      // L4：效果 arena + render task
     nc_task_register(nc_hello_task());  // L6：最小框架自測（每秒 Hello World）
+    nc_task_register(nc_bench_task_a()); // L4：量測驗證用（預設 (0,0) = 唔跑）
+    nc_task_register(nc_bench_task_b());
+    nc_task_register(nc_bench_task_c());
 
     nc_task_declare_all();       // → nc_plan_declare + 帳本檢查
 

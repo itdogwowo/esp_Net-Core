@@ -24,6 +24,9 @@ typedef struct {
     // 這是「被登記成任務」與「自己寫一個 for(;;) 直接跑」的差距。
     uint32_t last_wrap_us;
     uint64_t total_wrap_us;
+
+    // 每核「大循環」量測的 token（nc_epoch）。-1 = 未登記。
+    int epoch_token;
 } nc_task_rt_t;
 
 // 建立 / 停止 FreeRTOS task。arg 是 loop 的 arg；exit 用 nc_task_exit_requested()。
