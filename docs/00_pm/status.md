@@ -334,8 +334,8 @@ DIRAM 不變（S3 98,761／P4 129,863），flash 略減。
 
 建置（零 warning）：S3 OFF **385,584**／ON **402,704**；P4 不變（659,632／681,504）。
 
-> 未做：MSC storage／`async_io` task 仍喺 router 之前初始化（store init 早過 router）——
-> 要將 MSC driver install 延後到 router 之後，才可以用同一個核。
+> 已補（2026-11-05 晚）：MSC driver install 已延後到 router 之後；`msc_async_io` 同
+> `usb_reconn` 都釘喺 USB 服務組的核心（見 §7.13）。
 
 ---
 
@@ -391,3 +391,44 @@ trampoline 只喺 `fn` 返回後才 `nc_epoch_mark`，所以該核永遠完成�
 
 **新增測試指令**（`action/test_action`，受 `NC_ENABLE_TESTS` gate）：
 `0xF00B UART_LOOP`（寫 N 幀去 UART1）、`0xF00C LOOP_STAT`（讀收回幀數）、`0xF0FE LOOP_PING`（接收計數）。
+
+### 7.13 2026-11-05 晚（USB 隨身碟初始化、P4 建置）
+
+| 症狀 | 根因 | 修法 |
+|---|---|---|
+| 碟停在「需要格式化」／主機完全冇碟 | 原本的後備在 `nc_store_init()` 失敗時永遠到不了；而且用 `fw_new` 當條件，同 FAT 健不健康無關 | NVS `boot/fs_init`：**只有第一次初始化**才允許格式化；NVS `boot/fs_format`：`STATUS_SET` 的明確請求，下次開機重建。`nc_store_format()` 只在這些路徑呼叫，日常 mount 失敗唔會清資料 |
+| 主機拔插／`file_mode` 切換後碟唔返 | `usb_reconn`、`msc_async_io` 冇 pin 核，同 TinyUSB task 跨核爭 USB 狀態 | 兩者都釘喺 MSC driver 安裝核（USB 服務組） |
+| 同一個 WL handle 被掛到多個 pdrv | esp_tinyusb 預設喺 `tud_mount_cb`／`tud_umount_cb` 自動換 mount point，繞過 store | `auto_mount_off = 1`；主人只由 `switch_to()` 決定 |
+| 指紋相同時 NVS handle 漏 close | `fw_fp_changed()` 只喺變更時交回 handle | 相同就即刻 close |
+| 掛載失敗後 WL handle 漏／分區仍被佔 | IDF 的 `esp_vfs_fat_spiflash_mount_rw_wl()` 失敗路徑只 unregister pdrv／VFS，唔會 `wl_unmount` | `open_app()` 失敗時自己 `wl_unmount`，之後 `nc_store_format()` 才可以乾淨重掛 |
+| P4 建置失敗（`cdc_region` implicit declaration） | `task_nc4_start()` 喺 P4 仍引用只在 `!P4` 定義的 CDC 符號 | 加 `#if` guard；`cfg_probe_once()` 兩塊板都呼叫 |
+
+建置：S3 **381.4 KB**、P4 **649.9 KB**，零 warning。
+
+> **兩個獨立旗標（NVS `boot` namespace）：**
+> - `fs_init`：第一次初始化。未設 → `nc_store_init(part, true)`（真的掛唔上才 `nc_store_format()`）；
+>   已設 → `nc_store_init(part, false)`，掛唔上保持原狀、**唔清資料**。
+> - `fs_format`：**明確請求**。由 `0x1103 STATUS_SET {"System":{"fs_format":1}}` 設定；
+>   下次開機 `nc_store_format()` 抹分區重建，成功後清旗標。`STATUS_GET storage` 的 `req` 可看。
+> - `fw_new` 只決定「要不要刪 config」。
+> - 用法：`STATUS_SET {"System":{"fs_format":1}} persist=1` → `0x100F REBOOT`。
+>   工具：`tools/nc4_file.py ... set '{"System":{"fs_format":1}}' 1`，之後 `tools/nc4.py ... reboot`。
+
+**上板實測（2026-11-05 晚，S3；CDC 指令通道）**
+
+| 測試 | 結果 |
+|---|---|
+| 燒錄後重開 | ✅ 複合裝置 `esp_Net_Core` 列舉；`NC-2B4C` 7.3 MB 自動掛載 |
+| 碟內容 | ✅ `config/{system,network,tasks}.json` 都係合法 JSON（2701／3451／768 B） |
+| 主機寫入 → reboot | ✅ `test.txt` 重開後仍讀得返 |
+| `file_mode=1`（claim） | ✅ `storage.mode=app`、`app_ready=1`；LUN 已拆 |
+| `file_mode=0`（release） | ✅ 回 `mode=usb`，碟重新出現，`test.txt` 仍在 |
+| 第一次開機（NVS 無 `fs_init`） | ✅ `storage.first=1`；FAT 有效所以唔抹，直接掛載並落旗標 |
+| 第二次開機（旗標已落） | ✅ `storage.first=0`、`fmt=-99`；碟照常出現 |
+| OTA 0.1.0 → 0.1.1 | ✅ 388,704 B／2.0–2.7 s（142–191 KB/s）；reboot 後 `sys.fw=0.1.1`、`first=1`（OTA 後第一次）、`fmt=0`（config reset 有生效） |
+| host 把 FAT 改成 MBR/FAT32 → reboot（`first=0`） | ✅ 裝置**冇抹除**：反而掛上 host 建的 FAT32 分區、seed `config/`／`pixel/`；`first` 保持 0 |
+| `STATUS_SET {"System":{"fs_format":1}}` → reboot | ✅ ACK `fs_format=1; 下次開機抹 data 分區並重建 FAT`；`storage.req=1` → reboot 後 `req=0`、`fmt=0`，碟以 `NC-2B4C` 回來、config 重新 seed |
+
+> `nc_store_format()` 已由 `STATUS_SET → reboot` 實際呼叫（上表）。未測的只剩
+> 「開機第一次 init 就掛唔上」這個入口 —— 要 raw erase `data` 的 WL metadata 才觸發得到
+> （需要下載模式）；正常、第一次、第二次開機、host 改壞 FAT、STATUS_SET 明確格式化都已上板證實。

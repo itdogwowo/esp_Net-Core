@@ -60,7 +60,7 @@ components/action/
 | `0x2005` | FILE_QUERY（path → 存在/sha256/size/free/pending） | file.json | ✅ 唯讀 |
 | `0x2006` | FILE_QUERY_RSP | file.json | ✅ |
 | `0x2010` | FILE_ERROR_RSP（`err_busy=1` = FAT 目前在 host 手上） | file.json | ✅ |
-| `0x1103` | STATUS_SET（目前只認 `System.file_mode`：0=交還 host、1=裝置接管） | status.json | ✅ 子集 |
+| `0x1103` | STATUS_SET（`System.file_mode`：0=交還 host、1=裝置接管；`System.fs_format`：1=下次開機抹 data 分區重建 FAT） | status.json | ✅ 子集 |
 | `0x1104` | STATUS_ACK（`ok` + `message`） | status.json | ✅ |
 | `0x1105` | ROUTE_GET（空 payload → 回開機時定下的路由表） | status.json | ✅ |
 | `0x1106` | ROUTE_RSP（`routes_json`） | status.json | ✅ |
@@ -85,6 +85,30 @@ components/action/
 - 表裡只有 `line → core`，**沒有方向**。`out` 裡的 link（轉發）目前**未實作**：
   讀 config 時只取每行第一個 `decodeN` 當核心，其餘 `out` 成員被忽略。
 
+### `0x1103 STATUS_SET`：`System.fs_format` = 下次開機重建 FAT
+
+沿用舊專案「設定狀態 → 下次開機生效」的做法，沒有新增指令號：
+
+```json
+0x1103 STATUS_SET  {"System":{"fs_format":1}}   persist=1
+0x100F REBOOT
+```
+
+（也接受點分路徑 `{"System.fs_format":1}`，以及別名 `System.format`。）
+
+- `fs_format=1` → 寫 NVS `boot/fs_format`，回 `0x1104 STATUS_ACK {ok,message}`；
+  **不會在解碼路徑抹 7 MB**。`STATUS_SET` 只改狀態，格式化延後到開機。
+- `0x100F REBOOT` → 下次 `storage_init()` 見到旗標：
+  `nc_store_format()`（抹 7 MB → WL mount → `f_mkfs` → mount → seed）→ 清旗標。
+- `fs_format=0` → 取消請求。
+- 開機後 `STATUS_GET keys=storage`：
+  - `req=1` = 有待處理的格式化請求（未 reboot）
+  - `req=0` = 已消費
+  - `fmt=0` = 這次開機真的重建過；`-99` = 沒走重建
+- `first` 仍是「第一次初始化」旗標；`fs_format` 是**明確請求**，不受 `first` 限制。
+- 風險：會清掉使用者所有檔案；只用在 factory reset 或 FAT 確定壞掉。
+- 正常換韌體**不會**走這條：換版只刪 `config/*.json`，再 seed。
+
 ### `0x1101 STATUS_GET`：KEY 只是「揀邊幾份報告」，不是「查一個值」
 
 > 常問：「不是輸入 KEY 就回覆嗎？為什麼會有 2.4 KB 那麼大？」
@@ -98,7 +122,7 @@ components/action/
 | `mem` | 每個 class 的 plan 帳（宣告 / carve / 用量 / 峰值） | ~1,500 B |
 | `tasks` | 每個任務 × 每個 loop 的 core / level / count / avg / max / over / wrap | ~2,000 B |
 | `provides` | 誰提供什麼（buffer / JSON / 數值） | ~900 B |
-| `storage` | FAT 擁有者、`/ro` vs `/data`、free、pending | ~100 B |
+| `storage` | FAT 擁有者、`/ro` vs `/data`、`first`（第一次初始化？）、`req`（待格式化？）、`fmt`、free、pending | ~140 B |
 | `fx` | 每個 `.fxe` 的 manifest（kind / core / fps / px / mem / 指令） | 1,000–2,600 B |
 | `net` | IP / MAC / link 狀態（只在 P4） | ~300 B |
 
@@ -121,6 +145,7 @@ components/action/
 
 換 FAT 的擁有者不需要新指令號 —— 那是「一個具名的狀態」，走既有的
 `0x1103 STATUS_SET`：`{"System":{"file_mode":1}}`。
+「下次開機重建 FAT」也一樣走 `0x1103`：`{"System":{"fs_format":1}}`（見 §2）。
 
 讀取（`0x2005`）**任何模式都答得到**：主機擁有 FAT 時走唯讀視圖（`/ro`），
 回覆的 `pending=1` 表示「可能過期或半截」；裝置接管時走 `/data`，`pending=0` 是真值。
@@ -216,5 +241,5 @@ components/action/
 |---|---|---|
 | `0x1007` | SYS_TASK_SET | 要執行期改 task 的 affinity |
 | `0x100D/0x100E` | IDENTIFY_REQ/RSP | 多節點掃描配對 |
-| `0x1103/0x1104` | STATUS_SET / STATUS_ACK | ~~要遠端改設定並落盤~~ → 已實作 `System.file_mode` 子集（見 §2） |
+| `0x1103/0x1104` | STATUS_SET / STATUS_ACK | ~~要遠端改設定並落盤~~ → 已實作 `System.file_mode` / `System.fs_format` 子集（見 §2） |
 | `0x2212`–`0x2217` | LAST / PARTITION_STATUS / VERIFY | 要 OTA 歷史與細節驗證 |

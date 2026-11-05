@@ -125,7 +125,7 @@ static volatile uint32_t s_rx_frames;        // 成功收到的幀數
 #define UART_TEST_RX_PIN   8
 #define UART_TEST_RX_BUF   4096
 #define UART_TEST_DEF_BAUD 921600
-#define FW_VERSION         "0.1.0"
+#define FW_VERSION         "0.1.1"
 
 // ── 專屬測試域 0xFxxx（不屬於任何產品功能，可隨時刪）──
 // 0xF001 DEV_BENCH  size(u16) iters(u16) mode(u8) → 0xF002 DEV_RSP (str_u16len JSON)
@@ -320,18 +320,21 @@ static void ensure_volume_label(void)
 #endif
 }
 
-// ── 韌體換版 ⇒ 清空 data 分區（一次性）──
-// 用 NVS 記住「上次開機嘅韌體指紋」，同當前 app 不同就抹掉 data 分區。
+// ── 韌體換版 ⇒ 重置 data 分區的 config（一次性）──
+// 用 NVS 記住「上次開機嘅韌體指紋」，同當前 app 不同就重置。
 // 為什麼要：config 係由韌體 seed 出嚟，舊 config 會蓋住新韌體嘅預設值；
 // 而 host 直接改 FAT 之後 reboot 會令 FAT 不一致（實測會令開機卡死）。
-// 做法：**只抹 partition**，唔自己呼叫 FAT 格式化 —— 之後 nc_store_init() 掛載
-// 失敗，它內建的 format_if_mount_failed 會格式化，然後 seed_presets() 寫入預設。
-// （自己叫 esp_vfs_fat_spiflash_format_rw_wl 會同 store 的掛載打架，實測會卡死。）
-static int s_fmt_err = -99;          // -99 = 未嘗試，0 = 已抹，>0 = esp_err_t
+// 做法分兩條路：
+//   1. 正常（掛得上）→ **只刪 config 檔**（毫秒級），seed 會重寫這版預設。
+//   2. FAT 壞到掛唔上 → nc_store_format() 抹分區＋重建 FAT（唯一會清資料的路徑）。
+// 唔自己叫 esp_vfs_fat_spiflash_format_rw_wl：會同 store 的掛載打架，實測會卡死。
+static int s_fmt_err = -99;          // -99 = 未嘗試，0 = 正常／已重建，>0 = esp_err_t
 
-// 回傳 true = 韌體指紋變了（呼叫端負責抹分區 + 之後寫回指紋）
+// 回傳 true = 韌體指紋變了（呼叫端負責抹分區 + 之後寫回指紋）。
+// *out_h 只有在回傳 true 時才是有效 handle；指紋一樣就即刻關掉，不留 handle。
 static bool fw_fp_changed(nvs_handle_t *out_h, const char *cur)
 {
+    *out_h = 0;
     nvs_handle_t h;
     if (nvs_open("boot", NVS_READWRITE, &h) != ESP_OK) {
         return false;
@@ -339,8 +342,12 @@ static bool fw_fp_changed(nvs_handle_t *out_h, const char *cur)
     char stored[48] = {0};
     size_t len = sizeof(stored);
     (void)nvs_get_str(h, "fw_fp", stored, &len);
+    if (strcmp(stored, cur) == 0) {
+        nvs_close(h);
+        return false;
+    }
     *out_h = h;
-    return strcmp(stored, cur) != 0;
+    return true;
 }
 
 static void fw_fp_store(nvs_handle_t h, const char *cur)
@@ -364,7 +371,7 @@ static void fw_fp_now(char *out, size_t cap)
 }
 
 // 新韌體要清 config：**只刪檔案**（毫秒級），唔係抹 7 MB 分區（2–3 分鐘）。
-// 抹分區只留做「FAT 已經壞、連掛都掛唔到」嘅後備路徑。
+// 抹分區只留給「第一次初始化」或使用者明確要求 factory reset。
 static const char *const k_cfg_reset[] = {
     "/data/config/system.json",
     "/data/config/system.json.bak",
@@ -383,6 +390,45 @@ static int reset_config_files(void)
     return n;
 }
 
+// ── data 分區的「第一次初始化」旗標（NVS）──
+// 這是一個**持久化**的位置（NVS namespace "boot"、key "fs_init"），
+// 不是每次開機都 reset 的 static bool：
+//   旗標不存在／=0 → 第一次初始化，允許格式化（全新分區 / factory reset）
+//   旗標 =1       → 已初始化過，之後就算 mount 失敗都**絕對唔會自動格式化**
+// 要重新初始化（factory reset）就清 NVS（或以未來的 factory-reset 指令清旗標），
+// 下次開機又會當第一次。
+//
+// 為什麼不用韌體版本判斷：版本只代表「config 可能過期」，同 FAT 健不健康無關；
+// 同一版韌體也可能因為 host 沒 eject、斷電、WL 壞掉而掛唔上。
+static int s_fs_first = -1;          // 本次開機讀到的值（STATUS storage.first）
+
+static bool fs_first_init(void)
+{
+    nvs_handle_t h;
+    if (nvs_open("boot", NVS_READONLY, &h) != ESP_OK) {
+        // 第一次：連 namespace 都未建立。若是 NVS 讀取失敗，記錄一下，
+        // 因為這會令本次開機「允許格式化」。
+        ESP_LOGW(TAG, "NVS 讀唔到 fs_init → 當第一次初始化（允許格式化）");
+        return true;
+    }
+    uint8_t v = 0;
+    const esp_err_t e = nvs_get_u8(h, "fs_init", &v);
+    nvs_close(h);
+    return e != ESP_OK || v == 0;
+}
+
+static void fs_mark_initialized(void)
+{
+    nvs_handle_t h;
+    if (nvs_open("boot", NVS_READWRITE, &h) != ESP_OK) {
+        ESP_LOGW(TAG, "NVS 開唔到 → fs_init 未寫入（下次開機仍會當第一次）");
+        return;
+    }
+    (void)nvs_set_u8(h, "fs_init", 1);
+    (void)nvs_commit(h);
+    nvs_close(h);
+}
+
 static esp_err_t storage_init(void)
 {
     const esp_partition_t *part = find_data_partition();
@@ -396,29 +442,65 @@ static esp_err_t storage_init(void)
     char fp[48];
     fw_fp_now(fp, sizeof(fp));
     const bool fw_new = fw_fp_changed(&nh, fp);
+    const bool fs_first = fs_first_init();
+    const bool fs_force = nc_store_format_requested();   // STATUS_SET System.fs_format
+    s_fs_first = fs_first ? 1 : 0;
+    ESP_LOGI(TAG, "data 初始化：%s（fs_init=%d, fs_format=%d）",
+             fs_first ? "第一次，允許格式化" : "已初始化過，唔會自動格式化",
+             s_fs_first, fs_force ? 1 : 0);
 
     // WL / FatFS / MSC 的整個生命週期都由 store 管 —— 它有辦法在 claim 時
     // 把 LUN 拆掉，否則主機在 APP 模式仍然寫得進同一塊 flash。
-    ESP_RETURN_ON_ERROR(nc_store_init(part), TAG, "store 初始化失敗");
-
-    if (fw_new) {
-        if (nc_store_app_ready()) {
-            // 正常路徑：FS 好，只刪 config 檔 → seed 會重寫這版預設
-            const int n = reset_config_files();
+    esp_err_t serr;
+    if (fs_force) {
+        // STATUS_SET 明確要求：無論 fs_init 是什麼都重建 FAT。
+        // 呢個 flag 只喺開機（app_main、tasks 未起）消費，唔會喺解碼路徑抹 7 MB。
+        ESP_LOGW(TAG, "System.fs_format=1 → 抹 data 分區並重建 FAT");
+        serr = nc_store_format(part);
+        if (serr == ESP_OK) {
+            nc_store_request_format(false);   // 成功才清；失敗留返下次開機再試
             s_fmt_err = 0;
-            ESP_LOGW(TAG, "韌體 %s → 重置 config（刪除 %d 個檔）", fp, n);
         } else {
-            // 後備：連掛都掛唔到（FAT 壞）→ 抹分區，再 init 一次（會自動格式化）
-            ESP_LOGW(TAG, "韌體 %s → /data 掛唔到，抹除整個分區", fp);
-            const esp_err_t e = esp_partition_erase_range(part, 0, part->size);
-            s_fmt_err = (int)e;
-            if (e == ESP_OK) {
-                (void)nc_store_init(part);
-            }
+            s_fmt_err = (int)serr;
+        }
+    } else {
+        serr = nc_store_init(part, fs_first);
+
+        if (serr != ESP_OK && fs_first) {
+            // **只有第一次初始化**才允許抹分區重建。之後掛唔上就保持原狀，
+            // 由 host 端格式化／修復；唔會因為一次 mount 失敗清掉使用者資料。
+            ESP_LOGW(TAG, "/data 第一次初始化掛唔上（%s）→ 抹分區重建 FAT",
+                     esp_err_to_name(serr));
+            serr = nc_store_format(part);
+            s_fmt_err = (serr == ESP_OK) ? 0 : (int)serr;
         }
     }
 
+    if (serr != ESP_OK) {
+        ESP_LOGE(TAG, "/data 初始化失敗：%s（用 STATUS_SET System.fs_format=1 "
+                      "＋ REBOOT 可要求下次開機重建）", esp_err_to_name(serr));
+        if (fw_new) {
+            nvs_close(nh);
+        }
+        return serr;
+    }
+
+    if (fw_new) {
+        // **韌體版本只決定「要不要重置 config」**，唔係重建 FAT 的條件。
+        // 正常路徑：FS 好，只刪 config 檔 → seed 會重寫這版預設。
+        // （走過 nc_store_format() 的話分區已經是空的，這裡自然刪 0 個檔。）
+        const int n = reset_config_files();
+        s_fmt_err = 0;
+        ESP_LOGW(TAG, "韌體 %s → 重置 config（刪除 %d 個檔）", fp, n);
+    }
+
     seed_presets();
+
+    // 第一次成功建立／掛上 FAT 之後才落旗標；之後永遠唔會自動格式化。
+    // 明確要求格式化（fs_force）成功之後都算「已初始化」，所以一併落旗標。
+    if ((fs_first || fs_force) && nc_store_app_ready()) {
+        fs_mark_initialized();
+    }
 
     if (fw_new) {
         if (nc_store_app_ready()) {
@@ -649,17 +731,23 @@ static int s_cfg_app_ready = -1;
 static int s_cfg_errno;
 static int s_cfg_open_ok;            // nc_cfg_open("system") 有冇成功（0 = NULL）
 static uint32_t s_cfg_hdr;           // 檔案頭 4 bytes（偵測 BOM／亂碼）
+#if !CONFIG_IDF_TARGET_ESP32P4
 static int s_cdc_cfg_src = -9;       // CDC 的 rx 參數在「宣告階段」套用了幾多項
                                      // （bus 建立嗰刻 FAT 已交咗俾 host，讀唔到 config）
+#endif
 
 static size_t status_put_storage(char *buf, size_t cap)
 {
     size_t off = 0;
-    // FAT 現在在誰手上、裝置能不能直接讀；app_decl / cfg_errno = 宣告階段的探測結果
+    // FAT 現在在誰手上、裝置能不能直接讀；app_decl / cfg_errno = 宣告階段的探測結果。
+    // first = 本次開機是否「第一次初始化」（1 = 允許格式化，0 = 已初始化過、唔會自動格式化）。
+    // req   = NVS boot/fs_format 是否有待處理的「下次開機格式化」請求。
     jappend(buf, cap, &off,
-            "\"storage\":{\"mode\":\"%s\",\"app_ready\":%d,\"app_decl\":%d,\"cfg_errno\":%d,"
-            "\"cfg_open\":%d,\"cfg_hdr\":\"%02X%02X%02X%02X\",\"fmt\":%d}",
-            nc_store_mode_name(), nc_store_app_ready() ? 1 : 0,
+            "\"storage\":{\"mode\":\"%s\",\"app_ready\":%d,\"first\":%d,\"req\":%d,"
+            "\"app_decl\":%d,\"cfg_errno\":%d,\"cfg_open\":%d,"
+            "\"cfg_hdr\":\"%02X%02X%02X%02X\",\"fmt\":%d}",
+            nc_store_mode_name(), nc_store_app_ready() ? 1 : 0, s_fs_first,
+            nc_store_format_requested() ? 1 : 0,
             s_cfg_app_ready, s_cfg_errno, s_cfg_open_ok,
             (unsigned)(s_cfg_hdr & 0xFF), (unsigned)((s_cfg_hdr >> 8) & 0xFF),
             (unsigned)((s_cfg_hdr >> 16) & 0xFF), (unsigned)((s_cfg_hdr >> 24) & 0xFF),
@@ -1304,6 +1392,13 @@ static esp_err_t task_nc4_start(const nc_task_res_view_t *res, int n)
     (void)n;
     // 用 plan 名字取，不用 view 次序：冇宣告 / 被 shed 就係 NULL（天然嘅「冇就唔要」）
     s_nc4_rx_region = nc_plan_get("nc4.rx");
+    cfg_probe_once();          // STATUS 要的探測結果（S3／P4 都用得著）
+#if CONFIG_IDF_TARGET_ESP32P4
+    // P4 冇 USB OTG → 唔會有 nc4.rx，亦冇 CDC 的 rx 參數可讀。
+    // cdc_region()／CDC_RX_REGION_DEF 只在 !P4 定義，唔可以喺呢邊引用。
+    s_nc4_rx_bytes = 0;
+    ESP_LOGW(TAG, "svc nc4: 冇 parser 緩衝（本板冇 USB）");
+#else
     link_rx_t rx = { .region = CDC_RX_REGION_DEF };
     link_rx("CDC", &rx);
     rx.region = cdc_region(rx.region);
@@ -1313,6 +1408,7 @@ static esp_err_t task_nc4_start(const nc_task_res_view_t *res, int n)
     } else {
         ESP_LOGW(TAG, "svc nc4: 冇 parser 緩衝（CDC 未啟用 / 本板冇 USB）");
     }
+#endif
     return ESP_OK;
 }
 
@@ -2032,8 +2128,14 @@ void app_main(void)
     err = ESP_ERR_NOT_SUPPORTED;
     ESP_LOGW(TAG, "P4 無 USB → /data 留在 APP，改用 http://<ip>:8080/config.json");
 #else
-    err = storage_hand_over_to_usb();
-    ESP_LOGI(TAG, "碟交給 host: %s", esp_err_to_name(err));
+    if (err == ESP_OK) {
+        const esp_err_t herr = storage_hand_over_to_usb();
+        ESP_LOGI(TAG, "碟交給 host: %s", esp_err_to_name(herr));
+    } else {
+        // USB 沒起來就不要交 FAT：主機看不到碟，裝置自己也會失去 /data。
+        // 留在 APP 至少 config／seed／HTTP 都仍然可用，唔會兩邊都拿唔到。
+        ESP_LOGE(TAG, "USB 未起來 → /data 留在 APP（唔交 FAT）");
+    }
 #endif
 
     // 解碼器已在 ⑤ 宣告期建立；核心指令由 cmds 模組註冊（帶擁有權）。

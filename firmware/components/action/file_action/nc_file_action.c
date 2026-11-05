@@ -242,11 +242,51 @@ static void on_status_set(nc4_ctx_t *ctx, const nc4_frame_t *f)
     }
 
     cJSON *sys = cJSON_GetObjectItemCaseSensitive(root, "System");
+
+    // ── System.fs_format：只寫 NVS 旗標，下一次開機才真的格式化 ──
+    // 支援兩種寫法（跟舊版 STATUS_SET 的點分路徑相容）：
+    //   {"System":{"fs_format":1}}      / {"System":{"format":1}}（別名）
+    //   {"System.fs_format":1}          / {"System.format":1}
+    cJSON *fmt = cJSON_IsObject(sys) ? cJSON_GetObjectItemCaseSensitive(sys, "fs_format") : NULL;
+    if (fmt == NULL && cJSON_IsObject(sys)) {
+        fmt = cJSON_GetObjectItemCaseSensitive(sys, "format");
+    }
+    if (fmt == NULL) {
+        fmt = cJSON_GetObjectItemCaseSensitive(root, "System.fs_format");
+    }
+    if (fmt == NULL) {
+        fmt = cJSON_GetObjectItemCaseSensitive(root, "System.format");
+    }
+    if (fmt != NULL) {
+        bool on;
+        if (cJSON_IsBool(fmt)) {
+            on = cJSON_IsTrue(fmt);
+        } else if (cJSON_IsNumber(fmt)) {
+            on = fmt->valueint != 0;
+        } else if (cJSON_IsString(fmt) && fmt->valuestring != NULL &&
+                   fmt->valuestring[0] != '\0') {
+            const char c = fmt->valuestring[0];
+            on = (c == '1' || c == 't' || c == 'T');
+        } else {
+            cJSON_Delete(root);
+            ack(ctx, false, "System.fs_format 要 0/1");
+            return;
+        }
+        cJSON_Delete(root);
+        nc_store_request_format(on);
+        char msg[96];
+        snprintf(msg, sizeof(msg), "fs_format=%d; %s", on ? 1 : 0,
+                 on ? "下次開機抹 data 分區並重建 FAT" : "已取消");
+        ESP_LOGI(TAG, "STATUS_SET %s → %s", json, msg);
+        ack(ctx, true, msg);
+        return;
+    }
+
     cJSON *fm = cJSON_IsObject(sys) ? cJSON_GetObjectItemCaseSensitive(sys, "file_mode") : NULL;
 
     if (!cJSON_IsNumber(fm)) {
         cJSON_Delete(root);
-        ack(ctx, false, "only System.file_mode is supported");
+        ack(ctx, false, "only System.file_mode / System.fs_format is supported");
         return;
     }
 

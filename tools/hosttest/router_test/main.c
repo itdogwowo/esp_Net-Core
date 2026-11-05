@@ -44,7 +44,7 @@ int main(void)
     CHECK(!nc4_router_core_used(0), "core0 冇線");
     CHECK(!nc4_router_core_used(1), "core1 冇線");
     CHECK(!nc4_router_core_used(2), "core2 唔存在 → false");
-    CHECK(nc4_router_core_or("CDC", 0) == 0, "core_or 用 fallback");
+    CHECK(nc4_router_core("") == NC4_ROUTE_NONE, "空字串 → NONE（冇 fallback）");
 
     // ── 2. 正常表 ──
     case_begin("兩條線：CDC→0、UART→1");
@@ -58,8 +58,8 @@ int main(void)
         CHECK(nc4_router_core("CDC") == 0, "CDC → 0");
         CHECK(nc4_router_core("UART") == 1, "UART → 1");
         CHECK(nc4_router_core("TCP") == NC4_ROUTE_NONE, "未登記的線 → NONE");
-        CHECK(nc4_router_core_or("TCP", 0) == 0, "未登記 → fallback 0");
-        CHECK(nc4_router_core_or("TCP", 1) == 1, "未登記 → fallback 1");
+        CHECK(nc4_router_core("TCP2") == NC4_ROUTE_NONE, "只做全名比對 → NONE");
+        CHECK(nc4_router_core("CD") == NC4_ROUTE_NONE, "前綴唔算命中 → NONE");
         CHECK(nc4_router_core_used(0), "core0 有線");
         CHECK(nc4_router_core_used(1), "core1 有線");
     }

@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
-"""FAT 讀取與儲存狀態（全部用既有指令，沒有新增指令號）。
+"""FAT 讀取與儲存狀態。
 
     tools/nc4_file.py --port /dev/cu.usbmodem* status          # STATUS_GET storage
     tools/nc4_file.py --port /dev/cu.usbmodem* query /config.json
     tools/nc4_file.py --port /dev/cu.usbmodem* claim           # STATUS_SET file_mode=1
     tools/nc4_file.py --port /dev/cu.usbmodem* release         # STATUS_SET file_mode=0
+    tools/nc4_file.py --port /dev/cu.usbmodem* set '{"System":{"fs_format":1}}' 1
+        # STATUS_SET：寫 NVS 旗標；之後送 REBOOT，下次開機才會抹 data 分區＋重建 FAT
 
 讀取（FILE_QUERY）在任何模式都答得到：
   主機擁有 FAT 時走唯讀視圖（`/ro`），答案可能過期或半截（回覆 pending=1）；
@@ -84,6 +86,9 @@ def main() -> int:
     sub.add_parser("status")
     sub.add_parser("claim")
     sub.add_parser("release")
+    st = sub.add_parser("set")        # STATUS_SET：任意 JSON + persist
+    st.add_argument("json")
+    st.add_argument("persist", type=int, nargs="?", default=1)
     q = sub.add_parser("query")
     q.add_argument("path")
     args = ap.parse_args()
@@ -96,7 +101,10 @@ def main() -> int:
     elif args.cmd == "status":
         cmd, payload = STATUS_GET, enc_str("storage")
         wait = 1.0
-    else:
+    elif args.cmd == "set":
+        cmd, payload = STATUS_SET, enc_str(args.json) + bytes([args.persist & 0xFF])
+        wait = 2.0
+    else:                              # claim / release
         mode = 1 if args.cmd == "claim" else 0
         body = json.dumps({"System": {"file_mode": mode}}, separators=(",", ":"))
         cmd, payload = STATUS_SET, enc_str(body) + bytes([0])
