@@ -112,10 +112,17 @@ void nc4_bus_frame_end(nc4_bus_handle_t bus);
 // producer commit 之後呼叫：叫醒服務這條 bus 的 decode task（不用等輪詢）
 void nc4_bus_kick(nc4_bus_handle_t bus);
 
-// 每條 bus 的統計（JSON 陣列）：frames / mb / copied / parse_ms / us_per_frame
+// 統計（JSON 陣列）：frames / mb / copied / avg_b / hwm / parse_ms / us_per_frame / slots
 // copied = 為了把 payload 交給 parser 而做的 memcpy bytes（零複製模式應為 0）
+// hwm    = receiver task 的 stack 剩餘最少 bytes（用來把 stack 調到合身）
 size_t nc4_bus_stats_json(char *buf, size_t cap);
 void nc4_bus_stats_reset(void);
+
+// 登記這條 bus 的 receiver task（只為量 stack 高水位；可選）
+void nc4_bus_set_producer(nc4_bus_handle_t bus, void *task_handle);
+
+// 登記這條 bus 的 rx 參數有幾多項來自 config（0 = 全用 code 預設）。只在報表用。
+void nc4_bus_set_cfg_src(nc4_bus_handle_t bus, int applied);
 
 // 啟動這條 bus 的 producer（PUSH 模式）：
 //   同一個 core 上「讀 driver → push 插槽 → kick decode」，所以叫醒係同核 notify。

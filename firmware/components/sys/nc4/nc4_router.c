@@ -103,12 +103,6 @@ int nc4_router_core(const char *line)
     return NC4_ROUTE_NONE;
 }
 
-int nc4_router_core_or(const char *line, int fallback)
-{
-    const int core = nc4_router_core(line);
-    return (core == NC4_ROUTE_NONE) ? fallback : core;
-}
-
 bool nc4_router_core_used(int core)
 {
     if (!core_ok(core)) {

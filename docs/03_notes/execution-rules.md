@@ -143,18 +143,23 @@
 
 | 位置 | 形態 | 處置 |
 |---|---|---|
-| `main.c` `tcp_nc4_rx_task` 的 `if (++spins < 300) taskYIELD();` | 有界自旋 | 改成 `vTaskDelay(1)` 會令小幀吞吐 6.2 → 0.78 MB/s。**待拍板**：守規則，或開一個明寫的例外 |
+| `nc4_bus.c` `producer_task`：插槽滿 → `taskYIELD()`；讀到 0 byte → `taskYIELD()` | **無界自旋**（2026-11-05 由 `main.c` 的 300 次有界自旋搬過來） | 原本「有界」的保護消失：插槽長期滿（consumer 卡住）時 producer 會 100% 燒該核，而且冇延遲可以讓低 prio task 有機會跑。**待拍板**：加 `vTaskDelay(1)`，或登記為明寫的例外 |
 
 **規則**：任何例外必須寫在本節，並註明數字與原因。唔准有未記錄的自旋。
 
-### 3.2 大循環（round / epoch）已停用
+### 3.2 大循環（round / epoch）：仍啟用，但只作健康指標
 
-逐圈量測（`nc_epoch`）**不再使用**：週期由最慢那條 loop 決定，數字意義有限，而干擾來源
-（事件到達率）已經清楚。移除掛載點：`nc_task_loop.c` 的兩處 `nc_epoch_mark`、
-`nc_epoch_add/remove`、STATUS 的 `core0/core1` 段。`nc_epoch.c` 保留但不掛載。
+原本的用途（逐圈推算 CPU 負荷）**已放棄**：週期由最慢那條 loop 決定，數字意義有限，
+而干擾來源（事件到達率）已經清楚。
 
-未來的效能評估方式：**乾淨環境下做壓力測試**，不由管理器在線量測。
-（若日後要工具，另開一支獨立小工具，唔好塞回 trampoline。）
+**現況（2026-11-05 驗證）**：`nc_epoch` **仍然掛載**——`nc_task_loop.c` 兩處
+`nc_epoch_mark`、`nc_epoch_add/remove`、STATUS 的 `core0/core1` 段全部還在，數字照樣輸出。
+保留理由：`rounds` 是「該核有冇停滯」唯一現成的指標。
+`nc_task_loop_t.no_epoch` 是為此加的退出開關，但**目前零使用者**（`monitor` 已刪）。
+
+**規則**：可以用 `rounds`／`jitter` 判斷「有冇卡死」；
+**唔可以**拿 `duty` 當效能基準或做架構決策。
+真正的效能評估仍然在乾淨環境做壓力測試，不由管理器在線量測。
 
 ---
 

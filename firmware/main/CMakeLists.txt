@@ -13,9 +13,17 @@
 set(_preset_embed)
 foreach(_cfg system network tasks)
     if(EXISTS "${PORT_DIR}/data/config/${_cfg}.json")
-        configure_file("${PORT_DIR}/data/config/${_cfg}.json"
-                       "${CMAKE_CURRENT_BINARY_DIR}/preset_${_cfg}.json" COPYONLY)
-        list(APPEND _preset_embed "${CMAKE_CURRENT_BINARY_DIR}/preset_${_cfg}.json")
+        # 用 build-time 的 copy_if_different，而唔係 configure_file：
+        # configure_file 只在「CMake 重跑」時複製，只改 JSON 內容唔會觸發
+        # ⇒ 嵌進 firmware 的預置會係舊版（實測：改了 routes 但 seed 出嚟仍係舊值）。
+        set(_preset_out "${CMAKE_CURRENT_BINARY_DIR}/preset_${_cfg}.json")
+        add_custom_command(
+            OUTPUT  "${_preset_out}"
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                    "${PORT_DIR}/data/config/${_cfg}.json" "${_preset_out}"
+            DEPENDS "${PORT_DIR}/data/config/${_cfg}.json"
+            COMMENT "預置 ${_cfg}.json → build")
+        list(APPEND _preset_embed "${_preset_out}")
     endif()
 endforeach()
 if(_preset_embed)

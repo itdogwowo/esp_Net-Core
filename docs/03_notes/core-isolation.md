@@ -310,7 +310,7 @@
 
 | # | 未分開 | 位置 | 影響 |
 |---|---|---|---|
-| R1 | `decode1` 用 `ulTaskNotifyTake(10 ms)` | [nc4_bus.c](../../firmware/components/sys/nc4/nc4_bus.c) | 逾時由 core0 tick 處理 → **100 次/秒跨核中斷**（閒置都有） |
+| R1 | ~~`decode1` 用 `ulTaskNotifyTake(10 ms)`~~ **已更正（2026-11-05 驗證）**：只有「該核有 PULL bus」才用 10 ms，其餘 `portMAX_DELAY` | [nc4_bus.c](../../firmware/components/sys/nc4/nc4_bus.c) `nc4_bus_task_entry` | 預設 core1 只有 UART（PUSH）⇒ **無限等、零逾時喚醒**；10 ms 輪詢只剩 core0（CDC＋TCP 都係 PULL）。而且 tick 係每核自己的 systimer，**唔會跨核**，所以原本「100 次/秒跨核中斷」的說法不成立 |
 | R2 | 一個 decoder 一把 mutex | [nc4.c](../../firmware/components/sys/nc4/nc4.c) | decode0／decode1／httpd（P4）／udp（P4）輪流等鎖 |
 | R3 | flash 讀／寫／擦 | `spi_flash` 路徑 | IPC ＋凍結對方核（`AUTO_SUSPEND` 仍未開）；FAT／NVS／OTA／config 全部中 |
 | R4 | CDC FIFO | decode0（core0）↔ TinyUSB（core1，S3） | 每次 CDC 回覆跨核 mutex |
@@ -346,3 +346,27 @@
 1. **R3 flash**（要先驗 `CONFIG_SPI_FLASH_AUTO_SUSPEND`）——決定 I1 成唔成立
 2. **R1／R2 解碼**（per-core decoder ＋ 非 core0 純 poll）
 3. **R5 log**（緩衝 ＋ 獨立任務，核心跟 console）
+
+---
+
+## 11. CDC receiver：核隔離實測（2026-11-05）
+
+`cdc.rx`（receiver task）同 `decode0` **都釘喺 core 0**；`kick` 由 receiver 發出，
+同核 notify，唔會經 IPC。以下係上板實測（包含一次完整 OTA：4 KB × 96 包）：
+
+| 指標 | 值 | 判讀 |
+|---|---|---|
+| `remote`（跨核 kick 次數） | **0** | 冇任何跨核喚醒 ← 核心隔離的硬指標 |
+| `crc_err` / `bad_hdr` | 0 / 0 | 冇干擾造成的錯幀 |
+| `peak`（環峰值） | 2 / 4 格 | 環夠用；`avg_b` = 65 B／次 |
+| `hwm`（receiver stack 剩餘） | 696 / 1,536 | 實測最多用 840 B |
+| RTT p50 / p95 / p99 / max | 0.59 / 0.65 / **0.75** / 0.77 ms | 分佈極窄，冇抖動 |
+
+**配置**：`region 4,192`、環 4 × 256 B、stack 1,536、prio 5、core 0。
+相對 PULL（10 ms、9,229 B）＝ **記憶體幾乎一樣（＋836 B），延遲快 19 倍**。
+
+> **注意**：`cdc.rx` 的 prio 5 同 **TinyUSB task 的 prio 5 同核** ⇒ 同 prio 會 1 ms tick
+> 輪轉。實測 RTT p99 = 0.75 ms 已經包含呢個成本；如果要再收窄，就要調開其中一邊的 prio。
+
+**仍然存在的跨核耦合**（同 CDC receiver 無關，屬第 10 節的 R 系列）：
+R3 flash、R4 console/CDC FIFO、R5 log、R6 lwIP 未釘核、R8 `usb_reconn` 未釘核、R10 heap。

@@ -48,7 +48,10 @@ static esp_err_t open_app(void)
 {
     esp_vfs_fat_mount_config_t cfg = {
         .format_if_mount_failed = s_first_mount,   // 全新分區才准格式化
-        .max_files = 5,
+        // 5 太細：console 的 stdin/stdout/stderr 已佔 3 個，只剩 2 個。
+        // config 讀取（nc_cfg_open）會連續開檔，撞到上限就無聲回 NULL
+        // ⇒ 上層以為「冇 config」而靜靜用預設。
+        .max_files = 12,
     };
     const esp_err_t err = esp_vfs_fat_spiflash_mount_rw_wl(APP_BASE, PART_LABEL, &cfg, &s_wl);
     s_first_mount = false;

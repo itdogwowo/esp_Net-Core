@@ -17,7 +17,9 @@
     "cfg：這一種通道自己的參數（port、rx、將來的 tx）—— 每條 link 都是 name / kind / cfg 三層",
     "kind：cdc | uart | tcp | ws | udp",
     "port：tcp / ws / udp 的埠號",
-    "rx.mode：pull | push_frame | message | datagram（cdc/uart 目前只實作 pull）",
+    "rx.mode：只對 tcp / ws / udp 有效（pull = 非阻塞 recv；push_frame = producer 阻塞 recv）",
+    "          cdc / uart 由 kind 推導（cdc→pull、uart→push），唔可以設；寫咗都唔會讀",
+    "核歸屬：routes[].out[] 的 decodeN 是唯一真相；冇任何一列指向 → 該通道唔建立（code 冇預設核）",
     "rx.region：parser 緩衝大小（會餵給 nc_plan 宣告）",
     "rx.chunk：一次 read 最多拿多少 bytes",
     "rx.budget：一條線一輪最多讀幾次（＝幾幀），讀完換下一條",
@@ -39,8 +41,8 @@
 
   "nc4": {
     "links": [
-      { "name": "CDC", "kind": "cdc", "enable": 1, "cfg": { "rx": { "mode": "pull", "region": 8205, "chunk": 1024, "budget": 8 } } },
-      { "name": "UART", "kind": "uart", "enable": 1, "cfg": { "rx": { "mode": "pull", "region": 1024, "chunk": 512, "budget": 8 } } }
+      { "name": "CDC", "kind": "cdc", "enable": 1 },
+      { "name": "UART", "kind": "uart", "enable": 1 }
     ],
 
     "routes": [

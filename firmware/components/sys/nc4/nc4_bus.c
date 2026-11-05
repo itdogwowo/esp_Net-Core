@@ -49,6 +49,12 @@ struct nc4_bus {
 
     bool owner_ready;                 // owner_init 已跑（每個核一次）
 
+    int occ;                          // 目前非 free 的格數（受 mux 保護）
+    uint32_t st_slot_peak;            // 歷史最高同時佔用的格數（量「環要幾大」）
+    uint32_t st_kick_remote;          // 跨核 kick 次數（核心隔離的可驗證指標，必須為 0）
+    int cfg_src;                      // config 實際套用了幾多個 rx 欄位（0 = 全用 code 預設）
+    void *producer;                   // 這條 bus 的 receiver task（量 stack 高水位用）
+
     // 統計（0xF008）：證明 copy 有沒有真的消失
     uint32_t st_frames;
     uint64_t st_bytes;                // 收進來的 bytes（含表頭/CRC）
@@ -72,9 +78,16 @@ void nc4_bus_kick(nc4_bus_handle_t bus)
         return;
     }
     const int core = (b->cfg.core == 1) ? 1 : 0;
-    if (s_decode_task[core] != NULL) {
-        xTaskNotifyGive(s_decode_task[core]);
+    TaskHandle_t t = s_decode_task[core];
+    if (t == NULL) {
+        return;
     }
+    // 核心隔離的硬指標：kick 必須由「同一個核」發出。
+    // 跨核就會變成 IPC 中斷（設計禁止），所以呢個數字要永遠係 0。
+    if ((int)xTaskGetCoreID(t) != (int)xPortGetCoreID()) {
+        b->st_kick_remote++;          // 只計數，唔改變行為（唔好喺熱路徑改為丟棄）
+    }
+    xTaskNotifyGive(t);
 }
 
 // ───────────────────────── 插槽（PUSH 模式）─────────────────────────
@@ -121,6 +134,12 @@ esp_err_t nc4_bus_push_commit(nc4_bus_handle_t bus, size_t len)
     b->slot_state[idx] = 1;          // ready
     b->slot_w = (idx + 1) % b->slot_n;
     b->push_idx = -1;
+    // 只有「已 commit、等 decode 讀」的格才計入佔用 —— 空探測唔算，
+    // 否則每次查詢都會量到 +1 的假峰值。
+    b->occ++;
+    if ((uint32_t)b->occ > b->st_slot_peak) {
+        b->st_slot_peak = (uint32_t)b->occ;     // 峰值＝環真正需要幾多格
+    }
     taskEXIT_CRITICAL(&b->mux);
     return ESP_OK;
 }
@@ -254,6 +273,9 @@ static size_t slot_pop(struct nc4_bus *b, uint8_t *out, size_t cap)
             b->slot_state[idx] = 0;      // free
             b->slot_r = (idx + 1) % b->slot_n;
             b->rd_idx = -1;
+            if (b->occ > 0) {
+                b->occ--;
+            }
         }
         taskEXIT_CRITICAL(&b->mux);
         produced += n;
@@ -329,6 +351,14 @@ esp_err_t nc4_bus_add(nc4_decoder_t *decoder, const nc4_bus_cfg_t *cfg,
         // 0 = 用框架預設（不是硬性值 —— 之後由 config.json 覆寫）
         b->max_frame = cfg->max_frame ? cfg->max_frame : NC4_MAX_FRAME;
         b->read_chunk = cfg->read_chunk ? cfg->read_chunk : DEFAULT_READ_CHUNK;
+        // PUSH 模式：一次最多搬「一格」，所以 chunk 冇理由大過 slot_size。
+        // （以前留 1,024 而 slot 係 256，等於白配置 768 B；呢個值從來冇量測過。）
+        if (cfg->mode == NC4_BUS_PUSH) {
+            const size_t slot = cfg->rx_ring_size ? cfg->rx_ring_size : DEFAULT_RING_SIZE;
+            if (b->read_chunk > slot) {
+                b->read_chunk = slot;
+            }
+        }
         b->budget = cfg->budget_per_pass ? cfg->budget_per_pass : DEFAULT_BUDGET_PER_PASS;
         b->mux = (portMUX_TYPE)portMUX_INITIALIZER_UNLOCKED;
         b->frame_mode = cfg->frame_aligned ? 1 : 0;
@@ -373,6 +403,25 @@ size_t nc4_bus_count(void)
     return s_count;
 }
 
+// 由建立 receiver 的地方登記 task handle（只為量 stack 高水位）。
+void nc4_bus_set_producer(nc4_bus_handle_t handle, void *task_handle)
+{
+    struct nc4_bus *b = find_bus(handle);
+    if (b != NULL) {
+        b->producer = task_handle;
+    }
+}
+
+// 由 main 登記「這條 bus 的 rx 參數有幾多項來自 config」（0 = 全部用 code 預設）。
+// 用途：令「config 到底有冇被讀」變成可觀察，而唔係靠推理。
+void nc4_bus_set_cfg_src(nc4_bus_handle_t handle, int applied)
+{
+    struct nc4_bus *b = find_bus(handle);
+    if (b != NULL) {
+        b->cfg_src = applied;
+    }
+}
+
 void nc4_bus_stats_reset(void)
 {
     for (size_t i = 0; i < NC4_MAX_BUSES; i++) {
@@ -384,6 +433,7 @@ void nc4_bus_stats_reset(void)
         b->st_bytes = 0;
         b->st_copied = 0;
         b->st_parse_us = 0;
+        b->st_slot_peak = (uint32_t)(b->occ > 0 ? b->occ : 0);   // 重新量峰值
     }
 }
 
@@ -416,9 +466,11 @@ size_t nc4_bus_stats_json(char *buf, size_t cap)
                         "%s{\"name\":\"%s\",\"mode\":\"%s\",\"core\":%d,"
                         "\"frame\":%u,"
                         "\"frames\":%u,\"mb\":%.2f,\"copied\":%llu,"
+                        "\"avg_b\":%u,\"hwm\":%u,"
                         "\"parse_ms\":%.1f,\"us_per_frame\":%.1f,"
                         "\"crc_err\":%u,\"bad_hdr\":%u,"
-                        "\"slots\":[%d,%d,%d,%d]}",
+                        "\"remote\":%u,\"region\":%u,\"cfg_src\":%d,"
+                        "\"slots\":[%d,%d,%d,%d],\"occ\":%d,\"peak\":%u}",
                         first ? "" : ",", b->cfg.name ? b->cfg.name : "?",
                         b->cfg.mode == NC4_BUS_PULL ? "pull"
                                                     : (b->frame_mode ? "push-frame" : "push-slot"),
@@ -426,10 +478,18 @@ size_t nc4_bus_stats_json(char *buf, size_t cap)
                         (unsigned)((b->cfg.mode == NC4_BUS_PUSH && b->frame_mode) ? 1 : 0),
                         (unsigned)b->st_frames, mb,
                         (unsigned long long)b->st_copied,
+                        // 每次 push 平均幾多 bytes（＝實際「一次傳輸」的大小）
+                        (unsigned)(b->st_frames ? (b->st_bytes / b->st_frames) : 0),
+                        // receiver stack 剩餘最少 bytes（0 = 未登記或非 task）
+                        (unsigned)(b->producer ? uxTaskGetStackHighWaterMark(
+                                                     (TaskHandle_t)b->producer) : 0),
                         (double)b->st_parse_us / 1000.0,
                         b->st_frames ? (double)b->st_parse_us / (double)b->st_frames : 0.0,
                         (unsigned)crc_err, (unsigned)bad_hdr,
-                        st_cnt[0], st_cnt[1], st_cnt[2], st_cnt[3]);
+                        (unsigned)b->st_kick_remote,
+                        (unsigned)b->cfg.rx_region_bytes, b->cfg_src,
+                        st_cnt[0], st_cnt[1], st_cnt[2], st_cnt[3],
+                        b->occ, (unsigned)b->st_slot_peak);
         first = false;
     }
     if (off < cap) {

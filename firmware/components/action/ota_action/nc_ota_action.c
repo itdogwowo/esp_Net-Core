@@ -31,6 +31,8 @@ static const char *TAG = "nc_ota_action";
 #define OTA_APPLY           0x2220
 
 // CDC 上的上限；其他 transport 應該各自回報更小的值
+// 受 CDC 的 rx.region 限制：幀 = chunk + 17，region 4,192 ⇒ 上限 4,175，取 4,096 留餘裕。
+// 正式版應該由 region 推導（見 docs），唔好兩邊各自硬編碼。
 #define OTA_MAX_CHUNK       4096
 
 // OTA_ERROR_RSP 的 11 個 bool，順序與 schema 相同

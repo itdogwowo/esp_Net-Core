@@ -278,8 +278,13 @@ route     TCP      → decode0, UART     config
 **已經接上的部分**（開機 ④ 讀 `system.json` → `nc4_router_set()`）：
 
 - `routes[].in` → 每行**第一個** `decodeN` 決定「這條線由第 N 核解」。
-- `bus.core` 不再寫死：CDC / UART / TCP 三條 bus 都用 `nc4_router_core_or(名字, 預設)`
-  問 router（`main.c` 的 `s_task_net` 建立處）。
+- `bus.core` 只由 `routes[]` 決定（`nc4_router_core()`）；取唔到就**唔建立該通道**並 `ESP_LOGE`
+  —— code 冇 fallback（`_or(名字, 預設)` 已移除，因為寫死預設核會令「config 打錯名」
+  變成「靜靜跑喺錯嘅核」，最難查）。
+- `links[].cfg.rx` 的 `region / chunk / budget / slots / slot_size` 已經接上
+  （`main.c` 的 `link_rx()`）；缺省值只係「config 冇寫」時的後備，寫了就以 config 為準。
+- `rx.mode` **唔再由 config 決定**：`cdc → pull`、`uart → push` 由 `kind` 推導；
+  只有 `tcp / ws / udp` 保留 `mode`。
 - `decode0` / `decode1` 兩個任務的**存在與否**由 `nc4_router_core_used(N)` 決定
   （`nc4_want_core0()` / `nc4_want_core1()`）；一條線都沒有的核，任務根本不建立。
 - 讀不到有效 `routes[]` 就退回板子預設表（`router_defaults()`），並印 `ESP_LOGW`。

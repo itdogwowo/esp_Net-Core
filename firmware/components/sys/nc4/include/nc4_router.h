@@ -52,8 +52,9 @@ void nc4_router_reset(void);
 // 查核：冇路由返 NC4_ROUTE_NONE
 int nc4_router_core(const char *line);
 
-// 查核，冇路由就用 fallback（開機要保證指令通道一定有人服務）
-int nc4_router_core_or(const char *line, int fallback);
+// 冇 `_or(line, fallback)` 變體，是故意的：核歸屬只由 config 決定。
+// 呼叫端取唔到就自己決定「唔建立」（fail-visible），
+// 唔准在 code 裡寫預設核 —— 打錯 config 名會靜靜跑喺錯嘅核，最難查。
 
 // 呢一核有冇任何線？decode 任務嘅開關就係問呢個
 bool nc4_router_core_used(int core);

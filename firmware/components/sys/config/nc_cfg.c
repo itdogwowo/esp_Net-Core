@@ -40,12 +40,26 @@ cfg_file_t *nc_cfg_open(const char *layer)
     if (f == NULL) {
         return NULL;    // 缺檔 = 用預設
     }
-    char *buf = malloc(CFG_MAX);
-    if (buf == NULL) {
+    // 只配置「檔案實際大小 + 1」：以前無條件要 16 KB，喺內部 RAM 碎片化時
+    // 會無聲失敗（回 NULL → 上層以為「冇 config」而靜靜用預設）。
+    if (fseek(f, 0, SEEK_END) != 0) {
         fclose(f);
         return NULL;
     }
-    const size_t n = fread(buf, 1, CFG_MAX - 1, f);
+    const long sz = ftell(f);
+    if (sz <= 0 || sz >= CFG_MAX) {
+        fclose(f);
+        ESP_LOGW(TAG, "%s 大小 %ld 不合理（上限 %d）", path, sz, CFG_MAX);
+        return NULL;
+    }
+    rewind(f);
+    char *buf = malloc((size_t)sz + 1);
+    if (buf == NULL) {
+        fclose(f);
+        ESP_LOGW(TAG, "%s 配置 %ld B 失敗（heap 不足）", path, sz);
+        return NULL;
+    }
+    const size_t n = fread(buf, 1, (size_t)sz, f);
     fclose(f);
     buf[n] = '\0';
 
