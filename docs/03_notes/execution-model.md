@@ -143,7 +143,8 @@ group = N   → 同核、同 N、同 layer 的 loop 合成一個「group runner�
 ### 4.5 WDT（B 最有價值的副產品）
 
 - **group runner**：一圈餵一次（跟舊版一樣）。
-- **獨立 task（A）**：用 IDF 的 TWDT per-task 註冊，或用下面第 5 節的 round monitor。
+- **獨立 task（A）**：用 IDF 的 TWDT per-task 註冊，或用第 5 節的 round monitor。
+- **現況**：round monitor 已實作成 `sys/monitor`（只記錄、不餵狗、不重啟）。
 - 注意：TWDT 是**全域**的（所有註冊 task 都要餵）；不要一部分註冊、一部分不註冊。
 
 ---
@@ -198,12 +199,14 @@ group = N   → 同核、同 N、同 layer 的 loop 合成一個「group runner�
 ## 8. 結論與建議順序
 
 1. **保留 A 作為 I/O 邊界**（decode、TCP、UDP、httpd）。
-2. **先做 round watchdog**（~50 行）：拿回 B 的卡死偵測，不改執行模型。
+2. **round watchdog**：✅ **已實作**（`sys/monitor`，core0／1 秒／`no_epoch`）。
+   `epoch.rounds` 停滯 5 秒 → `ESP_LOGE` ＋ 任務清單；預設只記錄（`NC_MON_RESTART_S=0`）。
+   限制：monitor 自己跑 core0，core0 被餓死時它也可能跑不到；要硬性偵測 CPU 飢餓要接 TWDT。
 3. **有需要才做 group**：當低頻 loop（sensors、LED、UI、bench）多起來，
    把它們合併成一條 task，省 stack 並且順序確定。
-3. 如果你的目標是「同一個 codebase 兩邊都行」——可以，`group=0/1` 就是開關；
+4. 如果你的目標是「同一個 codebase 兩邊都行」——可以，`group=0/1` 就是開關；
    但「兩邊都行」不等於「兩邊都一樣好」，decode 永遠應該留在 A。
 
 > **一句話**：舊 B 在 MicroPython 是對的；C/IDF 上 A 是現實。
-> 用 `group` 把 B 局部取回是合理的「小改裝」，但真正值得先做的是
-> **round watchdog** —— 它用 50 行就拿回 B 最有價值的功能。
+> round watchdog 已經用 ~50 行拿回 B 最有價值的功能；
+> 下一步只剩「低頻 loop 多起來才做 group」。

@@ -157,7 +157,7 @@ static int my_declare(nc_task_res_t *out, int max)
 |---|---|---|
 | **decoder + dispatch 表** | 位元組 → frame → 查表 → 呼叫 handler | `sys/nc4`（每條通道一個 parser，一張全域表） |
 | **action** | 一條指令做的事：驗參數、選機制、回結果 | `components/action/*`（`ota_action` / `file_action` …）與 `main.c` |
-| **task** | 把能力恆常化：收發迴圈、渲染迴圈、節拍 | `components/sys/task`（型別＋loop）／`sys/task_manager`（管理器）；每個任務一個 component，在 `components/app/tasks/<name>/` |
+| **task** | 把能力恆常化：收發迴圈、渲染迴圈、節拍 | `components/sys/task`（型別＋loop）／`sys/task_manager`（管理器）；每個任務一個 component，在 `components/tasks/<name>_tasks/`（**測試**任務一律 `test_<name>_tasks/`，受 `NC_ENABLE_TESTS` gate） |
 
 **handler 跑在哪一核**：跟著**解碼任務**跑。`decode0`/`decode1` 各綁一核，
 哪個核收到這一幀，handler 就在那核執行。而且 `nc4.c` 呼叫 handler 時拿
@@ -286,7 +286,7 @@ hub、arena、DMA 槽。一次性的 frame / 回覆不需要，也不該進。
 | `avg_us` | 平均 |
 | `max_us` | 最久的一輪 |
 | `over` | 超過 `budget_us` 的次數 |
-| `wrap_us` | **管理器自己的成本**（整輪 − fn，含兩次 `esp_timer_get_time()`） |
+| `wrap_us` | **管理器自己的成本**（整輪 − fn，含兩次 `esp_timer_get_time()` ＋ epoch mark 的一次 cycle 讀取） |
 | `wrap_avg_us` | 上面那個的平均 |
 
 `STATUS_GET keys=tasks`：
@@ -300,6 +300,10 @@ hub、arena、DMA 槽。一次性的 frame / 回覆不需要，也不該進。
 ```
 
 `budget_us` 只是一個宣告值 —— 超過只記數，不會停掉你（停止與否由政策決定）。
+
+> **診斷／低頻 loop**（例如每 1 秒的 monitor）要設 `.no_epoch = true`：
+> 否則該核的「大循環」round 會被拉到它的 period，令 `epoch` 的量測失真。
+> 一般任務不需要管這個欄位（預設 false = 參與量測）。
 
 **要量「直接執行」vs「被登記成任務」的差距**：`last_us` 是你的工作，`wrap_us` 是管理器
 多做的（結束旗標、enable 判斷、兩次取時、計數、預算比較、延遲決策）。

@@ -84,7 +84,7 @@ components/sys/
   config/         config.json → nc_net_cfg_t
 components/sys/task/          nc_task.h（型別）、nc_task_loop.c（loop 執行層）
 components/sys/task_manager/  nc_task.c（管理器：登記 → 宣告 → 啟動 → 開 loop）
-components/app/tasks/<name>/  每個任務一個 component（宣告 + loop 本體）
+components/tasks/<name>_tasks/  每個任務一個 component（宣告 + loop 本體；測試 = test_<name>_tasks）
 firmware/main/main.c       ← 只剩裝配：declare → commit → registry_add → decode_start
 ```
 

@@ -14,8 +14,6 @@ static const char *TAG = "nc4_bus";
 #define DEFAULT_BUDGET_PER_PASS 8
 #define DEFAULT_POLL_MS         10
 #define DEFAULT_RING_SIZE       2048
-#define DEFAULT_TASK_STACK      4096
-#define DEFAULT_TASK_PRIO       4
 #define MAX_CHUNK               1024
 
 struct nc4_bus {
@@ -49,6 +47,8 @@ struct nc4_bus {
     uint8_t frame_mode;
     int frame_idx;                    // consumer 目前持有哪一格（-1 = 沒有）
 
+    bool owner_ready;                 // owner_init 已跑（每個核一次）
+
     // 統計（0xF008）：證明 copy 有沒有真的消失
     uint32_t st_frames;
     uint64_t st_bytes;                // 收進來的 bytes（含表頭/CRC）
@@ -59,7 +59,6 @@ struct nc4_bus {
 static struct nc4_bus s_buses[NC4_MAX_BUSES];
 
 static struct nc4_bus *find_bus(nc4_bus_handle_t h) { return (struct nc4_bus *)h; }
-static TaskHandle_t s_task = NULL;
 static TaskHandle_t s_decode_task[2];   // 每個核心一個 decode task
 static size_t s_count = 0;
 
@@ -441,12 +440,74 @@ size_t nc4_bus_stats_json(char *buf, size_t cap)
 
 // ───────────────────────── 解碼任務 ─────────────────────────
 
+// ── producer：同核讀 driver → push → kick ──
+static void producer_task(void *arg)
+{
+    struct nc4_bus *b = arg;
+    for (;;) {
+        uint8_t *dst = nc4_bus_push_begin(b, b->slot_size);
+        if (dst == NULL) {
+            taskYIELD();          // 插槽滿：local yield（唔用 vTaskDelay，避免 core1 跨核 tick）
+            continue;
+        }
+        const int n = b->cfg.read(b->cfg.read_arg, dst, b->slot_size);
+        if (n > 0) {
+            nc4_bus_push_commit(b, (size_t)n);
+            nc4_bus_kick(b);      // 同核 notify
+        } else {
+            nc4_bus_push_abort(b);
+            taskYIELD();
+        }
+    }
+}
+
+esp_err_t nc4_bus_start_producer(nc4_bus_handle_t handle, const char *name,
+                                 uint32_t prio, uint32_t stack)
+{
+    struct nc4_bus *b = find_bus(handle);
+    if (b == NULL || b->cfg.mode != NC4_BUS_PUSH || b->cfg.read == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (xTaskCreatePinnedToCore(producer_task, name, stack, b, prio, NULL,
+                                (BaseType_t)b->cfg.core) != pdPASS) {
+        return ESP_ERR_NO_MEM;
+    }
+    ESP_LOGI(TAG, "[%s] producer 啟動（core %d）", b->cfg.name, b->cfg.core);
+    return ESP_OK;
+}
+
 void nc4_bus_task_entry(void *arg)
 {
     (void)arg;
     const int my_core = (int)(intptr_t)arg & 1;
     s_decode_task[my_core] = xTaskGetCurrentTaskHandle();
     ESP_LOGI(TAG, "解碼任務啟動（core %d），共 %u 條通道", my_core, (unsigned)s_count);
+
+    // 這一核如果有 PULL bus（decode 自己讀 driver），就冇 producer 會 kick，
+    // 只能用 10 ms 逾時輪詢；如果全部係 PUSH（有同核 producer），就可以無限等。
+    bool has_pull = false;
+    for (size_t i = 0; i < NC4_MAX_BUSES; i++) {
+        struct nc4_bus *b = &s_buses[i];
+        if (b->used && b->cfg.core == my_core && b->cfg.mode == NC4_BUS_PULL) {
+            has_pull = true;
+        }
+    }
+    ESP_LOGI(TAG, "core %d 等待策略：%s", my_core,
+             has_pull ? "PULL（10 ms 輪詢）" : "PUSH（portMAX_DELAY）");
+
+    // bus 的 driver 在「自己嘅核」初始化（所有權原則：唔跨核）
+    for (size_t i = 0; i < NC4_MAX_BUSES; i++) {
+        struct nc4_bus *b = &s_buses[i];
+        if (!b->used || b->cfg.core != my_core || b->owner_ready) {
+            continue;
+        }
+        b->owner_ready = true;
+        if (b->cfg.owner_init != NULL) {
+            const esp_err_t e = b->cfg.owner_init(b->cfg.owner_arg);
+            ESP_LOGI(TAG, "[%s] owner_init on core %d: %s", b->cfg.name, my_core,
+                     esp_err_to_name(e));
+        }
+    }
 
     for (;;) {
         bool busy = false;
@@ -525,24 +586,9 @@ void nc4_bus_task_entry(void *arg)
         if (busy) {
             taskYIELD();       // 有資料就繼續解，不要睡（HZ=100 時 1 tick = 10 ms 會鎖死在 1.6 MB/s）
         } else {
-            // 等 producer 叫醒；10 ms timeout 只是保險（PULL 通道沒有 kick）
-            ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(DEFAULT_POLL_MS));
+            // PUSH：只等 producer 的同核 kick（無限等，冇 tick、冇跨核）。
+            // PULL：冇人 kick，只能 10 ms 醒一次輪詢（本核；core0 無害）。
+            ulTaskNotifyTake(pdTRUE, has_pull ? pdMS_TO_TICKS(DEFAULT_POLL_MS) : portMAX_DELAY);
         }
     }
-}
-
-esp_err_t nc4_bus_start(uint32_t poll_ms)
-{
-    (void)poll_ms;   // 目前用「有資料 1ms、沒有 10ms」的自適應節奏
-    if (s_task != NULL) {
-        return ESP_ERR_INVALID_STATE;
-    }
-    if (s_count == 0) {
-        return ESP_ERR_INVALID_STATE;
-    }
-    if (xTaskCreate(nc4_bus_task_entry, "nc4_bus", DEFAULT_TASK_STACK, NULL,
-                    DEFAULT_TASK_PRIO, &s_task) != pdPASS) {
-        return ESP_ERR_NO_MEM;
-    }
-    return ESP_OK;
 }

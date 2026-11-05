@@ -144,7 +144,9 @@ esp_err_t nc_task_rt_start(nc_task_rt_t *rt)
     }
     rt->started = true;
     rt->core = (int)xTaskGetCoreID(rt->handle);   // CORE_ANY 喺呢度定案
-    rt->epoch_token = nc_epoch_add(rt->core);
+    if (!rt->def->no_epoch) {
+        rt->epoch_token = nc_epoch_add(rt->core);
+    }
     ESP_LOGI(TAG, "loop [%s] L%d → core %d", rt->def->name, rt->def->layer,
              rt->core);
     return ESP_OK;

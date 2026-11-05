@@ -285,16 +285,16 @@ route     TCP      → decode0, UART     config
 - 讀不到有效 `routes[]` 就退回板子預設表（`router_defaults()`），並印 `ESP_LOGW`。
 - `0x1105 ROUTE_GET` 可以線上查「板子實際吃了哪一份表」。
 
-**還沒接上的部分**：
+**還沒接上的部分**（處置見 [disposition.md](../00_pm/disposition.md)）：
 
-| # | 現況 | 要改成 |
-|---|---|---|
-| 1 | `main.c:2564` 只 `nc4_decoder_create()` 一次，兩核共用同一個 decoder 與回覆緩衝 | 每個被 routes 指到的 `decodeN` 一個 decoder、一份回覆緩衝 |
-| 2 | `out` 裡的 **link**（轉發）完全被忽略 | 依 `out` 把幀送進對應 link 的 tx |
-| 3 | `tcp_accept`（9）、`tcp_rx`（10）、`nc4_udp`（10）是裸 `xTaskCreatePinnedToCore` | 收進 `tasks[]`，由任務管理器建立與管 |
-| 4 | `fx` 是一個固定 task（core 1、prio 3） | 依 manifest 的 `core` 分組，每一核一個 fx 引擎；`-1` → 預設核 |
-| 5 | WS / UDP 在 httpd / udp task 內直接解析 | 納入 `links[]`，各自宣告 rx 區域 |
-| 6 | 只有部分通道有 `send` | `out` 只能指向有 send 的 link |
+| # | 現況 | 要改成 | 處置 |
+|---|---|---|---|
+| 1 | `s_decoder` 只建立一次：兩核共用同一個 decoder，handler 被它的 mutex 序列化（回覆緩衝已改成每次呼叫在 stack 上，不再是共用） | 每個被 routes 指到的 `decodeN` 一個 decoder | ❓ 待決（架構） |
+| 2 | `out` 裡的 **link**（轉發）完全被忽略 | 依 `out` 把幀送進對應 link 的 tx | 🔄 先從 schema 移除，等要做再加 |
+| 3 | `tcp_accept`（9）、`tcp_rx`（10）、`nc4_udp`（10）是裸 `xTaskCreatePinnedToCore` | 收進 `tasks[]`，由任務管理器建立與管 | 🔄 收進任務管理器 |
+| 4 | `fx` 是一個固定 task（core 1、prio 3） | 依 manifest 的 `core` 分組，每一核一個 fx 引擎；`-1` → 預設核 | 🔄 依 manifest core |
+| 5 | WS / UDP 在 httpd / udp task 內直接解析 | 納入 `links[]`，各自宣告 rx 區域 | 🔄 納入 links[] |
+| 6 | 只有部分通道有 `send` | `out` 只能指向有 send 的 link | ✅ 約束（保留） |
 
 > **所以今日的真相是**：`routes[]` 的 `in` 半邊**真的生效**（決定誰解、哪一核存在），
 > `out` 半邊只有 `decodeN` 生效，**link 轉發仍然是格式**。

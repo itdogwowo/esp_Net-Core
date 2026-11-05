@@ -77,11 +77,14 @@ ESP32-P4（另有 S3 port）上的 **NC4 通訊核心**：多條傳輸通道 →
 
 | 項目 | S3 | P4 |
 |---|---:|---:|
-| DIRAM 已用（靜態） | **97,929 B** | **129,023 B** |
-| DIRAM 剩餘（heap 上限） | **243,831 B（238 KB）** | **443,345 B（433 KB）** |
-| `.bss` / `.data` | 32,496 / 23,246 | 39,040 / 21,837 |
-| flash `.bin` | 403,232（Wi-Fi 未編入） | 683,705 |
-| 開機後實際剩（估） | ~185–195 KB | ~333 KB |
+| DIRAM 已用（靜態） | **98,761 B** | **129,863 B** |
+| DIRAM 剩餘（heap 上限） | **242,999 B（237 KB）** | **442,505 B（432 KB）** |
+| `.bss` / `.data` | 33,328 / 23,246 | 39,880 / 21,837 |
+| flash `.bin` | 406,736（Wi-Fi 未編入） | 685,680 |
+| 開機後實際剩（估） | ~184–194 KB | ~330 KB |
+
+> 這是 **Phase 1 之後**的數字（epoch／bench／monitor／測試 task 開關）。
+> 上一個 commit（只有 epoch／bench）是 97,929 / 129,023；差值主要是 monitor 與 0x1005 的程式碼。
 
 - 與 11-03 相比：S3 靜態 **−9,792 B**；P4 把 WS/UDP/測試殘留搬出 SRAM **≈ −54.8 KB**（逐符號計算）。
 - Wi-Fi 編入但 `enable=0`：S3 **+48,992 B 靜態 ＋ 548,768 B flash**；所以預設 `CONFIG_NETCORE_WIFI=n`。
@@ -101,7 +104,7 @@ ESP32-P4（另有 S3 port）上的 **NC4 通訊核心**：多條傳輸通道 →
 | **收/解路徑** | 傳輸總線（ID 註冊表）→ 解碼引擎（可換核/可多實例）→ 執行 | [rx-architecture.md](../03_notes/rx-architecture.md) |
 | **配置分層** | System / Hardware / Driver / Network / Tasks / Effects / UI | [config-layers.md](../03_notes/config-layers.md) |
 
-**現況**：`main.c` 只剩一張任務表（核心 `nc4` / `net` / `core` / `fx` ＋ 租戶 `probe` / `hello`）
+**現況**：`main.c` 只剩一張任務表（核心 `nc4` / `net` / `core` / `monitor` / `fx` ＋ 租戶 `probe` / `hello` / `bench_a/b/c`）
 ＋ 一個 `actions_register()` ＋ 六行生命週期呼叫（register → declare → start → boot）。
 service 與 task 已合併成同一個 `nc_task_t`。
 `tasks.json` 已接（含補寫）；`system.json` 只讀 `cID`、`network.json` 只讀 `bt.pin`，
@@ -208,13 +211,131 @@ USB 的完整分析：[failure-policy.md §4](../03_notes/failure-policy.md)。
 
 | # | 項目 | 狀態 | 影響 |
 |---|---|---|---|
-| T | **`router_from_cfg()` use-after-free** | ❌ **未修（P0）** | 存 `in->valuestring` → `nc_cfg_close()` → 之後才 `memcpy` 入 router。修好之前不要重構 routing |
-| U | **P4 測試 task 佔 ~30.7 KB runtime** | ❌ | `tcp_sink`×2 / `tcp_src`×2 / `accept` 各 6,144 B，只為 bench 存在；關掉 = +30.7 KB |
+| T | **`router_from_cfg()` use-after-free** | ✅ **已修（2026-11-04）** | 名稱先抄入 `s_route_names[]` 再 `nc_cfg_close()`；`nc4_router_set()` 之後拿到的是有效字串。太長的名字直接跳過（不再截斷） |
+| U | **P4 測試 task（4 條）** | ✅ 已加開關（2026-11-04） | `tcp_sink`×2 / `tcp_src`×2 = 4 × 6,144 = **24,576 B**；`CONFIG_NETCORE_TEST_TASKS` 預設 **n**。`tcp_nc4_accept` 係正式通道，不在其中 |
 | V | **P4 tinyusb 仍被 link（21,748 B）** | ❌ | 不是 main.c；`nc_store.c` 仍然建 MSC LUN。要 guard 整個 MSC 段 |
-| W | `NC_TASK_MAX` 20 格（`s_slots` 7,680 B） | ⚠️ | 縮到 12 格可省 ~3 KB |
+| W | `NC_TASK_MAX` 20 格（`s_slots` 7,680 B） | ❌ 不可縮 | 10 個固定任務 ＋ 8 個 `.fxe` = 18；縮到 12 會令 `.fxe` attach 失敗（靜默） |
 | X | **狀態管理器（三層：熱／冷／封存）** | 🟡 只定案未實作 | 三層、fast 區純數字、字典放 rodata＋PSRAM、`keys` 解析鏈。**不會省 RAM**（+256 B），價值在單一事實 |
 | Y | WS/UDP 改 PSRAM 後的吞吐 | ⚠️ 未量 | 要跑 `tools/bench/nc4_ws_test.py`；P4 的 PSRAM 較快，S3 沒 link 這兩條 |
 | Z | `ssid_pw` 明文在 FAT | ⚠️ | 上游搬 btree／NVS；我們應搬 NVS |
+
+### 7.3 2026-11-04 晚（Phase 1）
+
+| # | 項目 | 狀態 | 說明 |
+|---|---|---|---|
+| A1 | P4 測試 task 開關 | ✅ | `CONFIG_NETCORE_TEST_TASKS`（預設 n）；4 條 task＝24,576 B runtime |
+| A2 | `0x1005` 截斷 | ✅ | 改用緊湊清單 `nc_task_list_json()`（name/level/affinity/started/loops）；保證合法 JSON，放不下回 `{"truncated":1}` |
+| A3 | round watchdog | ✅ | 新 SYSTEM 任務 `monitor`（core0、1 s、`no_epoch`）：`epoch.rounds` 停滯 5 s → log（含任務清單）；預設**不重啟** |
+| A4 | `NC_TASK_MAX` 20→12 | ❌ 取消 | 10 固定 ＋ 8 `.fxe` = 18，20 格必要 |
+
+> A3 的代價：monitor 自己一條 3,072 B 棧（runtime）。淨效果：P4 測試 task −24,576、
+> monitor +3,072 → **約 −21.5 KB**。
+
+### 7.4 2026-11-04 晚（死碼清理，行為不變）
+
+依 [disposition.md](disposition.md) 的 B 節執行「真正該移除」那一批：
+
+| # | 移除 | 說明 |
+|---|---|---|
+| B2b | `DEV_BENCH` mode 2/3/4 | erase／write OTA 分區：任何通道一幀就能擦 OTA slot。現在送 >1 的 mode 回 `{"err":"mode"}`（不再靜默當成 decode） |
+| B3 | `NC_DECODE_CORE` 巨集 | router 已取代；原位留一行指出「核由 `routes[].out` 決定」 |
+| B4 | `nc4_bus_start()` | 連 header 宣告、`s_task`、`DEFAULT_TASK_STACK/PRIO` 一起刪；decode0/1 由任務管理器建立 |
+| B5 | `NC4_CMD_RESET_TO_DOWNLOAD` | 0x1019 在 `nc4.h` 留註解：保留給 `ASSET_RELOAD` |
+| B6 | 重複 `#include "nc_task.h"` | — |
+
+驗證：S3／P4 皆零 warning 建置成功；`tools/hosttest/run_all.sh` 8 項全過。
+DIRAM 不變（S3 98,761／P4 129,863），flash 略減。
+
+### 7.5 2026-11-04 晚（刪 slow_worker，落實 execution-rules §7）
+
+| # | 項目 | 狀態 | 說明 |
+|---|---|---|---|
+| A1 | `slow_worker` + `s_task_core` | ✅ 已刪 | 指令層嚴格一問一答，「慢指令擋住後面」天然不存在（execution-rules §7 早已裁決） |
+| A2 | plan `"jobs"`（8 槽）＋ `s_job_hub` | ✅ 已刪 | 少一個 hub、少 4 KB stack、少每秒 1000 次喚醒 |
+| A3 | `0xF005 DEV_SLOW` / `0xF006 UART_BENCH` | ✅ 已刪 | `s_core_actions[]` 15 → 13 條 |
+| A4 | UART driver 改開機安裝 | ✅ 修 bug | 以前只由 `UART_BENCH` lazy init → **UART 通道要打過 bench 才會通**；現由 `task_net_start()` 安裝 |
+
+> flash：S3 −3,936 B（406,208 → 402,272）、P4 −4,992 B（685,072 → 680,080）。
+
+### 7.6 2026-11-04 晚（測試歸位：`test_*_tasks` ＋ `NC_ENABLE_TESTS`）
+
+按 [execution-rules §6](execution-rules.md) 的約定落實「測試唔污染功能結構」：
+
+| 動作 | 內容 |
+|---|---|
+| 搬目錄 | `app/tasks/bench` → `app/test_bench_tasks`；`app/tasks/hello` → `app/test_hello_tasks`；`app/fx` → `app/test_fx_tasks`；`sys/monitor` → `app/test_monitor_tasks` |
+| 分類 | `fx`（POC 燈效引擎）同 `monitor`（實驗 watchdog）都歸測試；release 唔出 |
+| 開關 | `option(NC_ENABLE_TESTS … OFF)`：OFF = `components/tasks` 唔加入編譯（唔係 runtime 關） |
+| 移除 | `CONFIG_NETCORE_TEST_TASKS`（合併入上面嘅開關） |
+| main.c | 測試相關 include／宣告／註冊／`nc_fx_scan` 全部 `#ifdef NC_ENABLE_TESTS` |
+
+建置矩陣（全部零 warning）：
+
+| | tests OFF | tests ON |
+|---|---:|---:|
+| S3 | 390,928 B | 402,272 B |
+| P4 | 667,424 B | 682,112 B |
+
+> **未搬**（下一步）：`test_action` 的 8 條 `0xF00x` handler 同 `hub_w/r`、`tx_pack`。
+
+### 7.7 2026-11-04 晚（續搬：probe／tcp 測試任務，刪 monitor）
+
+| 動作 | 內容 |
+|---|---|
+| 新增 `app/test_probe_tasks/` | `probe` 由 `main.c` 搬出（declare/start/hub 自測），對外只係 `nc_test_probe_task()` |
+| 新增 `app/test_tcp_tasks/` | `tcp_sink0/3`、`tcp_src0/1` 由 `main.c` 搬出，對外 `nc_test_tcp_start()`（P4 ETH 起來才呼叫） |
+| 刪除 `app/test_monitor_tasks/` | monitor 只有一行 log；`epoch`／`STATUS_GET` 已可即時查；省 3 KB stack 同每秒跨核讀 |
+
+建置（零 warning）：S3 OFF 390,928／ON 401,712；P4 OFF 667,424／ON 681,488。
+
+### 7.8 2026-11-04 晚（最後一批：`test_action`）
+
+| 動作 | 內容 |
+|---|---|
+| 新增 `action/test_action/` | 8 條測試指令（`DEV_BENCH`／`HUB_BENCH`／`TX_BENCH`／`BUS_STATS`／`NET_TUNE`／`BENCH_READY·DATA·RESULT`）＋ `hub_w`／`hub_r`／`tx_pack` 三條測試 task |
+| 對外 | `nc_test_action_register(dec, hooks)`；hooks 只提供 RX 診斷計數（`rx_counter`／`rx_fill_us`／`frame_align`／`reset_rx`） |
+| `main.c` | `s_core_actions[]` 只剩 **5 條真指令**；測試 handler 全部移走 |
+| 效果 | tests OFF 時連 handler 都唔存在：**S3 −6,512 B、P4 −6,800 B**（之前 8 條 handler 一直編入正式映像） |
+
+建置（零 warning）：S3 OFF **384,416**／ON **402,144**；P4 OFF **660,512**／ON **682,016**。hosttest 8/8。
+
+### 7.9 2026-11-05 凌晨（bus 所有權：driver 喺所屬核初始化）
+
+| 動作 | 內容 |
+|---|---|
+| 新增 `nc4_bus_cfg_t.owner_init` | bus 綁邊個核，就由嗰個核的 decode task **開 loop 之前**初始化 driver（UART 已改用它） |
+| 刪 `rx_split` / `rx_core` | 核心歸屬只剩一個來源：router（`routes[].out` 的 `decodeN`）；NVS 兩個旋鈕作廢 |
+| TCP | 固定 PULL（由 bus 所屬核的 decode 直接讀 socket）；刪 `tcp_nc4_rx_task`、`tcp_nc4_fill_frame`、`rx_wait_readable` |
+| `0xF00A NET_TUNE` | 只再寫 `frame_align`（其餘兩個 key 已無意義） |
+
+建置（零 warning）：S3 OFF **383,648**／ON **401,776**；P4 OFF **658,800**／ON **679,136**。
+
+### 7.10 2026-11-05 凌晨（producer ＋ 條件式無限等）
+
+| 動作 | 內容 |
+|---|---|
+| 新增 `nc4_bus_start_producer()` | 同核 task：讀 driver → push 插槽 → `kick`（同核 notify）；插槽滿／冇資料用 `taskYIELD()`（**唔用 vTaskDelay**，避免 core1 跨核 tick） |
+| UART 改 PUSH | `mode = NC4_BUS_PUSH`、`uart_bus_read` 改 `portMAX_DELAY`（ISR 同核）；producer 名 `uart.rx`（prio 5） |
+| decode 等待策略 | 該核**全部係 PUSH** → `portMAX_DELAY`（只等同核 kick）；有 PULL bus → 保留 10 ms（本核輪詢） |
+| 預期 | core1（UART）**唔再**每秒 100 次跨核中斷；core0（CDC／TCP 仍 PULL）保持本地 10 ms |
+
+建置（零 warning）：S3 OFF **385,872**／ON **402,480**；P4 OFF **659,632**／ON **681,504**。hosttest 8/8。
+
+> ⚠️ 上板驗證未做：本沙盒冇 USB/serial 裝置權限（`/dev/cu.*` open 回 EPERM）。
+> 開機應見 `core 1 等待策略：PUSH（portMAX_DELAY）`；要驗 UART 通道仍通。
+
+### 7.11 2026-11-05（USB 服務組跟 router；`nc_core_run_on`）
+
+| 動作 | 內容 |
+|---|---|
+| 新增 `sys/core`：`nc_core_run_on(core, fn, arg)` | 一次性 init 派送；同核直接跑，跨核用 `esp_ipc_call_blocking`（**只准開機 init**） |
+| `usb_init` → `usb_install()` | TinyUSB device stack ＋ CDC-ACM ＋ console 全部喺 **CDC 所屬核**（router 的 CDC 行）執行 → USB ISR、TinyUSB task、之後的 RX callback／producer／kick 同核 |
+| 原則 | 核心歸屬**唯一來源 = router**（唔加 `cores` map）；服務以「組」為單位綁核：USB 組（TinyUSB+CDC+console+MSC）、網絡組（ETH+lwIP+TCP+httpd，未來） |
+
+建置（零 warning）：S3 OFF **385,584**／ON **402,704**；P4 不變（659,632／681,504）。
+
+> 未做：MSC storage／`async_io` task 仍喺 router 之前初始化（store init 早過 router）——
+> 要將 MSC driver install 延後到 router 之後，才可以用同一個核。
 
 ---
 
@@ -237,7 +358,36 @@ USB 的完整分析：[failure-policy.md §4](../03_notes/failure-policy.md)。
 | 類別 | 文件 |
 |---|---|
 | 協議 | [commands.md](../01_protocol/commands.md)、[transports.md](../01_protocol/transports.md)、[frame.md](../01_protocol/frame.md)（幀格式權威版） |
-| 交接 | [handoff-2026-11-04.md](handoff-2026-11-04.md)（2026-11-04：記憶體清理、link 閘、Wi-Fi 兩道閘、量測與待辦） |
+| 交接 | [disposition.md](disposition.md)（移除／新做法／保留／待決）｜[next-steps.md](next-steps.md)（排序、決策點、驗收）｜[handoff-2026-11-04.md](handoff-2026-11-04.md)（2026-11-04：記憶體清理、link 閘、Wi-Fi 兩道閘、量測與待辦） |
 | 教學 | [build_and_flash.md](../02_guides/build_and_flash.md)、[testing.md](../02_guides/testing.md)（§2.13–2.16 是量測總表） |
-| 筆記 | [execution-model.md](../03_notes/execution-model.md)（A/B 執行模型取捨與 group 改裝）、[core-round.md](../03_notes/core-round.md)（每核大循環量測）、[config-layers.md](../03_notes/config-layers.md)、[writing-a-task.md](../03_notes/writing-a-task.md)、[task-lifecycle.md](../03_notes/task-lifecycle.md)、[rx-architecture.md](../03_notes/rx-architecture.md)、[failure-policy.md](../03_notes/failure-policy.md)、[p4-bringup.md](../03_notes/p4-bringup.md)、[buffer-manager.md](../03_notes/buffer-manager.md)、[memory.md](../03_notes/memory.md)、[memory-budget.md](../03_notes/memory-budget.md)（SRAM 帳）、[decode-routes.md](../03_notes/decode-routes.md)、[naming.md](../03_notes/naming.md)、[component-layout.md](../03_notes/component-layout.md)、[architecture-flow.md](../03_notes/architecture-flow.md)、[rewrite-plan.md](roadmap.md) |
+| 筆記 | [execution-model.md](../03_notes/execution-model.md)（A/B 執行模型取捨與 group 改裝）、[core-isolation.md](../03_notes/core-isolation.md)（核隔離不變式：唯一接口係緩衝）、[cross-core.md](../03_notes/cross-core.md)（跨核中斷與共享狀態清單）、[core-round.md](../03_notes/core-round.md)（每核大循環量測）、[config-layers.md](../03_notes/config-layers.md)、[writing-a-task.md](../03_notes/writing-a-task.md)、[task-lifecycle.md](../03_notes/task-lifecycle.md)、[rx-architecture.md](../03_notes/rx-architecture.md)、[failure-policy.md](../03_notes/failure-policy.md)、[p4-bringup.md](../03_notes/p4-bringup.md)、[buffer-manager.md](../03_notes/buffer-manager.md)、[memory.md](../03_notes/memory.md)、[memory-budget.md](../03_notes/memory-budget.md)（SRAM 帳）、[decode-routes.md](../03_notes/decode-routes.md)、[naming.md](../03_notes/naming.md)、[component-layout.md](../03_notes/component-layout.md)、[architecture-flow.md](../03_notes/architecture-flow.md)、[roadmap.md](roadmap.md) |
 | 研究 | [effect-language.md](../03_notes/effect-language.md)、[extension-architecture.md](../03_notes/extension-architecture.md)、[fx-loader.md](../03_notes/fx-loader.md) |
+
+### 7.12 2026-11-05 早上（實機測試：USB 通，UART 迴路抓到漏 kick）
+
+**在板子上做的**（S3，USB CDC，經 `tools/ota.py` OTA 上板兩次）
+
+| 測試 | 結果 |
+|---|---|
+| `STATUS_GET keys=?` | ✅ 71 B |
+| `keys=sys` / `mem` / `sys,mem` / `storage` | ✅ keys 過濾有效 |
+| `keys=epoch` | ❌→✅ 修好 `status_put_epoch()`（`nc_epoch_json` 係整份物件，要加 `"epoch":` 前綴） |
+| `keys=tasks` | ✅ 2357 B |
+| `0x1005 SYS_TASK_QUERY` | ✅ 556 B、9 個任務（768 B 截斷 bug 已消失） |
+| `0xF001 DEV_BENCH` | ✅ 回 `0xF002`，test_action 生效 |
+| **UART 迴路（IO7↔IO8 短接）** | ❌ `sent=100, rx=0`；`BUS_STATS` 顯示 UART `slots=[4,0,0,0] frames=0` |
+
+**UART 判讀**：producer 成功（driver 在 core1 安裝、讀到資料、push 滿 4 格），
+但 **decode1 從未消費**。原因：producer 喺 decode1 啟動前就 push（`s_decode_task[1]==NULL`
+→ `nc4_bus_kick()` 直接 return）；插槽滿之後 producer 冇得再 push，decode1 就永遠等。
+
+**修法（未做）**：
+1. `nc4_bus_task_entry` 設完 `s_decode_task[core]` 後，先 drain 自己核每條 PUSH bus（唔等 kick）
+2. `nc4_bus_kick()` 對未就緒 handle 記 pending，decode 起動時補發
+3. producer 插槽滿時改用「decode 釋放插槽 → 通知 producer」，唔自旋
+
+**另一未修 bug**：`epoch.rounds` 永遠 0 —— `decode0/1` 的 `fn` 係 `for(;;)` 永不返回，
+trampoline 只喺 `fn` 返回後才 `nc_epoch_mark`，所以該核永遠完成唔到一輪。
+
+**新增測試指令**（`action/test_action`，受 `NC_ENABLE_TESTS` gate）：
+`0xF00B UART_LOOP`（寫 N 幀去 UART1）、`0xF00C LOOP_STAT`（讀收回幀數）、`0xF0FE LOOP_PING`（接收計數）。

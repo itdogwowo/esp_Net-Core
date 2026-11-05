@@ -60,8 +60,15 @@ typedef struct {
     nc4_send_fn send;
     void *send_arg;
 
-    // 這條 bus 由哪個核心的 decode task 服務（0 / 1）
+    // 這條 bus 由哪個核心的 decode task 服務（0 / 1）。
+    // **所有權原則**：driver 初始化、RX、kick、decode 全部在這個核，
+    // 所以叫醒永遠是同核 notify，唔會跨核。
     int core;
+
+    // bus 的 driver 初始化（只會在 core 上、decode loop 開始之前跑一次）。
+    // 例：UART 綁 core1 → uart_driver_install() 喺 core1 執行。
+    esp_err_t (*owner_init)(void *arg);
+    void *owner_arg;
 
     // 外部提供的 parser 緩衝（plan 給的記憶體）；NULL = 自己配
     void *rx_region;
@@ -110,12 +117,15 @@ void nc4_bus_kick(nc4_bus_handle_t bus);
 size_t nc4_bus_stats_json(char *buf, size_t cap);
 void nc4_bus_stats_reset(void);
 
-// 解碼任務本體（公開給任務註冊表使用；也可用 nc4_bus_start 直接建立）
+// 啟動這條 bus 的 producer（PUSH 模式）：
+//   同一個 core 上「讀 driver → push 插槽 → kick decode」，所以叫醒係同核 notify。
+// read 必須係「無限等」語義（blocking），唔可以用 timeout —— 否則又會經 core0 tick。
+esp_err_t nc4_bus_start_producer(nc4_bus_handle_t bus, const char *name,
+                                 uint32_t prio, uint32_t stack);
+
+// 解碼任務本體（公開給任務註冊表使用：decode0 / decode1 兩個 loop）
 // arg 必須轉型成 int 傳入「這個 task 負責的 core」
 void nc4_bus_task_entry(void *arg);
-
-// 啟動解碼任務（掃描所有已註冊通道）。等於自行建立上面那個 task。
-esp_err_t nc4_bus_start(uint32_t poll_ms);
 
 size_t nc4_bus_count(void);
 

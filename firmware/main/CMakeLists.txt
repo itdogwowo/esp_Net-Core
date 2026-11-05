@@ -36,17 +36,35 @@ set(_nc_priv_extra)
 if(NOT "${IDF_TARGET}" STREQUAL "esp32p4")
     list(APPEND _nc_priv_extra esp_wifi)
 endif()
+# 測試任務（test_*_tasks）只在 NC_ENABLE_TESTS=ON 時存在；OFF 時連 component 都冇。
+set(_nc_test_reqs)
+if(NC_ENABLE_TESTS)
+    list(APPEND _nc_test_reqs test_fx_tasks test_hello_tasks test_bench_tasks)
+endif()
 
 idf_component_register(
     SRCS "main.c" "nc_wifi.c"
     INCLUDE_DIRS "."
     PRIV_REQUIRES fatfs esp_timer esp_partition esp_driver_gpio esp_driver_uart wear_levelling esp_eth esp_netif lwip esp_event esp_psram nvs_flash
-                   espressif__esp_tinyusb nc4 mem config ota_action task_manager transport store file_action fx hello bench
+                   espressif__esp_tinyusb nc4 mem config ota_action task_manager core transport store file_action
                    ${_nc_priv_extra}
     ${_preset_args}
 )
 
 target_compile_definitions(${COMPONENT_LIB} PRIVATE NETCORE_HAS_PRESET_TASKS=${_has_tasks_preset})
+if(NC_ENABLE_TESTS)
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE NC_ENABLE_TESTS=1)
+    # main 直接 include 測試任務的標頭（nc_fx.h / nc_bench.h …）。
+    # 不靠 PRIV_REQUIRES：組件掃描階段（component manager）睇唔到本專案的
+    # 變數（NC_ENABLE_TESTS 未定義），嗰次登記就會漏咗 include path。
+    target_include_directories(${COMPONENT_LIB} PRIVATE
+        "${CMAKE_CURRENT_LIST_DIR}/../components/tasks/test_fx_tasks/include"
+        "${CMAKE_CURRENT_LIST_DIR}/../components/tasks/test_hello_tasks/include"
+        "${CMAKE_CURRENT_LIST_DIR}/../components/tasks/test_bench_tasks/include"
+        "${CMAKE_CURRENT_LIST_DIR}/../components/tasks/test_probe_tasks/include"
+        "${CMAKE_CURRENT_LIST_DIR}/../components/tasks/test_tcp_tasks/include"
+        "${CMAKE_CURRENT_LIST_DIR}/../components/action/test_action/include")
+endif()
 
 # 最小映像（只印心跳，不碰 USB/MSC/ETH）：用來確認新板子的基礎能不能跑
 if(NETCORE_MINIMAL)

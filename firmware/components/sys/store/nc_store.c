@@ -223,6 +223,23 @@ static void usb_reconnect(void)
 
 // ───────────────────────── 對外 ─────────────────────────
 
+// USB 服務組的一員：MSC driver 安裝。
+// 由 main 喺 router 之後、USB 所屬核執行（TinyUSB 之前），咁 MSC 同 CDC 同核。
+esp_err_t nc_store_usb_driver(void)
+{
+    if (s_driver_installed) {
+        return ESP_OK;
+    }
+    const tinyusb_msc_driver_config_t drv_cfg = { .callback = msc_event_cb };
+    const esp_err_t err = tinyusb_msc_install_driver(&drv_cfg);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "MSC driver 安裝失敗：%s", esp_err_to_name(err));
+        return err;
+    }
+    s_driver_installed = true;
+    return ESP_OK;
+}
+
 esp_err_t nc_store_init(const esp_partition_t *part)
 {
     if (s_lock == NULL) {
@@ -237,17 +254,6 @@ esp_err_t nc_store_init(const esp_partition_t *part)
         s_mode = NC_STORE_MODE_UNAVAILABLE;
         ESP_LOGW(TAG, "沒有 data 分區 → FAT 不可用");
         return ESP_ERR_NOT_FOUND;
-    }
-
-    if (!s_driver_installed) {
-        const tinyusb_msc_driver_config_t drv_cfg = { .callback = msc_event_cb };
-        const esp_err_t err = tinyusb_msc_install_driver(&drv_cfg);
-        if (err != ESP_OK) {
-            ESP_LOGE(TAG, "MSC driver 安裝失敗：%s", esp_err_to_name(err));
-            s_mode = NC_STORE_MODE_UNAVAILABLE;
-            return err;
-        }
-        s_driver_installed = true;
     }
 
     const esp_err_t err = open_app();          // 開機先留在 APP（寫出廠預置）

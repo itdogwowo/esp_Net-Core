@@ -29,11 +29,10 @@ components/action/
 └─ test_action/     0xFxxx  測試區（上游冇這個 group，所以只能自訂名）                ⬜ 待建
 ```
 
-> **現況違規**：`main.c` 的 `s_core_actions[]` 有 15 條，但其中 **10 條是 `0xFxxx` 測試指令**
-> （DEV_BENCH / HUB_BENCH / TX_BENCH / BUS_STATS / DEV_SLOW / UART_BENCH / NET_TUNE /
-> BENCH_READY / BENCH_DATA / BENCH_RESULT），真正的產品指令只有
+> **已修正（2026-11-04）**：8 條測試指令搬到 `components/action/test_action/`，
+> 由 `NC_ENABLE_TESTS` gate。`main.c` 的 `s_core_actions[]` 只剩 5 條產品指令：
 > `0x1005 SYS_TASK_QUERY`、`0x100F REBOOT`、`0x1016 SET_MASTER`、`0x1101 STATUS_GET`、
-> `0x1105 ROUTE_GET` 五條。
+> `0x1105 ROUTE_GET`。
 > 所以現在「想找某條指令的實作」要分兩個地方找。搬過去之後，
 > **看到 `action/` 就知道那裡有指令**，`main.c` 只剩開機順序。
 >
@@ -134,18 +133,17 @@ components/action/
 > 也不保證跨版本存在。它們只是「量測某個機制有沒有真的做到」的工具：
 > 吞吐、零複製、雙核 hub 交換、慢工作延後。**要接產品的東西，一律不要用 `0xFxxx`。**
 >
-> 其中 `0xF005` / `0xF006` 連「工作」都是假工作（`vTaskDelay` 模擬寫 flash、UART 自環 bench）——
-> 它們存在的唯一目的是**證明「慢工作被搬出解碼路徑」這件事真的有效**，
-> 不是提供任何實際功能。真正會用到慢工作佇列的，是之後的 OTA apply、config 落盤、FAT 同步。
+> **`0xF005` DEV_SLOW 與 `0xF006` UART_BENCH 已刪除**（2026-11-04）。
+> 它們是為了證明「慢工作佇列」有效而存在的假工作；而指令層本來就是嚴格一問一答，
+> 「慢指令擋住後面的指令」這個問題**天然不存在**（見 [execution-rules §7](../03_notes/execution-rules.md)）。
+> 慢工作佇列（`slow_worker` + `nc_hub` jobs）亦一併移除。
 
 | CMD | 用途 |
 |---|---|
-| `0xF001` DEV_BENCH | `size(u16) iters(u16) mode(u8)` → `0xF002` JSON。mode 0=decode、1=pack、2=erase 4K、3=write 4K、4=erase 64K |
+| `0xF001` DEV_BENCH | `size(u16) iters(u16) mode(u8)` → `0xF002` JSON。mode 0=decode、1=pack（純 CPU，不碰 flash／網路）。舊的 2=erase 4K、3=write 4K、4=erase 64K **已移除**：任何通道打一幀就能擦 OTA slot |
 | `0xF002` DEV_RSP | 上述回覆（`str_u16len` JSON） |
 | `0xF003` HUB_BENCH | `iters(u32) [mode(u8)]` → `0xF004` JSON：雙核 hub 交換量測（writer core1 / reader core0）。`mode` bit0=1 用舊版次序（deadline 太晚）重現 read=0，回歸測試用 |
 | `0xF004` HUB_RSP | `{iters,read,us,per_sec,torn,w,w_full,r_null,exit:[w,r],late}`；`exit` 1=完成 2=逾時 3=等不到 start |
-| `0xF005` DEV_SLOW | `ms(u16)` → 排進慢工作佇列，worker 延遲 ms 後回 `0xF004` JSON（`{"slow_ms":N,"deferred":1}`）。**假工作**：只是 `vTaskDelay`，用來證明 decode task 沒有被卡住 |
-| `0xF006` UART_BENCH | `baud(u32) frames(u16) size(u16)` → 交給 worker 做 UART 自環吞吐量測，回 `0xF004` JSON。**假工作**：測的是 UART 本身，不是產品功能 |
 | `0xF007` TX_BENCH | `frames(u32) size(u16) mode(u8)` → `0xF004` JSON：**上傳**（打包＋送出）量測。mode 0=同核（同一 task 打包後送出）、1=分核（core1 打包進插槽、decode task 送出） |
 | `0xF008` BUS_STATS | `[reset:u8]` → `0xF009` JSON：每條 bus 的 `{name,mode,frame,frames,mb,copied,parse_ms,us_per_frame}` + `resync`。`copied=0` 就是零複製 |
 | `0xF009` BUS_RSP | 上述回覆（`str_u16len` JSON） |

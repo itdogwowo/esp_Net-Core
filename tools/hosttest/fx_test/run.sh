@@ -6,9 +6,9 @@ OUT="${TMPDIR:-/tmp}/fx_test"
 cc -std=c11 -Wall -Wextra -Werror -D_POSIX_C_SOURCE=200809L \
    -DNC_FX_HOST_TEST \
    -I "$ROOT/tools/hosttest/fx_test/include" \
-   -I "$ROOT/firmware/components/app/fx/include" \
-   "$ROOT/firmware/components/app/fx/nc_fx.c" \
-   "$ROOT/firmware/components/app/fx/nc_fx_manifest.c" \
+   -I "$ROOT/firmware/components/tasks/test_fx_tasks/include" \
+   "$ROOT/firmware/components/tasks/test_fx_tasks/nc_fx.c" \
+   "$ROOT/firmware/components/tasks/test_fx_tasks/nc_fx_manifest.c" \
    "$ROOT/tools/hosttest/fx_test/fx_host.c" \
    "$ROOT/tools/hosttest/fx_test/main.c" \
    -o "$OUT"

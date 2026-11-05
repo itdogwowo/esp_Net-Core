@@ -904,5 +904,41 @@ size_t nc_task_json(char *buf, size_t cap)
         }
         off = jappend(buf, cap, off, "]}");
     }
-    return jappend(buf, cap, off, "]");
+    const size_t end = jappend(buf, cap, off, "]");
+    if (end >= cap - 1) {
+        // 放唔落：回一個合法物件，唔好送半截 JSON
+        const int n = snprintf(buf, cap, "[{\"truncated\":1,\"cap\":%u}]", (unsigned)cap);
+        return (n > 0) ? (size_t)n : 0;
+    }
+    return end;
+}
+
+// 緊湊清單：0x1005 用。9 個任務 ≈ 540 B；就算 17 個都放得落 1 KB。
+size_t nc_task_list_json(char *buf, size_t cap)
+{
+    if (buf == NULL || cap == 0) {
+        return 0;
+    }
+    size_t off = jappend(buf, cap, 0, "[");
+    bool first = true;
+    for (int i = 0; i < s_count && off < cap - 1; i++) {
+        const tm_slot_t *s = &s_slots[i];
+        const nc_task_t *t = s->def;
+        const bool sys = (t->kind == NC_TASK_SYSTEM);
+        off = jappend(buf, cap, off,
+                      "%s{\"name\":\"%s\",\"level\":%d,\"aff\":[%d,%d],"
+                      "\"started\":%d,\"loops\":%d}",
+                      first ? "" : ",", s->name,
+                      s->cfg_seen ? s->cfg_level : t->level,
+                      sys ? -1 : s->cfg_aff[0],
+                      sys ? -1 : s->cfg_aff[1],
+                      s->started ? 1 : 0, s->nloops);
+        first = false;
+    }
+    const size_t end = jappend(buf, cap, off, "]");
+    if (end >= cap - 1) {
+        const int n = snprintf(buf, cap, "[{\"truncated\":1,\"cap\":%u}]", (unsigned)cap);
+        return (n > 0) ? (size_t)n : 0;
+    }
+    return end;
 }

@@ -117,6 +117,9 @@ typedef struct {
     // 房東自己話事嘅開關：回 false = 呢個 loop 唔建立（連棧都唔配置）。
     // NULL = 永遠開。config 管唔到 —— 呢個係固件宣告嘅一部分。
     bool (*enabled)(void);
+    // true = 唔參與每核「大循環」量測。診斷／低頻 loop 用：
+    // 一條 1 秒的 monitor 會把該核的 round 拉到 1 秒，令量測失真。
+    bool no_epoch;
 } nc_task_loop_t;
 
 // ── 一個任務的完整宣告 ──
@@ -195,6 +198,11 @@ int  nc_task_count(void);
 size_t nc_task_ledger(char *buf, size_t cap);
 // 狀態：任務 + 資源 + 每個 loop 的實際核心與量測（count / last / avg / max / over / wrap）
 size_t nc_task_json(char *buf, size_t cap);
+
+// 緊湊清單（給 0x1005 SYS_TASK_QUERY 用）：
+//   [{"name","level","aff":[c0,c1],"started","loops"},…]
+// 保證回傳合法 JSON：放不下就回 [{"truncated":1,"cap":N}]
+size_t nc_task_list_json(char *buf, size_t cap);
 
 // ── 對外提供的查詢（消費端）──
 // 只查「已啟動任務」的 provide；找不到（或提供者已卸載）一律回 false / 0 / NULL。

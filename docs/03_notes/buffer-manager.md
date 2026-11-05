@@ -2,7 +2,8 @@
 
 > **用途**：esp_Net-Core 的緩衝區管理完整設計 —— 目標、現況、架構、四種機制、三層 tier、撇除規則、S3 記憶體實測、分期計畫、待決事項。
 > **對象**：要接手實作的人（含未來的自己）；要 review「為什麼不直接用 malloc」的人。
-> **狀態**：**設計定案、尚未實作**。現有程式碼只有 pool / arena 兩個原語（見 §2）。
+> **狀態**：**原語（pool／arena）已實作；交換管理器 v2（plan／declare／commit）亦已實作** ——
+> 以 [buffer-manager-status.md](buffer-manager-status.md) 為準。本文件仍保留「三層 tier／撇除／分期」的設計部分（未全部落地）。
 > **相關**：[memory.md](memory.md)（原語與壽命）、[architecture-flow.md](architecture-flow.md)（執行期流程）、[component-layout.md](component-layout.md)（分區）、[roadmap.md](../00_pm/roadmap.md)（分期）
 
 ---

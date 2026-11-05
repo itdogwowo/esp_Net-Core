@@ -1,6 +1,7 @@
 # 解碼路線與接收緩衝（現況）
 
-> **狀態**：現況盤點（2026-11-02）。不是提案，是「現在程式真的怎麼跑」。
+> **狀態**：**歷史快照（2026-11-02）**。之後 bus／core 已改成 router ＋ `links[].enable`；
+> 現況請看 [routing.md](routing.md)。內容保留作對照。
 > **相關**：[rx-architecture.md](rx-architecture.md)（目標架構）、[memory.md](memory.md)（plan / hub）、[naming.md](naming.md)
 
 ---

@@ -89,7 +89,7 @@ _Static_assert(sizeof(nc_fxe_hdr_t) == 48, "fxe header must stay 48 B");
 類型、跑哪一核、哪一層、優先權、要多少線性記憶體、幾 px、每幀預算、擁有哪幾條指令。
 
 ```c
-// firmware/components/app/fx/include/nc_fx_manifest.h（純 C，可 host 測試）
+// firmware/components/tasks/test_fx_tasks/include/nc_fx_manifest.h（純 C，可 host 測試）
 #define NC_FXM_MAGIC   0x314D5846u   // 'F','X','M','1'
 #define NC_FXM_VERSION 1
 
@@ -414,7 +414,7 @@ nc_task_register(&(nc_task_loop_t){
 
 ### 10.7 實作現況（2026-11-02 驗證）
 
-骨架已落地：`firmware/components/app/fx/`（`nc_fx.c` + `include/nc_fx.h`）。
+骨架已落地：`firmware/components/tasks/test_fx_tasks/`（`nc_fx.c` + `include/nc_fx.h`）。
 
 | 項目 | 狀態 |
 |---|---|

@@ -7,7 +7,7 @@
 typedef struct {
     const nc_task_loop_t *def;
     TaskHandle_t handle;
-    int core;                 // 執行期核心（set_core 會改這個，不是改 def）
+    int core;                 // 執行期核心（CORE_ANY 在 start 時定案；沒有 set_core）
     bool started;
     bool exited;
     bool enabled;

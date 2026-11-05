@@ -195,24 +195,35 @@
 firmware/components/action/
 ├── file_action/      真功能
 ├── ota_action/       真功能
-└── test_action/      測試指令
-firmware/components/app/
-├── fx/               真功能（燈效引擎）
-├── test_bench_tasks/
-├── test_hello_tasks/
-└── test_probe_tasks/
+└── test_action/      測試指令（0xF00x / 0x181x）—— **已搬，2026-11-04**
+firmware/components/tasks/
+├── test_bench_tasks/      bench_a/b/c（量測驗證）
+├── test_hello_tasks/      hello（框架自測）
+├── test_fx_tasks/         fx（POC 燈效引擎；運作方式未定）
+├── test_probe_tasks/      probe（開機 hub 自測）
+└── test_tcp_tasks/        tcp_sink0/3、tcp_src0/1（P4 吞吐量測，5000–5003）
+
+（monitor 已刪：2026-11-04，只有一行 log，價值唔夠 3 KB + 跨核讀取）
 ```
+
+**現況（2026-11-04）**：
+
+- `components/tasks` 整個目錄由 `NC_ENABLE_TESTS` gate；OFF = 唔加入 `EXTRA_COMPONENT_DIRS` = 唔編譯、唔 link。
+- `fx`／`monitor` 係 POC／實驗，所以同測試放埋一齊（release 唔會出）。
+- 全部已搬完（2026-11-04）：`test_action`（8 條測試指令）、`test_probe_tasks`、`test_tcp_tasks`
+  （`tcp_sink/src`）；`hub_w/r`、`tx_pack` 隨 `HUB_BENCH`／`TX_BENCH` 一齊入 `test_action`。
+- `main.c` 只剩 5 條真指令（`REBOOT`／`STATUS_GET`／`ROUTE_GET`／`SET_MASTER`／`SYS_TASK_QUERY`）。
 
 **指令分類（15 條 → 7 真 + 8 測試）**
 
 | 真功能 | 測試 → `test_action` |
 |---|---|
-| `REBOOT`、`STATUS_GET`、`ROUTE_GET`、`SET_MASTER`、`SYS_TASK_QUERY`、`BUS_STATS`、`NET_TUNE` | `DEV_BENCH`、`HUB_BENCH`、`TX_BENCH`、`DEV_SLOW`、`UART_BENCH`、`BENCH_READY`、`BENCH_DATA`、`BENCH_RESULT` |
+| `REBOOT`、`STATUS_GET`、`ROUTE_GET`、`SET_MASTER`、`SYS_TASK_QUERY`、`BUS_STATS`、`NET_TUNE` | `DEV_BENCH`、`HUB_BENCH`、`TX_BENCH`、`BENCH_READY`、`BENCH_DATA`、`BENCH_RESULT`（`DEV_SLOW`／`UART_BENCH` 已刪） |
 
 **編譯開關**（真正「唔污染」的做法：唔係靠命名，係靠唔存在）：
 
 ```cmake
-option(NC_ENABLE_TESTS "測試指令與測試任務" ON)   # release 關掉
+option(NC_ENABLE_TESTS "測試指令與測試任務" OFF)  # 預設關；要量測時 -DNC_ENABLE_TESTS=ON
 ```
 
 關掉之後 `test_action`／`test_*_tasks` 唔編譯、唔註冊、唔佔 stack。
@@ -239,3 +250,20 @@ option(NC_ENABLE_TESTS "測試指令與測試任務" ON)   # release 關掉
 
 **將來真正的慢工作**（flash 寫入、FAT、OTA）用**專屬 task**：一個用途一條 task，
 唔用通用 worker。通用 worker 會令「邊個喺邊個核做咩」變模糊，正好違反第 2 節的隔離目標。
+
+### 7.1 執行紀錄（2026-11-04）
+
+✅ **已執行**：
+
+| 移除 | 位置 | 連帶 |
+|---|---|---|
+| `slow_worker` loop | `main.c` `s_core_loops` / `s_task_core` | 任務管理器唔再註冊 `core` 任務 |
+| `slow_job_t` / `s_job_hub` | `main.c` | plan 的 `"jobs"`（8 槽）一併刪 |
+| `0xF005 DEV_SLOW`、`0xF006 UART_BENCH` | `main.c` handler + 指令表 | `s_core_actions[]` 由 15 → 13 條 |
+| `task_core_declare` / `task_core_start` | `main.c` | — |
+
+**順手修好一個真 bug**：`uart_loop_init()` 以前只由 `UART_BENCH` 呼叫，
+所以 **UART 通道要先打一次測試指令才會通**。現在改由 `task_net_start()` 在開機時安裝
+（只在 `link_enabled("UART")` 且有 `uart.rx` 緩衝時），baud 用 `UART_TEST_DEF_BAUD`（921600）。
+
+驗證：S3／P4 零 warning，flash −3,936 B（S3）／−4,992 B（P4）；hosttest 8/8。

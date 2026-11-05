@@ -41,7 +41,8 @@ extern "C" {
 #define NC4_CMD_REBOOT             0x100F
 #define NC4_CMD_STATUS_GET         0x1101
 #define NC4_CMD_STATUS_RSP         0x1102
-#define NC4_CMD_RESET_TO_DOWNLOAD  0x1019  // vendor：進 ROM download mode
+// 0x1019 是空號，保留給 ASSET_RELOAD（見 docs/01_protocol/commands.md §3）。
+// 它一度被定義成 RESET_TO_DOWNLOAD，從未實作，已刪。
 
 typedef struct {
     uint16_t addr;

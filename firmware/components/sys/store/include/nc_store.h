@@ -45,6 +45,7 @@ typedef enum {
 } nc_nc_store_mode_t;
 
 // part = type data / subtype fat 的分區。store 負責 WL 與 FatFS 的整個生命週期。
+esp_err_t nc_store_usb_driver(void);   // MSC driver 安裝（USB 組，開機 init）
 esp_err_t nc_store_init(const esp_partition_t *part);
 
 nc_nc_store_mode_t nc_store_mode(void);

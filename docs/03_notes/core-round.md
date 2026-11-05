@@ -74,7 +74,7 @@ STATUS_GET  keys=epoch     →     0x1102 STATUS_RSP
 
 ## 4. 用 bench 任務驗證（線性 × 波幅 × 影響）
 
-`bench_a` / `bench_b` / `bench_c` 三條任務（`components/app/tasks/bench/`）：
+`bench_a` / `bench_b` / `bench_c` 三條任務（`components/tasks/test_bench_tasks/`）：
 
 - 每 **5 ms** 燒 **100,000 CPU cycles**（≈ **278 µs** @360 MHz、250 µs @400 MHz）。
 - 預設 **不跑**（tasks.json 補寫成 `[0,0]`）。
@@ -117,6 +117,7 @@ STATUS_GET  keys=epoch     →     0x1102 STATUS_RSP
 | 停用（`nc_task_enable(false)`）的 loop | **仍然參與**（exec=0），否則其他 loop 的 round 會永遠等它 |
 | `run_once` 的 loop | 跑完退出時移除 token；不會卡住 |
 | 同一 loop 一輪跑多次 | 只算一次參與者，但 exec 照加（真實 CPU 用量） |
+| 診斷／低頻 loop（例如 monitor 1 秒一次） | 要設 `.no_epoch = true`，否則該核的 round 會被拉到它的 period |
 | 每核 > 8 條 loop | `nc_epoch_add` 回 -1（token 用完）；目前最多 4–5 條 |
 | round > 10.7 s @400 MHz | `cycles` 的 u32 差不夠用；`period` 仍然正確 |
 
@@ -138,7 +139,9 @@ token 上限、cycles wrap、JSON 合法），不需要板子。
 
 | 板子 | DIRAM 增加 | 備註 |
 |---|---:|---|
-| S3 | **+688 B** | epoch 表 ＋ bench 三條任務的靜態定義 |
-| P4 | **+680 B** | 同上 |
+| S3 | **+832 B** | epoch 表 ＋ bench 三條任務 ＋ monitor／0x1005 的程式碼 |
+| P4 | **+840 B** | 同上 |
 
-bench 任務預設不跑，執行期成本 0；epoch 每個 loop 每次迭代約 1–2 µs（已算在 `wrap_us`）。
+- 基準：epoch 之前 S3 97,929 / P4 129,023；現在 98,761 / 129,863。
+- bench 任務預設不跑，執行期成本 0；monitor 自己 3,072 B 棧（`no_epoch`）。
+- epoch 每個 loop 每次迭代約 1–2 µs（已算在 `wrap_us`）。

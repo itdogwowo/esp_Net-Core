@@ -15,10 +15,22 @@ if(EXISTS "${PORT_DIR}/sdkconfig.defaults")
     list(APPEND SDKCONFIG_DEFAULTS "${PORT_DIR}/sdkconfig.defaults")
 endif()
 
-set(EXTRA_COMPONENT_DIRS "${CMAKE_CURRENT_LIST_DIR}/components/sys"
-                          "${CMAKE_CURRENT_LIST_DIR}/components/app"
-                          "${CMAKE_CURRENT_LIST_DIR}/components/app/tasks"
-                          "${CMAKE_CURRENT_LIST_DIR}/components/action")
+# ── 測試專用（約定：action/test_action、app/test_*_tasks）──
+# OFF 時整個 components/app 唔加入編譯：測試任務「唔存在」，而唔係靠命名或 runtime 開關。
+option(NC_ENABLE_TESTS "測試指令與測試任務（test_action / test_*_tasks）" OFF)
+
+# 正式組件（永遠編譯）
+set(_nc_extra_dirs
+    "${CMAKE_CURRENT_LIST_DIR}/components/sys"
+    "${CMAKE_CURRENT_LIST_DIR}/components/action/file_action"
+    "${CMAKE_CURRENT_LIST_DIR}/components/action/ota_action")
+# 測試組件（NC_ENABLE_TESTS=OFF 時唔加入 → 唔編譯、唔 link、唔存在）
+if(NC_ENABLE_TESTS)
+    list(APPEND _nc_extra_dirs
+        "${CMAKE_CURRENT_LIST_DIR}/components/action/test_action"
+        "${CMAKE_CURRENT_LIST_DIR}/components/tasks")
+endif()
+set(EXTRA_COMPONENT_DIRS ${_nc_extra_dirs})
 
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 project(esp_net_core)

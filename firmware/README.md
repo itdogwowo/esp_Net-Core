@@ -41,7 +41,7 @@ firmware/
 └─ build/  managed_components/  sdkconfig  dependencies.lock   ← 生成物，不進 git
 ```
 
-`components/sys` 與 `components/app` 由根 `CMakeLists.txt` 的 `EXTRA_COMPONENT_DIRS` 掛進來。
+`components/sys` 與 `components/tasks` 由根 `CMakeLists.txt` 的 `EXTRA_COMPONENT_DIRS` 掛進來。
 新增一個分區（`hw/`、`sw/`…）時，要同時加進那個清單。
 
 ---

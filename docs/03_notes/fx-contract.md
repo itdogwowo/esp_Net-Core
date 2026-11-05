@@ -1,10 +1,13 @@
 # fx 模組契約：安全邊界與交接緩衝區
 
+> ⚠️ **狀態：POC 原始形態（2026-11-04 標記）。** 呢份係當時的設計提案；燈效引擎實際運作方式
+> **仍未定義**（邊個核 render、幀從邊度嚟、同 buffer 交換點對接），唔好當成現況。
+>
 > **狀態**：設計（2026-11-02）。骨架已上板，執行引擎待接。
 > **相關**：[fx-loader.md](fx-loader.md) §10（三層）、[effect-language.md](effect-language.md) §6（ABI v0）、
 > [memory.md](memory.md)（heap class）、[buffer-manager.md](buffer-manager.md)（declare→commit）、
 > [architecture-flow.md](architecture-flow.md)（frame pipeline）
-> **程式**：`firmware/components/app/fx/`（`nc_fx.c`、`include/nc_fx_abi.h`）
+> **程式**：`firmware/components/tasks/test_fx_tasks/`（`nc_fx.c`、`include/nc_fx_abi.h`）
 
 ---
 

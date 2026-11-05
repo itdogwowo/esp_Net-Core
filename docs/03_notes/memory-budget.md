@@ -253,8 +253,8 @@ xtensa-esp32s3-elf-size -A <idf>/components/esp_wifi/lib/esp32s3/libnet80211.a
 
 | 指標 | 改前 | 改後 |
 |---|---:|---:|
-| DIRAM 已用 | 107,721 | **97,929** |
-| DIRAM 剩餘 | 234,039 | **243,831** |
+| DIRAM 已用 | 107,721 | **97,929**（Phase 1 後：98,761） |
+| DIRAM 剩餘 | 234,039 | **243,831**（Phase 1 後：242,999） |
 | `.bss` | 42,288 | 32,496 |
 | `.data` | 23,246 | 23,246 |
 
@@ -302,9 +302,10 @@ DIRAM 總量（P4 572,368 / S3 341,760）
 
 | 項目 | 大小 | 類型 | 備註 |
 |---|---:|---|---|
-| P4 測試 task（sink×2／src×2／accept） | ~30.7 KB | runtime | 只為 bench 存在 |
+| P4 測試 task（sink×2／src×2） | 24,576 B | runtime | ✅ 已由 `CONFIG_NETCORE_TEST_TASKS` 關閉（預設 n） |
+| monitor（每核停滯監控） | 3,072 B | runtime | 新增；`no_epoch`，不影響大循環量測 |
 | P4 tinyusb（`_cdcd_itf` ＋ epbuf） | 21,748 B | 靜態 | 由 `nc_store.c` 的 MSC 拉住 |
-| `s_slots`（任務表 20 格） | 7,680 B | 靜態 | → 12 格可省 ~3 KB |
+| `s_slots`（任務表 20 格） | 7,680 B | 靜態 | ❌ 不可縮：10 固定 ＋ 8 `.fxe` = 18 |
 
 ### 9.6 建置方式（不污染共用 build）
 

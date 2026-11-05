@@ -1,6 +1,7 @@
 # esp_Net-Core（C / ESP-IDF）流程概念圖
 
-> 本文件描述 C / ESP-IDF 版本的目標架構；既有 MicroPython 版為行為參考。
+> 本文件描述 C / ESP-IDF 版本的**目標架構**（不是現況）；Pixel Pipeline／FrameClock 仍未實作。
+> 既有 MicroPython 版為行為參考。
 > 設計原則：
 > 1. **一個 command layer（NC4），多個 transport（UART / Wi-Fi / CDC）**。
 > 2. **Device 擁有 FS**；NC4 file service 寫 staging → validate → atomic swap。
