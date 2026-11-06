@@ -54,7 +54,7 @@ idf_component_register(
     SRCS "main.c" "nc_wifi.c"
     INCLUDE_DIRS "."
     PRIV_REQUIRES fatfs esp_timer esp_partition esp_driver_gpio esp_driver_uart wear_levelling esp_eth esp_netif lwip esp_event esp_psram nvs_flash
-                   espressif__esp_tinyusb nc4 mem config ota_action task_manager core transport store file_action
+                   espressif__esp_tinyusb nc4 mem config ota_action task_manager core transport store state nclog file_action
                    ${_nc_priv_extra}
     ${_preset_args}
 )

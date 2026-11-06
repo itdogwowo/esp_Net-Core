@@ -32,7 +32,8 @@
     "nctx 與 outbound 是兩個永遠存在的預設列，排最前；冇寫就自動補",
     "out：目的地；decodeN = 本地執行（N = 核心編號），link = 轉發；空 = 丟棄",
     "例：out=[decode0] 只執行｜out=[TCP] 只轉發｜兩者一齊寫 = 兩樣都做｜out=[] 丟棄",
-    "decodeN 有人指向才開；冇人指向就唔存在"
+    "decodeN 有人指向才開；冇人指向就唔存在",
+    "log_debug_mode：0 = 正常（INFO、2 KB，由 USB 起來開始記，看到服務啟動）｜1 = 除錯（全部等級、8 KB，連最早期開機）"
   ],
 
   "cID": "",
@@ -51,5 +52,6 @@
       { "in": "CDC",      "out": ["decode0"] },
       { "in": "UART",     "out": ["decode1"] }
     ]
-  }
+  },
+  "log_debug_mode": 0
 }

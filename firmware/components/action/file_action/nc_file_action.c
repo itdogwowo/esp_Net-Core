@@ -10,6 +10,8 @@
 #include "ff.h"                 // f_getfree：IDF 的 FATFS 沒有 statvfs
 #include "psa/crypto.h"
 #include "nc_store.h"
+#include "nc_boot.h"            // fs_format：狀態一律經 state manager
+#include "nc_log.h"             // log_mode / log_level
 
 static const char *TAG = "nc_file_action";
 
@@ -273,10 +275,29 @@ static void on_status_set(nc4_ctx_t *ctx, const nc4_frame_t *f)
             return;
         }
         cJSON_Delete(root);
-        nc_store_request_format(on);
+        // 狀態一律經 state manager：它決定要不要落盤（這裡一定要，否則重開機就冇）。
+        nc_boot_request_format(on);
         char msg[96];
         snprintf(msg, sizeof(msg), "fs_format=%d; %s", on ? 1 : 0,
                  on ? "下次開機抹 data 分區並重建 FAT" : "已取消");
+        ESP_LOGI(TAG, "STATUS_SET %s → %s", json, msg);
+        ack(ctx, true, msg);
+        return;
+    }
+
+    // ── System.log_debug_mode：0=正常（INFO、2 KB）｜1=除錯（全部、8 KB）──
+    cJSON *ll = cJSON_IsObject(sys) ? cJSON_GetObjectItemCaseSensitive(sys, "log_debug_mode") : NULL;
+    if (ll != NULL) {
+        if (!cJSON_IsNumber(ll) || (ll->valueint != 0 && ll->valueint != 1)) {
+            cJSON_Delete(root);
+            ack(ctx, false, "log_debug_mode 要 0 或 1");
+            return;
+        }
+        const int v = ll->valueint;
+        cJSON_Delete(root);
+        (void)nc_log_set_levels((uint8_t)v);
+        char msg[80];
+        snprintf(msg, sizeof(msg), "log_debug_mode=%d；即時生效，並記住下次開機", v);
         ESP_LOGI(TAG, "STATUS_SET %s → %s", json, msg);
         ack(ctx, true, msg);
         return;

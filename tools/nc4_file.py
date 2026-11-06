@@ -23,8 +23,11 @@ import struct
 import sys
 import time
 
-SOF = b"NC"
-VERSION = 4
+import os
+
+# 協議實作只有一份：tools/nc4_demux.py（嚴格 CRC、失敗只前進 1 byte）
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from nc4_demux import parse_frames, pack  # noqa: E402
 
 STATUS_GET = 0x1101
 STATUS_RSP = 0x1102
@@ -35,27 +38,9 @@ FILE_QUERY_RSP = 0x2006
 FILE_ERROR_RSP = 0x2010
 
 
-def pack(cmd: int, payload: bytes = b"") -> bytes:
-    body = struct.pack("<BHHH", VERSION, 0xFFFF, cmd, len(payload)) + payload
-    return SOF + body + struct.pack("<I", binascii.crc32(body, 0) & 0xFFFFFFFF)
-
-
 def frames(buf: bytes):
-    out, i = [], 0
-    while True:
-        j = buf.find(SOF, i)
-        if j < 0 or len(buf) - j < 11:
-            break
-        ver, _addr, cmd, ln = struct.unpack_from("<BHHH", buf, j + 2)
-        if ver != VERSION:
-            i = j + 1
-            continue
-        end = j + 2 + 7 + ln + 4
-        if len(buf) < end:
-            break
-        out.append((cmd, buf[j + 9:end - 4]))
-        i = end
-    return out
+    """只取完整的幀（其餘留在緩衝外的部分丟棄——回覆都是短幀）。"""
+    return parse_frames(buf)[0]
 
 
 def str_u16len(b: bytes, off: int = 0) -> tuple[str, int]:

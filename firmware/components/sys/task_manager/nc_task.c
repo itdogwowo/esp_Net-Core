@@ -429,12 +429,11 @@ static int active_claims(const tm_slot_t *s)
     return n;
 }
 
-// 讀 tasks.json：只取 level / affinity。名字對不上 → 用固件預設（cfg_seen = false）。
+// 讀 tasks 層：只取 level / affinity。名字對不上 → 用固件預設（cfg_seen = false）。
+// 型別化之後這裡只讀 struct；不再自己 parse JSON，也不再有「config 讀不到」的分支。
 static void load_cfg(void)
 {
-    cfg_file_t *cfg = nc_cfg_open("tasks");
-    const cJSON *root = (cfg != NULL) ? nc_cfg_root(cfg) : NULL;
-    const cJSON *arr = (root != NULL) ? cJSON_GetObjectItemCaseSensitive(root, "tasks") : NULL;
+    const nc_tasks_cfg_t *cfg = nc_cfg_tasks();
 
     for (int i = 0; i < s_count; i++) {
         tm_slot_t *s = &s_slots[i];
@@ -447,33 +446,24 @@ static void load_cfg(void)
         if (s->def->kind == NC_TASK_SYSTEM) {
             continue;
         }
-        if (!cJSON_IsArray(arr)) {
+        if (cfg == NULL) {
             continue;
         }
-        const cJSON *it = NULL;
-        cJSON_ArrayForEach(it, arr) {
-            const cJSON *nm = cJSON_GetObjectItemCaseSensitive(it, "name");
-            if (!cJSON_IsString(nm) || nm->valuestring == NULL ||
-                strcmp(nm->valuestring, s->name) != 0) {
+        for (uint8_t k = 0; k < cfg->n_tasks; k++) {
+            const nc_task_cfg_t *t = &cfg->tasks[k];
+            if (strcmp(t->name, s->name) != 0) {
                 continue;
             }
             s->cfg_seen = true;
-            const cJSON *lv = cJSON_GetObjectItemCaseSensitive(it, "level");
-            if (cJSON_IsNumber(lv)) {
-                s->cfg_level = lv->valueint;
-            }
-            const cJSON *af = cJSON_GetObjectItemCaseSensitive(it, "affinity");
-            if (cJSON_IsArray(af) && cJSON_GetArraySize(af) == 2) {
-                const cJSON *a0 = cJSON_GetArrayItem(af, 0);
-                const cJSON *a1 = cJSON_GetArrayItem(af, 1);
-                // 非數字（null / 字串 / 缺）一律當 0：未設定 = 唔准跑嗰核。
-                s->cfg_aff[0] = cJSON_IsNumber(a0) ? a0->valueint : 0;
-                s->cfg_aff[1] = cJSON_IsNumber(a1) ? a1->valueint : 0;
-            }
+            // config 冇寫 level → 用固件宣告（has_level 就是為此存在；
+            // 直接當 0 會把「漏寫」變成「強制 level 0」，行為會靜靜改變）。
+            s->cfg_level = t->has_level ? t->level : s->def->level;
+            // 未寫的核一律當 0：未設定 = 唔准跑嗰核（同舊行為）。
+            s->cfg_aff[0] = t->aff[0] ? 1 : 0;
+            s->cfg_aff[1] = t->aff[1] ? 1 : 0;
             break;
         }
     }
-    nc_cfg_close(cfg);
 
     for (int i = 0; i < s_count; i++) {
         tm_slot_t *s = &s_slots[i];

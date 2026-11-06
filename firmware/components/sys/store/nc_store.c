@@ -11,7 +11,6 @@
 #include "diskio_wl.h"
 #include "esp_vfs_fat.h"
 #include "ff.h"
-#include "nvs.h"               // boot/fs_format：STATUS_SET 的「下次開機格式化」旗標
 #include "tinyusb_msc.h"
 #include "wear_levelling.h"
 #include "tusb.h"              // tud_disconnect / tud_connect：強制 host 重新列舉
@@ -24,8 +23,6 @@ static const char *TAG = "store";
 #define RO_DRIVE     "1:"
 #define RO_PDRV      1
 #define PART_LABEL   "data"
-#define NVS_NS       "boot"
-#define NVS_FMT_KEY  "fs_format"
 
 static const esp_partition_t *s_part;
 static wl_handle_t s_wl = WL_INVALID_HANDLE;
@@ -34,7 +31,6 @@ static volatile nc_nc_store_mode_t s_mode = NC_STORE_MODE_UNAVAILABLE;
 static SemaphoreHandle_t s_lock;
 static bool s_driver_installed;
 static int s_usb_core = tskNO_AFFINITY;  // USB 服務組的核心（MSC driver 安裝時決定）
-static int s_fmt_req = -1;               // -1 = 未讀；0/1 = NVS boot/fs_format 的快取
 static bool s_app_mounted;
 static FATFS *s_ro_fs;
 static bool s_ro_mounted;
@@ -218,6 +214,10 @@ static void close_usb(void)
 // 所以在切換後重拉一次 D+/D-，讓 host 重新列舉 —— CDC 也會斷一下（幾百 ms），
 // 所以等回覆送出去之後才做。
 
+static volatile uint16_t s_reconn_hwm;   // usb_reconn 臨終前的 stack 剩餘
+
+uint16_t nc_store_reconn_hwm(void) { return s_reconn_hwm; }
+
 static void reconnect_task(void *arg)
 {
     (void)arg;
@@ -226,6 +226,7 @@ static void reconnect_task(void *arg)
     vTaskDelay(pdMS_TO_TICKS(300));
     tud_connect();
     ESP_LOGI(TAG, "USB 已重新列舉");
+    s_reconn_hwm = (uint16_t)uxTaskGetStackHighWaterMark(NULL);
     vTaskDelete(NULL);
 }
 
@@ -234,7 +235,7 @@ static void usb_reconnect(void)
     // 同 TinyUSB task 同核：tud_disconnect/connect 會動 USB 狀態機，
     // 落在另一核就係跨核競態（而且會由 core0 的 tick 叫醒）。
     const BaseType_t core = (BaseType_t)s_usb_core;
-    if (xTaskCreatePinnedToCore(reconnect_task, "usb_reconn", 3072, NULL, 5, NULL,
+    if (xTaskCreatePinnedToCore(reconnect_task, "usb_reconn", 1024, NULL, 5, NULL,
                                 core) != pdPASS) {
         ESP_LOGW(TAG, "無法建立 reconnect task");
     }
@@ -261,7 +262,8 @@ esp_err_t nc_store_usb_driver(void)
         // 之後 unmount 可能拆錯那一份，碟就初始化唔返。
         .user_flags.auto_mount_off = 1,
         .async_io_task = {
-            .size = TINYUSB_MSC_ASYNC_IO_TASK_DEFAULT_SIZE,
+            // 實測 1,440 B（HWM 2,656/4,096）；2 KB 留 600 B 餘裕
+            .size = 2048,
             .priority = TINYUSB_MSC_ASYNC_IO_TASK_DEFAULT_PRIO,
             .xCoreID = s_usb_core,
         },
@@ -348,42 +350,9 @@ esp_err_t nc_store_format(const esp_partition_t *part)
     return nc_store_init(part, true);
 }
 
-// 讀 NVS `boot/fs_format`（只讀一次，之後用快取）。
-// 為什麼放 NVS 而不是 /data/config：STATUS_SET 到來時 FAT 通常由 host 持有
-//（USB 模式），裝置寫唔到 /data；而且「格式化請求」本身唔應該依賴它要格式化的 FS。
-bool nc_store_format_requested(void)
-{
-    if (s_fmt_req >= 0) {
-        return s_fmt_req != 0;
-    }
-    nvs_handle_t h;
-    if (nvs_open(NVS_NS, NVS_READONLY, &h) != ESP_OK) {
-        s_fmt_req = 0;
-        return false;
-    }
-    uint8_t v = 0;
-    const esp_err_t e = nvs_get_u8(h, NVS_FMT_KEY, &v);
-    nvs_close(h);
-    s_fmt_req = (e == ESP_OK && v != 0) ? 1 : 0;
-    return s_fmt_req != 0;
-}
-
-// 0x1103 STATUS_SET 的 System.fs_format：只寫旗標，唔會喺解碼路徑抹 7 MB。
-// 下一次 storage_init() 見到旗標才 nc_store_format()；成功後由 main 清掉。
-void nc_store_request_format(bool on)
-{
-    nvs_handle_t h;
-    if (nvs_open(NVS_NS, NVS_READWRITE, &h) != ESP_OK) {
-        ESP_LOGW(TAG, "NVS 開唔到 → fs_format 未寫入");
-        return;
-    }
-    (void)nvs_set_u8(h, NVS_FMT_KEY, on ? 1 : 0);
-    (void)nvs_commit(h);
-    nvs_close(h);
-    s_fmt_req = on ? 1 : 0;
-    ESP_LOGW(TAG, "fs_format=%d（下次開機%s格式化 data 分區）",
-             on ? 1 : 0, on ? "會" : "唔會");
-}
+// 「下次開機格式化」的旗標已搬到 state manager（sys/state 的 nc_boot）。
+// store 只負責**執行**格式化（nc_store_format），不負責記住「想不想格式化」。
+// 這樣同一個事實只有一份記錄（boot record），不會再出現 fs_init / fs_format 打架。
 
 nc_nc_store_mode_t nc_store_mode(void)
 {

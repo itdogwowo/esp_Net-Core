@@ -166,6 +166,31 @@ const char *cfg_stub_appended(int i)
     return (i >= 0 && i < s_nappended) ? s_appended[i] : NULL;
 }
 
+// 型別化之後 nc_task.c 只讀這個（不再 parse cJSON）。
+// 把 stub 表映射成 nc_tasks_cfg_t；has_level 保留「冇寫」與「寫 0」的分別。
+static nc_tasks_cfg_t s_typed;
+
+const nc_tasks_cfg_t *nc_cfg_tasks(void)
+{
+    memset(&s_typed, 0, sizeof(s_typed));
+    s_typed.version = NC_CFG_SCHEMA_VERSION;
+    int n = (s_ntasks < NC_CFG_MAX_TASKS) ? s_ntasks : NC_CFG_MAX_TASKS;
+    for (int i = 0; i < n; i++) {
+        nc_task_cfg_t *t = &s_typed.tasks[i];
+        snprintf(t->name, sizeof(t->name), "%s",
+                 (s_tasks[i].name != NULL) ? s_tasks[i].name : "");
+        t->has_level = s_tasks[i].has_level;
+        t->level = (int8_t)s_tasks[i].level;
+        if (s_tasks[i].has_aff) {
+            // stub 用 -1 表示 JSON null（舊行為：非數字 → 0）
+            t->aff[0] = s_tasks[i].aff[0] > 0;
+            t->aff[1] = s_tasks[i].aff[1] > 0;
+        }
+    }
+    s_typed.n_tasks = (uint8_t)n;
+    return &s_typed;
+}
+
 cfg_file_t *nc_cfg_open(const char *layer)
 {
     if (layer == NULL || strcmp(layer, "tasks") != 0) {

@@ -24,9 +24,9 @@ import struct
 import sys
 import time
 
-SOF = b"NC"
-VERSION = 4
-ADDR_BROADCAST = 0xFFFF
+# 協議實作只有一份：tools/nc4_demux.py（嚴格 CRC、失敗只前進 1 byte）
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from nc4_demux import ADDR_BROADCAST, SOF, VERSION, pack, str_u16, Reader  # noqa: E402
 
 CMD_BEGIN = 0x2201
 CMD_WRITE = 0x2202
@@ -45,82 +45,6 @@ ERROR_NAMES = [
     "err_end_validate_fail", "err_end_not_writing", "err_apply_set_boot_fail",
     "err_not_in_verified_state", "err_already_active",
 ]
-
-
-def pack(cmd: int, payload: bytes = b"", addr: int = ADDR_BROADCAST) -> bytes:
-    body = struct.pack("<BHHH", VERSION, addr, cmd, len(payload)) + payload
-    crc = binascii.crc32(body, 0) & 0xFFFFFFFF
-    return SOF + body + struct.pack("<I", crc)
-
-
-def str_u16(s: str) -> bytes:
-    b = s.encode()[:200]
-    return struct.pack("<H", len(b)) + b
-
-
-class Reader:
-    """從 CDC 的混合輸出裡撈出 NC4 帧（會跳過 console 的文字）。"""
-
-    def __init__(self, ser):
-        self.ser = ser
-        self.buf = bytearray()
-
-    def poll(self, timeout=0.01):
-        end = time.time() + timeout
-        while time.time() < end:
-            chunk = self.ser.read(4096)
-            if chunk:
-                self.buf += chunk
-            self._trim()
-            frame = self._parse()
-            if frame:
-                return frame
-        return None
-
-    def wait_for(self, cmds, timeout=5.0):
-        end = time.time() + timeout
-        while time.time() < end:
-            f = self.poll(0.01)
-            if f is None:
-                continue
-            if f[0] in cmds:
-                return f
-        return None
-
-    def _trim(self):
-        # 留最後 8KB，避免無限成長
-        if len(self.buf) > 16384:
-            del self.buf[:-8192]
-
-    def _parse(self):
-        while True:
-            idx = self.buf.find(SOF)
-            if idx < 0:
-                self.buf.clear()
-                return None
-            if idx:
-                del self.buf[:idx]
-            if len(self.buf) < 9:
-                return None
-            ver = self.buf[2]
-            if ver != VERSION:
-                del self.buf[:1]
-                continue
-            cmd, ln = struct.unpack_from("<HH", self.buf, 5)
-            if ln > 8192:
-                del self.buf[:1]
-                continue
-            total = 9 + ln + 4
-            if len(self.buf) < total:
-                return None
-            body = bytes(self.buf[2:9 + ln])
-            crc = struct.unpack_from("<I", self.buf, 9 + ln)[0]
-            if (binascii.crc32(body, 0) & 0xFFFFFFFF) != crc:
-                del self.buf[:1]
-                continue
-            payload = bytes(self.buf[9:9 + ln])
-            del self.buf[:total]
-            return cmd, payload
 
 
 def main() -> int:

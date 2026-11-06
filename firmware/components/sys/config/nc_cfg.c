@@ -29,8 +29,11 @@ static bool path_of(const char *layer, char *out, size_t cap, const char *suffix
     return n > 0 && (size_t)n < cap;
 }
 
-cfg_file_t *nc_cfg_open(const char *layer)
+cfg_file_t *nc_cfg_open_ex(const char *layer, bool *exists)
 {
+    if (exists != NULL) {
+        *exists = false;
+    }
     char path[64];
     if (!path_of(layer, path, sizeof(path), NULL)) {
         return NULL;
@@ -38,7 +41,10 @@ cfg_file_t *nc_cfg_open(const char *layer)
 
     FILE *f = fopen(path, "rb");
     if (f == NULL) {
-        return NULL;    // 缺檔 = 用預設
+        return NULL;    // 缺檔 = 用預設（exists 保持 false）
+    }
+    if (exists != NULL) {
+        *exists = true;   // 檔案在：之後失敗就係「壞檔」而不是「缺檔」
     }
     // 只配置「檔案實際大小 + 1」：以前無條件要 16 KB，喺內部 RAM 碎片化時
     // 會無聲失敗（回 NULL → 上層以為「冇 config」而靜靜用預設）。
@@ -77,6 +83,11 @@ cfg_file_t *nc_cfg_open(const char *layer)
     }
     cfg->root = root;
     return cfg;
+}
+
+cfg_file_t *nc_cfg_open(const char *layer)
+{
+    return nc_cfg_open_ex(layer, NULL);
 }
 
 void nc_cfg_close(cfg_file_t *cfg)

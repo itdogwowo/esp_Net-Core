@@ -46,22 +46,19 @@ typedef enum {
 
 // part = type data / subtype fat 的分區。store 負責 WL 與 FatFS 的整個生命週期。
 esp_err_t nc_store_usb_driver(void);   // MSC driver 安裝（USB 組，開機 init）
+uint16_t  nc_store_reconn_hwm(void);  // usb_reconn 臨終前的 stack 剩餘（0 = 未跑過）
 
 // allow_format = 這次初始化可否在掛載失敗時格式化。
-// **只有「第一次初始化」傳 true**（由呼叫端用 NVS 旗標判斷）；
-// 之後的開機一律傳 false：掛唔上就原樣保留，唔會自動清掉使用者的資料。
+// **只有「第一次初始化／重建」傳 true**（呼叫端由 state manager 的 boot record 判斷）；
+// 之後的開機一律傳 false：掛唔上就原樣保留，不會自動清掉使用者的資料。
 esp_err_t nc_store_init(const esp_partition_t *part, bool allow_format);
 
 // 明確的「重建 FAT」：抹除整個 data 分區 → 重新建立。
 // **會清掉使用者全部檔案**，只應該在第一次初始化失敗、或使用者明確要求 factory reset 時呼叫。
 // 它一定會用 allow_format=true 重新 init（因為分區已經空白）。
+//
+// 「什麼時候該重建」不是 store 的事 —— 那個決策在 state manager（nc_boot）。
 esp_err_t nc_store_format(const esp_partition_t *part);
-
-// ── 「下次開機格式化」的請求（0x1103 STATUS_SET 的 System.fs_format）──
-// 存在 NVS `boot/fs_format`。STATUS_SET 只寫這個旗標，不會在解碼路徑上抹 7 MB；
-// 真正的 nc_store_format() 在下一次 storage_init() 執行，成功後自動清旗標。
-bool nc_store_format_requested(void);
-void nc_store_request_format(bool on);
 
 nc_nc_store_mode_t nc_store_mode(void);
 const char *nc_store_mode_name(void);

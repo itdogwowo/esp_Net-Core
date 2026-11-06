@@ -403,6 +403,18 @@ size_t nc4_bus_count(void)
     return s_count;
 }
 
+size_t nc4_bus_slot_size(nc4_bus_handle_t handle)
+{
+    struct nc4_bus *b = find_bus(handle);
+    return (b != NULL) ? b->slot_size : 0;
+}
+
+int nc4_bus_slot_count(nc4_bus_handle_t handle)
+{
+    struct nc4_bus *b = find_bus(handle);
+    return (b != NULL) ? b->slot_n : 0;
+}
+
 // 由建立 receiver 的地方登記 task handle（只為量 stack 高水位）。
 void nc4_bus_set_producer(nc4_bus_handle_t handle, void *task_handle)
 {
@@ -501,22 +513,30 @@ size_t nc4_bus_stats_json(char *buf, size_t cap)
 // ───────────────────────── 解碼任務 ─────────────────────────
 
 // ── producer：同核讀 driver → push → kick ──
+//
+// ⚠️ 兩個不變式（2026-11-06 實測踩到）：
+//   1. priority **一定要低過** 同核的 decode task。
+//      以前 UART producer 用 prio 5、decode 用 prio 4：環一滿，producer 就永遠
+//      贏得排程，decode 冇機會排空 → 死鎖；driver 未就緒時更會直接餓死整個核
+//      （連 app_main 都跑不到，開機停在「USB 有列舉、但冇任何回應」）。
+//   2. 任何「等」都必須真的阻塞（vTaskDelay／等 driver），唔可以 taskYIELD()。
+//      taskYIELD 只會讓給同／更高優先級，低優先級的 consumer 永遠等不到。
 static void producer_task(void *arg)
 {
     struct nc4_bus *b = arg;
     for (;;) {
         uint8_t *dst = nc4_bus_push_begin(b, b->slot_size);
         if (dst == NULL) {
-            taskYIELD();          // 插槽滿：local yield（唔用 vTaskDelay，避免 core1 跨核 tick）
+            vTaskDelay(1);        // 插槽滿：讓 decode 先排空（1 tick 對 UART 無影響）
             continue;
         }
         const int n = b->cfg.read(b->cfg.read_arg, dst, b->slot_size);
         if (n > 0) {
             nc4_bus_push_commit(b, (size_t)n);
-            nc4_bus_kick(b);      // 同核 notify
+            nc4_bus_kick(b);      // 同核 notify（decode 優先級更高，會即刻接手）
         } else {
             nc4_bus_push_abort(b);
-            taskYIELD();
+            vTaskDelay(1);        // driver 未就緒／暫時冇資料：唔可以自旋
         }
     }
 }
@@ -528,10 +548,21 @@ esp_err_t nc4_bus_start_producer(nc4_bus_handle_t handle, const char *name,
     if (b == NULL || b->cfg.mode != NC4_BUS_PUSH || b->cfg.read == NULL) {
         return ESP_ERR_INVALID_ARG;
     }
-    if (xTaskCreatePinnedToCore(producer_task, name, stack, b, prio, NULL,
+    // 不變式 1：producer 唔可以高過 decode。寧願這裡夾住，唔好靠呼叫端記得。
+    const uint32_t decode_prio = 4;   // s_nc4_loops 的 decodeN prio
+    if (prio >= decode_prio) {
+        ESP_LOGW(TAG, "[%s] producer prio %u ≥ decode prio %u → 夾到 %u（避免餓死 decode）",
+                 b->cfg.name, (unsigned)prio, (unsigned)decode_prio,
+                 (unsigned)(decode_prio - 1));
+        prio = decode_prio - 1;
+    }
+    TaskHandle_t th = NULL;
+    if (xTaskCreatePinnedToCore(producer_task, name, stack, b, prio, &th,
                                 (BaseType_t)b->cfg.core) != pdPASS) {
         return ESP_ERR_NO_MEM;
     }
+    // 自己登記 handle：STATUS 的 hwm（stack 高水位）才看得到 producer。
+    b->producer = (void *)th;
     ESP_LOGI(TAG, "[%s] producer 啟動（core %d）", b->cfg.name, b->cfg.core);
     return ESP_OK;
 }

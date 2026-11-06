@@ -112,6 +112,12 @@ void nc4_bus_frame_end(nc4_bus_handle_t bus);
 // producer commit 之後呼叫：叫醒服務這條 bus 的 decode task（不用等輪詢）
 void nc4_bus_kick(nc4_bus_handle_t bus);
 
+// PUSH 模式的格大小／格數（由 nc4_bus_cfg_t 決定）。
+// receiver task 要知「一次最多搬幾多」—— 以前寫死一個 macro，config 改 slot_size
+// 之後 reader 仍然用舊值，會直接寫壞插槽的邊界。讓 bus 自己答，只有一個真相。
+size_t nc4_bus_slot_size(nc4_bus_handle_t bus);
+int    nc4_bus_slot_count(nc4_bus_handle_t bus);
+
 // 統計（JSON 陣列）：frames / mb / copied / avg_b / hwm / parse_ms / us_per_frame / slots
 // copied = 為了把 payload 交給 parser 而做的 memcpy bytes（零複製模式應為 0）
 // hwm    = receiver task 的 stack 剩餘最少 bytes（用來把 stack 調到合身）

@@ -71,6 +71,9 @@
 #include "cJSON.h"
 #include "nc4_http.h"
 #include "nc_store.h"
+#include "nc_boot.h"
+#include "nc_log.h"
+#include "nc_state.h"
 #include "nc_file_action.h"
 #ifdef NC_ENABLE_TESTS
 #include "nc_fx.h"
@@ -86,8 +89,13 @@
 #include "tinyusb_console.h"
 #include "tinyusb_default_config.h"
 #include "tinyusb_msc.h"
+#include "tusb.h"              // tud_cdc_n_connected()：log 出口要知主機有冇開 port
 
 static const char *TAG = "netcore";
+
+// 開機階段 HWM：main 究竟邊一段用最多 stack（之後決定 stack 大細）
+#define MAIN_HWM(tag) ESP_LOGW(TAG, "main hwm %-10s = %u", tag, \
+                                (unsigned)uxTaskGetStackHighWaterMark(NULL))
 
 // 解碼跑在哪個核心：router 決定（`nc4.routes[].out` 的第一個 `decodeN`），沒有編譯期巨集。
 
@@ -143,6 +151,11 @@ static volatile uint32_t s_rx_frames;        // 成功收到的幀數
 //   每條 bus 的 frames / mb / copied / parse_ms / us_per_frame（copied=0 就是零複製）
 #define NC4_CMD_BUS_STATS  0xF008
 #define NC4_CMD_BUS_RSP    0xF009
+// 0xF00D CDC_TX_BENCH  bytes(u32) chunk(u16) mode(u8) → 0xF002 DEV_RSP
+//   量「裝置 → 主機」CDC 吞吐；log 管道要幾大個 ring 由這支決定。
+//   mode 0 = 連續寫、最後 flush 一次（理想吞吐）
+//   mode 1 = 每個 chunk flush 一次（模擬「一行 flush 一次」的成本）
+#define NC4_CMD_CDC_TX_BENCH 0xF00D
 
 // bench 域（對齊 slave/schema/bench.json）
 #define NC4_CMD_BENCH_READY   0x1811
@@ -248,40 +261,12 @@ static bool label_is_ours(const char *label)
     return p[4] == '\0';
 }
 
-// ── 設定正規化：把「只有人能讀」的寫法整理成機器用的值，並寫回檔案 ──
-// 目前只有一個：bt.pin 只取數字，合法長度 4–6 位（PIN 規格）：
-//   "1234" → "1234"；"123456" → "123456"；"dfgd321fgjf55" → "32155"；
-//   多於 6 位取前 6 位；不足 4 位或沒有數字 → 清成 ""（Just Works）。
-static void config_sanitize(void)
-{
-    cfg_file_t *cfg = nc_cfg_open("network");
-    if (cfg == NULL) {
-        return;
-    }
-    const cJSON *bt = cJSON_GetObjectItemCaseSensitive(nc_cfg_root(cfg), "bt");
-    const cJSON *pin = cJSON_GetObjectItemCaseSensitive(bt, "pin");
-    const char *raw = (cJSON_IsString(pin) && pin->valuestring != NULL) ? pin->valuestring : NULL;
-    if (raw != NULL && raw[0] != '\0') {
-        char norm[7] = {0};    // 4–6 位 + NUL
-        int n = 0;
-        for (const char *q = raw; *q != '\0' && n < 6; q++) {
-            if (*q >= '0' && *q <= '9') {
-                norm[n++] = *q;
-            }
-        }
-        if (n < 4) {
-            norm[0] = '\0';
-        }
-        if (strcmp(norm, raw) != 0) {
-            if (nc_cfg_set_string("network", "bt.pin", norm)) {
-                ESP_LOGI(TAG, "bt.pin 正規化：\"%s\" → \"%s\"", raw, norm);
-            } else {
-                ESP_LOGW(TAG, "bt.pin 正規化失敗（記憶體值仍用 \"%s\"）", norm);
-            }
-        }
-    }
-    nc_cfg_close(cfg);
-}
+// ── 設定正規化：已移除（2026-11-06）──
+// 以前開機把 network.json 的 bt.pin 正規化之後**寫回用戶的檔**。
+// 按「firmware 只寫用戶無法掌握的資訊」的規則，這不合法：
+// 用戶打的 PIN 是他自己的輸入，格式不合法應該在**讀取端**當場處理（RAM），
+// 不應該改他的檔。而且現時沒有任何程式會讀 bt.pin（BLE 未實作），
+// 所以這段「寫回」只是純粹的副作用。等 BT 真的接上，正規化寫在讀取處。
 
 static void ensure_volume_label(void)
 {
@@ -320,114 +305,14 @@ static void ensure_volume_label(void)
 #endif
 }
 
-// ── 韌體換版 ⇒ 重置 data 分區的 config（一次性）──
-// 用 NVS 記住「上次開機嘅韌體指紋」，同當前 app 不同就重置。
-// 為什麼要：config 係由韌體 seed 出嚟，舊 config 會蓋住新韌體嘅預設值；
-// 而 host 直接改 FAT 之後 reboot 會令 FAT 不一致（實測會令開機卡死）。
-// 做法分兩條路：
-//   1. 正常（掛得上）→ **只刪 config 檔**（毫秒級），seed 會重寫這版預設。
-//   2. FAT 壞到掛唔上 → nc_store_format() 抹分區＋重建 FAT（唯一會清資料的路徑）。
-// 唔自己叫 esp_vfs_fat_spiflash_format_rw_wl：會同 store 的掛載打架，實測會卡死。
+// ── data 分區的生命週期（2026-11-06 改）──
+// 以前這裡有四個旗標（fs_init / fs_format / fw_fp / s_fs_first）＋「換版刪 config 檔」。
+// 它們其實都在答同一條問題：「這塊分區而家喺生命週期的哪一步？」
+// 現在全部由 state manager 的一條 NVS 記錄（nc_boot）回答：
+//   PROVISIONED     初始化過、底座已寫 → 之後唔准自動格式化
+//   FORMAT_PENDING  明確重建（用戶指令，或偵測到換韌體）
+// 換韌體 = 回到起點：格式化 → seed，唔再有「刪 4 個 config 檔」這條另類路徑。
 static int s_fmt_err = -99;          // -99 = 未嘗試，0 = 正常／已重建，>0 = esp_err_t
-
-// 回傳 true = 韌體指紋變了（呼叫端負責抹分區 + 之後寫回指紋）。
-// *out_h 只有在回傳 true 時才是有效 handle；指紋一樣就即刻關掉，不留 handle。
-static bool fw_fp_changed(nvs_handle_t *out_h, const char *cur)
-{
-    *out_h = 0;
-    nvs_handle_t h;
-    if (nvs_open("boot", NVS_READWRITE, &h) != ESP_OK) {
-        return false;
-    }
-    char stored[48] = {0};
-    size_t len = sizeof(stored);
-    (void)nvs_get_str(h, "fw_fp", stored, &len);
-    if (strcmp(stored, cur) == 0) {
-        nvs_close(h);
-        return false;
-    }
-    *out_h = h;
-    return true;
-}
-
-static void fw_fp_store(nvs_handle_t h, const char *cur)
-{
-    (void)nvs_set_str(h, "fw_fp", cur);
-    (void)nvs_commit(h);
-    nvs_close(h);
-}
-
-// 當前 image 的身份：app_elf_sha256（linker 每次重算）。
-// 唔用 date|time：esp_app_desc.c 係 configure 時生成，唔重 configure 就唔會更新
-// （實測：連續 rebuild 兩次 date/time 一樣 ⇒ 永遠唔會觸發）。
-static void fw_fp_now(char *out, size_t cap)
-{
-    const esp_app_desc_t *app = esp_app_get_description();
-    snprintf(out, cap, "%02x%02x%02x%02x%02x%02x%02x%02x",
-             app->app_elf_sha256[0], app->app_elf_sha256[1],
-             app->app_elf_sha256[2], app->app_elf_sha256[3],
-             app->app_elf_sha256[4], app->app_elf_sha256[5],
-             app->app_elf_sha256[6], app->app_elf_sha256[7]);
-}
-
-// 新韌體要清 config：**只刪檔案**（毫秒級），唔係抹 7 MB 分區（2–3 分鐘）。
-// 抹分區只留給「第一次初始化」或使用者明確要求 factory reset。
-static const char *const k_cfg_reset[] = {
-    "/data/config/system.json",
-    "/data/config/system.json.bak",
-    "/data/config/network.json",
-    "/data/config/tasks.json",
-};
-
-static int reset_config_files(void)
-{
-    int n = 0;
-    for (size_t i = 0; i < sizeof(k_cfg_reset) / sizeof(k_cfg_reset[0]); i++) {
-        if (remove(k_cfg_reset[i]) == 0) {
-            n++;
-        }
-    }
-    return n;
-}
-
-// ── data 分區的「第一次初始化」旗標（NVS）──
-// 這是一個**持久化**的位置（NVS namespace "boot"、key "fs_init"），
-// 不是每次開機都 reset 的 static bool：
-//   旗標不存在／=0 → 第一次初始化，允許格式化（全新分區 / factory reset）
-//   旗標 =1       → 已初始化過，之後就算 mount 失敗都**絕對唔會自動格式化**
-// 要重新初始化（factory reset）就清 NVS（或以未來的 factory-reset 指令清旗標），
-// 下次開機又會當第一次。
-//
-// 為什麼不用韌體版本判斷：版本只代表「config 可能過期」，同 FAT 健不健康無關；
-// 同一版韌體也可能因為 host 沒 eject、斷電、WL 壞掉而掛唔上。
-static int s_fs_first = -1;          // 本次開機讀到的值（STATUS storage.first）
-
-static bool fs_first_init(void)
-{
-    nvs_handle_t h;
-    if (nvs_open("boot", NVS_READONLY, &h) != ESP_OK) {
-        // 第一次：連 namespace 都未建立。若是 NVS 讀取失敗，記錄一下，
-        // 因為這會令本次開機「允許格式化」。
-        ESP_LOGW(TAG, "NVS 讀唔到 fs_init → 當第一次初始化（允許格式化）");
-        return true;
-    }
-    uint8_t v = 0;
-    const esp_err_t e = nvs_get_u8(h, "fs_init", &v);
-    nvs_close(h);
-    return e != ESP_OK || v == 0;
-}
-
-static void fs_mark_initialized(void)
-{
-    nvs_handle_t h;
-    if (nvs_open("boot", NVS_READWRITE, &h) != ESP_OK) {
-        ESP_LOGW(TAG, "NVS 開唔到 → fs_init 未寫入（下次開機仍會當第一次）");
-        return;
-    }
-    (void)nvs_set_u8(h, "fs_init", 1);
-    (void)nvs_commit(h);
-    nvs_close(h);
-}
 
 static esp_err_t storage_init(void)
 {
@@ -438,36 +323,31 @@ static esp_err_t storage_init(void)
     ESP_LOGI(TAG, "data 分區: offset 0x%08" PRIx32 ", size %" PRIu32 " KB",
              part->address, (uint32_t)(part->size / 1024));
 
-    nvs_handle_t nh = 0;
-    char fp[48];
-    fw_fp_now(fp, sizeof(fp));
-    const bool fw_new = fw_fp_changed(&nh, fp);
-    const bool fs_first = fs_first_init();
-    const bool fs_force = nc_store_format_requested();   // STATUS_SET System.fs_format
-    s_fs_first = fs_first ? 1 : 0;
-    ESP_LOGI(TAG, "data 初始化：%s（fs_init=%d, fs_format=%d）",
-             fs_first ? "第一次，允許格式化" : "已初始化過，唔會自動格式化",
-             s_fs_first, fs_force ? 1 : 0);
+    // 一個記錄管住生命週期（provisioned / fmt_pending / degraded / fw_hash）。
+    // 換韌體會在這裡被偵測到：唔再係「刪 config 檔」，而係回到起點重建。
+    nc_boot_init();
+    const bool first = !nc_boot_provisioned();
+    const bool force = nc_boot_format_pending();
+    ESP_LOGI(TAG, "data 初始化：%s（provisioned=%d fmt_pending=%d fw_new=%d）",
+             first ? "第一次／重建，允許格式化" : "已初始化過，唔會自動格式化",
+             nc_boot_provisioned() ? 1 : 0, force ? 1 : 0,
+             nc_boot_fw_changed() ? 1 : 0);
 
     // WL / FatFS / MSC 的整個生命週期都由 store 管 —— 它有辦法在 claim 時
     // 把 LUN 拆掉，否則主機在 APP 模式仍然寫得進同一塊 flash。
     esp_err_t serr;
-    if (fs_force) {
-        // STATUS_SET 明確要求：無論 fs_init 是什麼都重建 FAT。
-        // 呢個 flag 只喺開機（app_main、tasks 未起）消費，唔會喺解碼路徑抹 7 MB。
-        ESP_LOGW(TAG, "System.fs_format=1 → 抹 data 分區並重建 FAT");
+    if (force) {
+        // 明確重建：換韌體，或用戶下了 STATUS_SET fs_format=1。
+        // 只喺開機（tasks 未起）消費，唔會喺解碼路徑抹 7 MB。
+        ESP_LOGW(TAG, "%s → 抹 data 分區並重建 FAT",
+                 nc_boot_fw_changed() ? "換韌體" : "System.fs_format=1");
         serr = nc_store_format(part);
-        if (serr == ESP_OK) {
-            nc_store_request_format(false);   // 成功才清；失敗留返下次開機再試
-            s_fmt_err = 0;
-        } else {
-            s_fmt_err = (int)serr;
-        }
+        s_fmt_err = (serr == ESP_OK) ? 0 : (int)serr;
     } else {
-        serr = nc_store_init(part, fs_first);
+        serr = nc_store_init(part, first);
 
-        if (serr != ESP_OK && fs_first) {
-            // **只有第一次初始化**才允許抹分區重建。之後掛唔上就保持原狀，
+        if (serr != ESP_OK && first) {
+            // **只有「第一次／重建」才允許抹分區**。之後掛唔上就保持原狀，
             // 由 host 端格式化／修復；唔會因為一次 mount 失敗清掉使用者資料。
             ESP_LOGW(TAG, "/data 第一次初始化掛唔上（%s）→ 抹分區重建 FAT",
                      esp_err_to_name(serr));
@@ -475,39 +355,25 @@ static esp_err_t storage_init(void)
             s_fmt_err = (serr == ESP_OK) ? 0 : (int)serr;
         }
     }
+    // 冇走 nc_store_format() 就保持 -99（= 這次開機冇重建）。
+    // 這個數字是「這次開機到底有冇抹」的唯一證據，唔好用成功／失敗去蓋掉它。
 
     if (serr != ESP_OK) {
         ESP_LOGE(TAG, "/data 初始化失敗：%s（用 STATUS_SET System.fs_format=1 "
                       "＋ REBOOT 可要求下次開機重建）", esp_err_to_name(serr));
-        if (fw_new) {
-            nvs_close(nh);
-        }
+        // 唔 commit：FORMAT_PENDING 留返，下次開機再試。
         return serr;
     }
 
-    if (fw_new) {
-        // **韌體版本只決定「要不要重置 config」**，唔係重建 FAT 的條件。
-        // 正常路徑：FS 好，只刪 config 檔 → seed 會重寫這版預設。
-        // （走過 nc_store_format() 的話分區已經是空的，這裡自然刪 0 個檔。）
-        const int n = reset_config_files();
-        s_fmt_err = 0;
-        ESP_LOGW(TAG, "韌體 %s → 重置 config（刪除 %d 個檔）", fp, n);
-    }
-
+    // 底座（seed）：缺檔才寫；已有的檔一律不動（seed_file 自己檢查）。
+    // 換韌體走的是「格式化 → 這裡自然寫回」同一條路，唔需要另寫刪檔邏輯。
     seed_presets();
 
-    // 第一次成功建立／掛上 FAT 之後才落旗標；之後永遠唔會自動格式化。
-    // 明確要求格式化（fs_force）成功之後都算「已初始化」，所以一併落旗標。
-    if ((fs_first || fs_force) && nc_store_app_ready()) {
-        fs_mark_initialized();
-    }
-
-    if (fw_new) {
-        if (nc_store_app_ready()) {
-            fw_fp_store(nh, fp);       // 只有成功才記住，否則下次再試
-        } else {
-            nvs_close(nh);
+    if (nc_store_app_ready()) {
+        if (first || force) {
+            nc_boot_mark_provisioned();   // PROVISIONED=1、FORMAT_PENDING=0
         }
+        (void)nc_boot_commit();           // 新的 fw_hash 亦喺呢度落盤
     }
     return ESP_OK;
 }
@@ -581,13 +447,76 @@ static esp_err_t storage_hand_over_to_usb(void)
     return nc_store_release_usb();
 }
 
+// ── CDC 出口仲裁（一個出口、兩個入口）──
+//
+// 為什麼需要：TinyUSB 的 write_queue 沒有鎖（直接寫 FIFO）。回覆（decode 任務）
+// 和 log（log 任務）是兩個 writer，交錯起來可以切斷一幀。
+//
+// 規則（唔用 mutex，只有本核幾 µs 的 critical section）：
+//   · 回覆優先：整幀獨佔出口（s_tx_reply），FIFO 滿時讓出 CPU 等 TinyUSB 排空。
+//   · log 永遠唔跨「等待」持有出口：空間不夠就整行稍後再試，唔會卡住回覆。
+//   · 兩個 writer 都在 CDC 核，所以 s_tx_reply 只會由同一核讀寫。
+static portMUX_TYPE s_tx_mux = portMUX_INITIALIZER_UNLOCKED;
+static volatile bool s_tx_reply;      // 回覆正在寫一整幀
+static uint32_t s_tx_stalls;          // 回覆等 FIFO 的次數（可觀察）
+
+#define CDC_TX_WAIT_US  100000        // 回覆最多等 100 ms；超過就丟，避免卡死 decode
+
 static esp_err_t cdc_send(void *arg, const uint8_t *frame, size_t len)
 {
     (void)arg;
-    if (tinyusb_cdcacm_write_queue(TINYUSB_CDC_ACM_0, frame, len) != len) {
-        return ESP_FAIL;
+    if (frame == NULL || len == 0) {
+        return ESP_ERR_INVALID_ARG;
     }
+    s_tx_reply = true;
+    size_t off = 0;
+    const int64_t deadline = esp_timer_get_time() + CDC_TX_WAIT_US;
+    while (off < len) {
+        size_t k = 0;
+        portENTER_CRITICAL(&s_tx_mux);
+        k = tinyusb_cdcacm_write_queue(TINYUSB_CDC_ACM_0, frame + off, len - off);
+        portEXIT_CRITICAL(&s_tx_mux);
+        if (k == 0) {
+            // FIFO 滿：一定要讓出 CPU，TinyUSB task（prio 5）高過 decode（4）
+            s_tx_stalls++;
+            if (esp_timer_get_time() > deadline) {
+                s_tx_reply = false;
+                ESP_LOGW(TAG, "CDC TX 塞住 → 丟回覆（%u B 未送）", (unsigned)(len - off));
+                return ESP_ERR_TIMEOUT;
+            }
+            vTaskDelay(1);
+            continue;
+        }
+        off += k;
+    }
+    s_tx_reply = false;
     return tinyusb_cdcacm_write_flush(TINYUSB_CDC_ACM_0, 0);
+}
+
+// log 入口：整行一次寫；回覆正在用出口、或者 FIFO 空間不夠 → BUSY（稍後再試）。
+// 主機未開 port → OFFLINE：consumer 會保留資料，唔會白白掉走開機 log。
+// 這裡必然在 critical section 內完成「檢查 + 寫入」，所以不會切開回覆的幀。
+static nc_log_tx_result_t cdc_tx_text(const char *buf, size_t len)
+{
+    // 上限要對得起一「批」：batch 最多 NC_LOG_BATCH_BYTES(512)，
+    // 加一行餘裕；TinyUSB TX FIFO 是 4 KB，一次寫 1 KB 完全冇問題。
+    if (buf == NULL || len == 0 || len > 1024) {
+        return NC_LOG_TX_BUSY;
+    }
+    if (!tud_cdc_n_connected(TINYUSB_CDC_ACM_0)) {
+        return NC_LOG_TX_OFFLINE;      // 主機未開這個 port（DTR 未拉高）
+    }
+    bool ok = false;
+    portENTER_CRITICAL(&s_tx_mux);
+    if (!s_tx_reply) {
+        ok = (tinyusb_cdcacm_write_queue(TINYUSB_CDC_ACM_0, (const uint8_t *)buf, len) == len);
+    }
+    portEXIT_CRITICAL(&s_tx_mux);
+    if (ok) {
+        (void)tinyusb_cdcacm_write_flush(TINYUSB_CDC_ACM_0, 0);
+        return NC_LOG_TX_OK;
+    }
+    return NC_LOG_TX_BUSY;
 }
 #endif   // !CONFIG_IDF_TARGET_ESP32P4
 
@@ -725,6 +654,36 @@ static void status_add(char *buf, size_t cap, size_t *off, bool *first, nc_json_
 // 全部改成「寫入呼叫者給的緩衝並回傳長度」：沒有 static，所以兩個 decoder 同時
 // 問 STATUS_GET 也不會互相踩（以前那 ~10 KB static 正是「開第二個 decoder」的硬阻塞）。
 
+// log 管道（兩個核的 ESP_LOG → 每核 ring → 單一 consumer → CDC 出口）
+static size_t status_put_log(char *buf, size_t cap)
+{
+    size_t off = 0;
+    char lj[256];
+    nc_log_json(lj, sizeof(lj));
+    jappend(buf, cap, &off, "\"log\":%s", lj);
+    return off;
+}
+
+// 執行期任務表（名稱 / 核 / 優先序 / stack 剩餘）。需要 CONFIG_FREERTOS_USE_TRACE_FACILITY。
+// 用途：判斷每個 task 的 stack 到底用幾多，唔好靠估。
+#if CONFIG_FREERTOS_USE_TRACE_FACILITY
+static size_t status_put_rt(char *buf, size_t cap)
+{
+    static TaskStatus_t st[24];
+    const UBaseType_t n = uxTaskGetSystemState(st, 24, NULL);
+    size_t off = 0;
+    jappend(buf, cap, &off, "\"rt\":[");
+    for (UBaseType_t i = 0; i < n && off < cap; i++) {
+        jappend(buf, cap, &off, "%s{\"n\":\"%s\",\"prio\":%u,\"hwm\":%u}",
+                (i != 0) ? "," : "", st[i].pcTaskName,
+                (unsigned)st[i].uxCurrentPriority,
+                (unsigned)st[i].usStackHighWaterMark);
+    }
+    jappend(buf, cap, &off, "]");
+    return off;
+}
+#endif
+
 // ── config 探測結果（宣告階段填一次，STATUS 回報）──
 // -1 = 未探測；app_ready = 探測當刻 FAT 有冇掛上；errno = fopen 失敗原因。
 static int s_cfg_app_ready = -1;
@@ -739,19 +698,30 @@ static int s_cdc_cfg_src = -9;       // CDC 的 rx 參數在「宣告階段」�
 static size_t status_put_storage(char *buf, size_t cap)
 {
     size_t off = 0;
+    char boot[96];
+    nc_boot_json(boot, sizeof(boot));   // {"prov":1,"fmtq":0,"degr":0,"fw_new":0}
     // FAT 現在在誰手上、裝置能不能直接讀；app_decl / cfg_errno = 宣告階段的探測結果。
-    // first = 本次開機是否「第一次初始化」（1 = 允許格式化，0 = 已初始化過、唔會自動格式化）。
-    // req   = NVS boot/fs_format 是否有待處理的「下次開機格式化」請求。
+    // boot = state manager 的開機狀態（provisioned / format_pending / degraded / fw_new）
     jappend(buf, cap, &off,
-            "\"storage\":{\"mode\":\"%s\",\"app_ready\":%d,\"first\":%d,\"req\":%d,"
+            "\"storage\":{\"mode\":\"%s\",\"app_ready\":%d,\"boot\":%s,"
             "\"app_decl\":%d,\"cfg_errno\":%d,\"cfg_open\":%d,"
-            "\"cfg_hdr\":\"%02X%02X%02X%02X\",\"fmt\":%d}",
-            nc_store_mode_name(), nc_store_app_ready() ? 1 : 0, s_fs_first,
-            nc_store_format_requested() ? 1 : 0,
+            "\"cfg_hdr\":\"%02X%02X%02X%02X\",\"fmt\":%d,\"reconn_hwm\":%u}",
+            nc_store_mode_name(), nc_store_app_ready() ? 1 : 0, boot,
             s_cfg_app_ready, s_cfg_errno, s_cfg_open_ok,
             (unsigned)(s_cfg_hdr & 0xFF), (unsigned)((s_cfg_hdr >> 8) & 0xFF),
             (unsigned)((s_cfg_hdr >> 16) & 0xFF), (unsigned)((s_cfg_hdr >> 24) & 0xFF),
-            s_fmt_err);
+            s_fmt_err, (unsigned)nc_store_reconn_hwm());
+    return off;
+}
+
+// config 的載入結果（哪一層用咗預設、有冇壞檔、有幾多不合法）——呢啲數字
+// 以前只係「睇 code 推」；現在每次開機都答得出來。
+static size_t status_put_cfg(char *buf, size_t cap)
+{
+    size_t off = 0;
+    char cj[288];
+    nc_cfg_json(cj, sizeof(cj));
+    jappend(buf, cap, &off, "\"cfg\":%s", cj);
     return off;
 }
 
@@ -889,6 +859,17 @@ static void on_status_get(nc4_ctx_t *ctx, const nc4_frame_t *f)
     if (keys_want(keys, "storage")) {
         status_add(json, cap, &off, &first, status_put_storage);
     }
+    if (keys_want(keys, "cfg")) {
+        status_add(json, cap, &off, &first, status_put_cfg);
+    }
+    if (keys_want(keys, "log")) {
+        status_add(json, cap, &off, &first, status_put_log);
+    }
+#if CONFIG_FREERTOS_USE_TRACE_FACILITY
+    if (keys_want(keys, "rt")) {
+        status_add(json, cap, &off, &first, status_put_rt);
+    }
+#endif
     if (keys_want(keys, "epoch")) {
         status_add(json, cap, &off, &first, status_put_epoch);
     }
@@ -975,26 +956,22 @@ static void node_identity_init(void)
 {
     nvs_boot_init();
 
-    // cID 的真相在 config/system.json，每次開機都讀：
-    //   有值 → 用使用者的；空的/缺的 → 用 MAC 末 2 bytes 推導，並寫回 config。
+    // cID 的真相在 config/system.json（已由 nc_cfg_boot 型別化）：
+    //   有值 → 用使用者的；空的 → 用 MAC 末 2 bytes 推導，並寫回 config。
+    // 寫回是允許的（FW_FILL 規則）：用戶睇唔到 MAC，冇辦法自己填這個值。
     uint16_t cid = NC4_ADDR_BROADCAST;
     bool present = false;
 
-    cfg_file_t *cfg = nc_cfg_open("system");
-    if (cfg != NULL) {
-        const cJSON *v = cJSON_GetObjectItemCaseSensitive(nc_cfg_root(cfg), "cID");
-        if (cJSON_IsString(v) && v->valuestring != NULL && v->valuestring[0] != '\0') {
-            char *endp = NULL;
-            const unsigned long x = strtoul(v->valuestring, &endp, 16);
-            if (endp != NULL && *endp == '\0') {
-                cid = (uint16_t)x;
-                present = true;
-            }
-        } else if (cJSON_IsNumber(v)) {
-            cid = (uint16_t)v->valueint;
+    const nc_system_cfg_t *sys = nc_cfg_system();
+    if (sys != NULL && sys->cid[0] != '\0') {
+        char *endp = NULL;
+        const unsigned long x = strtoul(sys->cid, &endp, 16);
+        if (endp != NULL && *endp == '\0' && x <= 0xFFFF) {
+            cid = (uint16_t)x;
             present = true;
+        } else {
+            ESP_LOGW(TAG, "cID \"%s\" 不是 4 位 hex → 改由 MAC 推導", sys->cid);
         }
-        nc_cfg_close(cfg);
     }
 
     if (!present) {
@@ -1138,19 +1115,21 @@ static void cdc_rx_notify(int itf, cdcacm_event_t *ev)
 static void cdc_rx_task(void *arg)
 {
     nc4_bus_handle_t bus = (nc4_bus_handle_t)arg;
+    // 每次搬一格，格大小由 bus 自己答（config 可以改 rx.slot_size，不用改這裡）
+    const size_t slot = nc4_bus_slot_size(bus);
 
     for (;;) {
         if (ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(CDC_RX_WAIT_MS)) == 0) {
             // 超時：安全網。正常情況下面嘅 RX callback 會即刻叫醒我哋。
         }
         for (;;) {
-            uint8_t *dst = nc4_bus_push_begin(bus, CDC_RX_SLOT);
+            uint8_t *dst = nc4_bus_push_begin(bus, slot);
             if (dst == NULL) {
                 break;                          // 環滿：等 decode 排空
             }
             size_t off = 0;
-            while (off < CDC_RX_SLOT) {
-                const int n = cdc_read(NULL, dst + off, CDC_RX_SLOT - off);
+            while (off < slot) {
+                const int n = cdc_read(NULL, dst + off, slot - off);
                 if (n <= 0) {
                     break;
                 }
@@ -1192,6 +1171,8 @@ static void load_net_tuning(void)
 static void *s_nc4_rx_region;
 static size_t s_nc4_rx_bytes;
 static void *s_uart_rx_region;
+// UART 的 producer 要延後到 decode 任務起咗之後才建立（見 app_main 的說明）。
+static nc4_bus_handle_t s_uart_bus;
 #if CONFIG_IDF_TARGET_ESP32P4
 static void *s_tcp_rx_region;      // 同上：S3 冇 TCP 通道
 #endif
@@ -1233,32 +1214,14 @@ static const nc_task_provide_t s_fx_provides[] = {
 // 一旦要咗就開機到 reset 都收唔返。
 static bool link_enabled(const char *name)
 {
-    cfg_file_t *cfg = nc_cfg_open("system");
-    if (cfg == NULL) {
-        return true;                 // 讀不到 → 照硬體探測結果
+    const nc_link_cfg_t *l = nc_cfg_link(name);
+    if (l == NULL) {
+        // 讀不到 config（或 links[] 冇這條線）→ 照硬體探測結果。
+        // 這是「最後保底」：config 壞掉時不應該連通道都沒有。
+        ESP_LOGW(TAG, "link %s：config 冇呢一條 → 當啟用（要關就寫 \"enable\": 0）", name);
+        return true;
     }
-    const cJSON *nc4 = cJSON_GetObjectItemCaseSensitive(nc_cfg_root(cfg), "nc4");
-    const cJSON *links = cJSON_GetObjectItemCaseSensitive(nc4, "links");
-    bool en = true;
-    bool found = false;
-    const cJSON *it = NULL;
-    cJSON_ArrayForEach(it, links) {
-        const cJSON *nm = cJSON_GetObjectItemCaseSensitive(it, "name");
-        if (!cJSON_IsString(nm) || nm->valuestring == NULL ||
-            strcmp(nm->valuestring, name) != 0) {
-            continue;
-        }
-        found = true;
-        const cJSON *e = cJSON_GetObjectItemCaseSensitive(it, "enable");
-        en = cJSON_IsNumber(e) ? (e->valueint != 0)
-             : (cJSON_IsBool(e) ? cJSON_IsTrue(e) : true);
-        break;
-    }
-    nc_cfg_close(cfg);
-    if (!found) {
-        ESP_LOGW(TAG, "link %s：links[] 冇呢一條 → 當啟用（要關就寫 \"enable\": 0）", name);
-    }
-    return en;
+    return l->enable;
 }
 
 // 核歸屬：routes[].out[] 是唯一真相。取唔到就唔建立該通道（fail-visible）。
@@ -1276,61 +1239,31 @@ static bool link_core(const char *line, int *out)
     return true;
 }
 
-// rx 參數：只覆寫 config 有寫嘅欄位；其餘留呼叫端嘅預設值。
-// mode 不在這裡 —— 佢由 kind 推導（cdc=非阻塞→PULL；uart=driver 阻塞→PUSH）。
-// 回傳「config 實際套用了幾多個欄位」：0 = 全部用 code 預設。開機把它印出來，
-// 咁「config 到底有冇被讀」就係可觀察嘅，而唔係靠推理。
+// rx 參數：直接由 struct 拿（不再逐項覆寫呼叫端的預設）。
+// 回傳「config 真的寫了幾個欄位」（rx_mask 的位數），給 STATUS 的 cfg_src 用。
+// 找不到這條 link 回 -2；struct 未載入回 -1。
 static int link_rx(const char *name, link_rx_t *rx)
 {
     if (rx == NULL) {
         return -3;
     }
+    const nc_link_cfg_t *l = nc_cfg_link(name);
+    if (l == NULL) {
+        return -1;
+    }
+    rx->region = l->rx.region;
+    rx->chunk = l->rx.chunk;
+    rx->budget = l->rx.budget;
+    rx->slots = l->rx.slots;
+    rx->slot = l->rx.slot_size;
+
     int applied = 0;
-    bool found = false;
-    cfg_file_t *cfg = nc_cfg_open("system");
-    if (cfg == NULL) {
-        return -1;                     // config 開唔到（FAT 未 mount / 檔案不存在）
+    for (int i = 0; i < 5; i++) {
+        if (l->rx_mask & (1u << i)) {
+            applied++;
+        }
     }
-    const cJSON *nc4 = cJSON_GetObjectItemCaseSensitive(nc_cfg_root(cfg), "nc4");
-    const cJSON *links = cJSON_GetObjectItemCaseSensitive(nc4, "links");
-    const cJSON *it = NULL;
-    cJSON_ArrayForEach(it, links) {
-        const cJSON *nm = cJSON_GetObjectItemCaseSensitive(it, "name");
-        if (!cJSON_IsString(nm) || nm->valuestring == NULL ||
-            strcmp(nm->valuestring, name) != 0) {
-            continue;
-        }
-        found = true;
-        const cJSON *rxo = cJSON_GetObjectItemCaseSensitive(
-            cJSON_GetObjectItemCaseSensitive(it, "cfg"), "rx");
-        const cJSON *v;
-        if ((v = cJSON_GetObjectItemCaseSensitive(rxo, "region")) != NULL && cJSON_IsNumber(v)) {
-            rx->region = (size_t)v->valueint;
-            applied++;
-        }
-        if ((v = cJSON_GetObjectItemCaseSensitive(rxo, "chunk")) != NULL && cJSON_IsNumber(v)) {
-            rx->chunk = (size_t)v->valueint;
-            applied++;
-        }
-        if ((v = cJSON_GetObjectItemCaseSensitive(rxo, "budget")) != NULL && cJSON_IsNumber(v)) {
-            rx->budget = (uint32_t)v->valueint;
-            applied++;
-        }
-        if ((v = cJSON_GetObjectItemCaseSensitive(rxo, "slots")) != NULL && cJSON_IsNumber(v)) {
-            rx->slots = (size_t)v->valueint;
-            applied++;
-        }
-        if ((v = cJSON_GetObjectItemCaseSensitive(rxo, "slot_size")) != NULL && cJSON_IsNumber(v)) {
-            rx->slot = (size_t)v->valueint;
-            applied++;
-        }
-        break;
-    }
-    nc_cfg_close(cfg);
-    if (!found) {
-        return -2;                     // config 開到，但 links[] 冇呢個名字
-    }
-    return applied;                    // 0 = 有呢條 link，但 cfg.rx 冇任何可辨識欄位
+    return applied;
 }
 
 // ── config 探測：一次性，結果經 STATUS 回報（開機 log 搶唔到，因為 USB 會重列舉）──
@@ -1574,6 +1507,75 @@ static void on_route_get(nc4_ctx_t *ctx, const nc4_frame_t *f)
     reply_send(&r, n);
 }
 
+// ── 0xF00D CDC_TX_BENCH：量裝置→主機的 CDC 吞吐（決定 log ring 要幾大）──
+// 為什麼在 main.c 而不是 test_action：要直接碰 TinyUSB FIFO（唔經 NC4 分幀），
+// 而且要知道 FIFO 滿的時候阻塞幾多次。
+// 樣式刻意只用 hex 字元（冇 "NC"），免得干擾主機的分幀器。
+#ifdef NC_ENABLE_TESTS
+#if !CONFIG_IDF_TARGET_ESP32P4
+static uint8_t s_bench_pat[4096];
+
+static void bench_pat_fill(void)
+{
+    static const char hex[] = "0123456789abcdef";
+    for (size_t i = 0; i < sizeof(s_bench_pat); i++) {
+        s_bench_pat[i] = (uint8_t)hex[i % (sizeof(hex) - 1)];
+    }
+}
+
+static void on_cdc_tx_bench(nc4_ctx_t *ctx, const nc4_frame_t *f)
+{
+    if (f->len < 7) {
+        reply_json(ctx, NC4_CMD_DEV_RSP, "{\"err\":\"bytes/chunk/mode\"}");
+        return;
+    }
+    uint32_t bytes = (uint32_t)f->data[0] | ((uint32_t)f->data[1] << 8) |
+                     ((uint32_t)f->data[2] << 16) | ((uint32_t)f->data[3] << 24);
+    const uint16_t chunk = (uint16_t)f->data[4] | ((uint16_t)f->data[5] << 8);
+    const uint8_t mode = f->data[6];
+
+    const size_t ch = (chunk == 0 || chunk > sizeof(s_bench_pat)) ? 64 : chunk;
+    if (bytes == 0 || bytes > (1u << 20)) {
+        bytes = 65536;      // 上限 1 MB，預設 64 KB
+    }
+
+    bench_pat_fill();
+    const int64_t t0 = esp_timer_get_time();
+    uint32_t stalls = 0;
+    size_t left = bytes;
+    while (left > 0) {
+        size_t n = (left > ch) ? ch : left;
+        size_t off = 0;
+        while (off < n) {
+            // FIFO 滿會回比較少 → 讓 TinyUSB task（prio 5，高過 decode 的 4）排空
+            const size_t k = tinyusb_cdcacm_write_queue(TINYUSB_CDC_ACM_0,
+                                                        s_bench_pat, n - off);
+            if (k == 0) {
+                stalls++;
+                taskYIELD();
+                continue;
+            }
+            off += k;
+        }
+        left -= n;
+        if (mode == 1) {
+            (void)tinyusb_cdcacm_write_flush(TINYUSB_CDC_ACM_0, 0);
+        }
+    }
+    (void)tinyusb_cdcacm_write_flush(TINYUSB_CDC_ACM_0, pdMS_TO_TICKS(1000));
+    const int64_t us = esp_timer_get_time() - t0;
+
+    char js[160];
+    snprintf(js, sizeof(js),
+             "{\"bytes\":%u,\"chunk\":%u,\"mode\":%u,\"dev_us\":%lld,\"stalls\":%u}",
+             (unsigned)bytes, (unsigned)ch, (unsigned)mode, (long long)us,
+             (unsigned)stalls);
+    ESP_LOGW(TAG, "CDC_TX_BENCH %s", js);
+    reply_json(ctx, NC4_CMD_DEV_RSP, js);
+}
+#endif   // !P4
+#endif   // NC_ENABLE_TESTS
+
 static void actions_register(nc4_decoder_t *dec)
 {
     if (dec == NULL) {
@@ -1585,6 +1587,9 @@ static void actions_register(nc4_decoder_t *dec)
     // cid / master_cid 已在開機最前面初始化（卷標要用）
 #ifdef NC_ENABLE_TESTS
     nc_test_action_register(dec, &s_test_hooks);   // 0xF00x / 0x181x
+#if !CONFIG_IDF_TARGET_ESP32P4
+    nc4_decoder_on_owner(dec, NC4_CMD_CDC_TX_BENCH, on_cdc_tx_bench, "core");
+#endif
 #endif
     nc_ota_action_register(dec);             // 0x22xx
     nc_file_action_register(dec);       // 0x2005 FILE_QUERY / 0x1103 STATUS_SET
@@ -1609,58 +1614,44 @@ static char s_route_names[NC4_ROUTE_MAX][NC4_ROUTE_NAME_MAX];
 
 static int router_from_cfg(nc4_route_t *out, int max)
 {
-    cfg_file_t *cfg = nc_cfg_open("system");
-    if (cfg == NULL) {
+    const nc_system_cfg_t *sys = nc_cfg_system();
+    if (sys == NULL || sys->n_routes == 0) {
         return 0;
     }
-    const cJSON *nc4 = cJSON_GetObjectItemCaseSensitive(nc_cfg_root(cfg), "nc4");
-    const cJSON *rows = cJSON_GetObjectItemCaseSensitive(nc4, "routes");
     int n = 0;
-    const cJSON *row = NULL;
-    cJSON_ArrayForEach(row, rows) {
-        if (n >= max || n >= NC4_ROUTE_MAX) {
-            break;
-        }
-        const cJSON *in = cJSON_GetObjectItemCaseSensitive(row, "in");
-        if (!cJSON_IsString(in)) {
-            continue;
-        }
+    for (uint8_t i = 0; i < sys->n_routes && n < max && n < NC4_ROUTE_MAX; i++) {
+        const nc_route_cfg_t *row = &sys->routes[i];
         // 呢條 link 冇啟用 → 佢唔會存在，路由都唔應該令嗰個核「有嘢做」
-        const char *inname = in->valuestring;
-        if (strcmp(inname, "nctx") != 0 && strcmp(inname, "outbound") != 0 &&
-            !link_enabled(inname)) {
-            ESP_LOGW(TAG, "router：%s 未啟用（links[].enable=0）→ 跳過呢行", inname);
+        if (strcmp(row->in, "nctx") != 0 && strcmp(row->in, "outbound") != 0 &&
+            !link_enabled(row->in)) {
+            ESP_LOGW(TAG, "router：%s 未啟用（links[].enable=0）→ 跳過呢行", row->in);
             continue;
         }
         int core = NC4_ROUTE_NONE;
-        const cJSON *o = NULL;
-        cJSON_ArrayForEach(o, cJSON_GetObjectItemCaseSensitive(row, "out")) {
-            if (!cJSON_IsString(o)) {
-                continue;
-            }
-            const char *s = o->valuestring;
+        for (uint8_t k = 0; k < row->n_out; k++) {
+            const char *s = row->out[k];
             if (strncmp(s, "decode", 6) == 0 && (s[6] == '0' || s[6] == '1') && s[7] == '\0') {
                 core = s[6] - '0';
                 break;
             }
         }
         if (core == NC4_ROUTE_NONE) {
-            continue;
+            continue;   // 只轉發／丟棄 → 本地冇人要解
         }
-        // 先抄入自己的 pool（喺 nc_cfg_close() 之前），唔好借 cJSON 的指標
-        const size_t nlen = strlen(inname);
+        // 名字已喺 struct 裡面（壽命 = 程式執行期），但仍抄入 router 自己的 pool：
+        // router 的介面契約是「唔借 caller 的字串」。
+        const size_t nlen = strlen(row->in);
         if (nlen >= NC4_ROUTE_NAME_MAX) {
             ESP_LOGW(TAG, "router：線名太長（%u）→ 跳過", (unsigned)nlen);
             continue;
         }
-        memcpy(s_route_names[n], inname, nlen + 1);
+        memcpy(s_route_names[n], row->in, nlen + 1);
         out[n].line = s_route_names[n];
         out[n].core = core;
         n++;
     }
-    nc_cfg_close(cfg);
     if (n > 0) {
-        ESP_LOGI(TAG, "router：由 system.json 讀到 %d 列", n);
+        ESP_LOGI(TAG, "router：由 config 讀到 %d 列", n);
     }
     return n;
 }
@@ -1980,6 +1971,16 @@ void app_main(void)
     rtc_gpio_deinit(BOOT_BUTTON_GPIO);
     gpio_hold_dis(BOOT_BUTTON_GPIO);
 
+    // ★ NVS 要先起來：log 的開機模式（runtime/boot/debug）存在 NVS，
+    //   而 log 擷取要最早開始（見下面理由），所以次序是 NVS → log → 其他。
+    nvs_boot_init();
+
+    // ★ log 擷取要最早開始：
+    //   S3 的 USB-Serial-JTAG 同 OTG 共用 PHY，usb_init() 之後 JTAG 的 port 會消失，
+    //   之後才裝 hook 的話，NVS／storage／config／router 這整段開機 log 都會冇。
+    //   這裡只裝 hook（寫入 RAM ring）；consumer 要到 usb_init() 之後才有出口。
+    (void)nc_log_capture();
+
     esp_chip_info_t chip;
     esp_chip_info(&chip);
     ESP_LOGI(TAG, "esp_Net-Core boot — ESP-IDF %s", esp_get_idf_version());
@@ -1993,14 +1994,33 @@ void app_main(void)
              (unsigned)(esp_clk_apb_freq() / 1000000),
              (unsigned)(esp_clk_xtal_freq() / 1000000));
 
-    // ── NVS → /data 掛載 → 身份（cID 在 config）→ 卷標（用 cid）──
-    nvs_boot_init();        // ★ 一定要比任何 nvs_open 早
+    // ── NVS → /data 掛載 → config 型別化 → 身份 → 卷標 ──
+    // 次序是硬性的：config 的檔案就住在 data 分區，所以「掛載」一定先過「讀 config」。
+    // 而 config 之後只讀一次（struct），任何人再用都唔會再碰檔案 ——
+    // 所以「FAT 交咗俾 host 之後 config 讀唔到」這個舊問題由設計上消失。
+    // nvs_boot_init() 已在 app_main 最前面（log 需要讀 NVS 設定）
+    MAIN_HWM("pre-storage");
     esp_err_t err = storage_init();
+    MAIN_HWM("post-storage");
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "storage 初始化失敗: %s", esp_err_to_name(err));
     }
-    config_sanitize();
+    (void)nc_cfg_boot();    // 永遠成功：最差 = 全部用預設
+    // system.json 的 "log_debug_mode"：
+    //   0 = 正常（INFO、2 KB、USB 起來之後開始記 → 看到服務/bus 啟動）
+    //   1 = 除錯（全部等級、8 KB、第一行開始）
+    {
+        const nc_system_cfg_t *sys = nc_cfg_system();
+        uint8_t cur = 0;
+        nc_log_get_levels(&cur);
+        if (sys != NULL && sys->log_debug_mode != cur) {
+            (void)nc_log_set_levels(sys->log_debug_mode);
+            ESP_LOGW(TAG, "log_debug_mode=%u（即時生效，並記住下次開機）",
+                     (unsigned)sys->log_debug_mode);
+        }
+    }
     node_identity_init();
+    MAIN_HWM("post-ident");
     ensure_volume_label();
     load_net_tuning();
 
@@ -2117,10 +2137,27 @@ void app_main(void)
     err = ESP_ERR_NOT_SUPPORTED;
 #else
     err = usb_init();
+    MAIN_HWM("post-usb");
 #endif
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "USB 初始化失敗: %s", esp_err_to_name(err));
     }
+
+#if !CONFIG_IDF_TARGET_ESP32P4
+    // log 管道要在 TinyUSB 起來之後、FAT 交接之前啟動：
+    //   · 之前：log 直接去 USB-Serial-JTAG（開機一定有）
+    //   · 之後：JTAG 的 PHY 被 OTG 拿走了，log 改走 CDC（同一個出口，由 arbiter 仲裁）
+    if (err == ESP_OK) {
+        int lc = nc4_router_core("CDC");
+        if (lc < 0) {
+            lc = 0;      // CDC 未路由：仍要有一條出路，記錄喺 boot log
+        }
+        const esp_err_t lerr = nc_log_start(lc, cdc_tx_text);
+        if (lerr != ESP_OK) {
+            ESP_LOGW(TAG, "log 管道未啟動：%s → 仍然直出 console", esp_err_to_name(lerr));
+        }
+    }
+#endif
 
 #if CONFIG_IDF_TARGET_ESP32P4
     // P4 這版沒有 USB（TinyUSB 沒列舉成功）→ 不要把 FAT 交給 USB，
@@ -2170,9 +2207,9 @@ void app_main(void)
         esp_err_t berr = ESP_ERR_NOT_SUPPORTED;
         if (link_enabled("CDC")) {
             int cdc_core = 0;
-            link_rx_t rx = { .region = CDC_RX_REGION_DEF, .chunk = 1024, .budget = 8 };
-            // 呢一刻 FAT 已經交咗俾 host，所以讀唔到 config（預期 -1）；
-            // 真正生效嘅值喺宣告階段已經量到，存在 s_cdc_cfg_src。
+            // config 已型別化：link_rx 只係由 struct 抄數，冇檔案 I/O，
+            // 所以「FAT 交咗俾 host」唔再影響這裡（舊問題已消失）。
+            link_rx_t rx = { .region = CDC_RX_REGION_DEF };
             (void)link_rx("CDC", &rx);
             rx.region = cdc_region(rx.region);
             if (s_nc4_rx_region == NULL || !link_core("CDC", &cdc_core)) {
@@ -2190,8 +2227,8 @@ void app_main(void)
                     .rx_region_bytes = s_nc4_rx_bytes,
                     .read_chunk = rx.chunk,
                     .budget_per_pass = rx.budget,
-                    .rx_ring_size = CDC_RX_SLOT,
-                    .rx_slots = CDC_RX_SLOTS,
+                    .rx_ring_size = rx.slot,
+                    .rx_slots = rx.slots,
                 };
                 nc4_bus_handle_t cdc_handle = (nc4_bus_handle_t)0;
                 berr = nc4_bus_add(s_decoder, &cdc_bus, &cdc_handle);
@@ -2231,7 +2268,7 @@ void app_main(void)
         int uart_core = -1;
         if (s_uart_rx_region != NULL && link_core("UART", &uart_core)) {
             link_rx_t rx = { .region = 1024, .chunk = 512, .budget = 8, .slots = 4, .slot = 1024 };
-            link_rx("UART", &rx);
+            const int uapplied = link_rx("UART", &rx);   // config 真的寫了幾個 rx 欄位
             const nc4_bus_cfg_t uart_bus = {
                 .name = "UART",
                 // PUSH：driver 由 owner core 的 producer 讀，讀到就 push + kick（同核）
@@ -2251,8 +2288,10 @@ void app_main(void)
             nc4_bus_handle_t uart_handle = (nc4_bus_handle_t)0;
             esp_err_t uerr = nc4_bus_add(s_decoder, &uart_bus, &uart_handle);
             if (uerr == ESP_OK) {
-                // producer 同 decode 同一核；佢讀 driver、push、kick
-                nc4_bus_start_producer(uart_handle, "uart.rx", 5, 4096);
+                // producer **唔喺這裡建立**：要等 decode 任務起咗（owner_init 裝 driver）
+                // 才可以開始讀。見 nc_task_boot() 之後的說明。
+                s_uart_bus = uart_handle;
+                nc4_bus_set_cfg_src(uart_handle, uapplied);   // STATUS 的 cfg_src
             }
             ESP_LOGI(TAG, "UART bus: %s", esp_err_to_name(uerr));
         } else {
@@ -2292,6 +2331,17 @@ void app_main(void)
         // 任務已經由各模組在 start 時登記（decode0/1、fx、log）；
         // 這裡只負責「依 layer 啟動」，不再手動 xTaskCreate 任何 loop。
         nc_task_boot();
+        MAIN_HWM("post-boot");
+
+        // producer 一定要喺 decode 起咗之後才建立：
+        //   decode 的 entry 會跑 owner_init（裝 UART driver）才開始等；
+        //   太早建立 producer，佢會喺「driver 未好」時自旋，而且優先級一旦高過
+        //   decode 就會把整個核餓死（實測：開機停在 USB 已列舉、但冇任何回應）。
+        // prio 由 nc4_bus_start_producer 夾到 decode 之下（不變式寫在那裡）。
+        if (s_uart_bus != NULL) {
+            const esp_err_t perr = nc4_bus_start_producer(s_uart_bus, "uart.rx", 3, 4096);
+            ESP_LOGI(TAG, "UART producer: %s", esp_err_to_name(perr));
+        }
     }
 
     // ── 開機帳：所有初始化／任務都起完之後，實際仲剩幾多 ──

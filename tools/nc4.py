@@ -19,50 +19,21 @@ import struct
 import sys
 import time
 
-SOF = b"NC"
-VERSION = 4
-ADDR_BROADCAST = 0xFFFF
+import os
+
+# 協議實作只有一份：tools/nc4_demux.py（嚴格 CRC、失敗只前進 1 byte）
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from nc4_demux import ADDR_BROADCAST, SOF, VERSION, pack, Reader, Demux  # noqa: E402
 
 CMD_REBOOT = 0x100F
 CMD_STATUS_GET = 0x1101
 CMD_STATUS_RSP = 0x1102
 
 
-def pack(cmd: int, payload: bytes = b"", addr: int = ADDR_BROADCAST) -> bytes:
-    body = struct.pack("<BHHH", VERSION, addr, cmd, len(payload)) + payload
-    crc = binascii.crc32(body, 0) & 0xFFFFFFFF
-    return SOF + body + struct.pack("<I", crc)
-
-
-def parse_frames(buf: bytes):
-    """從位元組流裡挑出完整幀：[(cmd, payload), ...]"""
-    out = []
-    i = 0
-    while True:
-        j = buf.find(SOF, i)
-        if j < 0 or len(buf) - j < 9:
-            break
-        ver = buf[j + 2]
-        _addr, cmd, plen = struct.unpack_from("<HHH", buf, j + 3)
-        end = j + 9 + plen + 4
-        if ver != VERSION or end > len(buf):
-            i = j + 2
-            continue
-        out.append((cmd, buf[j + 9:j + 9 + plen]))
-        i = end
-    return out
-
-
 def wait_for(ser, want_cmd: int, seconds: float):
     """等一個指定的回覆幀；回傳 payload 或 None。"""
-    end = time.time() + seconds
-    buf = b""
-    while time.time() < end:
-        buf += ser.read(4096)
-        for cmd, payload in parse_frames(buf):
-            if cmd == want_cmd:
-                return payload
-    return None
+    f = Reader(ser).wait_for({want_cmd}, seconds)
+    return None if f is None else f[1]
 
 
 def main() -> int:
@@ -121,11 +92,19 @@ def main() -> int:
             time.sleep(1.0)
 
         elif args.action == "listen":
+            # log 行同 NC4 幀會交錯：用共用 Demux 分清，唔會把文字當幀
+            dm = Demux()
             end = time.time() + args.seconds
-            buf = b""
             while time.time() < end:
-                buf += s.read(4096)
-            sys.stdout.write(buf.decode("utf-8", "replace"))
+                data = s.read(4096)
+                if not data:
+                    continue
+                for kind, v in dm.feed(data):
+                    if kind == "line":
+                        print(v)
+                    else:
+                        cmd, payload = v
+                        print(f"<< frame 0x{cmd:04X}  {len(payload)} B  {payload[:48].hex()}")
             return 0
 
         # 順便印一下裝置回吐的 log（reboot 後埠可能已經消失）
