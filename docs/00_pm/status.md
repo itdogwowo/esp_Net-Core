@@ -1134,7 +1134,7 @@ STATUS（108 條、p50 2.29 ms）時由 339.9→**334.9 ms（−1.5%）**。殘�
 decoder**（handler 執行序列化）—— 反映在回覆延遲，不影響 UART 吞吐；per-core decoder
 仍是未做項（§7.21）。
 
-**soak 與 CRC 追查**：UART 在滿載混合 soak 偶發 `crc_err`（1 KB 環 4 次/2,181 循環）。追查結果：不是插槽（`slot_full=0`）、不是 parser（`max_dlen` 遠低於 region）、**也不是環容量**（RX 環加倍後同樣出現）；而是 `fx` 測試任務與 `uart.rx` **同優先級**（都是 3），FreeRTOS 以 10 ms/tick 時間切片，剛好把 producer 壓過 1 KB 環的 11 ms。fx 降到 prio 2 之後：**1,836 循環 0 次**（若事件率不變，機率僅 ~3%）。→ 1 KB 環定案；同時記下一條規則：同核的租戶任務不得與 producer 同級。
+**soak 與 CRC 追查**：UART 在滿載混合 soak 偶發 `crc_err`。六輪對照排除了插槽（`slot_full=0`）、parser、環容量（RX 1 KB→2 KB 照樣出現）；真兇是 `fx` 測試任務與 `uart.rx` **同優先級**（都是 3）→ 10 ms/tick 時間切片剛好壓過 1 KB 環的 11 ms。fx 降到 prio 2 後，事件率由 ≈1/900 降到 **≈1/3,150 循環**（30 分鐘、4,460 循環、2 次；每一輪 300 幀都收齊，沒有真的掉幀）。殘留那次已排除緩衝因素，下一步是數 RX FIFO overrun。規則：**同核的租戶任務不得與 producer 同優先級**。
 
 **靜態分區**：`s_entries`（plan 宣告）64→16 格、`s_buses` 8→4 格，合計 **−3,136 B**；
 開機內部 heap `287,383 → 290,519`（正好 +3,136），`STATUS mem` 顯示 `decl=4 fail=0`、
