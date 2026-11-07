@@ -120,9 +120,12 @@ components/action/
 |---|---|---|
 | `sys` | 版本、cID、晶片、運行時間、開機原因 | ~200 B |
 | `mem` | 每個 class 的 plan 帳（宣告 / carve / 用量 / 峰值） | ~1,500 B |
-| `tasks` | 每個任務 × 每個 loop 的 core / level / count / avg / max / over / wrap | ~2,000 B |
+| `tasks` | 每個任務 × 每個 loop 的 core / layer / prio / period / running / enabled | ~1,500 B |
 | `provides` | 誰提供什麼（buffer / JSON / 數值） | ~900 B |
-| `storage` | FAT 擁有者、`/ro` vs `/data`、`first`（第一次初始化？）、`req`（待格式化？）、`fmt`、free、pending | ~140 B |
+| `storage` | FAT 擁有者、`/ro` vs `/data`、`boot`（`prov`／`fmtq`／`degr`／`fw_new`）、`fmt`、free、pending、`sd{en,mnt,mb,vfs_mb,drv,fr,probe,sv_err,err,drives}` | ~400 B |
+| `cfg` | 兩層 config 的載入結果：`miss`（缺檔）/`bad`（壞 JSON）/`ver`/`def`（用預設）/`inv`（不合法）/`unk`（不認識的鍵） | ~200 B |
+| `log` | log 管道：`cap`（hook 裝了？）/`run`（consumer 起了？）/`lvl`/`mask`/`buf`/`used`/`peak`/`produced`/`sent`/`dropped`/`busy`/`offline` | ~250 B |
+| `rt` | 執行期 FreeRTOS task 表（name / prio / stack HWM），要 `CONFIG_FREERTOS_USE_TRACE_FACILITY` | ~500 B |
 | `fx` | 每個 `.fxe` 的 manifest（kind / core / fps / px / mem / 指令） | 1,000–2,600 B |
 | `net` | IP / MAC / link 狀態（只在 P4） | ~300 B |
 
@@ -130,11 +133,12 @@ components/action/
 所以「空 KEY」的語意是**盡力而為**，不是「保證全部」：
 
 - 砌得落就照砌，砌唔落就**停手**，改回一個**合法**的物件
-  `{"truncated":1,"cap":2600,"tips":"keys=sys,storage,mem,provides,tasks,fx 分批問"}`。
-- 順序是**由便宜到貴**（sys → storage → mem → provides → tasks → fx → net），
+  `{"truncated":1,"cap":2600,"tips":"keys=sys,storage,cfg,log,mem,provides,tasks,fx 分批問"}`。
+- 順序是**由便宜到貴**（sys → storage → cfg → log → rt → mem → provides → tasks → fx → wifi → net），
   所以截斷時你**一定**拿到便宜那幾份，貴的（`tasks` / `fx`）才可能被切走。
-- 想要全部就**分批問**：先 `keys=sys,mem`，再 `keys=tasks`，再 `keys=fx`。
+- 想要全部就**分批問**：先 `keys=sys,storage`，再 `keys=cfg,log`，再 `keys=tasks`，再 `keys=fx`。
   每份都遠低於 2,600 B，一定完整。
+- `keys=?` 回可用 KEY 清單（唔會回內容），用來探測這版 firmware 支援哪些區塊。
 
 > 為什麼不把上限提到 8 KB？因為回覆幀要放進 `NC4_MAX_FRAME`（8,205 B），
 > 而那個 8,192 是**經驗參數**（見 [frame.md](frame.md)），不是可以隨便借的空間。

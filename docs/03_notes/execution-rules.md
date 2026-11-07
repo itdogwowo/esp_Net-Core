@@ -147,19 +147,17 @@
 
 **規則**：任何例外必須寫在本節，並註明數字與原因。唔准有未記錄的自旋。
 
-### 3.2 大循環（round / epoch）：仍啟用，但只作健康指標
+### 3.2 大循環（round / epoch）：已移除（2026-11-06）
 
-原本的用途（逐圈推算 CPU 負荷）**已放棄**：週期由最慢那條 loop 決定，數字意義有限，
-而干擾來源（事件到達率）已經清楚。
+原本想用「每核所有 loop 各跑完一次」推算 CPU 負荷，但 `decode0/1` 的 `fn` 係 `for(;;)`，
+round 永遠完成唔到 → `rounds` / `duty` 永遠 0。一個永遠 0 的指標比冇更差（會令人以為「冇負載」）。
 
-**現況（2026-11-05 驗證）**：`nc_epoch` **仍然掛載**——`nc_task_loop.c` 兩處
-`nc_epoch_mark`、`nc_epoch_add/remove`、STATUS 的 `core0/core1` 段全部還在，數字照樣輸出。
-保留理由：`rounds` 是「該核有冇停滯」唯一現成的指標。
-`nc_task_loop_t.no_epoch` 是為此加的退出開關，但**目前零使用者**（`monitor` 已刪）。
+**現況**：`components/sys/epoch/` 已刪、`STATUS keys=epoch` 已移除、
+`nc_task_loop_t` 的 `budget_us` / `no_epoch` 同 `keys=tasks` 的 `count`／`avg_us`／`max_us`／`over`／`wrap_us` 全部拿走。
 
-**規則**：可以用 `rounds`／`jitter` 判斷「有冇卡死」；
-**唔可以**拿 `duty` 當效能基準或做架構決策。
-真正的效能評估仍然在乾淨環境做壓力測試，不由管理器在線量測。
+**規則**：要知「有冇卡死／幾忙」用外部手段 —— `tools/nc4_log.py` 看即時 log、
+`STATUS keys=log` 的 `produced`／`dropped`、`keys=rt` 的 stack HWM、`keys=mem` 的 buffer 帳、
+`tools/bench/` 的吞吐與 RTT；**唔可以**再引用 epoch 數字做架構決策。
 
 ---
 

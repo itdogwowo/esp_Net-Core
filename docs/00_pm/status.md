@@ -1,7 +1,7 @@
 # 專案現況總結（單頁）
 
 > **用途**：所有「已經驗證的事實、已定案的設計、還沒做的事」集中在這一頁；
-> 細節都連到對應文件。**最後更新**：2026-11-03。
+> 細節都連到對應文件。**最後更新**：2026-11-06。
 
 ---
 
@@ -140,6 +140,7 @@ slots 還沒走 plan。
 | UART 數量 | **P4 = 6 條、S3 = 3 條**；console 佔 UART0，其餘可給應用 |
 | P4 console 腳位 | GPIO37/38（不是 S3 的 43/44） |
 | ESP↔ESP 不能用 USB 對接 | 兩個都是 device，沒有 host；VBUS 還會互灌 → 請走 UART1/2 |
+| S3 上 TinyUSB 一跑，`/dev/cu.usbmodem*` 就係**應用 CDC**，唔再係 ROM 的 USB-Serial-JTAG | `make.py flash` 會 `No serial data received`；日常更新走 OTA（`tools/ota.py`），實體燒錄要按住 BOOT 再 reset |
 
 USB 的完整分析：[failure-policy.md §4](../03_notes/failure-policy.md)。
 
@@ -157,7 +158,10 @@ USB 的完整分析：[failure-policy.md §4](../03_notes/failure-policy.md)。
 | `tools/bench/nc4_stats.py` | 零複製驗證（`copied` 應為 0）+ 邊界測試 |
 | `tools/bench/hub_bench.py` | `0xF003` 雙核 hub 交換 |
 | `tools/fx.py pack / dump` | 打包 / 檢視 `.fxe`（header + manifest + payload + 指令表） |
-| `bash tools/hosttest/run_all.sh` | 一次跑完 7 支 host test（cfg / fxm / task / router / fx / hub / plan），全綠 = 冇 error 亦冇 warning |
+| `tools/nc4_demux.py` | **NC4 協議唯一實作**：`\x1e`…`\n` = log 行；`"NC"`+VER/LEN/CRC32 才算幀，失敗只前進 1 byte |
+| `tools/nc4_log.py` | 看 log 管道（log 與幀共用 CDC） |
+| `tools/bench/cdc_tx.py` | CDC TX 壓測（log／回覆爭出口時的行為） |
+| `bash tools/hosttest/run_all.sh` | 一次跑完 8 支 host test（cfg / cfgstruct / fxm / task / router / fx / hub / plan），全綠 = 冇 error 亦冇 warning |
 | `tools/hosttest/*/run.sh` | 單支 host 測試，不用板子也不用 IDF：hub / plan / fx / **fxm** / **task** / **cfg** / **router**。Windows 上只有 `cfg` / `fxm` / `task` / `router` 有 `run.bat` |
 | **WSL + ESP-IDF v6.1.0** | **唯一能 build 的地方**（Windows 冇 IDF）。`firmware/build/` 是兩邊共用的，所以 Windows 上看到的 map 其實是 WSL 上次 build 的結果 |
 | `curl http://10.10.1.50:8080/config.json` | 讀寫設定（GET/PUT） |
@@ -360,7 +364,7 @@ DIRAM 不變（S3 98,761／P4 129,863），flash 略減。
 | 協議 | [commands.md](../01_protocol/commands.md)、[transports.md](../01_protocol/transports.md)、[frame.md](../01_protocol/frame.md)（幀格式權威版） |
 | 交接 | [disposition.md](disposition.md)（移除／新做法／保留／待決）｜[next-steps.md](next-steps.md)（排序、決策點、驗收）｜[handoff-2026-11-04.md](handoff-2026-11-04.md)（2026-11-04：記憶體清理、link 閘、Wi-Fi 兩道閘、量測與待辦） |
 | 教學 | [build_and_flash.md](../02_guides/build_and_flash.md)、[testing.md](../02_guides/testing.md)（§2.13–2.16 是量測總表） |
-| 筆記 | [execution-model.md](../03_notes/execution-model.md)（A/B 執行模型取捨與 group 改裝）、[core-isolation.md](../03_notes/core-isolation.md)（核隔離不變式：唯一接口係緩衝）、[cross-core.md](../03_notes/cross-core.md)（跨核中斷與共享狀態清單）、[core-round.md](../03_notes/core-round.md)（每核大循環量測）、[config-layers.md](../03_notes/config-layers.md)、[writing-a-task.md](../03_notes/writing-a-task.md)、[task-lifecycle.md](../03_notes/task-lifecycle.md)、[rx-architecture.md](../03_notes/rx-architecture.md)、[failure-policy.md](../03_notes/failure-policy.md)、[p4-bringup.md](../03_notes/p4-bringup.md)、[buffer-manager.md](../03_notes/buffer-manager.md)、[memory.md](../03_notes/memory.md)、[memory-budget.md](../03_notes/memory-budget.md)（SRAM 帳）、[decode-routes.md](../03_notes/decode-routes.md)、[naming.md](../03_notes/naming.md)、[component-layout.md](../03_notes/component-layout.md)、[architecture-flow.md](../03_notes/architecture-flow.md)、[roadmap.md](roadmap.md) |
+| 筆記 | [execution-model.md](../03_notes/execution-model.md)（A/B 執行模型取捨與 group 改裝）、[core-isolation.md](../03_notes/core-isolation.md)（核隔離不變式：唯一接口係緩衝）、[cross-core.md](../03_notes/cross-core.md)（跨核中斷與共享狀態清單）、[config-layers.md](../03_notes/config-layers.md)、[writing-a-task.md](../03_notes/writing-a-task.md)、[task-lifecycle.md](../03_notes/task-lifecycle.md)、[rx-architecture.md](../03_notes/rx-architecture.md)、[failure-policy.md](../03_notes/failure-policy.md)、[p4-bringup.md](../03_notes/p4-bringup.md)、[buffer-manager.md](../03_notes/buffer-manager.md)、[memory.md](../03_notes/memory.md)、[memory-budget.md](../03_notes/memory-budget.md)（SRAM 帳）、[decode-routes.md](../03_notes/decode-routes.md)、[naming.md](../03_notes/naming.md)、[component-layout.md](../03_notes/component-layout.md)、[architecture-flow.md](../03_notes/architecture-flow.md)、[roadmap.md](roadmap.md) |
 | 研究 | [effect-language.md](../03_notes/effect-language.md)、[extension-architecture.md](../03_notes/extension-architecture.md)、[fx-loader.md](../03_notes/fx-loader.md) |
 
 ### 7.12 2026-11-05 早上（實機測試：USB 通，UART 迴路抓到漏 kick）
@@ -432,3 +436,604 @@ trampoline 只喺 `fn` 返回後才 `nc_epoch_mark`，所以該核永遠完成�
 > `nc_store_format()` 已由 `STATUS_SET → reboot` 實際呼叫（上表）。未測的只剩
 > 「開機第一次 init 就掛唔上」這個入口 —— 要 raw erase `data` 的 WL metadata 才觸發得到
 > （需要下載模式）；正常、第一次、第二次開機、host 改壞 FAT、STATUS_SET 明確格式化都已上板證實。
+
+### 7.14 2026-11-06（log 管道、型別化 config、boot record；epoch 量測層移除）
+
+> 上游 `35f0e51` 一次改了四層；同日本機審查、上板驗證，並按用戶決定移除 `epoch`／`count`。
+> **§7.13 的三個 NVS 旗標（`fs_init`／`fs_format`／`fw_new`）已被本節的 boot record 取代。**
+
+| 層 | 之前 | 之後 | 檔案 |
+|---|---|---|---|
+| log | 每行直落 console，兩核爭同一個出口；USB 起來前那幾行收唔到 | 每核一個可變長 byte ring（只存文字、4 B header），單一 consumer 合批送 CDC；出口 OFFLINE 就唔消費 ring | `components/sys/nclog/` |
+| config | 每次 `nc_cfg_open()` + 自己 parse cJSON（router UAF 來源） | `types`（struct = schema，無指標）／`defaults`／`load`（解析一次） | `config/nc_cfg_{types,defaults,load}.c` |
+| 開機狀態 | 多個散旗標 | 一條 8 B `boot/record`（PROVISIONED／FORMAT_PENDING／DEGRADED／fw_hash）＋狀態管理器 | `state/nc_boot.c`、`state/nc_state.c` |
+| 主機工具 | 各工具各自 framing | `nc4_demux.py` 唯一實作：`\x1e`…`\n` = log 行；`"NC"` + VER/LEN/**CRC32** 才算幀，失敗只前進 1 byte | `tools/nc4_demux.py` |
+
+**行為變化**
+
+1. `system.json` 的 `log_debug_mode`：0 = 簡（E/W/I、2 KB／512 B、USB 起來之後才記）；
+   1 = 詳（全部等級、8 KB／1 KB、第一行開始記）。即時生效，並寫回 NVS（`boot/log`）。
+2. log 與 NC4 幀**共用同一條 CDC**：每行 `\x1e` ＋ 核號 ＋ 空格。
+3. **換韌體 = factory reset**：`app_elf_sha256` 前 4 B 改變 → 下次開機格式化 data 分區再 provision
+   （`/data/pixel` 會清空）。
+4. config 預設只寫一次；缺檔重建底座、壞檔用預設並標記 `degraded`。
+5. **2 KB 環是刻意設定**（用戶只需要開機後的資訊）：有 host 讀時 `peak=1.4 KB`、`dropped=0`；
+   冇 host 約 30 秒滿（設計上的 backlog 上限）。
+
+**驗證（S3，2026-11-06）**
+
+| 項目 | 結果 |
+|---|---|
+| hosttest | ✅ 8/8（`epoch_test` 已隨量測層移除） |
+| S3／P4 建置 | ✅ 391.6 KB／661.3 KB，零 warning |
+| OTA 上板 | ✅ 400,992 B／2.8 s（140.4 KB/s）、`END ok` |
+| 換版偵測 | ✅ `storage.boot={prov:1,fmtq:0,degr:0,fw_new:1}`、`fmt=0` → 真的格式化重建 |
+| `keys=?` | ✅ 11 個 KEY（冇 `epoch`） |
+| `nc4_log.py` | ✅ log 行與 STATUS 幀共存，`crc_err=0 junk=0` |
+| `keys=tasks` | ✅ loop 只回結構（name/core/layer/prio/period_ms/running/enabled） |
+
+**審查發現（已修）**
+
+| # | 問題 | 修法 |
+|---|---|---|
+| L1 | `ring_put` 環尾剩 1–3 B 時寫唔落 PAD，consumer 照讀 4 B → 讀過緩衝尾、垃圾 header | `ring_at`／`ring_migrate` 見 `off+4>cap` 當繞回 0 |
+| L2 | `nc_log_json` 在 capture 前被問到 → `ring_used` 除零 | `cap==0` 回 0 |
+| L3 | demux 丟棄被讀取切開的半個 SOF（`"N"`）→ 白丟一幀 | 留住尾端 `N`，`k<=0` 就 break |
+| L4 | `nc_log.h` 級別註解（E/W、6 KB）同實作唔一致 | 改正註解 |
+| L5 | `keys=?` 漏報 `cfg`／`log`／`rt` | 補齊（實機 11 KEY） |
+
+**epoch／count：整層移除（2026-11-06）**
+
+`decode0/1` 的 `fn` 係 `for(;;)`，trampoline 只喺 `fn` **返回後**才計數／mark → `rounds`、`count` 永遠 0。
+留一個永遠 0 的指標比冇更差。已刪 `components/sys/epoch/`、`keys=epoch`、
+`budget_us`／`no_epoch`、`count`／`avg_us`／`max_us`／`over`／`wrap_us`、`tools/hosttest/epoch_test`。
+image 各少約 2.4 KB（S3 391.6 KB、P4 661.3 KB）。
+
+**TinyUSB task stack：4,096 → 1,280**
+
+壓力：開機列舉、MSC 4–6.3 MB 寫（65–76 KB/s）、CDC 400–1,000 請求/回覆、
+**8 MB 的 8 KB 幀（0.47 MB/s，RAM 環路徑）**、OTA 上傳、2–3 次重新列舉。峰值 **976–1,008 B**。
+
+| 設定 | 峰值已用 | 餘裕 | 判斷 |
+|---|---:|---:|---|
+| 4,096 | 976 | 3,120（76%） | 浪費 |
+| 1,024 | 976–1,008 | 16–48（1–5%） | ❌ 少於一個中斷 frame，panic 風險 |
+| **1,280（現在）** | **976** | **304（24%）** | ✅ 全部壓力測試通過 |
+| 1,536 | 976 | 560（36%） | 安全但多 256 B |
+
+**decode 是動態綁定（實測）**
+
+`routes[].out` 的 `decodeN` 是唯一真相：`link_core()` 只查表（冇 fallback），bus 的 `cfg.core`
+由它決定；decode 任務由 `nc4_router_core_used(N)` 決定開唔開。**冇「CDC→decode0」硬綁定**。
+
+| 設定 | 開機 log 證據 | 結果 |
+|---|---|---|
+| CDC→decode0、UART→decode1（預設） | `cdc.rx 同 decode0 同喺 core 0`、`[UART] owner_init on core 1` | 兩條 decode 都建立 |
+| CDC→decode1、UART→decode0（對調） | `cdc.rx 同 decode1 同喺 core 1`、`[UART] owner_init on core 0` | 跟住換 |
+| 兩條都→decode0 | 只有 `解碼任務啟動（core 0）` | decode1 唔建立；heap +6,260 B（≈6,144 棧） |
+
+緩衝同綁定無關：三組 `keys=mem` 都係 `nc4.rx 4,192` ＋ `uart.rx 1,024` ＝ 5,216 B（每條 link 一份）。
+
+**decode stack：6,144 → 5,120**
+
+峰值 4,680 B（91% 用盡），主要係固定成本：回覆 JSON 緩衝 2,601 B ＋ `nc4_ctx` ＋ 分派框架。
+
+| 情境（decode0） | 已用 | 餘裕（5,120） |
+|---|---:|---:|
+| 開機後閒置 | 4,000 | 1,120 |
+| 1,000 個 STATUS 回覆（tasks/mem/混合） | 4,680 | 440 |
+| 8 MB 的 8 KB 幀 | 4,680 | 440 |
+| OTA 上傳（400 KB） | 4,008 | 1,112 |
+
+`decode1`（UART）目前只有 idle 數據（1,164 B）；有流量版本要 IO7↔IO8 短接。
+
+### 7.15 2026-11-07（SD 卡：sdmmc 4-bit 上板成功）
+
+新增 `SDcard` 層（`system.json`）：`enable`／`phat`（掛載點）／`config{slot,width,freq}`／
+`GPIO{sck,cmd,data[4]}`。`enable=0` 時不初始化、不佔 RAM；指定 GPIO 時自動走 slot1（GPIO matrix，
+因為 S3 的 slot0 係 IOMUX 固定腳）。`STATUS storage` 多了 `sd{en,mnt,mb,err}`。
+
+**上板結果（S3，SD 卡 30,436 MB）**
+
+| 嘗試 | 結果 |
+|---|---|
+| 腳位 `[5,4,16,15]`（照舊專案寫法）、4-bit 40 MHz | ❌ `send_scr` timeout（CMD1 過、SCR 讀不到） |
+| 1-bit 400 kHz、同一組腳位 | ❌ 一樣 |
+| **腳位 `[15,16,4,5]`**（即舊寫法反過來）、4-bit **40 MHz** | ✅ **`SD 已掛載 /sd：30436 MB（4-bit、40000 kHz、sector 512 B）`** |
+| `STATUS storage` | ✅ `sd{en:1,mnt:"/sd",mb:30436,err:0}` |
+
+**根因**：舊專案的 `data[]` 順序是 **D3,D2,D1,D0**，本韌體按 **D0,D1,D2,D3** 解讀。
+另外第一張卡在 CMD1 就 timeout（`0x107`），換卡後 CMD1 才過 —— 即「卡冇插好／第一張卡有問題」＋「腳位次序錯」兩件事疊在一起。
+
+**要注意**
+
+1. `sck=7` 同 **UART1 TX=7** 撞腳：開 SD 就要在 `system.json` 把 `links[UART].enable` 設 0（實測這樣兩者都正常，UART 那條 decode1 也不會建立）。
+2. 掛載點 `/sd` 目前只是掛起＋可由 STATUS 看到；NC4 的檔案指令仍然只認 `/data`（要對 `/sd` 讀寫要另外加 path 參數）。
+3. 開 SD 令 image 由 391.6 → **440.4 KB**（+48.8 KB：sdmmc driver + VFS/FAT 路徑）。
+
+### 7.16 2026-11-07（SD 的「慢」是假的：/sd 一直在讀寫內部 flash）
+
+§7.15 之後一直以為 SD 寫入只有 **148 KB/s**、讀 6.4 MB/s，並由此懷疑「USB 隨身碟佔住 FAT」。
+實測推翻了全部前提：**那些數字是內部 flash 的速度，SD 卡一次都沒有被 FAT 碰過。**
+
+**三個獨立證據**
+
+| 證據 | 觀察 |
+|---|---|
+| 檔案指紋 | bench 寫 `/sd/bench.bin` 2 MB；`FILE_QUERY /bench.bin`（讀 `/data`）找到**同一個大小、同一個 sha256** |
+| 驅動計數 | 2 MB FAT 讀寫期間 `sdmmc_write_sectors` 被呼叫 **0 次**（反組譯確認 `ff_sdmmc_write` 確實 `call8 __wrap_sdmmc_write_sectors`，wrap 有效） |
+| 主機視角 | `ls -f /Volumes/NC-D5F4` 直接看到 `bench.bin` 在隨身碟根目錄 |
+
+**根因 1：FATFS 磁碟號被搶**
+
+`store` 的唯讀視圖寫死 `RO_PDRV=1`／`RO_DRIVE="1:"`；SD 用 `esp_vfs_fat_sdmmc_mount()` 取「第一個
+空槽」—— 開機次序剛好也是 1。`ff_diskio_register()` 對已佔用的槽是**靜靜覆寫 + free 舊 impl**，
+不會報錯。於是 `/sd` 的每一次讀寫都落到 flash 的唯讀視圖上。
+
+⇒ 唯讀視圖改成 `ff_diskio_get_drive()` 動態取槽；`CONFIG_FATFS_VOLUME_COUNT` 2 → 3
+（flash / SD / 唯讀視圖各一個）。塞爆時 `ESP_LOGE`。
+
+**根因 2：GPIO7 同時係 SD CLK 同 UART1 TX**
+
+`sd_boot()` 成功（mount、`fopen` 探測都通），幾百 ms 之後 SD 全死；`sdmmc_send_cmd` 回 `0x107`
+（`ESP_ERR_INVALID_STATE`）。開機 log 給出答案：
+
+```
+UART 迴路已啟動：TX=7 RX=8 baud=921600     ← 測試迴路把 GPIO7 變成 UART1 TX
+SD: sck=7 cmd=6 d0..d3=15,16,4,5           ← 同一支腳
+```
+
+⇒ `uart_owner_init()` 見到 SD 已啟用且 clk/cmd 撞到 7/8 就**不啟動**測試迴路（`ESP_ERR_INVALID_STATE`）。
+這也解釋了為何 SD 只在 `sd_boot()` 內正常：UART 那條 bus 比 SD 晚初始化。
+
+**根因 3（順手）：NC4 指令表 32 格但註冊 36 條**
+
+`core 5 + test 11 + test bench 9 + ota 9 + file 2 = 36`：最後 4 條靜靜失敗，
+`STATUS_SET (0x1103)` 和 `FILE_QUERY (0x2005)` 完全冇反應（症狀同「線路壞」一模一樣）。
+⇒ `NC4_MAX_HANDLERS` 32 → 48，滿了 `ESP_LOGE`。
+
+**真正的 SD 速度（4-bit / 40 MHz、FAT32 64 KB cluster）**
+
+| 項目 | KB/s |
+|---|---|
+| FAT 建立 2 MB 檔 | 9,241 |
+| FAT 覆寫 2 MB（64 KB 區塊） | 8,947 ～ 9,262 |
+| FAT 讀 2 MB | 15,557 ～ 15,807 |
+| FAT 讀 4K / 16K / 64K | 5,159 / 11,162 / 15,695 |
+| FAT 寫 4K / 16K / 64K | 1,835 / 4,330 / 9,144 |
+| raw（繞過 FAT）讀 / 寫 | 16,001 / 9,538 |
+
+**A/B：USB 隨身碟在不在，對 SD 零影響**
+
+| 模式 | 寫 | 讀 |
+|---|---|---|
+| `mode=usb`（碟交給主機） | 8,947 KB/s | 15,807 KB/s |
+| `mode=app`（裝置自己持有 FAT） | 9,262 KB/s | 15,557 KB/s |
+
+差別在噪音範圍內。之前「轉手令 FAT 變慢」的假設不成立 —— 因為 SD 從來沒進過那條路。
+
+**其他**
+
+- `calls=83 / sectors=8211`：64 KB 區塊之下 FATFS 每次 `disk_write` 已經帶 ~99 個 sector
+  （multi-block 正常）。慢的一直是「區塊細」而唔係「冇 batch」。
+- `STATUS storage` 的 `sd` 新增 `drv`（實際磁碟號）、`fr`（f_mount FRESULT）、`probe`
+  （開機時真的開一次檔的 errno）、`drives`（每個 FatFS 磁碟的 FRESULT + 容量）——
+  同類「掛錯卡」以後一眼看得出來。
+- `statvfs()` 對 FATFS 回 `ENOTSUP`，所以容量對帳改用 `f_getfree` + `probe`。
+- 板子預設改成 `SDIO.enable=1`、`SDcard.enable=1`（換韌體會重建 `/data`，不然 SD 又關掉）。
+
+#### 7.16.1 順帶：64 KB bench 緩衝搬離 .bss（PSRAM 實測）
+
+`s_sd_bench_buf[64 KB]` 一直係 `.bss`（`0x3fc9b600`，佔 `.dram0.bss` 109,360 B 的 58%），
+而 SD 那幾條測試指令只在 `NC_ENABLE_TESTS` 才註冊。改成**按需配置**、預設內部 DMA：
+
+```c
+heap_caps_aligned_alloc(512, 64*1024, MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA);
+```
+
+| 項目 | 之前 | 之後 |
+|---|---|---|
+| `.dram0.bss` | 109,360 B | **44,096 B** |
+| 開機剩餘（內部） | 211,623 B | **276,959 B**（+65,336） |
+| 最大連續（內部） | 139,264 B | **204,800 B**（+65,536） |
+
+**PSRAM 可不可以放？實測給出答案：可以放，但慢 2～3 倍**
+
+| 緩衝位置 | 寫 | 讀 | 建立 |
+|---|---|---|---|
+| 內部 DMA（預設） | 9,152 KB/s | 15,304 KB/s | 9,263 KB/s |
+| **PSRAM** | **3,271 KB/s** | **7,011 KB/s** | 3,151 KB/s |
+
+原因寫在 IDF 原始碼裡：`SOC_SDMMC_PSRAM_DMA_CAPABLE` **只有 ESP32-P4 是 1**，S3 的
+SDMMC DMA 到不了 PSRAM，所以 `sd_host_check_buffer_alignment()` 直接回 `false`，
+協議層改用內部 bounce buffer 再複製一次（`calls` 由 87 升到 170、每次帶的 sector 由
+~94 跌到 ~97/65）。同理，任何真正要搬檔案的 SD buffer 都應該留在內部 RAM。
+
+PSRAM 適合的是「唔經 SD／唔需要外設 DMA 讀它」的大塊緩衝（JSON/HTTP 暫存、影像、
+純 CPU 計算）。`0xF012` 第二個 byte = 1 可以即時切去 PSRAM 做對照。
+
+**「細內部 + 大 PSRAM」值唔值？（0xF019 SD_STAGE，源頭 128 KB PSRAM）**
+
+| 內部 staging | 寫入 | 佔滿速 | memcpy 佔用 |
+|---|---|---|---|
+| 4 KB | 2,124 KB/s | 23% | 40.9 / 964 ms |
+| 16 KB | 4,216 KB/s | 46% | 39.3 / 486 ms |
+| 32 KB | 5,970 KB/s | 65% | 39.4 / 343 ms |
+| 64 KB | **8,460 KB/s** | **92%** | 38.7 / 242 ms |
+| （對照）64 KB 全程內部 | 9,152 KB/s | 100% | — |
+| （對照）PSRAM 直接寫（IDF 8 KB bounce） | 3,271 KB/s | 36% | — |
+
+結論：**PSRAM 代替不了那 64 KB 內部 RAM**。2 MB 的 PSRAM→內部 memcpy 固定約 39 ms
+（≈52 MB/s），佔比由 4 KB 的 4% 升到 64 KB 的 16% —— 真正的差別在**每次寫入的 chunk 大小**，
+唔係複製本身。4 KB 只有 23% 速度，而且比「整塊 PSRAM 直接寫」更差（IDF 自己用 8 KB bounce）。
+
+⇒ 設計原則：內部 DMA 一次只需「一個 chunk」；chunk ≥ 32 KB 才有意義，64 KB 才接近滿速。
+其餘資料放 PSRAM（128 KB / 1 MB 都可以），每次搬 64 KB 入內部再寫。
+
+**更正（2026-11-07）：bench 迴圈的 `vTaskDelay(1)` 污染了 4K/16K 數字**
+
+`0xF012`/`0xF014`/`0xF015`/`0xF018` 的計時迴圈每個 chunk 都 `vTaskDelay(1)`，
+而 `CONFIG_FREERTOS_HZ=1000` → **1 tick = 1 ms**。4 KB chunk 寫 2 MB = 512 次 = 512 ms，
+佔總時間 1,142 ms 的 45%。已經全部移除（計時迴圈內唔可以讓 CPU）。
+
+| 項目 | 舊（有延遲） | 新（移除後） |
+|---|---|---|
+| FAT 寫 4K | 1,835 | **2,317** |
+| FAT 寫 16K | 4,330 | **4,681** |
+| FAT 寫 64K | 9,144 | **10,404** |
+| FAT 建立 2 MB | 9,263 | **10,282** |
+| raw 寫（MBR 空隙） | 9,538 | **10,282** |
+| raw 讀 64K | 16,001 | 15,981（讀本來就冇延遲） |
+| FAT 讀 4K / 16K / 64K | 5,159 / 11,162 / 15,695 | 4,930 / 10,716 / 15,557（變異） |
+
+`0xF019 SD_STAGE` 本來就冇延遲，所以 staging 那組不受影響（2,124 → 2,189 屬變異）。
+正確的比較是 **2,189（staging 4 KB，含 memcpy）vs 2,317（直接 4 KB）**，即複製成本約 5%。
+
+**修正後的結論更清楚**：64 KB chunk 之下 raw 寫（10,282）同 FAT 寫（10,404）已經打平 ——
+瓶頸純粹是卡本身，FAT 一層冇額外成本。
+
+**1-bit 對照（同卡、同 40 MHz、`hardware.json` 的 `width` 1 ↔ 4）**
+
+| 項目 | 1-bit | 4-bit | 倍數 |
+|---|---|---|---|
+| raw 讀 4K / 16K / 64K | 3,391 / 4,391 / **4,655** | 6,398 / 12,178 / **15,981** | 3.4× |
+| raw 寫 | **4,073** | **10,282** | 2.5× |
+| FAT 讀 2 MB | **4,678** | **15,604** | 3.3× |
+| FAT 寫 2 MB | **4,021** | **10,459** | 2.6× |
+| FAT 建立 2 MB | 3,918 | 10,282 | 2.6× |
+
+**判讀**：1-bit @ 40 MHz 的理論上限是 40 MHz ÷ 8 = **5,000 KB/s**，實測讀 4,655 = **93%**
+—— 即 1-bit 係**匯流排飽和**，卡本身仲有餘力。4-bit @ 40 MHz 理論 20,000 KB/s，實測讀
+15,604 = 78%，**呢邊才是卡的天花板**。所以 1-bit 換 4-bit 拿到 3.3～3.4×（唔到 4×，
+因為 1-bit 那側受制於理論上限)。
+
+寫比讀慢（10,282 vs 15,981）係卡本身的 program 時間，兩種寬度都一樣。
+
+註：切換寬度要先改 `ports/S3/ESP32-S3-N16R8/data/config/hardware.json` 的 `SDIO.list[0].width`
+再換韌體（SD 只在開機掛載一次）。量完已改回 4。
+
+### 7.17 2026-11-07（SD 當第二個 LUN：主機看到兩顆磁碟）
+
+**為什麼不是 `NC-D5F4/sd/`**：FAT 冇 mount point 呢個概念。主機看到的是 MSC 交出去的
+**磁區**，而 `NC-D5F4` 就是 flash data 分割區的全部磁區；要它裡面再出現另一個檔案系統，
+等於一個 FAT 磁碟裡面放另一個 FAT 磁碟，協議層做不到。（§7.16 之前那個「看起來有」的
+`/sd` 其實是別名到 flash 的 bug。）
+
+**參考實作：CircuitPython 的 `CIRCUITPY_SDCARD_USB`** —— 同一個模型：`LUN_COUNT = 2`，
+主機看到 `CIRCUITPY` + `SDCARD` 兩顆獨立磁碟（[issue #10965](https://github.com/adafruit/circuitpython/issues/10965)、
+[TinyUSB MSC Dual LUN](https://docs.tinyusb.org/en/stable/examples/device/msc_dual_lun.html)）。
+同一份 issue 亦記錄了 **macOS 對 LUN 1 的 probe 有坑**（RP2040 上完全不 probe；RP2350 正常）。
+
+**實作**（esp_tinyusb 本來就支援 `TINYUSB_MSC_STORAGE_MAX_LUNS = 2`）
+
+- `nc_store.h` 新增 `nc_store_sd_attach(card, mount_app, unmount_app, arg)`：main 做完
+  `sdmmc_card_init()` 之後把卡交進來，store 負責「交給 host ↔ 收回」。
+- 交出（usb）：`sd_vfs_unmount()` → `tinyusb_msc_new_storage_sdmmc()`。
+  收回（app）：`tinyusb_msc_delete_storage()` → `sd_vfs_mount()`。
+- 次序不可反：兩邊同時寫同一份 FAT 一定爛，所以**永遠只有一邊掛住**。
+- 磁碟號每次都重新 `ff_diskio_get_drive()`（唔可以假設同一個）。
+
+**實測（S3 + macOS 26）**
+
+```
+/dev/disk5  external physical   ← flash（NC-D5F4）
+/dev/disk6  external physical   ← SD 卡（31.9 GB、FDisk_partition_scheme、DOS_FAT_32 "NO NAME"）
+```
+
+來回都通：
+
+| 方向 | 結果 |
+|---|---|
+| 裝置 → 主機 | 裝置寫的 `/sd/bench.bin`、`/sd/stage.bin`（各 2 MB）出現在主機磁碟上 |
+| 主機 → 裝置 | 主機寫的 `from_mac.txt` 在裝置收回後同一張卡上可見（Free 30,425 → 30,421 MB） |
+
+**兩個實際坑**
+
+1. `STATUS_SET file_mode` 切換會**等主機做完手上的 I/O**（macOS 在 Spotlight 索引時可以幾秒），
+   原本 `nc4_file.py` 只等 2 秒 → 收不到 ACK（但切換其實成功了）。已改成等 ACK 最多 10 秒。
+2. release 之後 macOS 偶爾留住舊的 mount（`Permission denied`）：
+   `diskutil unmount force /dev/diskN` 再 `diskutil mount /dev/diskN` 就回來。
+
+**現況**：開機預設交出（跟 flash 一樣），所以主機一插上就看到兩顆碟；`/sd` 在
+`mode=usb` 時裝置端不可用（`drives` 會顯示 `fr=12`），claim 之後才掛回。
+
+### 7.17.1 調校：速度、名稱、內部路徑
+
+**速度（host ↔ SD，8 MB `dd`，重新掛載後無快取）**
+
+| 方向 | 實測 | USB FS 理論上限 | 佔比 |
+|---|---|---|---|
+| 主機寫入 | 1,027 KB/s | 1,216 KB/s | 84% |
+| 主機讀取 | 914 KB/s | 1,216 KB/s | 75% |
+
+SD 卡本身有 10 MB/s，所以瓶頸 **100% 在 USB FS**（S3 只有 FS，沒有 HS PHY）。
+`CONFIG_TINYUSB_MSC_BUFSIZE` 在 S3 的 Kconfig range 是 `64..8192` —— **8192 已經係上限**。
+
+> 踩過的坑：改成 16384 會被 clamp 成 **512**，而 `tinyusb_msc_new_storage_spiflash()`
+> 要求緩衝 ≥ WL sector（4096）→ 建立 storage 失敗 → **flash 碟完全唔出現**，裝置靜靜
+> 回落 app 模式（log 只有一行 `建立 USB storage 失敗：ESP_ERR_NOT_SUPPORTED`）。已改回 8192。
+
+**名稱**
+
+SD 的 FAT 卷標由裝置寫入：**`NCSD-D5F4`**（規則同 flash 的 `NC-D5F4`：prefix + cID 後 4 碼；
+使用者自己命名過就不覆寫）。修了兩件事：
+
+1. `label_is_ours()` 只認 `NC-` 前綴 → SD 的 `NCSD-` 會被當成「使用者命名」而永不更新。
+   改成按傳入的 prefix 判斷，並且「只有前綴」（cid 未定時寫下的）也視為自己的。
+2. `sd_boot()` 原本排在 `node_identity_init()` **之前** → 當時 `s_cid` 還是 0xFFFF，
+   卷標只寫成 `NCSD-`。已把身分初始化移到 SD 之前。
+
+現在開機 macOS 直接掛成 `NCSD-D5F4`，唔再需要 `diskutil unmount force` 重掛。
+
+**內部路徑**
+
+- 掛載點集中定義：`NC_STORE_SD_MOUNT "/sd"`（`nc_store.h`），main 與 file_action 共用。
+- **`FILE_QUERY` 支援 `/sd/…`**：app 模式下讀的是真值；主機持有時回 busy（唔會假裝有答案）。
+  ```
+  /sd/bench.bin     2,097,152 B  sha e609118b…   ← 裝置自己寫的
+  /sd/from_mac.txt  44 B         sha 6bdbd872…   ← 主機透過 MSC 寫的
+  ```
+  `free` 對 `/sd` 回 0：`f_getfree()` 要磁碟號，而 VFS 唔會暴露；`size`/`sha` 才是重點。
+- `STATUS storage` 的 `sd` 多了 `lbl`（卷標）與 `host`（主機持有中 = 1）。
+
+### 7.18 2026-11-07（SD 設定收斂：只在 hardware.json 宣告一次）
+
+`system.json` 的 `SDcard { enable, bus:{type,index} }` 已刪 —— 它是「SPI 與 SDIO 二選一」年代
+的產物；SDSPI 路徑根本沒有實作，而 SDIO 的 `width: 1|4` 已經涵蓋「一線版本」，所以那個
+bus 引用純粹是重複。`driver.json` 裡面那份死的 `SDcard`（enable=0）也一起刪。
+
+現在 SD 跟 ETH 一樣**只宣告一次**：
+
+```json
+"SDIO": { "enable": 1, "list": [ { "freq": 40000000, "width": 4,
+                                  "GPIO": { "sck": 7, "cmd": 6, "data": [15,16,4,5] } } ] }
+```
+
+程式側：`nc_sd_cfg_t` / `parse_sd()` 移除；`sd_boot()` 只看 `hw->n_sdio`（enable=0 時 n_sdio=0）。
+掛載點固定 `/sd`（`NC_STORE_SD_MOUNT`）。
+
+**`GPIO.data` 的次序是 D0,D1,D2,D3**（跟舊專案的 D3..D0 相反）
+
+- 程式：`slot.d0 = e->d[0]; slot.d1 = e->d[1]; slot.d2 = e->d[2]; slot.d3 = e->d[3];`
+- 實證：1-bit 模式（只用 D0）用同一份 config 跑出 4,655 KB/s —— 次序若反了，1-bit 會去用
+  GPIO5 而完全不通（§7.16 的 1-bit 對照）。
+- 所以 `[15,16,4,5]` = **D0=15, D1=16, D2=4, D3=5**。
+- `STATUS storage` 新增 `sd.pins` 直接顯示這個對照，唔需要翻 config：
+  `"pins":"CLK7 CMD6 D0=15 D1=16 D2=4 D3=5"`
+
+順手修掉一個 JSON bug：`sd.drives` 之前是被引號包住的字串（裡面又有 `"`），整個
+`STATUS storage` 回覆其實不是合法 JSON。已改成真正的陣列。
+
+### 7.19 2026-11-07（main 的棧：把兩塊大緩衝搬離任務棧）
+
+`main.c` 的靜態緩衝其實早就清得差不多（`.bss` 只剩 4,374 B，其中 4,096 是測試用的
+`s_bench_pat`）。真正有問題的是**放在任務棧上的兩塊**：
+
+| 緩衝 | 大小 | 原本住哪裡 | 現在 |
+|---|---|---|---|
+| NC4 回覆幀（`nc4_reply_t.frame`） | 2,615 B | 每個 handler 的區域變數 → decode 棧 | decoder 持有（**PSRAM**，每 decoder 一份） |
+| SHA-256 讀取緩衝（`sha256_of`） | 2,048 B | 區塊內 `uint8_t buf[2048]` | 每次呼叫 `malloc`，用完即還 |
+
+**為什麼一定要搬**：`FILE_QUERY` 之後 decode0 只剩 **256 B** 餘裕（5,120 B 的棧用了 4,864）。
+一次深一點的呼叫就會爆。搬完之後：
+
+| 項目 | 之前 | 之後 |
+|---|---|---|
+| decode0 峰值 | 4,864 B（剩 256） | **2,844 B（剩 1,252）** |
+| decode1 峰值 | — | 1,184 B（剩 2,912） |
+| decode 棧 | 5,120 | **4,096**（−1 KB × 2 核） |
+
+回覆幀放在 decoder 上是安全的：同一個 decoder 一次只跑一個 handler（有鎖），而且它只被
+CPU 讀寫、不經 DMA（CDC 是 memcpy 入 FIFO）。`STATUS sys` 新增 `rep_ps` 直接確認它真的在
+PSRAM（目前 `rep_ps: 1`）。
+
+**順手抓到的第二個問題：main 任務的棧幾乎見底**
+
+`CONFIG_ESP_MAIN_TASK_STACK_SIZE` 是 2,560，實測 `main` 只剩 **424 B**（某些路徑 **56 B**）。
+開機路徑（cJSON 解析 + store + 網絡 + TinyUSB）把它吃到 2,504。已改成 **4,096**，
+現在剩 1,512 B。呢個唔係「省 RAM」，係**避免一次深呼叫就 panic**。
+
+**代價／收益**：內部 RAM 幾乎打平（decode 棧 −2 KB、main 棧 +1.5 KB），
+但兩個危險的餘裕（256 B / 56 B）變成 1.2 KB / 1.5 KB。
+
+`STATUS sys` 亦加了三個 heap 數字（`h_int` / `h_dma` / `h_ps`）—— 以後講「搬去 PSRAM
+有冇用」不用再靠估。
+
+### 7.20 2026-11-07（棧深：由「採樣」改成「算 + 走遍」）
+
+HWM 只覆蓋走過的路 —— 這個說法容易被聽成「不可預測」。其實呼叫是明確的，
+問題在**用什麼方法**取得。兩個新工具：
+
+**1. `tools/stack_depth.py`（靜態算）**
+
+用 GCC 的 `-fcallgraph-info=su` 產生的 `.ci`（945 個、9,558 個函數）併成呼叫圖，
+從任務入口算最壞路徑。
+
+| 根 | 靜態最壞 | 實測 |
+|---|---|---|
+| `app_main` | 2,352 B | 2,056（開機）～2,584（運行中） |
+| `nc4_bus_task_entry` | **1,408 B** | **2,944 B** ← 差很遠 |
+
+**為什麼 decode 差這麼多（重點）**：handler 是**函數指標**（`entry.handler(ctx, f)`）。
+在整份圖裡，`on_file_query` **一條入邊都沒有**，所有間接呼叫都變成指向
+`__indirect_call`（2,431 條邊）。也就是說 decode 最深的那一段（VFS → FATFS → SDMMC）
+在靜態圖上**不存在**。這不是「不確定」，是「這個方法看不到」。
+
+**2. `tools/stack_cover.py`（走遍）**
+
+既然看不到，就改成列舉：新加 `STATUS keys=cmds` 回傳已註冊的 37 條指令（含 owner），
+工具逐條打一次，HWM 就覆蓋全部 handler —— 有限、可重複，不再是抽樣。
+
+第一次跑就抓到問題：**`0xF003`（HUB_BENCH）會令板子重啟** —— 它會開兩個 task 跑 3 秒，
+主機在它未完之前再打一條，等於同一個 static 狀態被兩邊同時用。測試指令，已整段跳過。
+
+覆蓋結果（跳過測試/OTA）：**decode0 用 2,236／4,096（剩 1,860）、decode1 用 1,184**。
+OTA 那 9 條不敢亂打，但今天十幾次 OTA 都在 4,096 的棧上成功 —— 實務上已覆蓋。
+
+**結論**：靜態算得到「直接呼叫」的上界，間接呼叫要靠列舉；兩者合起來才是完整答案。
+`tools/stack_cover.py` 之後每次改 handler 都可以重跑一次。
+
+### 7.21 2026-11-07（指令是怎樣被支援的；加一條指令要幾多資源）
+
+**流程（一條指令從進來到執行完）**
+
+```
+CDC ISR / UART task
+  └ nc4_bus_push()        插槽（CDC 4×256 B、UART 4×1,024 B）
+      └ decodeN 任務（core N，4,096 B 棧）
+          └ 取插槽 → 抄入該通道的 parser ring（CDC 4,192 B、UART 1,024 B）
+              └ nc4_parser_feed：找 SOF、驗 CRC32、跳過垃圾
+                  └ parser_dispatch
+                      ├ ADDR 過濾（廣播，或 = 我的 cID）
+                      ├ decoder_lookup（線性掃 ≤48 格）
+                      └ decoder_lock → handler(ctx, frame) → unlock
+```
+
+- **零複製**：`frame.data` 直接指向 parser ring，handler 回傳後失效。
+- **一個 decoder、一把鎖**：decode0/decode1 是兩個 worker，但 handler 執行是**序列化**的
+  —— 第二核平行的是「解析」，不是「執行 handler」。
+- 回覆：`reply_open()` 拿的是 **decoder 持有的那一塊**（`NC4_REPLY_FRAME_MAX` = 2,615 B，
+  在 PSRAM），不在任務棧上。
+
+**4 KB 指令夠不夠？分通道**
+
+| 通道 | parser 緩衝 | 可收的最大 payload | 4,096 B 指令 |
+|---|---|---|---|
+| CDC | 4,192 B | 4,192 − 9 − 4 = **4,179 B** | ✅ 收得下 |
+| UART | 1,024 B | **1,011 B** | ❌ **靜靜丟棄**（`total > parser->cap` → `start += 1`、`n_bad_hdr++`、節流警告） |
+
+回覆上限是 decoder 的 2,600 B（`NC4_REPLY_JSON_MAX`）。所以「4 KB 指令」在 CDC 上完整可行，
+在 UART 上不行 —— 要就改 `system.json` 的 `links[UART].region`（plan 會跟），要就唔好走 UART。
+
+**加一條指令要幾多資源：0**
+
+- 指令表是**固定陣列**：`nc4_entry_t table[48]`，每格 `cmd(2) + handler(4) + owner(4)` = 12 B，
+  整個 decoder 約 600 B，建立時一次過配置。
+- 每加一條只佔**陣列裡面的一格**，不會新增任何緩衝、不會新增任務、不會新增棧。
+- 唯一的成本是那條 handler **執行時**用到的棧（跟其他 handler 共用 decode 的 4,096 B），
+  以及它自己 malloc 的東西。
+- 上限 48 格（測試映像 37 條、正式映像 16 條）；滿了會 `ESP_LOGE` 並註冊失敗。
+
+**設計上「怪」的地方（老實講）**
+
+兩個 decode 任務共用同一個 decoder，所以 handler 永遠不會並行 —— 想真正並行就要
+per-core decoder（每個再 600 B 表 + 2,615 B 回覆幀；回覆幀已經在 PSRAM，成本很低）。
+現在的取捨是：指令表只有一份（好維護）、鎖保證兩個核不會同時改同一份狀態。
+
+### 7.22 2026-11-07（Action 管理器：統計 → 一次配置 → 封存）
+
+**問題**：指令表以前是 decoder 內部寫死的 `table[48]`，各模組用 `on_owner()` 逐條塞。
+48 是魔術數字；滿了只會靜靜失敗（真的發生過：STATUS_SET / FILE_QUERY 完全冇反應）。
+
+**改法**：模組**宣告**自己的 `const` 表（放 flash），管理器在開機時統計總數，
+**一次 malloc 剛好大小**、填入、按 cmd 排序、封存。
+
+```
+core   5 條 ┐
+bench 10 條 ┤
+test  11 條 ├─ nc_action_init() → 統計 37 → malloc(37 × 12 = 444 B) → 排序 → 封存
+ota    9 條 ┤
+file   2 條 ┘
+```
+
+| | 之前 | 之後 |
+|---|---|---|
+| 表格 | `.bss` 固定 48 格 = 576 B | heap **444 B**（剛好 37 格） |
+| 上限 | 48（魔術數字） | 無 —— 加一行就自動變大 |
+| 查找 | 線性掃描 | **二分搜尋**（已排序） |
+| 滿了 | 靜靜失敗 → 現在會 log | 不會發生；重複 cmd 會 `ESP_LOGE` 並合併 |
+| 開機內部 RAM | 268,895 B | **269,031 B**（+136） |
+
+**形狀**：
+- `nc_action_table_t {svc, list, count}`，每個模組一個（`nc_ota_action_table` 等）。
+- `main` 只負責列出「有邊幾張表」（5 行），統計／配置／排序全在管理器內。
+- `nc4_decoder_on*()` 保留簽名但回 `ESP_ERR_NOT_SUPPORTED` —— 表是靜態的，唔應該執行期改。
+- `nc_action_find()` 二分搜尋；`STATUS keys=cmds` 直接遍歷排序後的表。
+
+**為什麼不會碎片**：整個生命週期只有一次 `malloc`、永不 `free`、永不 `realloc`，
+大小由「所有表的總和」決定 —— 加指令只會令這唯一一次配置大一點。
+
+驗證：37 條（core 15 / test 11 / ota 9 / file 2）；FILE_QUERY、0xF014、STATUS 全部正常。
+
+**驗證（Action 管理器改完之後）**
+
+`STATUS keys=cmds` 現在附自我檢查：
+
+```json
+"verify": {"n":37, "unsorted":0, "lookup_bad":0, "null_fn":0, "bytes":444}
+```
+
+`lookup_bad: 0` = 每一條都查得回自己（二分搜尋與表一致）；`unsorted: 0` = 排序正確。
+
+| 類別 | 指令 | 怎樣驗的 |
+|---|---|---|
+| 核心查詢 | 0x1005 / 0x1016 / 0x1101 / 0x1105 | 剛才逐條打，全部有回應 |
+| 檔案 | 0x1103 / 0x2005 | 剛才逐條打（claim/release、FILE_QUERY 回正確 sha） |
+| OTA 查詢 | 0x2206 / 0x2210 / 0x2218 / 0x221A | 剛才逐條打 |
+| OTA 寫入 | 0x2201/02/03/05/20 | 今日 20+ 次真實 OTA 都成功 |
+| SD bench | 0xF012–0xF019 | 今日實測（有速度數字，見 §7.16） |
+| CDC bench | 0xF00D / 0xF011 | 今日實測（0xF00D 缺參數會回 err，dispatch 正常） |
+| 其餘測試 | 0xF001/03/07/08/0A/0B/0C/0FE、0x1811-13 | **未逐一執行**（會開 task／跑數秒）；其中 0xF003 有問題 |
+
+**已知問題：`0xF003`（HUB_BENCH）會令板子重啟** —— 單獨打也一樣（不是重疊造成的）。
+它會開兩個 4 KB 任務跑 3 秒；懷疑是 hub_w/hub_r 的棧或 hub 內部 assert。測試指令，
+不在產品路徑上，先記錄未修。
+
+### 7.23 2026-11-08（開機階段拆出來：boot.c 管順序／計時／政策）
+
+`app_main` 以前是一支 420 行的直落函數，所有階段靠註解分段；「邊一步失敗會點」
+散落在各個 `if` 裡面，出事之後冇一個地方可以一眼看到跑到邊。
+
+現在：**順序變成資料**。
+
+```c
+// main.c
+static const nc_boot_phase_t phases[] = {
+    { "banner+nvs", ph_boot },      { "storage+cfg", ph_storage },
+    { "hardware",   ph_hardware },  { "declare",     ph_declare },
+    { "commit",     ph_commit },    { "start",       ph_start },
+    { "usb",        ph_usb },       { "channels",    ph_channels },
+    { "account",    ph_account },
+};
+(void)nc_boot_run(phases, NC_BOOT_COUNT(phases));   // boot.c
+```
+
+- `boot.c`：只負責跑 + 計時 + 記錄（**零硬體知識**）。失敗唔會自動停 —— 政策留給呼叫者。
+- `main.c`：每個階段一支 `static esp_err_t ph_xxx(void)`，內容同以前一樣。
+- 加一步 = 表加一行；唔需要再記住「它應該放喺邊」。
+
+**實測（開機一行睇完）**
+
+```
+boot 摘要：9.66 | 126.92 | 0.33 | 10.45 | 0.76 | 5.39 | 52.01 | 1.81 | 0.19 ms（9 個階段）
+           banner  storage  hw   declare  commit  start   usb   channels account
+```
+
+最大的兩塊：`storage+cfg` 126.9 ms（flash 掛載＋config 解析）、`usb` 52.0 ms（列舉）。
+總共約 **207 ms**。
+
+**順手發現的一件事**：`app_main` 尾部那條 `for(;;)` 心跳迴圈被「account」階段吞了，
+所以 `boot[9/9]` 永遠唔會印 —— 現在明確搬去階段之後（佢唔係階段，永遠唔返回）。
+
+**未做**：階段實作仍然住喺 `main.c`（因為佢們共用 20+ 個 static）。下一步可以逐個搬去
+`boot.c`，但每次都要連同它用到的 static 一齊決定歸屬，所以分開做。

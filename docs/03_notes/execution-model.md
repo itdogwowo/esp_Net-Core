@@ -5,7 +5,7 @@
 > 有 5 個邊界條件一定要處理，否則會出現「停不掉、量不準、stack 不夠」的隱形 bug。
 >
 > 相關：[execution-rules.md](execution-rules.md)（搶佔條件、等待規則、核心隔離——**先讀這份**）、
-> [core-round.md](core-round.md)（大循環量測，已停用）、[task-lifecycle.md](task-lifecycle.md)、
+> [task-lifecycle.md](task-lifecycle.md)、
 > [task-model.md](task-model.md)。
 
 ---

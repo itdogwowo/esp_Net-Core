@@ -135,8 +135,7 @@
 
 | 位置 | 狀態 | 風險 |
 |---|---|---|
-| [nc_epoch.c](../../firmware/components/sys/epoch/nc_epoch.c) | `rounds/exec/cycles/...`（`nc_epoch_stats_t` 全部純量） | 每個核的 loop 寫自己 core 的格；status 由另一個核讀 → 會讀到半新半舊（數字唔準，但唔會越界）。**冇 lock、冇 barrier** |
-| [nc_task_priv.h](../../firmware/components/sys/task/nc_task_priv.h) `nc_task_rt_t` | `enabled`（非 volatile）、`total_us`（64-bit） | 管理器改 `enabled` 對另一核的 trampoline 冇保證；64-bit 讀取可能撕裂 |
+| [nc_task_priv.h](../../firmware/components/sys/task/nc_task_priv.h) `nc_task_rt_t` | `enabled`（非 volatile） | 管理器改 `enabled` 對另一核的 trampoline 冇保證（2026-11-06 起已經冇任何統計欄位） |
 | [nc_hub.c](../../firmware/components/sys/mem/nc_hub.c) | `state[]` 用普通寫入做 READY／IDLE 轉換 | producer／consumer 唔同核時，冇 acquire/release 語義（依賴 cache 一致 + 時序，冇正式保證） |
 | [nc4_bus.c](../../firmware/components/sys/nc4/nc4_bus.c) 插槽 | `slot_state` 在 `taskENTER_CRITICAL` 內改，資料在鎖外寫 | 有 spinlock 做 release barrier，暫時OK；但如果改成 lock-free 要補 barrier |
 | [main.c](../../firmware/main/main.c) `s_rx_*` 診斷計數 | `volatile uint32_t`，多核寫 | 數字可能唔準（可接受） |
@@ -166,7 +165,7 @@
 ## 4. 要留意嘅「隱形」跨核影響
 
 1. **寫 flash = 另一個核停擺**。所以「core1 解碼、core0 寫 flash」係假平行。
-   OTA 期間 decode 延遲會直接反映喺 `epoch` 的 `exec` / `period`。
+   OTA 期間 decode 延遲會直接反映喺外部吞吐／RTT（原本的 `epoch` 量測已於 2026-11-06 移除）。
 2. **ISR 唔可以碰 PSRAM**：flash 操作期間對方核快取關閉，IRAM ISR 如果讀 PSRAM（hub／WS/UDP 緩衝）會爆。
 3. **`vTaskDelete(remote)`** 會打斷對方核，而且刪一條「正在跑」的任務本身有 race；
    [nc4_udp.c:187](../../firmware/components/sys/transport/nc4_udp.c#L187) 呢條路徑冇人用，但留住係地雷。
@@ -181,7 +180,7 @@
 | 想知 | 做法 |
 |---|---|
 | 跨核中斷幾多次 | 喺 `nc4_bus_kick()` 加 counter（只覆蓋我們自己發的 notify）；系統級要用 `esp_crosscore_int_send_yield` 的 hook（IDF 冇公開 API，要 patch 或 gdb） |
-| flash 凍結幾耐 | 寫 flash 前後 `esp_timer_get_time()`，同時睇另一核 `epoch.cycles` 與 `exec` 的差 |
+| flash 凍結幾耐 | 寫 flash 前後 `esp_timer_get_time()`；另一核同期跑一條已知工作量的 loop，比較前後吞吐 |
 | mutex 爭用 | 在 `nc4.c` 的 lock／unlock 加 `esp_timer` 量等鎖時間（decode 任務內） |
 
 ---
@@ -193,5 +192,5 @@
 2. **PULL → PUSH 唔一定好**：PUSH 會多發 notify（跨核中斷），換來低延遲；要按通道決定。
 3. **flash 寫入集中一核**（例如全部慢工作入 `slow_worker`@core0），另一核保持乾淨；
    代價係 OTA／FAT 都要排隊。
-4. **共享狀態**：`nc_epoch`／`nc_task_rt` 可以接受「數字半新半舊」就明文寫低；
+4. **共享狀態**：`nc_task_rt` 只剩 `enabled` 等旗標，可以接受「半新半舊」就明文寫低；
    `nc_hub` 如果要跨核正式用，要補 release/acquire（或用 FreeRTOS queue 代替）。

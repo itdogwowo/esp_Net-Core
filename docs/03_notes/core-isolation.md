@@ -41,7 +41,7 @@
    純迴圈唔會讓出 CPU，idle 永遠唔跑 → 5 秒誤報。
 9. **共享緩衝要用內部 SRAM**：內部 SRAM 唔經快取，兩核天然一致；
    PSRAM 有快取，跨核交換要另外處理（msync／只做單向 bulk）。
-10. **狀態／量測要經緩衝**：`epoch`、任務統計、RX 計數等等，唔可以直接讀另一個核的變數
+10. **狀態要經緩衝**：任務統計、RX 計數等等，唔可以直接讀另一個核的變數（`epoch` 量測層已於 2026-11-06 移除）
     （讀到半新半舊事小，破壞 I2 事大）。
 
 ---
@@ -60,7 +60,7 @@
 | V8 | `vTaskDelete(remote)` | I1 | [nc4_udp.c:187](../../firmware/components/sys/transport/nc4_udp.c#L187) | 零呼叫（死路徑），要刪 |
 | V9 | lwIP tcpip task 冇 pin | I3 | `CONFIG_LWIP_TCPIP_TASK_AFFINITY_NO_AFFINITY=y` | 網路喚醒會飄去另一核 |
 | V10 | TWDT 檢查 CPU1 idle | I1（間接） | `CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU1=y` | 純迴圈 core1 會 5 秒誤報 |
-| V11 | 共享可變狀態無鎖／無 barrier | I2 | `nc_hub`、`nc_epoch`、`nc_task_priv`、`s_rx_*` | status 讀到半新半舊 |
+| V11 | 共享可變狀態無鎖／無 barrier | I2 | `nc_hub`、`nc_task_priv`、`s_rx_*` | status 讀到半新半舊 |
 | V12 | 開機由 core0 建立 pin 去 core1 的任務 | I2（一次性） | [nc_task_loop.c:132](../../firmware/components/sys/task/nc_task_loop.c#L132) | 初始化例外，要明文寫落文件 |
 
 ---
@@ -90,7 +90,7 @@
 
 ### D3. 量測／狀態數字算唔算「共享狀態」？
 
-- 嚴格：`epoch`、任務統計都要每個核自己 snapshot 落 buffer，再由 core0 讀 buffer。
+- 嚴格：任務統計、RX 計數都要每個核自己 snapshot 落 buffer，再由 core0 讀 buffer。
 - 寬鬆：允許「唯讀、單向、容許撕裂」的數字（明文寫低係 best-effort）。
 
 建議先行**寬鬆 + 明文標記**，因為呢啲數字唔影響功能；但 `STATUS_GET` 唔可以因此去叫醒另一個核。
@@ -114,10 +114,10 @@
 | 檢查 | 方法 | 合格線 |
 |---|---|---|
 | core1 冇逾時 | 代碼審查 + grep：core1 路徑上冇 `vTaskDelay`／timeout／queue／mutex | 0 命中 |
-| 冇跨核中斷 | 喺 `nc4_bus_kick` 加 counter；core0 做 OTA 時對比 core1 的 `epoch.period` | 抖動 < 5% |
+| 冇跨核中斷 | 喺 `nc4_bus_kick` 加 counter；core0 做 OTA 時對比 core1 的吞吐／RTT | 抖動 < 5% |
 | 緩衝協議 | hub slot 狀態用 atomic（release/acquire）；跑 hosttest 的 hub／torn 測試 | torn = 0 |
 | flash | 開 Auto-Suspend 後，OTA 期間 core1 的 round 唔停 | 連續 3 次 OTA |
-| 核心分配 | `STATUS_GET` / `epoch` 顯示任務核心同設計一致 | 100% |
+| 核心分配 | `STATUS_GET keys=tasks`（loop 的 `core`）同設計一致 | 100% |
 
 ---
 
@@ -320,7 +320,7 @@
 | R8 | `usb_reconn` 冇 pin | [nc_store.c](../../firmware/components/sys/store/nc_store.c) | 可能落 core1（S3，切換 file_mode 時） |
 | R9 | UDP `recvfrom` 阻塞（core1） | [nc4_udp.c](../../firmware/components/sys/transport/nc4_udp.c) | 每個 datagram 由 lwIP 喚醒（P4） |
 | R10 | heap 共用 | `malloc`/`free` | 兩核共用 spinlock（decode 路徑有分配就爭） |
-| R11 | 量測共享 | `nc_epoch`／`nc_task_rt`／hub slot | 跨核讀，無 barrier（數字唔準，但唔影響功能） |
+| R11 | 狀態共享 | `nc_task_rt`／hub slot | 跨核讀，無 barrier（數字唔準，但唔影響功能） |
 
 ### 10.2 已經分開（今輪完成）
 

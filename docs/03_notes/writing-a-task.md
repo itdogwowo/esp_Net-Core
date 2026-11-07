@@ -275,43 +275,26 @@ hub、arena、DMA 槽。一次性的 frame / 回覆不需要，也不該進。
 
 ---
 
-## 4. 管理器幫你量了什麼
+## 4. 管理器不再幫你量時間
 
-每個 loop 都會記：
+**2026-11-06 起移除**了 per-loop 的 `count`／`last_us`／`avg_us`／`max_us`／`over`／`wrap_us`
+與每核大循環 `epoch`。原因很簡單：`decode0/1` 的 `fn` 是 `for(;;)` 永不返回，計數與標記
+都寫在 trampoline（`fn` 返回後才跑），所以那兩條 loop 的數字永遠是 0 —— 一個「看起來有、
+其實冇量到」的假指標，比冇更差。
 
-| 欄位 | 意思 |
-|---|---|
-| `count` | 跑了幾輪 |
-| `last_us` | 上一輪花多久 |
-| `avg_us` | 平均 |
-| `max_us` | 最久的一輪 |
-| `over` | 超過 `budget_us` 的次數 |
-| `wrap_us` | **管理器自己的成本**（整輪 − fn，含兩次 `esp_timer_get_time()` ＋ epoch mark 的一次 cycle 讀取） |
-| `wrap_avg_us` | 上面那個的平均 |
-
-`STATUS_GET keys=tasks`：
+`STATUS_GET keys=tasks` 現在只回**結構**，不回時間：
 
 ```json
 [{"name":"fx","kind":"normal","level":4,"started":1,"runtime":0,
   "mem":1,"claims":0,"provides":1,
   "loops":[{"name":"fx","core":1,"layer":3,"prio":3,"period_ms":0,
-            "running":1,"enabled":1,"count":1606,"last_us":4100,
-            "avg_us":3900,"max_us":8200,"over":0}]}]
+            "running":1,"enabled":1}]}]
 ```
 
-`budget_us` 只是一個宣告值 —— 超過只記數，不會停掉你（停止與否由政策決定）。
-
-> **診斷／低頻 loop**（例如每 1 秒的 monitor）要設 `.no_epoch = true`：
-> 否則該核的「大循環」round 會被拉到它的 period，令 `epoch` 的量測失真。
-> 一般任務不需要管這個欄位（預設 false = 參與量測）。
-
-**要量「直接執行」vs「被登記成任務」的差距**：`last_us` 是你的工作，`wrap_us` 是管理器
-多做的（結束旗標、enable 判斷、兩次取時、計數、預算比較、延遲決策）。
-所以「登記後的每輪成本 ≈ `last_us + wrap_us`」。
-
-想看真實差距就同一個 `fn` 寫兩份：一份給任務管理器跑，一份用 `xTaskCreate` 直接跑，
-固定秒數後比較 `count`（或反過來比較 CPU 時間）。`wrap_us` 的好處是不用改 code 就量得到，
-而且它會隨 core / 頻率 / 編譯器變 —— 所以要在目標板、目標頻率下量。
+要量效能就量**外面**：`tools/bench/` 的吞吐／RTT、`STATUS keys=mem` 的 buffer 帳、
+`nc4_bus_stats` 的 `parse_us`／`copied`，以及 `keys=rt` 的 stack HWM。
+想看「直接被 xTaskCreate」vs「被登記成任務」的差距，就同一個 `fn` 寫兩份、固定秒數跑，
+用板上的實際吞吐／延遲比較；管理器本身只負責建立、開關與停止，不再代你計時。
 
 ---
 
