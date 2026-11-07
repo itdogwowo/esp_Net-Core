@@ -226,7 +226,12 @@ firmware/components/tasks/
 **編譯開關**（真正「唔污染」的做法：唔係靠命名，係靠唔存在）：
 
 ```cmake
-option(NC_ENABLE_TESTS "測試指令與測試任務" OFF)  # 預設關；要量測時 -DNC_ENABLE_TESTS=ON
+option(NC_ENABLE_TESTS "測試指令與測試任務" OFF)  # 預設關
+
+# 從 make.py 建：`python3 make.py build s3 --tests`（ON）／不寫（OFF）。
+# 以前 make.py 不傳這個旗標，CMake cache 會沿用上一次的值 —— 看起來在建 release，
+# 其實是 tests 映像（2026-11-08 實測踩到）。現在 builder 每次都明確傳 ON/OFF，
+# artifacts 的側錄也多了 "tests": true/false。
 ```
 
 關掉之後 `test_action`／`test_*_tasks` 唔編譯、唔註冊、唔佔 stack。

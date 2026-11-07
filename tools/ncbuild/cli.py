@@ -32,13 +32,15 @@ def cmd_build(cfg: dict, args: argparse.Namespace) -> int:
     if args.all:
         return builder.build_all(cfg, minimal=args.minimal, jobs=args.jobs,
                                  clean=args.clean, fresh=args.fresh,
-                                 do_archive=False if args.no_archive else None)
+                                 do_archive=False if args.no_archive else None,
+                                 tests=args.tests)
     return builder.build(
         cfg, _board_of(cfg, args),
         minimal=args.minimal, jobs=args.jobs,
         clean=args.clean, fresh=args.fresh,
         do_doctor=not args.no_doctor,
         do_archive=False if args.no_archive else None,
+        tests=args.tests,
     )
 
 
@@ -46,7 +48,7 @@ def cmd_flash(cfg: dict, args: argparse.Namespace) -> int:
     mode = "erase" if args.erase else ("full" if args.full else "app")
     return builder.flash(cfg, _board_of(cfg, args), port=args.port, mode=mode,
                          minimal=args.minimal, no_build=args.no_build,
-                         dry_run=args.dry_run)
+                         dry_run=args.dry_run, tests=args.tests)
 
 
 def cmd_monitor(cfg: dict, args: argparse.Namespace) -> int:
@@ -163,6 +165,9 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("build", help="建置")
     _add_common(p)
     p.add_argument("--minimal", action="store_true", help="最小映像（只印心跳，bring-up 用）")
+    p.add_argument("--tests", action="store_true",
+                   help="測試映像（NC_ENABLE_TESTS=ON：0xF00x 指令與 test_* 任務）；"
+                        "預設 OFF＝出貨映像。之前靠 CMake cache 記住上一個值，現在每次都明確傳")
     p.add_argument("--jobs", type=int, help="平行編譯數（預設讓 IDF 決定）")
     p.add_argument("--clean", action="store_true", help="先清 build/")
     p.add_argument("--fresh", action="store_true", help="先清 build/ 與 sdkconfig（重新套用 defaults）")
@@ -177,6 +182,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--full", action="store_true", help="bootloader + 分割表 + app")
     p.add_argument("--erase", action="store_true", help="全清再燒")
     p.add_argument("--minimal", action="store_true")
+    p.add_argument("--tests", action="store_true", help="測試映像（NC_ENABLE_TESTS=ON）")
     p.add_argument("--no-build", action="store_true", help="不先建置，直接燒現有 image")
     p.add_argument("--dry-run", action="store_true", help="只印出會執行的命令，不真的燒")
     p.set_defaults(fn=cmd_flash)

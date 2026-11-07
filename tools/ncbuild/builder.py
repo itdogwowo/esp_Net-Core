@@ -26,10 +26,13 @@ def _current_target() -> str | None:
     return m.group(1) if m else None
 
 
-def _idf_args(d: Path, b: dict, minimal: bool) -> list[str]:
+def _idf_args(d: Path, b: dict, minimal: bool, tests: bool = False) -> list[str]:
     args = [f'-DPORT={env.port_name(d)}', f'-DIDF_TARGET={b["chip"]}']
     if minimal:
         args.append("-DNETCORE_MINIMAL=1")
+    # 明確傳：CMake 的 cache 會記住上一次的值，靠「不傳」＝靠運氣。
+    # 之前的坑：`make.py build s3` 看似建 release，其實重用了 NC_ENABLE_TESTS=ON 的 cache。
+    args.append("-DNC_ENABLE_TESTS=" + ("ON" if tests else "OFF"))
     return args
 
 
@@ -46,7 +49,8 @@ def _prepare_target(chip: str, idf: Path, log: Path | None, args: list[str]) -> 
 
 def build(cfg: dict, board_query: str | None, *, minimal: bool = False,
           jobs: int | None = None, clean: bool = False, fresh: bool = False,
-          do_doctor: bool = True, do_archive: bool | None = None) -> int:
+          do_doctor: bool = True, do_archive: bool | None = None,
+          tests: bool = False) -> int:
     d, b, chip, chip_dir = env.resolve_board(board_query)
     board = b.get("name", d.name)
     idf = env.idf_path_for(chip, cfg)
@@ -70,7 +74,7 @@ def build(cfg: dict, board_query: str | None, *, minimal: bool = False,
             shutil.rmtree(bd)
             print(f"→ 清掉 {bd.relative_to(env.ROOT)}")
 
-    args = _idf_args(d, b, minimal)
+    args = _idf_args(d, b, minimal, tests)
     out_dir = env.artifacts_dir(cfg)
     ts = artifacts.stamp()
     log = out_dir / "logs" / f"{board}_{ts}{'_minimal' if minimal else ''}.log"
@@ -115,6 +119,7 @@ def build(cfg: dict, board_query: str | None, *, minimal: bool = False,
         prev = artifacts.previous_size(cfg, board)
         out = artifacts.archive(cfg, board, bin_path, {
             "chip": chip, "target": b["chip"], "minimal": minimal,
+            "tests": tests,          # 側錄要寫清楚：兩個映像的行為差很多（測試指令／任務）
             "profiles": b.get("profiles") or [],
             "idf": env.idf_version(idf),
         })
@@ -132,7 +137,7 @@ def build(cfg: dict, board_query: str | None, *, minimal: bool = False,
 
 def build_all(cfg: dict, *, minimal: bool = False, jobs: int | None = None,
               clean: bool = False, fresh: bool = False,
-              do_archive: bool | None = None) -> int:
+              do_archive: bool | None = None, tests: bool = False) -> int:
     """依序建置 ports/ 下每一塊板子（CI / 回歸用）。每塊各自切 target。"""
     import board as boardmod
 
@@ -149,7 +154,7 @@ def build_all(cfg: dict, *, minimal: bool = False, jobs: int | None = None,
         print(f"── [{i}/{len(dirs)}] {name} ─────────────────────────────")
         rc = build(cfg, env.port_name(d), minimal=minimal, jobs=jobs,
                    clean=clean, fresh=fresh, do_doctor=(i == 1),
-                   do_archive=do_archive)
+                   do_archive=do_archive, tests=tests)
         results.append((name, rc))
         if rc != 0:
             print(f"✘ {name} 失敗，停止（後面的板子沒建）")
@@ -167,13 +172,13 @@ def build_all(cfg: dict, *, minimal: bool = False, jobs: int | None = None,
 
 def flash(cfg: dict, board_query: str | None, *, port: str | None = None,
           mode: str = "app", minimal: bool = False, no_build: bool = False,
-          dry_run: bool = False) -> int:
+          dry_run: bool = False, tests: bool = False) -> int:
     d, b, chip, _ = env.resolve_board(board_query)
     board = b.get("name", d.name)
     idf = env.idf_path_for(chip, cfg)
 
     if not no_build:
-        rc = build(cfg, board_query, minimal=minimal, do_doctor=False)
+        rc = build(cfg, board_query, minimal=minimal, do_doctor=False, tests=tests)
         if rc != 0:
             return rc
 

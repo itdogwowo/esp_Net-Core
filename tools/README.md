@@ -36,6 +36,7 @@ tools/ncbuild/
 |---|---|---|
 | `make.py p4` = `make.py build p4` | — | 建置；自動處理 target 切換 |
 | `make.py build s3 --minimal` | — | 最小映像（只印心跳），新板 bring-up 用 |
+| `make.py build s3 --tests` | — | **測試映像**（`NC_ENABLE_TESTS=ON`：`0xF00x` 指令與 test_* 任務）。不寫＝出貨映像（OFF）。每次都會明確傳給 CMake，不再靠 cache 記住上一個值 |
 | `make.py build p4 --fresh` | — | 先刪 `sdkconfig` 再建（改了 defaults 才需要） |
 | `make.py build p4 --jobs 4` | — | 限制平行編譯 |
 | `make.py build --all` | — | 依序建置**全部**板子（CI / 回歸用；每塊都會切 target，慢） |
