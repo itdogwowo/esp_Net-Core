@@ -145,7 +145,10 @@ static volatile uint32_t s_rx_frames;        // 成功收到的幀數
 // UART 的緩衝照 CDC 的形狀：8 KB TX／4 KB RX 的環是「照抄放大」年代留下的。
 // 實測（921600 baud、迴路）：producer 每次最多搬 242 B；一幀 18 B 的指令
 // 以前的 1 KB slot 會令 read 等到填滿才返回（見 uart_bus_read 的註解）。
-#define UART_TEST_RX_BUF   1024      // 1 KB ≈ 線速 11 ms；producer 一直阻塞等第一個 byte
+// 1 KB ≈ 線速 11 ms。對照實驗（buffer-tightening §4.5）：1 KB 與 2 KB 在同樣的
+// 98% 線速混合 soak 都是「約每 1,500 循環 1 次 CRC」（1 KB：3/4,135；2 KB：1/1,620），
+// 而且兩者 slot_full 都是 0 → 那個偶發不是環容量問題，所以留貼身的 1 KB。
+#define UART_TEST_RX_BUF   1024
 #define UART_TEST_TX_BUF   1024      // TX 只由測試指令用（UART 的 send 未接）；1 KB 已足夠
 #define UART_TEST_DEF_BAUD 921600
 #define FW_VERSION         "0.1.1"

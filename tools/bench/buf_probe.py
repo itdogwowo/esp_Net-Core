@@ -206,6 +206,60 @@ def do_storm(args, reader, ser):
     return res
 
 
+def _round_up(v: int, step: int) -> int:
+    return ((v + step - 1) // step) * step
+
+
+def do_sizing(args, reader, ser):
+    """把裝置側的峰值換算成「貼身尺寸建議」；用來決定 config，而不是憑感覺。
+
+    region 最少要放得落「一幀」＝ 9(header) + payload + 4(crc)；
+    slot_size ≥ 實測單次最大搬運；slots ≥ 峰值 + 1（留一格給 producer 週轉）。
+    """
+    net = status(reader, ser, "net")
+    rt = status(reader, ser, "rt")
+    if net is None:
+        print("讀不到 net")
+        return None
+    # 已知但這次沒有打出來的需求（例如 CDC 要收 OTA 的 4 KB chunk）：
+    # 只靠「觀察到的最大值」會把 region 算得太細，所以要用 --declare 補。
+    declared = {}
+    for item in args.declare or []:
+        name, _, val = item.partition("=")
+        try:
+            declared[name] = int(val)
+        except ValueError:
+            sys.exit(f"--declare 格式要 BUS=BYTES，收到 {item!r}")
+    if not declared:
+        print("# 注意：只用觀察到的流量；已知但未發生的需求要用 --declare BUS=BYTES 補",
+              file=sys.stderr)
+    rows = []
+    for b in net.get("net", {}).get("bus", []):
+        name = b.get("name")
+        need = max(int(b.get("max_dlen") or 0), declared.get(name, 0))
+        frame_bytes = 13 + need
+        rows.append({
+            "bus": name,
+            "declared_dlen": declared.get(name),
+            "region_now": b.get("region"),
+            "region_rec": _round_up(max(frame_bytes, 256), 256),
+            "max_dlen": b.get("max_dlen"),
+            "region_fits_frame": b.get("region", 0) >= frame_bytes,
+            "max_read": b.get("max_read"),
+            "slot_rec": _round_up(max(int(b.get("max_read") or 0), 16), 128),
+            "peak": b.get("peak"),
+            "slots_rec": max(2, int(b.get("peak") or 0) + 1),
+            "slot_full": b.get("slot_full"),
+            "tx_max": b.get("tx_max"),
+        })
+    stacks = {}
+    if rt is not None:
+        for t in rt.get("rt", []):
+            stacks[t["n"]] = t["hwm"]
+    print(json.dumps({"bus": rows, "stack_hwm": stacks}, indent=2, ensure_ascii=False))
+    return rows
+
+
 def do_idle(args, reader, ser):
     time.sleep(args.seconds)
     print(json.dumps({"idle_s": args.seconds}))
@@ -241,6 +295,10 @@ def main() -> int:
     p.add_argument("--fill", default="A", help="payload 填充字元")
     p.add_argument("--timeout", type=float, default=10.0)
 
+    p = sub.add_parser("sizing")
+    p.add_argument("--declare", action="append", default=[],
+                   help="已知需求 BUS=PAYLOAD_BYTES，可重複（例：--declare CDC=4096）")
+
     p = sub.add_parser("idle")
     p.add_argument("--seconds", type=float, default=10.0)
 
@@ -255,6 +313,7 @@ def main() -> int:
         fn = {
             "snap": do_snap, "rtt": do_rtt, "uart": do_uart,
             "txbench": do_txbench, "storm": do_storm, "idle": do_idle,
+            "sizing": do_sizing,
         }[args.action]
         r = fn(args, reader, ser)
         return 0 if r is not None else 1

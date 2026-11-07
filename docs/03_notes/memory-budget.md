@@ -76,22 +76,30 @@
 
 ## 4. 執行期佔用（開機後從 heap 拿）
 
+> **2026-11-08 重量**（貼身化之後；逐項依據見 [buffer-tightening.md](buffer-tightening.md)）。
+> 舊表把已刪除的 `slow_worker`／`jobs` 與尚未收斂的 6,144 棧都算進去了，已改成實測值。
+> 測試任務（`fx`／`hello`／`probe`）只在 `NC_ENABLE_TESTS=ON` 存在，release 不含。
+
 | 項目 | 大小 | 來源 |
 |---|---|---|
-| `decode0` + `decode1` 棧 | 2 × 6,144 = 12,288 | `s_nc4_loops` |
-| `slow_worker` 棧 | 4,096 | `s_core_loops` |
-| `fx` 棧 | 4,096 | `s_fx_loops` |
-| `hello` 棧 | 3,072 | `nc_hello` |
-| `nc4.rx`（parser） | 8,205 | plan（INTERNAL） |
-| `uart.rx` | 1,024 | plan（INTERNAL） |
-| `jobs`（8 格慢工作） | ~192 | plan（INTERNAL） |
-| `probe.hub` | 512 | plan（INTERNAL） |
-| main task 棧 + idle/timer | ~6,500 | FreeRTOS |
-| **合計** | **~40 KB** | |
+| `decode0` + `decode1` 棧 | 2 × 3,072 = 6,144 | `s_nc4_loops`（全 handler 走遍實測 2,232 B/核） |
+| `cdc.rx` 棧 | 1,280 | `CDC_RX_TASK_STACK`（實測 936） |
+| `uart.rx` 棧 | 1,536 | `nc4_bus_start_producer`（實測 888） |
+| `nc_log` 棧 | 2,560 | `nc_log_start`（實測 1,804） |
+| main task 棧 | 3,072 | `CONFIG_ESP_MAIN_TASK_STACK_SIZE`（實測 2,120） |
+| `nc4.rx`（CDC parser） | 4,192 | plan（INTERNAL）—— OTA 的 4 KB chunk |
+| `uart.rx`（parser） | 1,024 | plan（INTERNAL） |
+| CDC 插槽 | 4 × 256 = 1,024 | heap（零複製收斂） |
+| UART 插槽 | 4 × 256 = 1,024 | heap |
+| UART driver 環 | RX 1,024 + TX 1,024 | IDF `uart_driver_install` |
+| `fx` / `hello` 棧（測試） | 4,096 / 2,048 | `s_fx_loops` / `nc_hello` |
+| `probe.hub`（測試） | 512 | plan（INTERNAL） |
+| idle／timer／ipc | ~6.5 KB | FreeRTOS |
+| **合計（release）** | **~24 KB** | |
 
 `fx.arena` 512 KB 在 **PSRAM**，不佔內部 SRAM。
 
-**開機穩定後剩餘：約 227.8 − 40 ≈ 188 KB（±10 KB）。**
+**開機穩定後剩餘（實測 2026-11-08，S3、tests ON）：內部 286 KB、最大連續 208 KB；PSRAM 7.85 MB。**
 
 ---
 
