@@ -36,10 +36,15 @@ static const char *TAG = "test_action";
 
 static nc_test_action_hooks_t s_hooks;
 
+// 回覆幀由 **decoder** 持有（PSRAM），唔再放任務棧。
+// 之前這裡是 `uint8_t frame[2,615]` 的 by-value struct：每個測試指令的回覆
+// 都要在 decode 任務的 4 KB 棧上佔 2.6 KB。實測代價：
+//   decode0 的 HWM 由 2,580 → 364（單一條 0xF00C），洪水時只剩 124 B。
+// 7.19 已經把 main.c 的回覆幀搬到 decoder，這裡是漏掉的一處。
 typedef struct {
     nc4_ctx_t *ctx;
     uint16_t cmd;
-    uint8_t frame[NC4_HDR_LEN + 2 + NC4_REPLY_JSON_MAX + NC4_CRC_LEN];
+    uint8_t *frame;      // → nc4_decoder_reply_buf()，不在棧上
 } nc4_reply_t;
 
 static uint32_t s_bench_ok;
@@ -49,6 +54,10 @@ static char *reply_open(nc4_reply_t *r, nc4_ctx_t *ctx, uint16_t cmd)
 {
     r->ctx = ctx;
     r->cmd = cmd;
+    r->frame = nc4_decoder_reply_buf(ctx->decoder);
+    if (r->frame == NULL) {
+        return NULL;      // decoder 建立時已配置好，正常唔會發生
+    }
     char *json = (char *)r->frame + NC4_HDR_LEN + 2;
     json[0] = '\0';
     return json;
@@ -56,7 +65,7 @@ static char *reply_open(nc4_reply_t *r, nc4_ctx_t *ctx, uint16_t cmd)
 
 static void reply_send(nc4_reply_t *r, size_t len)
 {
-    if (r->ctx == NULL || r->ctx->send == NULL) {
+    if (r->ctx == NULL || r->ctx->send == NULL || r->frame == NULL) {
         return;
     }
     if (len > NC4_REPLY_JSON_MAX) {
@@ -65,7 +74,9 @@ static void reply_send(nc4_reply_t *r, size_t len)
     uint8_t *data = r->frame + NC4_HDR_LEN;   // DATA 區：2B 長度前綴 + JSON
     data[0] = (uint8_t)len;
     data[1] = (uint8_t)(len >> 8);
-    const int total = nc4_pack_into(r->frame, sizeof(r->frame), r->cmd,
+    // 用 NC4_REPLY_FRAME_MAX，唔可以用 sizeof(r->frame)：frame 由陣列改成指標之後
+    // sizeof 只剩 4/8 B → pack_into 直接回 -1 → 回覆靜靜消失（實測：0xF00C/0xF00E 全部冇回）。
+    const int total = nc4_pack_into(r->frame, NC4_REPLY_FRAME_MAX, r->cmd,
                                     nc4_reply_addr(r->ctx), data, 2 + len);
     if (total > 0) {
         r->ctx->send(r->ctx->send_arg, r->frame, (size_t)total);
@@ -79,6 +90,9 @@ static void reply_json(nc4_ctx_t *ctx, uint16_t cmd, const char *json)
     }
     nc4_reply_t r;
     char *dst = reply_open(&r, ctx, cmd);
+    if (dst == NULL) {
+        return;
+    }
     size_t n = strlen(json);
     if (n > NC4_REPLY_JSON_MAX) {
         n = NC4_REPLY_JSON_MAX;
@@ -458,8 +472,11 @@ static void on_uart_loop(nc4_ctx_t *ctx, const nc4_frame_t *f)
     if (size > 256) size = 256;
     if (frames == 0) frames = 1;
 
-    uint8_t payload[256];
-    uint8_t frame[NC4_HDR_LEN + 256 + NC4_CRC_LEN];
+    // 這兩個陣列以前在 decode0 的 4 KB 棧上：525 B ＋ uart_write_bytes/wait_tx_done
+    // 的呼叫深度直接把棧打爆（實測：每次 0xF00B 都撞 stack canary → 整塊板重啟）。
+    // handler 由 decoder lock 序列化，所以 static 是安全的。
+    static uint8_t payload[256];
+    static uint8_t frame[NC4_HDR_LEN + 256 + NC4_CRC_LEN];
     memset(payload, 0xA5, sizeof(payload));
     const int total = nc4_pack_into(frame, sizeof(frame), NC4_CMD_LOOP_PING,
                                     NC4_ADDR_BROADCAST, payload, size);
@@ -474,12 +491,73 @@ static void on_uart_loop(nc4_ctx_t *ctx, const nc4_frame_t *f)
     reply_json(ctx, NC4_CMD_HUB_RSP, json);
 }
 
+// ── 0xF00E UART_STREAM：由**獨立 task** 灌 UART（唔揸 decoder 鎖）──
+//
+// 為什麼要獨立 task：handler 執行時揸住 decoder 的鎖，而 decode0/decode1 共用
+// 同一個 decoder —— 寫入期間 decode1 根本冇辦法 dispatch，插槽一滿 producer 就停，
+// UART driver 的 RX ring 跟著溢位，看起來像「UART 掉幀」。
+// 實測（0xF00B 從 handler 寫 200 幀 × 77 B）：rx 只有 62/200，還等滿 20 秒 timeout。
+// 真實的 UART 對端不會揸住我們的鎖，所以量吞吐一定要用這支。
+#define NC4_CMD_UART_STREAM 0xF00E
+#define UART_STREAM_PORT    UART_NUM_1
+
+static volatile uint32_t s_stream_sent;
+
+static void uart_stream_task(void *arg)
+{
+    const uint32_t v = (uint32_t)(uintptr_t)arg;
+    const uint16_t frames = (uint16_t)(v & 0xFFFF);
+    const uint16_t size = (uint16_t)((v >> 16) & 0xFFFF);
+    static uint8_t payload[256];
+    static uint8_t frame[NC4_HDR_LEN + 256 + NC4_CRC_LEN];
+    memset(payload, 0x5A, size);
+    const int total = nc4_pack_into(frame, sizeof(frame), NC4_CMD_LOOP_PING,
+                                    NC4_ADDR_BROADCAST, payload, size);
+    if (total <= 0) {
+        __atomic_store_n(&s_stream_sent, 0xFFFFFFFFu, __ATOMIC_RELAXED);
+        vTaskDelete(NULL);
+        return;
+    }
+    __atomic_store_n(&s_loop_rx, 0, __ATOMIC_RELAXED);
+    __atomic_store_n(&s_stream_sent, 0, __ATOMIC_RELAXED);
+    for (uint16_t i = 0; i < frames; i++) {
+        const int w = uart_write_bytes(UART_STREAM_PORT, (const char *)frame, total);
+        if (w != total) {
+            break;
+        }
+        __atomic_add_fetch(&s_stream_sent, 1, __ATOMIC_RELAXED);
+    }
+    uart_wait_tx_done(UART_STREAM_PORT, pdMS_TO_TICKS(2000));
+    vTaskDelete(NULL);
+}
+
+static void on_uart_stream(nc4_ctx_t *ctx, const nc4_frame_t *f)
+{
+    uint16_t frames = 200, size = 64;
+    if (f->len >= 2) frames = (uint16_t)(f->data[0] | (f->data[1] << 8));
+    if (f->len >= 4) size = (uint16_t)(f->data[2] | (f->data[3] << 8));
+    if (size < 16) size = 16;
+    if (size > 256) size = 256;
+    if (frames == 0) frames = 1;
+    const uint32_t arg = ((uint32_t)size << 16) | frames;
+    if (xTaskCreatePinnedToCore(uart_stream_task, "u_stream", 2560,
+                                (void *)(uintptr_t)arg, 3, NULL, 1) != pdPASS) {
+        reply_json(ctx, NC4_CMD_HUB_RSP, "{\"err\":\"task\"}");
+        return;
+    }
+    char json[64];
+    snprintf(json, sizeof(json), "{\"started\":1,\"frames\":%u,\"size\":%u}",
+             frames, size);
+    reply_json(ctx, NC4_CMD_HUB_RSP, json);
+}
+
 static void on_loop_stat(nc4_ctx_t *ctx, const nc4_frame_t *f)
 {
     (void)f;
-    char json[64];
-    snprintf(json, sizeof(json), "{\"rx\":%u}",
-             (unsigned)__atomic_load_n(&s_loop_rx, __ATOMIC_RELAXED));
+    char json[96];
+    snprintf(json, sizeof(json), "{\"rx\":%u,\"sent\":%u}",
+             (unsigned)__atomic_load_n(&s_loop_rx, __ATOMIC_RELAXED),
+             (unsigned)__atomic_load_n(&s_stream_sent, __ATOMIC_RELAXED));
     reply_json(ctx, NC4_CMD_HUB_RSP, json);
 }
 
@@ -733,6 +811,7 @@ static const nc_action_t k_actions[] = {
     { NC4_CMD_BENCH_DATA, on_bench_data, "test" },
     { NC4_CMD_BENCH_RESULT, on_bench_result, "test" },
     { NC4_CMD_UART_LOOP, on_uart_loop, "test" },
+    { NC4_CMD_UART_STREAM, on_uart_stream, "test" },
     { NC4_CMD_LOOP_STAT, on_loop_stat, "test" },
     { NC4_CMD_LOOP_PING, on_loop_ping, "test" },
 };

@@ -432,7 +432,8 @@ esp_err_t nc_log_start(int core, nc_log_tx_fn tx)
     s_tx = tx;
     s_core = core;
 
-    if (xTaskCreatePinnedToCore(log_task, "nc_log", 3072, NULL, 2, &s_task,
+    // 實測 1,804 B（4 KB 洪水下 HWM 1,268）；2,560 留 756 B 餘裕。
+    if (xTaskCreatePinnedToCore(log_task, "nc_log", 2560, NULL, 2, &s_task,
                                 (BaseType_t)core) != pdPASS) {
         s_task = NULL;
         return ESP_ERR_NO_MEM;

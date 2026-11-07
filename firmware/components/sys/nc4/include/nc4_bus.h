@@ -131,6 +131,10 @@ void nc4_bus_stats_reset(void);
 // 登記這條 bus 的 receiver task（只為量 stack 高水位；可選）
 void nc4_bus_set_producer(nc4_bus_handle_t bus, void *task_handle);
 
+// 回覆出口的尺寸量測（tx_max = 單次回覆最大 bytes，決定 TX ring 下限）。
+// transport 的 send 包一層呼叫即可，不改行為。
+void nc4_bus_note_tx(nc4_bus_handle_t bus, size_t len);
+
 // 登記這條 bus 的 rx 參數有幾多項來自 config（0 = 全用 code 預設）。只在報表用。
 void nc4_bus_set_cfg_src(nc4_bus_handle_t bus, int applied);
 

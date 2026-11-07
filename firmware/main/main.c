@@ -142,7 +142,11 @@ static volatile uint32_t s_rx_frames;        // 成功收到的幀數
 #define UART_TEST_PORT     UART_NUM_1
 #define UART_TEST_TX_PIN   7
 #define UART_TEST_RX_PIN   8
-#define UART_TEST_RX_BUF   4096
+// UART 的緩衝照 CDC 的形狀：8 KB TX／4 KB RX 的環是「照抄放大」年代留下的。
+// 實測（921600 baud、迴路）：producer 每次最多搬 242 B；一幀 18 B 的指令
+// 以前的 1 KB slot 會令 read 等到填滿才返回（見 uart_bus_read 的註解）。
+#define UART_TEST_RX_BUF   1024      // 1 KB ≈ 線速 11 ms；producer 一直阻塞等第一個 byte
+#define UART_TEST_TX_BUF   1024      // TX 只由測試指令用（UART 的 send 未接）；1 KB 已足夠
 #define UART_TEST_DEF_BAUD 921600
 #define FW_VERSION         "0.1.1"
 
@@ -739,12 +743,16 @@ static uint32_t s_tx_stalls;          // 回覆等 FIFO 的次數（可觀察）
 
 #define CDC_TX_WAIT_US  100000        // 回覆最多等 100 ms；超過就丟，避免卡死 decode
 
+// 貼身化量測：回覆的最大／平均大小（由 nc4_bus 的統計轉出，不改變行為）
+static nc4_bus_handle_t s_cdc_bus_for_stats;
+
 static esp_err_t cdc_send(void *arg, const uint8_t *frame, size_t len)
 {
     (void)arg;
     if (frame == NULL || len == 0) {
         return ESP_ERR_INVALID_ARG;
     }
+    nc4_bus_note_tx(s_cdc_bus_for_stats, len);
     s_tx_reply = true;
     size_t off = 0;
     const int64_t deadline = esp_timer_get_time() + CDC_TX_WAIT_US;
@@ -1417,11 +1425,32 @@ static int uart_bus_read(void *arg, uint8_t *buf, size_t cap)
 {
     (void)arg;
     if (!s_uart_ready) {
-        return 0;       // 尚未安裝（第一次 UART 測試時才裝）
+        vTaskDelay(1);
+        return 0;       // 尚未安裝（driver 由 owner_init 在 bus 所屬核安裝）
     }
-    // producer 用：無限等（ISR 喺同一核，wake 係本地；唔用 timeout）
-    int n = uart_read_bytes(UART_TEST_PORT, buf, cap, portMAX_DELAY);
-    return n < 0 ? -1 : n;
+    // ★ 模仿 CDC：資料一到就搬走「現在環裡有的」，唔等 slot 填滿。
+    //
+    // 以前是 uart_read_bytes(port, buf, cap, portMAX_DELAY)。IDF 的實作是
+    //   while (length) { xRingbufferReceiveUpTo(..., ticks_to_wait, length) ... }
+    // 所以它會**一直等到收滿 cap 才返回**。cap = slot_size = 1 KB 的年代，
+    // 一幀 18 B 的指令要等 1 KB 到齊才被讀走 —— 等於 UART 的延遲沒有上限。
+    // 實測：送 1 幀（77 B）之後 producer 一直卡在 read，rx 永遠是 0。
+    //
+    // 現在：阻塞等「第一個 byte」（ISR 同核、wake 本地，portMAX_DELAY 安全），
+    // 然後把環裡已經有的全部搬走（最多 cap），立即返回。
+    const int n = uart_read_bytes(UART_TEST_PORT, buf, 1, portMAX_DELAY);
+    if (n <= 0) {
+        return n < 0 ? -1 : 0;
+    }
+    size_t avail = 0;
+    if (uart_get_buffered_data_len(UART_TEST_PORT, &avail) == ESP_OK && avail > 0 && cap > 1) {
+        const size_t want = (avail < cap - 1) ? avail : (cap - 1);
+        const int more = uart_read_bytes(UART_TEST_PORT, buf + 1, want, 0);
+        if (more > 0) {
+            return n + more;
+        }
+    }
+    return n;
 }
 
 static esp_err_t uart_loop_init(uint32_t baud)
@@ -1434,7 +1463,8 @@ static esp_err_t uart_loop_init(uint32_t baud)
         .flow_ctrl = UART_HW_FLOWCTRL_DISABLE,
         .source_clk = UART_SCLK_DEFAULT,
     };
-    ESP_RETURN_ON_ERROR(uart_driver_install(UART_TEST_PORT, UART_TEST_RX_BUF, 8192, 0, NULL, 0),
+    ESP_RETURN_ON_ERROR(uart_driver_install(UART_TEST_PORT, UART_TEST_RX_BUF,
+                                            UART_TEST_TX_BUF, 0, NULL, 0),
                         TAG, "uart driver");
     ESP_RETURN_ON_ERROR(uart_param_config(UART_TEST_PORT, &cfg), TAG, "uart param");
     ESP_RETURN_ON_ERROR(uart_set_pin(UART_TEST_PORT, UART_TEST_TX_PIN, UART_TEST_RX_PIN,
@@ -1503,7 +1533,7 @@ static size_t cdc_region(size_t want)
 #define CDC_RX_SLOT       256        // 實測每次 push 平均 68 B（USB FS 64 B 封包）⇒ 256 已有 3.7× 餘裕
 #define CDC_RX_SLOTS      4          // 4 × 256 = 1 KB（實測峰值 3 格）
 #define CDC_RX_TASK_PRIO  5
-#define CDC_RX_TASK_STACK 1536       // 實測用 840 B；1 KB 只剩 184 B（太薄），1.5 KB 留 696 B 餘裕
+#define CDC_RX_TASK_STACK 1280       // 實測 844 B（4 KB 洪水下 HWM 692）；1280 留 436 B 餘裕
 #define CDC_RX_WAIT_MS    2
 
 static TaskHandle_t s_cdc_rx_task = NULL;
@@ -1828,10 +1858,12 @@ static bool nc4_want_core1(void) { return nc4_router_core_used(1); }
 
 static const nc_task_loop_t s_nc4_loops[] = {
     { .name = "decode0", .fn = nc4_bus_task_entry, .arg = (void *)0,
-      .stack = 4096, .prio = 4, .core = 0, .layer = 1,
+      // 棧：全 handler 走遍實測 2,260 B（stack_cover），3072 留 812 B 餘裕。
+      // 以前是 4096，而 2,615 B 的回覆幀還住在棧上時 HWM 只剩 124 B。
+      .stack = 3072, .prio = 4, .core = 0, .layer = 1,
       .enabled = nc4_want_core0 },
     { .name = "decode1", .fn = nc4_bus_task_entry, .arg = (void *)1,
-      .stack = 4096, .prio = 4, .core = 1, .layer = 1,
+      .stack = 3072, .prio = 4, .core = 1, .layer = 1,
       .enabled = nc4_want_core1 },
 };
 
@@ -3341,6 +3373,9 @@ static esp_err_t ph_channels(void)
                 };
                 nc4_bus_handle_t cdc_handle = (nc4_bus_handle_t)0;
                 berr = nc4_bus_add(s_decoder, &cdc_bus, &cdc_handle);
+                if (berr == ESP_OK) {
+                    s_cdc_bus_for_stats = cdc_handle;   // 只給 TX 尺寸量測用
+                }
                 if (berr == ESP_OK && cdc_handle != NULL) {
                     if (xTaskCreatePinnedToCore(cdc_rx_task, "cdc.rx", CDC_RX_TASK_STACK,
                                                 cdc_handle, CDC_RX_TASK_PRIO,
@@ -3376,7 +3411,9 @@ static esp_err_t ph_channels(void)
 
         int uart_core = -1;
         if (s_uart_rx_region != NULL && link_core("UART", &uart_core)) {
-            link_rx_t rx = { .region = 1024, .chunk = 512, .budget = 8, .slots = 4, .slot = 1024 };
+            // 實測：max_read 242 B、slot 峰值 1 格、slot_full 0 → 4×256 就貼身。
+            // region 保留 1024（可收 ≤1011 B 的指令；要 4 KB 指令就改 config）。
+            link_rx_t rx = { .region = 1024, .chunk = 256, .budget = 8, .slots = 4, .slot = 256 };
             const int uapplied = link_rx("UART", &rx);   // config 真的寫了幾個 rx 欄位
             const nc4_bus_cfg_t uart_bus = {
                 .name = "UART",
@@ -3448,7 +3485,9 @@ static esp_err_t ph_channels(void)
         //   decode 就會把整個核餓死（實測：開機停在 USB 已列舉、但冇任何回應）。
         // prio 由 nc4_bus_start_producer 夾到 decode 之下（不變式寫在那裡）。
         if (s_uart_bus != NULL) {
-            const esp_err_t perr = nc4_bus_start_producer(s_uart_bus, "uart.rx", 3, 4096);
+            // producer 只做「等第一個 byte → 搬走環裡有的 → push」：實測 884 B。
+            // 以前是 4096，純粹是照 decode 的數字抄過來。
+            const esp_err_t perr = nc4_bus_start_producer(s_uart_bus, "uart.rx", 3, 1536);
             ESP_LOGI(TAG, "UART producer: %s", esp_err_to_name(perr));
         }
     }

@@ -118,6 +118,7 @@ firmware image 在 `firmware/build/esp_net_core.bin`（先 build 才有）。
 | `nc4_stats.py` | 0xF008 匯流排統計（`copied` 應為 0）＋ 碎片/垃圾重同步邊界 |
 | `nc4_tx_bench.py` | 0xF007 上傳（打包＋送出），同核 / 分核 |
 | `hub_bench.py` | 0xF003 雙核 hub 交換量測 |
+| `buf_probe.py` | **緩衝貼身化**：`snap` / `rtt` / `uart` / `txbench` / `storm` / `idle`。會把裝置側的 `max_read`、slot 峰值、`slot_full`、`max_dlen`、HWM 一齊拉出來，每個尺寸決策都有數字（見 [buffer-tightening.md](../docs/03_notes/buffer-tightening.md)） |
 
 P4 預設靜態 IP `10.10.1.50/16`，量測前先確認連得到。
 

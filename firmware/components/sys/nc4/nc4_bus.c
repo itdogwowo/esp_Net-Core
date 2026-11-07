@@ -60,6 +60,13 @@ struct nc4_bus {
     uint64_t st_bytes;                // 收進來的 bytes（含表頭/CRC）
     uint64_t st_copied;               // 為了「把資料交給 parser」所做的 memcpy bytes
     uint64_t st_parse_us;             // 解析佔用的時間
+
+    // 貼身化量測（2026-11-08）：每一個尺寸決策都要有數字支撐
+    uint32_t st_reads;                // 成功 read/pop/整幀的次數
+    size_t   st_max_read;             // 單次搬運的最大 bytes  → slot_size 的下限
+    uint32_t st_slot_full;            // 拿不到插槽的次數      → slots 的下限
+    uint32_t st_tx_count;             // 回覆次數
+    size_t   st_tx_max;               // 單次回覆最大 bytes    → TX ring / FIFO 的下限
 };
 
 static struct nc4_bus s_buses[NC4_MAX_BUSES];
@@ -121,6 +128,9 @@ uint8_t *nc4_bus_push_begin(nc4_bus_handle_t bus, size_t want)
         // 之前死掉，這一格就永遠停在 2、永遠回不到 free，整條環會慢慢卡死。
         // 少一個狀態就少一個可以卡死的地方。
         b->push_idx = idx;
+    }
+    if (idx < 0) {
+        b->st_slot_full++;       // 貼身化：這個 > 0 就代表 slots 不夠（或 producer 太急）
     }
     taskEXIT_CRITICAL(&b->mux);
     return idx >= 0 ? b->slots + (size_t)idx * b->slot_size : NULL;
@@ -476,7 +486,10 @@ size_t nc4_bus_stats_json(char *buf, size_t cap)
         }
         uint32_t crc_err = 0;
         uint32_t bad_hdr = 0;
+        uint32_t max_dlen = 0;
+        uint32_t max_ok = 0;
         nc4_parser_errors(b->parser, &crc_err, &bad_hdr);
+        nc4_parser_peaks(b->parser, &max_dlen, &max_ok);
         off += snprintf(buf + off, cap - off,
                         "%s{\"name\":\"%s\",\"mode\":\"%s\",\"core\":%d,"
                         "\"frame\":%u,"
@@ -485,7 +498,9 @@ size_t nc4_bus_stats_json(char *buf, size_t cap)
                         "\"parse_ms\":%.1f,\"us_per_frame\":%.1f,"
                         "\"crc_err\":%u,\"bad_hdr\":%u,"
                         "\"remote\":%u,\"region\":%u,\"cfg_src\":%d,"
-                        "\"slots\":[%d,%d,%d,%d],\"occ\":%d,\"peak\":%u}",
+                        "\"slots\":[%d,%d,%d,%d],\"occ\":%d,\"peak\":%u,"
+                        "\"reads\":%u,\"max_read\":%u,\"slot_full\":%u,"
+                        "\"tx\":%u,\"tx_max\":%u,\"max_dlen\":%u,\"max_ok\":%u}",
                         first ? "" : ",", b->cfg.name ? b->cfg.name : "?",
                         b->cfg.mode == NC4_BUS_PULL ? "pull"
                                                     : (b->frame_mode ? "push-frame" : "push-slot"),
@@ -504,7 +519,11 @@ size_t nc4_bus_stats_json(char *buf, size_t cap)
                         (unsigned)b->st_kick_remote,
                         (unsigned)b->cfg.rx_region_bytes, b->cfg_src,
                         st_cnt[0], st_cnt[1], st_cnt[2], st_cnt[3],
-                        b->occ, (unsigned)b->st_slot_peak);
+                        b->occ, (unsigned)b->st_slot_peak,
+                        (unsigned)b->st_reads, (unsigned)b->st_max_read,
+                        (unsigned)b->st_slot_full,
+                        (unsigned)b->st_tx_count, (unsigned)b->st_tx_max,
+                        (unsigned)max_dlen, (unsigned)max_ok);
         first = false;
     }
     if (off < cap) {
@@ -535,12 +554,30 @@ static void producer_task(void *arg)
         }
         const int n = b->cfg.read(b->cfg.read_arg, dst, b->slot_size);
         if (n > 0) {
+            b->st_reads++;
+            if ((size_t)n > b->st_max_read) {
+                b->st_max_read = (size_t)n;
+            }
             nc4_bus_push_commit(b, (size_t)n);
             nc4_bus_kick(b);      // 同核 notify（decode 優先級更高，會即刻接手）
         } else {
             nc4_bus_push_abort(b);
             vTaskDelay(1);        // driver 未就緒／暫時冇資料：唔可以自旋
         }
+    }
+}
+
+// 回覆出口的尺寸量測：由 transport 的 send 包一層呼叫（不改行為）。
+// tx_max 決定 TX ring／FIFO 要幾大；tx_count 用來對照「回覆有沒有被丟」。
+void nc4_bus_note_tx(nc4_bus_handle_t handle, size_t len)
+{
+    struct nc4_bus *b = find_bus(handle);
+    if (b == NULL) {
+        return;
+    }
+    b->st_tx_count++;
+    if (len > b->st_tx_max) {
+        b->st_tx_max = len;
     }
 }
 
@@ -678,6 +715,10 @@ void nc4_bus_task_entry(void *arg)
                         nc4_bus_frame_end(b);
                         break;
                     }
+                    b->st_reads++;
+                    if (flen > b->st_max_read) {
+                        b->st_max_read = flen;
+                    }
                     const int64_t t0 = esp_timer_get_time();
                     const esp_err_t perr = nc4_parser_frame(b->parser, fp, flen);
                     b->st_parse_us += (uint64_t)(esp_timer_get_time() - t0);
@@ -705,6 +746,10 @@ void nc4_bus_task_entry(void *arg)
 
                 if (got == 0) {
                     break;
+                }
+                b->st_reads++;
+                if (got > b->st_max_read) {
+                    b->st_max_read = got;
                 }
                 if (b->parser == NULL && bus_alloc(b) != ESP_OK) {
                     ESP_LOGE(TAG, "[%s] parser 配置失敗，丟棄 %u B",

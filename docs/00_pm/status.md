@@ -1103,3 +1103,44 @@ ETH 的缺段／正常／明確關閉／型別錯／未知鍵，以及兩塊板*
 preset/merge 與 arena→PSRAM 見 [hardware-config.md](../03_notes/hardware-config.md) §7。
 **P4 只在 build 層驗過**（板子不在手邊），ETH 改由 config 決定的行為要上板確認：
 開機應見 `hardware: eth=開 mdc=31 mdio=52 refclk=50 IP101@1` 與 `ETH started (... 來源=hardware.json)`。
+
+### 7.25 2026-11-08（緩衝區貼身化：UART −15 KB、測試回覆幀 −2.6 KB 棧、雙核隔離量測）
+
+**目標**：每個緩衝都要有實測依據（不再「先給大」）；UART 照 CDC 的形狀；雙核互不干擾；
+吞吐不得退步。全部在 S3 上以 [buf_probe.py](../../tools/bench/buf_probe.py) 量測。
+
+**先抓到四件「看起來正常、其實在燒資源」的事**
+
+| # | 問題 | 證據 | 修法 |
+|---|---|---|---|
+| 1 | UART 的 `uart_read_bytes(cap, portMAX_DELAY)` 會**等收滿 cap** 才返回（IDF 是 `while(length)` 迴圈） | 送 1 幀 77 B → `rx` 永遠 0 | 改成「阻塞等第一個 byte → 搬走環裡已有的」＝ CDC 的語義 |
+| 2 | `test_action` 的回覆幀仍是 **2,615 B by-value struct**（7.19 只搬了 main.c 那份） | 單一條 `0xF00C` → decode0 HWM 2,580 → **364**；4 KB 洪水時只剩 **124 B** | 改用 `nc4_decoder_reply_buf()`（PSRAM） |
+| 3 | UART 的環是「照抄 CDC 再放大」：slot 4×1,024、RX 4,096、TX 8,192 ＝ **16.4 KB** | 實測 `max_read=246`、slot 峰值 **1**、`slot_full=0` | 全部貼身（見下表） |
+| 4 | 測試指令由 handler 直接寫 UART：揸住 decoder 鎖 → decode1 不能消費 → 溢位 | 200 幀×77 B 只收到 62/200 | 新增 `0xF00E UART_STREAM`（獨立 task） |
+
+**尺寸（前 → 後）**：UART slot 4×1,024→**4×256**、RX ring 4,096→**1,024**、TX ring 8,192→**1,024**、
+`uart.rx` 棧 4,096→**1,536**（實測 888）、`cdc.rx` 1,536→**1,280**（實測 936）、
+decode0/1 4,096→**3,072**（全 handler 走遍 2,232，剩 840）、main 4,096→**3,072**（實測 2,120）、
+`nc_log` 3,072→**2,560**（實測 1,804）。CDC region 4,192 **不動**（OTA 的 4,096 chunk 需要），
+CDC slot 4×256 **不動**（已經是 1 KB）。
+單項合計 **約 −19.7 KB 內部 RAM**（開機實測 +8.5 KB，差額來自 FATFS/MSC 等非本次項目）。
+
+**不降性能**（前後各 3 次）：UART 500×16 B 172→**161–166 ms**、200×64 B 220→**169–178 ms**、
+100×256 B 339→**294–301 ms**（全部 `lost=0`，≈90 KB/s＝921600 baud 的 98%，在線速上限）；
+CDC RTT 1.084→**1.07–1.13 ms**；CDC TX 1 MB 1.025→**1.024 s**；CDC RX 500×256 **500/500 不變**。
+
+**雙核獨立**：兩條 bus 的 `remote`（跨核 kick）都是 **0**；UART 400×64 B 在 core0 狂打
+STATUS（108 條、p50 2.29 ms）時由 339.9→**334.9 ms（−1.5%）**。殘留耦合是**共用一個
+decoder**（handler 執行序列化）—— 反映在回覆延遲，不影響 UART 吞吐；per-core decoder
+仍是未做項（§7.21）。
+
+**soak**：兩輪共約 21 分鐘、約 3,200 循環：heap 固定、六個任務 HWM 全程不變、CDC 零錯誤；
+UART 在 13 萬幀中出現 **1 次** `crc_err`＋`bad_hdr`（`slot_full=0`、slot 峰值 1，
+單獨 UART 壓力 402 KB 零錯誤）→ 判定為 921600 baud 迴路跳線的偶發干擾，不是緩衝溢位。
+**帳目**：把 UART `rx.slots` 由 4 改 16 重開機，內部 heap `286,243 → 283,171`（正好 −3,072），
+刪掉 cfg 回到 286,243 —— config→實際配置是 1:1，逐項可驗。
+
+**未做／取捨**：CDC 4 KB 連續洪水仍受 4 格插槽限制（74/100，與改動前相同；OTA 有流控）；
+UART 仍然**只收不回**（`send=NULL`，所以 TX ring 只留 1 KB；要回覆得先接 `uart_send()`）；
+IO7 同時是 SD CLK 與 UART 迴路 TX，兩者不能同時用（需要換腳位）。
+細節與量測表：[buffer-tightening.md](../03_notes/buffer-tightening.md)。

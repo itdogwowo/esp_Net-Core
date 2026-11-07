@@ -53,6 +53,12 @@ struct nc4_parser {
     // 壞幀統計：以前 CRC 錯了只會靜靜前移 1 byte，外面完全看不出來。
     uint32_t n_crc_err;     // CRC32 對不上
     uint32_t n_bad_hdr;     // VER 不對 / LEN 超上限
+
+    // 尺寸量測（緩衝區貼身化用）：這條線「到底收多大的幀」。
+    // n_max_dlen = 表頭宣稱的最大 payload（包含放唔落而丟棄的 —— 那才代表真實需求）
+    // n_max_ok   = 真正通過 CRC 並 dispatch 的最大 payload
+    uint32_t n_max_dlen;
+    uint32_t n_max_ok;
 };
 
 // ───────────────────────── decoder ─────────────────────────
@@ -307,6 +313,16 @@ void nc4_parser_errors(const nc4_parser_t *parser, uint32_t *crc_err, uint32_t *
     }
 }
 
+void nc4_parser_peaks(const nc4_parser_t *parser, uint32_t *max_dlen, uint32_t *max_ok)
+{
+    if (max_dlen != NULL) {
+        *max_dlen = (parser != NULL) ? parser->n_max_dlen : 0;
+    }
+    if (max_ok != NULL) {
+        *max_ok = (parser != NULL) ? parser->n_max_ok : 0;
+    }
+}
+
 // 看 9 B 表頭判斷整幀長度；不是合法表頭回 0。
 // 給「先看表頭、再決定這次要 recv 多少」的傳輸層用（frame-aligned 收包）。
 size_t nc4_header_total(const uint8_t *hdr)
@@ -417,6 +433,9 @@ esp_err_t nc4_parser_feed(nc4_parser_t *parser, const uint8_t *data, size_t len)
         // 2. 標頭（不合就前移 1 byte 重找 —— 與 MP 版一致的寬鬆重同步）
         const uint8_t ver = base[2];
         const uint16_t dlen = (uint16_t)(base[7] | (base[8] << 8));
+        if (dlen > parser->n_max_dlen) {
+            parser->n_max_dlen = dlen;   // 貼身化：連「放唔落」的都要記，那是真實需求
+        }
 
         if (ver != NC4_VERSION || dlen > NC4_MAX_PAYLOAD) {
             parser->n_bad_hdr++;
@@ -448,6 +467,9 @@ esp_err_t nc4_parser_feed(nc4_parser_t *parser, const uint8_t *data, size_t len)
             continue;
         }
 
+        if (dlen > parser->n_max_ok) {
+            parser->n_max_ok = dlen;
+        }
         parser_dispatch(parser, base, dlen);
 
         parser->start += total;

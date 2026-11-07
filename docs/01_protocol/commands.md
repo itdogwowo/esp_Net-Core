@@ -174,9 +174,12 @@ components/action/
 | `0xF003` HUB_BENCH | `iters(u32) [mode(u8)]` → `0xF004` JSON：雙核 hub 交換量測（writer core1 / reader core0）。`mode` bit0=1 用舊版次序（deadline 太晚）重現 read=0，回歸測試用 |
 | `0xF004` HUB_RSP | `{iters,read,us,per_sec,torn,w,w_full,r_null,exit:[w,r],late}`；`exit` 1=完成 2=逾時 3=等不到 start |
 | `0xF007` TX_BENCH | `frames(u32) size(u16) mode(u8)` → `0xF004` JSON：**上傳**（打包＋送出）量測。mode 0=同核（同一 task 打包後送出）、1=分核（core1 打包進插槽、decode task 送出） |
-| `0xF008` BUS_STATS | `[reset:u8]` → `0xF009` JSON：每條 bus 的 `{name,mode,frame,frames,mb,copied,parse_ms,us_per_frame}` + `resync`。`copied=0` 就是零複製 |
+| `0xF008` BUS_STATS | `[reset:u8]` → `0xF009` JSON：每條 bus 的 `{name,mode,frame,frames,mb,copied,parse_ms,us_per_frame,region,slots[],peak,reads,max_read,slot_full,tx,tx_max,max_dlen,max_ok}` + `resync`。`copied=0` 就是零複製；`max_read`／`peak`／`slot_full` 是**緩衝貼身化**的量測依據（見 [buffer-tightening.md](../03_notes/buffer-tightening.md)） |
 | `0xF009` BUS_RSP | 上述回覆（`str_u16len` JSON） |
 | `0xF00A` NET_TUNE | `split(u8) core(u8) [frame_align(u8)]` → `0xF004` JSON：把 RX 收斂模式寫進 NVS（`net/rx_split`、`net/rx_core`、`net/frame_align`），**下次開機生效** |
+| `0xF00B` UART_LOOP | `frames(u16) size(u16)` → `0xF004` `{sent,frame}`：由 **handler** 直接灌 UART 迴路。⚠️ handler 揸住 decoder 鎖，寫入期間 decode1 不能消費 → 只適合小量（≤ RX ring），量吞吐請用 `0xF00E` |
+| `0xF00C` LOOP_STAT | 空 → `0xF004` `{rx,sent}`：UART 迴路已收到的幀數／串流已寫出的幀數 |
+| `0xF00E` UART_STREAM | `frames(u16) size(u16)` → `0xF004` `{started,frames,size}`：**由獨立 task** 灌 UART（唔揸 decoder 鎖），配合 `0xF00C` 取進度。`size ≤ 256` |
 
 `0xF004` 是共用的回覆號（HUB / SLOW / UART / TX / NET_TUNE 都用它），因為它們都是「量測結果」。
 

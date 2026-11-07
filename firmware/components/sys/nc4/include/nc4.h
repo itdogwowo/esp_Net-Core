@@ -142,6 +142,10 @@ void nc4_parser_reset(nc4_parser_t *parser);
 //   bad_hdr：VER 不對或 LEN 超上限（多半是根本沒對上 SOF）
 void nc4_parser_errors(const nc4_parser_t *parser, uint32_t *crc_err, uint32_t *bad_hdr);
 
+// 尺寸量測：這條線收過的最大 payload（max_dlen 含被丟棄的超大幀，max_ok 只算成功 dispatch 的）。
+// 用途：parser region = 13 + max_dlen + 餘裕 —— 用實測取代「先給 8 KB」。
+void nc4_parser_peaks(const nc4_parser_t *parser, uint32_t *max_dlen, uint32_t *max_ok);
+
 // ── 打包（給 transport 當 send 用；也可給 handler 產生回覆）──
 // 回傳實際長度；容量不足回 -1（不寫、不 raise）
 int nc4_pack_into(uint8_t *buf, size_t cap, uint16_t cmd, uint16_t addr,

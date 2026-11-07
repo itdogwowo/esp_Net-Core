@@ -27,7 +27,8 @@ void nc_cfg_rx_default(nc_link_kind_t kind, nc_link_rx_t *rx)
                               .slots = 4, .budget = 8 };
         break;
     case NC_LINK_UART:
-        *rx = (nc_link_rx_t){ .region = 1024, .chunk = 512, .slot_size = 1024,
+        // 實測（921600 baud 迴路）：單次最多 242 B、slot 峰值 1 → 4×256 貼身。
+        *rx = (nc_link_rx_t){ .region = 1024, .chunk = 256, .slot_size = 256,
                               .slots = 4, .budget = 8 };
         break;
     case NC_LINK_TCP:
@@ -56,7 +57,7 @@ static const nc_system_cfg_t k_system = {
         },
         {
             .name = "UART", .kind = NC_LINK_UART, .enable = true, .port = 0,
-            .rx = { .region = 1024, .chunk = 512, .slot_size = 1024, .slots = 4, .budget = 8 },
+            .rx = { .region = 1024, .chunk = 256, .slot_size = 256, .slots = 4, .budget = 8 },
         },
     },
     .n_routes = 4,
