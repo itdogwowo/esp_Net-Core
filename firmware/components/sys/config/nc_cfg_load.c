@@ -77,19 +77,25 @@ static void get_str(const cJSON *o, const char *key, char *out, size_t cap,
                     const char *def, nc_cfg_stat_t *st)
 {
     const cJSON *v = item(o, key);
-    const char *s = (v != NULL && cJSON_IsString(v) && v->valuestring != NULL)
-                        ? v->valuestring : NULL;
-    if (s == NULL) {
-        st->defaulted++;
-        snprintf(out, cap, "%s", def != NULL ? def : "");
+    const char *d = (def != NULL) ? def : "";
+    if (v == NULL) {
+        st->defaulted++;        // 冇寫
+        snprintf(out, cap, "%s", d);
         return;
     }
-    if (strlen(s) >= cap) {
-        st->invalid++;      // 放唔落就唔截斷：截斷會變成另一個名
-        snprintf(out, cap, "%s", def != NULL ? def : "");
+    // 寫了但不是字串 = 型別錯（要計 invalid，唔係 defaulted）——
+    // 這兩種在 STATUS 上要分得出來，否則「打錯字」會看起來像「冇填」。
+    if (!cJSON_IsString(v) || v->valuestring == NULL) {
+        st->invalid++;
+        snprintf(out, cap, "%s", d);
         return;
     }
-    snprintf(out, cap, "%s", s);
+    if (strlen(v->valuestring) >= cap) {
+        st->invalid++;          // 放唔落就唔截斷：截斷會變成另一個名
+        snprintf(out, cap, "%s", d);
+        return;
+    }
+    snprintf(out, cap, "%s", v->valuestring);
 }
 
 static void note_unknown(const cJSON *o, const char *const *known, size_t n,
@@ -303,46 +309,62 @@ static void parse_routes(const cJSON *root, nc_system_cfg_t *out, nc_cfg_stat_t 
 }
 
 // ───────────────────────── hardware ─────────────────────────
-// { "SDIO": { "enable":1, "list":[ {"freq":40000000,"width":4,
-//              "GPIO":{"sck":7,"cmd":6,"data":[15,16,4,5]}} ] } }
-esp_err_t nc_cfg_apply_hardware(const cJSON *root, nc_hardware_cfg_t *out, nc_cfg_stat_t *st)
-{
-    if (out == NULL || st == NULL) {
-        return ESP_ERR_INVALID_ARG;
-    }
-    *out = *nc_cfg_defaults_hardware();
-    if (root == NULL) {
-        st->missing = 1;
-        return ESP_OK;
-    }
-    const cJSON *ver = item(root, "version");
-    if (ver != NULL && cJSON_IsNumber(ver) && ver->valueint != NC_CFG_SCHEMA_VERSION) {
-        st->bad_version = 1;
-        return ESP_OK;
-    }
-    static const char *const root_keys[] = {
-        "version", "_comment", "_gpio_convention",
-        "ETH", "PIN", "SPI", "I2C", "I80", "UART", "I2S", "PWM", "SDIO", "ENC", "XL9555",
-    };
-    note_unknown(root, root_keys, sizeof(root_keys) / sizeof(root_keys[0]), st);
+// 每一段一個函式，apply_hardware 只負責「按段叫」；加一段 = 加一個函式 + 一行。
+// 這個形狀是刻意跟 hardware-config.md 的「preset / merge」對齊的：
+// 之後每一段都會變成「preset 表 + 逐欄位覆蓋」，而不是在這裡逐個 get_int。
 
+// ETH（RMII）：{ "ETH": {"enable":1,"mdc":31,"mdio":52,"ref_clk":50,
+//                        "phy_type":"IP101","phy_addr":1} }
+// spi / cs / rst / int 是 SPI 接線的 PHY 用的欄位：認得（不計 unknown）但唔解析 ——
+// IDF 6 的 RMII 驅動不需要它們，要用再補型別（現在解析了也只是假裝有作用）。
+static void apply_eth(const cJSON *root, nc_hardware_cfg_t *out, nc_cfg_stat_t *st)
+{
+    nc_eth_cfg_t *e = &out->eth;
+    const cJSON *o = item(root, "ETH");
+    if (o == NULL) {
+        st->defaulted++;        // 缺整段 → present 保持 0（呼叫端用內建腳位）
+        return;
+    }
+    if (!cJSON_IsObject(o)) {
+        st->invalid++;          // 型別錯一樣當「冇講」，唔會變成「關閉」
+        return;
+    }
+    e->present = true;          // 有寫就算數 —— 即使 enable=0（明確關閉）
+    static const char *const keys[] = {
+        "enable", "mdc", "mdio", "ref_clk", "phy_type", "phy_addr",
+        "spi", "cs", "rst", "int", "_comment",
+    };
+    note_unknown(o, keys, sizeof(keys) / sizeof(keys[0]), st);
+
+    e->enable   = get_bool(o, "enable", false, st);
+    e->mdc      = (int8_t)get_int(o, "mdc", -1, -1, NC_CFG_GPIO_MAX, st);
+    e->mdio     = (int8_t)get_int(o, "mdio", -1, -1, NC_CFG_GPIO_MAX, st);
+    e->ref_clk  = (int8_t)get_int(o, "ref_clk", -1, -1, NC_CFG_GPIO_MAX, st);
+    e->phy_addr = (uint8_t)get_int(o, "phy_addr", 1, 0, 31, st);
+    get_str(o, "phy_type", e->phy_type, sizeof(e->phy_type), "IP101", st);
+}
+
+// SDIO：{ "SDIO": { "enable":1, "list":[ {"freq":40000000,"width":4,
+//                   "GPIO":{"sck":7,"cmd":6,"data":[15,16,4,5]}} ] } }
+static void apply_sdio(const cJSON *root, nc_hardware_cfg_t *out, nc_cfg_stat_t *st)
+{
     const cJSON *sdio = item(root, "SDIO");
     if (sdio == NULL) {
         st->defaulted++;
-        return ESP_OK;
+        return;
     }
     if (!cJSON_IsObject(sdio)) {
         st->invalid++;
-        return ESP_OK;
+        return;
     }
     out->n_sdio = 0;
     if (!get_bool(sdio, "enable", false, st)) {
-        return ESP_OK;
+        return;
     }
     const cJSON *list = item(sdio, "list");
     if (!cJSON_IsArray(list)) {
         st->invalid++;
-        return ESP_OK;
+        return;
     }
     const cJSON *it = NULL;
     cJSON_ArrayForEach(it, list) {
@@ -356,16 +378,49 @@ esp_err_t nc_cfg_apply_hardware(const cJSON *root, nc_hardware_cfg_t *out, nc_cf
         e.freq_hz = (uint32_t)get_int(it, "freq", 40000000, 100000, 80000000, st);
         e.width   = (uint8_t)get_int(it, "width", 4, 1, 4, st);
         const cJSON *g = item(it, "GPIO");
-        e.clk = (int8_t)get_int(g, "sck", -1, -1, 48, st);
-        e.cmd = (int8_t)get_int(g, "cmd", -1, -1, 48, st);
+        e.clk = (int8_t)get_int(g, "sck", -1, -1, NC_CFG_GPIO_MAX, st);
+        e.cmd = (int8_t)get_int(g, "cmd", -1, -1, NC_CFG_GPIO_MAX, st);
         const cJSON *arr = item(g, "data");
         for (int i = 0; i < 4; i++) {
             const cJSON *v = cJSON_IsArray(arr) ? cJSON_GetArrayItem(arr, i) : NULL;
-            e.d[i] = (cJSON_IsNumber(v) && v->valueint >= 0 && v->valueint <= 48)
+            e.d[i] = (cJSON_IsNumber(v) && v->valueint >= 0 && v->valueint <= NC_CFG_GPIO_MAX)
                          ? (int8_t)v->valueint : -1;
         }
         out->sdio[out->n_sdio++] = e;
     }
+}
+
+esp_err_t nc_cfg_apply_hardware(const cJSON *root, nc_hardware_cfg_t *out, nc_cfg_stat_t *st)
+{
+    if (out == NULL || st == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    *out = *nc_cfg_defaults_hardware();
+    // system / tasks 兩個 apply_* 都有這一行，hardware 以前漏了：boot 路徑的
+    // s_hw_stat 是 static 所以看不出來，任何非 static 的呼叫端（host test）拿到的是
+    // 未初始化的計數 —— 看起來像「解析出錯」，其實是沒人清過。
+    memset(st, 0, sizeof(*st));
+    if (root == NULL) {
+        st->missing = 1;
+        return ESP_OK;
+    }
+    if (!cJSON_IsObject(root)) {
+        st->bad_json = 1;
+        return ESP_OK;
+    }
+    const cJSON *ver = item(root, "version");
+    if (ver != NULL && cJSON_IsNumber(ver) && ver->valueint != NC_CFG_SCHEMA_VERSION) {
+        st->bad_version = 1;
+        return ESP_OK;
+    }
+    static const char *const root_keys[] = {
+        "version", "_comment", "_gpio_convention",
+        "ETH", "PIN", "SPI", "I2C", "I80", "UART", "I2S", "PWM", "SDIO", "ENC", "XL9555",
+    };
+    note_unknown(root, root_keys, sizeof(root_keys) / sizeof(root_keys[0]), st);
+
+    apply_eth(root, out, st);    // 已型別化的段：改它 = 改行為
+    apply_sdio(root, out, st);   // 同上；其餘段未型別化 = 改它沒有作用（只計 unknown）
     return ESP_OK;
 }
 
@@ -640,7 +695,11 @@ esp_err_t nc_cfg_boot(void)
              s_sys_stat.bad_version ? " 版本不符" : "",
              (unsigned)s_sys_stat.defaulted, (unsigned)s_sys_stat.invalid,
              (unsigned)s_sys_stat.unknown);
-    ESP_LOGI(TAG, "hardware: sdio=%u%s%s（def=%u inv=%u unk=%u）",
+    // ETH 的「未寫」與「關閉」要分得出來：前者用內建腳位，後者真的不啟動。
+    const char *eth_state = !s_hw.eth.present ? "未寫(內建)" : (s_hw.eth.enable ? "開" : "關");
+    ESP_LOGI(TAG, "hardware: eth=%s mdc=%d mdio=%d refclk=%d %s@%u；sdio=%u%s%s（def=%u inv=%u unk=%u）",
+             eth_state, s_hw.eth.mdc, s_hw.eth.mdio, s_hw.eth.ref_clk,
+             s_hw.eth.phy_type, (unsigned)s_hw.eth.phy_addr,
              (unsigned)s_hw.n_sdio,
              s_hw_stat.missing ? " 缺檔" : "",
              s_hw_stat.bad_json ? " 壞檔" : "",

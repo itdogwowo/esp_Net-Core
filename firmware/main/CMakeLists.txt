@@ -6,9 +6,11 @@
 #   改成：firmware 內嵌 → 第一次開機自動格式化 → 寫入預置 → 交給 host。
 #   使用者不需要手動格式化；換預置只要改 ports/<board>/data/config/*.json 再 build。
 #
-# 一個層一個檔：目前嵌 system / network / tasks（存在才嵌）；缺的層由 firmware 的預設補。
-# 注意：ports/<board>/data/config/ 下的 hardware.json / driver.json 目前**沒有** embed，
-#       firmware 也還沒讀它們 —— 別以為改了那兩個檔會生效。
+# 一個層一個檔：目前嵌 hardware / system / network / tasks（存在才嵌）；缺的層由 firmware 的預設補。
+# hardware.json 目前只有 **ETH** 與 **SDIO** 兩段真的被讀（nc_cfg_apply_hardware）；
+# 其餘段（PIN/SPI/I2C/I80/UART/I2S/PWM/ENC/XL9555）只會被計入 config 的 unknown 計數，
+# 改它們不會生效 —— 等有 driver 用到再補型別。
+# driver.json **沒有** embed、也還沒有任何地方讀它。
 
 set(_preset_embed)
 foreach(_cfg hardware system network tasks)
@@ -80,9 +82,14 @@ if(NETCORE_MINIMAL)
 endif()
 
 # SD 速度量測（sd_boot 內）：-DNC_SD_BENCH=1 才編入，正常映像唔會有。
-# FAT 寫入量測：包住 sdmmc_write_sectors 計 sector 數（只影響有 link 的映像）
-idf_build_set_property(LINK_OPTIONS "-Wl,--wrap=sdmmc_write_sectors" APPEND)
-idf_build_set_property(LINK_OPTIONS "-Wl,--wrap=sdmmc_read_sectors" APPEND)
+# FAT 寫入量測：包住 sdmmc_write_sectors 計 sector 數。
+# ★ 只可以在測試映像加 --wrap：__wrap_sdmmc_* 的定義在 main.c 的 NC_ENABLE_TESTS 區塊裡
+#   （0xF012–0xF019 的 SD bench 本身就是測試指令）。無條件加就會令 release 映像
+#   出現 undefined reference to `__wrap_sdmmc_write_sectors` —— 這裡之前就是這樣。
+if(NC_ENABLE_TESTS)
+    idf_build_set_property(LINK_OPTIONS "-Wl,--wrap=sdmmc_write_sectors" APPEND)
+    idf_build_set_property(LINK_OPTIONS "-Wl,--wrap=sdmmc_read_sectors" APPEND)
+endif()
 
 if(NC_SD_BENCH)
     target_compile_definitions(${COMPONENT_LIB} PRIVATE NC_SD_BENCH=1)

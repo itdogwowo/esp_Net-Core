@@ -28,6 +28,8 @@ extern "C" {
 #define NC_CFG_TASK_NAME_MAX    24
 #define NC_CFG_CID_MAX          8      // "F5F9" + 餘裕
 #define NC_CFG_REGION_MAX       8300   // = NC4_MAX_FRAME（8205）向上取整；不直接 include nc4
+#define NC_CFG_GPIO_MAX         54     // P4 最大 GPIO54（S3 只到 48；超出的值留給 driver 判錯）
+#define NC_CFG_PHY_NAME_MAX     12     // "IP101" / "LAN8720" …
 
 typedef enum {
     NC_LINK_CDC = 0,
@@ -75,8 +77,24 @@ typedef struct {
 
 // ── hardware 層（hardware.json）：實體匯流排 ──
 // 一個層一個檔，跟 system/tasks 同一個生命周期（seed → load → struct）。
-// 目前只型別化 SDIO；其他匯流排（SPI/I2C/UART…）等有 driver 用到再逐個加。
+// 已型別化：ETH、SDIO。其他段（PIN/SPI/I2C/I80/UART/I2S/PWM/ENC/XL9555）
+// 只會被計入 unknown —— **改它們不會生效**，等有 driver 用到再逐個加型別。
 #define NC_CFG_MAX_SDIO 2
+
+// ETH（RMII）：跟 SDIO 一樣只出現一次。
+// present 不是 enable 的別名，兩者語意不同：
+//   present=0（config 冇寫 ETH 段）→ 呼叫端用**編譯期內建腳位**
+//       —— hardware.json 缺檔／壞掉時板子仍然上得了網（failure-policy）；
+//   present=1, enable=0            → 用戶明確關閉，唔起 netif。
+typedef struct {
+    bool    present;
+    bool    enable;
+    int8_t  mdc;
+    int8_t  mdio;
+    int8_t  ref_clk;
+    uint8_t phy_addr;
+    char    phy_type[NC_CFG_PHY_NAME_MAX];   // 目前只影響 log；IDF 6 只有 generic PHY 驅動
+} nc_eth_cfg_t;
 
 typedef struct {
     bool     enable;
@@ -88,8 +106,9 @@ typedef struct {
 } nc_sdio_cfg_t;
 
 typedef struct {
-    uint16_t     version;
-    uint8_t      n_sdio;
+    uint16_t      version;
+    nc_eth_cfg_t  eth;
+    uint8_t       n_sdio;
     nc_sdio_cfg_t sdio[NC_CFG_MAX_SDIO];
 } nc_hardware_cfg_t;
 

@@ -49,6 +49,50 @@ static nc_cfg_stat_t parse_tasks(const char *json, nc_tasks_cfg_t *out)
     return st;
 }
 
+// 解析一段 JSON 並填 hardware；回傳 stat
+static nc_cfg_stat_t parse_hw(const char *json, nc_hardware_cfg_t *out)
+{
+    nc_cfg_stat_t st;
+    cJSON *root = (json != NULL) ? cJSON_Parse(json) : NULL;
+    (void)nc_cfg_apply_hardware(root, out, &st);
+    if (root != NULL) {
+        cJSON_Delete(root);
+    }
+    return st;
+}
+
+// 真的出廠 hardware.json：零 invalid／零 unknown，ETH 的 enable 要符合預期。
+static void check_preset_hw(const char *path, int expect_eth)
+{
+    printf("  —— 預置 %s\n", path);
+    FILE *f = fopen(path, "rb");
+    ok("開得到", f != NULL);
+    if (f == NULL) {
+        return;
+    }
+    static char buf[64 * 1024];
+    const size_t n = fread(buf, 1, sizeof(buf) - 1, f);
+    fclose(f);
+    buf[n] = '\0';
+    cJSON *root = cJSON_Parse(buf);
+    ok("合法 JSON", root != NULL);
+    if (root == NULL) {
+        return;
+    }
+    nc_hardware_cfg_t hw;
+    nc_cfg_stat_t ps;
+    (void)nc_cfg_apply_hardware(root, &hw, &ps);
+    ok("零 invalid", ps.invalid == 0);
+    ok("零 unknown", ps.unknown == 0);
+    ok("ETH 段有寫（present）", hw.eth.present);
+    ok("ETH enable 符合預期", hw.eth.enable == (expect_eth != 0));
+    if (hw.eth.enable) {
+        ok("啟用時腳位齊", hw.eth.mdc >= 0 && hw.eth.mdio >= 0 && hw.eth.ref_clk >= 0);
+    }
+    ok("phy_type 非空", hw.eth.phy_type[0] != '\0');
+    cJSON_Delete(root);
+}
+
 static const nc_link_cfg_t *link(const nc_system_cfg_t *s, const char *name)
 {
     for (uint8_t i = 0; i < s->n_links; i++) {
@@ -211,11 +255,56 @@ int main(void)
     ts = parse_tasks("{\"version\":1,\"tasks\":[]}", &tasks);
     ok("n_tasks=0", tasks.n_tasks == 0);
 
+    // ── hardware：ETH（2026-11-08 起真的會被讀）──
+    nc_hardware_cfg_t hw;
+    nc_cfg_stat_t hs;
+
+    printf("[15] hardware：缺檔 → eth.present=0（呼叫端改用內建腳位）\n");
+    hs = parse_hw(NULL, &hw);
+    ok("missing=1", hs.missing == 1);
+    ok("present=0", !hw.eth.present);
+    ok("enable=0", !hw.eth.enable);
+    ok("mdc=-1", hw.eth.mdc == -1);
+    ok("phy_type 預設 IP101", strcmp(hw.eth.phy_type, "IP101") == 0);
+
+    printf("[16] hardware：正常 ETH 段（mdio=52 在 P4 的 GPIO 範圍內）\n");
+    hs = parse_hw("{\"version\":1,\"ETH\":{\"enable\":1,\"mdc\":31,\"mdio\":52,"
+                  "\"ref_clk\":50,\"phy_addr\":1,\"phy_type\":\"IP101\","
+                  "\"spi\":-1,\"cs\":-1,\"rst\":-1,\"int\":-1}}", &hw);
+    ok("present=1", hw.eth.present);
+    ok("enable=1", hw.eth.enable);
+    ok("mdc=31", hw.eth.mdc == 31);
+    ok("mdio=52（唔可以當超範圍）", hw.eth.mdio == 52);
+    ok("ref_clk=50", hw.eth.ref_clk == 50);
+    ok("phy_addr=1", hw.eth.phy_addr == 1);
+    ok("phy_type=IP101", strcmp(hw.eth.phy_type, "IP101") == 0);
+    ok("spi/cs/rst/int 認得（unknown=0）", hs.unknown == 0);
+    ok("零 invalid", hs.invalid == 0);
+
+    printf("[17] hardware：enable=0 是「明確關閉」，與「缺段」唔同\n");
+    hs = parse_hw("{\"version\":1,\"ETH\":{\"enable\":0}}", &hw);
+    ok("present=1（有寫就算）", hw.eth.present);
+    ok("enable=0", !hw.eth.enable);
+
+    printf("[18] hardware：enable 型別錯／GPIO 超範圍／phy_type 型別錯 → 用預設 + invalid\n");
+    hs = parse_hw("{\"version\":1,\"ETH\":{\"enable\":\"yes\",\"mdc\":99,\"phy_type\":123}}",
+                  &hw);
+    ok("present=1", hw.eth.present);
+    ok("enable 回 false", !hw.eth.enable);
+    ok("mdc 回 -1", hw.eth.mdc == -1);
+    ok("phy_type 回 IP101", strcmp(hw.eth.phy_type, "IP101") == 0);
+    ok("invalid>=3（三項都係型別／範圍錯）", hs.invalid >= 3);
+
+    printf("[19] hardware：未知鍵只計數，仍然解析\n");
+    hs = parse_hw("{\"version\":1,\"ETH\":{\"enable\":1,\"mdc_gpio\":31}}", &hw);
+    ok("unknown>0", hs.unknown > 0);
+    ok("仍然 present + enable", hw.eth.present && hw.eth.enable);
+
 #ifndef PRESET_SYSTEM
 #define PRESET_SYSTEM ""
 #endif
     if (PRESET_SYSTEM[0] != '\0') {
-        printf("[15] 真的出廠預置（%s）\n", PRESET_SYSTEM);
+        printf("[20] 真的出廠 system.json（%s）\n", PRESET_SYSTEM);
         FILE *f = fopen(PRESET_SYSTEM, "rb");
         ok("開得到預置", f != NULL);
         if (f != NULL) {
@@ -236,6 +325,14 @@ int main(void)
             }
         }
     }
+
+    printf("[21] 真的出廠 hardware.json\n");
+#ifdef PRESET_HARDWARE_P4
+    check_preset_hw(PRESET_HARDWARE_P4, 1);   // P4 這塊板有 ETH
+#endif
+#ifdef PRESET_HARDWARE_S3
+    check_preset_hw(PRESET_HARDWARE_S3, 0);   // S3 沒有 ETH
+#endif
 
     printf("\n%d/%d 項通過\n", checks - fails, checks);
     return fails == 0 ? 0 : 1;

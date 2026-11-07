@@ -37,6 +37,7 @@
 #include "esp_chip_info.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
+#include "esp_memory_utils.h"   // esp_ptr_external_ram()：STATUS 要講回覆幀係唔係在 PSRAM
 #include "esp_partition.h"
 #include "esp_system.h"
 #include "esp_timer.h"
@@ -475,8 +476,13 @@ static esp_err_t usb_init(void)
     // 喺 CDC 所屬核執行：USB ISR、TinyUSB task、RX callback 之後全部同核
     return nc_core_run_on(cdc_core, usb_install, (void *)(intptr_t)cdc_core);
 }
+#endif   // !CONFIG_IDF_TARGET_ESP32P4 —— 上半：TinyUSB／CDC（真正只有 S3 有）
 
-// ── SD 卡（system.json 的 SDcard 段；enable=0 時一個 byte 都唔配）──
+// ── SD 卡（hardware.json 的 SDIO 段；enable=0 時一個 byte 都唔配）──
+//
+// 為什麼不在上面的 S3 區塊：SDMMC 兩顆晶片都有，P4 這塊板只是「冇卡座」
+// （SDIO.enable=0 → sd_boot 直接返回）。用晶片擋會令 P4 永遠接不到 SD；
+// 用 config 擋，將來換一塊有卡座的 P4 只要填腳位。
 //
 // S3 的 slot0 係 IOMUX 固定腳（CLK36/CMD35/D37/D138/D233/D334）；
 // 只要 config 指定了 sck/cmd，就代表走 GPIO matrix → slot1。
@@ -493,6 +499,9 @@ static BYTE s_sd_pdrv;             // /sd 用的 diskio 槽
 static bool s_sd_vfs_mounted;      // /sd 的 VFS 現在掛住？
 static int s_sd_fr = -1;           // f_mount 的 FRESULT
 
+// ★ 以下整塊只給測試映像用（0xF012–0xF019 的 SD bench）。
+//   release 會把 call site 全部編掉，留下的 static 函式就是 -Wunused-function。
+#ifdef NC_ENABLE_TESTS
 // 三個 SD 測試指令共用一個 64 KB、512 對齊的緩衝（互斥使用），
 // 避免每個 bench 各佔 64 KB .bss（之前三個加起來 192 KB，開機就可能爆 DRAM）。
 #define SD_BENCH_BUF_BYTES (64 * 1024)
@@ -525,6 +534,7 @@ static esp_err_t sd_bench_buf_get(bool in_psram)
              in_psram ? "PSRAM" : "內部 DMA", s_sd_bench_buf);
     return ESP_OK;
 }
+#endif   // NC_ENABLE_TESTS（SD bench 緩衝）
 
 // ── /sd 的 VFS：掛上／卸下 ──
 // 交去 USB 之前一定要卸（兩邊同時寫同一份 FAT 會爛）；收回之後再掛。
@@ -704,6 +714,9 @@ static esp_err_t sd_boot(void)
     return ESP_OK;
 }
 
+#if !CONFIG_IDF_TARGET_ESP32P4
+// MSC／CDC 出口只在 S3 有（P4 這塊板冇 OTG，見 failure-policy §4）。
+// SD 已經在上面編完 —— 它與晶片無關，只由 hardware.json 決定。
 static esp_err_t storage_hand_over_to_usb(void)
 {
     // 交出去之後裝置只剩唯讀視圖（/ro）；要拿回來請把 System.file_mode 設成 1
@@ -2738,13 +2751,54 @@ static const nc_task_t s_task_fx = {
 
 #endif
 #if CONFIG_IDF_TARGET_ESP32P4
-// ── P4：RMII 乙太網（IP101，設定取自 ports/P4/ESP32-ETH/config.json）──
-#define ETH_MDC_GPIO     31
-#define ETH_MDIO_GPIO    52
-#define ETH_REFCLK_GPIO  50
-#define ETH_PHY_ADDR     1
+// ── P4：RMII 乙太網（IP101）──
+// 腳位的真相在 ports/P4/ESP32-P4-ETH/data/config/hardware.json 的 ETH 段。
+// 下面四個只是「config 冇寫 ETH 段」時的內建值（hardware.json 缺檔／壞掉時仍要上得了網）；
+// 有寫 ETH 段時佢們完全唔會被讀 —— 改 config 就係改行為，唔會再有第二個真相。
+#define ETH_MDC_GPIO_DEFAULT     31
+#define ETH_MDIO_GPIO_DEFAULT    52
+#define ETH_REFCLK_GPIO_DEFAULT  50
+#define ETH_PHY_ADDR_DEFAULT     1
 #define TCP_SINK_PORT    5000
 #define TCP_NC4_PORT     6000
+
+// config → driver 的解析結果（一次，開機時）。
+typedef struct {
+    bool        enable;
+    int8_t      mdc;
+    int8_t      mdio;
+    int8_t      ref_clk;
+    uint8_t     addr;
+    const char *type;
+    bool        from_cfg;      // true = 值來自 hardware.json
+} eth_cfg_t;
+
+static eth_cfg_t eth_cfg_resolve(void)
+{
+    const nc_hardware_cfg_t *hw = nc_cfg_hardware();
+    if (hw != NULL && hw->eth.present) {
+        return (eth_cfg_t){
+            .enable  = hw->eth.enable,
+            .mdc     = hw->eth.mdc,
+            .mdio    = hw->eth.mdio,
+            .ref_clk = hw->eth.ref_clk,
+            .addr    = hw->eth.phy_addr,
+            .type    = hw->eth.phy_type,
+            .from_cfg = true,
+        };
+    }
+    ESP_LOGW(TAG, "hardware.json 冇 ETH 段 → 用編譯期內建腳位（mdc=%d mdio=%d refclk=%d）",
+             ETH_MDC_GPIO_DEFAULT, ETH_MDIO_GPIO_DEFAULT, ETH_REFCLK_GPIO_DEFAULT);
+    return (eth_cfg_t){
+        .enable  = true,
+        .mdc     = ETH_MDC_GPIO_DEFAULT,
+        .mdio    = ETH_MDIO_GPIO_DEFAULT,
+        .ref_clk = ETH_REFCLK_GPIO_DEFAULT,
+        .addr    = ETH_PHY_ADDR_DEFAULT,
+        .type    = "IP101",
+        .from_cfg = false,
+    };
+}
 
 // NC4 over TCP：一個連線 = 一條 bus
 static volatile int s_tcp_nc4_fd = -1;
@@ -2876,6 +2930,20 @@ static void got_ip_cb(void *arg, esp_event_base_t base, int32_t id, void *data)
 
 static esp_err_t net_eth_start(void)
 {
+    // 1) config 先決定「有冇 ETH」與「腳位在哪」。enable=0 就唔會建立 netif，
+    //    上層見 ESP_ERR_NOT_SUPPORTED 就唔宣告 TCP 通道（見 ph_hardware）。
+    const eth_cfg_t eth = eth_cfg_resolve();
+    if (!eth.enable) {
+        ESP_LOGW(TAG, "ETH 未啟用（hardware.json 的 ETH.enable=0）→ 唔建立 netif、唔宣告 TCP");
+        return ESP_ERR_NOT_SUPPORTED;
+    }
+    if (eth.mdc < 0 || eth.mdio < 0 || eth.ref_clk < 0) {
+        // enable=1 但腳位留 -1：這是最常見的「填一半」。講清楚缺哪一條，唔好交給 driver 靜靜失敗。
+        ESP_LOGE(TAG, "ETH 腳位不完整（mdc=%d mdio=%d refclk=%d）→ 唔啟動",
+                 eth.mdc, eth.mdio, eth.ref_clk);
+        return ESP_ERR_INVALID_ARG;
+    }
+
     ESP_RETURN_ON_ERROR(esp_netif_init(), TAG, "netif init");
     ESP_RETURN_ON_ERROR(esp_event_loop_create_default(), TAG, "event loop");
 
@@ -2887,15 +2955,15 @@ static esp_err_t net_eth_start(void)
 
     eth_mac_config_t mac_cfg = ETH_MAC_DEFAULT_CONFIG();
     eth_esp32_emac_config_t emac_cfg = ETH_ESP32_EMAC_DEFAULT_CONFIG();
-    emac_cfg.smi_gpio.mdc_num = ETH_MDC_GPIO;
-    emac_cfg.smi_gpio.mdio_num = ETH_MDIO_GPIO;
+    emac_cfg.smi_gpio.mdc_num = eth.mdc;
+    emac_cfg.smi_gpio.mdio_num = eth.mdio;
     emac_cfg.interface = EMAC_DATA_INTERFACE_RMII;
     emac_cfg.clock_config.rmii.clock_mode = EMAC_CLK_EXT_IN;
-    emac_cfg.clock_config.rmii.clock_gpio = ETH_REFCLK_GPIO;
+    emac_cfg.clock_config.rmii.clock_gpio = eth.ref_clk;
 
     esp_eth_mac_t *mac = esp_eth_mac_new_esp32(&emac_cfg, &mac_cfg);
     eth_phy_config_t phy_cfg = ETH_PHY_DEFAULT_CONFIG();
-    phy_cfg.phy_addr = ETH_PHY_ADDR;
+    phy_cfg.phy_addr = eth.addr;
     phy_cfg.reset_gpio_num = -1;
     esp_eth_phy_t *phy = esp_eth_phy_new_generic(&phy_cfg);   // IDF 6 只留 generic 802.3 PHY
     if (mac == NULL || phy == NULL) {
@@ -2911,8 +2979,9 @@ static esp_err_t net_eth_start(void)
     ESP_RETURN_ON_ERROR(esp_event_handler_register(IP_EVENT, IP_EVENT_ETH_GOT_IP,
                                                    got_ip_cb, NULL), TAG, "ip evt");
     ESP_RETURN_ON_ERROR(esp_eth_start(handle), TAG, "eth start");
-    ESP_LOGW(TAG, "ETH started (RMII, IP101@%d, mdc=%d mdio=%d refclk=%d)",
-             ETH_PHY_ADDR, ETH_MDC_GPIO, ETH_MDIO_GPIO, ETH_REFCLK_GPIO);
+    ESP_LOGW(TAG, "ETH started (RMII, %s@%u, mdc=%d mdio=%d refclk=%d, 來源=%s)",
+             eth.type, (unsigned)eth.addr, eth.mdc, eth.mdio, eth.ref_clk,
+             eth.from_cfg ? "hardware.json" : "內建");
 
     // 測試用：固定 IP（DHCP 拿不到時也能量吞吐）
     esp_netif_dhcpc_stop(netif);
@@ -3044,6 +3113,9 @@ static esp_err_t ph_hardware(void)
         nc_test_tcp_start();   // 吞吐量測端點（5000–5003）
 #endif
         xTaskCreatePinnedToCore(tcp_nc4_accept_task, "tcp_nc4", 6144, NULL, 9, NULL, 0);
+    } else if (nerr == ESP_ERR_NOT_SUPPORTED) {
+        // 「config 冇開」與「硬體/驅動壞了」要分得清：一個是政策，一個是故障。
+        ESP_LOGW(TAG, "ETH 未啟用（want=0）→ 不宣告/不啟動 TCP 通道");
     } else {
         ESP_LOGE(TAG, "乙太網啟動失敗: %s → 不宣告/不啟動 TCP 通道", esp_err_to_name(nerr));
     }

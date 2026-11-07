@@ -1,7 +1,7 @@
 {
   "version": 1,
   "_comment": [
-    "Hardware 層：實體腳位與匯流排。全部 enable = 0，填好腳位才開。",
+    "Hardware 層：實體腳位與匯流排。enable = 0 就是「這塊板沒有這個東西」；填好腳位再開。",
     "driver 用 bus = { type, index } 引用這裡的實例；index = 該類型 list 的次序（0,1,2…），跟註冊次序一致。",
     "ETH 是特例：它不掛在任何匯流排上，所以整段放最頂（腳位 + PHY），不再拆去 driver。",
     "XL9555 也在這層註冊（I2C + IO 標籤）；但 I80 面板的 rst/bl 是用 TFT.xl9555 填 IO 編號，不是 label。",

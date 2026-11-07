@@ -1,7 +1,7 @@
 # 專案現況總結（單頁）
 
 > **用途**：所有「已經驗證的事實、已定案的設計、還沒做的事」集中在這一頁；
-> 細節都連到對應文件。**最後更新**：2026-11-06。
+> 細節都連到對應文件。**最後更新**：2026-11-08。
 
 ---
 
@@ -104,12 +104,12 @@ ESP32-P4（另有 S3 port）上的 **NC4 通訊核心**：多條傳輸通道 →
 | **收/解路徑** | 傳輸總線（ID 註冊表）→ 解碼引擎（可換核/可多實例）→ 執行 | [rx-architecture.md](../03_notes/rx-architecture.md) |
 | **配置分層** | System / Hardware / Driver / Network / Tasks / Effects / UI | [config-layers.md](../03_notes/config-layers.md) |
 
-**現況**：`main.c` 只剩一張任務表（核心 `nc4` / `net` / `core` / `monitor` / `fx` ＋ 租戶 `probe` / `hello` / `bench_a/b/c`）
-＋ 一個 `actions_register()` ＋ 六行生命週期呼叫（register → declare → start → boot）。
+**現況**：`main.c` 只剩一張任務表（核心 `nc4` / `net` / `core` / `fx` ＋ 測試用 `probe` / `hello` / `bench_a/b/c`；
+後者在 `NC_ENABLE_TESTS=OFF` 時完全不存在）＋ 一個指令表清單 ＋ 六行生命週期呼叫（register → declare → start → boot）。
 service 與 task 已合併成同一個 `nc_task_t`。
-`tasks.json` 已接（含補寫）；`system.json` 只讀 `cID`、`network.json` 只讀 `bt.pin`，
-其餘欄位仍是程式預設 + NVS；`hardware.json` / `driver.json` **尚未接線**（有出廠檔但沒 embed、沒讀）。
-slots 還沒走 plan。
+`tasks.json` 已接（含補寫）；`system.json` 已接 `cID` / `links[]` / `routes[]` / `log_debug_mode`；
+`hardware.json` 已接 **ETH 與 SDIO** 兩段（其餘段只計 unknown，**改它無效**，見 §7.24）；
+`network.json` 只讀 `bt.pin`；`driver.json` **未 embed、未讀**。slots 還沒走 plan。
 
 ---
 
@@ -195,7 +195,7 @@ USB 的完整分析：[failure-policy.md §4](../03_notes/failure-policy.md)。
 | B | **任務棧 high-water 量測** | ❌ 冇 | 6,144 夠唔夠全靠估；`nc_task.h` 註解寫「量測」但未實作 |
 | C | **`nc_task_set_core()` 死 API** | ✅ **已刪（2026-11-03）** | 它是「停 → 改 core → 起」的**執行期換核**，0 呼叫者，而且同 router 的「開機決定邊個核開 decoder」互相矛盾。已由 `nc_task.h` 與 `nc_task.c` 移除，原位留註解說明「核心在開機時定死」。`nc_task_enable()` 保留（它只是開關，唔換核） |
 | D | **router 未接 config、亦未接對外 JSON** | ✅ **已接（2026-11-03）** | 開機 ④ 由 `router_from_cfg()` 讀 `system.json` 的 `routes[]`，每行第一個 `decodeN` 決定那條線由第 N 核解；`decode0`/`decode1` 任務存在與否、CDC/UART/TCP 三條 bus 掛哪核，全部由此推導。讀不到就 `router_defaults()` 退回板子預設並印 `ESP_LOGW`。另加 `0x1105 ROUTE_GET` / `0x1106 ROUTE_RSP` 線上查表。**未做**：`out` 的 link 轉發、兩核各自一個 decoder |
-| E | **`hardware.json` / `driver.json` 未 embed 亦未讀** | ❌ | 改那兩個檔完全冇效（`main/CMakeLists.txt` 已註明） |
+| E | **`hardware.json` / `driver.json` 未接線** | 🟡 部分 | `hardware.json` 已 embed，**ETH 與 SDIO 兩段真的會被讀**（2026-11-08，見 §7.24）；其餘段只計 unknown、改它冇效。`driver.json` 仍然**冇 embed、冇人讀** |
 | F | **S3 冇 WiFi** | ❌ | 只有 P4 有 ETH；S3 的無線能力未接。**實測：目前 image 完全冇 link Wi-Fi**（`libnet80211.a` 等 0 個成員被拉進來），所以現有 105.9 KB 靜態是「無 Wi-Fi」的數字。開 Wi-Fi 的帳：靜態 ≤14.3 KB ＋ 執行期 90–120 KB（見 [memory-budget.md](../03_notes/memory-budget.md) §7） |
 | G | **WS / UDP 緩衝未入 plan**（41 KB BSS，P4 專屬） | ⚠️ | 只在 P4 link 進來；未宣告、不可見 |
 | H | **TCP PUSH 插槽 65,640 B 未入 plan** | ⚠️ | `calloc`，`keys=mem` 看不到 |
@@ -1037,3 +1037,69 @@ boot 摘要：9.66 | 126.92 | 0.33 | 10.45 | 0.76 | 5.39 | 52.01 | 1.81 | 0.19 m
 
 **未做**：階段實作仍然住喺 `main.c`（因為佢們共用 20+ 個 static）。下一步可以逐個搬去
 `boot.c`，但每次都要連同它用到的 static 一齊決定歸屬，所以分開做。
+
+### 7.24 2026-11-08（hardware.json 的 ETH 真的接上線；修 config 層三個潛在坑）
+
+**起點**：`hardware.json` 的 ETH 段一直是裝飾品 —— 腳位在 `main.c` 寫死成
+`#define ETH_MDC_GPIO 31`，`ph_hardware()` 也無條件啟動 ETH。兩邊數字剛好一樣，
+所以「改了 JSON 沒反應」不會被發現。
+
+**改法**：ETH 跟 SDIO 一樣進 `nc_hardware_cfg_t`，由 `nc_cfg_apply_hardware()` 解析；
+`main.c` 只留一組**內建值**做 fallback。
+
+| | 之前 | 之後 |
+|---|---|---|
+| ETH 腳位 | `main.c` 的 `#define`（唯一來源） | `hardware.json` 的 `ETH{}`；`#define` 只在「config 冇寫 ETH 段」時用 |
+| `ETH.enable` | 不存在（有 ETH 就一定開） | `0` = 唔建立 netif、唔宣告 TCP 通道（log 寫 `want=0`） |
+| 改 JSON | 完全冇效 | 重開機即生效 |
+| 缺檔／壞檔 | （無此概念） | `present=0` → 用內建腳位並印 `ESP_LOGW`，板子仍然上得了網 |
+
+**`present` 與 `enable` 是兩件事**（刻意分開）：
+`present=0` = config 沒講 → 用內建值（fail-open，避免一個壞 JSON 就把有線網弄死）；
+`present=1, enable=0` = 用戶明確關閉（fail-closed）。型別錯一律當「沒講」，不會被誤讀成「關閉」。
+
+**順手修掉的三個坑**（都是「看起來正常，換個呼叫端就爆」）：
+
+| 坑 | 症狀 | 修法 |
+|---|---|---|
+| `nc_cfg_apply_hardware()` 冇 `memset(st)` | `s_hw_stat` 是 static 所以看不出來；host test 用棧變數就拿到垃圾計數 | 跟 system／tasks 一致，入口清零；另補 `root` 不是 object → `bad_json` |
+| `get_str()` 把型別錯記成 `defaulted` | STATUS 上「打錯字」與「冇填」分不出來，違反檔頭自己寫的規則 | 型別錯 → `invalid`，只有「冇寫」才是 `defaulted` |
+| SDIO 的 GPIO 上限寫死 48 | P4 有 GPIO 52（MDIO 就在用）；P4 的 SDIO／ETH 一填 >48 就靜靜變 -1 | 改用 `NC_CFG_GPIO_MAX = 54` |
+
+**同時清掉的過期敘述**（會誤導下一個人）：
+
+- `main/CMakeLists.txt`：寫「hardware.json 沒有 embed、firmware 沒讀它」→ 實際有 embed，只是只有 ETH/SDIO 會被讀。
+- status §3：寫「system.json 只讀 cID、hardware.json 尚未接線」→ 早已不是。
+- `tools/board.py` 的 schema 用 `debug_level`，實際鍵是 `log_debug_mode` → `board.py check` 永遠有 3 個假警告（現為 0 error、0 warning）。
+- `ports/P4/.../system.json` 仍留著 7.18 已刪的 `SDcard` 段（當時只刪了 S3）。
+
+**意外的收穫：P4 與 release 建置本來就是壞的**
+
+這次為了編 P4（上一次 P4 建置是 11-07 00:05、commit `35f0e51`，即 SD 改動之前）才發現：
+
+| 問題 | 症狀 | 修法 |
+|---|---|---|
+| SD 段被包在 `#if !CONFIG_IDF_TARGET_ESP32P4`，但 STATUS／`uart_owner_init()`／`ph_storage()` 照樣用 `sd_hw()`／`sd_boot()`／`s_sd_*` | P4 **編不過**（6 個 `-Werror`：implicit declaration、undeclared） | SD 段移出晶片 guard —— SDMMC 兩顆晶片都有，P4 這塊板只是 `SDIO.enable=0`；用 config 擋，唔用晶片擋 |
+| `-Wl,--wrap=sdmmc_*` 無條件加，但 `__wrap_sdmmc_*` 的定義在 `#ifdef NC_ENABLE_TESTS` 裡 | **release 映像 link 失敗**（`undefined reference to __wrap_sdmmc_write_sectors`）。之前的 build 目錄剛好帶著 `NC_ENABLE_TESTS=ON` 的 cache，所以一直沒撞 | `--wrap` 收窄到 `if(NC_ENABLE_TESTS)`：包住那些 sector 的是 `0xF012` 的測試指令 |
+| `esp_ptr_external_ram()` 靠別的標頭間接引入 | P4 缺宣告 | 明確 `#include "esp_memory_utils.h"` |
+| `sd_bench_buf_get()` 在 release 從未被呼叫 | `-Wunused-function`（P4 先爆） | 整塊 bench 緩衝包進 `#ifdef NC_ENABLE_TESTS` |
+
+> 教訓與 §7.20 同一個：**「上次編得過」不代表現在編得過**。這次 P4 有 2 天沒建置，
+> 兩個回歸都是「一方改動、另一方沒驗」。之後每次動 `main.c` 都應該兩邊各 build 一次。
+
+**驗證**：
+
+| 建置 | 結果 |
+|---|---|
+| S3 release（tests OFF） | ✅ 0 warning，**0x70a70（450.6 KB）** |
+| S3 tests ON | ✅ 0 warning，0x77220（476.5 KB） |
+| P4 release（tests OFF） | ✅ 0 warning，**0xb6460（729.1 KB）**（上一顆 11-07 的 0xa5530／661 KB 少了 SD／Action／boot 全部改動，+0x10F30） |
+
+`tools/hosttest/run_all.sh` 8/8（`cfgstruct_test` 新增 38 項、合共 **93 項**：
+ETH 的缺段／正常／明確關閉／型別錯／未知鍵，以及兩塊板**真的出廠 hardware.json**
+零 invalid、零 unknown）；`python3 tools/board.py check` 0 錯誤、0 警告。
+
+**未做**：`PIN/SPI/I2C/I80/UART/I2S/PWM/ENC/XL9555` 仍然只有「認得這個鍵」；
+preset/merge 與 arena→PSRAM 見 [hardware-config.md](../03_notes/hardware-config.md) §7。
+**P4 只在 build 層驗過**（板子不在手邊），ETH 改由 config 決定的行為要上板確認：
+開機應見 `hardware: eth=開 mdc=31 mdio=52 refclk=50 IP101@1` 與 `ETH started (... 來源=hardware.json)`。

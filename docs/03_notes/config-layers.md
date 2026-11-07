@@ -1,12 +1,15 @@
 # 配置分層：一個層一個檔案
 
-> **狀態（2026-11-03 更新）**：`nc_cfg`（`sys/config`）已上線，但**只接了三個檔**：
-> `tasks.json`（任務管理器讀 level / affinity，並會補寫）、`system.json`（只讀 `cID`）、
-> `network.json`（只讀 `bt.pin`）。
+> **狀態（2026-11-08 更新）**：`nc_cfg`（`sys/config`）已上線，已接四個檔：
+> `tasks.json`（任務管理器讀 level / affinity，並會補寫）、`system.json`
+> （`cID` / `links[]` / `routes[]` / `log_debug_mode`）、`network.json`（只讀 `bt.pin`）、
+> `hardware.json`（**只有 ETH 與 SDIO 兩段**，2026-11-08 起 ETH 的腳位與 enable 真的生效）。
 >
-> ⚠️ **`hardware.json` / `driver.json` 還沒有接**：`ports/*/data/config/` 有這兩個出廠檔，
-> 但 `firmware/main/CMakeLists.txt` 只 embed `system / network / tasks`，而且 firmware
-> 沒有任何程式讀它們 —— 插上隨身碟你看不到這兩個檔，改了也不會生效。
+> ⚠️ **`driver.json` 仍然沒有接**：`ports/*/data/config/` 有這個出廠檔，
+> 但 `firmware/main/CMakeLists.txt` 沒有 embed 它，firmware 也沒有任何程式讀它 ——
+> 插上隨身碟你看不到這個檔，改了也不會生效。
+> `hardware.json` 其餘段（`PIN`/`SPI`/`I2C`/`I80`/`UART`/`I2S`/`PWM`/`ENC`/`XL9555`）同理：
+> 只會被計入 config 的 `unknown`，改它沒有作用。
 > 下面 §2–§4 寫的是**目標設計**，不是現況。
 >
 > **參考**：mp_Net-Core 的 `config.json`（一個檔 24 個 section：System / Buffer / SPI / I2C / UART / TFT / WS2812 …）
@@ -63,10 +66,11 @@ config 只能管租戶。** 但「冇 config 都開得機」不等於「config �
 3. **核心不讀 config 也能開機**：`nc4` / `net` / `core` / FXE 引擎都是 `NC_TASK_SYSTEM`，
    照 C 宣告跑；`tasks.json` 只影響租戶。所以 ③ 全冇、② 也冇，板子仍然收得到指令。
 
-> ⚠️ **現況缺口**：目前只有第 ② 層（而且只有 `system` / `network` / `tasks` 三個檔）。
+> ⚠️ **現況缺口**：目前只有第 ② 層（而且只有 `hardware` / `system` / `network` / `tasks` 四個檔）。
 > 第 ① 層**不存在** —— 如果某塊板冇 `ports/<board>/data/config/tasks.json`，
 > `NETCORE_HAS_PRESET_TASKS=0`，`tasks.json` 就**永遠不會被建立**（`nc_task` 只會補條目，
-> 不會建檔）。`hardware.json` / `driver.json` 更完全沒有 embed（見開頭警告）。
+> 不會建檔）。`driver.json` 完全沒有 embed；`hardware.json` 有 embed，但 firmware 只讀
+> ETH 與 SDIO 兩段（見開頭說明）。
 >
 > 要補的東西：在 `main.c` 加三個內建最小字串（`system` / `network` / `tasks`），
 > 讓 `seed_presets()` 在「冇板級預置」時用它們。內容只要 `{"version":1}` 這種骨架即可。
@@ -442,7 +446,7 @@ DMA 大小（1600）與環數（16/16）**不在 config**——那是 build-time
 |---|---|---|
 | C0 | 建 `sys/config`：開檔 → cJSON → 關檔；缺檔/壞檔回 NULL | host test：三種檔案狀態 |
 | C1 | `system.json` 的 `nc4.links` 先接（唯讀）；`routes[]` 的 `in → decodeN` 已生效（決定哪一核解、哪一核存在），`out` 的 link 轉發未做 | 改 `slots` 重開機生效；改 `routes[].in` 的 `decodeN` 會換核 |
-| C2 | `hardware.json` / `driver.json` 接掉 `main.c` 的寫死值 | 換腳位不用改 code |
+| C2 | `hardware.json` / `driver.json` 接掉 `main.c` 的寫死值 | 🟡 ETH 已完成（2026-11-08，含 `enable`）；SDIO 早前已完成；其餘段與 `driver.json` 未做 |
 | C3 | `network.json` / `tasks.json` | IP 與 core 可由檔案覆蓋 |
 | C4 | 出廠預置改成多檔（`ports/<board>/data/config/`） | 新板首次開機長出 `config/` 目錄 |
 | C5 | `pixel/` 樹（`effects/`、`map/`、`modes/`） | 拖拉 `.fxe` 進 `pixel/effects/` 就生效 |

@@ -80,6 +80,13 @@ const nc_system_cfg_t *nc_cfg_defaults_system(void)
 
 static const nc_hardware_cfg_t k_hw = {
     .version = NC_CFG_SCHEMA_VERSION,
+    // ETH：預設「config 冇寫」（present=0）→ 呼叫端用編譯期內建腳位；
+    // 這裡填的是「連內建值都沒有」時的形狀（全 -1、不啟用）。
+    .eth = {
+        .present = false, .enable = false,
+        .mdc = -1, .mdio = -1, .ref_clk = -1,
+        .phy_addr = 1, .phy_type = "IP101",
+    },
     .n_sdio = 1,
     .sdio = {
         { .enable = false, .freq_hz = 40000000, .width = 4,

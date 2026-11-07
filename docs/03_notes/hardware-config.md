@@ -2,6 +2,10 @@
 
 > 目標：**加一顆新 IC 只加一行資料，邏輯不變**；設定壞了有統一的處理；解析結果放
 > PSRAM（低重要、少改動、少讀取）。
+>
+> **進度（2026-11-08）**：第 0 步（型別化）完成 —— ETH 與 SDIO 兩段已進 `nc_hardware_cfg_t`
+> 並真的被 driver 讀（見 [status §7.24](../00_pm/status.md)）。preset 表、merge、arena→PSRAM
+> 與 boot report 的 `want/found/started` 都**還沒做**，就是下面的順序。
 
 ## 一、三層
 
@@ -117,6 +121,7 @@ merged：完整、可直接餵給 driver init 的設定
 
 ## 七、實作順序（每步可獨立驗證）
 
+0. ~~**型別化**（`nc_hardware_cfg_t` + `nc_cfg_apply_hardware()`）~~ ✅ ETH／SDIO（2026-11-08）
 1. **arena → PSRAM**（不改語義，只改放置）＋ `STATUS cfg` 顯示 bytes/來源。
 2. **preset 表 + merge**：先把 SDIO 一種搬過去，驗證「只寫 enable 都開得成」。
 3. 其餘（TFT / touch / PHY / LED）逐類搬；每次加一行。

@@ -17,6 +17,8 @@ cc -std=c11 -Wall -Wextra -Werror \
    -I"$ROOT/firmware/components/sys/config" \
    -I"$CJSON" \
    -DPRESET_SYSTEM="\"$ROOT/ports/S3/ESP32-S3-N16R8/data/config/system.json\"" \
+   -DPRESET_HARDWARE_P4="\"$ROOT/ports/P4/ESP32-P4-ETH/data/config/hardware.json\"" \
+   -DPRESET_HARDWARE_S3="\"$ROOT/ports/S3/ESP32-S3-N16R8/data/config/hardware.json\"" \
    "$ROOT/tools/hosttest/cfgstruct_test/main.c" \
    "$ROOT/tools/hosttest/cfgstruct_test/stubs.c" \
    "$ROOT/firmware/components/sys/config/nc_cfg.c" \

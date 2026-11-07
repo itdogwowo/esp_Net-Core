@@ -62,7 +62,7 @@ CONSOLE_SYM = {
 }
 # 每個 config 檔允許的頂層鍵（檔名 → 允許的鍵）；一個層一個檔
 RUNTIME_KEYS_BY_FILE = {
-    "system.json":   {"version", "_comment", "cID", "debug_level",
+    "system.json":   {"version", "_comment", "cID", "log_debug_mode",
                       "frame_interval_ms", "boot_strict", "num_pixels", "nc4"},
     "network.json":  {"version", "_comment", "hostname", "priority", "lan", "wifi", "bt", "espnow"},
     "hardware.json": {"version", "_comment", "_gpio_convention", "ETH",

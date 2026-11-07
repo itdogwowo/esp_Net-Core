@@ -110,13 +110,5 @@
       }
     ]
   },
-  "log_debug_mode": 0,
-  "SDcard": {
-    "_comment": "P4 呢塊板冇 SD 卡座；要開就填 hardware.json 的 SDIO 腳位。",
-    "enable": 0,
-    "bus": {
-      "type": "sdio",
-      "index": 0
-    }
-  }
+  "log_debug_mode": 0
 }
