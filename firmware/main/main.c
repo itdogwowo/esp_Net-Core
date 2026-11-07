@@ -2737,7 +2737,11 @@ static int router_defaults(nc4_route_t *out, int max)
 // ⑥ fx（Normal L4）：**POC／原始形態**（2026-11-04 標記）—— arena + 實例表 + render task。
 //    運作方式未定義：核心、幀來源、同緩衝交換的接口都係待規劃，唔好當成正式功能。
 #define NC_FX_TASK_CORE 1
-#define NC_FX_TASK_PRIO 3
+// ★ 測試任務的優先級要**低過** UART producer（prio 3）：同級會時間切片（10 ms/tick），
+//   fx 每 10 ms 醒一次，剛好把 uart.rx 壓住一個 tick —— 1 KB 的 UART RX 環（11 ms）
+//   會因此偶發溢位（實測 15 分鐘 soak 4 次 CRC）。降到 2 之後 uart.rx 永遠先跑。
+//   （release 映像沒有 fx，這個競爭本來就不存在。）
+#define NC_FX_TASK_PRIO 2
 
 static esp_err_t task_fx_start(const nc_task_res_view_t *res, int n)
 {

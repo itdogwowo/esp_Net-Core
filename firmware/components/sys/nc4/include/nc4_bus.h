@@ -36,7 +36,10 @@
 extern "C" {
 #endif
 
-#define NC4_MAX_BUSES        8
+// 同時存在的 bus 數。實測：S3 = CDC＋UART（2 條）、P4 = CDC＋UART＋TCP（3 條）；
+// 每格 struct nc4_bus 304 B。8 格＝2,432 B 的靜態分區只用 3 格（省 1,216 B）。
+// 4 格留 1 格餘裕；滿了 nc4_bus_add() 回 ESP_ERR_NO_MEM 並印 log（不是靜默）。
+#define NC4_MAX_BUSES        4
 
 typedef enum {
     NC4_BUS_PULL = 0,     // 解碼任務主動呼叫 read()
