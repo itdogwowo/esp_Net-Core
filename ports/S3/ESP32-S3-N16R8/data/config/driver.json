@@ -9,13 +9,6 @@
   ],
   "USB": {"enable": 1, "msc": 1, "cdc": 1},
   "TFT": {"enable": 0, "bus": {"type": "spi", "index": -1}, "driver": "ST7789", "width": 240, "height": 320, "rotation": 0, "color_order": "RGB", "invert": 0, "pixel_format": "RGB565_BE", "pins": {"dc": "tft_dc", "cs": "tft_cs", "rst": "tft_rst", "bl": "tft_bl"}, "xl9555": {"rst": 0, "bl": 1}},
-  "SDcard": {"enable": 0, "bus": {"type": "sdio", "index": 0}, "mount": "/sd", "slot": 0},
-  "WS2812": {
-    "enable": 0,
-    "list": [
-      {"GPIO": null, "Q": 10, "order": "GRB", "dStay": 0}
-    ]
-  },
   "APA102": {
     "enable": 0,
     "list": [

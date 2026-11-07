@@ -8,6 +8,7 @@
 #include <stdint.h>
 
 #include "nc4.h"
+#include "nc_action.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -21,7 +22,10 @@ typedef struct {
     void (*reset_rx)(void);
 } nc_test_action_hooks_t;
 
-void nc_test_action_register(nc4_decoder_t *dec, const nc_test_action_hooks_t *hooks);
+// 指令表（靜態）：由 main 交給 nc_action_init()。
+extern const nc_action_table_t nc_test_action_table;
+// 設定 hooks（測試指令要讀的 RX 診斷）。
+void nc_test_action_init(const nc_test_action_hooks_t *hooks);
 
 #ifdef __cplusplus
 }

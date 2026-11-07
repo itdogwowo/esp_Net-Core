@@ -66,6 +66,7 @@ static struct nc4_bus s_buses[NC4_MAX_BUSES];
 
 static struct nc4_bus *find_bus(nc4_bus_handle_t h) { return (struct nc4_bus *)h; }
 static TaskHandle_t s_decode_task[2];   // 每個核心一個 decode task
+static volatile uint32_t s_loop_count[2];   // 每個核 decode 迴圈跑過幾多次（停滯偵測用）
 static size_t s_count = 0;
 
 // producer 每 commit 一格就叫醒 decode task。
@@ -115,7 +116,10 @@ uint8_t *nc4_bus_push_begin(nc4_bus_handle_t bus, size_t want)
     taskENTER_CRITICAL(&b->mux);
     int idx = slot_find_free(b);
     if (idx >= 0) {
-        b->slot_state[idx] = 2;      // writing
+        // 只記 push_idx（每條 bus 只有一個 producer）。**唔**把格標成 writing：
+        // consumer 只讀 state==1，writing 對它不可見；但一旦 producer 在 commit
+        // 之前死掉，這一格就永遠停在 2、永遠回不到 free，整條環會慢慢卡死。
+        // 少一個狀態就少一個可以卡死的地方。
         b->push_idx = idx;
     }
     taskEXIT_CRITICAL(&b->mux);
@@ -151,8 +155,7 @@ esp_err_t nc4_bus_push_abort(nc4_bus_handle_t bus)
         return ESP_ERR_INVALID_STATE;
     }
     taskENTER_CRITICAL(&b->mux);
-    b->slot_state[b->push_idx] = 0;      // free
-    b->push_idx = -1;
+    b->push_idx = -1;                    // 格本來就係 free，唔使改 state
     taskEXIT_CRITICAL(&b->mux);
     return ESP_OK;
 }
@@ -567,6 +570,51 @@ esp_err_t nc4_bus_start_producer(nc4_bus_handle_t handle, const char *name,
     return ESP_OK;
 }
 
+// 自己核有冇「已 commit、等 decode 讀」的格。解碼迴圈睡前用它做最後檢查：
+// 就算 kick 在邊界遺失，也不會睡在一個「有資料」的環上。
+static bool bus_has_ready(int core)
+{
+    for (size_t i = 0; i < NC4_MAX_BUSES; i++) {
+        struct nc4_bus *b = &s_buses[i];
+        if (b->used && b->cfg.core == core && b->occ > 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+uint32_t nc4_bus_loop_count(int core)
+{
+    return s_loop_count[(core == 1) ? 1 : 0];
+}
+
+// 停滯時要睇的狀態：每條 bus 的 occ／寫入指標／插槽狀態。給 monitor 印出來。
+size_t nc4_bus_dump(char *buf, size_t cap)
+{
+    if (buf == NULL || cap == 0) {
+        return 0;
+    }
+    size_t off = snprintf(buf, cap, "[");
+    bool first = true;
+    for (size_t i = 0; i < NC4_MAX_BUSES && off < cap; i++) {
+        struct nc4_bus *b = &s_buses[i];
+        if (!b->used) {
+            continue;
+        }
+        off += snprintf(buf + off, cap - off,
+                        "%s{\"n\":\"%s\",\"core\":%d,\"occ\":%d,\"wr\":%d,\"rd\":%d,"
+                        "\"st\":[%d,%d,%d,%d]}",
+                        first ? "" : ",", b->cfg.name ? b->cfg.name : "?", b->cfg.core,
+                        b->occ, b->push_idx, b->rd_idx,
+                        b->slot_state[0], b->slot_state[1], b->slot_state[2], b->slot_state[3]);
+        first = false;
+    }
+    if (off < cap) {
+        off += snprintf(buf + off, cap - off, "]");
+    }
+    return off;
+}
+
 void nc4_bus_task_entry(void *arg)
 {
     (void)arg;
@@ -584,7 +632,7 @@ void nc4_bus_task_entry(void *arg)
         }
     }
     ESP_LOGI(TAG, "core %d 等待策略：%s", my_core,
-             has_pull ? "PULL（10 ms 輪詢）" : "PUSH（portMAX_DELAY）");
+             has_pull ? "PULL（10 ms 輪詢）" : "PUSH（kick 或 50 ms 安全網）");
 
     // bus 的 driver 在「自己嘅核」初始化（所有權原則：唔跨核）
     for (size_t i = 0; i < NC4_MAX_BUSES; i++) {
@@ -601,6 +649,7 @@ void nc4_bus_task_entry(void *arg)
     }
 
     for (;;) {
+        s_loop_count[my_core]++;
         bool busy = false;
 
         for (size_t i = 0; i < NC4_MAX_BUSES; i++) {
@@ -676,10 +725,16 @@ void nc4_bus_task_entry(void *arg)
 
         if (busy) {
             taskYIELD();       // 有資料就繼續解，不要睡（HZ=100 時 1 tick = 10 ms 會鎖死在 1.6 MB/s）
+        } else if (bus_has_ready(my_core)) {
+            // 仲有已 commit 的格：唔好睡（唔靠 kick 也不怕 kick 遺失）
+            continue;
         } else {
-            // PUSH：只等 producer 的同核 kick（無限等，冇 tick、冇跨核）。
-            // PULL：冇人 kick，只能 10 ms 醒一次輪詢（本核；core0 無害）。
-            ulTaskNotifyTake(pdTRUE, has_pull ? pdMS_TO_TICKS(DEFAULT_POLL_MS) : portMAX_DELAY);
+            // PUSH：等 producer 的同核 kick。**不可無限等**：kick 只會在 commit 之後發，
+            // 一旦插槽全部卡在「writing」或 kick 在邊界遺失，decode 就會永遠睡，producer
+            // 也永遠等不到空位（2026-11-07 實測：8 MB 幀洪水之後裝置完全唔答指令）。
+            // 50 ms 安全網：醒來重掃一次，代價係閒置時 20 次/秒的 no-op。
+            // PULL：本來就只能輪詢。
+            ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(has_pull ? DEFAULT_POLL_MS : 50));
         }
     }
 }

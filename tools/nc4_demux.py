@@ -100,9 +100,14 @@ class Demux:
             i = self.buf.find(bytes([RS]))
             j = self.buf.find(SOF)
             cand = [x for x in (i, j) if x >= 0]
-            k = min(cand) if cand else len(self.buf)
-            if k == 0:
-                k = 1
+            if cand:
+                k = max(1, min(cand))
+            else:
+                # 全部都係垃圾。但尾端可能係「被讀取切開」的 SOF 前半（'N'）：
+                # 留住佢，否則下一個 read 帶住 'C…' 入嚟就永遠接唔返，白白丟一幀。
+                k = len(self.buf) - 1 if self.buf.endswith(b"N") else len(self.buf)
+            if k <= 0:
+                break                      # 只餘一個 'N'：等下一批 byte（唔可以原地打轉）
             self.junk += k
             self.buf = self.buf[k:]
         return out

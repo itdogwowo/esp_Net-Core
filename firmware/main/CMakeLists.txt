@@ -11,7 +11,7 @@
 #       firmware 也還沒讀它們 —— 別以為改了那兩個檔會生效。
 
 set(_preset_embed)
-foreach(_cfg system network tasks)
+foreach(_cfg hardware system network tasks)
     if(EXISTS "${PORT_DIR}/data/config/${_cfg}.json")
         # 用 build-time 的 copy_if_different，而唔係 configure_file：
         # configure_file 只在「CMake 重跑」時複製，只改 JSON 內容唔會觸發
@@ -51,9 +51,9 @@ if(NC_ENABLE_TESTS)
 endif()
 
 idf_component_register(
-    SRCS "main.c" "nc_wifi.c"
+    SRCS "main.c" "nc_wifi.c" "boot.c"
     INCLUDE_DIRS "."
-    PRIV_REQUIRES fatfs esp_timer esp_partition esp_driver_gpio esp_driver_uart wear_levelling esp_eth esp_netif lwip esp_event esp_psram nvs_flash
+    PRIV_REQUIRES fatfs esp_timer esp_partition esp_driver_gpio esp_driver_uart esp_driver_sdmmc wear_levelling esp_eth esp_netif lwip esp_event esp_psram nvs_flash
                    espressif__esp_tinyusb nc4 mem config ota_action task_manager core transport store state nclog file_action
                    ${_nc_priv_extra}
     ${_preset_args}
@@ -77,4 +77,13 @@ endif()
 # 最小映像（只印心跳，不碰 USB/MSC/ETH）：用來確認新板子的基礎能不能跑
 if(NETCORE_MINIMAL)
     target_compile_definitions(${COMPONENT_LIB} PRIVATE NETCORE_MINIMAL=1)
+endif()
+
+# SD 速度量測（sd_boot 內）：-DNC_SD_BENCH=1 才編入，正常映像唔會有。
+# FAT 寫入量測：包住 sdmmc_write_sectors 計 sector 數（只影響有 link 的映像）
+idf_build_set_property(LINK_OPTIONS "-Wl,--wrap=sdmmc_write_sectors" APPEND)
+idf_build_set_property(LINK_OPTIONS "-Wl,--wrap=sdmmc_read_sectors" APPEND)
+
+if(NC_SD_BENCH)
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE NC_SD_BENCH=1)
 endif()

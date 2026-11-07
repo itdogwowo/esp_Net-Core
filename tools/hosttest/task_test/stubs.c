@@ -155,27 +155,6 @@ bool nc_task_rt_exit_requested(void)
     return false;
 }
 
-uint32_t nc_task_rt_avg_us(const nc_task_rt_t *rt)
-{
-    if (rt == NULL || rt->count == 0) {
-        return 0;
-    }
-    return (uint32_t)(rt->total_us / rt->count);
-}
-
-uint32_t nc_task_rt_wrap_us(const nc_task_rt_t *rt)
-{
-    return rt ? rt->last_wrap_us : 0;
-}
-
-uint32_t nc_task_rt_wrap_avg_us(const nc_task_rt_t *rt)
-{
-    if (rt == NULL || rt->count == 0) {
-        return 0;
-    }
-    return (uint32_t)(rt->total_wrap_us / rt->count);
-}
-
 bool mod_stub_loop_running(const char *name)
 {
     for (int i = 0; i < LOOP_MAX; i++) {

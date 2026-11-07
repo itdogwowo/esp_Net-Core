@@ -1,4 +1,5 @@
 #include "nc_ota_action.h"
+#include "nc_action.h"
 
 #include <string.h>
 
@@ -390,21 +391,23 @@ static void on_state_query(nc4_ctx_t *ctx, const nc4_frame_t *f)
     reply_state(ctx);
 }
 
-void nc_ota_action_register(nc4_decoder_t *decoder)
-{
-    if (decoder == NULL) {
-        return;
-    }
-    memset(&s_ota, 0, sizeof(s_ota));
+// 指令表：靜態宣告，nc_action 管理器在開機時統計＋一次配置（見 nc_action.h）。
+// 加一條指令 = 這裡多一行，總數自動變大，沒有魔術數字。
+static const nc_action_t s_ota_actions[] = {
+    { OTA_BEGIN,          on_begin,          "ota" },
+    { OTA_WRITE,          on_write,          "ota" },
+    { OTA_END,            on_end,            "ota" },
+    { OTA_ABORT,          on_abort,          "ota" },
+    { OTA_APPLY,          on_apply,          "ota" },
+    { OTA_VERSION_QUERY,  on_version_query,  "ota" },
+    { OTA_CAPS_QUERY,     on_caps_query,     "ota" },
+    { OTA_PROGRESS_QUERY, on_progress_query, "ota" },
+    { OTA_STATE_QUERY,    on_state_query,    "ota" },
+};
 
-    nc4_decoder_on_owner(decoder, OTA_BEGIN, on_begin, "ota");
-    nc4_decoder_on_owner(decoder, OTA_WRITE, on_write, "ota");
-    nc4_decoder_on_owner(decoder, OTA_END, on_end, "ota");
-    nc4_decoder_on_owner(decoder, OTA_ABORT, on_abort, "ota");
-    nc4_decoder_on_owner(decoder, OTA_APPLY, on_apply, "ota");
-    nc4_decoder_on_owner(decoder, OTA_VERSION_QUERY, on_version_query, "ota");
-    nc4_decoder_on_owner(decoder, OTA_CAPS_QUERY, on_caps_query, "ota");
-    nc4_decoder_on_owner(decoder, OTA_PROGRESS_QUERY, on_progress_query, "ota");
-    nc4_decoder_on_owner(decoder, OTA_STATE_QUERY, on_state_query, "ota");
-    ESP_LOGI(TAG, "OTA 指令已註冊（0x2201~0x2220 子集）");
+NC_ACTION_TABLE_DEF(nc_ota_action_table, "ota", s_ota_actions);
+
+void nc_ota_action_init(void)
+{
+    memset(&s_ota, 0, sizeof(s_ota));
 }

@@ -1,4 +1,5 @@
 #include "nc_file_action.h"
+#include "nc_action.h"
 
 #include <stdbool.h>
 #include <stdio.h>
@@ -109,23 +110,30 @@ static void sha256_of(const char *path, uint8_t out[32], bool *ok)
         return;
     }
 
-    // 2 KB 讀取緩衝放**棧**（decode 任務 6,144 B，這一層夠深）。
-    // 以前是 static：兩個 decoder 同時算 SHA-256 會互相蓋掉讀到的資料 → 算出錯的雜湊。
-    uint8_t buf[2048];
+    // 2 KB 讀取緩衝：**每次呼叫自己攞**。
+    //   static  → 兩個 decoder 同時算 SHA-256 會互相蓋掉讀到的資料（算出錯雜湊）
+    //   放棧   → decode 任務只剩 256 B 餘裕（實測 hwm），差一點就爆
+    // 所以兩者都唔要，用 heap；用完即還，失敗就當讀不到。
+    uint8_t *buf = malloc(2048);
+    if (buf == NULL) {
+        fclose(f);
+        return;
+    }
     psa_hash_operation_t op = PSA_HASH_OPERATION_INIT;
     bool started = (psa_hash_setup(&op, PSA_ALG_SHA_256) == PSA_SUCCESS);
 
     while (started) {
-        const size_t n = fread(buf, 1, sizeof(buf), f);
+        const size_t n = fread(buf, 1, 2048, f);
         if (n > 0 && psa_hash_update(&op, buf, n) != PSA_SUCCESS) {
             started = false;
             break;
         }
-        if (n < sizeof(buf)) {
+        if (n < 2048) {
             break;
         }
     }
     fclose(f);
+    free(buf);
 
     if (started) {
         size_t olen = 0;
@@ -179,7 +187,17 @@ static void on_file_query(nc4_ctx_t *ctx, const nc4_frame_t *f)
     }
 
     char full[PATH_MAX_LOCAL];
-    if (!map_path(req, full, sizeof(full))) {
+    // /sd/… 走 SD（裝置端掛載點就是 /sd，唔使再加前綴）。
+    // 主機持有那張卡時裝置讀不到 —— 明確回 busy，唔好假裝有答案。
+    const bool is_sd = (strncmp(req, NC_STORE_SD_MOUNT "/", sizeof(NC_STORE_SD_MOUNT)) == 0);
+    if (is_sd) {
+        if (nc_store_sd_on_usb()) {
+            ESP_LOGW(TAG, "FILE_QUERY(%s)：SD 由主機持有", req);
+            send_error(ctx, 1, req);
+            return;
+        }
+        snprintf(full, sizeof(full), "%s", req);
+    } else if (!map_path(req, full, sizeof(full))) {
         ESP_LOGW(TAG, "FILE_QUERY(%s) 讀不到（mode=%s）", req, nc_store_mode_name());
         send_error(ctx, 1, req);
         return;
@@ -206,9 +224,9 @@ static void on_file_query(nc4_ctx_t *ctx, const nc4_frame_t *f)
     n += 32;
     n += wr_u32(b + n, size);
     n += wr_str(b + n, req);
-    n += wr_u32(b + n, free_bytes());
+    n += wr_u32(b + n, is_sd ? 0 : free_bytes());
     // pending：主機擁有 FAT 時，答案來自唯讀視圖 → 可能過期或半截
-    b[n++] = nc_store_app_ready() ? 0 : 1;
+    b[n++] = is_sd ? 0 : (nc_store_app_ready() ? 0 : 1);   // SD 讀的是真值，不是唯讀視圖
     send_payload(ctx, FILE_QUERY_RSP, b, n);
 
     ESP_LOGI(TAG, "FILE_QUERY %s → exists=%d size=%u（%s）", req,
@@ -322,13 +340,15 @@ static void on_status_set(nc4_ctx_t *ctx, const nc4_frame_t *f)
     ack(ctx, err == ESP_OK, msg);
 }
 
-void nc_file_action_register(nc4_decoder_t *decoder)
+// 指令表：靜態宣告（加一條 = 多一行）
+static const nc_action_t s_file_actions[] = {
+    { FILE_QUERY, on_file_query, "file" },
+    { STATUS_SET, on_status_set, "file" },
+};
+
+NC_ACTION_TABLE_DEF(nc_file_action_table, "file", s_file_actions);
+
+void nc_file_action_init(void)
 {
-    if (decoder == NULL) {
-        return;
-    }
     psa_crypto_init();                   // 幂等
-    nc4_decoder_on_owner(decoder, FILE_QUERY, on_file_query, "file");
-    nc4_decoder_on_owner(decoder, STATUS_SET, on_status_set, "file");
-    ESP_LOGI(TAG, "已註冊：0x2005 FILE_QUERY / 0x1103 STATUS_SET");
 }

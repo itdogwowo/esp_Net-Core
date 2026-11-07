@@ -1,10 +1,14 @@
 #include "nc4.h"
+#include "nc_action.h"
 
+#include <stdarg.h>
 #include <stdlib.h>
 #include <string.h>
 
+#include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_rom_crc.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 
@@ -14,19 +18,14 @@
 // ⚠️ 要開第二個 decoder 之前，handler 必須是 reentrant（不能共寫 static 回覆緩衝）。
 static const char *TAG = "nc4";
 
-typedef struct {
-    uint16_t cmd;
-    nc4_handler_t handler;
-    const char *owner;     // 誰註冊的（模組名）；NULL = 核心或舊式註冊
-} nc4_entry_t;
-
 struct nc4_decoder {
-    nc4_entry_t table[NC4_MAX_HANDLERS];
-    size_t count;
+    // 指令表唔再住喺呢個 struct：由 nc_action 管理器統計＋一次配置＋封存
+    //（見 nc_action.h）。decoder 只保留「誰是我、一次跑一個」這些狀態。
     SemaphoreHandle_t lock;   // 這個 decoder 的執行鎖（一個 decoder 一次一個 handler）
     uint16_t cid;          // 我自己（0xFFFF = 未設定）
     uint16_t master_cid;   // 我的上級（0xFFFF = 未設定）
     uint32_t dropped_addr; // 丟掉的「不是給我的」幀
+    uint8_t *reply;        // 回覆幀（NC4_REPLY_FRAME_MAX B，見 nc4_reply_buf）
 };
 
 static inline void decoder_lock(nc4_decoder_t *d)
@@ -71,6 +70,17 @@ nc4_decoder_t *nc4_decoder_create(void)
         free(d);
         return NULL;
     }
+    // 回覆幀：優先 PSRAM（它只被 CPU 讀寫，不經 DMA），冇 PSRAM 才落內部。
+    // 這 2.6 KB 以前在每個 decode 任務的棧上 —— 搬出來之後棧可以細一半。
+    d->reply = heap_caps_malloc(NC4_REPLY_FRAME_MAX, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (d->reply == NULL) {
+        d->reply = malloc(NC4_REPLY_FRAME_MAX);
+    }
+    if (d->reply == NULL) {
+        vSemaphoreDelete(d->lock);
+        free(d);
+        return NULL;
+    }
     return d;
 }
 
@@ -98,6 +108,11 @@ uint16_t nc4_decoder_master_cid(const nc4_decoder_t *decoder)
     return decoder ? decoder->master_cid : NC4_ADDR_BROADCAST;
 }
 
+uint8_t *nc4_decoder_reply_buf(nc4_decoder_t *decoder)
+{
+    return decoder ? decoder->reply : NULL;
+}
+
 uint16_t nc4_reply_addr(const nc4_ctx_t *ctx)
 {
     if (ctx == NULL || ctx->decoder == NULL) {
@@ -114,108 +129,30 @@ void nc4_decoder_destroy(nc4_decoder_t *decoder)
     if (decoder->lock != NULL) {
         vSemaphoreDelete(decoder->lock);
     }
+    free(decoder->reply);
     free(decoder);
 }
 
-esp_err_t nc4_decoder_on(nc4_decoder_t *decoder, uint16_t cmd, nc4_handler_t handler)
+static nc4_handler_t decoder_lookup(nc4_decoder_t *decoder, uint16_t cmd)
 {
-    return nc4_decoder_on_owner(decoder, cmd, handler, NULL);
-}
-
-// owner 是「誰擁有這條指令」：模組卸載時用它整批收回（見 nc4_decoder_off_owner）。
-// 同名 owner 重複註冊同一條 cmd = 覆寫（後載入者勝）；不同 owner 蓋掉別人的 cmd
-// 會印警告 —— 那是帳本該在開機就擋下的衝突，不該到執行期才悄悄發生。
-esp_err_t nc4_decoder_on_owner(nc4_decoder_t *decoder, uint16_t cmd, nc4_handler_t handler,
-                               const char *owner)
-{
-    if (decoder == NULL || handler == NULL) {
-        return ESP_ERR_INVALID_ARG;
-    }
-    for (size_t i = 0; i < decoder->count; i++) {
-        if (decoder->table[i].cmd == cmd) {
-            const char *prev = decoder->table[i].owner;
-            if (owner != NULL && prev != NULL && strcmp(owner, prev) != 0) {
-                ESP_LOGW(TAG, "cmd 0x%04X 被 %s 覆寫（原本是 %s）",
-                         (unsigned)cmd, owner, prev);
-            }
-            decoder->table[i].handler = handler;
-            decoder->table[i].owner = owner;
-            return ESP_OK;
-        }
-    }
-    if (decoder->count >= NC4_MAX_HANDLERS) {
-        return ESP_ERR_NO_MEM;
-    }
-    decoder->table[decoder->count++] = (nc4_entry_t){
-        .cmd = cmd, .handler = handler, .owner = owner,
-    };
-    return ESP_OK;
-}
-
-int nc4_decoder_off_owner(nc4_decoder_t *decoder, const char *owner)
-{
-    if (decoder == NULL || owner == NULL) {
-        return 0;
-    }
-    int removed = 0;
-    for (size_t i = 0; i < decoder->count;) {
-        const char *o = decoder->table[i].owner;
-        if (o != NULL && strcmp(o, owner) == 0) {
-            memmove(&decoder->table[i], &decoder->table[i + 1],
-                    (decoder->count - i - 1) * sizeof(decoder->table[0]));
-            decoder->count--;
-            removed++;
-        } else {
-            i++;
-        }
-    }
-    return removed;
+    (void)decoder;
+    return nc_action_find(cmd);      // 已排序 → 二分搜尋
 }
 
 size_t nc4_decoder_count(const nc4_decoder_t *decoder)
 {
-    return decoder ? decoder->count : 0;
+    return decoder ? nc_action_count() : 0;
 }
 
 bool nc4_decoder_at(const nc4_decoder_t *decoder, size_t i, uint16_t *cmd,
                     const char **owner, nc4_handler_t *handler)
 {
-    if (decoder == NULL || i >= decoder->count) {
-        return false;
-    }
-    if (cmd != NULL) {
-        *cmd = decoder->table[i].cmd;
-    }
-    if (owner != NULL) {
-        *owner = decoder->table[i].owner;
-    }
-    if (handler != NULL) {
-        *handler = decoder->table[i].handler;
-    }
-    return true;
+    return decoder ? nc_action_at(i, cmd, owner, handler) : false;
 }
 
 bool nc4_decoder_has(const nc4_decoder_t *decoder, uint16_t cmd)
 {
-    if (decoder == NULL) {
-        return false;
-    }
-    for (size_t i = 0; i < decoder->count; i++) {
-        if (decoder->table[i].cmd == cmd) {
-            return true;
-        }
-    }
-    return false;
-}
-
-static nc4_handler_t decoder_lookup(nc4_decoder_t *decoder, uint16_t cmd)
-{
-    for (size_t i = 0; i < decoder->count; i++) {
-        if (decoder->table[i].cmd == cmd) {
-            return decoder->table[i].handler;
-        }
-    }
-    return NULL;
+    return decoder ? (nc_action_find(cmd) != NULL) : false;
 }
 
 // ───────────────────────── pack ─────────────────────────
@@ -411,6 +348,26 @@ esp_err_t nc4_parser_frame(nc4_parser_t *parser, const uint8_t *buf, size_t len)
     return ESP_OK;
 }
 
+// 溢位／過大幀的警告限速：每秒最多一行。唔限速的話，洪水測試會用 log 淹死
+// 自己的 CDC TX（實測：8 KB 幀 × 8 MB → 三萬行，回覆全部排唔到隊）。
+static void nc4_warn_throttled(const char *src, const char *fmt, ...)
+{
+    static int64_t  s_last_us;
+    static uint32_t s_count;
+    s_count++;
+    const int64_t now = esp_timer_get_time();
+    if (now - s_last_us < 1000000) {
+        return;
+    }
+    s_last_us = now;
+    char msg[96];
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(msg, sizeof(msg), fmt, ap);
+    va_end(ap);
+    ESP_LOGW(TAG, "[%s] %s（累計 %u 次，每秒最多 1 行）", src, msg, (unsigned)s_count);
+}
+
 esp_err_t nc4_parser_feed(nc4_parser_t *parser, const uint8_t *data, size_t len)
 {
     if (parser == NULL || data == NULL) {
@@ -421,7 +378,7 @@ esp_err_t nc4_parser_feed(nc4_parser_t *parser, const uint8_t *data, size_t len)
     if (parser->end + len > parser->cap) {
         size_t keep = parser->end - parser->start;
         if (keep + len > parser->cap) {
-            ESP_LOGW(TAG, "[%s] rx 溢位，丟棄 %u bytes", parser->ctx.source, (unsigned)keep);
+            nc4_warn_throttled(parser->ctx.source, "rx 溢位，丟棄 %u bytes", (unsigned)keep);
             parser->start = parser->end = 0;
             return ESP_ERR_NO_MEM;
         }
@@ -468,6 +425,16 @@ esp_err_t nc4_parser_feed(nc4_parser_t *parser, const uint8_t *data, size_t len)
         }
 
         const size_t total = NC4_HDR_LEN + dlen + NC4_CRC_LEN;
+        // 幀比 parser 緩衝大：永遠放唔落。以前會一直緩衝到溢位再整段丟，
+        // 一個 8 KB 幀（CDC 的 region 只有 4,192）就變成每 256 B 一次「rx 溢位」
+        // —— 洪水測試時 22 秒噴 627 行 log，塞爆 CDC TX，decode 的回覆全部被丟。
+        // 正確做法：認出「放唔落」就跳過這個 SOF，繼續找下一個，而且 log 要限速。
+        if (total > parser->cap) {
+            parser->n_bad_hdr++;
+            parser->start += 1;
+            nc4_warn_throttled(parser->ctx.source, "幀過大（>%u B）", (unsigned)parser->cap);
+            continue;
+        }
         if (avail < total) {
             return ESP_OK;   // 等更多資料
         }

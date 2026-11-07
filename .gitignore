@@ -1,6 +1,8 @@
 # ── 生成物：由 idf.py / 組件管理器產生，永遠不進 git ──
 # 位置在 firmware/ 下；路徑不寫死深度，所以任何子目錄都適用
 build/
+# 分析用建置（例如 build_ana：帶 -fcallgraph-info 的棧深分析）
+build_*/
 sdkconfig
 sdkconfig.old
 managed_components/

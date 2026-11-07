@@ -30,7 +30,7 @@ static void bench_burn(void *arg)
         .name = "bench_" #NM, .fn = bench_burn,                                \
         .arg = (void *)(uintptr_t)BENCH_BURN_CYCLES,                           \
         .stack = 3072, .prio = 2, .core = CORE, .layer = 4,                    \
-        .period_ms = BENCH_PERIOD_MS, .budget_us = 2000,                       \
+        .period_ms = BENCH_PERIOD_MS,                                          \
     };                                                                         \
     static const nc_task_t s_bench_##NM = {                                    \
         .name = "bench_" #NM, .kind = NC_TASK_NORMAL, .level = 4,              \

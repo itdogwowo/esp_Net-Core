@@ -20,9 +20,7 @@ cl /nologo /utf-8 /std:c11 /W4 ^
   /I firmware\components\sys\config\include ^
   /I firmware\components\sys\nc4\include ^
   /I firmware\components\sys\mem\include ^
-  /I firmware\components\sys\epoch\include ^
   firmware\components\sys\task_manager\nc_task.c ^
-  firmware\components\sys\epoch\nc_epoch.c ^
   tools\hosttest\task_test\cfg_stub.c ^
   tools\hosttest\task_test\stubs.c ^
   tools\hosttest\task_test\main.c ^

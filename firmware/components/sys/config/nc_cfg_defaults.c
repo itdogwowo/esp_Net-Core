@@ -78,6 +78,20 @@ const nc_system_cfg_t *nc_cfg_defaults_system(void)
     return &k_system;
 }
 
+static const nc_hardware_cfg_t k_hw = {
+    .version = NC_CFG_SCHEMA_VERSION,
+    .n_sdio = 1,
+    .sdio = {
+        { .enable = false, .freq_hz = 40000000, .width = 4,
+          .clk = -1, .cmd = -1, .d = { -1, -1, -1, -1 } },
+    },
+};
+
+const nc_hardware_cfg_t *nc_cfg_defaults_hardware(void)
+{
+    return &k_hw;
+}
+
 const nc_tasks_cfg_t *nc_cfg_defaults_tasks(void)
 {
     return &k_tasks;

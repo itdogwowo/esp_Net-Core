@@ -25,6 +25,8 @@ static nc_system_cfg_t s_sys;
 static nc_tasks_cfg_t  s_tasks;
 static nc_cfg_stat_t   s_sys_stat;
 static nc_cfg_stat_t   s_tasks_stat;
+static nc_hardware_cfg_t s_hw;
+static nc_cfg_stat_t   s_hw_stat;
 static bool s_loaded;
 
 // ───────────────────────── 小工具 ─────────────────────────
@@ -300,6 +302,78 @@ static void parse_routes(const cJSON *root, nc_system_cfg_t *out, nc_cfg_stat_t 
     }
 }
 
+// ───────────────────────── hardware ─────────────────────────
+// { "SDIO": { "enable":1, "list":[ {"freq":40000000,"width":4,
+//              "GPIO":{"sck":7,"cmd":6,"data":[15,16,4,5]}} ] } }
+esp_err_t nc_cfg_apply_hardware(const cJSON *root, nc_hardware_cfg_t *out, nc_cfg_stat_t *st)
+{
+    if (out == NULL || st == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    *out = *nc_cfg_defaults_hardware();
+    if (root == NULL) {
+        st->missing = 1;
+        return ESP_OK;
+    }
+    const cJSON *ver = item(root, "version");
+    if (ver != NULL && cJSON_IsNumber(ver) && ver->valueint != NC_CFG_SCHEMA_VERSION) {
+        st->bad_version = 1;
+        return ESP_OK;
+    }
+    static const char *const root_keys[] = {
+        "version", "_comment", "_gpio_convention",
+        "ETH", "PIN", "SPI", "I2C", "I80", "UART", "I2S", "PWM", "SDIO", "ENC", "XL9555",
+    };
+    note_unknown(root, root_keys, sizeof(root_keys) / sizeof(root_keys[0]), st);
+
+    const cJSON *sdio = item(root, "SDIO");
+    if (sdio == NULL) {
+        st->defaulted++;
+        return ESP_OK;
+    }
+    if (!cJSON_IsObject(sdio)) {
+        st->invalid++;
+        return ESP_OK;
+    }
+    out->n_sdio = 0;
+    if (!get_bool(sdio, "enable", false, st)) {
+        return ESP_OK;
+    }
+    const cJSON *list = item(sdio, "list");
+    if (!cJSON_IsArray(list)) {
+        st->invalid++;
+        return ESP_OK;
+    }
+    const cJSON *it = NULL;
+    cJSON_ArrayForEach(it, list) {
+        if (out->n_sdio >= NC_CFG_MAX_SDIO) {
+            st->invalid++;
+            break;
+        }
+        nc_sdio_cfg_t e;
+        memset(&e, 0, sizeof(e));
+        e.enable  = true;
+        e.freq_hz = (uint32_t)get_int(it, "freq", 40000000, 100000, 80000000, st);
+        e.width   = (uint8_t)get_int(it, "width", 4, 1, 4, st);
+        const cJSON *g = item(it, "GPIO");
+        e.clk = (int8_t)get_int(g, "sck", -1, -1, 48, st);
+        e.cmd = (int8_t)get_int(g, "cmd", -1, -1, 48, st);
+        const cJSON *arr = item(g, "data");
+        for (int i = 0; i < 4; i++) {
+            const cJSON *v = cJSON_IsArray(arr) ? cJSON_GetArrayItem(arr, i) : NULL;
+            e.d[i] = (cJSON_IsNumber(v) && v->valueint >= 0 && v->valueint <= 48)
+                         ? (int8_t)v->valueint : -1;
+        }
+        out->sdio[out->n_sdio++] = e;
+    }
+    return ESP_OK;
+}
+
+// SD 卡**不在這一層**：它是一條匯流排上的裝置，enable／腳位／頻率／寬度全部由
+// hardware.json 的 SDIO 決定（跟 ETH 一樣只出現一次）。掛載點固定 /sd。
+// 以前 system.json 有一份 { enable, bus:{type,index} } —— 那是「SPI 與 SDIO 二選一」
+// 年代的東西，兩者都係 SD 之後就變成純粹的重複，已刪。
+
 esp_err_t nc_cfg_apply_system(const cJSON *root, nc_system_cfg_t *out, nc_cfg_stat_t *st)
 {
     if (out == NULL || st == NULL) {
@@ -456,6 +530,11 @@ const nc_tasks_cfg_t *nc_cfg_tasks(void)
     return &s_tasks;
 }
 
+const nc_hardware_cfg_t *nc_cfg_hardware(void)
+{
+    return &s_hw;
+}
+
 const nc_cfg_stat_t *nc_cfg_stat_of(const char *layer)
 {
     if (layer == NULL) {
@@ -466,6 +545,9 @@ const nc_cfg_stat_t *nc_cfg_stat_of(const char *layer)
     }
     if (strcmp(layer, "tasks") == 0) {
         return &s_tasks_stat;
+    }
+    if (strcmp(layer, "hardware") == 0) {
+        return &s_hw_stat;
     }
     return NULL;
 }
@@ -524,6 +606,19 @@ esp_err_t nc_cfg_boot(void)
     }
 
     exists = false;
+    f = nc_cfg_open_ex("hardware", &exists);
+    if (f != NULL) {
+        (void)nc_cfg_apply_hardware(nc_cfg_root(f), &s_hw, &s_hw_stat);
+        nc_cfg_close(f);
+    } else {
+        (void)nc_cfg_apply_hardware(NULL, &s_hw, &s_hw_stat);
+        if (exists) {
+            s_hw_stat.missing = 0;
+            s_hw_stat.bad_json = 1;
+        }
+    }
+
+    exists = false;
     f = nc_cfg_open_ex("tasks", &exists);
     if (f != NULL) {
         (void)nc_cfg_apply_tasks(nc_cfg_root(f), &s_tasks, &s_tasks_stat);
@@ -545,6 +640,12 @@ esp_err_t nc_cfg_boot(void)
              s_sys_stat.bad_version ? " 版本不符" : "",
              (unsigned)s_sys_stat.defaulted, (unsigned)s_sys_stat.invalid,
              (unsigned)s_sys_stat.unknown);
+    ESP_LOGI(TAG, "hardware: sdio=%u%s%s（def=%u inv=%u unk=%u）",
+             (unsigned)s_hw.n_sdio,
+             s_hw_stat.missing ? " 缺檔" : "",
+             s_hw_stat.bad_json ? " 壞檔" : "",
+             (unsigned)s_hw_stat.defaulted, (unsigned)s_hw_stat.invalid,
+             (unsigned)s_hw_stat.unknown);
     ESP_LOGI(TAG, "tasks: %u 條%s%s（def=%u inv=%u unk=%u）",
              (unsigned)s_tasks.n_tasks,
              s_tasks_stat.missing ? " 缺檔" : "",
@@ -561,11 +662,15 @@ void nc_cfg_json(char *buf, size_t cap)
     }
     snprintf(buf, cap,
              "{\"sys\":{\"miss\":%u,\"bad\":%u,\"ver\":%u,\"def\":%u,\"inv\":%u,\"unk\":%u},"
-             "\"tasks\":{\"miss\":%u,\"bad\":%u,\"ver\":%u,\"def\":%u,\"inv\":%u,\"unk\":%u}}",
+             "\"tasks\":{\"miss\":%u,\"bad\":%u,\"ver\":%u,\"def\":%u,\"inv\":%u,\"unk\":%u},"
+             "\"hw\":{\"miss\":%u,\"bad\":%u,\"ver\":%u,\"def\":%u,\"inv\":%u,\"unk\":%u}}",
              (unsigned)s_sys_stat.missing, (unsigned)s_sys_stat.bad_json,
              (unsigned)s_sys_stat.bad_version, (unsigned)s_sys_stat.defaulted,
              (unsigned)s_sys_stat.invalid, (unsigned)s_sys_stat.unknown,
              (unsigned)s_tasks_stat.missing, (unsigned)s_tasks_stat.bad_json,
              (unsigned)s_tasks_stat.bad_version, (unsigned)s_tasks_stat.defaulted,
-             (unsigned)s_tasks_stat.invalid, (unsigned)s_tasks_stat.unknown);
+             (unsigned)s_tasks_stat.invalid, (unsigned)s_tasks_stat.unknown,
+             (unsigned)s_hw_stat.missing, (unsigned)s_hw_stat.bad_json,
+             (unsigned)s_hw_stat.bad_version, (unsigned)s_hw_stat.defaulted,
+             (unsigned)s_hw_stat.invalid, (unsigned)s_hw_stat.unknown);
 }

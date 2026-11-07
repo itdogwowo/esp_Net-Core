@@ -18,6 +18,7 @@ endif()
 # ── 測試專用（約定：action/test_action、app/test_*_tasks）──
 # OFF 時整個 components/app 唔加入編譯：測試任務「唔存在」，而唔係靠命名或 runtime 開關。
 option(NC_ENABLE_TESTS "測試指令與測試任務（test_action / test_*_tasks）" OFF)
+option(NC_STACK_ANALYSIS "產生 .su/.ci（給 tools/stack_depth.py 算最壞棧深）" OFF)
 
 # 正式組件（永遠編譯）
 set(_nc_extra_dirs
@@ -32,5 +33,15 @@ if(NC_ENABLE_TESTS)
 endif()
 set(EXTRA_COMPONENT_DIRS ${_nc_extra_dirs})
 
+# ── 靜態棧深分析（tools/stack_depth.py）──
+# 每個 .c 額外產生 .su（每個函數的框大小）與 .ci（呼叫圖，含框大小）。
+# 有它們就可以「算」出最壞情況深度，而唔係靠 runtime 採樣（HWM 只覆蓋走過的路）。
+# 必須在 project() 之前設定，才會套用到所有組件。
+if(NC_STACK_ANALYSIS)
+    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fstack-usage -fcallgraph-info=su")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fstack-usage -fcallgraph-info=su")
+endif()
+
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 project(esp_net_core)
+

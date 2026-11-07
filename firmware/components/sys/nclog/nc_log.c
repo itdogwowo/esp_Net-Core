@@ -76,6 +76,9 @@ static void ring_migrate(int i, size_t new_bytes);   // 定義在下面（apply_
 
 static inline uint16_t ring_used(const nc_log_ring_t *q, uint16_t head, uint16_t tail)
 {
+    if (q->cap == 0) {
+        return 0;                   // 環未配置（capture 之前問 STATUS）→ 唔可以除零
+    }
     return (uint16_t)((head + q->cap - tail) % q->cap);
 }
 
@@ -86,7 +89,9 @@ static bool ring_put(nc_log_ring_t *q, const nc_log_hdr_t *h, const char *text)
     uint16_t head = atomic_load_explicit(&q->head, memory_order_relaxed);
     const uint16_t tail = atomic_load_explicit(&q->tail, memory_order_acquire);
 
-    // 記錄必須連續；尾端放唔落就補一個 PAD header 再繞回 0
+    // 記錄必須連續；尾端放唔落就補一個 PAD header 再繞回 0。
+    // 注意尾端只剩 1–3 B 時連 header 都放唔落 → 唔寫 PAD，消費者靠「已無 4 B 可讀」認出繞回
+    // （ring_at 有對應處理；以前兩邊都冇，會讀過緩衝尾再將垃圾 header 當真）。
     const uint16_t wrap = (uint16_t)((head + need > q->cap) ? (q->cap - head) : 0);
     if ((uint32_t)ring_used(q, head, tail) + need + wrap + 1u > q->cap) {
         return false;                       // 放唔落：丟新行（保已排隊的順序）
@@ -113,6 +118,13 @@ static bool ring_at(nc_log_ring_t *q, uint16_t off, nc_log_hdr_t *h, uint16_t *n
     for (;;) {
         if (off == head) {
             return false;
+        }
+        // 環尾剩 < 一個 header（1–3 B）時，ring_put 冇位寫 PAD 標記，會直接由 0 開始寫。
+        // 呢種縫隙只能靠消費者自己認：off 之後已經冇 4 B 可讀 → 一定係繞回 0。
+        // （以前直接 memcpy，會讀過緩衝尾 1–3 B，用垃圾 header 當真，tail 就會跳去錯位置。）
+        if ((uint32_t)off + sizeof(*h) > q->cap) {
+            off = 0;
+            continue;
         }
         memcpy(h, q->buf + off, sizeof(*h));
         if ((h->flags & NC_LOG_F_PAD) != 0) {
@@ -457,6 +469,10 @@ static void ring_migrate(int i, size_t new_bytes)
     const uint16_t head = atomic_load_explicit(&q->head, memory_order_relaxed);
     while (off != head) {
         nc_log_hdr_t h;
+        if ((uint32_t)off + sizeof(h) > q->cap) {
+            off = 0;                    // 尾端 < 4 B 的縫隙（見 ring_at 的說明）
+            continue;
+        }
         memcpy(&h, q->buf + off, sizeof(h));
         if ((h.flags & NC_LOG_F_PAD) != 0) {
             off = 0;

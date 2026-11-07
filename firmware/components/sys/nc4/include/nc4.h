@@ -34,7 +34,16 @@ extern "C" {
 // 它的作用是配 parser 緩衝（NC4_MAX_FRAME = 8205）。改它要同步上游 proto.py 的 MAX_PAYLOAD。
 #define NC4_MAX_PAYLOAD      8192
 #define NC4_MAX_FRAME        (NC4_HDR_LEN + NC4_MAX_PAYLOAD + NC4_CRC_LEN)
-#define NC4_MAX_HANDLERS     32
+// 指令表的格數。**要對得起實際註冊量**：core 5 + test 11 + test bench 9 +
+// ota 9 + file 2 = 36（測試映像）。曾經是 32 → 最後 4 條靜靜咁註冊失敗
+// （STATUS_SET / FILE_QUERY 永遠答不到）。塞爆會印 ESP_LOGE（見 nc4.c）。
+// 回覆幀的 JSON 上限。完整的 STATUS_GET（sys+mem+tasks+provides+storage+fx）
+// 大約 2.4 KB，用小了會**靜靜截斷成無效 JSON**。
+// 這塊緩衝由 decoder 持有（每個 decoder 一份，預設放 PSRAM），**不再放任務棧**：
+// 以前它是 handler 的區域變數，一個 decode 任務的 5,120 B 棧裡面有 2,615 B 就是它。
+#define NC4_REPLY_JSON_MAX   2600
+#define NC4_REPLY_FRAME_MAX  (NC4_HDR_LEN + 2 + NC4_REPLY_JSON_MAX + NC4_CRC_LEN)
+#define NC4_MAX_HANDLERS     48
 #define NC4_ADDR_BROADCAST   0xFFFF
 
 // ── 指令碼（與 slave/schema/*.json 對齊）──
@@ -71,16 +80,10 @@ typedef struct nc4_parser nc4_parser_t;
 nc4_decoder_t *nc4_decoder_create(void);
 void nc4_decoder_destroy(nc4_decoder_t *decoder);
 
-// 註冊指令。舊式（owner = NULL）＝ 核心自己註冊，不會被任何模組收回。
-esp_err_t nc4_decoder_on(nc4_decoder_t *decoder, uint16_t cmd, nc4_handler_t handler);
-
-// 帶擁有權的註冊：owner 通常是模組名。模組卸載時整批收回（off_owner）。
-// 同一條 cmd 被不同 owner 覆寫 → 印警告（帳本應該在開機就擋下這種衝突）。
-esp_err_t nc4_decoder_on_owner(nc4_decoder_t *decoder, uint16_t cmd,
-                               nc4_handler_t handler, const char *owner);
-
-// 收回某個 owner 的全部指令；回傳移除幾條。
-int nc4_decoder_off_owner(nc4_decoder_t *decoder, const char *owner);
+// 指令表是**靜態**的：新增指令請寫在模組的 const 表（見 nc_action.h），
+// 由 nc_action_init() 在開機時統計＋一次配置。
+// 以前有 nc4_decoder_on() / on_owner() / off_owner() 三個執行期註冊 API ——
+// 已刪：留著只會讓人以為可以註冊，而實際上行不通（靜靜失敗正是之前最貴的 bug）。
 
 // 給帳本／狀態用：目前註冊了幾條、第 i 條是誰的、某條 cmd 有沒有主人
 size_t nc4_decoder_count(const nc4_decoder_t *decoder);
@@ -98,6 +101,10 @@ uint16_t nc4_decoder_master_cid(const nc4_decoder_t *decoder);
 
 // 回覆位址：有 master_cid 用 master_cid，否則廣播
 uint16_t nc4_reply_addr(const nc4_ctx_t *ctx);
+
+// 這個 decoder 的回覆幀緩衝（NC4_REPLY_FRAME_MAX B，建立時配置好）。
+// 由 decoder 獨佔：同一個 decoder 一次只跑一個 handler（有鎖），所以安全。
+uint8_t *nc4_decoder_reply_buf(nc4_decoder_t *decoder);
 
 // ── parser：每個通道一個 ──
 // max_frame = 這條通道的 parser 緩衝大小；0 → NC4_MAX_FRAME

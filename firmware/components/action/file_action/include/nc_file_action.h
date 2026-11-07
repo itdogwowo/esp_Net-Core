@@ -11,13 +11,16 @@
 #pragma once
 
 #include "nc4.h"
+#include "nc_action.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-// 註冊 handler（0x2005 / 0x1103）
-void nc_file_action_register(nc4_decoder_t *decoder);
+// 指令表（靜態）：由 main 交給 nc_action_init()。
+extern const nc_action_table_t nc_file_action_table;
+// 只做非註冊的初始化（psa_crypto_init）。
+void nc_file_action_init(void);
 
 #ifdef __cplusplus
 }

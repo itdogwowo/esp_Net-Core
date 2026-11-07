@@ -33,8 +33,8 @@ extern "C" {
 #define NC_LOG_LINE_MAX  160     // 一行文字上限（唔含 NUL）
 // 環的大小（bytes，**只存文字**＋4 B header，可變長）。
 //   量出嚟：開機 burst ≈ 75–106 行、平均 57 B/行 → 加 4 B header ≈ 61 B/行。
-//   6 KB 可裝 ~100 行（正常開機有 ~20% 餘裕）。8 KB 是格式化那次的量；
-//   用戶決定用 6 KB（時間戳唔重要，所以 header 由 10 B 壓到 4 B）。
+//   8 KB 可裝 ~130 行；2 KB（簡模式）約 30 行，夠看到服務／bus 啟動。
+//   時間戳同 seq 都唔存（順序差一行無所謂），所以 header 由 10 B 壓到 4 B。
 // core1 開機只有 4–5 行，唔需要大環。
 #ifndef NC_LOG_BYTES_0
 #define NC_LOG_BYTES_0   8192    // core0（app_main / decode0 / CDC 組）
@@ -77,13 +77,13 @@ typedef nc_log_tx_result_t (*nc_log_tx_fn)(const char *buf, size_t len);
 #define NC_LOG_LVL_DEFAULT  (NC_LOG_LVL_ERROR | NC_LOG_LVL_WARN | NC_LOG_LVL_INFO)
 
 // ── 只有兩個級別（已經實測：7 KB 同 8 KB 冇分別，所以合併）──
-//   0 = 簡：error/warn、2 KB、**唔擷取開機**（只記開機之後）
-//   1 = 詳：error/warn/info、8 KB、連開機一齊擷取
+//   0 = 簡：error/warn/info、2 KB（core1 512 B）、USB 起來之後才裝 hook（只記開機之後）
+//   1 = 詳：全部等級（含 DEBUG/VERBOSE）、8 KB（core1 1 KB）、由 app_main 第一行開始記
 #define NC_LOG_LEVELS_QUIET 0
 #define NC_LOG_LEVELS_FULL  1
 
 // 設定存在 NVS（boot/log）：開機最早期就要讀（FAT 未掛）。
-// 由 config 的 system.json "log_levels" 覆寫；即時生效（必要時遷移環），並寫回 NVS。
+// 由 config 的 system.json "log_debug_mode" 覆寫；即時生效（必要時遷移環），並寫回 NVS。
 esp_err_t nc_log_set_levels(uint8_t levels);
 void nc_log_get_levels(uint8_t *levels);
 

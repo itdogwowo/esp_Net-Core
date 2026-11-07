@@ -50,6 +50,7 @@ bool nc_cfg_append_obj(const char *layer, const char *array_key, const char *obj
 // 預設（最基礎的形狀）。指標有效期限 = 程式執行期。
 const nc_system_cfg_t *nc_cfg_defaults_system(void);
 const nc_tasks_cfg_t  *nc_cfg_defaults_tasks(void);
+const nc_hardware_cfg_t *nc_cfg_defaults_hardware(void);
 
 // 依 kind 給一條 link 的 rx 預設（config 只寫 name/kind/enable 時用）。
 void nc_cfg_rx_default(nc_link_kind_t kind, nc_link_rx_t *rx);
@@ -58,6 +59,7 @@ void nc_cfg_rx_default(nc_link_kind_t kind, nc_link_rx_t *rx);
 // 抽出來是為了 host test 可以不用檔案系統直接驗。
 esp_err_t nc_cfg_apply_system(const cJSON *root, nc_system_cfg_t *out, nc_cfg_stat_t *st);
 esp_err_t nc_cfg_apply_tasks(const cJSON *root, nc_tasks_cfg_t *out, nc_cfg_stat_t *st);
+esp_err_t nc_cfg_apply_hardware(const cJSON *root, nc_hardware_cfg_t *out, nc_cfg_stat_t *st);
 
 // 開機載入一次（永遠回 ESP_OK：最差 = 全部預設）。
 esp_err_t nc_cfg_boot(void);
@@ -65,6 +67,7 @@ esp_err_t nc_cfg_boot(void);
 // 之後全系統只讀這些。
 const nc_system_cfg_t *nc_cfg_system(void);
 const nc_tasks_cfg_t  *nc_cfg_tasks(void);
+const nc_hardware_cfg_t *nc_cfg_hardware(void);
 const nc_cfg_stat_t   *nc_cfg_stat_of(const char *layer);   // "system" / "tasks"
 
 // 查一條 link / 一列 route（找不到回 NULL）

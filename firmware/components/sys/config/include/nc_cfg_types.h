@@ -71,6 +71,28 @@ typedef struct {
     char    out[NC_CFG_MAX_OUT][NC_CFG_NAME_MAX];
 } nc_route_cfg_t;
 
+#define NC_CFG_MOUNT_MAX  16
+
+// ── hardware 層（hardware.json）：實體匯流排 ──
+// 一個層一個檔，跟 system/tasks 同一個生命周期（seed → load → struct）。
+// 目前只型別化 SDIO；其他匯流排（SPI/I2C/UART…）等有 driver 用到再逐個加。
+#define NC_CFG_MAX_SDIO 2
+
+typedef struct {
+    bool     enable;
+    uint32_t freq_hz;      // 40000000
+    uint8_t  width;        // 1 / 4
+    int8_t   clk;          // SD 的 sck
+    int8_t   cmd;
+    int8_t   d[4];         // D0..D3（-1 = 未用）
+} nc_sdio_cfg_t;
+
+typedef struct {
+    uint16_t     version;
+    uint8_t      n_sdio;
+    nc_sdio_cfg_t sdio[NC_CFG_MAX_SDIO];
+} nc_hardware_cfg_t;
+
 typedef struct {
     uint16_t       version;
     char           cid[NC_CFG_CID_MAX];    // "F5F9"；空 = 由 MAC 推導

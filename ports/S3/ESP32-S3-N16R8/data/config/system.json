@@ -1,6 +1,5 @@
 {
   "version": 1,
-
   "_comment": [
     "System 層：身份、開機行為、NC4 通道與路由表。",
     "引擎不用宣告：decodeN 由 routes[].out 推導（有人指向就開），fxN 由 .fxe manifest 的 core 推導。",
@@ -35,22 +34,45 @@
     "decodeN 有人指向才開；冇人指向就唔存在",
     "log_debug_mode：0 = 正常（INFO、2 KB，由 USB 起來開始記，看到服務啟動）｜1 = 除錯（全部等級、8 KB，連最早期開機）"
   ],
-
   "cID": "",
   "frame_interval_ms": 20,
   "num_pixels": 0,
-
   "nc4": {
     "links": [
-      { "name": "CDC", "kind": "cdc", "enable": 1 },
-      { "name": "UART", "kind": "uart", "enable": 1 }
+      {
+        "name": "CDC",
+        "kind": "cdc",
+        "enable": 1
+      },
+      {
+        "name": "UART",
+        "kind": "uart",
+        "enable": 1
+      }
     ],
-
     "routes": [
-      { "in": "nctx",     "out": ["decode0"] },
-      { "in": "outbound", "out": [] },
-      { "in": "CDC",      "out": ["decode0"] },
-      { "in": "UART",     "out": ["decode1"] }
+      {
+        "in": "nctx",
+        "out": [
+          "decode0"
+        ]
+      },
+      {
+        "in": "outbound",
+        "out": []
+      },
+      {
+        "in": "CDC",
+        "out": [
+          "decode0"
+        ]
+      },
+      {
+        "in": "UART",
+        "out": [
+          "decode1"
+        ]
+      }
     ]
   },
   "log_debug_mode": 0

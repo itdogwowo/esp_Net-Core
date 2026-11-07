@@ -112,14 +112,10 @@ typedef struct {
     int core;                // NC_TASK_CORE_ANY / 0 / 1
     int layer;               // 0..NC_TASK_LAYERS-1，小的先啟動
     uint32_t period_ms;      // >0 = 管理器每輪幫你延遲；0 = loop 自己阻塞
-    uint32_t budget_us;      // 每輪預算（0 = 不統計超支）
     bool run_once;           // 只跑一次（開機自測那種）
     // 房東自己話事嘅開關：回 false = 呢個 loop 唔建立（連棧都唔配置）。
     // NULL = 永遠開。config 管唔到 —— 呢個係固件宣告嘅一部分。
     bool (*enabled)(void);
-    // true = 唔參與每核「大循環」量測。診斷／低頻 loop 用：
-    // 一條 1 秒的 monitor 會把該核的 round 拉到 1 秒，令量測失真。
-    bool no_epoch;
 } nc_task_loop_t;
 
 // ── 一個任務的完整宣告 ──

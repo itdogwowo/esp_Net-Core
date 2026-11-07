@@ -1,6 +1,7 @@
 // 測試指令（dev bench / hub bench / tx bench / bus stats / net tune / bench 域）。
 // 由 main.c 搬出：正式映像唔編譯（NC_ENABLE_TESTS=OFF 時 component 唔存在）。
 #include "nc_test_action.h"
+#include "nc_action.h"
 
 #include <stdarg.h>
 #include <stdio.h>
@@ -722,28 +723,25 @@ static void on_tx_bench(nc4_ctx_t *ctx, const nc4_frame_t *f)
 }
 
 // ── 註冊 ──
-static const struct { uint16_t cmd; nc4_handler_t fn; } k_actions[] = {
-    { NC4_CMD_DEV_BENCH,      on_dev_bench },
-    { NC4_CMD_HUB_BENCH,      on_hub_bench },
-    { NC4_CMD_TX_BENCH,       on_tx_bench },
-    { NC4_CMD_BUS_STATS,      on_bus_stats },
-    { NC4_CMD_NET_TUNE,       on_net_tune },
-    { NC4_CMD_BENCH_READY,    on_bench_ready },
-    { NC4_CMD_BENCH_DATA,     on_bench_data },
-    { NC4_CMD_BENCH_RESULT,   on_bench_result },
-    { NC4_CMD_UART_LOOP,      on_uart_loop },
-    { NC4_CMD_LOOP_STAT,      on_loop_stat },
-    { NC4_CMD_LOOP_PING,      on_loop_ping },
+static const nc_action_t k_actions[] = {
+    { NC4_CMD_DEV_BENCH, on_dev_bench, "test" },
+    { NC4_CMD_HUB_BENCH, on_hub_bench, "test" },
+    { NC4_CMD_TX_BENCH, on_tx_bench, "test" },
+    { NC4_CMD_BUS_STATS, on_bus_stats, "test" },
+    { NC4_CMD_NET_TUNE, on_net_tune, "test" },
+    { NC4_CMD_BENCH_READY, on_bench_ready, "test" },
+    { NC4_CMD_BENCH_DATA, on_bench_data, "test" },
+    { NC4_CMD_BENCH_RESULT, on_bench_result, "test" },
+    { NC4_CMD_UART_LOOP, on_uart_loop, "test" },
+    { NC4_CMD_LOOP_STAT, on_loop_stat, "test" },
+    { NC4_CMD_LOOP_PING, on_loop_ping, "test" },
 };
 
-void nc_test_action_register(nc4_decoder_t *dec, const nc_test_action_hooks_t *hooks)
+NC_ACTION_TABLE_DEF(nc_test_action_table, "test", k_actions);
+
+void nc_test_action_init(const nc_test_action_hooks_t *hooks)
 {
-    if (dec == NULL || hooks == NULL) {
-        return;
+    if (hooks != NULL) {
+        s_hooks = *hooks;
     }
-    s_hooks = *hooks;
-    for (size_t i = 0; i < sizeof(k_actions) / sizeof(k_actions[0]); i++) {
-        nc4_decoder_on_owner(dec, k_actions[i].cmd, k_actions[i].fn, "test");
-    }
-    ESP_LOGW(TAG, "測試指令已註冊：%u 條", (unsigned)(sizeof(k_actions) / sizeof(k_actions[0])));
 }

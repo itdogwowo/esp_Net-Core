@@ -118,6 +118,10 @@ void nc4_bus_kick(nc4_bus_handle_t bus);
 size_t nc4_bus_slot_size(nc4_bus_handle_t bus);
 int    nc4_bus_slot_count(nc4_bus_handle_t bus);
 
+// 停滯偵測（monitor 用）：decode 迴圈跑過幾多次、每條 bus 的狀態。
+uint32_t nc4_bus_loop_count(int core);
+size_t   nc4_bus_dump(char *buf, size_t cap);
+
 // 統計（JSON 陣列）：frames / mb / copied / avg_b / hwm / parse_ms / us_per_frame / slots
 // copied = 為了把 payload 交給 parser 而做的 memcpy bytes（零複製模式應為 0）
 // hwm    = receiver task 的 stack 剩餘最少 bytes（用來把 stack 調到合身）

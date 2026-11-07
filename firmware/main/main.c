@@ -20,6 +20,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <sys/stat.h>
+#include <sys/statvfs.h>
 
 #include "driver/gpio.h"
 #include "driver/uart.h"
@@ -49,6 +50,7 @@
 
 #include "ff.h"
 #include "nc4.h"
+#include "nc_action.h"
 #include "nc4_bus.h"
 #include "nc4_router.h"
 #include "nc_task.h"
@@ -71,6 +73,13 @@
 #include "cJSON.h"
 #include "nc4_http.h"
 #include "nc_store.h"
+#include "boot.h"
+
+#include "diskio_impl.h"     // ff_diskio_get_drive / ff_diskio_unregister
+#include "diskio_sdmmc.h"    // ff_diskio_register_sdmmc
+#include "driver/sdmmc_host.h"
+#include "esp_vfs_fat.h"
+#include "sdmmc_cmd.h"
 #include "nc_boot.h"
 #include "nc_log.h"
 #include "nc_state.h"
@@ -79,7 +88,6 @@
 #include "nc_fx.h"
 #endif
 #include "nc_wifi.h"
-#include "nc_epoch.h"
 #include "nc_core.h"
 #ifdef NC_ENABLE_TESTS
 #endif
@@ -118,7 +126,9 @@ static volatile uint32_t s_rx_frames;        // 成功收到的幀數
 
 #define BOOT_BUTTON_GPIO   GPIO_NUM_0
 #define MSC_MOUNT_POINT    "/data"
+#define SD_MOUNT_POINT     NC_STORE_SD_MOUNT   // 定義喺 nc_store.h，跟 FILE_QUERY 共用
 #define PRESET_DIR          MSC_MOUNT_POINT "/config"
+#define PRESET_HARDWARE_PATH PRESET_DIR "/hardware.json"
 #define PRESET_SYSTEM_PATH  PRESET_DIR "/system.json"
 #define PRESET_NETWORK_PATH PRESET_DIR "/network.json"
 #define PRESET_TASKS_PATH   PRESET_DIR "/tasks.json"
@@ -173,6 +183,8 @@ static volatile uint32_t s_rx_frames;        // 成功收到的幀數
 #define NC4_CMD_ROUTE_RSP 0x1106
 
 // ports/<board>/data/config/*.json 由 EMBED_FILES 嵌進 firmware（一個層一個檔）
+extern const uint8_t preset_hardware_start[] asm("_binary_preset_hardware_json_start");
+extern const uint8_t preset_hardware_end[]   asm("_binary_preset_hardware_json_end");
 extern const uint8_t preset_system_start[]  asm("_binary_preset_system_json_start");
 extern const uint8_t preset_system_end[]    asm("_binary_preset_system_json_end");
 extern const uint8_t preset_network_start[] asm("_binary_preset_network_json_start");
@@ -230,6 +242,7 @@ static void seed_dirs(void)
 static void seed_presets(void)
 {
     seed_dirs();
+    seed_file(PRESET_HARDWARE_PATH, preset_hardware_start, preset_hardware_end);
     seed_file(PRESET_SYSTEM_PATH, preset_system_start, preset_system_end);
     seed_file(PRESET_NETWORK_PATH, preset_network_start, preset_network_end);
 #if NETCORE_HAS_PRESET_TASKS
@@ -240,7 +253,7 @@ static void seed_presets(void)
 // ── 卷標：預設叫 NETCORE，不是 NO NAME ──
 // 這個卷標是不是「我們自己產生的」（可以隨 cID 更新）。
 // 使用者自己取的名字（例如 "MYBOARD"）一律不動。
-static bool label_is_ours(const char *label)
+static bool label_is_ours(const char *label, const char *prefix)
 {
     if (label == NULL || label[0] == '\0') {
         return true;
@@ -248,8 +261,11 @@ static bool label_is_ours(const char *label)
     if (strcmp(label, "NO NAME") == 0 || strcmp(label, "NETCORE") == 0) {
         return true;
     }
-    const size_t plen = strlen(VOLUME_PREFIX);
-    if (strncmp(label, VOLUME_PREFIX, plen) != 0) {
+    if (strcmp(label, prefix) == 0) {
+        return true;          // 只有前綴：cid 未定時寫下的，可以更新
+    }
+    const size_t plen = strlen(prefix);
+    if (strncmp(label, prefix, plen) != 0) {
         return false;
     }
     const char *p = label + plen;
@@ -268,41 +284,52 @@ static bool label_is_ours(const char *label)
 // 不應該改他的檔。而且現時沒有任何程式會讀 bt.pin（BLE 未實作），
 // 所以這段「寫回」只是純粹的副作用。等 BT 真的接上，正規化寫在讀取處。
 
-static void ensure_volume_label(void)
+// 卷標規則：prefix + CID 後 4 碼。
+//   flash data → "NC-D5F4"
+//   SD 卡      → "NCSD-D5F4"（11 字元上限之內）
+// 只覆寫「我們自己產生的」名字（空白 / NO NAME / NETCORE / 同 prefix），
+// 使用者自己命名過就不動 —— 呢個係之前定落嘅規則。
+static void ensure_volume_label_drive(const char *drive, const char *prefix)
 {
 #if FF_USE_LABEL
     char label[24] = {0};
     DWORD sn = 0;
-    if (f_getlabel("0:", label, &sn) != FR_OK) {
-        ESP_LOGW(TAG, "讀不到卷標");
+    if (f_getlabel(drive, label, &sn) != FR_OK) {
+        ESP_LOGW(TAG, "讀不到卷標（%s）", drive);
         return;
     }
     char want[12] = {0};
     if (s_cid != NC4_ADDR_BROADCAST) {
-        snprintf(want, sizeof(want), "%s%04X", VOLUME_PREFIX, (unsigned)s_cid);  // ≤11 字元
+        snprintf(want, sizeof(want), "%s%04X", prefix, (unsigned)s_cid);  // ≤11 字元
     } else {
-        snprintf(want, sizeof(want), "%s", VOLUME_PREFIX);
+        snprintf(want, sizeof(want), "%s", prefix);
     }
 
     if (strcmp(label, want) == 0) {
         return;
     }
-    // 使用者自己命名過就不覆寫；我們自己產生的（空白 / NO NAME / NETCORE / NC-XXXX）可以更新
-    if (!label_is_ours(label)) {
-        ESP_LOGI(TAG, "卷標 \"%s\" 由使用者命名，不動", label);
+    if (!label_is_ours(label, prefix)) {
+        ESP_LOGI(TAG, "卷標 \"%s\" 由使用者命名，不動（%s）", label, drive);
         return;
     }
 
-    char cmd[16];
-    snprintf(cmd, sizeof(cmd), "0:%s", want);
+    char cmd[20];
+    snprintf(cmd, sizeof(cmd), "%s%s", drive, want);
     if (f_setlabel(cmd) == FR_OK) {
-        ESP_LOGI(TAG, "卷標: \"%s\" → \"%s\"", label, want);
+        ESP_LOGI(TAG, "卷標（%s）: \"%s\" → \"%s\"", drive, label, want);
     } else {
-        ESP_LOGW(TAG, "設定卷標失敗（原 \"%s\" → \"%s\"）", label, want);
+        ESP_LOGW(TAG, "設定卷標失敗（%s，原 \"%s\" → \"%s\"）", drive, label, want);
     }
 #else
+    (void)drive;
+    (void)prefix;
     ESP_LOGW(TAG, "CONFIG_FATFS_USE_LABEL 未開，卷標會停在 NO NAME");
 #endif
+}
+
+static void ensure_volume_label(void)
+{
+    ensure_volume_label_drive("0:", VOLUME_PREFIX);
 }
 
 // ── data 分區的生命週期（2026-11-06 改）──
@@ -403,6 +430,11 @@ static int link_rx(const char *name, link_rx_t *rx);   // 回傳 config 實際�
 #if !CONFIG_IDF_TARGET_ESP32P4
 // USB 服務組：device stack + CDC + console（+ MSC）全部喺同一個核安裝。
 // 核心由 router 決定（system.json 的 CDC 行），唔寫死。
+// TinyUSB task stack（位元組）。預設 4,096；實測峰值 976 B → 收一半。
+#ifndef TINYUSB_TASK_STACK
+#define TINYUSB_TASK_STACK 1280
+#endif
+
 static esp_err_t usb_install(void *arg)
 {
     const int core = (int)(intptr_t)arg;
@@ -412,6 +444,10 @@ static esp_err_t usb_install(void *arg)
 #endif
     tinyusb_config_t tusb_cfg = TINYUSB_DEFAULT_CONFIG();
     tusb_cfg.task.xCoreID = core;
+    // 量出來才決定，不是抄預設：2026-11-06 壓力測試（開機列舉、6.3 MB MSC 寫、
+    // 1,000 個 CDC 請求／回覆、3 次重新列舉）峰值只用 976 B，4096 是 4 倍。
+    // 收到 2,048 仍留 2 倍餘裕；之後若加介面／改 descriptor，要重跑同一組壓力測試。
+    tusb_cfg.task.size = TINYUSB_TASK_STACK;
     ESP_RETURN_ON_ERROR(tinyusb_driver_install(&tusb_cfg), TAG, "TinyUSB driver 安裝失敗");
 
     const tinyusb_config_cdcacm_t acm_cfg = { .cdc_port = TINYUSB_CDC_ACM_0 };
@@ -438,6 +474,234 @@ static esp_err_t usb_init(void)
     ESP_LOGI(TAG, "USB 服務組（TinyUSB + CDC + console）→ core %d", cdc_core);
     // 喺 CDC 所屬核執行：USB ISR、TinyUSB task、RX callback 之後全部同核
     return nc_core_run_on(cdc_core, usb_install, (void *)(intptr_t)cdc_core);
+}
+
+// ── SD 卡（system.json 的 SDcard 段；enable=0 時一個 byte 都唔配）──
+//
+// S3 的 slot0 係 IOMUX 固定腳（CLK36/CMD35/D37/D138/D233/D334）；
+// 只要 config 指定了 sck/cmd，就代表走 GPIO matrix → slot1。
+// SD（sd_boot 與 STATUS 共用；-100 = 未嘗試、-1 = 未啟用）
+static sdmmc_card_t *s_sd_card;
+static int s_sd_err = -100;
+static uint64_t s_sd_mb;      // 卡片容量（CSD）
+static uint64_t s_sd_vfs_mb;  // VFS 看到的 FAT 容量（正常 ≈ 卡片容量）
+static int s_sd_probe_errno = -1;  // fopen(/sd/.nc_probe) 的 errno（0 = 通）
+static int s_sd_statvfs_errno = 0;
+static char s_sd_drive[8] = "-";   // 實際拿到的 FATFS 磁碟號（"N:"）
+static FATFS *s_sd_fs;             // /sd 的 FATFS 物件
+static BYTE s_sd_pdrv;             // /sd 用的 diskio 槽
+static bool s_sd_vfs_mounted;      // /sd 的 VFS 現在掛住？
+static int s_sd_fr = -1;           // f_mount 的 FRESULT
+
+// 三個 SD 測試指令共用一個 64 KB、512 對齊的緩衝（互斥使用），
+// 避免每個 bench 各佔 64 KB .bss（之前三個加起來 192 KB，開機就可能爆 DRAM）。
+#define SD_BENCH_BUF_BYTES (64 * 1024)
+static uint8_t *s_sd_bench_buf;          // 按需配置（見 sd_bench_buf_get）
+static bool s_sd_buf_in_psram;
+
+// 64 KB bench 緩衝按需配置，預設放**內部 RAM**：
+// S3 的 SDMMC DMA 到不了 PSRAM（SOC_SDMMC_PSRAM_DMA_CAPABLE 只有 P4 有），
+// 放在 PSRAM 的話 IDF 會自己開一個內部 bounce buffer 再複製一次 —— 量到的
+// 速度就變成「PSRAM + 複製」，唔係卡本身。想要對照可以喺 0xF012 帶 mem=1。
+static esp_err_t sd_bench_buf_get(bool in_psram)
+{
+    if (s_sd_bench_buf != NULL && s_sd_buf_in_psram == in_psram) {
+        return ESP_OK;
+    }
+    if (s_sd_bench_buf != NULL) {
+        heap_caps_free(s_sd_bench_buf);
+        s_sd_bench_buf = NULL;
+    }
+    const uint32_t caps = in_psram ? MALLOC_CAP_SPIRAM
+                                   : (MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA);
+    s_sd_bench_buf = heap_caps_aligned_alloc(512, SD_BENCH_BUF_BYTES, caps);
+    if (s_sd_bench_buf == NULL) {
+        ESP_LOGE(TAG, "SD bench 緩衝配置失敗（%s %d B）",
+                 in_psram ? "PSRAM" : "內部", SD_BENCH_BUF_BYTES);
+        return ESP_ERR_NO_MEM;
+    }
+    s_sd_buf_in_psram = in_psram;
+    ESP_LOGW(TAG, "SD bench 緩衝 %d B → %s（%p）", SD_BENCH_BUF_BYTES,
+             in_psram ? "PSRAM" : "內部 DMA", s_sd_bench_buf);
+    return ESP_OK;
+}
+
+// ── /sd 的 VFS：掛上／卸下 ──
+// 交去 USB 之前一定要卸（兩邊同時寫同一份 FAT 會爛）；收回之後再掛。
+// 磁碟號每次都重新拿，唔可以假設同一個。
+// SD 的唯一真相來源：hardware.json 的 SDIO[0]。
+// system.json 已經冇 SDcard 選項 —— SD 是匯流排上的裝置，跟 ETH 一樣只宣告一次；
+// 「enable + 腳位 + 頻率 + 寬度」重複兩份只會出現「兩邊打架」的情況。
+static const nc_sdio_cfg_t *sd_hw(void)
+{
+    const nc_hardware_cfg_t *hw = nc_cfg_hardware();
+    if (hw == NULL || hw->n_sdio <= 0) {
+        return NULL;      // 冇 SDIO，或者 enable=0（n_sdio 會是 0）
+    }
+    return &hw->sdio[0];
+}
+
+static esp_err_t sd_vfs_mount(void *arg)
+{
+    (void)arg;
+    if (s_sd_card == NULL) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    if (s_sd_vfs_mounted) {
+        return ESP_OK;
+    }
+    BYTE pdrv = 0;
+    esp_err_t err = ff_diskio_get_drive(&pdrv);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "SD：冇空 diskio 槽（FF_VOLUMES=%d）", (int)FF_VOLUMES);
+        return err;
+    }
+    ff_diskio_register_sdmmc(pdrv, s_sd_card);
+    s_sd_pdrv = pdrv;
+    snprintf(s_sd_drive, sizeof(s_sd_drive), "%d:", (int)pdrv);
+
+    const esp_vfs_fat_conf_t conf = {
+        .base_path = SD_MOUNT_POINT,
+        .fat_drive = s_sd_drive,
+        .max_files = 8,
+    };
+    err = esp_vfs_fat_register(&conf, &s_sd_fs);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "SD：VFS 註冊失敗（%s，%s）", SD_MOUNT_POINT, esp_err_to_name(err));
+        ff_diskio_unregister(pdrv);
+        return err;
+    }
+    const FRESULT fr = f_mount(s_sd_fs, s_sd_drive, 1);
+    s_sd_fr = (int)fr;
+    if (fr != FR_OK) {
+        ESP_LOGE(TAG, "SD：f_mount(%s) 失敗（FRESULT %d）", s_sd_drive, (int)fr);
+        esp_vfs_fat_unregister_path(SD_MOUNT_POINT);
+        ff_diskio_unregister(pdrv);
+        s_sd_fs = NULL;
+        return ESP_FAIL;
+    }
+    s_sd_vfs_mounted = true;
+    ensure_volume_label_drive(s_sd_drive, "NCSD-");   // 主機看到的名字（FAT 卷標）
+
+    // 掛得上唔代表掛對卡：真的開一次檔，並記下 errno。
+    s_sd_probe_errno = 0;
+    errno = 0;
+    FILE *pf = fopen(SD_MOUNT_POINT "/.nc_probe", "wb");
+    if (pf == NULL) {
+        s_sd_probe_errno = errno;
+    } else {
+        fputc('x', pf);
+        fclose(pf);
+        (void)remove(SD_MOUNT_POINT "/.nc_probe");
+    }
+    ESP_LOGW(TAG, "SD 已掛載 %s ← %s（probe errno=%d）", SD_MOUNT_POINT, s_sd_drive, s_sd_probe_errno);
+    return ESP_OK;
+}
+
+static esp_err_t sd_vfs_unmount(void *arg)
+{
+    (void)arg;
+    if (!s_sd_vfs_mounted) {
+        return ESP_OK;
+    }
+    f_mount(NULL, s_sd_drive, 0);
+    esp_vfs_fat_unregister_path(SD_MOUNT_POINT);
+    ff_diskio_unregister(s_sd_pdrv);
+    s_sd_fs = NULL;
+    s_sd_vfs_mounted = false;
+    ESP_LOGW(TAG, "SD VFS 已卸載（%s）", SD_MOUNT_POINT);
+    return ESP_OK;
+}
+
+static esp_err_t sd_boot(void)
+{
+    const nc_sdio_cfg_t *e = sd_hw();
+    if (e == NULL) {
+        s_sd_err = -1;                   // hardware.json 沒有啟用 SDIO：不是錯誤
+        return ESP_ERR_NOT_SUPPORTED;
+    }
+    const int bi = 0;
+
+    sdmmc_host_t host = SDMMC_HOST_DEFAULT();
+    if (e->freq_hz >= 400000) {
+        host.max_freq_khz = (int)(e->freq_hz / 1000);
+    }
+    // S3 的 slot0 係 IOMUX 固定腳；指定了 GPIO 就一定要走 slot1（GPIO matrix）。
+    host.slot = (e->clk >= 0 || e->cmd >= 0) ? SDMMC_HOST_SLOT_1 : SDMMC_HOST_SLOT_0;
+    sdmmc_slot_config_t slot = SDMMC_SLOT_CONFIG_DEFAULT();
+    slot.width = (e->width == 1) ? 1 : 4;
+    slot.flags |= SDMMC_SLOT_FLAG_INTERNAL_PULLUP;
+    if (e->clk >= 0 || e->cmd >= 0) {
+        slot.clk = (gpio_num_t)e->clk;
+        slot.cmd = (gpio_num_t)e->cmd;
+        slot.d0 = (gpio_num_t)e->d[0];
+        if (slot.width == 4) {
+            slot.d1 = (gpio_num_t)e->d[1];
+            slot.d2 = (gpio_num_t)e->d[2];
+            slot.d3 = (gpio_num_t)e->d[3];
+        }
+    }
+
+    // ── 自己指定磁碟號 ──
+    // 唔用 esp_vfs_fat_sdmmc_mount 的「第一個空槽」：磁碟號係全域資源，
+    // 靠猜就會同別的掛載撞，而 ff_diskio_register() 對已佔用的槽係靜靜覆寫。
+    // 自己拿到號碼、自己註冊、自己 mount —— 每一步都驗得、講得出。
+    esp_err_t err = (*host.init)();
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "SD：host init 失敗（%s）", esp_err_to_name(err));
+    }
+    if (err == ESP_OK) {
+        err = sdmmc_host_init_slot(host.slot, &slot);
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "SD：slot init 失敗（%s）", esp_err_to_name(err));
+        }
+    }
+    s_sd_card = calloc(1, sizeof(sdmmc_card_t));
+    if (err == ESP_OK) {
+        err = (s_sd_card != NULL) ? sdmmc_card_init(&host, s_sd_card) : ESP_ERR_NO_MEM;
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "SD：card init 失敗（%s）", esp_err_to_name(err));
+        }
+    }
+    if (err != ESP_OK) {
+        s_sd_err = (int)err;
+        ESP_LOGE(TAG, "SD 初始化失敗（sdio[%d] %d-bit %d kHz）：%s", bi, (int)slot.width,
+                 host.max_freq_khz, esp_err_to_name(err));
+        if (s_sd_card != NULL) {
+            free(s_sd_card);
+            s_sd_card = NULL;
+        }
+        return err;
+    }
+
+    // 把實際用的腳位印出來：data[] 的次序是 D0,D1,D2,D3（1-bit 只用 D0）。
+    // 這一行是「config 與硬體對不對得上」最便宜的證據。
+    if (slot.width == 4) {
+        ESP_LOGW(TAG, "SD 腳位：CLK=%d CMD=%d D0=%d D1=%d D2=%d D3=%d",
+                 (int)slot.clk, (int)slot.cmd, (int)slot.d0, (int)slot.d1, (int)slot.d2, (int)slot.d3);
+    } else {
+        ESP_LOGW(TAG, "SD 腳位：CLK=%d CMD=%d D0=%d（1-bit，只用 data[0]）",
+                 (int)slot.clk, (int)slot.cmd, (int)slot.d0);
+    }
+
+    s_sd_err = 0;
+    s_sd_mb = ((uint64_t)s_sd_card->csd.capacity * s_sd_card->csd.sector_size) / (1024ull * 1024ull);
+    ESP_LOGW(TAG, "SD 卡已初始化：%llu MB（sdio[%d]、%u-bit、%d kHz、sector %u B）",
+             (unsigned long long)s_sd_mb, bi, (unsigned)e->width, host.max_freq_khz,
+             (unsigned)s_sd_card->csd.sector_size);
+
+    // 登記成 store 的第二個 LUN：app 模式自己掛 VFS，usb 模式由 store 建 LUN。
+    (void)nc_store_sd_attach(s_sd_card, sd_vfs_mount, sd_vfs_unmount, NULL);
+    if (nc_store_app_ready()) {
+        const esp_err_t merr = sd_vfs_mount(NULL);
+        if (merr != ESP_OK) {
+            s_sd_err = (int)merr;
+            return merr;
+        }
+    } else {
+        ESP_LOGW(TAG, "SD 由 host 持有 → 裝置唔掛 %s", SD_MOUNT_POINT);
+    }
+    return ESP_OK;
 }
 
 static esp_err_t storage_hand_over_to_usb(void)
@@ -523,20 +787,16 @@ static nc_log_tx_result_t cdc_tx_text(const char *buf, size_t len)
 // str_u16len 編碼（與 schema 的 str_u16len 一致：2B 長度前綴 + UTF-8）
 //
 // 回覆直接砌入 TX 幀：DATA = [len u16][json]，中間冇獨立工作區。
-// 所以這塊緩衝**跟任務棧走**（每個 decode 任務私有），兩核同時回覆不會撞。
-// 之前那塊 static payload[2102] 是全域一份，正是「不能開第二個 decoder」的原因。
+// 緩衝由 **decoder** 持有（`nc4_decoder_reply_buf()`，預設 PSRAM）：
+// 每個 decode 任務私有、互不相撞，而且不再佔任務棧（以前每個 decode 棧上有 2,615 B）。
 //
-// 2,600 而不是 2,100：完整的 STATUS_GET（sys+mem+tasks+provides+storage+fx）
-// 大約 2.4 KB，用 2,100 會**靜靜截斷**成無效 JSON。
-#define NC4_REPLY_JSON_MAX 2600
-
 // 回覆建構器：整塊幀在呼叫者棧上。
 //   nc4_reply_t r; char *j = reply_open(&r, ctx, CMD); …寫 j…; reply_send(&r, len);
 // 兩個 decoder 各自一份，所以「砌 JSON」這件事本身不再需要全域鎖。
 typedef struct {
     nc4_ctx_t *ctx;
     uint16_t cmd;
-    uint8_t frame[NC4_HDR_LEN + 2 + NC4_REPLY_JSON_MAX + NC4_CRC_LEN];
+    uint8_t *frame;        // → nc4_decoder_reply_buf()，不在棧上
 } nc4_reply_t;
 
 // 回傳可寫的 JSON 區（容量 NC4_REPLY_JSON_MAX + 1，已清空）
@@ -544,6 +804,10 @@ static char *reply_open(nc4_reply_t *r, nc4_ctx_t *ctx, uint16_t cmd)
 {
     r->ctx = ctx;
     r->cmd = cmd;
+    r->frame = nc4_decoder_reply_buf(ctx->decoder);
+    if (r->frame == NULL) {
+        return NULL;      // decoder 建立時已經配置好，正常唔會發生
+    }
     char *json = (char *)r->frame + NC4_HDR_LEN + 2;
     json[0] = '\0';
     return json;
@@ -551,7 +815,7 @@ static char *reply_open(nc4_reply_t *r, nc4_ctx_t *ctx, uint16_t cmd)
 
 static void reply_send(nc4_reply_t *r, size_t len)
 {
-    if (r->ctx == NULL || r->ctx->send == NULL) {
+    if (r->ctx == NULL || r->ctx->send == NULL || r->frame == NULL) {
         return;
     }
     if (len > NC4_REPLY_JSON_MAX) {
@@ -562,7 +826,7 @@ static void reply_send(nc4_reply_t *r, size_t len)
     data[1] = (uint8_t)(len >> 8);
 
     // 就地打包：payload 指向 frame 自己的 DATA 區（pack_into 用 memmove，安全）
-    const int total = nc4_pack_into(r->frame, sizeof(r->frame), r->cmd,
+    const int total = nc4_pack_into(r->frame, NC4_REPLY_FRAME_MAX, r->cmd,
                                     nc4_reply_addr(r->ctx), data, 2 + len);
     if (total > 0) {
         r->ctx->send(r->ctx->send_arg, r->frame, (size_t)total);
@@ -577,6 +841,9 @@ static void reply_json(nc4_ctx_t *ctx, uint16_t cmd, const char *json)
     }
     nc4_reply_t r;
     char *dst = reply_open(&r, ctx, cmd);
+    if (dst == NULL) {
+        return;
+    }
     size_t n = strlen(json);
     if (n > NC4_REPLY_JSON_MAX) {
         n = NC4_REPLY_JSON_MAX;
@@ -695,6 +962,69 @@ static int s_cdc_cfg_src = -9;       // CDC 的 rx 參數在「宣告階段」�
                                      // （bus 建立嗰刻 FAT 已交咗俾 host，讀唔到 config）
 #endif
 
+// 設定檔宣稱的腳位對照（照 hardware.json，不是實測值）：
+//   "CLK7 CMD6 D0=15 D1=16 D2=4 D3=5"
+// 用途：一眼看出 config 與手冊/原理圖是否同一個次序（data[0..3] = D0..D3）。
+static const char *sd_pins_txt(void)
+{
+    static char t[64];
+    const nc_sdio_cfg_t *e = sd_hw();
+    if (e == NULL) {
+        return "-";
+    }
+    if (e->width == 4) {
+        snprintf(t, sizeof(t), "CLK%d CMD%d D0=%d D1=%d D2=%d D3=%d", (int)e->clk, (int)e->cmd,
+                 (int)e->d[0], (int)e->d[1], (int)e->d[2], (int)e->d[3]);
+    } else {
+        snprintf(t, sizeof(t), "CLK%d CMD%d D0=%d（1-bit，只用 data[0]）", (int)e->clk, (int)e->cmd,
+                 (int)e->d[0]);
+    }
+    return t;
+}
+
+// SD 卡現在的 FAT 卷標（主機看到的名字）；讀不到就 "-"
+static const char *sd_label_now(void)
+{
+    static char lbl[16];
+    snprintf(lbl, sizeof(lbl), "-");
+    if (s_sd_vfs_mounted) {
+        if (f_getlabel(s_sd_drive, lbl, NULL) != FR_OK) {
+            snprintf(lbl, sizeof(lbl), "?");
+        }
+    }
+    return lbl;
+}
+
+// 每一個 FatFS 邏輯磁碟的實況：FRESULT + 容量。
+// 這係「/sd 到底掛到邊個磁碟」唯一講得清的地方 —— 價格很便宜。
+static const char *sd_drives_json(void)
+{
+    static char js[192];
+    size_t off = 0;
+    js[off++] = '[';
+    for (int d = 0; d < 3; d++) {
+        char drv[4];
+        snprintf(drv, sizeof(drv), "%d:", d);
+        FATFS *fs = NULL;
+        DWORD nclst = 0;
+        const FRESULT fr = f_getfree(drv, &nclst, &fs);
+        uint64_t mb = 0;
+        if (fr == FR_OK && fs != NULL) {
+            mb = (uint64_t)nclst * fs->csize * fs->ssize / (1024ull * 1024ull);
+        }
+        off += (size_t)snprintf(js + off, sizeof(js) - off, "%s{\"d\":%d,\"fr\":%d,\"mb\":%llu}",
+                                (d == 0) ? "" : ",", d, (int)fr, (unsigned long long)mb);
+        if (off >= sizeof(js) - 48) {
+            break;
+        }
+    }
+    if (off < sizeof(js) - 2) {
+        js[off++] = ']';
+        js[off] = '\0';
+    }
+    return js;
+}
+
 static size_t status_put_storage(char *buf, size_t cap)
 {
     size_t off = 0;
@@ -705,12 +1035,22 @@ static size_t status_put_storage(char *buf, size_t cap)
     jappend(buf, cap, &off,
             "\"storage\":{\"mode\":\"%s\",\"app_ready\":%d,\"boot\":%s,"
             "\"app_decl\":%d,\"cfg_errno\":%d,\"cfg_open\":%d,"
-            "\"cfg_hdr\":\"%02X%02X%02X%02X\",\"fmt\":%d,\"reconn_hwm\":%u}",
+            "\"cfg_hdr\":\"%02X%02X%02X%02X\",\"fmt\":%d,\"reconn_hwm\":%u,"
+            "\"sd\":{\"en\":%d,\"mnt\":\"%s\",\"mb\":%llu,\"vfs_mb\":%llu,"
+            "\"pins\":\"%s\",\"lbl\":\"%s\",\"host\":%d,\"drv\":\"%s\",\"fr\":%d,\"probe\":%d,"
+            "\"sv_err\":%d,\"err\":%d,"
+            "\"drives\":%s}}",
             nc_store_mode_name(), nc_store_app_ready() ? 1 : 0, boot,
             s_cfg_app_ready, s_cfg_errno, s_cfg_open_ok,
             (unsigned)(s_cfg_hdr & 0xFF), (unsigned)((s_cfg_hdr >> 8) & 0xFF),
             (unsigned)((s_cfg_hdr >> 16) & 0xFF), (unsigned)((s_cfg_hdr >> 24) & 0xFF),
-            s_fmt_err, (unsigned)nc_store_reconn_hwm());
+            s_fmt_err, (unsigned)nc_store_reconn_hwm(),
+            sd_hw() != NULL ? 1 : 0,
+            SD_MOUNT_POINT,
+            (unsigned long long)s_sd_mb, (unsigned long long)s_sd_vfs_mb,
+            sd_pins_txt(), sd_label_now(), nc_store_sd_on_usb() ? 1 : 0,
+            s_sd_drive, s_sd_fr, s_sd_probe_errno, s_sd_statvfs_errno, s_sd_err,
+            sd_drives_json());
     return off;
 }
 
@@ -725,11 +1065,56 @@ static size_t status_put_cfg(char *buf, size_t cap)
     return off;
 }
 
+static nc4_decoder_t *s_decoder;   // 定義在下面（身份那一節），status 先要用
+
+// 已註冊指令清單：{"c":0x1101,"o":"core"}。
+// 用途：主機可以逐條打一次，令 HWM 覆蓋**全部** handler ——
+// 間接呼叫（函數指標）令靜態呼叫圖看不到這一段，唯一可靠的方法就是把表列出來跑一遍。
+static size_t status_put_cmds(char *buf, size_t cap)
+{
+    size_t off = 0;
+    jappend(buf, cap, &off, "\"cmds\":[");
+    // 順便做完整性檢查：排序 + 每條都查得回自己（= dispatch 找得到）。
+    // 呢個係「加咗一條指令但靜靜咁冇人叫到」最便宜的防護。
+    unsigned n = 0, unsorted = 0, lookup_bad = 0, null_fn = 0;
+    uint16_t prev = 0;
+    for (size_t i = 0; s_decoder != NULL && i < nc4_decoder_count(s_decoder); i++) {
+        uint16_t cmd = 0;
+        const char *owner = NULL;
+        nc4_handler_t h = NULL;
+        if (!nc4_decoder_at(s_decoder, i, &cmd, &owner, &h)) {
+            continue;
+        }
+        if (h == NULL) {
+            null_fn++;
+        }
+        if (nc_action_find(cmd) != h) {
+            lookup_bad++;
+        }
+        if (n > 0 && cmd < prev) {
+            unsorted++;
+        }
+        prev = cmd;
+        n++;
+        jappend(buf, cap, &off, "%s{\"c\":%u,\"o\":\"%s\"}",
+                (n > 1) ? "," : "", (unsigned)cmd, owner ? owner : "-");
+    }
+    jappend(buf, cap, &off,
+            "],\"verify\":{\"n\":%u,\"unsorted\":%u,\"lookup_bad\":%u,\"null_fn\":%u,\"bytes\":%u}",
+            n, unsorted, lookup_bad, null_fn, (unsigned)nc_action_bytes());
+    return off;
+}
+
+
 static size_t status_put_sys(char *buf, size_t cap)
 {
     size_t off = 0;
     jappend(buf, cap, &off,
-            "\"sys\":{\"fw\":\"%s\",\"app\":\"%02x%02x%02x%02x\",\"heap\":%u,\"up_s\":%lld,\"idf\":\"%s\",\"cid\":%u}",
+            "\"sys\":{\"fw\":\"%s\",\"app\":\"%02x%02x%02x%02x\",\"heap\":%u,\"up_s\":%lld,"
+            "\"idf\":\"%s\",\"cid\":%u,"
+            // 三種 heap 分開報：內部 / DMA 用 / PSRAM。冇呢三個數字，
+            // 「搬去 PSRAM 到底有冇用」只能靠估。
+            "\"h_int\":%u,\"h_dma\":%u,\"h_ps\":%u,\"rep_ps\":%d}",
             FW_VERSION,
             (unsigned)esp_app_get_description()->app_elf_sha256[0],
             (unsigned)esp_app_get_description()->app_elf_sha256[1],
@@ -737,16 +1122,12 @@ static size_t status_put_sys(char *buf, size_t cap)
             (unsigned)esp_app_get_description()->app_elf_sha256[3],
             (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
             (long long)(esp_timer_get_time() / 1000000),
-            esp_get_idf_version(), (unsigned)s_cid);
-    return off;
-}
-
-// nc_epoch_json 輸出的是「整份物件」{"core0":…}，但 status 區塊要 "key":{…} 片段。
-static size_t status_put_epoch(char *buf, size_t cap)
-{
-    size_t off = 0;
-    jappend(buf, cap, &off, "\"epoch\":");
-    jchain(buf, cap, &off, nc_epoch_json);
+            esp_get_idf_version(), (unsigned)s_cid,
+            (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
+            (unsigned)heap_caps_get_free_size(MALLOC_CAP_DMA),
+            (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM),
+            (s_decoder != NULL && nc4_decoder_reply_buf(s_decoder) != NULL &&
+             esp_ptr_external_ram(nc4_decoder_reply_buf(s_decoder))) ? 1 : 0);
     return off;
 }
 
@@ -837,8 +1218,8 @@ static void on_status_get(nc4_ctx_t *ctx, const nc4_frame_t *f)
 
     if (strcmp(keys, "?") == 0) {
         reply_json(ctx, NC4_CMD_STATUS_RSP,
-                   "{\"keys\":[\"sys\",\"storage\",\"mem\",\"provides\","
-                   "\"tasks\",\"fx\",\"wifi\",\"epoch\",\"net\"]}");
+                   "{\"keys\":[\"sys\",\"storage\",\"cfg\",\"log\",\"rt\","
+                   "\"mem\",\"provides\",\"tasks\",\"fx\",\"wifi\",\"net\",\"cmds\"]}");
         return;
     }
 
@@ -870,9 +1251,6 @@ static void on_status_get(nc4_ctx_t *ctx, const nc4_frame_t *f)
         status_add(json, cap, &off, &first, status_put_rt);
     }
 #endif
-    if (keys_want(keys, "epoch")) {
-        status_add(json, cap, &off, &first, status_put_epoch);
-    }
     if (keys_want(keys, "mem")) {
         status_add(json, cap, &off, &first, status_put_mem);
     }
@@ -890,6 +1268,9 @@ static void on_status_get(nc4_ctx_t *ctx, const nc4_frame_t *f)
     if (keys_want(keys, "wifi")) {
         status_add(json, cap, &off, &first, status_put_wifi);
     }
+    if (keys_want(keys, "cmds")) {
+        status_add(json, cap, &off, &first, status_put_cmds);
+    }
     if (keys_want(keys, "net")) {
         status_add(json, cap, &off, &first, status_put_net);
     }
@@ -899,7 +1280,7 @@ static void on_status_get(nc4_ctx_t *ctx, const nc4_frame_t *f)
         off = 0;
         jappend(json, cap, &off,
                 "{\"truncated\":1,\"cap\":%u,"
-                "\"tips\":\"keys=sys,storage,mem,provides,tasks,fx 分批問\"}",
+                "\"tips\":\"keys=sys,storage,cfg,log,mem,provides,tasks,fx 分批問\"}",
                 (unsigned)NC4_REPLY_JSON_MAX);
     } else {
         jappend(json, cap, &off, "}");
@@ -919,7 +1300,6 @@ static void on_sys_task_query(nc4_ctx_t *ctx, const nc4_frame_t *f)
 }
 
 // 0x1105 MEM_QUERY → 0x1106 MEM_RSP（plan + buf 一起回）
-static nc4_decoder_t *s_decoder = NULL;
 
 // ── 身份：cid（自己的 2B 協議位址）+ master_cid（上級）──
 
@@ -1056,6 +1436,19 @@ static esp_err_t uart_loop_init(uint32_t baud)
 static esp_err_t uart_owner_init(void *arg)
 {
     (void)arg;
+    // GPIO7 = SD 的 CLK。兩邊都設得「成功」，但 UART 一搶走腳位，之後 SD 的
+    // 每一次交易都會失敗（sdmmc_send_cmd 回 0x107），而症狀完全唔似腳位問題。
+    // 開機次序剛好是 SD 先、UART 後 —— 所以 SD 掛得上去，但幾百 ms 之後就死。
+    const nc_sdio_cfg_t *e = sd_hw();
+    if (e != NULL) {
+        const bool clash = (e->clk == UART_TEST_TX_PIN) || (e->clk == UART_TEST_RX_PIN) ||
+                           (e->cmd == UART_TEST_TX_PIN) || (e->cmd == UART_TEST_RX_PIN);
+        if (clash) {
+            ESP_LOGE(TAG, "UART 測試迴路唔啟動：GPIO%d/%d 已經係 SD 的 clk/cmd（SD 開著）",
+                     UART_TEST_TX_PIN, UART_TEST_RX_PIN);
+            return ESP_ERR_INVALID_STATE;
+        }
+    }
     return uart_loop_init(UART_TEST_DEF_BAUD);
 }
 
@@ -1411,17 +1804,21 @@ static esp_err_t task_net_start(const nc_task_res_view_t *res, int n)
 // ① nc4（System L0）：CDC parser 緩衝 + 兩核的解碼任務
 //
 // decode0 / decode1 開唔開，由路由器答：冇線去嗰核就索性唔建立，
-// 6 KB 棧同 parser 緩衝由頭到尾都唔存在。呢個開關係固件宣告，
+// 棧同 parser 緩衝由頭到尾都唔存在。呢個開關係固件宣告，
 // config 改唔到（SYSTEM 任務唔讀 tasks.json，見 nc_task.c 的 load_cfg）。
+//
+// 4,096 而不是 6,144：兩塊最大的一直在棧上 —— 回覆幀 2,615 B 和
+// SHA-256 的 2 KB 讀取緩衝 —— 現在分別歸 decoder（PSRAM）和 heap。
+// 實測最差 2,876 B（FILE_QUERY + 完整 STATUS），留 1.2 KB 餘裕。
 static bool nc4_want_core0(void) { return nc4_router_core_used(0); }
 static bool nc4_want_core1(void) { return nc4_router_core_used(1); }
 
 static const nc_task_loop_t s_nc4_loops[] = {
     { .name = "decode0", .fn = nc4_bus_task_entry, .arg = (void *)0,
-      .stack = 6144, .prio = 4, .core = 0, .layer = 1,
+      .stack = 4096, .prio = 4, .core = 0, .layer = 1,
       .enabled = nc4_want_core0 },
     { .name = "decode1", .fn = nc4_bus_task_entry, .arg = (void *)1,
-      .stack = 6144, .prio = 4, .core = 1, .layer = 1,
+      .stack = 4096, .prio = 4, .core = 1, .layer = 1,
       .enabled = nc4_want_core1 },
 };
 
@@ -1450,13 +1847,15 @@ typedef struct {
     nc4_handler_t fn;
 } core_action_t;
 
-static const core_action_t s_core_actions[] = {
-    { NC4_CMD_REBOOT,            on_reboot },
-    { NC4_CMD_STATUS_GET,        on_status_get },
-    { NC4_CMD_ROUTE_GET,         on_route_get },
-    { NC4_CMD_SET_MASTER,        on_set_master },
-    { NC4_CMD_SYS_TASK_QUERY,    on_sys_task_query },
+static const nc_action_t s_core_actions[] = {
+    { NC4_CMD_REBOOT,            on_reboot,            "core" },
+    { NC4_CMD_STATUS_GET,        on_status_get,        "core" },
+    { NC4_CMD_ROUTE_GET,         on_route_get,         "core" },
+    { NC4_CMD_SET_MASTER,        on_set_master,        "core" },
+    { NC4_CMD_SYS_TASK_QUERY,    on_sys_task_query,    "core" },
 };
+
+NC_ACTION_TABLE_DEF(s_core_action_table, "core", s_core_actions);
 
 // 開機把三組 action 註冊進 decoder：core（上面這張）、ota（0x22xx）、file（0x2005/0x1103）。
 // 沒有任務參與 —— 這就是「指令是核心、任務是表面」的實際長相。
@@ -1523,6 +1922,576 @@ static void bench_pat_fill(void)
     }
 }
 
+// 0xF011 CDC_DUPLEX：喺**獨立 task** 連續推 IN 資料 N 毫秒（或者 bytes 用完）。
+// 目的：decode 保持空閒，這樣同一時間可以由主機灌 OUT，量真正的雙向分享。
+static void cdc_stream_task(void *arg)
+{
+    const uint32_t bytes = (uint32_t)(uintptr_t)arg;
+    bench_pat_fill();
+    size_t left = bytes;
+    while (left > 0) {
+        size_t n = (left > 4096) ? 4096 : left;
+        size_t off = 0;
+        while (off < n) {
+            const size_t k = tinyusb_cdcacm_write_queue(TINYUSB_CDC_ACM_0, s_bench_pat, n - off);
+            if (k == 0) {
+                vTaskDelay(1);
+                continue;
+            }
+            off += k;
+        }
+        left -= n;
+    }
+    (void)tinyusb_cdcacm_write_flush(TINYUSB_CDC_ACM_0, pdMS_TO_TICKS(1000));
+    vTaskDelete(NULL);
+}
+
+// 0xF012 SD_BENCH：寫 8 MB → 讀 8 MB → 回 {"wr_kbs":..,"rd_kbs":..}。
+// 用 RAM 緩衝，量的是 sdmmc + FAT 路徑（唔關 USB）。
+// 量 FATFS 每次 disk_write 帶幾個 sector（linker wrap，唔使改 IDF）。
+//   calls≈sectors → 每個 sector 一次（慢的來源）
+//   calls≪sectors → 已經係 multi-block，慢就唔關斬件事
+static volatile uint32_t s_wr_calls;
+static volatile uint32_t s_wr_sectors;
+static volatile uint32_t s_rd_calls;      // 讀也包一層：用來證明 --wrap 到底有沒有效
+static volatile uint32_t s_rd_sectors;
+esp_err_t __real_sdmmc_write_sectors(sdmmc_card_t *card, const void *src,
+                                     size_t start_sector, size_t sector_count);
+esp_err_t __wrap_sdmmc_write_sectors(sdmmc_card_t *card, const void *src,
+                                     size_t start_sector, size_t sector_count)
+{
+    s_wr_calls++;
+    s_wr_sectors += (uint32_t)sector_count;
+    return __real_sdmmc_write_sectors(card, src, start_sector, sector_count);
+}
+esp_err_t __real_sdmmc_read_sectors(sdmmc_card_t *card, void *dst,
+                                    size_t start_sector, size_t sector_count);
+esp_err_t __wrap_sdmmc_read_sectors(sdmmc_card_t *card, void *dst,
+                                    size_t start_sector, size_t sector_count)
+{
+    s_rd_calls++;
+    s_rd_sectors += (uint32_t)sector_count;
+    return __real_sdmmc_read_sectors(card, dst, start_sector, sector_count);
+}
+
+// SD 寫入／讀取 bench：**獨立 task**（8 KB stack）。
+// 之前寫在 decode 內 → FATFS 寫入路徑（f_write→disk_write→sdmmc）把 decode 的
+// 5,120 B stack 打爆 → 每次都重啟。搬去自己的 task 之後，decode 保持空閒。
+static volatile uint32_t s_sd_calls, s_sd_sectors;
+static volatile int s_sd_open_errno;
+static volatile int s_sd_fr2 = -1;      // 直接 f_open("N:/...") 的 FRESULT（繞過 VFS）
+static volatile int s_sd_raw_wr = -1;   // 同一刻用 raw sdmmc 寫 1 個 sector 的結果
+static volatile int s_sd_raw_rd = -1;
+static volatile uint32_t s_sd_rd_calls, s_sd_rd_sectors;
+static volatile bool s_sd_fresh;
+static volatile int s_sd_state;          // 0 idle / 1 running / 2 done / 3 error
+static double s_sd_wr_kbs, s_sd_rd_kbs, s_sd_create_kbs;
+static uint32_t s_sd_clus_b;
+static unsigned s_sd_bus;
+static int s_sd_freq_khz;
+
+static void sd_bench_task(void *arg)
+{
+    (void)arg;
+    uint8_t *buf = s_sd_bench_buf;
+    const uint32_t total = 2u * 1024u * 1024u;
+    char path[64];
+    snprintf(path, sizeof(path), "%s/bench.bin", SD_MOUNT_POINT);
+    memset(buf, 0x5A, SD_BENCH_BUF_BYTES);
+
+    // 同一刻先做一次 raw 讀寫（MBR 空隙，安全）：分得清「卡／驅動壞」定「FATFS 壞」
+    {
+        uint8_t sec[512] __attribute__((aligned(512)));
+        memset(sec, 0xA5, sizeof(sec));
+        s_sd_raw_rd = (int)sdmmc_read_sectors(s_sd_card, sec, 100, 1);
+        s_sd_raw_wr = (int)sdmmc_write_sectors(s_sd_card, sec, 100, 1);
+    }
+
+    // 再繞過 VFS，直接用 FATFS 開同一個位置：分得清「VFS 壞」定「FAT 壞」
+    {
+        char fpath[32];
+        snprintf(fpath, sizeof(fpath), "%s/bench.dir.bin", s_sd_drive);
+        FIL fil;
+        const FRESULT fr = f_open(&fil, fpath, FA_CREATE_ALWAYS | FA_WRITE);
+        s_sd_fr2 = (int)fr;
+        if (fr == FR_OK) {
+            f_close(&fil);
+            (void)f_unlink(fpath);
+        }
+    }
+
+    if (s_sd_fresh) {
+        remove(path);          // 強制重新配置（對照「原地覆寫」）
+    }
+
+    // 連續寫：檔案存在且大小正確就由 offset 0 覆寫（唔重新配置 cluster → 唔會碎片化）
+    FILE *fp = fopen(path, "r+b");
+    if (fp != NULL) {
+        fseek(fp, 0, SEEK_END);
+        if (ftell(fp) != (long)total) {
+            fclose(fp);
+            remove(path);
+            fp = NULL;
+        } else {
+            fclose(fp);
+            fp = NULL;
+        }
+    }
+    if (fp == NULL) {
+        const int64_t c0 = esp_timer_get_time();
+        errno = 0;
+        fp = fopen(path, "wb");
+        s_sd_open_errno = (fp == NULL) ? (errno ? errno : -1) : 0;
+        uint32_t init = 0;
+        while (fp != NULL && init < total) {
+            const size_t n = (total - init < SD_BENCH_BUF_BYTES) ? (total - init) : SD_BENCH_BUF_BYTES;
+            if (fwrite(buf, 1, n, fp) != n) break;
+            init += (uint32_t)n;
+            // 計時迴圈內唔可以讓 CPU：1 tick = 1 ms（HZ=1000），
+            // 4 KB chunk 寫 2 MB 會憑空多 512 ms，量到嘅係延遲唔係卡速。
+        }
+        if (fp != NULL) fclose(fp);
+        s_sd_create_kbs = (esp_timer_get_time() > c0)
+                              ? (double)init / 1024.0 / ((esp_timer_get_time() - c0) / 1e6)
+                              : 0.0;
+    }
+
+    fp = fopen(path, "r+b");
+    uint32_t wr = 0;
+    const int64_t t0 = esp_timer_get_time();
+    while (fp != NULL && wr < total) {
+        const size_t n = (total - wr < SD_BENCH_BUF_BYTES) ? (total - wr) : SD_BENCH_BUF_BYTES;
+        if (fwrite(buf, 1, n, fp) != n) break;
+        wr += (uint32_t)n;
+        // 計時迴圈內唔可以讓 CPU：1 tick = 1 ms（HZ=1000），
+        // 4 KB chunk 寫 2 MB 會憑空多 512 ms，量到嘅係延遲唔係卡速。
+    }
+    if (fp != NULL) fclose(fp);
+    const int64_t t1 = esp_timer_get_time();
+    s_sd_calls = s_wr_calls;
+    s_sd_sectors = s_wr_sectors;
+    s_sd_rd_calls = s_rd_calls;
+    s_sd_rd_sectors = s_rd_sectors;
+
+    uint32_t rd = 0;
+    fp = fopen(path, "rb");
+    const int64_t t2 = esp_timer_get_time();
+    while (fp != NULL) {
+        const size_t n = fread(buf, 1, SD_BENCH_BUF_BYTES, fp);
+        if (n == 0) break;
+        rd += (uint32_t)n;
+    }
+    if (fp != NULL) fclose(fp);
+    const int64_t t3 = esp_timer_get_time();
+    // 唔刪檔：留下來給 0xF017/0xF018 的 chunk sweep 用
+
+    s_sd_wr_kbs = (t1 > t0) ? (double)wr / 1024.0 / ((t1 - t0) / 1e6) : 0.0;
+    s_sd_rd_kbs = (t3 > t2) ? (double)rd / 1024.0 / ((t3 - t2) / 1e6) : 0.0;
+    s_sd_bus = (s_sd_card->host.flags & SDMMC_HOST_FLAG_4BIT) ? 4 : 1;
+    s_sd_freq_khz = s_sd_card->host.max_freq_khz;
+
+    // cluster = BPB 的 512 × sectors_per_cluster（讀 MBR→VBR）
+    s_sd_clus_b = 0;
+    static uint8_t sec[512] __attribute__((aligned(512)));
+    if (sdmmc_read_sectors(s_sd_card, sec, 0, 1) == ESP_OK) {
+        const uint32_t pl = (uint32_t)sec[446 + 8] | ((uint32_t)sec[446 + 9] << 8) |
+                            ((uint32_t)sec[446 + 10] << 16) | ((uint32_t)sec[446 + 11] << 24);
+        if (pl != 0 && sdmmc_read_sectors(s_sd_card, sec, pl, 1) == ESP_OK) {
+            s_sd_clus_b = ((uint32_t)sec[11] | ((uint32_t)sec[12] << 8)) * (uint32_t)sec[13];
+        }
+    }
+    s_sd_state = 2;
+    vTaskDelete(NULL);
+}
+
+static void on_sd_bench(nc4_ctx_t *ctx, const nc4_frame_t *f)
+{
+    (void)f;
+    if (s_sd_card == NULL) {
+        reply_json(ctx, NC4_CMD_DEV_RSP, "{\"err\":\"sd not mounted\"}");
+        return;
+    }
+    if (s_sd_state == 1) {
+        reply_json(ctx, NC4_CMD_DEV_RSP, "{\"err\":\"running\"}");
+        return;
+    }
+    s_sd_fresh = (f->len >= 1 && f->data[0] == 1);
+    const bool want_psram = (f->len >= 2 && f->data[1] == 1);
+    const esp_err_t berr = sd_bench_buf_get(want_psram);
+    if (berr != ESP_OK) {
+        s_sd_state = 3;
+        reply_json(ctx, NC4_CMD_DEV_RSP, "{\"err\":\"buf\"}");
+        return;
+    }
+    s_sd_state = 1;
+    if (xTaskCreatePinnedToCore(sd_bench_task, "sdbench", 8192, NULL, 2, NULL, 0) != pdPASS) {
+        s_sd_state = 3;
+        reply_json(ctx, NC4_CMD_DEV_RSP, "{\"err\":\"task\"}");
+        return;
+    }
+    reply_json(ctx, NC4_CMD_DEV_RSP, "{\"started\":1}");
+}
+
+static void on_sd_bench_result(nc4_ctx_t *ctx, const nc4_frame_t *f)
+{
+    (void)f;
+    char js[256];
+    snprintf(js, sizeof(js),
+             "{\"state\":%d,\"wr_kbs\":%.0f,\"rd_kbs\":%.0f,\"clus_b\":%u,"
+             "\"bus\":%u,\"freq_khz\":%d,\"create_kbs\":%.0f,"
+             "\"calls\":%u,\"sectors\":%u,\"rd_calls\":%u,\"rd_sectors\":%u,"
+             "\"open_errno\":%d,\"f_open_fr\":%d,"
+             "\"raw_rd\":%d,\"raw_wr\":%d}",
+             s_sd_state, s_sd_wr_kbs, s_sd_rd_kbs, (unsigned)s_sd_clus_b,
+             s_sd_bus, s_sd_freq_khz, s_sd_create_kbs,
+             (unsigned)s_sd_calls, (unsigned)s_sd_sectors,
+             (unsigned)s_sd_rd_calls, (unsigned)s_sd_rd_sectors, s_sd_open_errno, s_sd_fr2,
+             s_sd_raw_rd, s_sd_raw_wr);
+    reply_json(ctx, NC4_CMD_DEV_RSP, js);
+}
+
+// 0xF016 SD_FORMAT：重新格式化 SD（FAT32，預設 cluster），之後要重開機。
+// 用嚟拿乾淨的檔案系統做寫入基準（反覆 create/delete 之後 FAT 會碎片化）。
+static void on_sd_format(nc4_ctx_t *ctx, const nc4_frame_t *f)
+{
+    (void)f;
+    if (s_sd_card == NULL) {
+        reply_json(ctx, NC4_CMD_DEV_RSP, "{\"err\":\"sd not mounted\"}");
+        return;
+    }
+    // 唔用 esp_vfs_fat_sdcard_format("/data/sd")：VFS 前綴會匹配到 /data（flash），
+    // 之前就係咁樣格式化錯咗分區。這裡直接對 FATFS 的第二個邏輯磁碟（SD）動手，
+    // 而且先用容量驗身（≈30 GB 才准格式化）。
+    // 逐個 FATFS 邏輯磁碟問容量，揀「≈30 GB」嗰個（SD）才格式化；
+    // 唔靠 drive 編號假設，避免再一次誤傷 /data。
+    int target = -1;
+    uint64_t target_mb = 0;
+    char info[128];
+    size_t off = 0;
+    off += snprintf(info + off, sizeof(info) - off, "{");
+    for (int d = 0; d < 2; d++) {
+        char drv[3] = { (char)('0' + d), ':', 0 };
+        FATFS *fs = NULL;
+        DWORD fre_clust = 0;
+        const FRESULT fr = f_getfree(drv, &fre_clust, &fs);
+        uint64_t mb = 0;
+        if (fr == FR_OK && fs != NULL && fs->csize != 0) {
+            mb = ((uint64_t)fs->n_fatent - 2) * fs->csize * 512ull / (1024ull * 1024ull);
+        }
+        off += snprintf(info + off, sizeof(info) - off, "%s\"%d\":{\"fr\":%d,\"mb\":%llu}",
+                        d ? "," : "", d, (int)fr, (unsigned long long)mb);
+        if (mb > 1000) {
+            target = d;
+            target_mb = mb;
+        }
+    }
+    off += snprintf(info + off, sizeof(info) - off, "}");
+    if (target < 0) {
+        reply_json(ctx, NC4_CMD_DEV_RSP, info);
+        return;
+    }
+    static BYTE work[4096];
+    char drv[3] = { (char)('0' + target), ':', 0 };
+    const FRESULT fr = f_mkfs(drv, NULL, work, sizeof(work));
+    char js[192];
+    snprintf(js, sizeof(js), "{\"drv\":%d,\"mb\":%llu,\"fr\":%d,\"reboot\":1}",
+             target, (unsigned long long)target_mb, (int)fr);
+    reply_json(ctx, NC4_CMD_DEV_RSP, js);
+}
+
+// 0xF017 SD_RD_SWEEP：同一個檔（/data/sd/bench.bin），用 4K/16K/64K 連續讀。
+// 看「FAT 讀取」係唔係被 chunk 大小限制（raw 已經知道 4K=6.3、64K=16 MB/s）。
+static void on_sd_read_sweep(nc4_ctx_t *ctx, const nc4_frame_t *f)
+{
+    (void)f;
+    if (s_sd_card == NULL) {
+        reply_json(ctx, NC4_CMD_DEV_RSP, "{\"err\":\"sd not mounted\"}");
+        return;
+    }
+    if (s_sd_bench_buf == NULL && sd_bench_buf_get(false) != ESP_OK) {
+        reply_json(ctx, NC4_CMD_DEV_RSP, "{\"err\":\"buf\"}");
+        return;
+    }
+    static const uint32_t sizes[] = { 4096, 16384, 65536 };
+    char js[256];
+    size_t off = 0;
+    off += snprintf(js + off, sizeof(js) - off, "{\"r\":[");
+    for (int i = 0; i < 3; i++) {
+        char path[64];
+        snprintf(path, sizeof(path), "%s/bench.bin", SD_MOUNT_POINT);
+        FILE *fp = fopen(path, "rb");
+        if (fp == NULL) {
+            reply_json(ctx, NC4_CMD_DEV_RSP, "{\"err\":\"no file\"}");
+            return;
+        }
+        uint32_t total = 0;
+        const int64_t t0 = esp_timer_get_time();
+        while (true) {
+            const size_t n = fread(s_sd_bench_buf, 1, sizes[i], fp);
+            if (n == 0) {
+                break;
+            }
+            total += (uint32_t)n;
+        }
+        const int64_t t1 = esp_timer_get_time();
+        fclose(fp);
+        off += snprintf(js + off, sizeof(js) - off, "%s{\"chunk\":%u,\"kbs\":%.0f}",
+                        i ? "," : "", (unsigned)sizes[i],
+                        (t1 > t0) ? (double)total / 1024.0 / ((t1 - t0) / 1e6) : 0.0);
+    }
+    snprintf(js + off, sizeof(js) - off, "]}");
+    reply_json(ctx, NC4_CMD_DEV_RSP, js);
+}
+
+// 0xF018 SD_WR_SWEEP：同一個檔連續覆寫，4K/16K/64K 三種 chunk。
+static void on_sd_write_sweep(nc4_ctx_t *ctx, const nc4_frame_t *f)
+{
+    (void)f;
+    if (s_sd_card == NULL) {
+        reply_json(ctx, NC4_CMD_DEV_RSP, "{\"err\":\"sd not mounted\"}");
+        return;
+    }
+    if (s_sd_bench_buf == NULL && sd_bench_buf_get(false) != ESP_OK) {
+        reply_json(ctx, NC4_CMD_DEV_RSP, "{\"err\":\"buf\"}");
+        return;
+    }
+    static const uint32_t sizes[] = { 4096, 16384, 65536 };
+    const uint32_t total = 2u * 1024u * 1024u;
+    char js[256];
+    size_t off = 0;
+    off += snprintf(js + off, sizeof(js) - off, "{\"w\":[");
+    for (int i = 0; i < 3; i++) {
+        char path[64];
+        snprintf(path, sizeof(path), "%s/bench.bin", SD_MOUNT_POINT);
+        FILE *fp = fopen(path, "r+b");
+        if (fp == NULL) {
+            reply_json(ctx, NC4_CMD_DEV_RSP, "{\"err\":\"no file\"}");
+            return;
+        }
+        uint32_t wr = 0;
+        const int64_t t0 = esp_timer_get_time();
+        while (wr < total) {
+            const uint32_t n = (total - wr < sizes[i]) ? (total - wr) : sizes[i];
+            if (fwrite(s_sd_bench_buf, 1, n, fp) != n) {
+                break;
+            }
+            wr += n;
+            // 計時迴圈內唔可以讓 CPU：1 tick = 1 ms（HZ=1000），
+            // 4 KB chunk 寫 2 MB 會憑空多 512 ms，量到嘅係延遲唔係卡速。
+        }
+        const int64_t t1 = esp_timer_get_time();
+        fclose(fp);
+        off += snprintf(js + off, sizeof(js) - off, "%s{\"chunk\":%u,\"kbs\":%.0f}",
+                        i ? "," : "", (unsigned)sizes[i],
+                        (t1 > t0) ? (double)wr / 1024.0 / ((t1 - t0) / 1e6) : 0.0);
+    }
+    snprintf(js + off, sizeof(js) - off, "]}");
+    reply_json(ctx, NC4_CMD_DEV_RSP, js);
+}
+
+// 0xF015 SD_RAW_WB：raw 寫／讀對照，只寫 MBR 與第一個分割區之間的「空隙」
+// （通常 1 MB，屬未使用區域，唔會踩到 FAT 資料），用嚟分辨「卡慢」還是「FATFS 慢」。
+static void on_sd_raw_wb(nc4_ctx_t *ctx, const nc4_frame_t *f)
+{
+    (void)f;
+    if (s_sd_card == NULL) {
+        reply_json(ctx, NC4_CMD_DEV_RSP, "{\"err\":\"sd not mounted\"}");
+        return;
+    }
+    if (s_sd_bench_buf == NULL && sd_bench_buf_get(false) != ESP_OK) {
+        reply_json(ctx, NC4_CMD_DEV_RSP, "{\"err\":\"buf\"}");
+        return;
+    }
+    uint8_t *wbuf = s_sd_bench_buf;
+    static uint8_t mbuf[512] __attribute__((aligned(512)));
+    uint32_t part_lba = 0;
+    if (sdmmc_read_sectors(s_sd_card, mbuf, 0, 1) != ESP_OK) {
+        reply_json(ctx, NC4_CMD_DEV_RSP, "{\"err\":\"mbr\"}");
+        return;
+    }
+    part_lba = (uint32_t)mbuf[446 + 8] | ((uint32_t)mbuf[446 + 9] << 8) |
+               ((uint32_t)mbuf[446 + 10] << 16) | ((uint32_t)mbuf[446 + 11] << 24);
+    if (part_lba < 129) {                     // 太窄，唔做
+        reply_json(ctx, NC4_CMD_DEV_RSP, "{\"err\":\"no gap\",\"part_lba\":0}");
+        return;
+    }
+    const uint32_t chunk_sec = 128;           // 64 KB
+    const uint32_t max_sec = part_lba - 1;    // LBA 1..part_lba-1
+    uint32_t done = 0;
+    memset(wbuf, 0x5A, sizeof(wbuf));
+    const int64_t t0 = esp_timer_get_time();
+    for (uint32_t sec = 1; sec + chunk_sec <= max_sec + 1; sec += chunk_sec) {
+        if (sdmmc_write_sectors(s_sd_card, wbuf, sec, chunk_sec) != ESP_OK) {
+            break;
+        }
+        done += chunk_sec;
+        // 計時迴圈內唔可以讓 CPU：1 tick = 1 ms（HZ=1000），
+        // 4 KB chunk 寫 2 MB 會憑空多 512 ms，量到嘅係延遲唔係卡速。
+    }
+    const int64_t t1 = esp_timer_get_time();
+    const double wr_kbs = (t1 > t0) ? (double)done * 512.0 / 1024.0 / ((t1 - t0) / 1e6) : 0.0;
+    uint32_t rdone = 0;
+    const int64_t t2 = esp_timer_get_time();
+    for (uint32_t sec = 1; sec + chunk_sec <= max_sec + 1; sec += chunk_sec) {
+        if (sdmmc_read_sectors(s_sd_card, wbuf, sec, chunk_sec) != ESP_OK) {
+            break;
+        }
+        rdone += chunk_sec;
+        // 計時迴圈內唔可以讓 CPU：1 tick = 1 ms（HZ=1000），
+        // 4 KB chunk 寫 2 MB 會憑空多 512 ms，量到嘅係延遲唔係卡速。
+    }
+    const int64_t t3 = esp_timer_get_time();
+    const double rd_kbs = (t3 > t2) ? (double)rdone * 512.0 / 1024.0 / ((t3 - t2) / 1e6) : 0.0;
+    char js[160];
+    snprintf(js, sizeof(js),
+             "{\"part_lba\":%u,\"sectors\":%u,\"raw_wr_kbs\":%.0f,\"raw_rd_kbs\":%.0f}",
+             (unsigned)part_lba, (unsigned)done, wr_kbs, rd_kbs);
+    reply_json(ctx, NC4_CMD_DEV_RSP, js);
+}
+
+// 0xF014 SD_READ_BENCH：純讀（唔寫卡，安全）。
+//   raw read（LBA 2048 起，避開 MBR/VBR）比較 chunk 大小 4K/64K/256K，
+//   用來看「讀取係唔係被 FATFS/chunk 限制」，順便印出實際匯流排寬度同頻率。
+// 0xF019 SD_STAGE stage_kb(u16)：源頭放 128 KB PSRAM，經 N KB 內部 staging 寫入 /sd。
+// 用嚟回答「細內部 + 大 PSRAM」值唔值：對照 0xF012 mem=1（整塊 PSRAM 直接寫）。
+static void on_sd_stage(nc4_ctx_t *ctx, const nc4_frame_t *f)
+{
+    if (s_sd_card == NULL) {
+        reply_json(ctx, NC4_CMD_DEV_RSP, "{\"err\":\"sd not mounted\"}");
+        return;
+    }
+    uint32_t stage_kb = 4;
+    if (f->len >= 2) {
+        stage_kb = (uint32_t)f->data[0] | ((uint32_t)f->data[1] << 8);
+    }
+    if (stage_kb < 4) {
+        stage_kb = 4;
+    }
+    if (stage_kb > 64) {
+        stage_kb = 64;
+    }
+    const size_t stage = stage_kb * 1024u;
+    const size_t src_bytes = 128u * 1024u;
+    uint8_t *src = heap_caps_aligned_alloc(64, src_bytes, MALLOC_CAP_SPIRAM);
+    uint8_t *stg = heap_caps_aligned_alloc(512, stage, MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA);
+    if (src == NULL || stg == NULL) {
+        if (src) heap_caps_free(src);
+        if (stg) heap_caps_free(stg);
+        reply_json(ctx, NC4_CMD_DEV_RSP, "{\"err\":\"mem\"}");
+        return;
+    }
+    memset(src, 0xA5, src_bytes);
+
+    const uint32_t total = 2u * 1024u * 1024u;
+    char path[64];
+    snprintf(path, sizeof(path), "%s/stage.bin", SD_MOUNT_POINT);
+    FILE *fp = fopen(path, "wb");
+    int64_t copy_us = 0;
+    uint32_t wr = 0;
+    const int64_t t0 = esp_timer_get_time();
+    while (fp != NULL && wr < total) {
+        size_t n = total - wr;
+        if (n > src_bytes) {
+            n = src_bytes;
+        }
+        for (size_t off = 0; off < n; off += stage) {
+            size_t k = n - off;
+            if (k > stage) {
+                k = stage;
+            }
+            const int64_t c0 = esp_timer_get_time();
+            memcpy(stg, src + off, k);
+            copy_us += esp_timer_get_time() - c0;
+            if (fwrite(stg, 1, k, fp) != k) {
+                wr = 0;
+                n = 0;
+                break;
+            }
+        }
+        if (n == 0) {
+            break;
+        }
+        wr += (uint32_t)n;
+    }
+    if (fp != NULL) {
+        fclose(fp);
+    }
+    const int64_t t1 = esp_timer_get_time();
+    heap_caps_free(src);
+    heap_caps_free(stg);
+
+    char js[160];
+    snprintf(js, sizeof(js),
+             "{\"stage_kb\":%u,\"wr_kbs\":%.0f,\"copy_ms\":%.1f,\"total_ms\":%.1f}",
+             (unsigned)stage_kb,
+             (t1 > t0) ? (double)wr / 1024.0 / ((t1 - t0) / 1e6) : 0.0,
+             (double)copy_us / 1000.0, (double)(t1 - t0) / 1000.0);
+    reply_json(ctx, NC4_CMD_DEV_RSP, js);
+}
+
+static void on_sd_read_bench(nc4_ctx_t *ctx, const nc4_frame_t *f)
+{
+    (void)f;
+    if (s_sd_card == NULL) {
+        reply_json(ctx, NC4_CMD_DEV_RSP, "{\"err\":\"sd not mounted\"}");
+        return;
+    }
+    if (s_sd_bench_buf == NULL && sd_bench_buf_get(false) != ESP_OK) {
+        reply_json(ctx, NC4_CMD_DEV_RSP, "{\"err\":\"buf\"}");
+        return;
+    }
+    uint8_t *rbuf = s_sd_bench_buf;
+    const uint32_t total = 8u * 1024u * 1024u;
+    const uint32_t base = 2048;                 // 分割區第一個 sector（安全範圍）
+    char js[256];
+    size_t off = 0;
+    const unsigned bus4 = (s_sd_card->host.flags & SDMMC_HOST_FLAG_4BIT) ? 4 : 1;
+    off += snprintf(js + off, sizeof(js) - off, "{\"bus\":%u,\"freq_khz\":%d,\"r\":[",
+                    bus4, s_sd_card->host.max_freq_khz);
+    const uint32_t chunks[] = { 4096, 16384, 65536 };
+    for (int i = 0; i < 3; i++) {
+        const uint32_t ch = chunks[i];
+        const uint32_t nsec = ch / 512;
+        uint32_t done = 0;
+        const int64_t t0 = esp_timer_get_time();
+        for (uint32_t b = 0; b + ch <= total; b += ch) {
+            if (sdmmc_read_sectors(s_sd_card, rbuf, base + b / 512, nsec) != ESP_OK) {
+                break;
+            }
+            done += ch;
+            if ((done & 0x3FFFF) == 0) {
+                vTaskDelay(1);
+            }
+        }
+        const int64_t t1 = esp_timer_get_time();
+        const double kbs = (t1 > t0) ? (double)done / 1024.0 / ((t1 - t0) / 1e6) : 0.0;
+        off += snprintf(js + off, sizeof(js) - off, "%s{\"chunk\":%u,\"kbs\":%.0f}",
+                        i ? "," : "", (unsigned)ch, kbs);
+    }
+    snprintf(js + off, sizeof(js) - off, "]}");
+    reply_json(ctx, NC4_CMD_DEV_RSP, js);
+}
+
+static void on_cdc_duplex(nc4_ctx_t *ctx, const nc4_frame_t *f)
+{
+    uint32_t bytes = 4u * 1024u * 1024u;
+    if (f->len >= 4) {
+        bytes = (uint32_t)f->data[0] | ((uint32_t)f->data[1] << 8) |
+                ((uint32_t)f->data[2] << 16) | ((uint32_t)f->data[3] << 24);
+    }
+    if (bytes == 0 || bytes > (16u << 20)) {
+        bytes = 4u << 20;
+    }
+    if (xTaskCreatePinnedToCore(cdc_stream_task, "cdc_str", 3072,
+                                (void *)(uintptr_t)bytes, 3, NULL, 0) != pdPASS) {
+        reply_json(ctx, NC4_CMD_DEV_RSP, "{\"err\":\"task\"}");
+        return;
+    }
+    char js[96];
+    snprintf(js, sizeof(js), "{\"stream\":%u}", (unsigned)bytes);
+    reply_json(ctx, NC4_CMD_DEV_RSP, js);
+}
+
 static void on_cdc_tx_bench(nc4_ctx_t *ctx, const nc4_frame_t *f)
 {
     if (f->len < 7) {
@@ -1541,7 +2510,12 @@ static void on_cdc_tx_bench(nc4_ctx_t *ctx, const nc4_frame_t *f)
 
     bench_pat_fill();
     const int64_t t0 = esp_timer_get_time();
+    // 3 秒截止：主機中途唔讀（或工具被 kill）時 FIFO 永遠滿，write_queue 一直回 0。
+    // 以前係 `taskYIELD()` 無限自旋 —— 只會讓給同／更高優先級，decode 會永遠卡死
+    // （2026-11-07 實測：CDC TX 壓測中途 kill 工具 → 裝置完全唔答指令，要斷電）。
+    const int64_t deadline = t0 + 3000000;
     uint32_t stalls = 0;
+    bool aborted = false;
     size_t left = bytes;
     while (left > 0) {
         size_t n = (left > ch) ? ch : left;
@@ -1552,10 +2526,17 @@ static void on_cdc_tx_bench(nc4_ctx_t *ctx, const nc4_frame_t *f)
                                                         s_bench_pat, n - off);
             if (k == 0) {
                 stalls++;
-                taskYIELD();
+                if (esp_timer_get_time() > deadline) {
+                    aborted = true;
+                    break;
+                }
+                vTaskDelay(1);      // 真阻塞：讓低優先級 task 亦有機會跑
                 continue;
             }
             off += k;
+        }
+        if (aborted) {
+            break;
         }
         left -= n;
         if (mode == 1) {
@@ -1567,8 +2548,9 @@ static void on_cdc_tx_bench(nc4_ctx_t *ctx, const nc4_frame_t *f)
 
     char js[160];
     snprintf(js, sizeof(js),
-             "{\"bytes\":%u,\"chunk\":%u,\"mode\":%u,\"dev_us\":%lld,\"stalls\":%u}",
-             (unsigned)bytes, (unsigned)ch, (unsigned)mode, (long long)us,
+             "{\"bytes\":%u,\"left\":%u,\"aborted\":%d,\"chunk\":%u,\"mode\":%u,\"dev_us\":%lld,\"stalls\":%u}",
+             (unsigned)bytes, (unsigned)left, aborted ? 1 : 0, (unsigned)ch, (unsigned)mode,
+             (long long)us,
              (unsigned)stalls);
     ESP_LOGW(TAG, "CDC_TX_BENCH %s", js);
     reply_json(ctx, NC4_CMD_DEV_RSP, js);
@@ -1576,26 +2558,52 @@ static void on_cdc_tx_bench(nc4_ctx_t *ctx, const nc4_frame_t *f)
 #endif   // !P4
 #endif   // NC_ENABLE_TESTS
 
-static void actions_register(nc4_decoder_t *dec)
+#ifdef NC_ENABLE_TESTS
+#if !CONFIG_IDF_TARGET_ESP32P4
+// main 自己的測試指令（0xF00B~0xF019）。表喺呢度，統計同配置交畀 nc_action。
+static const nc_action_t s_main_test_actions[] = {
+    { NC4_CMD_CDC_TX_BENCH, on_cdc_tx_bench,      "core" },
+    { 0xF011,               on_cdc_duplex,        "core" },
+    { 0xF012,               on_sd_bench,          "core" },
+    { 0xF013,               on_sd_bench_result,   "core" },
+    { 0xF014,               on_sd_read_bench,     "core" },
+    { 0xF015,               on_sd_raw_wb,         "core" },
+    { 0xF016,               on_sd_format,         "core" },
+    { 0xF017,               on_sd_read_sweep,     "core" },
+    { 0xF018,               on_sd_write_sweep,    "core" },
+    { 0xF019,               on_sd_stage,          "core" },
+};
+NC_ACTION_TABLE_DEF(s_main_test_action_table, "bench", s_main_test_actions);
+#endif
+#endif
+
+static void actions_init(void)
 {
-    if (dec == NULL) {
+    // 每個模組宣告自己的 const 表；呢度只負責「列出有邊幾張表」。
+    // 統計、一次配置、排序、封存全部喺 nc_action_init() 裡面（唔會碎片）。
+    static const nc_action_table_t *const tables[] = {
+        &s_core_action_table,
+#ifdef NC_ENABLE_TESTS
+#if !CONFIG_IDF_TARGET_ESP32P4
+        &s_main_test_action_table,
+#endif
+        &nc_test_action_table,
+#endif
+        &nc_ota_action_table,
+        &nc_file_action_table,
+    };
+    const esp_err_t err = nc_action_init(tables, sizeof(tables) / sizeof(tables[0]));
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "指令表建立失敗：%s", esp_err_to_name(err));
         return;
     }
-    for (size_t i = 0; i < sizeof(s_core_actions) / sizeof(s_core_actions[0]); i++) {
-        nc4_decoder_on_owner(dec, s_core_actions[i].cmd, s_core_actions[i].fn, "core");
-    }
-    // cid / master_cid 已在開機最前面初始化（卷標要用）
 #ifdef NC_ENABLE_TESTS
-    nc_test_action_register(dec, &s_test_hooks);   // 0xF00x / 0x181x
-#if !CONFIG_IDF_TARGET_ESP32P4
-    nc4_decoder_on_owner(dec, NC4_CMD_CDC_TX_BENCH, on_cdc_tx_bench, "core");
+    nc_test_action_init(&s_test_hooks);      // 只設定 hooks，唔再註冊
 #endif
-#endif
-    nc_ota_action_register(dec);             // 0x22xx
-    nc_file_action_register(dec);       // 0x2005 FILE_QUERY / 0x1103 STATUS_SET
-    ESP_LOGI(TAG, "actions：core %u 條 + ota + file 已註冊（decoder 共 %u 條）",
-             (unsigned)(sizeof(s_core_actions) / sizeof(s_core_actions[0])),
-             (unsigned)nc4_decoder_count(dec));
+    nc_ota_action_init();
+    nc_file_action_init();
+    ESP_LOGI(TAG, "actions：%u 條（%u B）", (unsigned)nc_action_count(),
+             (unsigned)nc_action_bytes());
 }
 
 // ── 路由器：張表由邊度嚟 ──
@@ -1704,7 +2712,7 @@ static const nc_task_loop_t s_fx_loops[] = {
       .stack = 4096, .prio = NC_FX_TASK_PRIO, .core = NC_FX_TASK_CORE,
       // period_ms = 0：幀週期由 manifest 的 fps 決定，nc_fx_task 自己延遲。
       // 兩邊都延遲會變成兩倍週期。
-      .layer = 3, .period_ms = 0, .budget_us = 16000 },
+      .layer = 3, .period_ms = 0 },
 };
 
 static int task_fx_declare(nc_task_res_t *out, int max)
@@ -1954,18 +2962,9 @@ static esp_err_t net_eth_start(void)
 
 #endif
 
-void app_main(void)
+// 開機階段：banner+nvs
+static esp_err_t ph_boot(void)
 {
-#ifdef NETCORE_MINIMAL
-    ESP_LOGI(TAG, "MINIMAL build start");
-    int64_t prev = esp_timer_get_time();
-    for (;;) {
-        vTaskDelay(pdMS_TO_TICKS(1000));
-        int64_t now = esp_timer_get_time();
-        ESP_LOGI(TAG, "t=%lld dt=%lld", (long long)now, (long long)(now - prev));
-        prev = now;
-    }
-#endif
     // 清掉上個 cycle 留下的 hold（否則板子會一直卡在 download mode）
     rtc_gpio_hold_dis(BOOT_BUTTON_GPIO);
     rtc_gpio_deinit(BOOT_BUTTON_GPIO);
@@ -1999,6 +2998,12 @@ void app_main(void)
     // 而 config 之後只讀一次（struct），任何人再用都唔會再碰檔案 ——
     // 所以「FAT 交咗俾 host 之後 config 讀唔到」這個舊問題由設計上消失。
     // nvs_boot_init() 已在 app_main 最前面（log 需要讀 NVS 設定）
+    return ESP_OK;
+}
+
+// 開機階段：storage+cfg
+static esp_err_t ph_storage(void)
+{
     MAIN_HWM("pre-storage");
     esp_err_t err = storage_init();
     MAIN_HWM("post-storage");
@@ -2019,11 +3024,17 @@ void app_main(void)
                      (unsigned)sys->log_debug_mode);
         }
     }
-    node_identity_init();
+    node_identity_init();     // 要先有 cID：SD 的卷標（NCSD-XXXX）同 flash 一樣靠它
+    (void)sd_boot();          // enable=0 → 直接返回，不佔 RAM、不碰 GPIO
     MAIN_HWM("post-ident");
     ensure_volume_label();
     load_net_tuning();
+    return ESP_OK;
+}
 
+// 開機階段：hardware
+static esp_err_t ph_hardware(void)
+{
     // ── ③④ 硬體 / Driver：先確認「有沒有這個硬體」──
 #if CONFIG_IDF_TARGET_ESP32P4
     esp_err_t nerr = net_eth_start();
@@ -2060,7 +3071,12 @@ void app_main(void)
         nc4_router_json(rj, sizeof(rj));
         ESP_LOGI(TAG, "router: %s", rj);
     }
+    return ESP_OK;
+}
 
+// 開機階段：declare
+static esp_err_t ph_declare(void)
+{
     // ── ⑤ 宣告（照「實際存在的硬體」決定）──
     // 這個 registry 管兩件事：記憶體（nc_plan）、迴圈（nc_task）。
     // 指令不在這裡 —— 它是 decoder 的表，下面 actions_register() 一次註冊完。
@@ -2069,7 +3085,7 @@ void app_main(void)
 
     s_decoder = nc4_decoder_create();
     if (s_decoder != NULL) {
-        actions_register(s_decoder);       // 核心執行能力先就位（不需要任何任務）
+        actions_init();                    // 統計 → 一次配置 → 封存（不需要任何任務）
     } else {
         ESP_LOGE(TAG, "解碼器建立失敗 → 裝置收不到任何指令");
     }
@@ -2086,7 +3102,12 @@ void app_main(void)
 #endif
 
     nc_task_declare_all();       // → nc_plan_declare + 帳本檢查
+    return ESP_OK;
+}
 
+// 開機階段：commit
+static esp_err_t ph_commit(void)
+{
     // ── ② 探測可用量，一次 commit（每 class 一次 carve）──
     size_t avail[NC_PLAN_CLASSES] = {0};
     avail[NC_PLAN_DMA] = heap_caps_get_largest_free_block(MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
@@ -2107,7 +3128,12 @@ void app_main(void)
     // 放在 plan commit 之後：核心通道先要記憶體，Wi-Fi 係可選項。
     // 未啟用時 nc_wifi_boot() 只回報狀態，一個 byte 都唔配。
     nc_wifi_boot();
+    return ESP_OK;
+}
 
+// 開機階段：start
+static esp_err_t ph_start(void)
+{
     // ── ③ 任務啟動：資源 → on_start → 指令 → 準備 loop（還不開）──
     nc_task_start_all();
 
@@ -2129,7 +3155,13 @@ void app_main(void)
             free(ledger);
         }
     }
+    return ESP_OK;
+}
 
+// 開機階段：usb
+static esp_err_t ph_usb(void)
+{
+    esp_err_t err;
 #if CONFIG_IDF_TARGET_ESP32P4
     // 診斷結論（2026-11-02）：這塊板子的 USB-C 只接 USB-Serial-JTAG，沒有接 USB-OTG。
     // 啟用 TinyUSB 後裝置照跑、但主機端完全沒有新裝置（列舉不到），
@@ -2174,7 +3206,12 @@ void app_main(void)
         ESP_LOGE(TAG, "USB 未起來 → /data 留在 APP（唔交 FAT）");
     }
 #endif
+    return ESP_OK;
+}
 
+// 開機階段：channels
+static esp_err_t ph_channels(void)
+{
     // 解碼器已在 ⑤ 宣告期建立；核心指令由 cmds 模組註冊（帶擁有權）。
     // 這裡只掛「需要硬體」的通道。
     if (s_decoder != NULL) {
@@ -2343,7 +3380,12 @@ void app_main(void)
             ESP_LOGI(TAG, "UART producer: %s", esp_err_to_name(perr));
         }
     }
+    return ESP_OK;
+}
 
+// 開機階段：account
+static esp_err_t ph_account(void)
+{
     // ── 開機帳：所有初始化／任務都起完之後，實際仲剩幾多 ──
     // 兩個數字要分開睇：
     //   free     = 現在仲可以 malloc 幾多（會隨任務／連線變動）
@@ -2357,6 +3399,40 @@ void app_main(void)
                  (unsigned)in_free, (unsigned)in_big, (unsigned)ps_free, (unsigned)ps_big);
     }
 
+    return ESP_OK;
+}
+
+void app_main(void)
+{
+#ifdef NETCORE_MINIMAL
+    ESP_LOGI(TAG, "MINIMAL build start");
+    int64_t prev = esp_timer_get_time();
+    for (;;) {
+        vTaskDelay(pdMS_TO_TICKS(1000));
+        int64_t now = esp_timer_get_time();
+        ESP_LOGI(TAG, "t=%lld dt=%lld", (long long)now, (long long)(now - prev));
+        prev = now;
+    }
+#endif
+
+    // 開機階段表：**順序就是資料**。加一步就在這裡加一行，
+    // 唔需要再記住「它應該放喺邊」。計時與結果由 boot.c 負責。
+    static const nc_boot_phase_t phases[] = {
+        { "banner+nvs", ph_boot },
+        { "storage+cfg", ph_storage },
+        { "hardware", ph_hardware },
+        { "declare", ph_declare },
+        { "commit", ph_commit },
+        { "start", ph_start },
+        { "usb", ph_usb },
+        { "channels", ph_channels },
+        { "account", ph_account },
+    };
+    (void)nc_boot_run(phases, NC_BOOT_COUNT(phases));
+
+    // ── 開機完成：主任務只剩心跳 ──
+    // 佢**唔係**開機階段（永遠唔會返回）。以前混喺 app_main 尾部，
+    // 令 app_main 睇落好似「跑完就完」，其實係一條無限迴圈。
     const TickType_t period = pdMS_TO_TICKS(1000);
     TickType_t last_wake = xTaskGetTickCount();
     int64_t prev_us = esp_timer_get_time();

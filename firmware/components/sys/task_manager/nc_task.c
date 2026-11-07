@@ -19,7 +19,6 @@
 
 #include "esp_log.h"
 #include "nc_cfg.h"
-#include "nc_epoch.h"
 #include "cJSON.h"
 
 static const char *TAG = "tm";
@@ -283,7 +282,6 @@ void nc_task_reset(void)
     memset(s_slots, 0, sizeof(s_slots));
     memset(s_provs, 0, sizeof(s_provs));
     s_count = 0;
-    nc_epoch_reset();
 }
 
 static esp_err_t insert_slot(const nc_task_t *t, bool runtime)
@@ -556,7 +554,6 @@ static void prepare_loops(tm_slot_t *s)
         nc_task_rt_t *rt = &s->loops[s->nloops++];
         memset(rt, 0, sizeof(*rt));
         rt->def = d;
-        rt->epoch_token = -1;
         rt->enabled = true;
         rt->core = d->core;      // 完全照宣告；框架不改你的核
         if (s->cfg_aff[0] >= 0 || s->cfg_aff[1] >= 0) {
@@ -880,17 +877,10 @@ size_t nc_task_json(char *buf, size_t cap)
             const nc_task_loop_t *d = rt->def;
             off = jappend(buf, cap, off,
                           "%s{\"name\":\"%s\",\"core\":%d,\"layer\":%d,\"prio\":%d,"
-                          "\"period_ms\":%u,\"running\":%d,\"enabled\":%d,"
-                          "\"count\":%u,\"last_us\":%u,\"avg_us\":%u,\"max_us\":%u,"
-                          "\"over\":%u,\"wrap_us\":%u,\"wrap_avg_us\":%u}",
+                          "\"period_ms\":%u,\"running\":%d,\"enabled\":%d}",
                           k ? "," : "", d->name ? d->name : "?", rt->core, d->layer,
                           (int)d->prio, (unsigned)d->period_ms,
-                          rt->started ? 1 : 0, rt->enabled ? 1 : 0,
-                          (unsigned)rt->count, (unsigned)rt->last_us,
-                          (unsigned)nc_task_rt_avg_us(rt), (unsigned)rt->max_us,
-                          (unsigned)rt->over,
-                          (unsigned)nc_task_rt_wrap_us(rt),
-                          (unsigned)nc_task_rt_wrap_avg_us(rt));
+                          rt->started ? 1 : 0, rt->enabled ? 1 : 0);
         }
         off = jappend(buf, cap, off, "]}");
     }

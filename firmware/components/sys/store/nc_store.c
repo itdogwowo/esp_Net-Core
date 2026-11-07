@@ -1,6 +1,7 @@
 #include "nc_store.h"
 
 #include <stdbool.h>
+#include <stdio.h>
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
@@ -20,8 +21,12 @@ static const char *TAG = "store";
 #define APP_BASE     "/data"
 #define APP_DRIVE    "0:"
 #define RO_BASE      "/ro"
-#define RO_DRIVE     "1:"
-#define RO_PDRV      1
+// 唯讀視圖的 diskio 槽／磁碟號**一定要動態拿**：
+// 寫死 1 會同 SD 卡撞（SD 開機時拿到的正是第一個空槽 = 1），
+// 而 ff_diskio_register() 對已佔用的槽是「靜靜咁覆寫、free 舊 impl」——
+// 結果 /sd 的每一次讀寫都落到這個 flash 唯讀視圖上，量到的「SD 速度」
+// 其實係內部 flash（148 KB/s），而 SD 卡一次都沒被碰過。
+#define RO_DRIVE_MAX 5
 #define PART_LABEL   "data"
 
 static const esp_partition_t *s_part;
@@ -32,8 +37,16 @@ static SemaphoreHandle_t s_lock;
 static bool s_driver_installed;
 static int s_usb_core = tskNO_AFFINITY;  // USB 服務組的核心（MSC driver 安裝時決定）
 static bool s_app_mounted;
+static sdmmc_card_t *s_sd_card;        // 第二個 LUN 的卡（NULL = 冇 SD）
+static tinyusb_msc_storage_handle_t s_msc_sd;
+static esp_err_t (*s_sd_mount_app)(void *arg);
+static esp_err_t (*s_sd_unmount_app)(void *arg);
+static void *s_sd_arg;
+static bool s_sd_on_usb;
 static FATFS *s_ro_fs;
 static bool s_ro_mounted;
+static BYTE s_ro_pdrv;                 // 動態取得的 diskio 槽
+static char s_ro_drive[8];             // "N:"（給 FatFS 用）
 
 static const char *const k_names[] = {
     [NC_STORE_MODE_UNAVAILABLE] = "unavailable",
@@ -95,31 +108,42 @@ static esp_err_t ro_open(void)
         return ESP_ERR_INVALID_STATE;
     }
 
-    esp_err_t err = ff_diskio_register_wl_partition(RO_PDRV, s_wl);
+    // 先要一個空槽，再往裡面註冊（不要寫死：SD 卡會先拿走第一個空槽）
+    BYTE pdrv = 0;
+    esp_err_t err = ff_diskio_get_drive(&pdrv);
     if (err != ESP_OK) {
-        ESP_LOGW(TAG, "唯讀視圖：diskio 註冊失敗（%s）", esp_err_to_name(err));
+        ESP_LOGE(TAG, "唯讀視圖：冇空 diskio 槽（FF_VOLUMES=%d）→ 唯一讀取視圖停用",
+                 (int)FF_VOLUMES);
         return err;
     }
+    err = ff_diskio_register_wl_partition(pdrv, s_wl);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "唯讀視圖：diskio 註冊失敗（槽 %d，%s）", (int)pdrv, esp_err_to_name(err));
+        return err;
+    }
+    s_ro_pdrv = pdrv;
+    snprintf(s_ro_drive, sizeof(s_ro_drive), "%d:", (int)pdrv);
 
-    const esp_vfs_fat_conf_t conf = { .base_path = RO_BASE, .fat_drive = RO_DRIVE, .max_files = 2 };
+    const esp_vfs_fat_conf_t conf = { .base_path = RO_BASE, .fat_drive = s_ro_drive,
+                                      .max_files = 2 };
     err = esp_vfs_fat_register(&conf, &s_ro_fs);
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "唯讀視圖：VFS 註冊失敗（%s）", esp_err_to_name(err));
-        ff_diskio_unregister(RO_PDRV);
+        ff_diskio_unregister(pdrv);
         return err;
     }
 
-    const FRESULT fr = f_mount(s_ro_fs, RO_DRIVE, 1);
+    const FRESULT fr = f_mount(s_ro_fs, s_ro_drive, 1);
     if (fr != FR_OK) {
         ESP_LOGW(TAG, "唯讀視圖：掛載失敗（FRESULT %d）", (int)fr);
         esp_vfs_fat_unregister_path(RO_BASE);
-        ff_diskio_unregister(RO_PDRV);
+        ff_diskio_unregister(pdrv);
         s_ro_fs = NULL;
         return ESP_FAIL;
     }
 
     s_ro_mounted = true;
-    ESP_LOGI(TAG, "唯讀視圖已掛載（%s）", RO_BASE);
+    ESP_LOGI(TAG, "唯讀視圖已掛載（%s ← %s 槽 %d）", RO_BASE, s_ro_drive, (int)pdrv);
     return ESP_OK;
 }
 
@@ -128,9 +152,9 @@ static void ro_close(void)
     if (!s_ro_mounted) {
         return;
     }
-    f_mount(NULL, RO_DRIVE, 0);
+    f_mount(NULL, s_ro_drive, 0);
     esp_vfs_fat_unregister_path(RO_BASE);
-    ff_diskio_unregister(RO_PDRV);
+    ff_diskio_unregister(s_ro_pdrv);
     s_ro_fs = NULL;
     s_ro_mounted = false;
     ESP_LOGI(TAG, "唯讀視圖已卸載");
@@ -156,6 +180,58 @@ static void msc_event_cb(tinyusb_msc_storage_handle_t handle, tinyusb_msc_event_
     default:
         break;
     }
+}
+
+// SD 交給 host：先卸掉裝置自己的 VFS（兩邊唔可以同時寫同一份 FAT），
+// 再把它掛成第二個 LUN。次序唔可以反。
+static esp_err_t open_usb_sd(void)
+{
+    if (s_sd_card == NULL) {
+        return ESP_OK;
+    }
+    if (s_sd_unmount_app != NULL) {
+        const esp_err_t uerr = s_sd_unmount_app(s_sd_arg);
+        if (uerr != ESP_OK) {
+            ESP_LOGW(TAG, "[sd] 卸載裝置端 VFS 失敗：%s（仍然照交出）", esp_err_to_name(uerr));
+        }
+    }
+    tinyusb_msc_storage_config_t cfg = {
+        .medium.card = s_sd_card,
+        .mount_point = TINYUSB_MSC_STORAGE_MOUNT_USB,
+        .fat_fs = {
+            .base_path = NULL,
+            .config = {
+                .format_if_mount_failed = false,
+                .max_files = 4,
+            },
+            .do_not_format = true,
+        },
+    };
+    const esp_err_t err = tinyusb_msc_new_storage_sdmmc(&cfg, &s_msc_sd);
+    if (err != ESP_OK) {
+        s_msc_sd = NULL;
+        ESP_LOGE(TAG, "[sd] 建立第二個 LUN 失敗：%s", esp_err_to_name(err));
+        // 交唔出去就還原：裝置自己要能繼續用 /sd
+        if (s_sd_mount_app != NULL) {
+            (void)s_sd_mount_app(s_sd_arg);
+        }
+        return err;
+    }
+    s_sd_on_usb = true;
+    ESP_LOGW(TAG, "[sd] 第二個 LUN 已建立（主機會看到第二顆磁碟）");
+    return ESP_OK;
+}
+
+static void close_usb_sd(void)
+{
+    if (s_msc_sd != NULL) {
+        const esp_err_t err = tinyusb_msc_delete_storage(s_msc_sd);
+        if (err != ESP_OK) {
+            ESP_LOGW(TAG, "[sd] delete_storage：%s", esp_err_to_name(err));
+        }
+        s_msc_sd = NULL;
+    }
+    s_sd_on_usb = false;
 }
 
 static esp_err_t open_usb(void)
@@ -187,12 +263,16 @@ static esp_err_t open_usb(void)
         s_msc = NULL;
         wl_unmount(s_wl);
         s_wl = WL_INVALID_HANDLE;
+        return err;
     }
-    return err;
+    // 第二個 LUN 失敗不影響第一個：主機仍然看到隨身碟，只是沒有 SD。
+    (void)open_usb_sd();
+    return ESP_OK;
 }
 
 static void close_usb(void)
 {
+    close_usb_sd();          // 先拆 SD LUN，主機的 I/O 立刻失效
     if (s_msc != NULL) {
         // 拆 LUN：主機立刻看不到這顆碟，READ10/WRITE10 全部失效
         const esp_err_t err = tinyusb_msc_delete_storage(s_msc);
@@ -387,7 +467,7 @@ const char *nc_store_fs_drive(void)
         return APP_DRIVE;
     }
     if (s_mode == NC_STORE_MODE_USB && s_ro_mounted) {
-        return RO_DRIVE;
+        return s_ro_drive;
     }
     return NULL;
 }
@@ -418,6 +498,9 @@ static esp_err_t switch_to(nc_nc_store_mode_t want)
         close_usb();
         ESP_LOGW(TAG, "從 host 收回 FAT（主機端若還掛著，會看到「未正確退出」）");
         err = open_app(false);       // runtime 重掛：永遠唔准自動格式化
+        if (err == ESP_OK && s_sd_mount_app != NULL) {
+            (void)s_sd_mount_app(s_sd_arg);   // SD LUN 已經拆掉，裝置可以拿回 /sd
+        }
     } else {
         close_app();
         ESP_LOGI(TAG, "交出 FAT 給 host");
@@ -450,6 +533,26 @@ static esp_err_t switch_to(nc_nc_store_mode_t want)
 
     xSemaphoreGive(s_lock);
     return err;
+}
+
+esp_err_t nc_store_sd_attach(sdmmc_card_t *card,
+                             esp_err_t (*mount_app)(void *arg),
+                             esp_err_t (*unmount_app)(void *arg), void *arg)
+{
+    if (card == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    s_sd_card = card;
+    s_sd_mount_app = mount_app;
+    s_sd_unmount_app = unmount_app;
+    s_sd_arg = arg;
+    ESP_LOGI(TAG, "[sd] 已登記第二個 LUN（模式=%s）", nc_store_mode_name());
+    return ESP_OK;
+}
+
+bool nc_store_sd_on_usb(void)
+{
+    return s_sd_on_usb;
 }
 
 esp_err_t nc_store_claim_app(void)

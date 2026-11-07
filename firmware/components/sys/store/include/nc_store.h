@@ -28,6 +28,11 @@
 //   要安全就先在 host 端 eject，再送 STATUS_SET 把 System.file_mode 設成 1。
 #pragma once
 
+#include "sd_protocol_types.h"   // sdmmc_card_t（第二個 LUN）
+
+// SD 在裝置端的掛載點（頂層，唔好放喺 /data 下面：VFS 前綴會撞到 flash 的 FAT）
+#define NC_STORE_SD_MOUNT "/sd"
+
 #include <stdbool.h>
 
 #include "esp_err.h"
@@ -74,6 +79,20 @@ const char *nc_store_fs_base(void);
 const char *nc_store_fs_drive(void);
 
 // 切換所有權。已在目標狀態時是 no-op。
+// ── 第二個 LUN：SD 卡 ──
+// 跟 CircuitPython 的 CIRCUITPY_SDCARD_USB 同一個模型：一個 LUN = 一顆磁碟。
+// FAT 冇 mount point，所以**不可能**出現「flash 碟裡面的 sd/ 資料夾」——
+// 主機會看到第二顆獨立磁碟。
+//   · card 由 main（sd_boot）初始化好之後交進來
+//   · mount_app / unmount_app：裝置要自己用 /sd 時掛 VFS、要交給 host 前卸 VFS
+//     （兩個都可以是 NULL，例如 SD 只做 raw 存取）
+esp_err_t nc_store_sd_attach(sdmmc_card_t *card,
+                             esp_err_t (*mount_app)(void *arg),
+                             esp_err_t (*unmount_app)(void *arg), void *arg);
+
+// 主機現在是不是拿著 SD（true = LUN 已建立，裝置自己唔可以用 /sd）
+bool nc_store_sd_on_usb(void);
+
 esp_err_t nc_store_claim_app(void);     // USB  → APP（主機的碟會消失）
 esp_err_t nc_store_release_usb(void);   // APP  → USB
 

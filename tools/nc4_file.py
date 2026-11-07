@@ -99,9 +99,24 @@ def main() -> int:
         time.sleep(0.6)
         s.reset_input_buffer()
         s.write(pack(cmd, payload))
-        time.sleep(wait)
+        got = []
         try:
-            got = frames(s.read(16384))
+            if args.cmd in ("claim", "release"):
+                # 拆掉/建立 LUN 要等主機做完手上的 I/O（macOS 在索引時可以幾秒），
+                # 固定 2 秒會 miss 掉 ACK —— 等足 10 秒或者見到 ACK 為止。
+                deadline = time.time() + 10.0
+                buf = b""
+                while time.time() < deadline:
+                    chunk = s.read(4096)
+                    if not chunk:
+                        continue
+                    buf += chunk
+                    got = frames(buf)
+                    if any(c == STATUS_ACK for c, _ in got):
+                        break
+            else:
+                time.sleep(wait)
+                got = frames(s.read(16384))
         except Exception:
             got = []      # release 會觸發 USB 重新列舉，連線可能先斷
 
