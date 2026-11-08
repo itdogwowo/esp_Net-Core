@@ -283,8 +283,10 @@ def _uart_run(reader, ser, frames: int, size: int, timeout: float = 30.0):
                 break
         time.sleep(0.005)
     dt = (time.perf_counter() - t0) * 1000.0
-    return {"frames": frames, "size": size, "ms": round(dt, 1),
-            "frames_per_s": round(got / (dt / 1000.0), 1) if dt > 0 and got > 0 else None,
+    fps = round(got / (dt / 1000.0), 1) if dt > 0 and got > 0 else None
+    return {"frames": frames, "size": size, "ms": round(dt, 1), "frames_per_s": fps,
+            # wire bytes/s（含 13 B 表頭/CRC）＝直接對照物理上限的量（見方法文件 §4）
+            "bytes_per_s": round(fps * (size + 13)) if fps else None,
             "lost": max(0, frames - got) if got >= 0 else -1}
 
 
@@ -309,9 +311,12 @@ def _storm_run(reader, ser, n: int, size: int, timeout: float = 40.0):
             break
         time.sleep(0.005)
     total_ms = (time.perf_counter() - t0) * 1000.0
+    fps = round(n / (total_ms / 1000.0), 1) if total_ms > 0 else None
     return {"n": n, "size": size, "rx": done, "lost": max(0, n - done),
             "write_ms": round(write_ms, 1), "total_ms": round(total_ms, 1),
-            "frames_per_s": round(n / (total_ms / 1000.0), 1) if total_ms > 0 else None}
+            "frames_per_s": fps,
+            "write_bytes_per_s": round(n * (size + 13) / (write_ms / 1000.0))
+            if write_ms > 0 else None}
 
 
 def do_session(args, reader, ser):
