@@ -1189,8 +1189,16 @@ fragment whole-archive 拉入，所以即使 `CONFIG_NETCORE_WIFI=n`（無任何
 「不呼叫 esp_wifi_init」（runtime heap 0），不是「不 link」。文件已同步（§1、§7.1 F、
 [memory-budget.md](../03_notes/memory-budget.md)）。
 
-**量測時發現的坑（重要）**：CDC RX 合成洪水（2,000×256 B）由 **1,827 → 1,711 fps（−6%）**；
-但把「新程式碼只建一個 decoder」也量到 1,710 → **不是 per-core 架構**，而是**二進位佈局**
-（熱路徑在 flash 的位置／cache set）。列為後續：熱路徑 `IRAM_ATTR` 或 `-falign-functions`
-——這也說明「換一個 build 就比較一次端到端吞吐」不能當成歸因方法（見
-[measurement-method.md §7 陷阱](../02_guides/measurement-method.md)）。
+**量測時發現的坑（重要，含一次自我更正）**：CDC RX 合成洪水（2,000×256 B）在
+「per-core 版本」量到 1,711 fps、在「舊的單 decoder 版本」量到 1,827 fps（−6%）。
+
+- 先做歸因實驗：把新程式碼**只建一個 decoder** → 仍是 1,710 ⇒ 不是 per-core 架構造成的。
+- 再試 `-falign-functions=64`：量到 1,772–1,789（回春 4%）。**但後來檢查發現那個 build
+  的映像大小與未對齊版完全相同（0x8a8c0），代表旗標根本沒有套用到（IDF 的 toolchain
+  會覆蓋 `CMAKE_C_FLAGS`）** —— 那 4% 是 **flash 與 flash 之間的量測變異**，不是對齊效果。
+- 結論要保留不確定性：**同一個 binary 的數字很穩（±0.5%），但「換一次 OTA／重新列舉 USB」
+  可以差到 4%**。所以 −6% 裡有多少是真的、多少是列舉變異，目前不能下定論；
+  唯一確定的是**不是 decoder 的接線**（單 decoder 對照同樣慢）。
+- 要再往前一步：把熱路徑（`nc4_parser_feed`／dispatch）放 `IRAM_ATTR` 做 A/B，
+  並且**每次都量同一顆 binary 三次**才算一組。這也寫進
+  [measurement-method.md §7 陷阱 11](../02_guides/measurement-method.md)。
