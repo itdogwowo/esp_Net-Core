@@ -103,6 +103,18 @@
 
 ---
 
+## 4.5 Wi-Fi 的 blobs：IDF 6 無法從 config 關掉（2026-11-08 實測）
+
+| 事實 | 數字 |
+|---|---|
+| 乾淨 sdkconfig 的 S3 映像 vs 舊 sdkconfig（WiFi off） | flash **+75 KB**（489 → 567 KB）、內部 RAM **−18 KB**（heap 290,479 → 271,911） |
+| 原因 | IDF 6 的 `CONFIG_ESP_WIFI_ENABLED` 是**沒有 prompt** 的符號（S3 `default y`），`esp_wifi` 用 linker fragment 把 `libesp_wifi.a`／`libnet80211.a` **whole-archive** 拉入 |
+| 試過但無效 | ① 寫進 `sdkconfig.defaults` → Kconfig 蓋回 y；② 給 `NETCORE_WIFI` 加 `depends` → 只擋 Kconfig、擋不住 IDF 的符號；③ 在 `project()` 前用 CMake normal variable 覆蓋 → 一樣被蓋回 |
+| 有效的部分 | `CONFIG_NETCORE_WIFI=n` 仍然保證**不呼叫 `esp_wifi_init`**（runtime heap 0），只是靜態 blobs 在映像裡 |
+
+> 也就是說：**「Wi-Fi 0 B」只對 flash 之外的行為成立，不對 flash／靜態 RAM 成立**。
+> 要真的 0 B，只能在 IDF 那一層處理（自訂 component 清單或 patch IDF），不是本專案的 config 能決定。
+
 ## 5. 「不可避免」的是幾多
 
 | 分類 | 大小 | 可不可以減 |

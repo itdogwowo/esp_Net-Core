@@ -20,7 +20,7 @@ ESP32-P4（另有 S3 port）上的 **NC4 通訊核心**：多條傳輸通道 →
 | 任務模型 | **核心（房東）／任務（租戶）**：`tasks.json` 只管租戶；`level` / `affinity` 由 config 定，**未設定 = `[0,0]` = 唔跑**；缺的條目開機自動補寫（寫 `[0,0]`，預設關閉）（[task-model.md](../03_notes/task-model.md)） |
 | .fxe | 掃 `/data/pixel/effects/` 與 `/data/tasks/`，attach 成 runtime 任務；**WAMR 執行引擎未接** |
 | 通道存在性 | `system.json` 的 `links[].enable`（缺省 1）：未啟用 → **不宣告緩衝、不建 bus、路由跳過**；要開就改 config ＋ 重啟（2026-11-04） |
-| Wi-Fi | **兩道閘**：編譯期 `CONFIG_NETCORE_WIFI`（預設 n，不編入 = 0 B）＋ 執行期 `network.json` `wifi.enable`（不啟用 = 0 heap） |
+| Wi-Fi | **兩道閘**：編譯期 `CONFIG_NETCORE_WIFI`（預設 n）＋ 執行期 `network.json` `wifi.enable`（不啟用 = 0 heap）。⚠️ 2026-11-08 更正：IDF 6 的 `CONFIG_ESP_WIFI_ENABLED` 是**無 prompt** 符號（S3 強制 y），blobs 用 linker fragment whole-archive 拉入 → **即使 `NETCORE_WIFI=n`，S3 映像仍含 WiFi**（實測 +75 KB flash、−18 KB 內部 RAM，見 §7.26） |
 
 ---
 
@@ -196,7 +196,7 @@ USB 的完整分析：[failure-policy.md §4](../03_notes/failure-policy.md)。
 | C | **`nc_task_set_core()` 死 API** | ✅ **已刪（2026-11-03）** | 它是「停 → 改 core → 起」的**執行期換核**，0 呼叫者，而且同 router 的「開機決定邊個核開 decoder」互相矛盾。已由 `nc_task.h` 與 `nc_task.c` 移除，原位留註解說明「核心在開機時定死」。`nc_task_enable()` 保留（它只是開關，唔換核） |
 | D | **router 未接 config、亦未接對外 JSON** | ✅ **已接（2026-11-03）** | 開機 ④ 由 `router_from_cfg()` 讀 `system.json` 的 `routes[]`，每行第一個 `decodeN` 決定那條線由第 N 核解；`decode0`/`decode1` 任務存在與否、CDC/UART/TCP 三條 bus 掛哪核，全部由此推導。讀不到就 `router_defaults()` 退回板子預設並印 `ESP_LOGW`。另加 `0x1105 ROUTE_GET` / `0x1106 ROUTE_RSP` 線上查表。**未做**：`out` 的 link 轉發、兩核各自一個 decoder |
 | E | **`hardware.json` / `driver.json` 未接線** | 🟡 部分 | `hardware.json` 已 embed，**ETH 與 SDIO 兩段真的會被讀**（2026-11-08，見 §7.24）；其餘段只計 unknown、改它冇效。`driver.json` 仍然**冇 embed、冇人讀** |
-| F | **S3 冇 WiFi** | ❌ | 只有 P4 有 ETH；S3 的無線能力未接。**實測：目前 image 完全冇 link Wi-Fi**（`libnet80211.a` 等 0 個成員被拉進來），所以現有 105.9 KB 靜態是「無 Wi-Fi」的數字。開 Wi-Fi 的帳：靜態 ≤14.3 KB ＋ 執行期 90–120 KB（見 [memory-budget.md](../03_notes/memory-budget.md) §7） |
+| F | **S3 冇 WiFi** | ❌ | 只有 P4 有 ETH；S3 的無線能力未接。~~目前 image 完全冇 link Wi-Fi~~ **2026-11-08 更正**：乾淨的 sdkconfig 下 IDF 6 會把 `libesp_wifi`／`libnet80211` 用 linker fragment 整包拉入（+75 KB flash、−18 KB 內部 RAM），`CONFIG_NETCORE_WIFI=n` 只保證**不初始化**（runtime heap 仍是 0）。舊的 sdkconfig 剛好關了 `ESP_WIFI_ENABLED` 才有「0 B」的數字；那個符號沒有 prompt，sdkconfig／Kconfig／CMake 都改不動（實測）。見 §7.26 |
 | G | **WS / UDP 緩衝未入 plan**（41 KB BSS，P4 專屬） | ⚠️ | 只在 P4 link 進來；未宣告、不可見 |
 | H | **TCP PUSH 插槽 65,640 B 未入 plan** | ⚠️ | `calloc`，`keys=mem` 看不到 |
 | I | **OTA `esp_ota_end` 仍在解碼路徑** | ❌ | **更正**：唔係「兩核都卡」—— OTA 只會喺一個核跑。真正問題係**收 `OTA_END` 嗰條線嘅解碼迴圈**會停幾百 ms：ACK 遲到、主機可能 timeout 重送，同埋同一條線後面排隊的幀一齊等。佇列（`slow_job_t` + `nc_hub` 8 格）已經存在但未用 |
@@ -1179,6 +1179,15 @@ WS→core0（httpd 在 core0）、UDP→core1（udp task 釘在 core1）；
 | 跨核 kick（`net.bus[].remote`） | 兩條 bus 都是 **0** |
 
 **代價**：+2,615 B PSRAM（第二個回覆幀）、內部 heap −240 B、OTA 多一把 mutex。
+
+**順帶發現（記憶體帳要更新）**：用乾淨 sdkconfig 重建後，映像由 489 KB 變 567 KB、內部 heap
+由 290,479 變 271,911 —— 追下去是 **IDF 6 把 WiFi 的 binary blobs 整包 link 入 S3 映像**：
+`CONFIG_ESP_WIFI_ENABLED` 是沒有 prompt 的符號（S3 `default y`），寫 sdkconfig、加 Kconfig
+`depends`、在 CMake 用 normal variable 覆蓋，三種方法都被 IDF 蓋回（實測）。它用 linker
+fragment whole-archive 拉入，所以即使 `CONFIG_NETCORE_WIFI=n`（無任何引用）也照樣進映像。
+→ 帳面更正：S3 映像 **+75 KB flash、−18 KB 內部 RAM**；`NETCORE_WIFI=n` 保證的是
+「不呼叫 esp_wifi_init」（runtime heap 0），不是「不 link」。文件已同步（§1、§7.1 F、
+[memory-budget.md](../03_notes/memory-budget.md)）。
 
 **量測時發現的坑（重要）**：CDC RX 合成洪水（2,000×256 B）由 **1,827 → 1,711 fps（−6%）**；
 但把「新程式碼只建一個 decoder」也量到 1,710 → **不是 per-core 架構**，而是**二進位佈局**
