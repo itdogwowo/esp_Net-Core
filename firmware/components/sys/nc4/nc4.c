@@ -313,6 +313,18 @@ void nc4_parser_errors(const nc4_parser_t *parser, uint32_t *crc_err, uint32_t *
     }
 }
 
+// 清掉統計（尺寸量測的 before/after 要用乾淨的窗口；0xF008 reset=1 會呼叫）
+void nc4_parser_reset_stats(nc4_parser_t *parser)
+{
+    if (parser == NULL) {
+        return;
+    }
+    parser->n_crc_err = 0;
+    parser->n_bad_hdr = 0;
+    parser->n_max_dlen = 0;
+    parser->n_max_ok = 0;
+}
+
 void nc4_parser_peaks(const nc4_parser_t *parser, uint32_t *max_dlen, uint32_t *max_ok)
 {
     if (max_dlen != NULL) {

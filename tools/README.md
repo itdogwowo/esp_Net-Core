@@ -119,7 +119,7 @@ firmware image 在 `firmware/build/esp_net_core.bin`（先 build 才有）。
 | `nc4_stats.py` | 0xF008 匯流排統計（`copied` 應為 0）＋ 碎片/垃圾重同步邊界 |
 | `nc4_tx_bench.py` | 0xF007 上傳（打包＋送出），同核 / 分核 |
 | `hub_bench.py` | 0xF003 雙核 hub 交換量測 |
-| `buf_probe.py` | **緩衝貼身化**：`snap` / `sizing` / `rtt` / `uart` / `txbench` / `storm` / `idle`。`sizing` 會把 `max_read`、slot 峰值、`slot_full`、`max_dlen` 換算成建議尺寸；已知但這次沒打出來的需求要 `--declare CDC=4096` 補（否則會算得太細）。見 [buffer-tightening.md](../docs/03_notes/buffer-tightening.md) |
+| `buf_probe.py` | **緩衝貼身化**：`snap` / `sizing` / `session` / `compare` / `rtt` / `uart` / `txbench` / `storm` / `idle`。`session` 跑標準量測並輸出 JSON、`compare` 並排兩次並標 >3% 退步；`sizing` 把峰值換算成建議尺寸（已知但沒打出來的需求用 `--declare CDC=4096` 補）。流程見 [measurement-method.md](../docs/02_guides/measurement-method.md)，本次紀錄見 [buffer-tightening.md](../docs/03_notes/buffer-tightening.md) |
 
 P4 預設靜態 IP `10.10.1.50/16`，量測前先確認連得到。
 

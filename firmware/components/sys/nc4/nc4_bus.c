@@ -459,6 +459,13 @@ void nc4_bus_stats_reset(void)
         b->st_copied = 0;
         b->st_parse_us = 0;
         b->st_slot_peak = (uint32_t)(b->occ > 0 ? b->occ : 0);   // 重新量峰值
+        // 貼身化的計數器／峰值：不清就會把上一個量測窗口的數字帶進來
+        b->st_reads = 0;
+        b->st_max_read = 0;
+        b->st_slot_full = 0;
+        b->st_tx_count = 0;
+        b->st_tx_max = 0;
+        nc4_parser_reset_stats(b->parser);
     }
 }
 

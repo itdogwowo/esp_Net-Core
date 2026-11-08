@@ -6,6 +6,8 @@
 > 2. **雙核各自獨立**：core0 與 core1 的任務／緩衝互不干擾（不是「共享一個大池然後看誰先搶」）。
 > 3. **UART 的緩衝區太大**，要模仿 CDC 的設計（由實測 payload 推導），最後上板驗。
 >
+> **可重複的流程**：[measurement-method.md](../02_guides/measurement-method.md)（下一節之後的數字都是照它跑的）。
+>
 > **環境**：S3（`ESP32-S3-N16R8`）、CDC（core0）＋ UART1 迴路（core1, IO7↔IO8）、
 > USB MSC 把 FAT 交給主機（`/Volumes/NC-2B4C`）。只有 OTA 一條更新路徑（無 JTAG、無 rollback）。
 > 量測時間預算 8 小時；可能需要人手（換接線、按鍵、斷電）的測試全部排最後。

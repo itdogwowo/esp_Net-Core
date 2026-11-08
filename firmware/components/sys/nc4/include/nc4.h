@@ -146,6 +146,9 @@ void nc4_parser_errors(const nc4_parser_t *parser, uint32_t *crc_err, uint32_t *
 // 用途：parser region = 13 + max_dlen + 餘裕 —— 用實測取代「先給 8 KB」。
 void nc4_parser_peaks(const nc4_parser_t *parser, uint32_t *max_dlen, uint32_t *max_ok);
 
+// 清空統計（crc_err / bad_hdr / 峰值）。量測工具用它把 before/after 的窗口對齊。
+void nc4_parser_reset_stats(nc4_parser_t *parser);
+
 // ── 打包（給 transport 當 send 用；也可給 handler 產生回覆）──
 // 回傳實際長度；容量不足回 -1（不寫、不 raise）
 int nc4_pack_into(uint8_t *buf, size_t cap, uint16_t cmd, uint16_t addr,

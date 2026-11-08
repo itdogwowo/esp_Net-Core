@@ -61,6 +61,7 @@ esp_Net-Core/
 | 有哪些通道、各自要實作什麼 | [docs/01_protocol/transports.md](docs/01_protocol/transports.md) |
 | 怎麼建置、怎麼燒、踩過哪些雷 | [docs/02_guides/build_and_flash.md](docs/02_guides/build_and_flash.md) |
 | 怎麼跑測試、數字怎麼判讀 | [docs/02_guides/testing.md](docs/02_guides/testing.md) |
+| 要調緩衝／棧、要證明「沒變慢」 | [docs/02_guides/measurement-method.md](docs/02_guides/measurement-method.md) |
 | 有線／無線／藍牙／ESP-NOW 怎麼選 | [docs/02_guides/connectivity.md](docs/02_guides/connectivity.md) |
 | 分層原則（七個程式分區） | [docs/03_notes/component-layout.md](docs/03_notes/component-layout.md) |
 | 實際的 C 程式 | `firmware/main/`、`firmware/components/` |

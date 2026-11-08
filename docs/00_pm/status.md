@@ -1143,4 +1143,4 @@ decoder**（handler 執行序列化）—— 反映在回覆延遲，不影響 U
 **未做／取捨**：CDC 4 KB 連續洪水仍受 4 格插槽限制（74/100，與改動前相同；OTA 有流控）；
 UART 仍然**只收不回**（`send=NULL`，所以 TX ring 只留 1 KB；要回覆得先接 `uart_send()`）；
 IO7 同時是 SD CLK 與 UART 迴路 TX，兩者不能同時用（需要換腳位）。
-細節與量測表：[buffer-tightening.md](../03_notes/buffer-tightening.md)。
+細節與量測表：[buffer-tightening.md](../03_notes/buffer-tightening.md)；下次照著跑的流程：[measurement-method.md](../02_guides/measurement-method.md)。
