@@ -1201,3 +1201,21 @@ fragment whole-archive 拉入，所以即使 `CONFIG_NETCORE_WIFI=n`（無任何
 - 要再往前一步：把熱路徑（`nc4_parser_feed`／dispatch）放 `IRAM_ATTR` 做 A/B，
   並且**每次都量同一顆 binary 三次**才算一組。這也寫進
   [measurement-method.md §7 陷阱 11](../02_guides/measurement-method.md)。
+
+### 7.27 2026-11-08（發送／轉寄路徑：今天的行為與下次的設計）
+
+使用者問「轉寄 4 KB 夠不夠？PSRAM 會不會中斷？要不要 DMA？是不是一定要等送完？」——
+答案整理成 [tx-path-design.md](../03_notes/tx-path-design.md)。摘要：
+
+| 通道 | 今天「交出去」的緩衝 | 要不要等送完 |
+|---|---|---|
+| CDC | TinyUSB FIFO **4,096 B**（>回覆上限 2,615） | **不用**（memcpy 進 FIFO 即返回；線路時間與下一指令重疊） |
+| UART | `send = NULL` | 根本不發 |
+| TCP（P4） | socket sndbuf **5,760 B** | **>5,760 B 要等**（8 KB 幀一定阻塞到對端 ACK） |
+| 轉寄 | **未實作**（router 只有 `line → core`） | — |
+
+- 「分三批」不會解放流水線：`frame.data` 指向 parser 環，handler 返回前不能失效。
+  要解放只能 **copy 進目的 ring**（µs）或 **pin 插槽**。
+- S3 **不需要** 8 KB：CDC 4,192／UART 1,024 已經對得上「命令小包、OTA 4 KB」；8 KB 只發生在 P4 TCP（16,410 region＋8×8,205 插槽）。
+- DMA：UART **沒有 TX DMA**、CDC FS 沒有、P4 ETH 有；DMA 不減少緩衝需求，只改變誰排空。
+- 回覆超 2,600 B 目前是**靜默截斷**（`reply_send`／`reply_json`）→ 列為要修的缺陷。
