@@ -43,7 +43,7 @@
 |---|---|
 | [build_and_flash.md](02_guides/build_and_flash.md) | **建置與燒錄**：IDF v6.0.3 安裝、macOS 26 的兩個地雷（libexpat / pip truststore）、`app-flash` vs `flash`、疑難排解 |
 | [testing.md](02_guides/testing.md) | **測試方法與結果**：環境、9 個解碼器 case、benchmark 怎麼打、OTA 怎麼推、怎麼重跑、未測清單、紀錄表 |
-| [measurement-method.md](02_guides/measurement-method.md) | **量測方法（可重跑）**：四條原則（含**用物理上限當參考線／達標率**）、S0–S6 流程、`buf_probe.py` 每個子命令回答什麼、尺寸公式（region/slot/slots/stack/環）、雙核＋同核隔離驗收、偶發事件追法、**十條踩過的陷阱**、紀錄模板（多了「物理上限／達標率」兩欄）、OTA-only 的安全規則 |
+| [measurement-method.md](02_guides/measurement-method.md) | **量測方法（可重跑）**：四條原則（含**用物理上限當參考線／達標率**）、S0–S7 流程、`buf_probe.py` 每個子命令回答什麼、尺寸公式（region/slot/slots/stack/環）、雙核＋同核隔離驗收、偶發事件追法、**十條踩過的陷阱**、紀錄模板（多了「物理上限／達標率」兩欄）、OTA-only 的安全規則 |
 | [connectivity.md](02_guides/connectivity.md) | **連線方式怎麼選**：`lan` / `wifi` / `bt` / `espnow` 的分別、每個參數的意思、能力矩陣（哪塊板支援什麼）、一起開會怎樣、藍牙專章 |
 
 ---
