@@ -1146,3 +1146,42 @@ decoder**（handler 執行序列化）—— 反映在回覆延遲，不影響 U
 UART 仍然**只收不回**（`send=NULL`，所以 TX ring 只留 1 KB；要回覆得先接 `uart_send()`）；
 IO7 同時是 SD CLK 與 UART 迴路 TX，兩者不能同時用（需要換腳位）。
 細節與量測表：[buffer-tightening.md](../03_notes/buffer-tightening.md)；下次照著跑的流程：[measurement-method.md](../02_guides/measurement-method.md)。
+
+### 7.26 2026-11-08（每核一個 decoder：接收與發送都不再共用一把鎖）
+
+**問題**：兩個 decode 任務共用**同一個** `nc4_decoder_t`，handler 執行由那一把鎖序列化
+——一條 CDC 指令在跑，core1 的 UART 指令只能等（§7.21 把它列為「設計上怪的地方」）。
+
+**改法**：每個核心一個 decoder（`s_decoder[2]`）。decoder 只管「執行與回覆」的狀態：
+
+| 每個核自己的 | 全程序共用（唯讀） |
+|---|---|
+| 執行鎖（`lock`） | 指令表 `nc_action`（排序後的唯讀陣列，`nc4_decoder_lookup` 直接查它） |
+| 回覆幀（2,615 B，PSRAM，每核一份） | 協定常數／CRC |
+| 位址過濾狀態（cid、master_cid、dropped） | parser 的**每個 bus** 仍然獨立（本來就是） |
+
+接線：`nc4_bus_add()` 依 bus 的核心取 decoder（CDC→core0、UART/TCP→各自核）、
+WS→core0（httpd 在 core0）、UDP→core1（udp task 釘在 core1）；
+`SET_MASTER` 同步到**所有** decoder（回覆位址必須一致）。指令表不用複製。
+
+**唯一需要另外保護的**：OTA 是跨指令的狀態機（`s_ota`）——整組用一把 mutex 串起來
+（`OTA_GUARD` wrapper），其他 handler 不受影響。test_action 的 bench statics 仍是測試專用，
+跨核同時打同一個 bench 本來就不安全（0xF003 已知會重啟，§7.22）。
+
+**並行性驗收**（新測試指令 `0xF00F UART_INJECT`：把任意 NC4 幀寫進 UART → 迴路 → decode1 執行）：
+
+| 情境 | 結果 |
+|---|---|
+| core1 被 `0xF001 DEV_BENCH`（3,000 iter ≈ 280 ms）**完全佔住** | 同期 50 條 ping 在 core1 上一條都沒被處理（rx=0 @ 277 ms） |
+| 同時間 core0 的 CDC RTT | **1.17 ms**（閒置 1.13）→ 不受影響 |
+| 20 條指令排隊的吞吐 | **1.21 ms/條**（改動前 1.26） |
+| UART 吞吐／CDC TX | 341.7 fps ／ 0.97 MB/s（與改動前相同） |
+| 跨核 kick（`net.bus[].remote`） | 兩條 bus 都是 **0** |
+
+**代價**：+2,615 B PSRAM（第二個回覆幀）、內部 heap −240 B、OTA 多一把 mutex。
+
+**量測時發現的坑（重要）**：CDC RX 合成洪水（2,000×256 B）由 **1,827 → 1,711 fps（−6%）**；
+但把「新程式碼只建一個 decoder」也量到 1,710 → **不是 per-core 架構**，而是**二進位佈局**
+（熱路徑在 flash 的位置／cache set）。列為後續：熱路徑 `IRAM_ATTR` 或 `-falign-functions`
+——這也說明「換一個 build 就比較一次端到端吞吐」不能當成歸因方法（見
+[measurement-method.md §7 陷阱](../02_guides/measurement-method.md)）。

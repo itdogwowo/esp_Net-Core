@@ -206,6 +206,7 @@ CDC RX `497,973 ÷ 512,000` ＝ **97.3%**。
 | 8 | 只看 HWM | 沒跑過的路徑沒覆蓋 | `tools/stack_cover.py` 逐條打已註冊指令 |
 | 9 | 只跑一次 | 以為變快／變慢 | 3 次取中位數；`compare` 的 3% 門檻 |
 | 10 | 用 `sizeof(指標)` 當緩衝長度 | 回覆靜靜消失（`pack_into` 回 -1） | 改用具名常數（`NC4_REPLY_FRAME_MAX`） |
+| 11 | **跨 build 比較當成歸因** | 同一份邏輯換個 build 就差 6%（熱路徑在 flash 的佈局／cache set） | 先 **back-to-back** 重測基準；再用裝置側計數器（`us_per_frame`、`slot_full`）判斷是不是同一條路徑變慢；要穩定就把熱路徑放 IRAM |
 
 ---
 

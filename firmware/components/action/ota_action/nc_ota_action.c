@@ -9,6 +9,7 @@
 #include "esp_timer.h"
 #include "esp_system.h"
 #include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "psa/crypto.h"
 
@@ -164,7 +165,7 @@ static void reply_ack(nc4_ctx_t *ctx, uint32_t offset)
 
 // ───────────────────────── 動作 ─────────────────────────
 
-static void on_begin(nc4_ctx_t *ctx, const nc4_frame_t *f)
+static void on_begin_impl(nc4_ctx_t *ctx, const nc4_frame_t *f)
 {
     if (s_ota.busy) {
         reply_error(ctx, E_BEGIN_PARTITION_CONFLICT, 0);
@@ -215,7 +216,7 @@ static void on_begin(nc4_ctx_t *ctx, const nc4_frame_t *f)
     reply_ack(ctx, 0);
 }
 
-static void on_write(nc4_ctx_t *ctx, const nc4_frame_t *f)
+static void on_write_impl(nc4_ctx_t *ctx, const nc4_frame_t *f)
 {
     if (!s_ota.busy) {
         reply_error(ctx, E_END_NOT_WRITING, 0);
@@ -252,7 +253,7 @@ static void on_write(nc4_ctx_t *ctx, const nc4_frame_t *f)
     reply_ack(ctx, offset);
 }
 
-static void on_end(nc4_ctx_t *ctx, const nc4_frame_t *f)
+static void on_end_impl(nc4_ctx_t *ctx, const nc4_frame_t *f)
 {
     (void)f;
     if (!s_ota.busy) {
@@ -290,7 +291,7 @@ static void on_end(nc4_ctx_t *ctx, const nc4_frame_t *f)
     reply_state(ctx);
 }
 
-static void on_abort(nc4_ctx_t *ctx, const nc4_frame_t *f)
+static void on_abort_impl(nc4_ctx_t *ctx, const nc4_frame_t *f)
 {
     (void)f;
     if (s_ota.busy) {
@@ -307,7 +308,7 @@ static void on_abort(nc4_ctx_t *ctx, const nc4_frame_t *f)
     reply_state(ctx);
 }
 
-static void on_apply(nc4_ctx_t *ctx, const nc4_frame_t *f)
+static void on_apply_impl(nc4_ctx_t *ctx, const nc4_frame_t *f)
 {
     uint8_t set_boot_only = 0;
     uint32_t delay_ms = 0;
@@ -342,7 +343,7 @@ static void on_apply(nc4_ctx_t *ctx, const nc4_frame_t *f)
 
 // ───────────────────────── 查詢 ─────────────────────────
 
-static void on_version_query(nc4_ctx_t *ctx, const nc4_frame_t *f)
+static void on_version_query_impl(nc4_ctx_t *ctx, const nc4_frame_t *f)
 {
     (void)f;
     const esp_app_desc_t *desc = esp_app_get_description();
@@ -359,7 +360,7 @@ static void on_version_query(nc4_ctx_t *ctx, const nc4_frame_t *f)
     send_payload(ctx, OTA_VERSION_RSP, &p);
 }
 
-static void on_caps_query(nc4_ctx_t *ctx, const nc4_frame_t *f)
+static void on_caps_query_impl(nc4_ctx_t *ctx, const nc4_frame_t *f)
 {
     (void)f;
     pb_t p = {0};
@@ -375,7 +376,7 @@ static void on_caps_query(nc4_ctx_t *ctx, const nc4_frame_t *f)
     send_payload(ctx, OTA_CAPS_RSP, &p);
 }
 
-static void on_progress_query(nc4_ctx_t *ctx, const nc4_frame_t *f)
+static void on_progress_query_impl(nc4_ctx_t *ctx, const nc4_frame_t *f)
 {
     (void)f;
     pb_t p = {0};
@@ -385,11 +386,34 @@ static void on_progress_query(nc4_ctx_t *ctx, const nc4_frame_t *f)
     send_payload(ctx, OTA_PROGRESS_RSP, &p);
 }
 
-static void on_state_query(nc4_ctx_t *ctx, const nc4_frame_t *f)
+static void on_state_query_impl(nc4_ctx_t *ctx, const nc4_frame_t *f)
 {
     (void)f;
     reply_state(ctx);
 }
+
+// ── OTA 狀態機的互斥 ──
+// 兩個核心各有一個 decoder（handler 可以並行）。OTA 是**唯一**一組跨指令的狀態機
+// （s_ota：目標 slot、sha、offset…），所以整組用一把 mutex 串起來；
+// 其他 handler（STATUS/FILE/查詢）不受影響。
+static SemaphoreHandle_t s_ota_lock;
+
+#define OTA_GUARD(fn) \
+    static void fn(nc4_ctx_t *ctx, const nc4_frame_t *f) { \
+        if (s_ota_lock != NULL) { xSemaphoreTake(s_ota_lock, portMAX_DELAY); } \
+        fn##_impl(ctx, f); \
+        if (s_ota_lock != NULL) { xSemaphoreGive(s_ota_lock); } \
+    }
+
+OTA_GUARD(on_begin)
+OTA_GUARD(on_write)
+OTA_GUARD(on_end)
+OTA_GUARD(on_abort)
+OTA_GUARD(on_apply)
+OTA_GUARD(on_version_query)
+OTA_GUARD(on_caps_query)
+OTA_GUARD(on_progress_query)
+OTA_GUARD(on_state_query)
 
 // 指令表：靜態宣告，nc_action 管理器在開機時統計＋一次配置（見 nc_action.h）。
 // 加一條指令 = 這裡多一行，總數自動變大，沒有魔術數字。
@@ -410,4 +434,10 @@ NC_ACTION_TABLE_DEF(nc_ota_action_table, "ota", s_ota_actions);
 void nc_ota_action_init(void)
 {
     memset(&s_ota, 0, sizeof(s_ota));
+    if (s_ota_lock == NULL) {
+        s_ota_lock = xSemaphoreCreateMutex();
+        if (s_ota_lock == NULL) {
+            ESP_LOGE(TAG, "OTA mutex 建立失敗 → OTA 指令將不保證互斥");
+        }
+    }
 }

@@ -551,6 +551,27 @@ static void on_uart_stream(nc4_ctx_t *ctx, const nc4_frame_t *f)
     reply_json(ctx, NC4_CMD_HUB_RSP, json);
 }
 
+// ── 0xF00F UART_INJECT：把任意 NC4 幀寫入 UART（IO7→IO8 迴路 → decode1 執行）──
+//
+// 用途：**驗證雙核並行**。注入一條「慢指令」（例如 0xF001 DEV_BENCH）之後，
+// core1 的 decode 會被那個 handler 佔住；同時量 core0 的 CDC RTT，就知道兩個核
+// 是不是真的各跑各的（每核一個 decoder 之前，shared lock 會讓 core0 一起等）。
+#define NC4_CMD_UART_INJECT 0xF00F
+#define UART_INJECT_PORT    UART_NUM_1
+
+static void on_uart_inject(nc4_ctx_t *ctx, const nc4_frame_t *f)
+{
+    if (f->len < 1) {
+        reply_json(ctx, NC4_CMD_HUB_RSP, "{\"err\":\"args\"}");
+        return;
+    }
+    // 一次寫整段；UART TX 環 1 KB，超過會阻塞到排空（測試用，可接受）
+    const int w = uart_write_bytes(UART_INJECT_PORT, (const char *)f->data, f->len);
+    char json[64];
+    snprintf(json, sizeof(json), "{\"wrote\":%d}", w);
+    reply_json(ctx, NC4_CMD_HUB_RSP, json);
+}
+
 static void on_loop_stat(nc4_ctx_t *ctx, const nc4_frame_t *f)
 {
     (void)f;
@@ -812,6 +833,7 @@ static const nc_action_t k_actions[] = {
     { NC4_CMD_BENCH_RESULT, on_bench_result, "test" },
     { NC4_CMD_UART_LOOP, on_uart_loop, "test" },
     { NC4_CMD_UART_STREAM, on_uart_stream, "test" },
+    { NC4_CMD_UART_INJECT, on_uart_inject, "test" },
     { NC4_CMD_LOOP_STAT, on_loop_stat, "test" },
     { NC4_CMD_LOOP_PING, on_loop_ping, "test" },
 };

@@ -179,6 +179,7 @@ components/action/
 | `0xF00A` NET_TUNE | `split(u8) core(u8) [frame_align(u8)]` → `0xF004` JSON：把 RX 收斂模式寫進 NVS（`net/rx_split`、`net/rx_core`、`net/frame_align`），**下次開機生效** |
 | `0xF00B` UART_LOOP | `frames(u16) size(u16)` → `0xF004` `{sent,frame}`：由 **handler** 直接灌 UART 迴路。⚠️ handler 揸住 decoder 鎖，寫入期間 decode1 不能消費 → 只適合小量（≤ RX ring），量吞吐請用 `0xF00E` |
 | `0xF00C` LOOP_STAT | 空 → `0xF004` `{rx,sent}`：UART 迴路已收到的幀數／串流已寫出的幀數 |
+| `0xF00F` UART_INJECT | 原始 bytes → `0xF004` `{wrote:N}`：把 payload **原樣寫入 UART**（IO7→IO8 迴路）。用途是驗證雙核並行：注入一條慢指令（例如 `0xF001`）讓 decode1 卡住，同時量 core0 的 RTT |
 | `0xF00E` UART_STREAM | `frames(u16) size(u16)` → `0xF004` `{started,frames,size}`：**由獨立 task** 灌 UART（唔揸 decoder 鎖），配合 `0xF00C` 取進度。`size ≤ 256` |
 
 `0xF004` 是共用的回覆號（HUB / SLOW / UART / TX / NET_TUNE 都用它），因為它們都是「量測結果」。

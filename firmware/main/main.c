@@ -1089,7 +1089,41 @@ static size_t status_put_cfg(char *buf, size_t cap)
     return off;
 }
 
-static nc4_decoder_t *s_decoder;   // 定義在下面（身份那一節），status 先要用
+// **每個核心一個 decoder**：接收（parser 的鎖、位址過濾、回覆幀）與發送（回覆緩衝）
+// 都是每個核自己的，所以兩個 decode 任務的 handler 可以**同時**執行。
+// 以前兩個 decode 共用一個 decoder + 一把鎖 → 完全序列化：一條 CDC 指令執行時，
+// core1 的 UART 指令只能等（實測跨核負載時 RTT 1.1 → 2.3 ms）。
+// 指令表（nc_action）是唯讀、全程序共用，所以 decoder 只管「執行與回覆」的狀態。
+#define NC4_DECODERS 2
+static nc4_decoder_t *s_decoder[NC4_DECODERS];
+
+// 取某個核的 decoder。第二個建立失敗時退回 decoder0（退化：回到共用鎖，但功能正常），
+// 並且在建立時已經印過 ESP_LOGE。
+static nc4_decoder_t *decoder_for_core(int core)
+{
+    const nc4_decoder_t *d = s_decoder[(core == 1) ? 1 : 0];
+    return (nc4_decoder_t *)(d != NULL ? d : s_decoder[0]);
+}
+
+// 兩個 decoder 共用同一個身份：cid 過濾與 master_cid（回覆位址）必須一致。
+static void decoders_set_identity(uint16_t cid, uint16_t master)
+{
+    for (int i = 0; i < NC4_DECODERS; i++) {
+        if (s_decoder[i] != NULL) {
+            nc4_decoder_set_cid(s_decoder[i], cid);
+            nc4_decoder_set_master_cid(s_decoder[i], master);
+        }
+    }
+}
+
+static void decoders_set_master(uint16_t master)
+{
+    for (int i = 0; i < NC4_DECODERS; i++) {
+        if (s_decoder[i] != NULL) {
+            nc4_decoder_set_master_cid(s_decoder[i], master);
+        }
+    }
+}
 
 // 已註冊指令清單：{"c":0x1101,"o":"core"}。
 // 用途：主機可以逐條打一次，令 HWM 覆蓋**全部** handler ——
@@ -1102,11 +1136,12 @@ static size_t status_put_cmds(char *buf, size_t cap)
     // 呢個係「加咗一條指令但靜靜咁冇人叫到」最便宜的防護。
     unsigned n = 0, unsorted = 0, lookup_bad = 0, null_fn = 0;
     uint16_t prev = 0;
-    for (size_t i = 0; s_decoder != NULL && i < nc4_decoder_count(s_decoder); i++) {
+    nc4_decoder_t *d0 = decoder_for_core(0);
+    for (size_t i = 0; d0 != NULL && i < nc4_decoder_count(d0); i++) {
         uint16_t cmd = 0;
         const char *owner = NULL;
         nc4_handler_t h = NULL;
-        if (!nc4_decoder_at(s_decoder, i, &cmd, &owner, &h)) {
+        if (!nc4_decoder_at(d0, i, &cmd, &owner, &h)) {
             continue;
         }
         if (h == NULL) {
@@ -1150,8 +1185,8 @@ static size_t status_put_sys(char *buf, size_t cap)
             (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
             (unsigned)heap_caps_get_free_size(MALLOC_CAP_DMA),
             (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM),
-            (s_decoder != NULL && nc4_decoder_reply_buf(s_decoder) != NULL &&
-             esp_ptr_external_ram(nc4_decoder_reply_buf(s_decoder))) ? 1 : 0);
+            (s_decoder[0] != NULL && nc4_decoder_reply_buf(s_decoder[0]) != NULL &&
+             esp_ptr_external_ram(nc4_decoder_reply_buf(s_decoder[0]))) ? 1 : 0);
     return off;
 }
 
@@ -1398,10 +1433,7 @@ static void node_identity_init(void)
     }
 
     s_cid = cid;
-    if (s_decoder != NULL) {
-        nc4_decoder_set_cid(s_decoder, cid);
-        nc4_decoder_set_master_cid(s_decoder, master);
-    }
+    decoders_set_identity(cid, master);
     ESP_LOGI(TAG, "cid=0x%04X（config） master_cid=0x%04X（NVS）", cid, master);
 }
 
@@ -1418,7 +1450,7 @@ static void on_set_master(nc4_ctx_t *ctx, const nc4_frame_t *f)
         nvs_commit(h);
         nvs_close(h);
     }
-    nc4_decoder_set_master_cid(ctx->decoder, master);
+    decoders_set_master(master);     // 兩個核的回覆位址必須一致
     ESP_LOGW(TAG, "[%s] SET_MASTER → 0x%04X（之後回覆都填它）", ctx->source, master);
 }
 
@@ -3194,11 +3226,17 @@ static esp_err_t ph_declare(void)
     nc_plan_reset();
     nc_task_reset();
 
-    s_decoder = nc4_decoder_create();
-    if (s_decoder != NULL) {
+    // 每個核心一個 decoder：兩個 decode 任務的 handler 可以同時執行（互不等待）。
+    // 指令表只有一份（唯讀）；第二份 decoder 只多 2.6 KB PSRAM 的回覆幀。
+    for (int i = 0; i < NC4_DECODERS; i++) {
+        s_decoder[i] = nc4_decoder_create();
+        if (s_decoder[i] == NULL) {
+            ESP_LOGE(TAG, "decoder%d 建立失敗%s", i,
+                     (i == 1) ? "（core1 會退回共用 decoder0）" : " → 裝置收不到任何指令");
+        }
+    }
+    if (s_decoder[0] != NULL) {
         actions_init();                    // 統計 → 一次配置 → 封存（不需要任何任務）
-    } else {
-        ESP_LOGE(TAG, "解碼器建立失敗 → 裝置收不到任何指令");
     }
 
     nc_task_register(&s_task_nc4);     // L0：parser 緩衝 + decode0/1
@@ -3325,16 +3363,16 @@ static esp_err_t ph_channels(void)
 {
     // 解碼器已在 ⑤ 宣告期建立；核心指令由 cmds 模組註冊（帶擁有權）。
     // 這裡只掛「需要硬體」的通道。
-    if (s_decoder != NULL) {
+    if (s_decoder[0] != NULL) {
 #if CONFIG_IDF_TARGET_ESP32P4
         if (s_eth_ok) {
-            // NC4 over WebSocket（訊息即一幀；直接解析，不經 bus）
-            esp_err_t werr = nc4_ws_start(s_decoder, 8080);
+            // NC4 over WebSocket（訊息即一幀；直接解析，不經 bus）—— httpd 在 core0
+            esp_err_t werr = nc4_ws_start(decoder_for_core(0), 8080);
             ESP_LOGW(TAG, "NC4 over WS: %s", esp_err_to_name(werr));
             // UDP 可以喺 config 關掉；WS 暫時唔提供關閉（同一個 httpd 亦係 HTTP 設定頁）
             esp_err_t uerr = ESP_ERR_NOT_SUPPORTED;
             if (link_enabled("UDP")) {
-                uerr = nc4_udp_start(s_decoder, 6001);
+                uerr = nc4_udp_start(decoder_for_core(1), 6001);   // udp task 釘在 core1
             } else {
                 ESP_LOGW(TAG, "UDP：links[].enable=0 → 唔建立（0 B）");
             }
@@ -3346,7 +3384,7 @@ static esp_err_t ph_channels(void)
 #endif
     }
 
-    if (s_decoder != NULL) {
+    if (s_decoder[0] != NULL) {
 #if CONFIG_IDF_TARGET_ESP32P4
         // P4 冇 USB OTG：連 initializer 都唔要有 ——
         // 一旦喺 initializer 取 cdc_read/cdc_send 的址，linker 就會拉入 tinyusb（21.7 KB）。
@@ -3379,7 +3417,7 @@ static esp_err_t ph_channels(void)
                     .rx_slots = rx.slots,
                 };
                 nc4_bus_handle_t cdc_handle = (nc4_bus_handle_t)0;
-                berr = nc4_bus_add(s_decoder, &cdc_bus, &cdc_handle);
+                berr = nc4_bus_add(decoder_for_core(cdc_core), &cdc_bus, &cdc_handle);
                 if (berr == ESP_OK) {
                     s_cdc_bus_for_stats = cdc_handle;   // 只給 TX 尺寸量測用
                 }
@@ -3439,7 +3477,7 @@ static esp_err_t ph_channels(void)
                 .rx_slots = rx.slots,
             };
             nc4_bus_handle_t uart_handle = (nc4_bus_handle_t)0;
-            esp_err_t uerr = nc4_bus_add(s_decoder, &uart_bus, &uart_handle);
+            esp_err_t uerr = nc4_bus_add(decoder_for_core(uart_core), &uart_bus, &uart_handle);
             if (uerr == ESP_OK) {
                 // producer **唔喺這裡建立**：要等 decode 任務起咗（owner_init 裝 driver）
                 // 才可以開始讀。見 nc_task_boot() 之後的說明。
@@ -3472,7 +3510,7 @@ static esp_err_t ph_channels(void)
                 .frame_aligned = s_frame_align ? 1 : 0,
             };
             nc4_bus_handle_t tcp_handle = (nc4_bus_handle_t)0;
-            esp_err_t terr = nc4_bus_add(s_decoder, &tcp_bus, &tcp_handle);
+            esp_err_t terr = nc4_bus_add(decoder_for_core(tcp_core), &tcp_bus, &tcp_handle);
             ESP_LOGI(TAG, "NC4/TCP bus: %s", esp_err_to_name(terr));
             s_tcp_nc4_bus = tcp_handle;
             ESP_LOGW(TAG, "NC4/TCP：PULL（decode 喺 bus 所屬核讀 socket）%s",
