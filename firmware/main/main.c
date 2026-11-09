@@ -46,6 +46,7 @@
 #include <ctype.h>
 #include <errno.h>
 #include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "wear_levelling.h"
 
@@ -53,6 +54,7 @@
 #include "nc4.h"
 #include "nc_action.h"
 #include "nc4_bus.h"
+#include "nc4_link.h"
 #include "nc4_router.h"
 #include "nc_task.h"
 #ifdef NC_ENABLE_TESTS
@@ -66,6 +68,7 @@
 #include "esp_mac.h"
 #include "nc_mem.h"
 #include "nc_plan.h"
+#include "nc_pool.h"
 #include "nc_hub.h"
 #include "nc_ota_action.h"
 #include "nc4_ws.h"
@@ -749,14 +752,25 @@ static uint32_t s_tx_stalls;          // 回覆等 FIFO 的次數（可觀察）
 // 貼身化量測：回覆的最大／平均大小（由 nc4_bus 的統計轉出，不改變行為）
 static nc4_bus_handle_t s_cdc_bus_for_stats;
 
+// 整幀獨佔（跨核轉寄之後必要）：CDC 的解碼在 core0，但 routes[].out 可以令
+// core1 把一幀轉寄過來。以前只有 core0 呼叫 cdc_send，所以「分 chunk 寫 FIFO」是安全的；
+// 現在兩個核都可以寫，沒有這把鎖，兩個幀的 chunk 會在 4 KB FIFO 裡交錯，變成兩條壞幀。
+// log 路徑**唔會**攞這把鎖（它用 s_tx_reply 的 critical section），所以 log 永遠唔會卡住回覆。
+static SemaphoreHandle_t s_cdc_tx_lock;
+
 static esp_err_t cdc_send(void *arg, const uint8_t *frame, size_t len)
 {
     (void)arg;
     if (frame == NULL || len == 0) {
         return ESP_ERR_INVALID_ARG;
     }
+    if (s_cdc_tx_lock != NULL) {
+        xSemaphoreTake(s_cdc_tx_lock, portMAX_DELAY);
+    }
     nc4_bus_note_tx(s_cdc_bus_for_stats, len);
-    s_tx_reply = true;
+    portENTER_CRITICAL(&s_tx_mux);
+    s_tx_reply = true;          // 同一個 critical section：另一個核的 log 才看得到
+    portEXIT_CRITICAL(&s_tx_mux);
     size_t off = 0;
     const int64_t deadline = esp_timer_get_time() + CDC_TX_WAIT_US;
     while (off < len) {
@@ -768,7 +782,12 @@ static esp_err_t cdc_send(void *arg, const uint8_t *frame, size_t len)
             // FIFO 滿：一定要讓出 CPU，TinyUSB task（prio 5）高過 decode（4）
             s_tx_stalls++;
             if (esp_timer_get_time() > deadline) {
+                portENTER_CRITICAL(&s_tx_mux);
                 s_tx_reply = false;
+                portEXIT_CRITICAL(&s_tx_mux);
+                if (s_cdc_tx_lock != NULL) {
+                    xSemaphoreGive(s_cdc_tx_lock);
+                }
                 ESP_LOGW(TAG, "CDC TX 塞住 → 丟回覆（%u B 未送）", (unsigned)(len - off));
                 return ESP_ERR_TIMEOUT;
             }
@@ -777,8 +796,21 @@ static esp_err_t cdc_send(void *arg, const uint8_t *frame, size_t len)
         }
         off += k;
     }
+    portENTER_CRITICAL(&s_tx_mux);
     s_tx_reply = false;
-    return tinyusb_cdcacm_write_flush(TINYUSB_CDC_ACM_0, 0);
+    portEXIT_CRITICAL(&s_tx_mux);
+    const esp_err_t r = tinyusb_cdcacm_write_flush(TINYUSB_CDC_ACM_0, 0);
+    if (s_cdc_tx_lock != NULL) {
+        xSemaphoreGive(s_cdc_tx_lock);
+    }
+    return r;
+}
+
+// 轉寄出口：cdc_send 本身就係「整幀 copy 入 TinyUSB FIFO 就返回」
+// （只有 FIFO 滿先等，最多 100 ms），所以 link 層唔需要再加一層等待。
+static int cdc_link_write(void *arg, const uint8_t *frame, size_t len)
+{
+    return (cdc_send(arg, frame, len) == ESP_OK) ? (int)len : -1;
 }
 
 // log 入口：整行一次寫；回覆正在用出口、或者 FIFO 空間不夠 → BUSY（稍後再試）。
@@ -843,7 +875,17 @@ static void reply_send(nc4_reply_t *r, size_t len)
         return;
     }
     if (len > NC4_REPLY_JSON_MAX) {
-        len = NC4_REPLY_JSON_MAX;
+        // ⚠️ 超限是**缺陷**，不是「盡量送」：以前 clamp 之後送出半截 JSON，
+        // 主機一定 parse 失敗，而且外面完全唔知發生咩事（見 tx-path-design §7）。
+        // 現在回一個合法、帶數字的錯誤物件：主機可以照 parse，亦知道要分批問。
+        const size_t need = len;
+        char *json = (char *)r->frame + NC4_HDR_LEN + 2;
+        len = (size_t)snprintf(json, NC4_REPLY_JSON_MAX + 1,
+                               "{\"err\":\"reply_too_big\",\"need\":%u,\"cap\":%u}",
+                               (unsigned)need, (unsigned)NC4_REPLY_JSON_MAX);
+        ESP_LOGW(TAG, "[%s] 回覆超限（cmd 0x%04X）：需要 %u B > 上限 %u → 回錯誤物件",
+                 r->ctx->source, (unsigned)r->cmd, (unsigned)need,
+                 (unsigned)NC4_REPLY_JSON_MAX);
     }
     uint8_t *data = r->frame + NC4_HDR_LEN;   // DATA 區：2B 長度前綴 + JSON
     data[0] = (uint8_t)len;
@@ -868,9 +910,12 @@ static void reply_json(nc4_ctx_t *ctx, uint16_t cmd, const char *json)
     if (dst == NULL) {
         return;
     }
-    size_t n = strlen(json);
+    const size_t n = strlen(json);
     if (n > NC4_REPLY_JSON_MAX) {
-        n = NC4_REPLY_JSON_MAX;
+        // 唔可以截斷再送（會變成無效 JSON），亦唔可以 copy 落去（會越界）：
+        // 直接交畀 reply_send 換成錯誤物件。
+        reply_send(&r, n);
+        return;
     }
     memcpy(dst, json, n);
     reply_send(&r, n);
@@ -1197,6 +1242,8 @@ static size_t status_put_mem(char *buf, size_t cap)
     jchain(buf, cap, &off, nc_plan_json);
     jappend(buf, cap, &off, ",\"hub\":");
     jchain(buf, cap, &off, nc_hub_registry_json);
+    jappend(buf, cap, &off, ",\"pool\":");
+    jchain(buf, cap, &off, nc_pool_json);
     jappend(buf, cap, &off, "}");
     return off;
 }
@@ -1226,6 +1273,12 @@ static size_t status_put_net(char *buf, size_t cap)
     size_t off = 0;
     jappend(buf, cap, &off, "\"net\":{\"bus\":");
     jchain(buf, cap, &off, nc4_bus_stats_json);
+    // 出口（轉寄）統計：frames = 成功交出的幀、drops = 目的通道拒收／短送。
+    // 轉寄的資料來源 handler 返回後就失效，所以 drops 只可以記錄，唔可以重試。
+    jappend(buf, cap, &off, ",\"links\":");
+    jchain(buf, cap, &off, nc4_link_json);
+    jappend(buf, cap, &off, ",\"fwd\":");
+    jchain(buf, cap, &off, nc4_fwd_json);
 #if CONFIG_IDF_TARGET_ESP32P4
     jappend(buf, cap, &off, ",\"ws\":");
     jchain(buf, cap, &off, nc4_ws_json);
@@ -1508,6 +1561,26 @@ static esp_err_t uart_loop_init(uint32_t baud)
     ESP_LOGW(TAG, "UART 迴路已啟動：TX=%d RX=%d baud=%u", UART_TEST_TX_PIN, UART_TEST_RX_PIN,
              (unsigned)baud);
     return ESP_OK;
+}
+
+// 回覆／轉寄出口（UART）：整幀寫入 driver 的 TX 環（1 KB）。
+//
+// IDF 的 uart_write_bytes 會阻塞到「整幀都排入環」為止；1 KB 環、921600 bps 之下，
+// 一次 4 KB 的轉寄最壞要排 ~44 ms（= 線速）。這是「同步送」的取捨：
+// 要 decouple 就得把環擴到 4 KB（+3.2 KB 內部 RAM）—— 那是 tx-path-design §4／§7 的 6.2，
+// 等有 4 KB 轉寄需求再做。
+static int uart_link_write(void *arg, const uint8_t *frame, size_t len)
+{
+    (void)arg;
+    if (!s_uart_ready) {
+        return -1;      // 未安裝（例如 GPIO7 已經被 SD 的 CLK 佔用）
+    }
+    return uart_write_bytes(UART_TEST_PORT, (const char *)frame, len);
+}
+
+static esp_err_t uart_send(void *arg, const uint8_t *frame, size_t len)
+{
+    return (uart_link_write(arg, frame, len) == (int)len) ? ESP_OK : ESP_FAIL;
 }
 
 // bus 的 driver 初始化：只會在 UART bus 所屬的那個核上跑（owner_init）。
@@ -2699,6 +2772,9 @@ static void actions_init(void)
 // 但 nc4_router_set() 係 caller 之後才呼叫 —— 借 cJSON 的指標會 use-after-free。
 // 所以名稱先抄一份入呢個 pool；表開機只讀一次，生命週期 = 整個開機。
 static char s_route_names[NC4_ROUTE_MAX][NC4_ROUTE_NAME_MAX];
+// 開機印一次的路由表。放 .bss 而不是 app_main 的棧：8 列 ×（line＋core＋out）約 420 B，
+// main 棧只有 3 KB，而且這份 JSON 只在開機印一次（唔需要每次進函式都佔）。
+static char s_route_json[768];
 
 static int router_from_cfg(nc4_route_t *out, int max)
 {
@@ -2716,15 +2792,37 @@ static int router_from_cfg(nc4_route_t *out, int max)
             continue;
         }
         int core = NC4_ROUTE_NONE;
+        const char *outs[NC4_ROUTE_OUT_MAX];
+        uint8_t n_out = 0;
         for (uint8_t k = 0; k < row->n_out; k++) {
             const char *s = row->out[k];
-            if (strncmp(s, "decode", 6) == 0 && (s[6] == '0' || s[6] == '1') && s[7] == '\0') {
-                core = s[6] - '0';
-                break;
+            const bool is_decode = (strncmp(s, "decode", 6) == 0 &&
+                                    (s[6] == '0' || s[6] == '1') && s[7] == '\0');
+            if (is_decode) {
+                // 第一個 decodeN = 本地解碼核。第二個 decodeN（兩個核都要解）
+                // 目前做唔到：一個 parser 只服務一個核 —— 警告＋忽略，唔好靜靜當真。
+                if (core == NC4_ROUTE_NONE) {
+                    core = s[6] - '0';
+                    if (n_out < NC4_ROUTE_OUT_MAX) {
+                        outs[n_out++] = s;
+                    }
+                } else if (core != s[6] - '0') {
+                    ESP_LOGW(TAG, "router：%s 的 out 指去兩個核 → 只取 decode%d，忽略 %s",
+                             row->in, core, s);
+                }
+                continue;
             }
+            // link 名 = 轉寄目的地。router 唔驗它是否存在（果度唔應該認識 transport），
+            // 開機尾段的 link 稽核會逐個對名。
+            if (n_out >= NC4_ROUTE_OUT_MAX) {
+                ESP_LOGW(TAG, "router：%s 的 out 超過 %d 個 → 忽略 %s",
+                         row->in, NC4_ROUTE_OUT_MAX, s);
+                continue;
+            }
+            outs[n_out++] = s;
         }
         if (core == NC4_ROUTE_NONE) {
-            continue;   // 只轉發／丟棄 → 本地冇人要解
+            continue;   // 只轉發／丟棄 → 本地冇人要解（forward-only 尚未支援，見 routing.md）
         }
         // 名字已喺 struct 裡面（壽命 = 程式執行期），但仍抄入 router 自己的 pool：
         // router 的介面契約是「唔借 caller 的字串」。
@@ -2736,6 +2834,10 @@ static int router_from_cfg(nc4_route_t *out, int max)
         memcpy(s_route_names[n], row->in, nlen + 1);
         out[n].line = s_route_names[n];
         out[n].core = core;
+        out[n].n_out = n_out;
+        for (uint8_t k = 0; k < n_out; k++) {
+            out[n].out[k] = outs[k];
+        }
         n++;
     }
     if (n > 0) {
@@ -2762,6 +2864,31 @@ static int router_defaults(nc4_route_t *out, int max)
     }
 #endif
     return n;
+}
+
+// 轉寄稽核：routes[].out 寫了 link 名，但嗰條通道今次冇建立（未啟用／硬體唔在／
+// 名字打錯）→ 這一幀會靜靜咁被丟。開機一次講清楚，唔好等到「點解轉唔到」才查。
+static void link_audit(void)
+{
+    int n_ok = 0;
+    int n_bad = 0;
+    for (int i = 0; i < nc4_router_count(); i++) {
+        const char *line = nc4_router_line(i);
+        const char *outs[NC4_ROUTE_OUT_MAX];
+        const int n = nc4_router_links(line, outs, NC4_ROUTE_OUT_MAX);
+        for (int k = 0; k < n; k++) {
+            if (nc4_link_has(outs[k])) {
+                ESP_LOGI(TAG, "轉寄：%s → %s ok", line, outs[k]);
+                n_ok++;
+            } else {
+                ESP_LOGE(TAG, "轉寄：%s → %s 冇出口（channel 冇建立／名字打錯）→ 會被丟",
+                         line, outs[k]);
+                n_bad++;
+            }
+        }
+    }
+    ESP_LOGI(TAG, "轉寄：%d 條可用、%d 條冇出口（出口登記 %u 個）",
+             n_ok, n_bad, (unsigned)nc4_link_count());
 }
 
 
@@ -2874,6 +3001,9 @@ static eth_cfg_t eth_cfg_resolve(void)
 // NC4 over TCP：一個連線 = 一條 bus
 static volatile int s_tcp_nc4_fd = -1;
 static nc4_bus_handle_t s_tcp_nc4_bus;
+// 整幀獨佔：TCP bus 的解碼在它的核，但 routes[].out 可以令另一個核轉寄過來。
+// send() 可能短送（我們再送其餘部分），兩個核交錯就會把兩幀切爛。
+static SemaphoreHandle_t s_tcp_tx_lock;
 
 // 收掉連線（唯一出口：fd 先歸零，accept task 才接得到下一條）
 static void tcp_nc4_close(const char *why)
@@ -2918,21 +3048,34 @@ static int tcp_nc4_send(void *arg, const uint8_t *buf, size_t len)
     if (fd < 0) {
         return -1;
     }
+    if (s_tcp_tx_lock != NULL) {
+        xSemaphoreTake(s_tcp_tx_lock, portMAX_DELAY);
+    }
     size_t off = 0;
     while (off < len) {
         int w = send(fd, buf + off, len - off, 0);
         if (w <= 0) {
             // 送不出去就沒有「之後」了：半截 frame 會讓對端永遠對不上，直接斷
             tcp_nc4_close("send 失敗");
+            if (s_tcp_tx_lock != NULL) {
+                xSemaphoreGive(s_tcp_tx_lock);
+            }
             return -1;
         }
         off += (size_t)w;
     }
+    if (s_tcp_tx_lock != NULL) {
+        xSemaphoreGive(s_tcp_tx_lock);
+    }
     return (int)len;
 }
 
-
-
+// 轉寄出口：tcp_nc4_send 已經係「整幀 send 迴圈」——資料 copy 入 socket sndbuf
+// （5,760 B）就返回；塞唔落就阻塞到對端 ACK（8 KB 幀在 100 Mbps 上 ~1 ms，慢對端會更長）。
+static int tcp_link_write(void *arg, const uint8_t *frame, size_t len)
+{
+    return tcp_nc4_send(arg, frame, len);
+}
 
 static void tcp_nc4_accept_task(void *arg)
 {
@@ -3210,14 +3353,59 @@ static esp_err_t ph_hardware(void)
         if (!nc4_router_core_used(0) && !nc4_router_core_used(1)) {
             nc4_router_keep(0);   // 一條線都冇：至少留一個 decode 任務答「點解冇線」
         }
-        char rj[256];
-        nc4_router_json(rj, sizeof(rj));
-        ESP_LOGI(TAG, "router: %s", rj);
+        nc4_router_json(s_route_json, sizeof(s_route_json));
+        ESP_LOGI(TAG, "router: %s", s_route_json);
     }
     return ESP_OK;
 }
 
 // 開機階段：declare
+// 開機階段：共用緩衝池（small／bulk／forward）
+// 放在 declare 之前：pool 先要記憶體，plan 之後才量剩餘量（順序就是資料）。
+static esp_err_t ph_pool(void)
+{
+    const nc_system_cfg_t *sys = nc_cfg_system();
+    nc_pool_class_cfg_t cfg[NC_POOL_MAX_CLASSES];
+    memset(cfg, 0, sizeof(cfg));
+
+    int parsed = 0;
+    for (int i = 0; i < sys->n_pools; i++) {
+        const nc_cfg_pool_t *p = &sys->pools[i];
+        if (!p->enable) {
+            continue;
+        }
+        nc_pool_class_t cls;
+        if (strcmp(p->name, "small") == 0) {
+            cls = NC_POOL_SMALL;
+        } else if (strcmp(p->name, "bulk") == 0) {
+            cls = NC_POOL_BULK;
+        } else if (strcmp(p->name, "forward") == 0) {
+            cls = NC_POOL_FORWARD;
+        } else {
+            ESP_LOGW(TAG, "pool class \"%s\" 唔認識（只支援 small/bulk/forward）", p->name);
+            continue;
+        }
+        if (cfg[cls].enable) {
+            ESP_LOGW(TAG, "pool class \"%s\" 重複，忽略第二個", p->name);
+            continue;
+        }
+        snprintf(cfg[cls].name, sizeof(cfg[cls].name), "%s", p->name);
+        cfg[cls].size = p->size;
+        cfg[cls].count = p->count;
+        cfg[cls].where = p->where ? NC_MEM_PSRAM : NC_MEM_INTERNAL;
+        cfg[cls].enable = true;
+        parsed++;
+    }
+
+    if (parsed == 0) {
+        ESP_LOGW(TAG, "pool：config 冇有效 class，唔建立（轉寄會退回同步）");
+        return ESP_OK;
+    }
+    const esp_err_t e = nc_pool_init(cfg, NC_POOL_MAX_CLASSES);
+    ESP_LOGI(TAG, "pool init: %s", esp_err_to_name(e));
+    return ESP_OK;   // pool 失敗唔阻止開機（fail-visible，STATUS 看得到）
+}
+
 static esp_err_t ph_declare(void)
 {
     // ── ⑤ 宣告（照「實際存在的硬體」決定）──
@@ -3420,6 +3608,9 @@ static esp_err_t ph_channels(void)
                 berr = nc4_bus_add(decoder_for_core(cdc_core), &cdc_bus, &cdc_handle);
                 if (berr == ESP_OK) {
                     s_cdc_bus_for_stats = cdc_handle;   // 只給 TX 尺寸量測用
+                    s_cdc_tx_lock = xSemaphoreCreateMutex();   // 跨核轉寄的整幀獨佔
+                    const esp_err_t lerr = nc4_link_register("CDC", cdc_link_write, NULL);
+                    ESP_LOGI(TAG, "link CDC 出口：%s", esp_err_to_name(lerr));
                 }
                 if (berr == ESP_OK && cdc_handle != NULL) {
                     if (xTaskCreatePinnedToCore(cdc_rx_task, "cdc.rx", CDC_RX_TASK_STACK,
@@ -3470,7 +3661,11 @@ static esp_err_t ph_channels(void)
                 .read = uart_bus_read,
                 .rx_region = s_uart_rx_region,
                 .rx_region_bytes = rx.region,
-                .send = NULL,
+                // UART 以前是 NULL（只收不回）。接上之後：
+                //   · UART 上的指令會有回覆
+                //   · routes[].out 寫 "UART" 的轉寄有出口
+                // 環仍然 1 KB（零 RAM 成本）→ 4 KB 轉寄會阻塞 ~44 ms，見 tx-path-design §4。
+                .send = uart_send,
                 .read_chunk = rx.chunk,
                 .budget_per_pass = rx.budget,
                 .rx_ring_size = rx.slot,
@@ -3483,6 +3678,9 @@ static esp_err_t ph_channels(void)
                 // 才可以開始讀。見 nc_task_boot() 之後的說明。
                 s_uart_bus = uart_handle;
                 nc4_bus_set_cfg_src(uart_handle, uapplied);   // STATUS 的 cfg_src
+                const esp_err_t lerr = nc4_link_register("UART", uart_link_write, NULL);
+                ESP_LOGI(TAG, "link UART 出口：%s（TX 環 %d B）",
+                         esp_err_to_name(lerr), UART_TEST_TX_BUF);
             }
             ESP_LOGI(TAG, "UART bus: %s", esp_err_to_name(uerr));
         } else {
@@ -3513,11 +3711,17 @@ static esp_err_t ph_channels(void)
             esp_err_t terr = nc4_bus_add(decoder_for_core(tcp_core), &tcp_bus, &tcp_handle);
             ESP_LOGI(TAG, "NC4/TCP bus: %s", esp_err_to_name(terr));
             s_tcp_nc4_bus = tcp_handle;
+            if (terr == ESP_OK) {
+                s_tcp_tx_lock = xSemaphoreCreateMutex();   // 跨核轉寄的整幀獨佔
+                const esp_err_t lerr = nc4_link_register("TCP", tcp_link_write, NULL);
+                ESP_LOGI(TAG, "link TCP 出口：%s", esp_err_to_name(lerr));
+            }
             ESP_LOGW(TAG, "NC4/TCP：PULL（decode 喺 bus 所屬核讀 socket）%s",
                      s_frame_align ? "，frame-aligned" : "");
         }
 #endif
         ESP_LOGI(TAG, "NC4 通道: %s", esp_err_to_name(berr));
+        link_audit();     // routes[].out 的 link 名逐個對出口（未建立 → 開機就講）
 
         // 任務已經由各模組在 start 時登記（decode0/1、fx、log）；
         // 這裡只負責「依 layer 啟動」，不再手動 xTaskCreate 任何 loop。
@@ -3577,6 +3781,7 @@ void app_main(void)
         { "banner+nvs", ph_boot },
         { "storage+cfg", ph_storage },
         { "hardware", ph_hardware },
+        { "pool", ph_pool },
         { "declare", ph_declare },
         { "commit", ph_commit },
         { "start", ph_start },

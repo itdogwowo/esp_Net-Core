@@ -26,6 +26,12 @@
     "rx.slots / rx.slot_size：push_frame 的插槽數與每格大小",
     "rx.max_msg：message / datagram 的單則上限",
     "",
+    "",
+    "── nc4.pool：共用緩衝池（2026-11-09）──",
+    "name：small（一般命令）／bulk（大指令 OTA）／forward（跨核轉寄）",
+    "size：每格 bytes（含 NC4 header+CRC）；count：幾格；where：internal / psram",
+    "forward 要交給 UART/TCP 送，必須 internal；bulk 可以 PSRAM（大而冷）",
+    "pool 在開機 \"pool\" 階段一次配置；STATUS mem.pool 看 used/peak/fails",
     "── nc4.routes：一列一個來源 ──",
     "in：來源（link 名；nctx = 本機→自己，outbound = 本機→外）",
     "nctx 與 outbound 是兩個永遠存在的預設列，排最前；冇寫就自動補",
@@ -48,6 +54,26 @@
         "name": "UART",
         "kind": "uart",
         "enable": 1
+      }
+    ],
+    "pool": [
+      {
+        "name": "small",
+        "size": 1024,
+        "count": 8,
+        "where": "internal"
+      },
+      {
+        "name": "bulk",
+        "size": 4112,
+        "count": 3,
+        "where": "internal"
+      },
+      {
+        "name": "forward",
+        "size": 4112,
+        "count": 2,
+        "where": "internal"
       }
     ],
     "routes": [

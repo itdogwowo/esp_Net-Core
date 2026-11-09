@@ -7,7 +7,7 @@
 # 全部都用 -Wall -Wextra -Werror，所以「跑得過」同時等於「冇警告」。
 set -u
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-TESTS="cfg_test cfgstruct_test fxm_test task_test router_test fx_test hub_test plan_test"
+TESTS="cfg_test cfgstruct_test fxm_test task_test router_test link_test fx_test hub_test plan_test"
 fail=0
 for t in $TESTS; do
     printf '%-12s ' "$t"

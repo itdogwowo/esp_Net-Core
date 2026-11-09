@@ -142,7 +142,8 @@ int main(void)
         CHECK(strstr(buf, "\"set\":1") != NULL, "set:1");
         CHECK(strstr(buf, "\"core0\":2") != NULL, "core0:2");
         CHECK(strstr(buf, "\"core1\":1") != NULL, "core1:1");
-        CHECK(strstr(buf, "{\"line\":\"UART\",\"core\":1}") != NULL, "UART 條目");
+        CHECK(strstr(buf, "{\"line\":\"UART\",\"core\":1,\"out\":[]") != NULL,
+              "UART 條目（out 為空時仍然有 out 欄，主機唔需要猜）");
         CHECK(buf[n] == '\0', "有 NUL 結尾");
 
         // 截斷：任何 cap 都唔可以越界、一定要有 NUL
@@ -159,6 +160,84 @@ int main(void)
         }
         CHECK(nc4_router_json(NULL, 10) == 0, "NULL 緩衝 → 0");
         CHECK(nc4_router_json(buf, 0) == 0, "cap=0 → 0");
+    }
+
+    // ── 8. out：轉寄目的地 ──
+    case_begin("out：decodeN 是本地、link 名是轉寄；自我反射與重複要濾走");
+    {
+        const nc4_route_t r[] = {
+            { .line = "CDC", .core = 0, .n_out = 2, .out = { "decode0", "UART" } },
+            { .line = "UART", .core = 1, .n_out = 1, .out = { "decode1" } },
+            { .line = "TCP", .core = 0, .n_out = 4,
+              .out = { "decode0", "UART", "UART", "DECODE9" } },
+            { .line = "WS", .core = 0, .n_out = 2, .out = { "WS", "UDP" } },
+        };
+        CHECK(nc4_router_set(r, 4) == ESP_OK, "set 成功");
+
+        const char *outs[NC4_ROUTE_OUT_MAX];
+        int n = nc4_router_links("CDC", outs, NC4_ROUTE_OUT_MAX);
+        CHECK(n == 1, "CDC：一個轉寄目標（decode0 濾走）");
+        CHECK(n == 1 && strcmp(outs[0], "UART") == 0, "CDC → UART");
+
+        n = nc4_router_links("UART", outs, NC4_ROUTE_OUT_MAX);
+        CHECK(n == 0, "UART 只有 decode1 → 冇轉寄");
+
+        n = nc4_router_links("TCP", outs, NC4_ROUTE_OUT_MAX);
+        CHECK(n == 2, "TCP：重複的 UART 去掉、DECODE9 不是 decodeN 所以當 link 名留着");
+        CHECK(n >= 1 && strcmp(outs[0], "UART") == 0, "TCP 第一個是 UART");
+        CHECK(n >= 2 && strcmp(outs[1], "DECODE9") == 0, "TCP 第二個是 DECODE9");
+
+        n = nc4_router_links("WS", outs, NC4_ROUTE_OUT_MAX);
+        CHECK(n == 1, "WS：自己唔轉寄自己");
+        CHECK(n == 1 && strcmp(outs[0], "UDP") == 0, "WS → UDP");
+
+        CHECK(nc4_router_links("NOPE", outs, NC4_ROUTE_OUT_MAX) == 0, "查唔到的線 → 0");
+        CHECK(nc4_router_links(NULL, outs, NC4_ROUTE_OUT_MAX) == 0, "NULL 線名 → 0");
+        CHECK(nc4_router_links("CDC", NULL, 4) == 0, "NULL 輸出 → 0");
+        CHECK(nc4_router_links("CDC", outs, 0) == 0, "max=0 → 0");
+
+        // 只回 max 個
+        n = nc4_router_links("TCP", outs, 1);
+        CHECK(n == 1, "max=1 只回一個");
+
+        CHECK(strcmp(nc4_router_line(0), "CDC") == 0, "line(0) == CDC");
+        CHECK(nc4_router_line(-1) == NULL, "line(-1) == NULL");
+        CHECK(nc4_router_line(4) == NULL, "line(4) 越界 == NULL");
+
+        // JSON 要帶 out（ROUTE_GET 才看得出「會不會轉寄」）
+        char buf[512];
+        const size_t jn = nc4_router_json(buf, sizeof(buf));
+        CHECK(jn > 0 && jn < sizeof(buf), "JSON 有寫入");
+        CHECK(strstr(buf, "\"out\":[\"decode0\",\"UART\"]") != NULL, "CDC 的 out 在 JSON 裡");
+    }
+
+    // ── 9. out 的矛盾要整張表拒絕 ──
+    case_begin("out 驗證：decode 核矛盾／壞名字／超上限 → 整張表拒絕，舊表不動");
+    {
+        const nc4_route_t good[] = {
+            { .line = "CDC", .core = 0, .n_out = 1, .out = { "decode0" } },
+        };
+        CHECK(nc4_router_set(good, 1) == ESP_OK, "先放一張好表");
+
+        const nc4_route_t mismatch[] = {
+            { .line = "X", .core = 0, .n_out = 2, .out = { "decode0", "decode1" } },
+        };
+        CHECK(nc4_router_set(mismatch, 1) == ESP_ERR_INVALID_ARG,
+              "out 有 decode1 但 core=0 → INVALID_ARG");
+        CHECK(nc4_router_count() == 1, "舊表仍然係 1 列");
+        CHECK(nc4_router_core("X") == NC4_ROUTE_NONE, "矛盾那列冇落地");
+
+        const nc4_route_t badname[] = {
+            { .line = "X", .core = 0, .n_out = 1, .out = { "" } },
+        };
+        CHECK(nc4_router_set(badname, 1) == ESP_ERR_INVALID_ARG, "out 有空名 → INVALID_ARG");
+
+        const nc4_route_t too_many[] = {
+            { .line = "X", .core = 0, .n_out = NC4_ROUTE_OUT_MAX + 1,
+              .out = { "A", "B", "C", "D" } },
+        };
+        CHECK(nc4_router_set(too_many, 1) == ESP_ERR_INVALID_ARG, "out 超過上限 → INVALID_ARG");
+        CHECK(nc4_router_core("CDC") == 0, "舊表原封不動");
     }
 
     printf("\n%s：%d 個 case，%d 個失敗\n", s_fail ? "FAIL" : "ALL PASS", s_case, s_fail);

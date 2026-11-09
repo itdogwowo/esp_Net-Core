@@ -9,6 +9,8 @@
 #include <string.h>
 
 #include "driver/uart.h"
+#include "esp_cache.h"
+#include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
@@ -16,6 +18,7 @@
 #include "nvs.h"
 
 #include "nc4_bus.h"
+#include "nc4_link.h"
 #include "nc_hub.h"
 
 static const char *TAG = "test_action";
@@ -69,7 +72,15 @@ static void reply_send(nc4_reply_t *r, size_t len)
         return;
     }
     if (len > NC4_REPLY_JSON_MAX) {
-        len = NC4_REPLY_JSON_MAX;
+        // 與 main.c 同一條規則：超限回合法錯誤物件，唔好靜默截斷（見 tx-path-design §7）。
+        const size_t need = len;
+        char *json = (char *)r->frame + NC4_HDR_LEN + 2;
+        len = (size_t)snprintf(json, NC4_REPLY_JSON_MAX + 1,
+                               "{\"err\":\"reply_too_big\",\"need\":%u,\"cap\":%u}",
+                               (unsigned)need, (unsigned)NC4_REPLY_JSON_MAX);
+        ESP_LOGW(TAG, "[%s] 回覆超限（cmd 0x%04X）：需要 %u B > 上限 %u → 回錯誤物件",
+                 r->ctx->source, (unsigned)r->cmd, (unsigned)need,
+                 (unsigned)NC4_REPLY_JSON_MAX);
     }
     uint8_t *data = r->frame + NC4_HDR_LEN;   // DATA 區：2B 長度前綴 + JSON
     data[0] = (uint8_t)len;
@@ -95,7 +106,8 @@ static void reply_json(nc4_ctx_t *ctx, uint16_t cmd, const char *json)
     }
     size_t n = strlen(json);
     if (n > NC4_REPLY_JSON_MAX) {
-        n = NC4_REPLY_JSON_MAX;
+        reply_send(&r, n);      // 由 reply_send 換成合法錯誤物件（唔截斷、唔越界）
+        return;
     }
     memcpy(dst, json, n);
     reply_send(&r, n);
@@ -821,6 +833,257 @@ static void on_tx_bench(nc4_ctx_t *ctx, const nc4_frame_t *f)
     reply_json(ctx, NC4_CMD_HUB_RSP, json);
 }
 
+// ── 0xF01A BIG_REPLY：驗「回覆超限不再靜默截斷」（tx-path-design §7 的 6.1）──
+//
+// payload = u16 n（預設 3000，1..4096）。回一條長度 n 的字串：
+//   n ≤ 2,600 → 正常（但內容係 'x'，不是 JSON —— 這支只為驗超限那條路）
+//   n > 2,600 → 應該收到 {"err":"reply_too_big","need":n,"cap":2600}
+// 以前會回半截 JSON，主機 parse 失敗之餘，完全唔知係「截斷」。
+#define NC4_CMD_BIG_REPLY  0xF01A
+
+static void on_big_reply(nc4_ctx_t *ctx, const nc4_frame_t *f)
+{
+    uint16_t n = 3000;
+    if (f->len >= 2) {
+        n = (uint16_t)(f->data[0] | (f->data[1] << 8));
+    }
+    if (n < 1) {
+        n = 1;
+    }
+    if (n > 4096) {
+        n = 4096;
+    }
+    static char s_big[4097];
+    memset(s_big, 'x', n);
+    s_big[n] = '\0';
+    reply_json(ctx, NC4_CMD_HUB_RSP, s_big);
+}
+
+// ── 0xF01B FWD：把一格整幀交給指定 link（驗 nc4_link_send ＋ UART TX）──
+//
+// payload = [u16 name_len][name][NC4 幀 bytes]
+// 回 {"link":…,"len":…,"err":…,"frames":…,"bytes":…,"drops":…}
+// 用途：唔使改 config 也可以量「轉寄一幀要幾久、UART 收唔收得到」
+//（配合 0xF00C 看 UART 迴路的 rx 計數）。
+#define NC4_CMD_LINK_FWD   0xF01B
+
+static void on_link_fwd(nc4_ctx_t *ctx, const nc4_frame_t *f)
+{
+    if (f->len < 4) {
+        reply_json(ctx, NC4_CMD_HUB_RSP, "{\"err\":\"args\"}");
+        return;
+    }
+    const uint16_t nlen = (uint16_t)(f->data[0] | (f->data[1] << 8));
+    if (nlen == 0 || nlen >= NC4_LINK_NAME_MAX || 2 + nlen >= f->len) {
+        reply_json(ctx, NC4_CMD_HUB_RSP, "{\"err\":\"args\"}");
+        return;
+    }
+    char name[NC4_LINK_NAME_MAX];
+    for (uint16_t i = 0; i < nlen; i++) {
+        const char c = (char)f->data[2 + i];
+        // 只收安全字元：避免 reply 的 JSON 被名字弄壞（測試指令也唔例外）
+        if (!((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
+              (c >= '0' && c <= '9') || c == '_' || c == '-')) {
+            reply_json(ctx, NC4_CMD_HUB_RSP, "{\"err\":\"name\"}");
+            return;
+        }
+        name[i] = c;
+    }
+    name[nlen] = '\0';
+
+    const uint8_t *frame = f->data + 2 + nlen;
+    const size_t flen = (size_t)f->len - 2 - nlen;
+    const esp_err_t e = nc4_link_send(name, frame, flen);
+    uint32_t frames = 0, bytes = 0, drops = 0;
+    nc4_link_stats(name, &frames, &bytes, &drops);
+    char json[192];
+    snprintf(json, sizeof(json),
+             "{\"link\":\"%s\",\"len\":%u,\"err\":\"%s\","
+             "\"frames\":%u,\"bytes\":%u,\"drops\":%u}",
+             name, (unsigned)flen, esp_err_to_name(e),
+             (unsigned)frames, (unsigned)bytes, (unsigned)drops);
+    reply_json(ctx, NC4_CMD_HUB_RSP, json);
+}
+
+// ── 0xF01C MEM_BENCH：internal / PSRAM 的實際頻寬（2026-11-09）──
+//
+// payload = [u16 psram_kb][u16 iters]（預設 256 KB、4 次）
+// 回 {"int":{kb,memset_mbps,read_mbps,copy_mbps},
+//     "psram":{kb,memset_mbps,read_mbps,copy_mbps},
+//     "msync_us":N}
+// 用途：回答「PSRAM 夠不夠做 framebuffer／音效」——用實測取代估計。
+#define NC4_CMD_MEM_BENCH  0xF01C
+#define MEM_BENCH_INT_KB   32
+
+static uint32_t bench_mbps(size_t bytes, int iters, int64_t us)
+{
+    if (us <= 0) {
+        return 0;
+    }
+    return (uint32_t)((double)bytes * (double)iters / (double)us);
+}
+
+static void on_mem_bench(nc4_ctx_t *ctx, const nc4_frame_t *f)
+{
+    uint16_t kb = 256;
+    uint16_t iters = 4;
+    if (f->len >= 2) {
+        kb = (uint16_t)(f->data[0] | (f->data[1] << 8));
+    }
+    if (f->len >= 4) {
+        iters = (uint16_t)(f->data[2] | (f->data[3] << 8));
+    }
+    if (kb < 16) kb = 16;
+    if (kb > 2048) kb = 2048;
+    if (iters < 1) iters = 1;
+    if (iters > 20) iters = 20;
+
+    const size_t in_bytes = (MEM_BENCH_INT_KB * 1024u) & ~(size_t)63;
+    const size_t ps_bytes = ((size_t)kb * 1024u) & ~(size_t)63;
+
+    uint8_t *is = heap_caps_malloc(in_bytes, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    uint8_t *id = heap_caps_malloc(in_bytes, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    uint8_t *ps = heap_caps_malloc(ps_bytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    uint8_t *pd = heap_caps_malloc(ps_bytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+
+    if (is == NULL || id == NULL || ps == NULL || pd == NULL) {
+        free(is); free(id); free(ps); free(pd);
+        reply_json(ctx, NC4_CMD_HUB_RSP, "{\"err\":\"nomem\"}");
+        return;
+    }
+
+    // internal：memset / read / copy
+    int64_t t0 = esp_timer_get_time();
+    for (int k = 0; k < iters; k++) memset(is, 0xA5, in_bytes);
+    const uint32_t i_memset = bench_mbps(in_bytes, iters, esp_timer_get_time() - t0);
+
+    volatile uint32_t sum = 0;
+    const volatile uint32_t *ip = (const volatile uint32_t *)is;
+    t0 = esp_timer_get_time();
+    for (int k = 0; k < iters; k++) {
+        for (size_t i = 0; i < in_bytes / 4; i++) sum += ip[i];
+    }
+    const uint32_t i_read = bench_mbps(in_bytes, iters, esp_timer_get_time() - t0);
+
+    t0 = esp_timer_get_time();
+    for (int k = 0; k < iters; k++) memcpy(id, is, in_bytes);
+    const uint32_t i_copy = bench_mbps(in_bytes, iters, esp_timer_get_time() - t0);
+
+    // PSRAM：同樣三項
+    t0 = esp_timer_get_time();
+    for (int k = 0; k < iters; k++) memset(ps, 0x5A, ps_bytes);
+    const uint32_t p_memset = bench_mbps(ps_bytes, iters, esp_timer_get_time() - t0);
+
+    const volatile uint32_t *pp = (const volatile uint32_t *)ps;
+    t0 = esp_timer_get_time();
+    for (int k = 0; k < iters; k++) {
+        for (size_t i = 0; i < ps_bytes / 4; i++) sum += pp[i];
+    }
+    const uint32_t p_read = bench_mbps(ps_bytes, iters, esp_timer_get_time() - t0);
+
+    t0 = esp_timer_get_time();
+    for (int k = 0; k < iters; k++) memcpy(pd, ps, ps_bytes);
+    const uint32_t p_copy = bench_mbps(ps_bytes, iters, esp_timer_get_time() - t0);
+
+    // cache writeback 的成本（I80 driver 每次 tx_color 都會做）。
+    // 先 memset 把 cache 弄髒，再量一次 flush；否則 read-only 之後量到的是 no-op。
+    memset(ps, 0x33, ps_bytes);
+    int64_t msync_us = -1;
+    t0 = esp_timer_get_time();
+    const esp_err_t me = esp_cache_msync(ps, ps_bytes,
+        ESP_CACHE_MSYNC_FLAG_DIR_C2M | ESP_CACHE_MSYNC_FLAG_UNALIGNED);
+    if (me == ESP_OK) {
+        msync_us = esp_timer_get_time() - t0;
+    }
+
+    char json[420];
+    snprintf(json, sizeof(json),
+             "{\"int\":{\"kb\":%u,\"memset_mbps\":%u,\"read_mbps\":%u,\"copy_mbps\":%u},"
+             "\"psram\":{\"kb\":%u,\"memset_mbps\":%u,\"read_mbps\":%u,\"copy_mbps\":%u},"
+             "\"msync_us\":%lld,\"msync_err\":\"%s\",\"sum\":%u}",
+             (unsigned)(in_bytes / 1024), (unsigned)i_memset, (unsigned)i_read, (unsigned)i_copy,
+             (unsigned)(ps_bytes / 1024), (unsigned)p_memset, (unsigned)p_read, (unsigned)p_copy,
+             (long long)msync_us, esp_err_to_name(me), (unsigned)sum);
+
+    free(is);
+    free(id);
+    free(ps);
+    free(pd);
+    reply_json(ctx, NC4_CMD_HUB_RSP, json);
+}
+
+// ── 0xF01D TILE_BENCH：整幀 streaming vs 分塊（cache-hot）──
+//
+// payload = [u16 total_kb][u16 tile_kb][u16 iters]（預設 40 / 8 / 8）
+// 回 {"total_kb":..,"tile_kb":..,"full_mbps":..,"tile_mbps":..,
+//     "full_us":..,"tile_us":..,"ratio":..}
+// 用途：證明「先寫完整幀再讀」vs「每塊寫完立即讀」在 PSRAM 的差距；
+// 這是 surface/audio 要不要分塊、要不要內部 staging 的實測依據。
+#define NC4_CMD_TILE_BENCH  0xF01D
+
+static void on_tile_bench(nc4_ctx_t *ctx, const nc4_frame_t *f)
+{
+    uint16_t total_kb = 40;
+    uint16_t tile_kb = 8;
+    uint16_t iters = 8;
+    if (f->len >= 2) total_kb = (uint16_t)(f->data[0] | (f->data[1] << 8));
+    if (f->len >= 4) tile_kb = (uint16_t)(f->data[2] | (f->data[3] << 8));
+    if (f->len >= 6) iters = (uint16_t)(f->data[4] | (f->data[5] << 8));
+    if (total_kb < 16) total_kb = 16;
+    if (total_kb > 1024) total_kb = 1024;
+    if (tile_kb < 1) tile_kb = 1;
+    if (tile_kb > 64) tile_kb = 64;
+    if (tile_kb > total_kb) tile_kb = total_kb;
+    if (iters < 1) iters = 1;
+    if (iters > 32) iters = 32;
+
+    const size_t total = (size_t)total_kb * 1024u;
+    const size_t tile = (size_t)tile_kb * 1024u;
+    uint8_t *src = heap_caps_malloc(total, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    uint8_t *dst = heap_caps_malloc(total, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (src == NULL || dst == NULL) {
+        free(src); free(dst);
+        reply_json(ctx, NC4_CMD_HUB_RSP, "{\"err\":\"nomem\"}");
+        return;
+    }
+
+    // 整幀：先寫完整塊，再 copy 完整塊（第二個 pass 已經 cache miss）
+    int64_t t0 = esp_timer_get_time();
+    for (int k = 0; k < iters; k++) {
+        memset(src, 0xA5, total);
+        memcpy(dst, src, total);
+    }
+    const int64_t full_us = (esp_timer_get_time() - t0) / iters;
+
+    // 分塊：每塊寫完立即 copy（同一塊仍在 cache）
+    t0 = esp_timer_get_time();
+    for (int k = 0; k < iters; k++) {
+        for (size_t off = 0; off < total; off += tile) {
+            const size_t n = (off + tile <= total) ? tile : (total - off);
+            memset(src + off, 0x5A, n);
+            memcpy(dst + off, src + off, n);
+        }
+    }
+    const int64_t tile_us = (esp_timer_get_time() - t0) / iters;
+
+    const uint32_t full_mbps = full_us > 0 ? (uint32_t)((double)total / (double)full_us) : 0;
+    const uint32_t tile_mbps = tile_us > 0 ? (uint32_t)((double)total / (double)tile_us) : 0;
+    const uint32_t ratio = tile_us > 0 ? (uint32_t)((double)full_us / (double)tile_us * 10) : 0;
+
+    char json[320];
+    snprintf(json, sizeof(json),
+             "{\"total_kb\":%u,\"tile_kb\":%u,\"iters\":%u,"
+             "\"full_us\":%lld,\"tile_us\":%lld,"
+             "\"full_mbps\":%u,\"tile_mbps\":%u,\"ratio_x10\":%u}",
+             (unsigned)total_kb, (unsigned)tile_kb, (unsigned)iters,
+             (long long)full_us, (long long)tile_us,
+             (unsigned)full_mbps, (unsigned)tile_mbps, (unsigned)ratio);
+
+    free(src);
+    free(dst);
+    reply_json(ctx, NC4_CMD_HUB_RSP, json);
+}
+
 // ── 註冊 ──
 static const nc_action_t k_actions[] = {
     { NC4_CMD_DEV_BENCH, on_dev_bench, "test" },
@@ -836,6 +1099,10 @@ static const nc_action_t k_actions[] = {
     { NC4_CMD_UART_INJECT, on_uart_inject, "test" },
     { NC4_CMD_LOOP_STAT, on_loop_stat, "test" },
     { NC4_CMD_LOOP_PING, on_loop_ping, "test" },
+    { NC4_CMD_BIG_REPLY, on_big_reply, "test" },
+    { NC4_CMD_LINK_FWD, on_link_fwd, "test" },
+    { NC4_CMD_MEM_BENCH, on_mem_bench, "test" },
+    { NC4_CMD_TILE_BENCH, on_tile_bench, "test" },
 };
 
 NC_ACTION_TABLE_DEF(nc_test_action_table, "test", k_actions);

@@ -1,7 +1,10 @@
 #include "nc4.h"
 #include "nc_action.h"
+#include "nc4_link.h"
+#include "nc4_router.h"
 
 #include <stdarg.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -11,6 +14,9 @@
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
+#include "freertos/task.h"
+#include "nc4_bus.h"
+#include "nc_pool.h"
 
 // handler 的互斥**屬於 decoder，不是全域**：
 //   一個 decoder 一次執行一個 handler；多個 decoder（每核一個）可以同時各跑一個。
@@ -266,6 +272,145 @@ void nc4_parser_destroy(nc4_parser_t *parser)
     free(parser);
 }
 
+// 轉寄限速警告（實作在下面；這裡先宣告）
+static void nc4_warn_throttled(const char *src, const char *fmt, ...);
+
+// ── 跨核轉寄 queue（2026-11-09）──
+// 來源核唔可以揸住 parser 環去等目的核送（會 block 整個 decode），所以：
+//   來源核 alloc 一格 forward pool → copy → 入目的核 queue → notify
+//   目的核 decode loop 每輪 poll，送完 release
+// 這是設計上**唯一允許**的跨核 notify（forward 專用）；bus producer 的 kick
+// 仍然係同核（nc4_bus_kick 會計 remote kick）。
+#define NC4_FWD_QMAX 8
+typedef struct {
+    nc_pool_slot_t *slot;
+    char dst[NC4_LINK_NAME_MAX];
+} nc4_fwd_entry_t;
+
+static nc4_fwd_entry_t s_fwd_q[2][NC4_FWD_QMAX];
+static uint8_t s_fwd_head[2];
+static uint8_t s_fwd_tail[2];
+static portMUX_TYPE s_fwd_mux = portMUX_INITIALIZER_UNLOCKED;
+static uint32_t s_fwd_frames[2];
+static uint32_t s_fwd_drops[2];
+static uint32_t s_fwd_err[2];
+
+static bool fwd_push(int core, nc_pool_slot_t *slot, const char *dst)
+{
+    nc4_fwd_entry_t e;
+    memset(&e, 0, sizeof(e));
+    e.slot = slot;
+    snprintf(e.dst, sizeof(e.dst), "%s", dst);
+
+    bool ok = false;
+    portENTER_CRITICAL(&s_fwd_mux);
+    const uint8_t nh = (uint8_t)((s_fwd_head[core] + 1) % NC4_FWD_QMAX);
+    if (nh != s_fwd_tail[core]) {
+        s_fwd_q[core][s_fwd_head[core]] = e;
+        s_fwd_head[core] = nh;
+        ok = true;
+    }
+    portEXIT_CRITICAL(&s_fwd_mux);
+    return ok;
+}
+
+static void fwd_enqueue(int core, const char *dst, const uint8_t *base, size_t total)
+{
+    if (core < 0 || core > 1) {
+        s_fwd_drops[0]++;
+        return;
+    }
+    nc_pool_slot_t *slot = nc_pool_alloc(NC_POOL_FORWARD, 0);
+    if (slot == NULL) {
+        s_fwd_drops[core]++;
+        return;
+    }
+    if (total > slot->cap) {
+        nc_pool_release(slot);
+        s_fwd_drops[core]++;
+        return;
+    }
+    memcpy(slot->data, base, total);
+    nc_pool_commit(slot, (uint16_t)total);
+    if (!fwd_push(core, slot, dst)) {
+        nc_pool_release(slot);
+        s_fwd_drops[core]++;
+        return;
+    }
+    nc4_bus_kick_core(core);
+}
+
+// 目的核 decode loop 呼叫：把 queue 裡的幀送出去（每次最多 8 幀）。
+int nc4_fwd_poll(int core)
+{
+    if (core < 0 || core > 1) {
+        return 0;
+    }
+    int n = 0;
+    for (;;) {
+        nc4_fwd_entry_t e;
+        bool got = false;
+        portENTER_CRITICAL(&s_fwd_mux);
+        if (s_fwd_tail[core] != s_fwd_head[core]) {
+            e = s_fwd_q[core][s_fwd_tail[core]];
+            s_fwd_tail[core] = (uint8_t)((s_fwd_tail[core] + 1) % NC4_FWD_QMAX);
+            got = true;
+        }
+        portEXIT_CRITICAL(&s_fwd_mux);
+        if (!got) {
+            break;
+        }
+        const esp_err_t err = nc4_link_send(e.dst, e.slot->data, e.slot->len);
+        if (err == ESP_OK) {
+            s_fwd_frames[core]++;
+        } else {
+            s_fwd_err[core]++;
+            nc4_warn_throttled("fwd", "跨核轉寄 → %s 失敗：%s（整幀丟棄）",
+                               e.dst, esp_err_to_name(err));
+        }
+        nc_pool_release(e.slot);
+        n++;
+    }
+    return n;
+}
+
+size_t nc4_fwd_json(char *buf, size_t cap)
+{
+    if (buf == NULL || cap == 0) {
+        return 0;
+    }
+    return (size_t)snprintf(buf, cap,
+                            "{\"core0\":{\"frames\":%u,\"drops\":%u,\"err\":%u},"
+                            "\"core1\":{\"frames\":%u,\"drops\":%u,\"err\":%u}}",
+                            (unsigned)s_fwd_frames[0], (unsigned)s_fwd_drops[0],
+                            (unsigned)s_fwd_err[0], (unsigned)s_fwd_frames[1],
+                            (unsigned)s_fwd_drops[1], (unsigned)s_fwd_err[1]);
+}
+
+// ── 轉寄：routes[].out 裡的 link 是「送出去」，不是「自己解」──
+// 走 nc4_link_send（link 名 → 目的通道自己的 TX 緩衝／FIFO），不經過回覆幀。
+// 失敗只可以丟：幀的來源是 parser 環／PUSH 插槽，handler 返回後就失效，
+// 所以「稍後重試」不可能。丟棄由 link 表計數（drops），STATUS 看得到。
+static void parser_forward(nc4_parser_t *parser, const uint8_t *base, size_t total)
+{
+    const char *outs[NC4_ROUTE_OUT_MAX];
+    const int n = nc4_router_links(parser->ctx.source, outs, NC4_ROUTE_OUT_MAX);
+    const int my_core = (int)xPortGetCoreID();
+    for (int i = 0; i < n; i++) {
+        const int dst_core = nc4_router_core(outs[i]);
+        if (dst_core >= 0 && dst_core != my_core) {
+            // 跨核：copy 入 forward pool，目的核自己送（來源核唔等）
+            fwd_enqueue(dst_core, outs[i], base, total);
+            continue;
+        }
+        const esp_err_t e = nc4_link_send(outs[i], base, total);
+        if (e != ESP_OK) {
+            nc4_warn_throttled(parser->ctx.source, "轉寄 → %s 失敗：%s（整幀丟棄）",
+                               outs[i], esp_err_to_name(e));
+        }
+    }
+}
+
 // 幀已驗過 CRC：ADDR 過濾後 dispatch。
 // base = 幀起點（SOF），dlen 已驗證 ≤ NC4_MAX_PAYLOAD。
 // 只借用呼叫端的緩衝，不複製 —— handler 回傳後 frame.data 即失效。
@@ -277,6 +422,12 @@ static void parser_dispatch(nc4_parser_t *parser, const uint8_t *base, uint16_t 
         .data = base + NC4_HDR_LEN,
         .len = dlen,
     };
+
+    // 轉寄（routes[].out 裡的 link 名）：**先出去，後本地執行**。
+    // 一定要在 handler 之前：frame.data 指向 parser 環／PUSH 插槽，
+    // handler 一返回就會被下一幀覆寫，到時想 copy 已經冇得 copy。
+    // 位址過濾放在轉寄之後：hub 轉出去的幀，目的地不一定是自己。
+    parser_forward(parser, base, (size_t)NC4_HDR_LEN + dlen + NC4_CRC_LEN);
 
     // ADDR 過濾：只收廣播或定址到本機 cid 的幀（與 mp 版 app.handle_stream 一致）
     const uint16_t my_cid = parser->ctx.decoder->cid;

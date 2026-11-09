@@ -2,5 +2,5 @@
 idf_component_register(
     SRCS "nc_test_action.c"
     INCLUDE_DIRS "include"
-    REQUIRES nc4 mem nvs_flash esp_driver_uart freertos esp_timer
+    REQUIRES nc4 mem nvs_flash esp_driver_uart freertos esp_timer heap esp_mm
 )

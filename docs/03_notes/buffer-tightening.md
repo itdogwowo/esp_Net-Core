@@ -267,9 +267,10 @@ P4 這塊板不在手邊，所以下面全部**只列方法，不改數字**：
 1. **CDC 4 KB 連續洪水**：4 格 ×256 B 的插槽池追不上 4 KB 幀（實測 74/100，`slot_full`）。
    OTA 有 ACK 流控所以沒問題；主機若無流控連發 4 KB 幀，本來就會丟。
    要改善＝加 slots（每格 256）或加大 slot_size，代價是 RAM；不是這次的目標。
-2. **UART 沒有 `send`**（`nc4_bus_cfg_t.send = NULL`）：UART 這條線目前**只收不回**，
-   所以 TX ring 可以只留 1 KB。要讓 UART 也能回覆，先接 `uart_send()`，再把 TX ring
-   依「最大回覆（2,615 B）」重定 —— 那時 decode1 也會用到回覆路徑（棧需求同 decode0）。
+2. **UART 的 `send` 已接上（2026-11-08 晚，status §7.28）**：`nc4_bus_cfg_t.send = uart_send`，
+   整幀 `uart_write_bytes`，**TX ring 仍然 1 KB**（零 RAM 成本）。1 KB 覆蓋命令與回覆；
+   4 KB 轉寄會阻塞 ~44 ms（921600 bps）。要 decouple 才把 ring 擴到 4,192（+3.2 KB，未做）。
+   接上之後 decode1 也會走回覆路徑（棧需求同 decode0）。
 3. **IO7 同時是 SD CLK 與 UART 迴路 TX**：`hardware.json` 的 SDIO 一開，UART 就不能啟動
    （`uart_owner_init` 會拒絕）。這次量測是把 SDIO 關掉做的；兩者要同時用必須換腳位（需要人）。
 4. **`s_buses`（8 條 × 280 B = 2,240 B）** 與 **`s_slots`（20 格 6,000 B）** 是靜態分區，

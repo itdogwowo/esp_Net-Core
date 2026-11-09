@@ -164,6 +164,58 @@ static bool rx_take(const cJSON *rx, const char *key, int32_t lo, int32_t hi,
 
 // ───────────────────────── system ─────────────────────────
 
+static void parse_pools(const cJSON *root, nc_system_cfg_t *out, nc_cfg_stat_t *st)
+{
+    const cJSON *arr = item(item(root, "nc4"), "pool");
+    if (arr == NULL) {
+        st->defaulted++;
+        return;
+    }
+    if (!cJSON_IsArray(arr)) {
+        st->invalid++;
+        return;
+    }
+
+    out->n_pools = 0;
+    const cJSON *it = NULL;
+    cJSON_ArrayForEach(it, arr) {
+        if (out->n_pools >= NC_CFG_MAX_POOLS) {
+            st->invalid++;
+            break;
+        }
+        nc_cfg_pool_t p;
+        memset(&p, 0, sizeof(p));
+
+        const cJSON *nm = item(it, "name");
+        if (!cJSON_IsString(nm) || nm->valuestring == NULL ||
+            nm->valuestring[0] == '\0' || strlen(nm->valuestring) >= NC_CFG_NAME_MAX) {
+            st->invalid++;
+            continue;
+        }
+        snprintf(p.name, sizeof(p.name), "%s", nm->valuestring);
+        p.size  = (uint16_t)get_int(it, "size", 1024, 64, NC_CFG_REGION_MAX, st);
+        p.count = (uint8_t)get_int(it, "count", 4, 1, 32, st);
+        p.enable = get_bool(it, "enable", true, st);
+
+        const cJSON *w = item(it, "where");
+        if (w == NULL) {
+            st->defaulted++;
+            p.where = 0;
+        } else if (cJSON_IsString(w) && w->valuestring != NULL &&
+                   strcmp(w->valuestring, "psram") == 0) {
+            p.where = 1;
+        } else if (cJSON_IsString(w) && w->valuestring != NULL &&
+                   strcmp(w->valuestring, "internal") == 0) {
+            p.where = 0;
+        } else {
+            st->invalid++;
+            p.where = 0;
+        }
+
+        out->pools[out->n_pools++] = p;
+    }
+}
+
 static void parse_links(const cJSON *root, nc_system_cfg_t *out, nc_cfg_stat_t *st)
 {
     const cJSON *arr = item(item(root, "nc4"), "links");
@@ -474,11 +526,12 @@ esp_err_t nc_cfg_apply_system(const cJSON *root, nc_system_cfg_t *out, nc_cfg_st
         st->invalid++;
         return ESP_OK;
     }
-    static const char *const nc4_keys[] = { "links", "routes" };
+    static const char *const nc4_keys[] = { "links", "routes", "pool" };
     note_unknown(nc4, nc4_keys, sizeof(nc4_keys) / sizeof(nc4_keys[0]), st);
 
     parse_links(root, out, st);
     parse_routes(root, out, st);
+    parse_pools(root, out, st);
     return ESP_OK;
 }
 

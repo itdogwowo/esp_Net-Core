@@ -300,6 +300,29 @@ int main(void)
     ok("unknown>0", hs.unknown > 0);
     ok("仍然 present + enable", hw.eth.present && hw.eth.enable);
 
+    printf("[22] system：nc4.pool 解析（size/count/where/enable）\n");
+    {
+        nc_system_cfg_t ps;
+        nc_cfg_stat_t st = parse_sys(
+            "{\"version\":1,\"nc4\":{\"pool\":["
+            "{\"name\":\"small\",\"size\":512,\"count\":6},"
+            "{\"name\":\"bulk\",\"size\":8208,\"count\":2,\"where\":\"psram\"},"
+            "{\"name\":\"forward\",\"size\":4112,\"count\":3,\"enable\":0}]}}",
+            &ps);
+        ok("n_pools=3", ps.n_pools == 3);
+        ok("small 512/6/internal", ps.pools[0].size == 512 && ps.pools[0].count == 6 &&
+                                   ps.pools[0].where == 0 && ps.pools[0].enable);
+        ok("bulk 8208/2/psram", ps.pools[1].size == 8208 && ps.pools[1].count == 2 &&
+                                 ps.pools[1].where == 1);
+        ok("forward enable=0", !ps.pools[2].enable && ps.pools[2].count == 3);
+        ok("零 invalid", st.invalid == 0);
+
+        nc_system_cfg_t bad;
+        st = parse_sys("{\"version\":1,\"nc4\":{\"pool\":["
+                       "{\"name\":\"x\",\"where\":\"vram\"}]}}", &bad);
+        ok("where 錯 → internal + invalid", bad.pools[0].where == 0 && st.invalid >= 1);
+    }
+
 #ifndef PRESET_SYSTEM
 #define PRESET_SYSTEM ""
 #endif

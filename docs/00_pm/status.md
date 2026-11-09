@@ -1204,6 +1204,9 @@ fragment whole-archive 拉入，所以即使 `CONFIG_NETCORE_WIFI=n`（無任何
 
 ### 7.27 2026-11-08（發送／轉寄路徑：今天的行為與下次的設計）
 
+> **本節是當日早上的結論**；同日晚上 §7.28 已把 6.1／6.2／6.3／6.4 落地（UART 會發、
+> link 出口與 router 轉寄已實作、回覆超限不再截斷）。下面的「未實作」保留作歷史對照。
+
 使用者問「轉寄 4 KB 夠不夠？PSRAM 會不會中斷？要不要 DMA？是不是一定要等送完？」——
 答案整理成 [tx-path-design.md](../03_notes/tx-path-design.md)。摘要：
 
@@ -1219,3 +1222,92 @@ fragment whole-archive 拉入，所以即使 `CONFIG_NETCORE_WIFI=n`（無任何
 - S3 **不需要** 8 KB：CDC 4,192／UART 1,024 已經對得上「命令小包、OTA 4 KB」；8 KB 只發生在 P4 TCP（16,410 region＋8×8,205 插槽）。
 - DMA：UART **沒有 TX DMA**、CDC FS 沒有、P4 ETH 有；DMA 不減少緩衝需求，只改變誰排空。
 - 回覆超 2,600 B 目前是**靜默截斷**（`reply_send`／`reply_json`）→ 列為要修的缺陷。
+
+### 7.28 2026-11-08（發送路徑落地：回覆超限、link 出口、router 轉寄、UART TX）
+
+**背景**：§7.27 的四個問題。當日把「低風險那幾項」做完，並且上板驗證。
+細節與取捨：[tx-path-design.md](../03_notes/tx-path-design.md)。
+
+| # | 項目 | 做法 | 驗收 |
+|---|---|---|---|
+| 6.1 | 回覆超 2,600 B 不再靜默截斷 | `reply_send` 改回合法錯誤物件 `{"err":"reply_too_big","need":N,"cap":2600}`；`reply_json` 唔再 copy 落去（避免越界） | 上板 `0xF01A 3000` → 收到該物件；`2600` → 原樣（2,602 B 幀） |
+| 6.3 | **`nc4_link` 出口登記表**（新檔案） | 名字 → write fn；`nc4_link_send` = 整幀交出去，成功計 `frames/bytes`，短送／錯誤計 `drops`（**不能重試**：來源緩衝即時失效） | hosttest `link_test` 8 case；上板 `0xF01B FWD CDC` → 主機真的收到轉寄幀 |
+| 6.4 | **router `out` 支援 link 轉寄** | `nc4_route_t` 存完整 out；`nc4_router_links()` 濾 `decodeN`／自我／重複；`parser_dispatch` **先轉寄、後本地 dispatch**；開機做 link 稽核 | 上板：`CDC out=["decode0","UART"]`，送 1 條 PING → `LOOP_STAT rx` **+2**（本地＋UART 迴路回來） |
+| 6.2 | UART TX 接上（沿用 1 KB 環，**零 RAM**） | `uart_send` = 整幀 `uart_write_bytes`（阻塞到排空） | 上板（暫時關 SD）：`0xF01B FWD UART` → `ESP_OK`，`frames 9 / bytes 175 / drops 0` |
+| — | **`make.py flash --tests` 會燒錯映像** | `flash()` 冇把 `tests` 傳給 `_idf_args()` → 先建測試版、`app-flash` 時又重編成 release 才寫入。已修 | 今天實際踩到（log 由 0x78590 變 0x71d30） |
+| — | **重複指令碼行為不確定** | 原本 qsort 之後 dedupe，相等 key 次序冇保證 → 同一 cmd 在兩顆 binary 可以是不同 handler。改成填入時**先到先得＋`ESP_LOGE`** | 今天真的撞到：0xF012／0xF013 已被 SD bench 佔用 → 新測試指令改用 **0xF01A／0xF01B** |
+
+**跨核轉寄的副作用（已處理）**：CDC／TCP 的「一幀分多個 chunk 寫」以前只在單核成立；
+現在 `routes[].out` 可以令 core1 送 CDC／TCP，兩個核的 chunk 會交錯成兩條壞幀。
+→ `cdc_send`／`tcp_nc4_send` 各加一把**整幀 mutex**；`s_tx_reply` 的寫入移到 critical
+section（另一個核的 log 才看得到）。log 路徑**唔攞鎖**，所以 log 永遠唔會卡回覆。
+
+**上板量測**（S3、tests 映像；暫時 `SDIO=0` 讓 GPIO7 做 UART 迴路，測完已還原）
+- 直接 link：`0xF01B FWD UART`（21 B）→ `{"link":"UART","len":21,"err":"ESP_OK","frames":3,"bytes":74,"drops":0}`；`LOOP_STAT rx` 0 → 2。
+- router：`CDC → ["decode0","UART"]`，主機送 1 條 21 B PING → `rx` 由 2 → 4（本地 1 ＋ 迴路 1）。
+- 統計：`links.UART frames 9 / bytes 175 / drops 0`；UART bus `frames 12 / crc_err 0 / bad_hdr 0`。
+- 開機稽核：`轉寄：CDC → UART ok`、`轉寄：1 條可用、0 條冇出口（出口登記 2 個）`。
+- 還原後：`轉寄：0 條可用…`、`UART 測試迴路唔啟動：GPIO7/8 已經係 SD 的 clk/cmd`（與改動前一致）。
+
+**大小**（同一棵樹、release）
+| 建置 | 前 | 後 | 差 |
+|---|---|---|---|
+| S3 release | 0x70e80（451.6 KB） | **0x71d30（455.3 KB）** | **+3,760 B** |
+| S3 tests | — | 0x78580（481.4 KB） | 含 0xF01A 的 4,097 B 測試緩衝 |
+| P4 release | 0xb6460（§7.24） | **0xb7b60（734.8 KB）** | +5.8 KB（含 §7.25／7.26，不能全記在本次） |
+
+靜態 RAM 約 **+1.6 KB**（link 表 288 B＋router out 名稱 512 B＋開機路由 JSON 768 B）；
+tests 映像另有 4,097 B 的 `0xF01A` 緩衝。
+
+**測試**：`bash tools/hosttest/run_all.sh` **9/9**（新增 `link_test`，`router_test` 加 out 的
+9 個 case）；S3／P4 零 warning；上板 OTA 兩輪（含一次配置切換與還原）。
+
+**仍未做**：UART 環 4,192（+3.2 KB，等決定）；轉寄滿了的政策（跟各 transport）；
+forward-only route；環狀拓撲；OTA flash 停頓對 `uart.rx`。見
+[next-steps §6](next-steps.md)。
+
+### 7.29 2026-11-09（共用緩衝池、跨核轉寄、PSRAM 實測）
+
+**背景**：§7.28 之後，使用者要把「每條線自己一份緩衝」收斂成共用 pool，並且問
+「PSRAM 到底可不可行」。這節只記落地與量測；設計與取捨在
+[buffer-pool.md](../03_notes/buffer-pool.md)。
+
+| # | 項目 | 做法 | 驗收 |
+|---|---|---|---|
+| 7.1 | **`nc_pool` 共用緩衝池**（新檔案） | 三個固定 size class（small 1 KB／bulk 4 KB／forward 4 KB）＋ descriptor（state／src_link／refcnt／gen）；`portMUX` 保護 free list；`nc_pool_alloc/commit/retain/release` | 上板 `STATUS mem.pool`：small 1024×8、bulk 4160×3、forward 4160×2；`init=1`、`fails=0` |
+| 7.2 | **`nc4.pool` 設定** | `system.json` 的 `nc4.pool[]`：name/size/count/where/enable；開機 `ph_pool` 一次配置；`where=psram` 可選 | S3／P4 system.json 已加；預設全 internal；P4 forward 8,208 |
+| 7.3 | **跨核轉寄 queue** | `parser_forward()`：目的核 ≠ 來源核 → 借 forward slot、copy、入目的核 queue（深度 8）、`nc4_bus_kick_core()`；目的核 `nc4_fwd_poll()` 送完 release | 上板 CDC→UART：6 幀 → `fwd.core1.err=6`、`links.UART.drops=6`、`forward.peak=1`、`fails=0`（UART driver 未開，見下） |
+| 7.4 | **`0xF01C MEM_BENCH`** | 量 internal／PSRAM 的 memset／read／copy MB/s＋`msync` µs | 見下表 |
+| — | **PSRAM 可行性** | 實測 21–33 MB/s（不是 160）；38.4 KB 一幀 copy 1.83 ms | 60 fps 下一次 copy 11%、3 passes 33%：可行但要預算 |
+
+**上板量測**（S3、tests、無 flash 活動；`0xF01C 256 4`／`1024 4` 結果一致）
+
+| 區域 | 大小 | memset | read（32-bit） | copy | msync（dirty） |
+|---|---:|---:|---:|---:|---:|
+| internal | 32 KB | 483–507 MB/s | 42–51 MB/s | 133–252 MB/s | — |
+| PSRAM | **16 KB** | 212 MB/s | 52 MB/s | **152 MB/s** | 316 µs（cache-hot） |
+| PSRAM | 64 KB | 29 MB/s | 30 MB/s | **20 MB/s** | 521 µs |
+| PSRAM | 256 KB／1 MB | **33 MB/s** | **32 MB/s** | **21 MB/s** | **515 µs** |
+
+- 38.4 KB frame（整幀 streaming）：PSRAM 寫 1.16–1.32 ms、copy 1.8–1.9 ms、read 1.28 ms、msync 0.4–0.5 ms；
+  internal copy 0.15–0.3 ms。
+- **修正**：16 KB 的 152 MB/s 是「同一塊重複 copy」的 cache-to-cache；`0xF01D` 量到新鮮 40 KB
+  分塊 copy 只有 **16 MB/s**（full 12），tiling 只快 1.3×，因為每個 byte 仍要寫入 PSRAM。
+- 分塊的真正好處是 bound latency（9.6 KB flush ~0.1–0.2 ms）同 multi-pass 局部性，不是單 pass 頻寬。
+- 38.4 KB frame：寫 1.2 ms＋讀 1.2 ms＋flush 0.4 ms ≈ **2.8 ms（17% @60fps）**；
+  每多一個全幀 pass 多 ~1.2 ms。多 pass 效果應 copy 入 internal tile 做完再寫回一次。
+- `pool` 本身 **28,992 B**＋descriptor；上板 `sys.h_int` 237,403（tests 任務有跑）／
+  253,983（USB storage 模式，部分測試任務未跑）。
+- 轉寄測試後 `system.json` **逐位元組還原**（sha256 `086bbbd7…`），`net.fwd` 全 0。
+- 大小：S3 tests 498,896 B（OTA 138–141 KB/s）；P4 release 零 warning。
+- 測試：hosttest **9/9**（`cfgstruct_test` 新增 `[22] nc4.pool` 解析：size/count/where/enable、
+  `where` 打錯 → internal＋invalid）；S3／P4 建置零 warning；上板 OTA 兩輪、轉寄測試一次。
+- 未做：`where=psram` 的**上板** override（USB volume 在 app 模式冇重新掛載；hosttest 已驗解析）。
+- **`0xF01D TILE_BENCH`（40 KB、8 次）**：整幀 12 MB/s；tile 2–16 KB 都係 **16 MB/s**（1.3×）；
+  tile 32 KB 13 MB/s。→ 單 pass streaming 是 **bus-bound**，tiling 只 bound latency／幫 multi-pass，
+  不是「切 16 KB 就 150 MB/s」。設計見 [psram-surface.md](../03_notes/psram-surface.md)。
+
+
+**仍未做**：TTL／leak watchdog、tap subscriber、bulk 放 PSRAM 實測、
+forward 成功路徑（要 UART 腳位或第二條可送 link）、pool 接到 RX（header-first）、
+多實例（UART0/1/2、I2C、SPI）。見 [buffer-pool.md §5](../03_notes/buffer-pool.md)。

@@ -47,7 +47,12 @@ esp_err_t nc_action_init(const nc_action_table_t *const *tables, size_t n_tables
         return ESP_ERR_NO_MEM;
     }
 
-    // ③ 填入
+    // ③ 填入（**先到先得**：重複的 cmd 在填入時就擋掉，後面的表蓋不掉前面的）
+    //
+    // 為什麼要在這裡擋、而不是排序後再合併：qsort 對相等 key 的次序**沒有保證**，
+    // 所以「保留前者」在排序後其實是「保留某一個」。實測（2026-11-08）：同一個映像裡
+    // 0xF012 保留了 test 的 BIG_REPLY、0xF013 卻保留了 core 的 SD_BENCH_RESULT ——
+    // 相等 key 誰勝出是由排序結果決定，換一次 build 就可能反過來。
     size_t n = 0;
     for (size_t t = 0; t < n_tables; t++) {
         const nc_action_table_t *tb = tables[t];
@@ -63,31 +68,30 @@ esp_err_t nc_action_init(const nc_action_table_t *const *tables, size_t n_tables
                 ESP_LOGE(TAG, "[%s] 統計與填入不一致 → 停", tb->svc);
                 break;
             }
+            bool dup = false;
+            for (size_t k = 0; k < n; k++) {
+                if (tab[k].cmd == tb->list[i].cmd) {
+                    ESP_LOGE(TAG, "指令 0x%04X 重複：[%s]（後來）與 [%s]（已登記）→ 丟棄後來者",
+                             (unsigned)tb->list[i].cmd,
+                             tb->list[i].owner ? tb->list[i].owner : "-",
+                             tab[k].owner ? tab[k].owner : "-");
+                    dup = true;
+                    break;
+                }
+            }
+            if (dup) {
+                continue;
+            }
             tab[n++] = tb->list[i];
         }
     }
 
-    // ④ 排序（dispatch 用二分搜尋）+ 重複檢查
+    // ④ 排序（dispatch 用二分搜尋）。重複在 ③ 已經擋掉，這裡只做保險檢查。
     qsort(tab, n, sizeof(tab[0]), cmp_cmd);
-    unsigned dups = 0;
     for (size_t i = 1; i < n; i++) {
         if (tab[i].cmd == tab[i - 1].cmd) {
-            ESP_LOGE(TAG, "指令 0x%04X 重複：%s 與 %s（保留前者）",
-                     (unsigned)tab[i].cmd, tab[i - 1].owner ? tab[i - 1].owner : "-",
-                     tab[i].owner ? tab[i].owner : "-");
-            dups++;
+            ESP_LOGE(TAG, "指令 0x%04X 仍然重複（不應該發生）", (unsigned)tab[i].cmd);
         }
-    }
-    if (dups > 0) {
-        // 把重複的移除，保持排序
-        size_t w = 1;
-        for (size_t r = 1; r < n; r++) {
-            if (tab[r].cmd != tab[w - 1].cmd) {
-                tab[w++] = tab[r];
-            }
-        }
-        n = w;
-        ESP_LOGW(TAG, "重複指令已合併：剩 %u 條", (unsigned)n);
     }
 
     s_actions = tab;

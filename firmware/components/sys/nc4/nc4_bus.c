@@ -98,6 +98,19 @@ void nc4_bus_kick(nc4_bus_handle_t bus)
     xTaskNotifyGive(t);
 }
 
+// 跨核轉寄專用：叫醒目的核 decode task。
+// 呢個係設計上唯一允許的跨核 notify；bus producer 的 kick 仍然同核。
+void nc4_bus_kick_core(int core)
+{
+    if (core < 0 || core > 1) {
+        return;
+    }
+    TaskHandle_t t = s_decode_task[core];
+    if (t != NULL) {
+        xTaskNotifyGive(t);
+    }
+}
+
 // ───────────────────────── 插槽（PUSH 模式）─────────────────────────
 
 static int slot_find_free(struct nc4_bus *b)
@@ -694,7 +707,8 @@ void nc4_bus_task_entry(void *arg)
 
     for (;;) {
         s_loop_count[my_core]++;
-        bool busy = false;
+        // 跨核轉寄：目的核每輪先清 queue（唔靠 producer kick）
+        bool busy = (nc4_fwd_poll(my_core) > 0);
 
         for (size_t i = 0; i < NC4_MAX_BUSES; i++) {
             struct nc4_bus *b = &s_buses[i];

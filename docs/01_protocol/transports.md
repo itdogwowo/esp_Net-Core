@@ -80,7 +80,11 @@ I2C/SPI slave 沒有「等一下再回」這種事 —— master 的時鐘已經
 
 ## 4. 目前的狀態
 
-| 通道 | 狀態 |
-|---|---|
-| USB CDC | ✅ 已接（PULL） |
-| 其他 | 框架已支援，缺各自的轉接頭 |
+| 通道 | 收 | 發（`send`） | 轉寄出口 |
+|---|---|---|---|
+| USB CDC | ✅ PUSH | ✅ TinyUSB FIFO（上限 100 ms） | ✅ `nc4_link` 的 `CDC` |
+| UART（測試迴路） | ✅ PUSH | ✅ `uart_write_bytes`（1 KB ring，阻塞到排空） | ✅ `UART` |
+| TCP（P4） | ✅ PULL／frame-aligned | ✅ `send()` 迴圈 | ✅ `TCP` |
+| WS（P4） | ✅ 訊息導向 | ✅ httpd async | ✅ `WS` |
+| UDP（P4） | ✅ datagram | ✅ `sendto` | ✅ `UDP` |
+| 其他（CAN／I2C slave／SPI slave…） | 框架已支援 | 缺各自的轉接頭 | 需要時自己 `nc4_link_register()` |

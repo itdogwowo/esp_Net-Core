@@ -134,6 +134,8 @@ tools/hosttest/fx_test/run.sh      # nc_fx.c：載入 / 選 / 兩幀釋放 / tra
 tools/hosttest/fxm_test/run.sh     # .fxe manifest：解碼 / 範圍 / 指令表
 tools/hosttest/task_test/run.sh    # 任務管理器：level 排序 / 帳本 / attach / detach / provides / config
 tools/hosttest/cfg_test/run.sh     # nc_cfg_patch：token patch（巢狀 / 陣列 / 轉義）
+tools/hosttest/router_test/run.sh  # nc4_router.c：線 → 核、out 轉寄清單（decodeN／自我／重複）
+tools/hosttest/link_test/run.sh    # nc4_link.c：出口表、整幀送出、短送／錯誤 → drops、JSON
 ```
 
 Windows（MSVC）用同目錄的 `run.bat`。注意：目前只有 `cfg_test` / `fxm_test` / `task_test`

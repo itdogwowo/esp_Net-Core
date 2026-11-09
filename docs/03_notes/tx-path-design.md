@@ -1,4 +1,4 @@
-# 發送／轉寄路徑的設計（2026-11-08 討論結論，未實作）
+# 發送／轉寄路徑的設計（2026-11-08 討論結論；同日已落地）
 
 > **這份文件回答四個問題**（使用者原話整理）：
 > 1. 回覆幀只有 2,615 B，轉寄要送 4 KB 夠不夠？
@@ -6,28 +6,32 @@
 > 3. 發送要不要用 DMA／更大的緩衝？
 > 4. 現在轉寄／發送是不是**一定要等送完**才能做其他事？
 >
-> **結論先講**：今天的 CDC 回覆**不用等**（2,615 < 4 KB FIFO）；UART 根本不發；
-> P4 TCP 的 8 KB 幀**會等**；**轉寄根本還沒實作**。要「解碼完就交出去」的唯一方法是
-> **目的通道自己擁有一段 ring，handler 只 copy 進去（µs）就返回**。
+> **結論先講**：CDC 的回覆**不用等**（2,615 < 4 KB FIFO）；UART 現在**會發**（1 KB TX 環，
+> 整幀阻塞到排空）；P4 TCP 的 8 KB 幀**會等**；**轉寄已經實作**（2026-11-08 晚，
+> 走 `nc4_link` ＋ `routes[].out`，同步送、不經回覆幀）。要「解碼完就交出去」的做法是
+> **目的通道自己的 TX 緩衝**（CDC FIFO／UART ring／TCP sndbuf／WS async），handler 只
+> copy 進去就返回；塞不下時由該 transport 自己決定等多久。
 > 大小按「目的通道的最大幀」決定，不是每條 bus 都配；S3 不需要 8 KB，8 KB 只發生在 P4 TCP。
 
 ---
 
-## 1. 現況（可以逐項查證，2026-11-08）
+## 1. 現況（2026-11-08 晚，可以逐項查證）
 
 | 通道 | 發送函式 | 「交出去」的緩衝 | 大小 | 單幀上限 | 何時會等 | 實測 |
 |---|---|---|---:|---:|---|---|
-| **CDC** | [`cdc_send`](../../firmware/main/main.c#L752) | TinyUSB CDC TX FIFO | **4,096 B** | 2,615 B（回覆上限） | 只有 FIFO 滿（主機不讀）→ 等 100 ms 後丟 | RTT 1.08–1.15 ms；20 條排隊 1.21–1.26 ms/條 |
-| **UART** | `NULL`（沒有 send） | UART driver TX ring | 1,024 B | 1,011 B（region 1,024） | —（不發） | — |
-| **TCP（P4）** | [`tcp_nc4_send`](../../firmware/main/main.c#L2914) | lwIP socket send buffer | **5,760 B** | 8,205 B | **>5,760 B 就阻塞**，直到對端 ACK | 未量 |
-| **轉寄** | **不存在** | — | — | — | — | router 只做 `line → core`（[nc4_router.c](../../firmware/components/sys/nc4/nc4_router.c)） |
+| **CDC** | `cdc_send` | TinyUSB CDC TX FIFO | **4,096 B** | 2,615 B（回覆上限） | 只有 FIFO 滿（主機不讀）→ 等 100 ms 後丟 | RTT 1.08–1.15 ms；20 條排隊 1.21–1.26 ms/條 |
+| **UART** | `uart_send`（`uart_write_bytes`） | UART driver TX ring | **1,024 B** | 1,011 B（region 1,024） | 整幀排入環為止（4 KB 幀 ≈ 44 ms @921600） | 21 B 幀：`0xF01B` → `ESP_OK`，迴路收到 |
+| **TCP（P4）** | `tcp_nc4_send` | lwIP socket send buffer | **5,760 B** | 8,205 B | **>5,760 B 就阻塞**，直到對端 ACK | 未量 |
+| **轉寄** | `nc4_link_send` → 目的通道的 write | 目的通道 TX 緩衝 | 見上 | 見上 | 由 transport 決定（同上） | `CDC→UART`：21 B 幀轉寄成功、`drops=0` |
 
 補充：
-- 回覆 JSON 上限 `NC4_REPLY_JSON_MAX = 2,600`，幀 2,615。**超過會靜默截斷**
-  （[main.c:845](../../firmware/main/main.c#L845) `reply_send`、[main.c:872](../../firmware/main/main.c#L872) `reply_json`）——
-  這是缺陷，不是設計。
-- `CDC_TX_WAIT_US = 100 ms`（[main.c:747](../../firmware/main/main.c#L747)）：主機不讀時保護 decode 不卡死。
+- 回覆 JSON 上限 `NC4_REPLY_JSON_MAX = 2,600`，幀 2,615。**超過不再靜默截斷**：
+  `reply_send`／`reply_json` 會改回合法物件
+  `{"err":"reply_too_big","need":N,"cap":2600}`（上板驗證：`0xF01A 3000`）。
+- `CDC_TX_WAIT_US = 100 ms`：主機不讀時保護 decode 不卡死。
 - 每核一個 decoder（§7.26）之後，**一核在等，另一核照跑**（已驗證：core1 卡 280 ms，core0 RTT 1.13 ms）。
+- 跨核轉寄之後，CDC／TCP 多了一把「整幀 mutex」：兩個核同時送出時，分 chunk 寫會把兩幀切爛。
+  log 路徑**唔攞**這把鎖（照用 `s_tx_reply` 的 critical section），所以 log 永遠唔會卡回覆。
 
 ## 2. 為什麼 CDC 今天不用等
 
@@ -37,12 +41,12 @@
 
 > 這就是「C 版本交給硬件處理傳送」在 CDC 上的實際樣子：**FIFO 就是那個「放好的位置」**。
 
-## 3. 大幀與轉寄：三種做法（選一個）
+## 3. 大幀與轉寄：三種做法（選了第二種）
 
 | 做法 | 資料誰持有 | decode 何時解放 | 成本 | 適用 |
 |---|---|---|---|---|
 | **同步送** | 來源 parser region | **送完才解放** | 0 RAM | UART 小幀（<1 KB） |
-| **copy → 目的 ring**（建議） | 目的通道 ring | **µs 後**（memcpy） | ring bytes ＋ 1 次 copy | 一般回覆／轉寄 |
+| **copy → 目的 ring**（**已採用**） | 目的通道 TX 緩衝 | **µs 後**（memcpy） | 緩衝本身 ＋ 1 次 copy | 一般回覆／轉寄 |
 | **pin 插槽**（零複製） | PUSH-frame 插槽 | 立即，但插槽被佔到送完 | 插槽 bytes（每格 8,205） | P4 TCP 大流 |
 
 **關鍵不變量**：`frame.data` 指向 parser 環，handler 一返回就會被下一幀覆寫。
@@ -61,6 +65,8 @@
 - 目前**沒有 8 KB 轉寄的產品需求**：命令是小包、OTA 是 4 KB、只有 P4 的 TCP 會到 8 KB（已經有）。
 - 省 RAM 的替代：大包罕見 → **一個共享 4 KB staging ＋ mutex**（同一時間只有一個大包在飛），
   代價是大包會排隊。
+- 今天先開 UART TX **但唔擴環**：1 KB 已經覆蓋「命令／回覆」；4 KB 轉寄會阻塞 ~44 ms。
+  要 decouple 才付 +3.2 KB（見 §9）。
 
 ## 5. DMA 的事實（IDF 6.0.3）
 
@@ -82,41 +88,61 @@
   - 對 CDC：USB 主機重送（NAK），不掉，只延遲。
   - 這與回覆幀放哪裡無關（整個核心被停）。
 - ⚠️ 以前共用一把 decoder 鎖時，OTA 在 core0 寫 flash、core1 的 handler 剛好被鎖住（**意外保護**）；
-  每核 decoder 之後這層保護消失 → 需要另外處理（見 §8）。
+  每核 decoder 之後這層保護消失 → 仍未另外處理（見 §9）。
 
-## 7. 建議的實作順序（下次照這個做）
+## 7. 實作順序（已完成 1、3、4；2 只做了「開」，5 維持不做）
 
-1. **`link_send(dest, ptr, len)`**：`len ≤ ring 剩餘空間` → memcpy ＋ kick，**返回 0（不等）**；
-   否則兩選一：**背壓**（等排空）或 **丟棄 ＋ 計數**（policy 可配）。
-2. **UART TX ring 1,024 → 4,192**（要開 UART send 時才做；+3.2 KB 內部 RAM）。
-3. **轉寄**：router 的 `out` 支援 link 名稱 → 走 `link_send`（copy），**不經過回覆幀**。
-4. **回覆截斷修正**：`reply_send`／`reply_json` 超過 2,600 → 回明確錯誤（或分頁），不要靜默截斷。
-5. **不做** S3 的 8 KB 轉寄；8 KB 留給 P4 TCP（插槽已有）。
+1. ✅ **`nc4_link` 出口表 ＋ `nc4_link_send(dest, ptr, len)`**：名字 → 目的通道的 write；
+   整幀交出去，成功計 `frames/bytes`，短送／錯誤計 `drops`（**不能重試**：來源緩衝即時失效）。
+2. ⚠️ **UART TX**：`uart_send` 已接上，**ring 仍然 1,024**（零 RAM）。4,192 的擴環未做。
+3. ✅ **轉寄**：router 的 `out` 支援 link 名稱 → `parser_dispatch` 先轉寄、後本地 dispatch，
+   **不經過回覆幀**。濾走 `decodeN`、自己、重複；開機做 link 稽核。
+4. ✅ **回覆截斷修正**：超過 2,600 → 合法錯誤物件（不再靜默截斷）。
+5. ✅ **不做** S3 的 8 KB 轉寄；8 KB 留給 P4 TCP（插槽已有）。
 
-## 8. 待驗證的量測（下次開工先跑）
+## 8. 量測（2026-11-08 晚，S3）
 
-| # | 量什麼 | 預期 | 方法 |
-|---|---|---|---|
-| 1 | 4 KB 轉寄時 decode 的實際佔用 | µs 級（copy 進 ring） | 在 handler 前後讀 `esp_timer`，`STATUS` 回報 |
-| 2 | P4 TCP 8 KB 幀的阻塞時間 | ~1–8 ms（受 RTT／窗口） | 對端故意慢讀，量 `send()` 時間 |
-| 3 | OTA 抹除／寫入時 UART 串流掉多少幀 | 可能有掉（FIFO 1.4 ms） | 串流中做 OTA，比對 `rx`／`lost` |
-| 4 | 大包發生率 | 罕見（status／轉寄） | 在 `link_send` 加桶計數（<256／<1K／<4K／<8K） |
+| # | 量什麼 | 結果 |
+|---|---|---|
+| 1 | 4 KB 轉寄時 decode 的實際佔用 | **未量**（沒有 4 KB 轉寄需求；UART 環 1 KB 先擋住） |
+| 2 | P4 TCP 8 KB 幀的阻塞時間 | **未量**（P4 不在手邊） |
+| 3 | OTA 抹除／寫入時 UART 串流掉多少幀 | **未量** |
+| 4 | 大包發生率 | `nc4_link` 的 `bytes/frames` 已經有，但未分桶 |
 
-## 9. 未決問題（要使用者決定）
+已量到的（上板、S3、暫時 `SDIO=0` 讓 GPIO7 做 UART 迴路）：
+- 直接 `0xF01B FWD UART`：`{"err":"ESP_OK","frames":3,"bytes":74,"drops":0}`，
+  `LOOP_STAT rx` 由 0 → 2（連同 FWD 自己的幀被 router 轉出去）。
+- router：`CDC out=["decode0","UART"]`，主機送 **1 條 21 B 的 PING** →
+  `LOOP_STAT rx` +2（本地執行 1 次 ＋ UART 迴路回來再 1 次）。
+- 統計：`links.UART frames 9 / bytes 175 / drops 0`；UART bus `frames 12, crc_err 0, bad_hdr 0`。
+- 回覆超限：`0xF01A 3000` → `{"err":"reply_too_big","need":3000,"cap":2600}`。
 
-1. **UART 要不要 TX？** 現在 `send = NULL`，UART 只收不回。
-2. **轉寄滿了怎麼辦？** 背壓（慢但可靠）還是丟棄＋計數（快但會掉）？
-3. **8 KB 轉寄要不要納入需求？** 若不要，S3 可以永遠不配 8 KB。
-4. **共享 staging 還是每 link ring？** 共享省 RAM 但大包會排隊。
+## 9. 未決問題（更新）
 
-## 10. 程式碼索引
+1. ~~UART 要不要 TX？~~ → **要**（已接上，1 KB 環）。**要不要擴到 4,192（+3.2 KB）** 仍未決定；
+   只有「要轉寄 4 KB 進 UART」才需要。
+2. **轉寄滿了怎麼辦？** 今天沿用各 transport 的語義（CDC 100 ms 後丟、UART 排空、TCP ACK）。
+   要改成「立即丟＋計數」就必須為每個 transport 提供非阻塞寫入（CDC 的 FIFO 可以，
+   TCP 要 `MSG_DONTWAIT` ＋ 續傳）。
+3. ~~8 KB 轉寄要不要納入需求？~~ → **不要**（S3 永遠不配 8 KB）。
+4. ~~共享 staging 還是每 link ring？~~ → 用各 transport 自己的 TX 緩衝（等於每 link 一個），
+   冇額外共享 staging。
+5. **拓撲成環**：`CDC→UART` 與 `UART→CDC` 兩條互指目前未擋（自我反射已濾）。
+   要嘛開機靜態檢查、要嘛幀頭加 TTL——NC4 表頭冇 TTL 欄位。
+6. **OTA flash 停頓 vs UART**：每核 decoder 之後，OTA（core0）停 cache 時 core1 的 uart.rx
+   冇保護。仍未處理。
+
+## 10. 程式碼索引（用符號名，避免行號漂移）
 
 | 位置 | 內容 |
 |---|---|
-| [`main.c:752`](../../firmware/main/main.c#L752) | `cdc_send`：FIFO 迴圈 ＋ 100 ms deadline |
-| [`main.c:2914`](../../firmware/main/main.c#L2914) | `tcp_nc4_send`：`send()` 迴圈，出錯直接斷線 |
-| [`main.c:845`](../../firmware/main/main.c#L845)／[`872`](../../firmware/main/main.c#L872) | 回覆長度 clamp（靜默截斷） |
-| [`nc4_router.c`](../../firmware/components/sys/nc4/nc4_router.c) | 只有 `line → core`，沒有轉寄 |
-| [`nc4.c`](../../firmware/components/sys/nc4/nc4.c) | `parser_dispatch`：handler 執行期間 parser 環被佔 |
+| `main.c` `cdc_send()` | FIFO 迴圈 ＋ 100 ms deadline ＋ 整幀 mutex |
+| `main.c` `uart_send()`／`uart_link_write()` | 整幀 `uart_write_bytes`（未安裝 driver 回 -1） |
+| `main.c` `tcp_nc4_send()`／`tcp_link_write()` | `send()` 迴圈 ＋ 整幀 mutex，出錯直接斷線 |
+| `main.c` `reply_send()`／`reply_json()` | 超過 2,600 → `{"err":"reply_too_big",…}` |
+| `nc4_link.c` | 名字 → write fn；`nc4_link_send`、統計、JSON |
+| `nc4_router.c` `nc4_router_links()` | 從 `out` 濾出真正的轉寄目的地 |
+| `nc4.c` `parser_forward()` | 先轉寄、後 ADDR 過濾與 dispatch |
+| `nc4.c` `parser_dispatch()` | handler 執行期間 parser 環被佔（不變量來源） |
 | [status §7.26](../00_pm/status.md) | 每核 decoder（發送的並行性前提） |
-| [status §7.1 D](../00_pm/status.md) | `out` 的 link 轉發「未做」 |
+| [status §7.28](../00_pm/status.md) | 本次落地的完整記錄與上板數據 |

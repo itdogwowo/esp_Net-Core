@@ -11,6 +11,7 @@
 #include "freertos/semphr.h"
 #include "esp_timer.h"
 #include "esp_heap_caps.h"
+#include "nc4_link.h"
 
 static const char *TAG = "nc4_ws";
 
@@ -77,6 +78,13 @@ static esp_err_t ws_send(void *arg, const uint8_t *frame, size_t len)
         s_fd = -1;
     }
     return r;
+}
+
+// 轉寄出口：WS 的「送出」是 httpd async send（整幀 copy 入 httpd 的傳送隊列），
+// 所以 link 層同樣唔需要加等待。目標是「最後一個連上來的 WS client」。
+static int ws_link_write(void *arg, const uint8_t *frame, size_t len)
+{
+    return (ws_send(arg, frame, len) == ESP_OK) ? (int)len : -1;
 }
 
 static esp_err_t ws_handler(httpd_req_t *req)
@@ -212,6 +220,7 @@ esp_err_t nc4_ws_start(nc4_decoder_t *decoder, uint16_t port)
         return ESP_ERR_NO_MEM;
     }
     s_tx_lock = xSemaphoreCreateMutex();
+    (void)nc4_link_register("WS", ws_link_write, NULL);
 
     httpd_config_t cfg = HTTPD_DEFAULT_CONFIG();
     cfg.server_port = port;

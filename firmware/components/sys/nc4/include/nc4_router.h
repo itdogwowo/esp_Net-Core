@@ -32,12 +32,20 @@ extern "C" {
 
 #define NC4_ROUTE_MAX       8
 #define NC4_ROUTE_NAME_MAX  16     // 線名上限（含 NUL）
+#define NC4_ROUTE_OUT_MAX   4      // 一列最多幾個 out（config 的 NC_CFG_MAX_OUT 也是 4）
 #define NC4_ROUTE_NONE      (-1)   // 冇人路由去呢條線
 
 // 一行 = 一條通道（"CDC" / "UART" / "TCP" / "WS" / "UDP" …）
 typedef struct {
     const char *line;
     int core;              // 0 / 1
+    // 完整的 out 清單（`decodeN` 與 link 名都原樣帶入）。
+    // `core` 仍然係「本地由邊個核解」，`out` 係「要不要轉出去」——兩者獨立：
+    //   out = ["decode0"]        只本地執行
+    //   out = ["decode0","UART"] 執行 ＋ 轉去 UART
+    // n_out = 0 = 舊式寫法（只有 line → core，沒有轉寄資訊）。
+    uint8_t n_out;
+    const char *out[NC4_ROUTE_OUT_MAX];
 } nc4_route_t;
 
 // 一次過設定整張表。先驗完先落地：唔會留低半張表。
@@ -51,6 +59,14 @@ void nc4_router_reset(void);
 
 // 查核：冇路由返 NC4_ROUTE_NONE
 int nc4_router_core(const char *line);
+
+// 這一列的**轉寄目的地**（名字）：已濾走 decodeN（本地執行）同自己（自我反射），
+// 亦已去重。回傳實際寫入幾個；line 查唔到／冇 out 回 0。
+// 例子：CDC 的 out = ["decode0","UART"] → 回 1，out[0] = "UART"。
+int nc4_router_links(const char *line, const char **out, int max);
+
+// 第 i 列的名字（開機稽核／除錯用；越界回 NULL）。
+const char *nc4_router_line(int i);
 
 // 冇 `_or(line, fallback)` 變體，是故意的：核歸屬只由 config 決定。
 // 呼叫端取唔到就自己決定「唔建立」（fail-visible），

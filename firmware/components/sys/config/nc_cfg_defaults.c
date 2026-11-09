@@ -67,6 +67,14 @@ static const nc_system_cfg_t k_system = {
         { .in = "CDC",      .n_out = 1, .out = { "decode0" } },
         { .in = "UART",     .n_out = 1, .out = { "decode1" } },
     },
+    // 2026-11-09：共用緩衝池（small／bulk／forward）。
+    // 預設全部 internal；forward 要給 UART/TCP 送，不可放 PSRAM。
+    .n_pools = 3,
+    .pools = {
+        { .name = "small",   .size = 1024, .count = 8, .where = 0, .enable = true },
+        { .name = "bulk",    .size = 4112, .count = 3, .where = 0, .enable = true },
+        { .name = "forward", .size = 4112, .count = 2, .where = 0, .enable = true },
+    },
 };
 
 static const nc_tasks_cfg_t k_tasks = {

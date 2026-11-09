@@ -61,7 +61,7 @@
 | [naming.md](03_notes/naming.md) | **命名慣例**：一個子系統一個前綴（`nc4_`/`nc_plan_`/`nc_task_`/`nc_store_`/`nc4_ws_`/`nc_fx_`）、**`<域>_task` 與 `<域>_action` 後綴**（同名域不混淆，例 pixel）、檔名＝前綴＋角色、型別與列舉規則、新舊對照、**§5 術語表（FXE 引擎／FXE 模組／FXE 容器／pixel 渲染器）** |
 | [component-layout.md](03_notes/component-layout.md) | **三層分區與 component 佈局（目標架構）**：hw/sys/sw/action/tasks/ui/schema 七區、`ports/` 專案層、依賴方向。⚠️ 目前只落地 `sys/` 與 `app/` |
 | [file-write-path.md](03_notes/file-write-path.md) | **分段寫入可行性**：mp 版 `.tmp`→`sha256`→`.bak`→rename 演算法、空間預算（覆蓋要 2×）、實測 141 KB/s、斷電恢復、四個必做條件 |
-| [tx-path-design.md](03_notes/tx-path-design.md) | **發送／轉寄路徑（2026-11-08 討論，未實作）**：各通道「交出去」的緩衝與阻塞行為（CDC 4 KB FIFO 不用等、UART 不發、P4 TCP >5.7 KB 會等）、零複製 vs copy-into-ring vs pin 插槽、4 KB／8 KB 的成本表、DMA 的事實（UART 無 TX DMA）、PSRAM 與 flash 停頓、建議實作順序與待量測清單 |
+| [tx-path-design.md](03_notes/tx-path-design.md) | **發送／轉寄路徑（2026-11-08 討論＋同日落地）**：各通道「交出去」的緩衝與阻塞行為（CDC 4 KB FIFO 不用等、UART 1 KB ring 會排空、P4 TCP >5.7 KB 會等）、`nc4_link` 出口表、`routes[].out` 轉寄（同步、先轉寄後本地）、零複製 vs copy-into-ring vs pin 插槽、4 KB／8 KB 的成本表、DMA 的事實（UART 無 TX DMA）、PSRAM 與 flash 停頓、**上板量測結果與仍未做的清單** |
 | [fat-ownership.md](03_notes/fat-ownership.md) | **FAT 擁有者（互斥模型）**：為什麼不能同時掛碟與讀檔、為什麼只切 mount_point 不夠、LUN 拆建＋USB 重新列舉、實測數據 |
 | [config-layers.md](03_notes/config-layers.md) | **配置分層（一個層一個檔案）**：`config/hardware.json`→`driver`→`system`→`network`→`tasks`→`effects`→`ui`；每層自己讀、缺檔用預設、壞檔只退化該層；開機順序（硬體先起來才讀分配）；`system.json` 的 `links[]` / `routes[]` 與 `tasks.json` 怎麼寫 |
 | [p4-bringup.md](03_notes/p4-bringup.md) | **ESP32-P4 上板紀錄**：IDF 版本、console/PSRAM 陷阱、乙太網吞吐調校（1.1 → 8 MB/s） |
@@ -70,6 +70,8 @@
 | [hardware-bus.md](03_notes/hardware-bus.md) | **硬體歸屬（設計紀錄，未實作）**：現在是裝配層人工分配（一裝置一 owner）、為什麼不需要執行期仲裁、哪天要做時的形狀與位置（task 層），以及三個觸發條件 |
 | [rx-architecture.md](03_notes/rx-architecture.md) | **收／解路徑正式架構（規劃）**：分核／零複製的能力邊界、缺什麼、component 切法、config 與記憶體、P0–P5 遷移 |
 | [buffer-manager-status.md](03_notes/buffer-manager-status.md) | **緩衝管理器實作現況**：三個原語、N 的語義、不變量、測試結果、已知缺陷 |
+| [buffer-pool.md](03_notes/buffer-pool.md) | **共用緩衝池與 PSRAM 實測（2026-11-09）**：三個 size class（small／bulk／forward）、descriptor／refcount、`nc4.pool` 設定、跨核轉寄 queue、`0xF01C` 量到的 internal 240 MB/s vs PSRAM 21–33 MB/s、38.4 KB frame 的可行性計算、限制與未做 |
+| [psram-surface.md](03_notes/psram-surface.md) | **PSRAM surface／pass 管理器（設計）**：什麼叫「用對 PSRAM」（數 pass、internal tile、分塊 bound latency，不是切細就快）、`nc_surface` 的 buffer／tile／sink／stats API、direct vs staging、38.4 KB frame 的預算、決策矩陣與落地順序 |
 | [memory-budget.md](03_notes/memory-budget.md) | **記憶體預算（S3 實測 map）**：內部 SRAM 126 KB 靜態 + 40 KB 執行期、開機剩 ~168 KB、與 MicroPython 對比、**開 WiFi 的 90–120 KB 成本**（Espressif 官方表）、怎麼自己量 |
 | [buffer-tightening.md](03_notes/buffer-tightening.md) | **緩衝區貼身化（2026-11-08 實測）**：每條 link／任務的緩衝逐一量測再收斂（UART 4×256、RX/TX 1 KB、棧 1.5 KB；decode/main 3 KB）；抓到 UART「等收滿才返回」、測試回覆幀 2.6 KB 上棧兩個真問題；雙核隔離與前後吞吐對照 |
 | [buffer-manager.md](03_notes/buffer-manager.md) | **緩衝管理器（設計定案、未實作）**：三階段 declare→commit→take、四種機制、三層 tier、撇除規則、S3 記憶體圖、P0–P4 分期、待決事項。**接手實作先讀這份** |

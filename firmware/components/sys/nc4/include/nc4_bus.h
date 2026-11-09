@@ -121,6 +121,9 @@ void nc4_bus_kick(nc4_bus_handle_t bus);
 size_t nc4_bus_slot_size(nc4_bus_handle_t bus);
 int    nc4_bus_slot_count(nc4_bus_handle_t bus);
 
+// 叫醒指定核心的 decode task（**只給跨核轉寄用**；bus producer 仍然同核 kick）。
+void nc4_bus_kick_core(int core);
+
 // 停滯偵測（monitor 用）：decode 迴圈跑過幾多次、每條 bus 的狀態。
 uint32_t nc4_bus_loop_count(int core);
 size_t   nc4_bus_dump(char *buf, size_t cap);

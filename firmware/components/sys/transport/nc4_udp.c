@@ -9,6 +9,7 @@
 #include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "lwip/sockets.h"
+#include "nc4_link.h"
 
 static const char *TAG = "nc4_udp";
 
@@ -56,6 +57,13 @@ static esp_err_t udp_send(void *arg, const uint8_t *frame, size_t len)
     }
     s_tx++;
     return ESP_OK;
+}
+
+// 轉寄出口：UDP 的 sendto 是一則 datagram（整幀交出去）。
+// 目標是「最後一則 datagram 的來源」—— 沒有 peer 就回錯，由 link 表計 drop。
+static int udp_link_write(void *arg, const uint8_t *frame, size_t len)
+{
+    return (udp_send(arg, frame, len) == ESP_OK) ? (int)len : -1;
 }
 
 static void udp_task(void *arg)
@@ -134,6 +142,7 @@ esp_err_t nc4_udp_start(nc4_decoder_t *decoder, uint16_t port)
         return ESP_ERR_NO_MEM;
     }
     s_tx_lock = xSemaphoreCreateMutex();
+    (void)nc4_link_register("UDP", udp_link_write, NULL);
 
     s_sock = socket(AF_INET, SOCK_DGRAM, 0);
     if (s_sock < 0) {

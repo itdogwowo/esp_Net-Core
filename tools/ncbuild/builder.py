@@ -193,7 +193,11 @@ def flash(cfg: dict, board_query: str | None, *, port: str | None = None,
         print(f"✘ firmware/sdkconfig 的 target 是 {now}，不是 {b['chip']}；先 build 這塊板子")
         return 1
 
-    args = _idf_args(d, b, minimal)
+    # ⚠️ `--tests` 一定要一路帶到**燒錄這一步**：idf.py 每次收到不同嘅
+    # -DNC_ENABLE_TESTS 都會重新 configure＋重編。以前呢裡漏咗 tests，
+    # 所以 `make.py flash s3 --tests` 先建測試映像、再喺 app-flash 時
+    # 悄悄重編成 release 才寫入（燒上去嘅同建好嘅唔係同一顆）。
+    args = _idf_args(d, b, minimal, tests)
     cmd_map = {
         "app": "app-flash",
         "full": "flash",

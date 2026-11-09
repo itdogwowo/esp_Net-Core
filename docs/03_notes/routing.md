@@ -245,9 +245,9 @@ route     TCP      → decode0, UART     config
 跟舊專案一樣。這是「用戶沒有機會知道」的補寫：新線路是程式建的，用戶不會知道要自己加 route。
 用戶寫過的值一律不動。
 
-> **現況**：上面這張表是**設計目標**。今日開機印的是 `nc4_router_json()` 的單行 JSON
-> （`{"set":1,"core0":3,"core1":1,"routes":[{"line":"CDC","core":0},…]}`），
-> 只有 `line → core`，沒有 `prio` / `src` / `fx` 那幾欄。要那張表得等 §7 的落差補完。
+> **現況**：`nc4_router_json()` 的單行 JSON 已經帶 `out`
+> （`{"set":1,"core0":3,"core1":1,"routes":[{"line":"CDC","core":0,"out":["decode0","UART"]},…]}`）；
+> 仍然沒有 `prio` / `src` / `fx` 那幾欄。link 轉寄**已於 2026-11-08 實作**（見 §7.1）。
 
 ---
 
@@ -288,22 +288,47 @@ route     TCP      → decode0, UART     config
 - `decode0` / `decode1` 兩個任務的**存在與否**由 `nc4_router_core_used(N)` 決定
   （`nc4_want_core0()` / `nc4_want_core1()`）；一條線都沒有的核，任務根本不建立。
 - 讀不到有效 `routes[]` 就退回板子預設表（`router_defaults()`），並印 `ESP_LOGW`。
-- `0x1105 ROUTE_GET` 可以線上查「板子實際吃了哪一份表」。
+- `0x1105 ROUTE_GET` 可以線上查「板子實際吃了哪一份表」，回覆帶 `out`。
+
+### 7.1 `out` 的 link 轉寄（2026-11-08 實作）
+
+```
+system.json:  { "in": "CDC", "out": ["decode0", "UART"] }
+                      │                        └─ 轉寄目的地（link 名）
+                      └─ 本地由 decode0 解
+```
+
+- **誰送**：來源線的 decode 任務（同步）。`parser_dispatch` 在 ADDR 過濾與 handler **之前**
+  呼叫 `nc4_router_links()` → `nc4_link_send()`，把**整幀** copy 進目的通道的 TX 緩衝
+  （CDC FIFO／UART ring／TCP sndbuf／WS async／UDP sendto）。
+- **為什麼不能「稍後再送」**：幀的 bytes 住在 parser 環／PUSH 插槽，handler 一返回就會被
+  下一幀覆寫。所以失敗只能丟，並在 `net.links[].drops` 計數（不是靜默消失）。
+- **會濾走什麼**：`decodeN`（那是本地執行）、自己（自我反射）、重複目的地。
+  查不到 link（未建立／名字打錯）→ 開機的 link 稽核會 `ESP_LOGE`，執行期每幀計 drop。
+- **要先送還是先本地執行**：先送。這樣慢的本地 handler（例如 OTA）不會延遲轉寄。
+- **背壓**：由目的通道自己決定（CDC FIFO 滿 → 等 ≤100 ms 再丟；UART → 等到 ring 排空；
+  TCP → 等到對端 ACK）。link 層唔另外加 queue。
+- **跨核**：destination 的解碼核不一定是來源核；CDC／TCP 因此加了「整幀 mutex」，
+  避免兩個核的 chunk 交錯（詳見 [tx-path-design.md](tx-path-design.md) §11／status §7.28）。
+- **未支援**：`out` 只有 link、冇任何 `decodeN` 的行（forward-only）——
+  一條通道仍然需要有一個核去跑它的 parser，所以這種行照舊唔建立（原則是 fail-visible）。
+- **未擋**：兩條線互指（`CDC→UART`、`UART→CDC`）會成環；自我反射已濾，但 A↔B 未擋。
+  NC4 表頭沒有 TTL，要做得另加欄位或開機靜態檢查。
 
 **還沒接上的部分**（處置見 [disposition.md](../00_pm/disposition.md)）：
 
 | # | 現況 | 要改成 | 處置 |
 |---|---|---|---|
-| 1 | `s_decoder` 只建立一次：兩核共用同一個 decoder，handler 被它的 mutex 序列化（回覆緩衝已改成每次呼叫在 stack 上，不再是共用） | 每個被 routes 指到的 `decodeN` 一個 decoder | ❓ 待決（架構） |
-| 2 | `out` 裡的 **link**（轉發）完全被忽略 | 依 `out` 把幀送進對應 link 的 tx | 🔄 先從 schema 移除，等要做再加 |
+| ~~1~~ | ~~兩核共用一個 decoder，handler 被它的 mutex 序列化~~ | 每個被 routes 指到的 `decodeN` 一個 decoder | ✅ 已做（status §7.26：`s_decoder[2]`） |
+| ~~2~~ | ~~`out` 裡的 **link**（轉發）完全被忽略~~ | 依 `out` 把幀送進對應 link 的 tx | ✅ 已做（status §7.28：`nc4_link`＋`nc4_router_links`） |
 | 3 | `tcp_accept`（9）、`tcp_rx`（10）、`nc4_udp`（10）是裸 `xTaskCreatePinnedToCore` | 收進 `tasks[]`，由任務管理器建立與管 | 🔄 收進任務管理器 |
 | 4 | `fx` 是一個固定 task（core 1、prio 3） | 依 manifest 的 `core` 分組，每一核一個 fx 引擎；`-1` → 預設核 | 🔄 依 manifest core |
 | 5 | WS / UDP 在 httpd / udp task 內直接解析 | 納入 `links[]`，各自宣告 rx 區域 | 🔄 納入 links[] |
 | 6 | 只有部分通道有 `send` | `out` 只能指向有 send 的 link | ✅ 約束（保留） |
 
-> **所以今日的真相是**：`routes[]` 的 `in` 半邊**真的生效**（決定誰解、哪一核存在），
-> `out` 半邊只有 `decodeN` 生效，**link 轉發仍然是格式**。
-> 改 `in` 會改變行為；改 `out` 加一條 link 不會。
+> **所以今日的真相是**：`in` 半邊決定「誰解、哪一核存在」；`out` 半邊的 `decodeN` 決定
+> 本地執行、link 名決定轉寄。三種組合（只解／只轉／又解又轉）都真的生效。
+> 唯一未支援的是「只轉不解」的行，以及兩條線互指的環（見 §7.1）。
 
 ---
 

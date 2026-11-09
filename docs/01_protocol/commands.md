@@ -71,19 +71,23 @@ components/action/
 [../03_notes/routing.md](../03_notes/routing.md)）。它不隨時間變，但**改 config 之後
 要能確認板子真的吃到了哪一份** —— 沒有這條指令就只可以看 UART 開機 log。
 
-回覆長這樣（`nc4_router_json()` 產生，每條線約 25 B）：
+回覆長這樣（`nc4_router_json()` 產生）：
 
 ```json
 {"set":1,"core0":3,"core1":1,
- "routes":[{"line":"nctx","core":0},{"line":"CDC","core":0},
-           {"line":"UART","core":1},{"line":"TCP","core":0}]}
+ "routes":[{"line":"nctx","core":0,"out":["decode0"]},
+           {"line":"CDC","core":0,"out":["decode0"]},
+           {"line":"UART","core":1,"out":["decode1"]},
+           {"line":"TCP","core":0,"out":["decode0","UART"]}]}
 ```
 
 - `set` = 1 表示表真的設過（0 = 冇人叫過 `nc4_router_set()`，router 等於冇開）。
 - `core0` / `core1` = 各有幾條線派去第 0 / 第 1 核；`0` 代表該核的 decode 任務
   **不會被建立**（除非有 `nc4_router_keep()`）。
-- 表裡只有 `line → core`，**沒有方向**。`out` 裡的 link（轉發）目前**未實作**：
-  讀 config 時只取每行第一個 `decodeN` 當核心，其餘 `out` 成員被忽略。
+- `core` = 本地由哪一核解（`out` 裡第一個 `decodeN`）。
+- `out` = **完整的目的地清單**（`decodeN` 與 link 名原樣照抄）：`decodeN` = 本地執行、
+  link 名 = 轉寄。2026-11-08 起轉寄真的生效（見
+  [routing.md §7.1](../03_notes/routing.md)）；只轉不解的行仍然唔會建立通道。
 
 ### `0x1103 STATUS_SET`：`System.fs_format` = 下次開機重建 FAT
 
@@ -181,8 +185,18 @@ components/action/
 | `0xF00C` LOOP_STAT | 空 → `0xF004` `{rx,sent}`：UART 迴路已收到的幀數／串流已寫出的幀數 |
 | `0xF00F` UART_INJECT | 原始 bytes → `0xF004` `{wrote:N}`：把 payload **原樣寫入 UART**（IO7→IO8 迴路）。用途是驗證雙核並行：注入一條慢指令（例如 `0xF001`）讓 decode1 卡住，同時量 core0 的 RTT |
 | `0xF00E` UART_STREAM | `frames(u16) size(u16)` → `0xF004` `{started,frames,size}`：**由獨立 task** 灌 UART（唔揸 decoder 鎖），配合 `0xF00C` 取進度。`size ≤ 256` |
+| `0xF01A` BIG_REPLY | `[n:u16]` → `0xF004`：回一條長度 n（預設 3,000）的字串，用來驗「回覆超限」。**n > 2,600 時預期收到 `{"err":"reply_too_big","need":n,"cap":2600}`**；n ≤ 2,600 時內容是 `x`（不是 JSON，只為驗邊界） |
+| `0xF01B` LINK_FWD | `name_len(u16) name(bytes) frame(bytes)` → `0xF004` `{link,len,err,frames,bytes,drops}`：把一段**已打包好的 NC4 幀**交給指定 link（走 `nc4_link_send`，與 router 轉寄同一條路）。未知 link → `err=ESP_ERR_NOT_FOUND` |
+| `0xF01C` MEM_BENCH | `[psram_kb:u16][iters:u16]`（預設 256 KB、4 次）→ `0xF004`：`{int:{kb,memset_mbps,read_mbps,copy_mbps}, psram:{...}, msync_us, msync_err, sum}`。量 internal／PSRAM 實際頻寬與 cache flush；用來決定 PSRAM 可否做 framebuffer |
+| `0xF01D` TILE_BENCH | `[total_kb:u16][tile_kb:u16][iters:u16]`（預設 40/8/8）→ `0xF004`：`{total_kb,tile_kb,iters,full_us,tile_us,full_mbps,tile_mbps,ratio_x10}`。整幀 streaming vs 分塊（cache-hot）的實測；證明單 pass 是 bus-bound、tiling 只快 1.3× |
 
-`0xF004` 是共用的回覆號（HUB / SLOW / UART / TX / NET_TUNE 都用它），因為它們都是「量測結果」。
+> ⚠️ 新增測試指令之前先查号：**指令碼重複時只會保留先登記的那一個**（`nc_action_init()`
+> 會在開機 `ESP_LOGE` 並丟棄後來者）。登記次序是 core →（測試的 bench／SD）→ test_action
+> → ota → file，所以生產指令永遠不會被測試表蓋掉。0xF012／0xF013 已被 SD bench 佔用；
+> 0xF005／0xF006 是 2026-11-04 刪除的舊號，不要再復用。
+
+`0xF004` 是共用的回覆號（HUB / SLOW / UART / TX / NET_TUNE / BIG_REPLY / LINK_FWD 都用它），
+因為它們都是「量測結果」。
 
 ### 名稱一律照上游，不要自己發明
 

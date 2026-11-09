@@ -24,6 +24,7 @@ extern "C" {
 #define NC_CFG_MAX_ROUTES       8
 #define NC_CFG_MAX_OUT          4
 #define NC_CFG_MAX_TASKS        20     // 與 NC_TASK_MAX 相同
+#define NC_CFG_MAX_POOLS        4      // nc4.pool：small／bulk／forward（+1 spare）
 #define NC_CFG_NAME_MAX         16     // 通道名（CDC / UART / TCP …）
 #define NC_CFG_TASK_NAME_MAX    24
 #define NC_CFG_CID_MAX          8      // "F5F9" + 餘裕
@@ -73,6 +74,16 @@ typedef struct {
     char    out[NC_CFG_MAX_OUT][NC_CFG_NAME_MAX];
 } nc_route_cfg_t;
 
+// nc4.pool 的一列：固定 size class 的緩衝池。
+// where: 0 = internal，1 = PSRAM（PSRAM 不可給 GDMA 直接用；forward/UART 用 internal）。
+typedef struct {
+    char     name[NC_CFG_NAME_MAX];
+    uint16_t size;        // 每格 bytes
+    uint8_t  count;       // 幾格
+    uint8_t  where;       // 0 internal / 1 psram
+    bool     enable;
+} nc_cfg_pool_t;
+
 #define NC_CFG_MOUNT_MAX  16
 
 // ── hardware 層（hardware.json）：實體匯流排 ──
@@ -121,6 +132,8 @@ typedef struct {
     nc_link_cfg_t  links[NC_CFG_MAX_LINKS];
     uint8_t        n_routes;
     nc_route_cfg_t routes[NC_CFG_MAX_ROUTES];
+    uint8_t        n_pools;
+    nc_cfg_pool_t  pools[NC_CFG_MAX_POOLS];
     uint8_t        log_debug_mode;  // 0 = 正常（2 KB、E/W/I、由 USB 起來開始記）｜1 = 除錯（8 KB、全部、連開機）
 } nc_system_cfg_t;
 
