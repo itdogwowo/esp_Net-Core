@@ -1084,6 +1084,1353 @@ static void on_tile_bench(nc4_ctx_t *ctx, const nc4_frame_t *f)
     reply_json(ctx, NC4_CMD_HUB_RSP, json);
 }
 
+// ── 0xF01E STAGE_BENCH：SRAM↔PSRAM 的方向、copy 與 freshness 成本 ──
+// payload = [u32 bytes][u16 iters][u16 mode]；bit0：0=fresh（含 sync）、1=hot；bit1=另一核持續 PSRAM copy。
+#define NC4_CMD_STAGE_BENCH  0xF01E
+
+typedef struct {
+    uint32_t copy_us;
+    uint32_t total_us;
+    uint32_t max_us;
+    uint32_t mbps;
+} stage_result_t;
+
+static void stage_sync(void *p, size_t bytes, int flags, esp_err_t *err)
+{
+    const esp_err_t e = esp_cache_msync(p, bytes, flags);
+    if (*err == ESP_OK && e != ESP_OK) {
+        *err = e;
+    }
+}
+
+static stage_result_t stage_run(void *dst, const void *src, size_t bytes, int iters,
+                                bool fresh, bool src_ext, bool dst_ext,
+                                esp_err_t *sync_err)
+{
+    int64_t copy_total = 0;
+    int64_t total = 0;
+    uint32_t max_us = 0;
+    for (int k = 0; k < iters; k++) {
+        const int64_t begin = esp_timer_get_time();
+        if (fresh && src_ext) {
+            stage_sync((void *)src, bytes, ESP_CACHE_MSYNC_FLAG_DIR_M2C, sync_err);
+        }
+        const int64_t t0 = esp_timer_get_time();
+        memcpy(dst, src, bytes);
+        const int64_t t1 = esp_timer_get_time();
+        if (fresh && dst_ext) {
+            stage_sync(dst, bytes, ESP_CACHE_MSYNC_FLAG_DIR_C2M, sync_err);
+        }
+        const int64_t t2 = esp_timer_get_time();
+        copy_total += t1 - t0;
+        total += t2 - begin;
+        if ((uint32_t)(t2 - begin) > max_us) {
+            max_us = (uint32_t)(t2 - begin);
+        }
+    }
+    return (stage_result_t){
+        .copy_us = (uint32_t)(copy_total / iters),
+        .total_us = (uint32_t)(total / iters),
+        .max_us = max_us,
+        .mbps = bench_mbps(bytes, iters, total),
+    };
+}
+
+typedef struct {
+    volatile bool stop;
+    volatile bool started;
+    TaskHandle_t done;
+    uint8_t *src;
+    uint8_t *dst;
+} stage_competitor_t;
+
+static void stage_competitor_task(void *arg)
+{
+    stage_competitor_t *c = arg;
+    c->started = true;
+    uint32_t rounds = 0;
+    while (!c->stop) {
+        memcpy(c->dst, c->src, 64 * 1024);
+        if ((++rounds & 0xFF) == 0) {
+            vTaskDelay(1);
+        }
+    }
+    c->done = NULL;
+    vTaskDelete(NULL);
+}
+
+static esp_err_t stage_competitor_begin(stage_competitor_t *c, uint8_t *src, uint8_t *dst)
+{
+    memset(c, 0, sizeof(*c));
+    c->src = src;
+    c->dst = dst;
+    const int other_core = (int)xPortGetCoreID() ^ 1;
+    const BaseType_t ok = xTaskCreatePinnedToCore(stage_competitor_task, "stage_competitor",
+                                                  3072, c, uxTaskPriorityGet(NULL),
+                                                  &c->done, other_core);
+    if (ok != pdPASS) {
+        return ESP_ERR_NO_MEM;
+    }
+    while (!c->started) {
+        vTaskDelay(1);
+    }
+    return ESP_OK;
+}
+
+static void stage_competitor_end(stage_competitor_t *c)
+{
+    c->stop = true;
+    while (c->done != NULL) {
+        vTaskDelay(1);
+    }
+}
+
+static void on_stage_bench(nc4_ctx_t *ctx, const nc4_frame_t *f)
+{
+    uint32_t bytes = 64 * 1024;
+    uint16_t iters = 8;
+    uint16_t mode = 0;
+    if (f->len >= 4) {
+        bytes = (uint32_t)f->data[0] | ((uint32_t)f->data[1] << 8) |
+                ((uint32_t)f->data[2] << 16) | ((uint32_t)f->data[3] << 24);
+    }
+    if (f->len >= 6) {
+        iters = (uint16_t)(f->data[4] | (f->data[5] << 8));
+    }
+    if (f->len >= 8) {
+        mode = (uint16_t)(f->data[6] | (f->data[7] << 8));
+    }
+    if (bytes < 64) bytes = 64;
+    if (bytes > 128 * 1024) bytes = 128 * 1024;
+    bytes = (bytes + 63) & ~(uint32_t)63;
+    if (iters < 1) iters = 1;
+    if (iters > 32) iters = 32;
+
+    const uint32_t internal_caps = MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT;
+    const uint32_t psram_caps = MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT;
+    uint8_t *is = heap_caps_aligned_alloc(64, bytes, internal_caps);
+    uint8_t *id = heap_caps_aligned_alloc(64, bytes, internal_caps);
+    uint8_t *ps = heap_caps_aligned_alloc(64, bytes, psram_caps);
+    uint8_t *pd = heap_caps_aligned_alloc(64, bytes, psram_caps);
+    if (is == NULL || id == NULL || ps == NULL || pd == NULL) {
+        free(is); free(id); free(ps); free(pd);
+        reply_json(ctx, NC4_CMD_HUB_RSP, "{\"err\":\"nomem\"}");
+        return;
+    }
+
+    memset(is, 0x11, bytes);
+    memset(id, 0x22, bytes);
+    memset(ps, 0x33, bytes);
+    memset(pd, 0x44, bytes);
+    esp_err_t sync_err = ESP_OK;
+    stage_sync(ps, bytes, ESP_CACHE_MSYNC_FLAG_DIR_C2M, &sync_err);
+    stage_sync(pd, bytes, ESP_CACHE_MSYNC_FLAG_DIR_C2M, &sync_err);
+
+    const bool fresh = ((mode & 1) == 0);
+    const bool contend = ((mode & 2) != 0);
+    uint8_t *cs = NULL;
+    uint8_t *cd = NULL;
+    stage_competitor_t competitor;
+    if (contend) {
+        cs = heap_caps_aligned_alloc(64, 64 * 1024, psram_caps);
+        cd = heap_caps_aligned_alloc(64, 64 * 1024, psram_caps);
+        if (cs == NULL || cd == NULL) {
+            free(is); free(id); free(ps); free(pd); free(cs); free(cd);
+            reply_json(ctx, NC4_CMD_HUB_RSP, "{\"err\":\"nomem_competitor\"}");
+            return;
+        }
+        memset(cs, 0x55, 64 * 1024);
+        if (stage_competitor_begin(&competitor, cs, cd) != ESP_OK) {
+            free(is); free(id); free(ps); free(pd); free(cs); free(cd);
+            reply_json(ctx, NC4_CMD_HUB_RSP, "{\"err\":\"nomem_task\"}");
+            return;
+        }
+    }
+
+    const stage_result_t ss = stage_run(id, is, bytes, iters, fresh, false, false, &sync_err);
+    const stage_result_t sp = stage_run(pd, is, bytes, iters, fresh, false, true, &sync_err);
+    const stage_result_t ps2i = stage_run(id, ps, bytes, iters, fresh, true, false, &sync_err);
+    const stage_result_t pp = stage_run(pd, ps, bytes, iters, fresh, true, true, &sync_err);
+    if (contend) {
+        stage_competitor_end(&competitor);
+        free(cs);
+        free(cd);
+    }
+
+    char json[700];
+    snprintf(json, sizeof(json),
+             "{\"bytes\":%u,\"iters\":%u,\"mode\":\"%s\",\"contend\":%u,\"sync_err\":\"%s\","
+             "\"s2s\":{\"copy_us\":%u,\"total_us\":%u,\"max_us\":%u,\"mbps\":%u},"
+             "\"s2p\":{\"copy_us\":%u,\"total_us\":%u,\"max_us\":%u,\"mbps\":%u},"
+             "\"p2s\":{\"copy_us\":%u,\"total_us\":%u,\"max_us\":%u,\"mbps\":%u},"
+             "\"p2p\":{\"copy_us\":%u,\"total_us\":%u,\"max_us\":%u,\"mbps\":%u}}",
+             (unsigned)bytes, (unsigned)iters, fresh ? "fresh" : "hot",
+             contend ? 1 : 0, esp_err_to_name(sync_err),
+             (unsigned)ss.copy_us, (unsigned)ss.total_us, (unsigned)ss.max_us, (unsigned)ss.mbps,
+             (unsigned)sp.copy_us, (unsigned)sp.total_us, (unsigned)sp.max_us, (unsigned)sp.mbps,
+             (unsigned)ps2i.copy_us, (unsigned)ps2i.total_us, (unsigned)ps2i.max_us, (unsigned)ps2i.mbps,
+             (unsigned)pp.copy_us, (unsigned)pp.total_us, (unsigned)pp.max_us, (unsigned)pp.mbps);
+    free(is); free(id); free(ps); free(pd);
+    reply_json(ctx, NC4_CMD_HUB_RSP, json);
+}
+
+// ── 0xF01F HUB_STRESS：雙核壓力測試 ──
+// payload = [u32 iters]；依序跑 N=2 / N=3 / N=16 / N=16+慢讀者。
+// 每個情境都檢查：torn、generation 對不對、序號是否連續、slot 是否洩漏、跨核違規。
+#define NC4_CMD_HUB_STRESS  0xF01F
+#define HUB_STRESS_ITERS_MAX 300000u
+
+typedef struct {
+    nc_hub_t *hub;
+    uint32_t iters;
+    volatile bool start;
+    volatile bool writer_done;
+    volatile uint32_t read_count;
+    uint32_t torn;
+    uint32_t seq_err;
+    uint32_t gap;
+    uint32_t dup;
+    uint32_t w_full;
+    uint32_t r_null;
+    uint32_t w_exit;
+    uint32_t r_exit;
+    uint32_t yield_every;
+    uint32_t prev_seq;      // 診斷：上一筆讀到的 seq
+    uint32_t bad_prev;      // 診斷：第一次 gap/dup 的 (上一筆, 本筆)
+    uint32_t bad_seq;
+    int64_t deadline_us;
+} hub_stress_t;
+
+static void hub_stress_writer(void *arg)
+{
+    hub_stress_t *s = arg;
+    while (!s->start) {
+        if (esp_timer_get_time() > s->deadline_us) {
+            s->w_exit = 2;
+            vTaskDelete(NULL);
+            return;
+        }
+        vTaskDelay(1);
+    }
+    const size_t sz = nc_hub_slot_size(s->hub);
+    uint32_t seq = 1;
+    uint32_t spins = 0;
+    while (seq <= s->iters) {
+        uint8_t *p = nc_hub_write_begin(s->hub);
+        if (p == NULL) {
+            s->w_full++;
+            if (esp_timer_get_time() > s->deadline_us) {
+                s->w_exit = 2;
+                break;
+            }
+            // 不可純 taskYIELD：同核 idle（prio 0）永遠輪不到 → TWDT。
+            if ((++spins & 0x3F) == 0) {
+                vTaskDelay(1);
+            } else {
+                taskYIELD();
+            }
+            continue;
+        }
+        spins = 0;
+        memcpy(p, &seq, sizeof(seq));
+        memset(p + sizeof(seq), (uint8_t)seq, sz - sizeof(seq));
+        nc_hub_write_commit(s->hub);
+        seq++;
+    }
+    s->writer_done = true;
+    if (s->w_exit == 0) {
+        s->w_exit = 1;
+    }
+    vTaskDelete(NULL);
+}
+
+static void hub_stress_reader(void *arg)
+{
+    hub_stress_t *s = arg;
+    while (!s->start) {
+        if (esp_timer_get_time() > s->deadline_us) {
+            s->r_exit = 2;
+            vTaskDelete(NULL);
+            return;
+        }
+        vTaskDelay(1);
+    }
+    const size_t sz = nc_hub_slot_size(s->hub);
+    uint32_t expect = 1;
+    uint32_t spins = 0;
+    while (s->read_count < s->iters) {
+        uint32_t gen = 0;
+        uint8_t *p = nc_hub_read_begin_gen(s->hub, &gen);
+        if (p == NULL) {
+            s->r_null++;
+            if (s->writer_done && !nc_hub_dirty(s->hub)) {
+                s->r_exit = 1;
+                break;
+            }
+            if (esp_timer_get_time() > s->deadline_us) {
+                s->r_exit = 2;
+                break;
+            }
+            if ((++spins & 0x0F) == 0) {
+                vTaskDelay(1);
+            } else {
+                taskYIELD();
+            }
+            continue;
+        }
+        spins = 0;
+        uint32_t seq = 0;
+        memcpy(&seq, p, sizeof(seq));
+        const uint8_t want = (uint8_t)seq;
+        for (size_t k = sizeof(seq); k < sz; k++) {
+            if (p[k] != want) {
+                s->torn++;
+                break;
+            }
+        }
+        if (gen != seq) {
+            s->seq_err++;
+        }
+        if (seq != expect && s->bad_prev == 0) {
+            s->bad_prev = s->prev_seq;
+            s->bad_seq = seq;
+        }
+        s->prev_seq = seq;
+        if (seq == expect) {
+            expect++;
+        } else if (seq > expect) {
+            s->gap++;
+            expect = seq + 1;
+        } else {
+            s->dup++;
+        }
+        nc_hub_read_end(s->hub);
+        s->read_count++;
+        if (s->yield_every != 0 && (s->read_count % s->yield_every) == 0) {
+            vTaskDelay(1);
+        }
+    }
+    if (s->r_exit == 0) {
+        s->r_exit = 1;
+    }
+    vTaskDelete(NULL);
+}
+
+// 跑完後每個 slot 都應回到 IDLE；拿不滿 N 格就代表有 slot 卡住。
+static int hub_stress_leak(nc_hub_t *hub)
+{
+    const size_t n = nc_hub_depth(hub);
+    size_t got = 0;
+    while (got < n) {
+        uint8_t *p = nc_hub_write_begin(hub);
+        if (p == NULL) {
+            break;
+        }
+        memset(p, 0xEE, nc_hub_slot_size(hub));
+        nc_hub_write_commit(hub);
+        got++;
+    }
+    while (nc_hub_read_begin(hub) != NULL) {
+        nc_hub_read_end(hub);
+    }
+    return (int)(n - got);
+}
+
+static size_t hs_append(char *buf, size_t cap, size_t off, const char *fmt, ...)
+{
+    if (off + 1 >= cap) {
+        return off;
+    }
+    va_list ap;
+    va_start(ap, fmt);
+    const int n = vsnprintf(buf + off, cap - off, fmt, ap);
+    va_end(ap);
+    if (n <= 0) {
+        return off;
+    }
+    const size_t next = off + (size_t)n;
+    return next < cap ? next : cap - 1;   // 截斷時也要保持合法 C 字串
+}
+
+static bool hub_stress_case(hub_stress_t *s, uint32_t n, uint32_t iters,
+                            uint32_t yield_every, char *json, size_t cap,
+                            size_t *off, bool *first)
+{
+    memset(s, 0, sizeof(*s));
+    s->hub = nc_hub_create("stress", 64, n, NC_HUB_SRAM, 32);
+    if (s->hub == NULL) {
+        *off = hs_append(json, cap, *off, "%s{\"n\":%u,\"err\":\"hub\"}",
+                         *first ? "" : ",", (unsigned)n);
+        *first = false;
+        return false;
+    }
+    s->iters = iters;
+    s->yield_every = yield_every;
+    s->deadline_us = esp_timer_get_time() + 4 * 1000 * 1000;
+
+    TaskHandle_t wr = NULL;
+    TaskHandle_t rd = NULL;
+    xTaskCreatePinnedToCore(hub_stress_writer, "st_w", 4096, s, 1, &wr, 1);
+    xTaskCreatePinnedToCore(hub_stress_reader, "st_r", 4096, s, 1, &rd, 0);
+    if (wr == NULL || rd == NULL) {
+        *off = hs_append(json, cap, *off, "%s{\"n\":%u,\"err\":\"task\"}",
+                         *first ? "" : ",", (unsigned)n);
+        *first = false;
+        nc_hub_destroy(s->hub);
+        return false;
+    }
+
+    const int64_t t0 = esp_timer_get_time();
+    s->start = true;
+    while (s->read_count < iters && s->r_exit == 0) {
+        vTaskDelay(1);
+        if (esp_timer_get_time() - t0 > 5 * 1000 * 1000) {
+            break;
+        }
+    }
+    const int64_t us = esp_timer_get_time() - t0;
+
+    // 必須等兩個 task 真正收手才能離開：s 在 stack 上，先返回會 use-after-free。
+    while (s->w_exit == 0 || s->r_exit == 0) {
+        vTaskDelay(1);
+    }
+
+    nc_hub_stats_t st;
+    nc_hub_stats(s->hub, &st);
+    const int leak = hub_stress_leak(s->hub);
+    const uint32_t per_sec = us > 0
+                                 ? (uint32_t)((uint64_t)s->read_count * 1000000u / (uint64_t)us)
+                                 : 0;
+
+    *off = hs_append(json, cap, *off,
+                     "%s{\"n\":%u,\"ops\":%u,\"per_sec\":%u,\"us\":%lld,"
+                     "\"torn\":%u,\"seq_err\":%u,\"gap\":%u,\"dup\":%u,"
+                     "\"w_full\":%u,\"r_null\":%u,\"leak\":%d,\"viol\":%u,"
+                     "\"bad\":[%u,%u],\"exit\":[%u,%u]}",
+                     *first ? "" : ",", (unsigned)n, (unsigned)s->read_count,
+                     (unsigned)per_sec, (long long)us,
+                     (unsigned)s->torn, (unsigned)s->seq_err,
+                     (unsigned)s->gap, (unsigned)s->dup,
+                     (unsigned)s->w_full, (unsigned)s->r_null, leak,
+                     (unsigned)st.core_violations,
+                     (unsigned)s->bad_prev, (unsigned)s->bad_seq,
+                     (unsigned)s->w_exit, (unsigned)s->r_exit);
+    *first = false;
+    nc_hub_destroy(s->hub);
+    return true;
+}
+
+// 放 .bss，不放 decode 任務的 stack（1.8 KB 區域曾在板上造成溢位重啟）。
+// 每核一份，避免兩核同時進來時共用同一塊。
+static char s_hub_stress_json[2][1200];
+
+static void on_hub_stress(nc4_ctx_t *ctx, const nc4_frame_t *f)
+{
+    static volatile bool busy;
+    if (busy) {
+        reply_json(ctx, NC4_CMD_HUB_RSP, "{\"err\":\"busy\"}");
+        return;
+    }
+    busy = true;
+
+    uint32_t iters = 50000;
+    if (f->len >= 4) {
+        iters = (uint32_t)f->data[0] | ((uint32_t)f->data[1] << 8) |
+                ((uint32_t)f->data[2] << 16) | ((uint32_t)f->data[3] << 24);
+    }
+    if (iters < 1000) {
+        iters = 1000;
+    }
+    if (iters > HUB_STRESS_ITERS_MAX) {
+        iters = HUB_STRESS_ITERS_MAX;
+    }
+
+    char *json = s_hub_stress_json[xPortGetCoreID() & 1];
+    const size_t cap = sizeof(s_hub_stress_json[0]);
+    size_t off = 0;
+    bool first = true;
+    off = hs_append(json, cap, off, "{\"iters\":%u,\"cases\":[", (unsigned)iters);
+
+    hub_stress_t s;
+    const uint32_t slow_iters = (iters / 4 < 1000) ? 1000 : iters / 4;
+    bool ok = true;
+    ok = ok && hub_stress_case(&s, 2, iters, 0, json, cap, &off, &first);
+    ok = ok && hub_stress_case(&s, 3, iters, 0, json, cap, &off, &first);
+    ok = ok && hub_stress_case(&s, 16, iters, 0, json, cap, &off, &first);
+    ok = ok && hub_stress_case(&s, 16, slow_iters, 32, json, cap, &off, &first);
+    (void)ok;
+
+    off = hs_append(json, cap, off, "]}");
+    reply_json(ctx, NC4_CMD_HUB_RSP, json);
+    busy = false;
+}
+
+// ── 0xF020 HUB_DUPLEX：兩個常駐測試任務，雙向同時交換 ──
+// payload = [u32 duration_ms]；core1 跑 A（tx=ab, rx=ba），core0 跑 B（tx=ba, rx=ab）。
+// 兩個任務同時送／收，跑滿時間才停；停止後對帳 sent/recv、torn、順序、洩漏。
+#define NC4_CMD_HUB_DUPLEX  0xF020
+
+typedef struct {
+    nc_hub_t *tx;
+    nc_hub_t *rx;
+    volatile bool start;
+    volatile bool stop;
+    volatile bool done;
+    uint32_t sent;
+    uint32_t recv;
+    uint32_t full;
+    uint32_t empty;
+    uint32_t torn;
+    uint32_t seq_err;
+    uint32_t expect;
+} duplex_ep_t;
+
+static void hub_duplex_task(void *arg)
+{
+    duplex_ep_t *e = arg;
+    while (!e->start) {
+        vTaskDelay(1);
+    }
+    const size_t txs = nc_hub_slot_size(e->tx);
+    const size_t rxs = nc_hub_slot_size(e->rx);
+    uint32_t seq = 1;
+    uint32_t spins = 0;
+    while (!e->stop) {
+        uint8_t *p = nc_hub_write_begin(e->tx);
+        if (p != NULL) {
+            memcpy(p, &seq, sizeof(seq));
+            memset(p + sizeof(seq), (uint8_t)seq, txs - sizeof(seq));
+            nc_hub_write_commit(e->tx);
+            e->sent++;
+            seq++;
+        } else {
+            e->full++;
+        }
+
+        uint8_t *q = nc_hub_read_begin(e->rx);
+        if (q != NULL) {
+            uint32_t v = 0;
+            memcpy(&v, q, sizeof(v));
+            const uint8_t want = (uint8_t)v;
+            for (size_t k = sizeof(v); k < rxs; k++) {
+                if (q[k] != want) {
+                    e->torn++;
+                    break;
+                }
+            }
+            if (v != e->expect) {
+                e->seq_err++;
+            }
+            e->expect = v + 1;
+            nc_hub_read_end(e->rx);
+            e->recv++;
+        } else {
+            e->empty++;
+        }
+
+        // 每 4096 圈讓出 1 tick：避免同核 idle 餓死 → TWDT。
+        if ((++spins & 0xFFF) == 0) {
+            vTaskDelay(1);
+        }
+    }
+    e->done = true;
+    vTaskDelete(NULL);
+}
+
+static char s_duplex_json[2][1200];
+static char s_sweep_json[2][1400];
+static volatile bool s_duplex_busy;
+
+typedef struct {
+    uint32_t a_sent, a_recv, a_full, a_empty, a_torn, a_seq_err;
+    uint32_t b_sent, b_recv, b_full, b_empty, b_torn, b_seq_err;
+    uint32_t drain_ab, drain_ba;
+    int leak_ab, leak_ba;
+    uint32_t us;
+} duplex_result_t;
+
+static bool duplex_run(uint32_t slot, uint32_t n, uint32_t ms, duplex_result_t *out)
+{
+    if (slot < 8) slot = 8;
+    if (slot > 16384) slot = 16384;
+    if (n < 2) n = 2;
+    if (n > 16) n = 16;
+
+    nc_hub_t *ab = nc_hub_create("d_ab", slot, n, NC_HUB_SRAM, 64);
+    nc_hub_t *ba = nc_hub_create("d_ba", slot, n, NC_HUB_SRAM, 64);
+    if (ab == NULL || ba == NULL) {
+        if (ab != NULL) nc_hub_destroy(ab);
+        if (ba != NULL) nc_hub_destroy(ba);
+        return false;
+    }
+
+    duplex_ep_t a = { .tx = ab, .rx = ba, .expect = 1 };
+    duplex_ep_t b = { .tx = ba, .rx = ab, .expect = 1 };
+
+    TaskHandle_t ta = NULL;
+    TaskHandle_t tb = NULL;
+    xTaskCreatePinnedToCore(hub_duplex_task, "dpx_a", 4096, &a, 1, &ta, 1);
+    xTaskCreatePinnedToCore(hub_duplex_task, "dpx_b", 4096, &b, 1, &tb, 0);
+    if (ta == NULL || tb == NULL) {
+        a.start = b.start = true;
+        a.stop = b.stop = true;
+        while (!a.done || !b.done) {
+            vTaskDelay(1);
+        }
+        nc_hub_destroy(ab);
+        nc_hub_destroy(ba);
+        return false;
+    }
+
+    const int64_t t0 = esp_timer_get_time();
+    a.start = b.start = true;
+    vTaskDelay(pdMS_TO_TICKS(ms));
+    a.stop = b.stop = true;
+    const int64_t us = esp_timer_get_time() - t0;
+    while (!a.done || !b.done) {
+        vTaskDelay(1);
+    }
+
+    uint32_t drain_ab = 0;
+    uint32_t drain_ba = 0;
+    while (nc_hub_read_begin(ab) != NULL) {
+        nc_hub_read_end(ab);
+        drain_ab++;
+    }
+    while (nc_hub_read_begin(ba) != NULL) {
+        nc_hub_read_end(ba);
+        drain_ba++;
+    }
+
+    out->leak_ab = hub_stress_leak(ab);
+    out->leak_ba = hub_stress_leak(ba);
+    out->us = (uint32_t)us;
+    out->a_sent = a.sent;
+    out->a_recv = a.recv;
+    out->a_full = a.full;
+    out->a_empty = a.empty;
+    out->a_torn = a.torn;
+    out->a_seq_err = a.seq_err;
+    out->b_sent = b.sent;
+    out->b_recv = b.recv;
+    out->b_full = b.full;
+    out->b_empty = b.empty;
+    out->b_torn = b.torn;
+    out->b_seq_err = b.seq_err;
+    out->drain_ab = drain_ab;
+    out->drain_ba = drain_ba;
+
+    nc_hub_destroy(ab);
+    nc_hub_destroy(ba);
+    return true;
+}
+
+static void on_hub_duplex(nc4_ctx_t *ctx, const nc4_frame_t *f)
+{
+    if (s_duplex_busy) {
+        reply_json(ctx, NC4_CMD_HUB_RSP, "{\"err\":\"busy\"}");
+        return;
+    }
+    s_duplex_busy = true;
+
+    uint32_t ms = 3000;
+    if (f->len >= 4) {
+        ms = (uint32_t)f->data[0] | ((uint32_t)f->data[1] << 8) |
+             ((uint32_t)f->data[2] << 16) | ((uint32_t)f->data[3] << 24);
+    }
+    if (ms < 500) {
+        ms = 500;
+    }
+    if (ms > 10000) {
+        ms = 10000;
+    }
+
+    duplex_result_t r;
+    if (!duplex_run(64, 8, ms, &r)) {
+        reply_json(ctx, NC4_CMD_HUB_RSP, "{\"err\":\"hub\"}");
+        s_duplex_busy = false;
+        return;
+    }
+
+    char *json = s_duplex_json[xPortGetCoreID() & 1];
+    const size_t cap = sizeof(s_duplex_json[0]);
+    const uint32_t a2b_ps = r.us ? (uint32_t)((uint64_t)r.b_recv * 1000000u / r.us) : 0;
+    const uint32_t b2a_ps = r.us ? (uint32_t)((uint64_t)r.a_recv * 1000000u / r.us) : 0;
+
+    size_t off = 0;
+    off = hs_append(json, cap, off,
+                    "{\"ms\":%u,\"slot\":64,\"n\":8,\"a2b\":{"
+                    "\"sent\":%u,\"recv\":%u,\"per_sec\":%u,\"full\":%u,\"empty\":%u,"
+                    "\"torn\":%u,\"seq_err\":%u,\"drain\":%u},"
+                    "\"b2a\":{\"sent\":%u,\"recv\":%u,\"per_sec\":%u,\"full\":%u,\"empty\":%u,"
+                    "\"torn\":%u,\"seq_err\":%u,\"drain\":%u},"
+                    "\"leak\":[%d,%d],\"us\":%u}",
+                    (unsigned)ms,
+                    (unsigned)r.a_sent, (unsigned)r.b_recv, (unsigned)a2b_ps,
+                    (unsigned)r.a_full, (unsigned)r.b_empty,
+                    (unsigned)r.b_torn, (unsigned)r.b_seq_err, (unsigned)r.drain_ab,
+                    (unsigned)r.b_sent, (unsigned)r.a_recv, (unsigned)b2a_ps,
+                    (unsigned)r.b_full, (unsigned)r.a_empty,
+                    (unsigned)r.a_torn, (unsigned)r.a_seq_err, (unsigned)r.drain_ba,
+                    r.leak_ab, r.leak_ba, (unsigned)r.us);
+    reply_json(ctx, NC4_CMD_HUB_RSP, json);
+    s_duplex_busy = false;
+}
+
+// ── 0xF021 HUB_DUPLEX_SWEEP：尺寸／深度梯度（每個 case 重新建環）──
+#define NC4_CMD_HUB_DUPLEX_SWEEP  0xF021
+
+static const struct {
+    uint16_t slot;
+    uint16_t n;
+} k_sweep_cases[] = {
+    { 16, 8 },   { 64, 8 },  { 256, 8 },  { 1024, 8 }, { 4096, 8 },
+    { 16384, 2 }, { 8192, 6 }, { 4096, 12 }, { 32768, 1 },
+    { 64, 2 },   { 64, 3 },  { 64, 16 },
+};
+
+static void on_hub_sweep(nc4_ctx_t *ctx, const nc4_frame_t *f)
+{
+    if (s_duplex_busy) {
+        reply_json(ctx, NC4_CMD_HUB_RSP, "{\"err\":\"busy\"}");
+        return;
+    }
+    s_duplex_busy = true;
+
+    uint32_t ms = 800;
+    if (f->len >= 4) {
+        ms = (uint32_t)f->data[0] | ((uint32_t)f->data[1] << 8) |
+             ((uint32_t)f->data[2] << 16) | ((uint32_t)f->data[3] << 24);
+    }
+    if (ms < 300) {
+        ms = 300;
+    }
+    if (ms > 2000) {
+        ms = 2000;
+    }
+
+    char *json = s_sweep_json[xPortGetCoreID() & 1];
+    const size_t cap = sizeof(s_sweep_json[0]);
+    size_t off = 0;
+    bool first = true;
+    off = hs_append(json, cap, off, "{\"ms\":%u,\"cases\":[", (unsigned)ms);
+
+    const size_t ncases = sizeof(k_sweep_cases) / sizeof(k_sweep_cases[0]);
+    for (size_t i = 0; i < ncases; i++) {
+        const uint32_t slot = k_sweep_cases[i].slot;
+        const uint32_t n = k_sweep_cases[i].n;
+        duplex_result_t r;
+        if (!duplex_run(slot, n, ms, &r)) {
+            off = hs_append(json, cap, off, "%s{\"slot\":%u,\"n\":%u,\"err\":\"hub\"}",
+                            first ? "" : ",", (unsigned)slot, (unsigned)n);
+            first = false;
+            continue;
+        }
+        const uint32_t a_ps = r.us ? (uint32_t)((uint64_t)r.b_recv * 1000000u / r.us) : 0;
+        const uint32_t b_ps = r.us ? (uint32_t)((uint64_t)r.a_recv * 1000000u / r.us) : 0;
+        off = hs_append(json, cap, off,
+                        "%s{\"slot\":%u,\"n\":%u,\"a\":%u,\"b\":%u,"
+                        "\"kb\":[%u,%u],\"torn\":[%u,%u],\"order\":[%u,%u],"
+                        "\"leak\":[%d,%d]}",
+                        first ? "" : ",", (unsigned)slot, (unsigned)n,
+                        (unsigned)a_ps, (unsigned)b_ps,
+                        (unsigned)((uint64_t)a_ps * slot / 1024u),
+                        (unsigned)((uint64_t)b_ps * slot / 1024u),
+                        (unsigned)r.b_torn, (unsigned)r.a_torn,
+                        (unsigned)r.b_seq_err, (unsigned)r.a_seq_err,
+                        r.leak_ab, r.leak_ba);
+        first = false;
+    }
+
+    off = hs_append(json, cap, off, "]}");
+    reply_json(ctx, NC4_CMD_HUB_RSP, json);
+    s_duplex_busy = false;
+}
+
+// ── 0xF022 HUB_DUPLEX4：4 任務、純方向（tx 只送、rx 只收）──
+// 每方向兩個任務，兩個方向同時跑；優先嘗試吃最多的內部 SRAM（16 KB × 3 × 2 環 = 96 KB）。
+#define NC4_CMD_HUB_DUPLEX4  0xF022
+
+typedef struct {
+    nc_hub_t *hub;
+    volatile bool *start;
+    volatile bool *stop;
+    volatile bool *done;
+    bool is_tx;
+    uint32_t sent, full, seq;
+    uint32_t recv, empty, torn, seq_err, expect;
+} d4_ep_t;
+
+static void d4_tx_task(void *arg)
+{
+    d4_ep_t *e = arg;
+    while (!*e->start) {
+        vTaskDelay(1);
+    }
+    const size_t sz = nc_hub_slot_size(e->hub);
+    uint32_t seq = 1;
+    uint32_t spins = 0;
+    while (!*e->stop) {
+        uint8_t *p = nc_hub_write_begin(e->hub);
+        if (p != NULL) {
+            memcpy(p, &seq, sizeof(seq));
+            memset(p + sizeof(seq), (uint8_t)seq, sz - sizeof(seq));
+            nc_hub_write_commit(e->hub);
+            e->sent++;
+            seq++;
+        } else {
+            e->full++;
+            taskYIELD();          // 讓同核的 rx 先跑，不要燒完整個 tick
+        }
+        if ((++spins & 0x1FF) == 0) {
+            vTaskDelay(1);        // 10 s 長跑時確保 idle 定期執行（TWDT）
+        }
+    }
+    *e->done = true;
+    vTaskDelete(NULL);
+}
+
+static void d4_rx_task(void *arg)
+{
+    d4_ep_t *e = arg;
+    while (!*e->start) {
+        vTaskDelay(1);
+    }
+    const size_t sz = nc_hub_slot_size(e->hub);
+    uint32_t expect = 1;
+    uint32_t spins = 0;
+    while (!*e->stop) {
+        uint8_t *q = nc_hub_read_begin(e->hub);
+        if (q != NULL) {
+            uint32_t v = 0;
+            memcpy(&v, q, sizeof(v));
+            const uint32_t want32 = (uint32_t)(uint8_t)v * 0x01010101u;
+            // q 是 64-byte 對齊、k 是 4 的倍數 → 直接 32-bit load，避免 memcpy 呼叫。
+            for (size_t k = sizeof(v); k + sizeof(uint32_t) <= sz; k += sizeof(uint32_t)) {
+                if (*(const uint32_t *)(const void *)(q + k) != want32) {
+                    e->torn++;
+                    break;
+                }
+            }
+            if (v != expect) {
+                e->seq_err++;
+            }
+            expect = v + 1;
+            nc_hub_read_end(e->hub);
+            e->recv++;
+        } else {
+            e->empty++;
+            taskYIELD();
+        }
+        if ((++spins & 0x1FF) == 0) {
+            vTaskDelay(1);        // 10 s 長跑時確保 idle 定期執行（TWDT）
+        }
+    }
+    e->expect = expect;
+    *e->done = true;
+    vTaskDelete(NULL);
+}
+
+static char s_d4_json[2][1400];
+
+static void on_hub_duplex4(nc4_ctx_t *ctx, const nc4_frame_t *f)
+{
+    if (s_duplex_busy) {
+        reply_json(ctx, NC4_CMD_HUB_RSP, "{\"err\":\"busy\"}");
+        return;
+    }
+    s_duplex_busy = true;
+
+    uint32_t ms = 3000;
+    if (f->len >= 4) {
+        ms = (uint32_t)f->data[0] | ((uint32_t)f->data[1] << 8) |
+             ((uint32_t)f->data[2] << 16) | ((uint32_t)f->data[3] << 24);
+    }
+    if (ms < 500) {
+        ms = 500;
+    }
+    if (ms > 15000) {
+        ms = 15000;
+    }
+
+    // 由大到小嘗試；任何一組失敗就往下退，回報實際用到的組合。
+    static const struct {
+        uint32_t slot;
+        uint32_t n;
+    } tries[] = {
+        { 32768, 2 }, { 32768, 1 }, { 16384, 3 }, { 16384, 2 },
+        { 8192, 6 },  { 8192, 4 },  { 4096, 12 }, { 4096, 8 },
+    };
+
+    nc_hub_t *ab = NULL;
+    nc_hub_t *ba = NULL;
+    uint32_t slot = 0;
+    uint32_t n = 0;
+    for (size_t i = 0; i < sizeof(tries) / sizeof(tries[0]); i++) {
+        ab = nc_hub_create("d4_ab", tries[i].slot, tries[i].n, NC_HUB_SRAM, 64);
+        if (ab == NULL) {
+            continue;
+        }
+        ba = nc_hub_create("d4_ba", tries[i].slot, tries[i].n, NC_HUB_SRAM, 64);
+        if (ba == NULL) {
+            nc_hub_destroy(ab);
+            ab = NULL;
+            continue;
+        }
+        slot = tries[i].slot;
+        n = tries[i].n;
+        break;
+    }
+    if (ab == NULL || ba == NULL) {
+        reply_json(ctx, NC4_CMD_HUB_RSP, "{\"err\":\"nomem\"}");
+        s_duplex_busy = false;
+        return;
+    }
+
+    volatile bool start = false;
+    volatile bool stop = false;
+    volatile bool done0 = false;
+    volatile bool done1 = false;
+    volatile bool done2 = false;
+    volatile bool done3 = false;
+    d4_ep_t atx = { .hub = ab, .start = &start, .stop = &stop, .done = &done0, .is_tx = true };
+    d4_ep_t brx = { .hub = ab, .start = &start, .stop = &stop, .done = &done1 };
+    d4_ep_t btx = { .hub = ba, .start = &start, .stop = &stop, .done = &done2, .is_tx = true };
+    d4_ep_t arx = { .hub = ba, .start = &start, .stop = &stop, .done = &done3 };
+
+    TaskHandle_t h0 = NULL, h1 = NULL, h2 = NULL, h3 = NULL;
+    xTaskCreatePinnedToCore(d4_tx_task, "d4_atx", 4096, &atx, 1, &h0, 1);
+    xTaskCreatePinnedToCore(d4_rx_task, "d4_brx", 4096, &brx, 1, &h1, 0);
+    xTaskCreatePinnedToCore(d4_tx_task, "d4_btx", 4096, &btx, 1, &h2, 0);
+    xTaskCreatePinnedToCore(d4_rx_task, "d4_arx", 4096, &arx, 1, &h3, 1);
+    if (h0 == NULL || h1 == NULL || h2 == NULL || h3 == NULL) {
+        start = true;
+        stop = true;
+        while (!done0 || !done1 || !done2 || !done3) {
+            vTaskDelay(1);
+        }
+        nc_hub_destroy(ab);
+        nc_hub_destroy(ba);
+        reply_json(ctx, NC4_CMD_HUB_RSP, "{\"err\":\"task\"}");
+        s_duplex_busy = false;
+        return;
+    }
+
+    const int64_t t0 = esp_timer_get_time();
+    start = true;
+    vTaskDelay(pdMS_TO_TICKS(ms));
+    stop = true;
+    const int64_t us = esp_timer_get_time() - t0;
+    while (!done0 || !done1 || !done2 || !done3) {
+        vTaskDelay(1);
+    }
+
+    uint32_t drain_ab = 0;
+    uint32_t drain_ba = 0;
+    while (nc_hub_read_begin(ab) != NULL) {
+        nc_hub_read_end(ab);
+        drain_ab++;
+    }
+    while (nc_hub_read_begin(ba) != NULL) {
+        nc_hub_read_end(ba);
+        drain_ba++;
+    }
+    const int leak_ab = hub_stress_leak(ab);
+    const int leak_ba = hub_stress_leak(ba);
+
+    const uint32_t a_ps = us > 0 ? (uint32_t)((uint64_t)brx.recv * 1000000u / (uint64_t)us) : 0;
+    const uint32_t b_ps = us > 0 ? (uint32_t)((uint64_t)arx.recv * 1000000u / (uint64_t)us) : 0;
+
+    char *json = s_d4_json[xPortGetCoreID() & 1];
+    const size_t cap = sizeof(s_d4_json[0]);
+    size_t off = 0;
+    off = hs_append(json, cap, off,
+                    "{\"ms\":%u,\"slot\":%u,\"n\":%u,\"sram\":%u,"
+                    "\"a2b\":{\"sent\":%u,\"recv\":%u,\"per_sec\":%u,\"kb\":%u,"
+                    "\"full\":%u,\"empty\":%u,\"torn\":%u,\"seq_err\":%u,\"drain\":%u},"
+                    "\"b2a\":{\"sent\":%u,\"recv\":%u,\"per_sec\":%u,\"kb\":%u,"
+                    "\"full\":%u,\"empty\":%u,\"torn\":%u,\"seq_err\":%u,\"drain\":%u},"
+                    "\"leak\":[%d,%d],\"us\":%u}",
+                    (unsigned)ms, (unsigned)slot, (unsigned)n,
+                    (unsigned)(slot * n * 2),
+                    (unsigned)atx.sent, (unsigned)brx.recv, (unsigned)a_ps,
+                    (unsigned)((uint64_t)a_ps * slot / 1024u),
+                    (unsigned)atx.full, (unsigned)brx.empty,
+                    (unsigned)brx.torn, (unsigned)brx.seq_err, (unsigned)drain_ab,
+                    (unsigned)btx.sent, (unsigned)arx.recv, (unsigned)b_ps,
+                    (unsigned)((uint64_t)b_ps * slot / 1024u),
+                    (unsigned)btx.full, (unsigned)arx.empty,
+                    (unsigned)arx.torn, (unsigned)arx.seq_err, (unsigned)drain_ba,
+                    leak_ab, leak_ba, (unsigned)us);
+    reply_json(ctx, NC4_CMD_HUB_RSP, json);
+
+    nc_hub_destroy(ab);
+    nc_hub_destroy(ba);
+    s_duplex_busy = false;
+}
+
+// ── 0xF023 HUB_SINGLE：單核（同一任務）交換，量 API 本身成本 ──
+#define NC4_CMD_HUB_SINGLE  0xF023
+
+static char s_single_json[2][1000];
+
+static void on_hub_single(nc4_ctx_t *ctx, const nc4_frame_t *f)
+{
+    if (s_duplex_busy) {
+        reply_json(ctx, NC4_CMD_HUB_RSP, "{\"err\":\"busy\"}");
+        return;
+    }
+    s_duplex_busy = true;
+
+    uint32_t iters = 20000;
+    if (f->len >= 4) {
+        iters = (uint32_t)f->data[0] | ((uint32_t)f->data[1] << 8) |
+                ((uint32_t)f->data[2] << 16) | ((uint32_t)f->data[3] << 24);
+    }
+    if (iters < 1000) {
+        iters = 1000;
+    }
+    if (iters > 100000) {
+        iters = 100000;
+    }
+
+    // mode bit0=1：純 copy；bit1=1：純位址交換（完全不搬資料，只寫/讀 4 B 序號）。
+    uint16_t mode = 0;
+    if (f->len >= 6) {
+        mode = (uint16_t)(f->data[4] | (f->data[5] << 8));
+    }
+
+    static const uint16_t sizes[] = { 16, 64, 256, 1024, 4096, 16384, 32768 };
+    char *json = s_single_json[xPortGetCoreID() & 1];
+    const size_t cap = sizeof(s_single_json[0]);
+    size_t off = 0;
+    bool first = true;
+    off = hs_append(json, cap, off, "{\"iters\":%u,\"mode\":\"%s\",\"cases\":[",
+                    (unsigned)iters,
+                    (mode & 2) ? "pointer" : ((mode & 1) ? "copy" : "fill+verify"));
+
+    for (size_t c = 0; c < sizeof(sizes) / sizeof(sizes[0]); c++) {
+        const uint32_t sz = sizes[c];
+        nc_hub_t *h = nc_hub_create("sgl", sz, 2, NC_HUB_SRAM, 64);
+        if (h == NULL) {
+            off = hs_append(json, cap, off, "%s{\"slot\":%u,\"err\":\"hub\"}",
+                            first ? "" : ",", (unsigned)sz);
+            first = false;
+            continue;
+        }
+        uint8_t *src = NULL;
+        uint8_t *dst = NULL;
+        if ((mode & 1) != 0 && (mode & 2) == 0) {
+            const uint32_t caps = MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA | MALLOC_CAP_8BIT;
+            src = heap_caps_aligned_alloc(64, sz, caps);
+            dst = heap_caps_aligned_alloc(64, sz, caps);
+            if (src == NULL || dst == NULL) {
+                free(src);
+                free(dst);
+                off = hs_append(json, cap, off, "%s{\"slot\":%u,\"err\":\"nomem\"}",
+                                first ? "" : ",", (unsigned)sz);
+                first = false;
+                nc_hub_destroy(h);
+                continue;
+            }
+            memset(src, 0xA5, sz);
+        }
+
+        uint32_t torn = 0;
+        const int64_t t0 = esp_timer_get_time();
+        for (uint32_t i = 1; i <= iters; i++) {
+            uint8_t *p = nc_hub_write_begin(h);
+            if (p == NULL) {
+                torn++;
+                continue;
+            }
+            if ((mode & 2) != 0) {
+                memcpy(p, &i, sizeof(i));      // 只寫序號，不搬 payload
+            } else if ((mode & 1) != 0) {
+                memcpy(p, src, sz);
+            } else {
+                memcpy(p, &i, sizeof(i));
+                memset(p + sizeof(i), (uint8_t)i, sz - sizeof(i));
+            }
+            nc_hub_write_commit(h);
+
+            uint32_t gen = 0;
+            uint8_t *q = nc_hub_read_begin_gen(h, &gen);
+            if (q == NULL) {
+                torn++;
+                continue;
+            }
+            if ((mode & 2) != 0) {
+                uint32_t v = 0;
+                memcpy(&v, q, sizeof(v));
+                if (v != i) {
+                    torn++;
+                }
+            } else if ((mode & 1) != 0) {
+                memcpy(dst, q, sz);
+            } else {
+                uint32_t v = 0;
+                memcpy(&v, q, sizeof(v));
+                const uint32_t w32 = (uint32_t)(uint8_t)v * 0x01010101u;
+                for (size_t k = sizeof(v); k + sizeof(uint32_t) <= sz; k += sizeof(uint32_t)) {
+                    if (*(const uint32_t *)(const void *)(q + k) != w32) {
+                        torn++;
+                        break;
+                    }
+                }
+                if (gen != v) {
+                    torn++;
+                }
+            }
+            nc_hub_read_end(h);
+            if ((i & 0x1FF) == 0) {
+                vTaskDelay(1);   // 單核長跑也要餵 idle（TWDT）
+            }
+        }
+        free(src);
+        free(dst);
+        const int64_t us = esp_timer_get_time() - t0;
+        const uint32_t ps = us > 0 ? (uint32_t)((uint64_t)iters * 1000000u / (uint64_t)us) : 0;
+        const uint32_t mbs = us > 0 ? (uint32_t)((uint64_t)iters * sz / (uint64_t)us) : 0;
+        off = hs_append(json, cap, off,
+                        "%s{\"slot\":%u,\"per_sec\":%u,\"mbps\":%u,\"us\":%u,\"torn\":%u}",
+                        first ? "" : ",", (unsigned)sz, (unsigned)ps, (unsigned)mbs,
+                        (unsigned)us, (unsigned)torn);
+        first = false;
+        nc_hub_destroy(h);
+    }
+
+    off = hs_append(json, cap, off, "]}");
+    reply_json(ctx, NC4_CMD_HUB_RSP, json);
+    s_duplex_busy = false;
+}
+
+// ── 0xF024 HUB_MESH：N 個任務 all-to-all，每對一條單向 hub ──
+// payload = [u32 ms][u16 nodes][u16 slot]；nodes 2–6（6 → 30 條鏈）。
+#define NC4_CMD_HUB_MESH  0xF024
+#define MESH_MAX_NODES    6
+
+typedef struct {
+    nc_hub_t *out[MESH_MAX_NODES];
+    nc_hub_t *in[MESH_MAX_NODES];
+    uint32_t seq[MESH_MAX_NODES];
+    uint32_t expect[MESH_MAX_NODES];
+    uint32_t sent, recv, full, empty, torn, seq_err;
+    uint32_t idx, nodes;
+    volatile bool *start;
+    volatile bool *stop;
+    volatile bool *done;
+} mesh_node_t;
+
+static mesh_node_t s_mesh[MESH_MAX_NODES];
+static nc_hub_t *s_mesh_hub[MESH_MAX_NODES][MESH_MAX_NODES];
+static volatile bool s_mesh_done[MESH_MAX_NODES];
+static char s_mesh_json[2][1000];
+
+static void mesh_task(void *arg)
+{
+    mesh_node_t *e = arg;
+    while (!*e->start) {
+        vTaskDelay(1);
+    }
+    size_t sz = 0;
+    for (uint32_t j = 0; j < e->nodes; j++) {
+        if (j != e->idx) {
+            sz = nc_hub_slot_size(e->out[j]);
+            break;
+        }
+    }
+    uint32_t spins = 0;
+    while (!*e->stop) {
+        for (uint32_t j = 0; j < e->nodes; j++) {
+            if (j == e->idx) {
+                continue;
+            }
+            uint8_t *p = nc_hub_write_begin(e->out[j]);
+            if (p != NULL) {
+                const uint32_t v = e->seq[j]++;
+                memcpy(p, &v, sizeof(v));
+                memset(p + sizeof(v), (uint8_t)v, sz - sizeof(v));
+                nc_hub_write_commit(e->out[j]);
+                e->sent++;
+            } else {
+                e->full++;
+            }
+
+            uint8_t *q = nc_hub_read_begin(e->in[j]);
+            if (q != NULL) {
+                uint32_t v = 0;
+                memcpy(&v, q, sizeof(v));
+                const uint32_t w32 = (uint32_t)(uint8_t)v * 0x01010101u;
+                for (size_t k = sizeof(v); k + sizeof(uint32_t) <= sz; k += sizeof(uint32_t)) {
+                    if (*(const uint32_t *)(const void *)(q + k) != w32) {
+                        e->torn++;
+                        break;
+                    }
+                }
+                if (v != e->expect[j]) {
+                    e->seq_err++;
+                }
+                e->expect[j] = v + 1;
+                nc_hub_read_end(e->in[j]);
+                e->recv++;
+            } else {
+                e->empty++;
+            }
+        }
+        // 6 節點 = 每核 3 個 prio-1 任務；太晚讓出會餓死 idle → TWDT。
+        if ((++spins & 0x3F) == 0) {
+            vTaskDelay(1);
+        }
+    }
+    *e->done = true;
+    vTaskDelete(NULL);
+}
+
+static void on_hub_mesh(nc4_ctx_t *ctx, const nc4_frame_t *f)
+{
+    if (s_duplex_busy) {
+        reply_json(ctx, NC4_CMD_HUB_RSP, "{\"err\":\"busy\"}");
+        return;
+    }
+    s_duplex_busy = true;
+
+    uint32_t ms = 2000;
+    uint32_t nodes = 4;
+    uint32_t slot = 256;
+    if (f->len >= 4) {
+        ms = (uint32_t)f->data[0] | ((uint32_t)f->data[1] << 8) |
+             ((uint32_t)f->data[2] << 16) | ((uint32_t)f->data[3] << 24);
+    }
+    if (f->len >= 6) {
+        nodes = (uint16_t)(f->data[4] | (f->data[5] << 8));
+    }
+    if (f->len >= 8) {
+        slot = (uint16_t)(f->data[6] | (f->data[7] << 8));
+    }
+    if (ms < 500) ms = 500;
+    if (ms > 15000) ms = 15000;
+    if (nodes < 2) nodes = 2;
+    if (nodes > MESH_MAX_NODES) nodes = MESH_MAX_NODES;
+    if (slot < 64) slot = 64;
+    if (slot > 2048) slot = 2048;
+
+    memset(s_mesh_hub, 0, sizeof(s_mesh_hub));
+    bool ok = true;
+    for (uint32_t i = 0; i < nodes && ok; i++) {
+        for (uint32_t j = i + 1; j < nodes; j++) {
+            s_mesh_hub[i][j] = nc_hub_create("mesh", slot, 4, NC_HUB_SRAM, 64);
+            s_mesh_hub[j][i] = nc_hub_create("mesh", slot, 4, NC_HUB_SRAM, 64);
+            if (s_mesh_hub[i][j] == NULL || s_mesh_hub[j][i] == NULL) {
+                ok = false;
+                break;
+            }
+        }
+    }
+    if (!ok) {
+        for (uint32_t i = 0; i < MESH_MAX_NODES; i++) {
+            for (uint32_t j = 0; j < MESH_MAX_NODES; j++) {
+                if (s_mesh_hub[i][j] != NULL) {
+                    nc_hub_destroy(s_mesh_hub[i][j]);
+                    s_mesh_hub[i][j] = NULL;
+                }
+            }
+        }
+        reply_json(ctx, NC4_CMD_HUB_RSP, "{\"err\":\"nomem\"}");
+        s_duplex_busy = false;
+        return;
+    }
+
+    volatile bool start = false;
+    volatile bool stop = false;
+    TaskHandle_t th[MESH_MAX_NODES] = { 0 };
+    for (uint32_t i = 0; i < nodes; i++) {
+        memset(&s_mesh[i], 0, sizeof(s_mesh[i]));
+        s_mesh[i].idx = i;
+        s_mesh[i].nodes = nodes;
+        s_mesh[i].start = &start;
+        s_mesh[i].stop = &stop;
+        s_mesh[i].done = &s_mesh_done[i];
+        s_mesh_done[i] = false;
+        for (uint32_t j = 0; j < nodes; j++) {
+            if (j == i) {
+                continue;
+            }
+            s_mesh[i].out[j] = s_mesh_hub[i][j];
+            s_mesh[i].in[j] = s_mesh_hub[j][i];
+            s_mesh[i].seq[j] = 1;
+            s_mesh[i].expect[j] = 1;
+        }
+        // prio 0（與 idle 同級）：多任務時仍能靠 time slicing 保證 idle 執行，
+        // 避免 6 節點長跑時 TWDT 餓死。
+        xTaskCreatePinnedToCore(mesh_task, "mesh", 4096, &s_mesh[i], 0, &th[i], (int)(i & 1));
+        if (th[i] == NULL) {
+            s_mesh_done[i] = true;   // 建立失敗：不要讓 handler 等不到 done
+        }
+    }
+
+    const int64_t t0 = esp_timer_get_time();
+    start = true;
+    vTaskDelay(pdMS_TO_TICKS(ms));
+    stop = true;
+    const int64_t us = esp_timer_get_time() - t0;
+    for (uint32_t i = 0; i < nodes; i++) {
+        while (!s_mesh_done[i]) {
+            vTaskDelay(1);
+        }
+    }
+
+    uint32_t sent = 0, recv = 0, full = 0, empty = 0, torn = 0, order = 0;
+    for (uint32_t i = 0; i < nodes; i++) {
+        sent += s_mesh[i].sent;
+        recv += s_mesh[i].recv;
+        full += s_mesh[i].full;
+        empty += s_mesh[i].empty;
+        torn += s_mesh[i].torn;
+        order += s_mesh[i].seq_err;
+    }
+    int leak = 0;
+    for (uint32_t i = 0; i < nodes; i++) {
+        for (uint32_t j = 0; j < nodes; j++) {
+            if (i == j || s_mesh_hub[i][j] == NULL) {
+                continue;
+            }
+            while (nc_hub_read_begin(s_mesh_hub[i][j]) != NULL) {
+                nc_hub_read_end(s_mesh_hub[i][j]);
+            }
+            leak += hub_stress_leak(s_mesh_hub[i][j]);
+        }
+    }
+
+    const uint32_t ps = us > 0 ? (uint32_t)((uint64_t)recv * 1000000u / (uint64_t)us) : 0;
+    const uint32_t mbs = us > 0 ? (uint32_t)((uint64_t)recv * slot / (uint64_t)us) : 0;
+
+    char *json = s_mesh_json[xPortGetCoreID() & 1];
+    const size_t cap = sizeof(s_mesh_json[0]);
+    size_t off = 0;
+    off = hs_append(json, cap, off,
+                    "{\"ms\":%u,\"nodes\":%u,\"slot\":%u,\"links\":%u,"
+                    "\"sent\":%u,\"recv\":%u,\"per_sec\":%u,\"mbps\":%u,"
+                    "\"full\":%u,\"empty\":%u,\"torn\":%u,\"order\":%u,"
+                    "\"leak\":%d,\"us\":%u}",
+                    (unsigned)ms, (unsigned)nodes, (unsigned)slot,
+                    (unsigned)(nodes * (nodes - 1)),
+                    (unsigned)sent, (unsigned)recv, (unsigned)ps, (unsigned)mbs,
+                    (unsigned)full, (unsigned)empty, (unsigned)torn, (unsigned)order,
+                    leak, (unsigned)us);
+    reply_json(ctx, NC4_CMD_HUB_RSP, json);
+
+    for (uint32_t i = 0; i < MESH_MAX_NODES; i++) {
+        for (uint32_t j = 0; j < MESH_MAX_NODES; j++) {
+            if (s_mesh_hub[i][j] != NULL) {
+                nc_hub_destroy(s_mesh_hub[i][j]);
+                s_mesh_hub[i][j] = NULL;
+            }
+        }
+    }
+    s_duplex_busy = false;
+}
+
 // ── 註冊 ──
 static const nc_action_t k_actions[] = {
     { NC4_CMD_DEV_BENCH, on_dev_bench, "test" },
@@ -1103,6 +2450,13 @@ static const nc_action_t k_actions[] = {
     { NC4_CMD_LINK_FWD, on_link_fwd, "test" },
     { NC4_CMD_MEM_BENCH, on_mem_bench, "test" },
     { NC4_CMD_TILE_BENCH, on_tile_bench, "test" },
+    { NC4_CMD_STAGE_BENCH, on_stage_bench, "test" },
+    { NC4_CMD_HUB_STRESS, on_hub_stress, "test" },
+    { NC4_CMD_HUB_DUPLEX, on_hub_duplex, "test" },
+    { NC4_CMD_HUB_DUPLEX_SWEEP, on_hub_sweep, "test" },
+    { NC4_CMD_HUB_DUPLEX4, on_hub_duplex4, "test" },
+    { NC4_CMD_HUB_SINGLE, on_hub_single, "test" },
+    { NC4_CMD_HUB_MESH, on_hub_mesh, "test" },
 };
 
 NC_ACTION_TABLE_DEF(nc_test_action_table, "test", k_actions);
