@@ -1311,3 +1311,22 @@ forward-only route；環狀拓撲；OTA flash 停頓對 `uart.rx`。見
 **仍未做**：TTL／leak watchdog、tap subscriber、bulk 放 PSRAM 實測、
 forward 成功路徑（要 UART 腳位或第二條可送 link）、pool 接到 RX（header-first）、
 多實例（UART0/1/2、I2C、SPI）。見 [buffer-pool.md §5](../03_notes/buffer-pool.md)。
+
+### 7.30 2026-11-09（通訊緩衝定案：轉發走 PSRAM 的 nc_hub）
+
+**背景**：`dd46be4` 的 `nc_hub` 有了 strict FIFO／generation／destroy／核心統計；
+使用者接受「轉發慢一點、走 PSRAM」。這節只定案，未改 code。
+
+| 決定 | 內容 |
+|---|---|
+| RX | 留在 internal（per-link parser／PUSH slots），不變 |
+| 轉發 | **`nc_hub` per（目的 link × 來源核）**，PSRAM，strict FIFO，writer mutex；同核也走 hub |
+| `nc_pool.forward` | **取消**；`nc_pool` 只留 small／bulk，預設 `enable:0` |
+| 回覆幀 | 每核 2,615 B PSRAM（不變） |
+| 記憶體 | S3 16 hubs × 2 × 4,160 = **133 KB PSRAM**（internal 新增 0）；P4 8 × 2 × 8,256 = 132 KB |
+| 延遲 | 4 KB 轉發 **+0.4 ms**（PSRAM 寫＋讀）；8 KB +0.8 ms |
+| 失敗 | hub 滿 → drop＋`drop_full`；send 失敗 → `drop_send`；registry 滿 → 開機 fail-visible |
+
+- 完整設計：[comm-buffers.md](../03_notes/comm-buffers.md)。
+- 下一步：`nc4_fwd` hub 版（P1），保留舊 queue 做 A/B；P2 才改預設。
+- 未做：tap／refcount（用 `nc_hub_generation`）、P4 8K 上板、per-link `max_frame`。

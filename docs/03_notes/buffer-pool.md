@@ -57,7 +57,13 @@
   {"name":"forward","size":4160,"count":2,"used":0,"peak":1,"fails":0}]}
 ```
 
-## 3. 跨核轉寄
+## 3. 跨核轉寄（**已被 comm-buffers.md 取代**）
+
+> 2026-11-09 定案：forward 改用 PSRAM 的 `nc_hub`（per 目的 link × 來源核），
+> `nc_pool.forward` 取消。以下保留作歷史；新設計見
+> [comm-buffers.md](comm-buffers.md)。
+
+
 
 ```
 來源核（decode0）                         目的核（decode1）

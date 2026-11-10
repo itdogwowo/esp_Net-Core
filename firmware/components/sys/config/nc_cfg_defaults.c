@@ -60,12 +60,14 @@ static const nc_system_cfg_t k_system = {
             .rx = { .region = 1024, .chunk = 256, .slot_size = 256, .slots = 4, .budget = 8 },
         },
     },
-    .n_routes = 4,
+    .n_routes = 5,
     .routes = {
         { .in = "nctx",     .n_out = 1, .out = { "decode0" } },
         { .in = "outbound", .n_out = 0 },
-        { .in = "CDC",      .n_out = 1, .out = { "decode0" } },
+        // 預設就把 CDC 同時轉去 ESPNOW：沒有 SD 設定的板子也可以做兩板互轉。
+        { .in = "CDC",      .n_out = 2, .out = { "decode0", "ESPNOW" } },
         { .in = "UART",     .n_out = 1, .out = { "decode1" } },
+        { .in = "ESPNOW",   .n_out = 1, .out = { "decode0" } },
     },
     // 2026-11-09：共用緩衝池（small／bulk／forward）。
     // 預設全部 internal；forward 要給 UART/TCP 送，不可放 PSRAM。

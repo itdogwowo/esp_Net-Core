@@ -2840,6 +2840,24 @@ static int router_from_cfg(nc4_route_t *out, int max)
         }
         n++;
     }
+#if defined(NC_ENABLE_TESTS) && CONFIG_NETCORE_WIFI
+    // 測試版：config 冇 ESPNOW 行時自動補一條，否則收到的 ESPNOW 幀冇人解。
+    bool has_espnow = false;
+    for (int i = 0; i < n; i++) {
+        if (strcmp(out[i].line, "ESPNOW") == 0) {
+            has_espnow = true;
+            break;
+        }
+    }
+    if (!has_espnow && n < max && n < NC4_ROUTE_MAX) {
+        out[n].line = "ESPNOW";
+        out[n].core = 0;
+        out[n].n_out = 1;
+        out[n].out[0] = "decode0";
+        n++;
+        ESP_LOGW(TAG, "router：測試版自動補 ESPNOW -> decode0");
+    }
+#endif
     if (n > 0) {
         ESP_LOGI(TAG, "router：由 config 讀到 %d 列", n);
     }
@@ -3465,6 +3483,10 @@ static esp_err_t ph_commit(void)
     // 放在 plan commit 之後：核心通道先要記憶體，Wi-Fi 係可選項。
     // 未啟用時 nc_wifi_boot() 只回報狀態，一個 byte 都唔配。
     nc_wifi_boot();
+#ifdef NC_ENABLE_TESTS
+    // 測試版：Wi-Fi 初始化之後才起 ESP-NOW（先 STA 連 AP，再沿用它的 channel）。
+    nc_test_action_espnow_boot(s_decoder[0]);
+#endif
     return ESP_OK;
 }
 

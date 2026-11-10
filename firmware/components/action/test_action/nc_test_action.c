@@ -1,5 +1,6 @@
 // 測試指令（dev bench / hub bench / tx bench / bus stats / net tune / bench 域）。
 // 由 main.c 搬出：正式映像唔編譯（NC_ENABLE_TESTS=OFF 時 component 唔存在）。
+#include "sdkconfig.h"
 #include "nc_test_action.h"
 #include "nc_action.h"
 
@@ -8,9 +9,21 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "driver/gpio.h"
 #include "driver/uart.h"
 #include "esp_cache.h"
+#include "soc/soc_caps.h"
+#if CONFIG_NETCORE_WIFI
+#include "esp_event.h"
+#include "esp_netif.h"
+#include "esp_now.h"
+#include "esp_wifi.h"
+#endif
 #include "esp_heap_caps.h"
+#if SOC_LCD_I80_SUPPORTED
+#include "esp_lcd_io_i80.h"
+#include "esp_lcd_panel_io.h"
+#endif
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
@@ -18,6 +31,7 @@
 #include "nvs.h"
 
 #include "nc4_bus.h"
+#include "nc4.h"
 #include "nc4_link.h"
 #include "nc_hub.h"
 
@@ -2431,6 +2445,718 @@ static void on_hub_mesh(nc4_ctx_t *ctx, const nc4_frame_t *f)
     s_duplex_busy = false;
 }
 
+// ── 0xF025–0xF027：執行期 GPIO 設定／讀寫（兩板接線測試用）──
+//
+// 為什麼要這幾支：板子接好之後 GPIO0/EN 可能被拉住，重燒要拔線；
+// 有了這幾支就可以經 USB 直接配置／讀寫任何 GPIO，唔使改 hardware.json 再 reboot。
+// payload：
+//   CFG  [pin:u8][mode:u8 0=out 1=in][pull:u8 0=none 1=up 2=down][level:u8]
+//   SET  [pin:u8][level:u8]
+//   GET  [n:u8][pin:u8 ...]  → {"levels":[...]}
+#define NC4_CMD_GPIO_CFG  0xF025
+#define NC4_CMD_GPIO_SET  0xF026
+#define NC4_CMD_GPIO_GET  0xF027
+
+static bool gpio_pin_ok(int pin)
+{
+    // 19/20 = USB D-/D+；唔好碰。其餘 0..48 留給測試。
+    return pin >= 0 && pin <= 48 && pin != 19 && pin != 20;
+}
+
+static void on_gpio_cfg(nc4_ctx_t *ctx, const nc4_frame_t *f)
+{
+    if (f->len < 4) {
+        reply_json(ctx, NC4_CMD_HUB_RSP, "{\"err\":\"args\"}");
+        return;
+    }
+    const int pin = f->data[0];
+    const int mode = f->data[1];
+    const int pull = f->data[2];
+    const int level = f->data[3];
+    if (!gpio_pin_ok(pin) || mode > 1 || pull > 2) {
+        reply_json(ctx, NC4_CMD_HUB_RSP, "{\"err\":\"pin\"}");
+        return;
+    }
+    gpio_config_t io = {
+        .pin_bit_mask = (1ULL << pin),
+        .mode = mode ? GPIO_MODE_INPUT : GPIO_MODE_OUTPUT,
+        .pull_up_en = (pull == 1) ? GPIO_PULLUP_ENABLE : GPIO_PULLUP_DISABLE,
+        .pull_down_en = (pull == 2) ? GPIO_PULLDOWN_ENABLE : GPIO_PULLDOWN_DISABLE,
+        .intr_type = GPIO_INTR_DISABLE,
+    };
+    const esp_err_t e = gpio_config(&io);
+    if (e == ESP_OK && mode == 0) {
+        gpio_set_level(pin, level ? 1 : 0);
+    }
+    char json[96];
+    snprintf(json, sizeof(json),
+             "{\"pin\":%d,\"mode\":\"%s\",\"pull\":%d,\"level\":%d,\"err\":\"%s\"}",
+             pin, mode ? "in" : "out", pull, gpio_get_level(pin), esp_err_to_name(e));
+    reply_json(ctx, NC4_CMD_HUB_RSP, json);
+}
+
+static void on_gpio_set(nc4_ctx_t *ctx, const nc4_frame_t *f)
+{
+    if (f->len < 2) {
+        reply_json(ctx, NC4_CMD_HUB_RSP, "{\"err\":\"args\"}");
+        return;
+    }
+    const int pin = f->data[0];
+    const int level = f->data[1];
+    if (!gpio_pin_ok(pin)) {
+        reply_json(ctx, NC4_CMD_HUB_RSP, "{\"err\":\"pin\"}");
+        return;
+    }
+    gpio_set_level(pin, level ? 1 : 0);
+    char json[64];
+    snprintf(json, sizeof(json), "{\"pin\":%d,\"level\":%d}", pin, gpio_get_level(pin));
+    reply_json(ctx, NC4_CMD_HUB_RSP, json);
+}
+
+static void on_gpio_get(nc4_ctx_t *ctx, const nc4_frame_t *f)
+{
+    if (f->len < 1) {
+        reply_json(ctx, NC4_CMD_HUB_RSP, "{\"err\":\"args\"}");
+        return;
+    }
+    const int n = f->data[0];
+    if (n < 1 || n > 16 || (int)f->len < 1 + n) {
+        reply_json(ctx, NC4_CMD_HUB_RSP, "{\"err\":\"args\"}");
+        return;
+    }
+    char json[256];
+    size_t off = 0;
+    off += snprintf(json + off, sizeof(json) - off, "{\"n\":%d,\"levels\":[", n);
+    for (int i = 0; i < n; i++) {
+        const int pin = f->data[1 + i];
+        if (!gpio_pin_ok(pin)) {
+            off += snprintf(json + off, sizeof(json) - off, "%s-1", i ? "," : "");
+        } else {
+            off += snprintf(json + off, sizeof(json) - off, "%s%d", i ? "," : "",
+                            gpio_get_level(pin));
+        }
+    }
+    snprintf(json + off, sizeof(json) - off, "]}");
+    reply_json(ctx, NC4_CMD_HUB_RSP, json);
+}
+
+// ── 0xF028–0xF02A：ESP-NOW 測試（S3 WiFi；P4 冇 radio）──
+//
+// 為什麼要有這幾支：ESP-NOW 唔需要連 AP，但需要 WiFi radio 起來、固定頻道。
+// 兩端要同頻道；broadcast peer 用 FF:FF:FF:FF:FF:FF。
+// payload：
+//   INIT  [ch:u8]（0 → 1）
+//   SEND  [len:u8][data]（1..250）
+//   STATS 無
+#if CONFIG_NETCORE_WIFI
+#define NC4_CMD_ESPNOW_INIT   0xF028
+#define NC4_CMD_ESPNOW_SEND   0xF029
+#define NC4_CMD_ESPNOW_STATS  0xF02A
+
+static bool s_now_ready;
+static uint8_t s_now_ch;
+static volatile uint32_t s_now_rx, s_now_tx_ok, s_now_tx_fail, s_now_bad;
+static volatile int s_now_last_len, s_now_last_rssi;
+static uint8_t s_now_last_mac[6];
+static uint8_t s_now_last[32];
+static volatile int s_now_last_n;
+static nc4_parser_t *s_now_parser;
+static uint8_t s_now_ring[64];
+
+typedef struct {
+    uint16_t len;
+    uint8_t data[250];
+} now_msg_t;
+
+static QueueHandle_t s_now_q;
+static TaskHandle_t s_now_task;
+static volatile uint32_t s_now_drop;
+
+// 不在 Wi-Fi receive callback 裡 parse：ESP-NOW 在 callback 內再 send 會失敗。
+// callback 只 copy 入 queue；由 task 做 parser_frame／handler／回覆。
+static void now_task(void *arg)
+{
+    (void)arg;
+    now_msg_t m;
+    for (;;) {
+        if (xQueueReceive(s_now_q, &m, portMAX_DELAY) == pdTRUE && s_now_parser != NULL) {
+            const esp_err_t e = nc4_parser_frame(s_now_parser, m.data, m.len);
+            if (e != ESP_OK) {
+                s_now_bad++;
+            }
+        }
+    }
+}
+
+// 轉寄出口：把整幀交給 ESP-NOW（broadcast）。>250 B 先回 -1（之後可加 fragmentation）。
+static int now_link_write(void *arg, const uint8_t *frame, size_t len)
+{
+    (void)arg;
+    if (!s_now_ready || frame == NULL || len == 0 || len > 250) {
+        return -1;
+    }
+    static const uint8_t bcast[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+    return (esp_now_send(bcast, frame, len) == ESP_OK) ? (int)len : -1;
+}
+
+static void now_recv_cb(const esp_now_recv_info_t *info, const uint8_t *data, int len)
+{
+    __atomic_add_fetch(&s_now_rx, 1, __ATOMIC_RELAXED);
+    s_now_last_len = len;
+    if (info != NULL && info->rx_ctrl != NULL) {
+        s_now_last_rssi = info->rx_ctrl->rssi;
+    }
+    if (info != NULL && info->src_addr != NULL) {
+        memcpy(s_now_last_mac, info->src_addr, 6);
+    }
+    const int n = (len < (int)sizeof(s_now_last)) ? len : (int)sizeof(s_now_last);
+    if (n > 0 && data != NULL) {
+        memcpy(s_now_last, data, (size_t)n);
+    }
+    s_now_last_n = n;
+
+    // 收到的是 NC4 幀就 copy 入 queue；由 now_task 解析（唔在 Wi-Fi callback 內 send）。
+    if (s_now_q != NULL && s_now_parser != NULL && data != NULL &&
+        len >= NC4_HDR_LEN && len <= 250 &&
+        data[0] == NC4_SOF_0 && data[1] == NC4_SOF_1) {
+        now_msg_t m;
+        m.len = (uint16_t)len;
+        memcpy(m.data, data, (size_t)len);
+        if (xQueueSend(s_now_q, &m, 0) != pdTRUE) {
+            s_now_drop++;
+        }
+    }
+}
+
+static void now_send_cb(const esp_now_send_info_t *tx_info, esp_now_send_status_t status)
+{
+    (void)tx_info;
+    if (status == ESP_NOW_SEND_SUCCESS) {
+        __atomic_add_fetch(&s_now_tx_ok, 1, __ATOMIC_RELAXED);
+    } else {
+        __atomic_add_fetch(&s_now_tx_fail, 1, __ATOMIC_RELAXED);
+    }
+}
+
+static esp_err_t now_ensure(uint8_t ch, nc4_decoder_t *dec)
+{
+    if (s_now_ready) {
+        if (ch != 0 && ch != s_now_ch) {
+            const esp_err_t e = esp_wifi_set_channel(ch, WIFI_SECOND_CHAN_NONE);
+            if (e == ESP_OK) {
+                s_now_ch = ch;
+            }
+        }
+        // 已經 init 過（例如 boot 自動 init）但 parser 未建立：補建。
+        if (s_now_parser == NULL && dec != NULL) {
+            s_now_parser = nc4_parser_create_in(s_now_ring, sizeof(s_now_ring), dec,
+                                                now_link_write, NULL, "ESPNOW");
+            ESP_LOGI(TAG, "ESP-NOW parser late create: %s", s_now_parser ? "ok" : "fail");
+        }
+        if (s_now_q == NULL) {
+            s_now_q = xQueueCreate(8, sizeof(now_msg_t));
+            if (s_now_q != NULL) {
+                xTaskCreatePinnedToCore(now_task, "espnow_rx", 4096, NULL, 5, &s_now_task, 0);
+            }
+        }
+        return ESP_OK;
+    }
+    esp_err_t e = esp_netif_init();
+    if (e != ESP_OK && e != ESP_ERR_INVALID_STATE) {
+        return e;
+    }
+    e = esp_event_loop_create_default();
+    if (e != ESP_OK && e != ESP_ERR_INVALID_STATE) {
+        return e;
+    }
+    wifi_mode_t mode;
+    if (esp_wifi_get_mode(&mode) == ESP_ERR_WIFI_NOT_INIT) {
+        wifi_init_config_t ic = WIFI_INIT_CONFIG_DEFAULT();
+        e = esp_wifi_init(&ic);
+        if (e != ESP_OK) {
+            return e;
+        }
+    }
+    e = esp_wifi_set_mode(WIFI_MODE_STA);
+    if (e != ESP_OK) {
+        return e;
+    }
+    e = esp_wifi_start();
+    if (e != ESP_OK) {
+        // 已經 start 過會回錯誤；下面 set_channel 會是最終判斷。
+        ESP_LOGW(TAG, "esp_wifi_start: %s（繼續）", esp_err_to_name(e));
+    }
+    if (ch != 0) {
+        e = esp_wifi_set_channel(ch, WIFI_SECOND_CHAN_NONE);
+        if (e != ESP_OK) {
+            return e;
+        }
+    } else {
+        // 0 = 沿用目前 channel（STA 連 AP 時由 AP 決定）
+        uint8_t cur = 1;
+        wifi_second_chan_t sec;
+        if (esp_wifi_get_channel(&cur, &sec) == ESP_OK) {
+            ch = cur;
+        } else {
+            ch = 1;
+        }
+    }
+    e = esp_now_init();
+    if (e != ESP_OK) {
+        ESP_LOGE(TAG, "esp_now_init: %s", esp_err_to_name(e));
+        return e;
+    }
+    esp_now_register_recv_cb(now_recv_cb);
+    esp_now_register_send_cb(now_send_cb);
+    esp_now_peer_info_t peer;
+    memset(&peer, 0, sizeof(peer));
+    memset(peer.peer_addr, 0xFF, 6);
+    peer.channel = 0;   // 跟隨目前 channel（STA 連 AP 後由 AP 決定）
+    peer.ifidx = WIFI_IF_STA;
+    peer.encrypt = false;
+    e = esp_now_add_peer(&peer);
+    if (e != ESP_OK && e != ESP_ERR_ESPNOW_EXIST) {
+        ESP_LOGE(TAG, "esp_now_add_peer(broadcast): %s", esp_err_to_name(e));
+        return e;
+    }
+    s_now_ch = ch;
+    s_now_ready = true;
+
+    // 轉寄出口 + 接收 parser（frame mode，不需要 ring）。
+    (void)nc4_link_register("ESPNOW", now_link_write, NULL);
+    if (s_now_parser == NULL && dec != NULL) {
+        s_now_parser = nc4_parser_create_in(s_now_ring, sizeof(s_now_ring), dec,
+                                            now_link_write, NULL, "ESPNOW");
+        if (s_now_parser == NULL) {
+            ESP_LOGE(TAG, "ESP-NOW parser 建立失敗");
+        }
+    }
+    if (s_now_q == NULL) {
+        s_now_q = xQueueCreate(8, sizeof(now_msg_t));
+        if (s_now_q != NULL) {
+            xTaskCreatePinnedToCore(now_task, "espnow_rx", 4096, NULL, 5, &s_now_task, 0);
+        }
+    }
+    return ESP_OK;
+}
+
+static void on_espnow_init(nc4_ctx_t *ctx, const nc4_frame_t *f)
+{
+    const uint8_t ch = (f->len >= 1) ? f->data[0] : 1;
+    const esp_err_t e = now_ensure(ch, ctx->decoder);
+    uint8_t mac[6] = {0};
+    esp_wifi_get_mac(WIFI_IF_STA, mac);
+    char json[160];
+    snprintf(json, sizeof(json),
+             "{\"init\":%d,\"ch\":%u,\"mac\":\"%02x:%02x:%02x:%02x:%02x:%02x\","
+             "\"err\":\"%s\"}",
+             s_now_ready ? 1 : 0, (unsigned)s_now_ch,
+             mac[0], mac[1], mac[2], mac[3], mac[4], mac[5], esp_err_to_name(e));
+    reply_json(ctx, NC4_CMD_HUB_RSP, json);
+}
+
+static void on_espnow_send(nc4_ctx_t *ctx, const nc4_frame_t *f)
+{
+    if (!s_now_ready) {
+        reply_json(ctx, NC4_CMD_HUB_RSP, "{\"err\":\"not_init\"}");
+        return;
+    }
+    if (f->len < 1 || f->data[0] == 0 || f->data[0] > 250) {
+        reply_json(ctx, NC4_CMD_HUB_RSP, "{\"err\":\"args\"}");
+        return;
+    }
+    const uint8_t n = f->data[0];
+    if ((int)f->len < 1 + n) {
+        reply_json(ctx, NC4_CMD_HUB_RSP, "{\"err\":\"args\"}");
+        return;
+    }
+    static const uint8_t bcast[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+    const esp_err_t e = esp_now_send(bcast, f->data + 1, n);
+    char json[96];
+    snprintf(json, sizeof(json), "{\"len\":%u,\"queued\":%d,\"err\":\"%s\"}",
+             (unsigned)n, e == ESP_OK ? 1 : 0, esp_err_to_name(e));
+    reply_json(ctx, NC4_CMD_HUB_RSP, json);
+}
+
+static void on_espnow_stats(nc4_ctx_t *ctx, const nc4_frame_t *f)
+{
+    (void)f;
+    char hex[2 * 16 + 1];
+    size_t off = 0;
+    const int n = s_now_last_n;
+    for (int i = 0; i < n && i < 16; i++) {
+        off += (size_t)snprintf(hex + off, sizeof(hex) - off, "%02x", s_now_last[i]);
+    }
+    if (n == 0) {
+        hex[0] = '\0';
+    }
+    char json[320];
+    snprintf(json, sizeof(json),
+             "{\"init\":%d,\"ch\":%u,\"rx\":%u,\"tx_ok\":%u,\"tx_fail\":%u,\"bad\":%u,\"drop\":%u,"
+             "\"parser\":%d,\"last_len\":%d,\"last_rssi\":%d,"
+             "\"last_mac\":\"%02x:%02x:%02x:%02x:%02x:%02x\",\"last_hex\":\"%s\"}",
+             s_now_ready ? 1 : 0, (unsigned)s_now_ch,
+             (unsigned)s_now_rx, (unsigned)s_now_tx_ok, (unsigned)s_now_tx_fail,
+             (unsigned)s_now_bad, (unsigned)s_now_drop, s_now_parser ? 1 : 0,
+             s_now_last_len, s_now_last_rssi,
+             s_now_last_mac[0], s_now_last_mac[1], s_now_last_mac[2],
+             s_now_last_mac[3], s_now_last_mac[4], s_now_last_mac[5], hex);
+    reply_json(ctx, NC4_CMD_HUB_RSP, json);
+}
+#endif  // CONFIG_NETCORE_WIFI
+
+void nc_test_action_espnow_boot(nc4_decoder_t *decoder)
+{
+#if CONFIG_NETCORE_WIFI
+    if (decoder == NULL) {
+        return;
+    }
+    const esp_err_t e = now_ensure(0, decoder);
+    ESP_LOGI(TAG, "ESP-NOW boot init: %s", esp_err_to_name(e));
+#else
+    (void)decoder;
+#endif
+}
+
+// ── 0xF02C–0xF02E：Wi-Fi STA / AP / INFO（測試用；憑證只在命令裡，不落檔案）──
+#if CONFIG_NETCORE_WIFI
+#define NC4_CMD_WIFI_STA   0xF02C
+#define NC4_CMD_WIFI_AP    0xF02D
+#define NC4_CMD_WIFI_INFO  0xF02E
+
+static esp_netif_t *s_sta_netif;
+static esp_netif_t *s_ap_netif;
+static volatile bool s_sta_got_ip;
+static uint32_t s_sta_ip_addr;
+
+static void wifi_ip_cb(void *arg, esp_event_base_t base, int32_t id, void *data)
+{
+    (void)arg;
+    if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP) {
+        const ip_event_got_ip_t *e = (const ip_event_got_ip_t *)data;
+        s_sta_ip_addr = e->ip_info.ip.addr;
+        s_sta_got_ip = true;
+        ESP_LOGI(TAG, "Wi-Fi STA IP: " IPSTR, IP2STR(&e->ip_info.ip));
+    }
+}
+
+static void wifi_ensure_netif_sta(void)
+{
+    if (s_sta_netif == NULL) {
+        s_sta_netif = esp_netif_create_default_wifi_sta();
+    }
+    static bool reg;
+    if (!reg) {
+        esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, wifi_ip_cb, NULL);
+        reg = true;
+    }
+}
+
+static void on_wifi_sta(nc4_ctx_t *ctx, const nc4_frame_t *f)
+{
+    if (f->len < 2) {
+        reply_json(ctx, NC4_CMD_HUB_RSP, "{\"err\":\"args\"}");
+        return;
+    }
+    const int sl = f->data[0];
+    if (sl < 1 || sl > 32 || 1 + sl >= f->len) {
+        reply_json(ctx, NC4_CMD_HUB_RSP, "{\"err\":\"ssid\"}");
+        return;
+    }
+    char ssid[33]; memcpy(ssid, f->data + 1, sl); ssid[sl] = '\0';
+    const int off = 1 + sl;
+    const int pl = f->data[off];
+    if (pl < 0 || pl > 64 || off + 1 + pl > f->len) {
+        reply_json(ctx, NC4_CMD_HUB_RSP, "{\"err\":\"pw\"}");
+        return;
+    }
+    char pw[65]; memcpy(pw, f->data + off + 1, pl); pw[pl] = '\0';
+
+    esp_err_t e = now_ensure(0, ctx->decoder);
+    if (e != ESP_OK) {
+        reply_json(ctx, NC4_CMD_HUB_RSP, "{\"err\":\"wifi_init\"}");
+        return;
+    }
+    wifi_ensure_netif_sta();
+    wifi_config_t wc; memset(&wc, 0, sizeof(wc));
+    memcpy(wc.sta.ssid, ssid, strnlen(ssid, sizeof(wc.sta.ssid)));
+    memcpy(wc.sta.password, pw, strnlen(pw, sizeof(wc.sta.password)));
+    wc.sta.threshold.authmode = (pw[0] != '\0') ? WIFI_AUTH_WPA2_PSK : WIFI_AUTH_OPEN;
+    e = esp_wifi_set_mode(WIFI_MODE_STA);
+    if (e == ESP_OK) e = esp_wifi_set_config(WIFI_IF_STA, &wc);
+    if (e == ESP_OK) e = esp_wifi_connect();
+    if (s_sta_netif != NULL) {
+        (void)esp_netif_dhcpc_start(s_sta_netif);   // 明確啟動 DHCP（避免 netif 建立時序）
+    }
+
+    char json[160];
+    snprintf(json, sizeof(json), "{\"sta\":1,\"ssid\":\"%s\",\"err\":\"%s\"}",
+             ssid, esp_err_to_name(e));
+    reply_json(ctx, NC4_CMD_HUB_RSP, json);
+}
+
+static void on_wifi_ap(nc4_ctx_t *ctx, const nc4_frame_t *f)
+{
+    if (f->len < 3) {
+        reply_json(ctx, NC4_CMD_HUB_RSP, "{\"err\":\"args\"}");
+        return;
+    }
+    const int sl = f->data[0];
+    if (sl < 1 || sl > 32 || 1 + sl >= f->len) {
+        reply_json(ctx, NC4_CMD_HUB_RSP, "{\"err\":\"ssid\"}");
+        return;
+    }
+    char ssid[33]; memcpy(ssid, f->data + 1, sl); ssid[sl] = '\0';
+    const int off = 1 + sl;
+    const int pl = f->data[off];
+    if (pl < 8 || pl > 64 || off + 1 + pl >= f->len) {
+        reply_json(ctx, NC4_CMD_HUB_RSP, "{\"err\":\"pw\"}");
+        return;
+    }
+    char pw[65]; memcpy(pw, f->data + off + 1, pl); pw[pl] = '\0';
+    const int ch = f->data[off + 1 + pl];
+
+    esp_err_t e = now_ensure(0, ctx->decoder);
+    if (e != ESP_OK) {
+        reply_json(ctx, NC4_CMD_HUB_RSP, "{\"err\":\"wifi_init\"}");
+        return;
+    }
+    if (s_ap_netif == NULL) {
+        s_ap_netif = esp_netif_create_default_wifi_ap();
+    }
+    wifi_config_t wc; memset(&wc, 0, sizeof(wc));
+    memcpy(wc.ap.ssid, ssid, strnlen(ssid, sizeof(wc.ap.ssid)));
+    wc.ap.ssid_len = (uint8_t)strlen(ssid);
+    memcpy(wc.ap.password, pw, strnlen(pw, sizeof(wc.ap.password)));
+    wc.ap.channel = (ch >= 1 && ch <= 13) ? ch : 6;
+    wc.ap.max_connection = 4;
+    wc.ap.authmode = WIFI_AUTH_WPA2_PSK;
+    e = esp_wifi_set_mode(WIFI_MODE_APSTA);
+    if (e == ESP_OK) e = esp_wifi_set_config(WIFI_IF_AP, &wc);
+    if (e == ESP_OK) e = esp_wifi_start();
+
+    char json[160];
+    snprintf(json, sizeof(json), "{\"ap\":1,\"ssid\":\"%s\",\"ch\":%d,\"err\":\"%s\"}",
+             ssid, wc.ap.channel, esp_err_to_name(e));
+    reply_json(ctx, NC4_CMD_HUB_RSP, json);
+}
+
+static void on_wifi_info(nc4_ctx_t *ctx, const nc4_frame_t *f)
+{
+    (void)f;
+    esp_netif_ip_info_t ip4; memset(&ip4, 0, sizeof(ip4));
+    if (s_sta_netif != NULL) {
+        esp_netif_get_ip_info(s_sta_netif, &ip4);
+    }
+    esp_netif_ip_info_t ap4; memset(&ap4, 0, sizeof(ap4));
+    if (s_ap_netif != NULL) {
+        esp_netif_get_ip_info(s_ap_netif, &ap4);
+    }
+    int rssi = 0;
+    esp_wifi_sta_get_rssi(&rssi);
+    char json[256];
+    snprintf(json, sizeof(json),
+             "{\"sta\":%d,\"ip\":\"" IPSTR "\",\"ap\":%d,\"ap_ip\":\"" IPSTR "\",\"rssi\":%d}",
+             s_sta_got_ip ? 1 : 0, IP2STR(&ip4.ip),
+             s_ap_netif ? 1 : 0, IP2STR(&ap4.ip), rssi);
+    reply_json(ctx, NC4_CMD_HUB_RSP, json);
+}
+#endif  // CONFIG_NETCORE_WIFI
+
+// ── 0xF031 STRESS：另一核負載（CPU / PSRAM），配合 I80 bench 看 render 核是否被影響 ──
+#define NC4_CMD_STRESS  0xF031
+static volatile bool s_stress_run;
+static volatile uint32_t s_stress_ops;
+static volatile uint8_t s_stress_mode;
+static TaskHandle_t s_stress_task;
+
+static void stress_task(void *arg)
+{
+    (void)arg;
+    uint8_t *a = heap_caps_malloc(32 * 1024, MALLOC_CAP_SPIRAM);
+    uint8_t *b = heap_caps_malloc(32 * 1024, MALLOC_CAP_SPIRAM);
+    if (a == NULL || b == NULL) {
+        free(a); free(b);
+        s_stress_run = false;
+        vTaskDelete(NULL);
+        return;
+    }
+    memset(a, 0x5a, 32 * 1024);
+    while (s_stress_run) {
+        if (s_stress_mode == 1) {
+            memcpy(b, a, 32 * 1024);
+        } else {
+            volatile uint32_t x = 0;
+            for (uint32_t i = 0; i < 100000; i++) x += i;
+        }
+        s_stress_ops++;
+    }
+    free(a); free(b);
+    s_stress_task = NULL;
+    vTaskDelete(NULL);
+}
+
+static void on_stress(nc4_ctx_t *ctx, const nc4_frame_t *f)
+{
+    if (f->len < 1) {
+        reply_json(ctx, NC4_CMD_HUB_RSP, "{\"err\":\"args\"}");
+        return;
+    }
+    const uint8_t start = f->data[0];
+    if (start) {
+        if (s_stress_task == NULL) {
+            s_stress_mode = (f->len >= 2) ? f->data[1] : 0;
+            s_stress_ops = 0;
+            s_stress_run = true;
+            if (xTaskCreatePinnedToCore(stress_task, "stress", 4096, NULL, 4, &s_stress_task, 1) != pdPASS) {
+                s_stress_run = false;
+                reply_json(ctx, NC4_CMD_HUB_RSP, "{\"err\":\"task\"}");
+                return;
+            }
+        }
+    } else {
+        s_stress_run = false;
+    }
+    char j[128];
+    snprintf(j, sizeof(j), "{\"run\":%d,\"mode\":%u,\"ops\":%u}",
+             s_stress_run ? 1 : 0, (unsigned)s_stress_mode, (unsigned)s_stress_ops);
+    reply_json(ctx, NC4_CMD_HUB_RSP, j);
+}
+
+// ── 0xF030 I80_DMA：I80 16-lane DMA 的 CPU 釋放／切片測試（合成，不需要 LED）──
+//
+// 目的：回答「I80 用 DMA、一塊一塊發、換緩衝，CPU 是否真的空出來」。
+// 用 16-bit I80 bus + 28,800 B frame（16 lane × 600 LED × 3 B）做時序；
+// 只 toggle 測試 GPIO，不驅動真 LED。量 submit（CPU）／wire（DMA）／fill（換緩衝）。
+#if SOC_LCD_I80_SUPPORTED
+#define NC4_CMD_I80_DMA     0xF030
+#define I80_FRAME_BYTES     28800      /* 16 × 600 × 3 */
+#define I80_SLICES          4
+#define I80_PCLK_HZ         1000000    /* 1 MHz；28.8 KB → 14.4 ms wire */
+
+static volatile bool s_i80_done;
+static volatile int64_t s_i80_done_us;
+
+static bool i80_done_cb(esp_lcd_panel_io_handle_t io, esp_lcd_panel_io_event_data_t *ed, void *ctx)
+{
+    (void)io; (void)ed; (void)ctx;
+    s_i80_done_us = esp_timer_get_time();
+    s_i80_done = true;
+    return false;
+}
+
+static void on_i80_dma(nc4_ctx_t *ctx, const nc4_frame_t *f)
+{
+    uint16_t iters = 3;
+    if (f->len >= 2) iters = (uint16_t)(f->data[0] | (f->data[1] << 8));
+    if (iters < 1) iters = 1;
+    if (iters > 10) iters = 10;
+    uint32_t pclk_hz = 2000000;   // 1 MHz 被驅動拒絕（NOT_SUPPORTED），先由 2 MHz 起
+    if (f->len >= 4) {
+        const uint16_t mhz = (uint16_t)(f->data[2] | (f->data[3] << 8));
+        if (mhz >= 1 && mhz <= 20) pclk_hz = (uint32_t)mhz * 1000000u;
+    }
+
+    // 16 data pins：避開 SD(4-7/15/16)、USB(19/20)、八角 PSRAM(26-37)、strap(45/46)
+    // N16R8 的 octal PSRAM 用了 33-37；先前用 33-48 會直接打爛 PSRAM → reset。
+    static const int data_pins[16] = {1,2,3,8,9,10,11,12,13,14,17,18,21,38,39,40};
+    esp_lcd_i80_bus_config_t bus_cfg = {
+        .dc_gpio_num = 47,
+        .wr_gpio_num = 41,
+        .clk_src = LCD_CLK_SRC_DEFAULT,
+        .bus_width = 16,
+        .max_transfer_bytes = I80_FRAME_BYTES,
+        .dma_burst_size = 64,
+    };
+    for (int i = 0; i < 16; i++) bus_cfg.data_gpio_nums[i] = data_pins[i];
+    esp_lcd_i80_bus_handle_t bus = NULL;
+    esp_err_t e = esp_lcd_new_i80_bus(&bus_cfg, &bus);
+    if (e != ESP_OK) {
+        char j[96]; snprintf(j,sizeof(j),"{\"err\":\"bus\",\"e\":\"%s\"}",esp_err_to_name(e));
+        reply_json(ctx, NC4_CMD_HUB_RSP, j); return;
+    }
+
+    esp_lcd_panel_io_i80_config_t io_cfg = {
+        .cs_gpio_num = 42,
+        .pclk_hz = pclk_hz,
+        .trans_queue_depth = 2,
+        .on_color_trans_done = i80_done_cb,
+        .user_ctx = NULL,
+        .lcd_cmd_bits = 8,
+        .lcd_param_bits = 8,
+    };
+    esp_lcd_panel_io_handle_t io = NULL;
+    e = esp_lcd_new_panel_io_i80(bus, &io_cfg, &io);
+    if (e != ESP_OK) {
+        esp_lcd_del_i80_bus(bus);
+        char j[96]; snprintf(j,sizeof(j),"{\"err\":\"io\",\"e\":\"%s\"}",esp_err_to_name(e));
+        reply_json(ctx, NC4_CMD_HUB_RSP, j); return;
+    }
+
+    uint8_t *buf[2] = {0};
+    buf[0] = heap_caps_aligned_alloc(64, I80_FRAME_BYTES, MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA);
+    buf[1] = heap_caps_aligned_alloc(64, I80_FRAME_BYTES, MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA);
+    if (!buf[0] || !buf[1]) {
+        free(buf[0]); free(buf[1]);
+        esp_lcd_panel_io_del(io); esp_lcd_del_i80_bus(bus);
+        reply_json(ctx, NC4_CMD_HUB_RSP, "{\"err\":\"nomem\"}"); return;
+    }
+    memset(buf[0], 0x55, I80_FRAME_BYTES);
+    memset(buf[1], 0xAA, I80_FRAME_BYTES);
+
+    // 整幀：submit 回來後 CPU 做 busy loop，直到 DMA 完成 → 量 CPU 可用的時間
+    int64_t submit_total = 0, wire_total = 0;
+    uint32_t busy_total = 0;
+    for (uint16_t k = 0; k < iters; k++) {
+        s_i80_done = false;
+        const int64_t t0 = esp_timer_get_time();
+        const esp_err_t se = esp_lcd_panel_io_tx_color(io, 0, buf[k & 1], I80_FRAME_BYTES);
+        const int64_t t1 = esp_timer_get_time();
+        if (se != ESP_OK) { submit_total += t1 - t0; continue; }
+        uint32_t spin = 0;
+        while (!s_i80_done) { spin++; }
+        const int64_t t2 = esp_timer_get_time();
+        submit_total += t1 - t0;
+        wire_total += t2 - t0;
+        busy_total += spin;
+    }
+
+    // 切片：submit 一片後，CPU 立即 fill 下一片；量 fill 與 wire 是否重疊
+    const size_t slice = I80_FRAME_BYTES / I80_SLICES;
+    int64_t fill_total = 0, slice_wire_total = 0;
+    for (int s = 0; s < I80_SLICES; s++) {
+        s_i80_done = false;
+        const uint8_t *cur = buf[s & 1];
+        const esp_err_t se = esp_lcd_panel_io_tx_color(io, 0, cur, slice);
+        const int64_t t0 = esp_timer_get_time();
+        if (se != ESP_OK) continue;
+        // 換緩衝：fill 另一塊（不是 DMA 正在讀的那塊）
+        uint8_t *nxt = buf[(s + 1) & 1];
+        const int64_t f0 = esp_timer_get_time();
+        memset(nxt, (uint8_t)(0x30 + s), slice);
+        const int64_t f1 = esp_timer_get_time();
+        fill_total += f1 - f0;
+        while (!s_i80_done) { }
+        slice_wire_total += esp_timer_get_time() - t0;
+    }
+
+    char json[420];
+    snprintf(json, sizeof(json),
+             "{\"pclk\":%u,\"frame\":%u,\"iters\":%u,"
+             "\"whole\":{\"submit_us\":%lld,\"wire_us\":%lld,\"busy\":%u},"
+             "\"slice\":{\"n\":%u,\"len\":%u,\"fill_us\":%lld,\"wire_us\":%lld}}",
+             (unsigned)pclk_hz, (unsigned)I80_FRAME_BYTES, (unsigned)iters,
+             (long long)(submit_total / iters), (long long)(wire_total / iters), (unsigned)busy_total,
+             (unsigned)I80_SLICES, (unsigned)slice,
+             (long long)fill_total, (long long)slice_wire_total);
+
+    free(buf[0]); free(buf[1]);
+    esp_lcd_panel_io_del(io);
+    esp_lcd_del_i80_bus(bus);
+    reply_json(ctx, NC4_CMD_HUB_RSP, json);
+}
+#endif  // SOC_LCD_I80_SUPPORTED
+
 // ── 註冊 ──
 static const nc_action_t k_actions[] = {
     { NC4_CMD_DEV_BENCH, on_dev_bench, "test" },
@@ -2457,6 +3183,21 @@ static const nc_action_t k_actions[] = {
     { NC4_CMD_HUB_DUPLEX4, on_hub_duplex4, "test" },
     { NC4_CMD_HUB_SINGLE, on_hub_single, "test" },
     { NC4_CMD_HUB_MESH, on_hub_mesh, "test" },
+    { NC4_CMD_GPIO_CFG, on_gpio_cfg, "test" },
+    { NC4_CMD_GPIO_SET, on_gpio_set, "test" },
+    { NC4_CMD_GPIO_GET, on_gpio_get, "test" },
+#if CONFIG_NETCORE_WIFI
+    { NC4_CMD_ESPNOW_INIT, on_espnow_init, "test" },
+    { NC4_CMD_ESPNOW_SEND, on_espnow_send, "test" },
+    { NC4_CMD_ESPNOW_STATS, on_espnow_stats, "test" },
+    { NC4_CMD_WIFI_STA, on_wifi_sta, "test" },
+    { NC4_CMD_WIFI_AP, on_wifi_ap, "test" },
+    { NC4_CMD_WIFI_INFO, on_wifi_info, "test" },
+#endif
+#if SOC_LCD_I80_SUPPORTED
+    { NC4_CMD_I80_DMA, on_i80_dma, "test" },
+#endif
+    { NC4_CMD_STRESS, on_stress, "test" },
 };
 
 NC_ACTION_TABLE_DEF(nc_test_action_table, "test", k_actions);

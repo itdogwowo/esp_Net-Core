@@ -26,6 +26,8 @@ typedef struct {
 extern const nc_action_table_t nc_test_action_table;
 // 設定 hooks（測試指令要讀的 RX 診斷）。
 void nc_test_action_init(const nc_test_action_hooks_t *hooks);
+// 測試版開機自動起 ESP-NOW（B 冇 CDC 時也可以做兩板互轉）。
+void nc_test_action_espnow_boot(nc4_decoder_t *decoder);
 
 #ifdef __cplusplus
 }

@@ -156,3 +156,17 @@
 | 7.7 | pool 接到 RX（header-first assembler） | ⏸ 未做 | 大改 | 現況仍用 per-link parser ring／PUSH slots |
 | 7.8 | 多實例（UART0/1/2、I2C、SPI） | ⏸ 未做 | 大改 | 要 pin map 與 per-instance owner |
 | 7.9 | `where=psram` 上板 override | ⏸ 未測 | — | USB volume 在 app 模式冇重新掛載；hosttest 已驗解析 |
+
+## 8. 2026-11-09：通訊緩衝定案（設計完成，P1 待實作）
+
+> 依據：[comm-buffers.md](../03_notes/comm-buffers.md)、[status §7.30](status.md)。
+
+| # | 項目 | 狀態 | 備註 |
+|---|---|---|---|
+| 8.1 | RX 留 internal | ✅ 定案 | per-link parser／PUSH slots 不變 |
+| 8.2 | 轉發走 PSRAM `nc_hub` | ✅ 定案 | per（目的 link × 來源核）；strict FIFO；writer mutex |
+| 8.3 | `nc_pool.forward` 取消 | ✅ 定案 | small／bulk 預設關；等 header-first／OTA |
+| 8.4 | `nc4_fwd` hub 版 | ⏸ **P1 待做** | 保留舊 queue `mode=pool` 做 A/B |
+| 8.5 | `nc4.forward` config | ⏸ P0 待加 | `where=psram`、`depth=2`、`max_frame` |
+| 8.6 | tap／refcount | ⏸ P3 | 用 `nc_hub_generation` 防 ABA |
+| 8.7 | P4 8K／depth 4 | ⏸ P4 | slot 8,256；量 PSRAM 頻寬 |

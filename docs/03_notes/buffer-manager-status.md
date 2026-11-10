@@ -26,7 +26,7 @@
 |---|---|---|
 | `nc_mem.c` | 記憶體原語 | `nc_mem_pool_create / _init / get / put / stats`、`nc_mem_arena_create / _init / alloc / reset` |
 | `nc_plan.c` | 決策 | `nc_plan_declare / commit / get / json / was_shed` |
-| `nc_hub.c` | 轉手 | `nc_hub_create / _create_in`、`write_begin / write_commit`、`read_begin / read_end`、`dirty / fill` |
+| `nc_hub.c` | 轉手 | `nc_hub_create / _create_in / destroy`、`write_begin / write_commit`、`read_begin / read_begin_gen / read_end`、`dirty / fill`、`generation / stats` |
 
 `_init` 系列吃「外部已配好的區域」——plan carve 出來的記憶體走這條，管理器是唯一配置者。
 
@@ -93,3 +93,34 @@
 | 3 | 無 reserve（WiFi / 第三方 driver） | 開 WiFi 之後 heap 可能不足 |
 | 4 | 服務：nc4 / uart / jobs / probe | pixel 與 WS 還沒接 |
 | 5 | 慢工作已可延後（jobs hub + slow_worker） | OTA 寫 flash 還沒搬進去 |
+
+---
+
+## 6.6 2026-11-09 上板測試（dd46be4、IDF 6.1、app `7dc65243`）
+
+`0xF01F`–`0xF024`、`0xF01E` 直接經 CDC 跑；全部 `torn=0`、`gap=0`、`dup=0`、`leak=0`、`viol=0`。
+
+| 測試 | 參數 | 結果 |
+|---|---|---|
+| `0xF01F` stress | 20k | n=2 **165.8k/s**、n=3 35.6k/s、n=16 **239.6k/s**、n=16 慢讀 15.9k/s；`w_full` 高（環細）但無 gap/dup |
+| `0xF020` duplex | 1,000 ms | a→b **156.4k/s**、b→a 156.3k/s；drain 6/1 |
+| `0xF021` sweep | 500 ms × 12 | 16 B 221.9k/s、64 B 156.3k/s、256 B 69.1k/s、1 KB 21.7k/s、4 KB 5.77k/s、8 KB 2.87k/s、16 KB 1.41k/s、32 KB 1.43k/s |
+| `0xF022` duplex4 | 1,000 ms | 32,768×2（128 KB SRAM）、1,244/1,250 次/s、**39.8/40.0 MB/s** |
+| `0xF023` single | 20k | 16 B 253k/s、64 B 171k/s、256 B 127k/s、1 KB 46k/s、4 KB 12.8k/s（52 MB/s）、16 KB 3.3k/s（54 MB/s）、32 KB 1.69k/s（55 MB/s） |
+| `0xF024` mesh | 4 nodes、1,000 ms | 12 links、**31.3k recv/s**、8 MB/s |
+| `0xF01E` stage | 64 KB、4 次 | hot：s2s 244、s2p 34、p2s 51、p2p 21 MB/s；fresh：s2p 31（含 514 µs sync）、p2s 54、p2p 20；另一核 PSRAM 競爭：s2p 18、p2s 24、p2p 10 |
+
+**觀察**
+
+- n=3 比 n=2 慢（35.6k vs 165.8k）是排程／競爭，不是 FIFO 錯誤；torn/gap/dup 全 0。
+- `0xF01E` 證實 **PSRAM 與另一核競爭時吞吐會腰斬**（21→10 MB/s p2p）；轉發走 PSRAM 要把這個算進去。
+- `0xF022` 用 128 KB SRAM hub 仍有 40 MB/s；`0xF024` 4-node 12 links 的空轉很高（full/empty 約 296k），但接收 31.3k/s。
+
+**一次 reset（未能重現）**
+
+- 第一次連續跑 `F01F → F020 → F021 → F022 → F023(20k)` 時，`F023` 期間 USB 消失、`up_s` 重置。
+- 單獨 `F023(20k)`、以及 `F022(500ms) → F023(2k)` 都正常；沒有重現。
+- 可能與 `F021` 12 個 case（6 s）＋`F022` 128 KB hub 之後的 heap／排程有關；列為待查，不影響 normal hub 語義。
+
+**工具鏈**：板子跑 IDF 6.1（app `7dc65243`）；本機預設 6.0.3 的 tests 映像 OTA 被拒
+（`err_end_validate_fail`），所以這次只跑板上已有的 6.1 映像，沒有覆蓋。

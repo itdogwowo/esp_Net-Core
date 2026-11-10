@@ -72,6 +72,8 @@
 | [buffer-manager-status.md](03_notes/buffer-manager-status.md) | **緩衝管理器實作現況**：三個原語、N 的語義、不變量、測試結果、已知缺陷 |
 | [buffer-pool.md](03_notes/buffer-pool.md) | **共用緩衝池與 PSRAM 實測（2026-11-09）**：三個 size class（small／bulk／forward）、descriptor／refcount、`nc4.pool` 設定、跨核轉寄 queue、`0xF01C` 量到的 internal 240 MB/s vs PSRAM 21–33 MB/s、38.4 KB frame 的可行性計算、限制與未做 |
 | [psram-surface.md](03_notes/psram-surface.md) | **PSRAM surface／pass 管理器（設計）**：什麼叫「用對 PSRAM」（數 pass、internal tile、分塊 bound latency，不是切細就快）、`nc_surface` 的 buffer／tile／sink／stats API、direct vs staging、38.4 KB frame 的預算、決策矩陣與落地順序 |
+| [comm-buffers.md](03_notes/comm-buffers.md) | **通訊緩衝最終定案（2026-11-09）**：RX 留 internal、轉發全部走 **PSRAM 的 `nc_hub`**（per 目的 link × 來源核、strict FIFO、writer mutex）、`nc_pool.forward` 取消、`nc4.forward` 設定、S3 138 KB／P4 132 KB PSRAM、失敗政策與 P0–P4 遷移 |
+| [wifi-espnow-led-tests.md](03_notes/wifi-espnow-led-tests.md) | **Wi-Fi／ESP-NOW／I80 測試紀錄（2026-11-09）**：ESP-NOW P2P＋router 閉環、AP 模式、STA DHCP 未取 IP、本地 AP reset、GRBW/NeoPixelBus vs I80 16-lane 的判斷、16×600 50 FPS 預算與量測結構、PSRAM 競爭數據 |
 | [memory-budget.md](03_notes/memory-budget.md) | **記憶體預算（S3 實測 map）**：內部 SRAM 126 KB 靜態 + 40 KB 執行期、開機剩 ~168 KB、與 MicroPython 對比、**開 WiFi 的 90–120 KB 成本**（Espressif 官方表）、怎麼自己量 |
 | [buffer-tightening.md](03_notes/buffer-tightening.md) | **緩衝區貼身化（2026-11-08 實測）**：每條 link／任務的緩衝逐一量測再收斂（UART 4×256、RX/TX 1 KB、棧 1.5 KB；decode/main 3 KB）；抓到 UART「等收滿才返回」、測試回覆幀 2.6 KB 上棧兩個真問題；雙核隔離與前後吞吐對照 |
 | [buffer-manager.md](03_notes/buffer-manager.md) | **緩衝管理器（設計定案、未實作）**：三階段 declare→commit→take、四種機制、三層 tier、撇除規則、S3 記憶體圖、P0–P4 分期、待決事項。**接手實作先讀這份** |
