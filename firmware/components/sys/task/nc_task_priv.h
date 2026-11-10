@@ -6,12 +6,16 @@
 // 一個 loop 的執行期狀態。由管理器持有。
 typedef struct {
     const nc_task_loop_t *def;
+    uint8_t kind;             // nc_task_kind_t：優先級治理要用（SYSTEM 可以用保留區）
     TaskHandle_t handle;
     int core;                 // 執行期核心（CORE_ANY 在 start 時定案；沒有 set_core）
     bool started;
     bool exited;
     bool enabled;
     volatile bool exit_req;
+    // 心跳：每跑一輪 ++。管理器唔做統計、唔開計時器，只係一個遞增的計數；
+    // 停滯由**主機**比對兩次 STATUS 的差值判斷（見 contracts §1.5）。
+    volatile uint32_t beats;
 } nc_task_rt_t;
 
 // 建立 / 停止 FreeRTOS task。arg 是 loop 的 arg；exit 用 nc_task_exit_requested()。

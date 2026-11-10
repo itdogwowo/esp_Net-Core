@@ -1,4 +1,7 @@
 #include "nc4_bus.h"
+#include "nc_buf.h"
+#include "nc_task.h"
+#include "nc_prio.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -30,22 +33,15 @@ struct nc4_bus {
     // 刻意不共用：兩條線的位元組永遠不會出現在同一塊記憶體裡
     uint8_t *chunk;
 
-    // PUSH 模式：N 個插槽（producer 寫、consumer 讀；每格獨立，可零複製）
-    uint8_t *slots;
+    // PUSH 模式：一條 nc_buf（FIFO）＝ N 個插槽（producer 寫、consumer 讀、零複製）
+    // 2026-11-10：手寫的 slot_state[16]／slot_len[16]／w·r·push_idx·rd_off 全部收進 nc_buf。
+    nc_buf_t *slots;
     size_t slot_size;
     int slot_n;
-    int slot_w;             // 下一個要寫的格子
-    int slot_r;             // 下一個要讀的格子
-    int push_idx;           // 正在寫的格子（-1 = 沒有）
-    int rd_idx;             // 正在讀的格子（-1 = 沒有）
-    size_t rd_off;
-    volatile uint8_t slot_state[16];   // 0=free 1=ready 2=writing
-    size_t slot_len[16];
     portMUX_TYPE mux;
 
     // 零複製模式：producer 一次 commit「剛好一幀」，consumer 直接在插槽上解析
     uint8_t frame_mode;
-    int frame_idx;                    // consumer 目前持有哪一格（-1 = 沒有）
 
     bool owner_ready;                 // owner_init 已跑（每個核一次）
 
@@ -60,6 +56,10 @@ struct nc4_bus {
     uint64_t st_bytes;                // 收進來的 bytes（含表頭/CRC）
     uint64_t st_copied;               // 為了「把資料交給 parser」所做的 memcpy bytes
     uint64_t st_parse_us;             // 解析佔用的時間
+    int64_t  st_commit_us;            // 最後一次 commit 的時間（量喚醒延遲）
+    uint64_t st_kick_sum_us;          // commit → decode 接手 的累計
+    uint32_t st_kick_n;
+    uint32_t st_kick_max_us;
 
     // 貼身化量測（2026-11-08）：每一個尺寸決策都要有數字支撐
     uint32_t st_reads;                // 成功 read/pop/整幀的次數
@@ -111,61 +111,45 @@ void nc4_bus_kick_core(int core)
     }
 }
 
-// ───────────────────────── 插槽（PUSH 模式）─────────────────────────
-
-static int slot_find_free(struct nc4_bus *b)
-{
-    for (int i = 0; i < b->slot_n; i++) {
-        int idx = (b->slot_w + i) % b->slot_n;
-        if (b->slot_state[idx] == 0) {
-            return idx;
-        }
-    }
-    return -1;
-}
+// ───────────────────────── 插槽（PUSH 模式）＝ 一條 nc_buf FIFO ─────────────────────────
+//
+// 2026-11-10：原本是自己手寫的 `slot_state[16]` / `slot_len[16]` / w·r·push_idx / rd_off
+// （第三份同類實作）。現在全部收進 nc_buf，對外語義不變：
+//   · producer 一次揸一格（`put_begin` → `put_end`）
+//   · consumer 一次拿一格（`get` → `get_end`），**整格交出去，零複製**
+//   · FIFO 唔會標 WRITING ⇒ producer 死掉只會令寫指標唔前進，環唔會卡死
 
 uint8_t *nc4_bus_push_begin(nc4_bus_handle_t bus, size_t want)
 {
     struct nc4_bus *b = find_bus(bus);
-    if (b == NULL || b->slots == NULL || b->push_idx >= 0) {
+    if (b == NULL || b->slots == NULL) {
         return NULL;
     }
-    if (want > b->slot_size) {
-        want = b->slot_size;
+    (void)want;        // 格大小固定；want 只係「我打算寫幾多」的提示
+    uint8_t *p = nc_buf_put_begin(b->slots, 0);
+    if (p == NULL) {
+        b->st_slot_full++;      // 貼身化：這個 > 0 就代表 slots 不夠（或 producer 太急）
     }
-    taskENTER_CRITICAL(&b->mux);
-    int idx = slot_find_free(b);
-    if (idx >= 0) {
-        // 只記 push_idx（每條 bus 只有一個 producer）。**唔**把格標成 writing：
-        // consumer 只讀 state==1，writing 對它不可見；但一旦 producer 在 commit
-        // 之前死掉，這一格就永遠停在 2、永遠回不到 free，整條環會慢慢卡死。
-        // 少一個狀態就少一個可以卡死的地方。
-        b->push_idx = idx;
-    }
-    if (idx < 0) {
-        b->st_slot_full++;       // 貼身化：這個 > 0 就代表 slots 不夠（或 producer 太急）
-    }
-    taskEXIT_CRITICAL(&b->mux);
-    return idx >= 0 ? b->slots + (size_t)idx * b->slot_size : NULL;
+    return p;
 }
 
 esp_err_t nc4_bus_push_commit(nc4_bus_handle_t bus, size_t len)
 {
     struct nc4_bus *b = find_bus(bus);
-    if (b == NULL || b->push_idx < 0) {
+    if (b == NULL || b->slots == NULL) {
         return ESP_ERR_INVALID_STATE;
     }
+    const esp_err_t e = nc_buf_put_end(b->slots, (uint32_t)len);
+    if (e != ESP_OK) {
+        return e;
+    }
+    b->st_commit_us = esp_timer_get_time();   // 事件驅動：量由 commit 到 decode 接手
+    const int fill = (int)nc_buf_fill(b->slots);
     taskENTER_CRITICAL(&b->mux);
-    const int idx = b->push_idx;
-    b->slot_len[idx] = len > b->slot_size ? b->slot_size : len;
-    b->slot_state[idx] = 1;          // ready
-    b->slot_w = (idx + 1) % b->slot_n;
-    b->push_idx = -1;
-    // 只有「已 commit、等 decode 讀」的格才計入佔用 —— 空探測唔算，
-    // 否則每次查詢都會量到 +1 的假峰值。
-    b->occ++;
-    if ((uint32_t)b->occ > b->st_slot_peak) {
-        b->st_slot_peak = (uint32_t)b->occ;     // 峰值＝環真正需要幾多格
+    b->occ = fill;
+    // 只有「已 commit、等 decode 讀」的格才計入佔用 —— 空探測唔算
+    if ((uint32_t)fill > b->st_slot_peak) {
+        b->st_slot_peak = (uint32_t)fill;
     }
     taskEXIT_CRITICAL(&b->mux);
     return ESP_OK;
@@ -174,33 +158,39 @@ esp_err_t nc4_bus_push_commit(nc4_bus_handle_t bus, size_t len)
 esp_err_t nc4_bus_push_abort(nc4_bus_handle_t bus)
 {
     struct nc4_bus *b = find_bus(bus);
-    if (b == NULL || b->push_idx < 0) {
+    if (b == NULL || b->slots == NULL) {
         return ESP_ERR_INVALID_STATE;
     }
-    taskENTER_CRITICAL(&b->mux);
-    b->push_idx = -1;                    // 格本來就係 free，唔使改 state
-    taskEXIT_CRITICAL(&b->mux);
-    return ESP_OK;
+    return nc_buf_put_abort(b->slots);
 }
 
-esp_err_t nc4_bus_push(nc4_bus_handle_t bus, const uint8_t *data, size_t len)
+// 取下一格（整格、零複製）：回插槽指標，*len = 實際 bytes。解析完必須 frame_end。
+uint8_t *nc4_bus_frame_begin(nc4_bus_handle_t bus, size_t *len)
 {
-    size_t off = 0;
-    while (off < len) {
-        uint8_t *dst = nc4_bus_push_begin(bus, len - off);
-        if (dst == NULL) {
-            return ESP_ERR_NO_MEM;
-        }
-        size_t n = len - off;
-        struct nc4_bus *b = find_bus(bus);
-        if (n > b->slot_size) {
-            n = b->slot_size;
-        }
-        memcpy(dst, data + off, n);
-        nc4_bus_push_commit(bus, n);
-        off += n;
+    struct nc4_bus *b = find_bus(bus);
+    if (b == NULL || b->slots == NULL) {
+        return NULL;
     }
-    return ESP_OK;
+    uint32_t n = 0;
+    uint8_t *p = nc_buf_get(b->slots, &n, NULL);
+    if (p != NULL && len != NULL) {
+        *len = n;
+    }
+    return p;
+}
+
+void nc4_bus_frame_end(nc4_bus_handle_t bus)
+{
+    struct nc4_bus *b = find_bus(bus);
+    if (b == NULL || b->slots == NULL) {
+        return;
+    }
+    if (nc_buf_get_end(b->slots) == ESP_OK) {
+        const int fill = (int)nc_buf_fill(b->slots);
+        taskENTER_CRITICAL(&b->mux);
+        b->occ = fill;
+        taskEXIT_CRITICAL(&b->mux);
+    }
 }
 
 esp_err_t nc4_bus_reset(nc4_bus_handle_t bus)
@@ -211,107 +201,15 @@ esp_err_t nc4_bus_reset(nc4_bus_handle_t bus)
     }
     nc4_parser_reset(b->parser);      // parser 可能還沒配置（第一次收到資料才配）
     if (b->slots != NULL) {
-        taskENTER_CRITICAL(&b->mux);
-        for (int i = 0; i < b->slot_n; i++) {
-            if (b->slot_state[i] == 1) {   // 只丟 READY；WRITING 是 producer 正在寫
-                b->slot_state[i] = 0;
-            }
+        uint32_t n = 0;
+        while (nc_buf_get(b->slots, &n, NULL) != NULL) {
+            nc_buf_get_end(b->slots);   // 丟掉所有 READY
         }
-        b->rd_idx = -1;
-        b->rd_off = 0;
-        taskEXIT_CRITICAL(&b->mux);
+        b->occ = 0;
     }
     return ESP_OK;
 }
 
-// ── 零複製：整個 frame 一格 ──
-
-// 取下一格「已 commit 的整幀」，直接回插槽指標（不 memcpy）。
-// 呼叫端解析完必須呼叫 nc4_bus_frame_end() 歸還。
-uint8_t *nc4_bus_frame_begin(nc4_bus_handle_t bus, size_t *len)
-{
-    struct nc4_bus *b = find_bus(bus);
-    if (b == NULL || b->slots == NULL || b->frame_idx >= 0) {
-        return NULL;
-    }
-    uint8_t *p = NULL;
-    taskENTER_CRITICAL(&b->mux);
-    for (int i = 0; i < b->slot_n; i++) {
-        int idx = (b->slot_r + i) % b->slot_n;
-        if (b->slot_state[idx] == 1) {          // READY
-            b->slot_state[idx] = 3;             // READING（frame 模式專用值）
-            b->slot_r = (idx + 1) % b->slot_n;
-            b->frame_idx = idx;
-            if (len != NULL) {
-                *len = b->slot_len[idx];
-            }
-            p = b->slots + (size_t)idx * b->slot_size;
-            break;
-        }
-    }
-    taskEXIT_CRITICAL(&b->mux);
-    return p;
-}
-
-void nc4_bus_frame_end(nc4_bus_handle_t bus)
-{
-    struct nc4_bus *b = find_bus(bus);
-    if (b == NULL || b->frame_idx < 0) {
-        return;
-    }
-    taskENTER_CRITICAL(&b->mux);
-    b->slot_state[b->frame_idx] = 0;            // free
-    b->frame_idx = -1;
-    taskEXIT_CRITICAL(&b->mux);
-}
-
-// 從插槽取資料；跨插槽自動接續（consumer 端只有這一份複製）
-static size_t slot_pop(struct nc4_bus *b, uint8_t *out, size_t cap)
-{
-    size_t produced = 0;
-    while (produced < cap) {
-        taskENTER_CRITICAL(&b->mux);
-        if (b->rd_idx < 0) {
-            int idx = -1;
-            for (int i = 0; i < b->slot_n; i++) {
-                int cand = (b->slot_r + i) % b->slot_n;
-                if (b->slot_state[cand] == 1) {
-                    idx = cand;
-                    break;
-                }
-            }
-            if (idx < 0) {
-                taskEXIT_CRITICAL(&b->mux);
-                break;
-            }
-            b->rd_idx = idx;
-            b->rd_off = 0;
-        }
-        const int idx = b->rd_idx;
-        const size_t avail = b->slot_len[idx] - b->rd_off;
-        size_t n = cap - produced;
-        if (n > avail) {
-            n = avail;
-        }
-        memcpy(out + produced, b->slots + (size_t)idx * b->slot_size + b->rd_off, n);
-        b->rd_off += n;
-        if (b->rd_off >= b->slot_len[idx]) {
-            b->slot_state[idx] = 0;      // free
-            b->slot_r = (idx + 1) % b->slot_n;
-            b->rd_idx = -1;
-            if (b->occ > 0) {
-                b->occ--;
-            }
-        }
-        taskEXIT_CRITICAL(&b->mux);
-        produced += n;
-    }
-    return produced;
-}
-
-// ───────────────────────── 註冊 ─────────────────────────
-
-// PULL 通道的 parser/ring 延後到第一次收到資料才配置（閒置通道只花 chunk）。
 static esp_err_t bus_alloc(struct nc4_bus *b)
 {
     if (b->parser != NULL) {
@@ -324,17 +222,24 @@ static esp_err_t bus_alloc(struct nc4_bus *b)
         if (b->slot_n > 16) {
             b->slot_n = 16;
         }
-        b->slots = calloc((size_t)b->slot_n, b->slot_size);
+        char nm[NC_BUF_NAME_MAX];
+        snprintf(nm, sizeof(nm), "%s.slots", b->cfg.name ? b->cfg.name : "bus");
+        b->slots = nc_buf_create(nm, NC_BUF_SRAM, (uint32_t)b->slot_size,
+                                 (uint16_t)b->slot_n, NC_BUF_F_RUNTIME);
         if (b->slots == NULL) {
             return ESP_ERR_NO_MEM;
         }
-        b->push_idx = -1;
-        b->rd_idx = -1;
-        ESP_LOGI(TAG, "[%s] %d 個插槽 × %u B（零複製收斂）", b->cfg.name,
+        ESP_LOGI(TAG, "[%s] %d 個插槽 × %u B（nc_buf FIFO，零複製）", b->cfg.name,
                  b->slot_n, (unsigned)b->slot_size);
     }
 
-    if (b->cfg.rx_region != NULL && b->cfg.rx_region_bytes > 0) {
+    if (b->cfg.rx_buf != NULL) {
+        b->parser = nc4_parser_create_buf(b->cfg.rx_buf, b->decoder, b->cfg.send,
+                                          b->cfg.send_arg,
+                                          b->cfg.name ? b->cfg.name : "?");
+        ESP_LOGI(TAG, "[%s] parser 用管理器給的緩衝區 %u B", b->cfg.name,
+                 (unsigned)nc_buf_slot_bytes(b->cfg.rx_buf));
+    } else if (b->cfg.rx_region != NULL && b->cfg.rx_region_bytes > 0) {
         b->parser = nc4_parser_create_in(b->cfg.rx_region, b->cfg.rx_region_bytes,
                                          b->decoder, b->cfg.send, b->cfg.send_arg,
                                          b->cfg.name ? b->cfg.name : "?");
@@ -346,7 +251,7 @@ static esp_err_t bus_alloc(struct nc4_bus *b)
         ESP_LOGI(TAG, "[%s] 配置 parser %u B", b->cfg.name, (unsigned)b->max_frame);
     }
     if (b->parser == NULL) {
-        free(b->slots);
+        nc_buf_release(b->slots);
         b->slots = NULL;
         return ESP_ERR_NO_MEM;
     }
@@ -388,7 +293,6 @@ esp_err_t nc4_bus_add(nc4_decoder_t *decoder, const nc4_bus_cfg_t *cfg,
         b->budget = cfg->budget_per_pass ? cfg->budget_per_pass : DEFAULT_BUDGET_PER_PASS;
         b->mux = (portMUX_TYPE)portMUX_INITIALIZER_UNLOCKED;
         b->frame_mode = cfg->frame_aligned ? 1 : 0;
-        b->frame_idx = -1;
 
         b->chunk = malloc(b->read_chunk);
         if (b->chunk == NULL) {
@@ -497,12 +401,11 @@ size_t nc4_bus_stats_json(char *buf, size_t cap)
         }
         const double mb = (double)b->st_bytes / (1024.0 * 1024.0);
         int st_cnt[4] = {0, 0, 0, 0};      // free / ready / writing / reading
-        for (int k = 0; k < b->slot_n; k++) {
-            int stt = b->slot_state[k];
-            if (stt == 0) st_cnt[0]++;
-            else if (stt == 1) st_cnt[1]++;
-            else if (stt == 2) st_cnt[2]++;
-            else st_cnt[3]++;
+        for (int k = 0; k < b->slot_n && b->slots != NULL; k++) {
+            const uint8_t stt = nc_buf_state_at(b->slots, (uint16_t)k);
+            if (stt < 4) {
+                st_cnt[stt]++;
+            }
         }
         uint32_t crc_err = 0;
         uint32_t bad_hdr = 0;
@@ -516,6 +419,7 @@ size_t nc4_bus_stats_json(char *buf, size_t cap)
                         "\"frames\":%u,\"mb\":%.2f,\"copied\":%llu,"
                         "\"avg_b\":%u,\"hwm\":%u,"
                         "\"parse_ms\":%.1f,\"us_per_frame\":%.1f,"
+                        "\"kick_us\":%u,\"kick_max_us\":%u,"
                         "\"crc_err\":%u,\"bad_hdr\":%u,"
                         "\"remote\":%u,\"region\":%u,\"cfg_src\":%d,"
                         "\"slots\":[%d,%d,%d,%d],\"occ\":%d,\"peak\":%u,"
@@ -535,6 +439,8 @@ size_t nc4_bus_stats_json(char *buf, size_t cap)
                                                      (TaskHandle_t)b->producer) : 0),
                         (double)b->st_parse_us / 1000.0,
                         b->st_frames ? (double)b->st_parse_us / (double)b->st_frames : 0.0,
+        (unsigned)(b->st_kick_n ? b->st_kick_sum_us / b->st_kick_n : 0),
+        (unsigned)b->st_kick_max_us,
                         (unsigned)crc_err, (unsigned)bad_hdr,
                         (unsigned)b->st_kick_remote,
                         (unsigned)b->cfg.rx_region_bytes, b->cfg_src,
@@ -609,7 +515,7 @@ esp_err_t nc4_bus_start_producer(nc4_bus_handle_t handle, const char *name,
         return ESP_ERR_INVALID_ARG;
     }
     // 不變式 1：producer 唔可以高過 decode。寧願這裡夾住，唔好靠呼叫端記得。
-    const uint32_t decode_prio = 4;   // s_nc4_loops 的 decodeN prio
+    const uint32_t decode_prio = NC_PRIO_DECODE;
     if (prio >= decode_prio) {
         ESP_LOGW(TAG, "[%s] producer prio %u ≥ decode prio %u → 夾到 %u（避免餓死 decode）",
                  b->cfg.name, (unsigned)prio, (unsigned)decode_prio,
@@ -662,8 +568,12 @@ size_t nc4_bus_dump(char *buf, size_t cap)
                         "%s{\"n\":\"%s\",\"core\":%d,\"occ\":%d,\"wr\":%d,\"rd\":%d,"
                         "\"st\":[%d,%d,%d,%d]}",
                         first ? "" : ",", b->cfg.name ? b->cfg.name : "?", b->cfg.core,
-                        b->occ, b->push_idx, b->rd_idx,
-                        b->slot_state[0], b->slot_state[1], b->slot_state[2], b->slot_state[3]);
+                        b->occ, nc_buf_writing(b->slots) ? 1 : -1,
+                        nc_buf_reading(b->slots) ? 1 : -1,
+                        b->slots ? nc_buf_state_at(b->slots, 0) : 0,
+                        b->slots ? nc_buf_state_at(b->slots, 1) : 0,
+                        b->slots ? nc_buf_state_at(b->slots, 2) : 0,
+                        b->slots ? nc_buf_state_at(b->slots, 3) : 0);
         first = false;
     }
     if (off < cap) {
@@ -706,6 +616,7 @@ void nc4_bus_task_entry(void *arg)
     }
 
     for (;;) {
+        nc_task_beat();     // 長跑 loop：自己報心跳（停滯偵測靠它）
         s_loop_count[my_core]++;
         // 跨核轉寄：目的核每輪先清 queue（唔靠 producer kick）
         bool busy = (nc4_fwd_poll(my_core) > 0);
@@ -740,6 +651,15 @@ void nc4_bus_task_entry(void *arg)
                     if (flen > b->st_max_read) {
                         b->st_max_read = flen;
                     }
+                    if (b->st_commit_us != 0) {
+                        const uint32_t d = (uint32_t)(esp_timer_get_time() - b->st_commit_us);
+                        b->st_kick_sum_us += d;
+                        b->st_kick_n++;
+                        if (d > b->st_kick_max_us) {
+                            b->st_kick_max_us = d;
+                        }
+                        b->st_commit_us = 0;
+                    }
                     const int64_t t0 = esp_timer_get_time();
                     const esp_err_t perr = nc4_parser_frame(b->parser, fp, flen);
                     b->st_parse_us += (uint64_t)(esp_timer_get_time() - t0);
@@ -754,6 +674,8 @@ void nc4_bus_task_entry(void *arg)
                     continue;
                 }
 
+                uint8_t *feed_src = b->chunk;
+                uint8_t *slot_ptr = NULL;
                 if (b->cfg.mode == NC4_BUS_PULL) {
                     int r = b->cfg.read(b->cfg.read_arg, b->chunk, b->read_chunk);
                     if (r < 0) {
@@ -762,11 +684,27 @@ void nc4_bus_task_entry(void *arg)
                     }
                     got = (size_t)r;
                 } else {
-                    got = slot_pop(b, b->chunk, b->read_chunk);
+                    // PUSH：整格交出來，直接由插槽解析（唔再經 chunk，省一次 copy）
+                    uint32_t slen = 0;
+                    slot_ptr = nc_buf_get(b->slots, &slen, NULL);
+                    if (slot_ptr == NULL) {
+                        break;
+                    }
+                    got = slen;
+                    feed_src = slot_ptr;
                 }
 
                 if (got == 0) {
                     break;
+                }
+                if (b->st_commit_us != 0) {
+                    const uint32_t d = (uint32_t)(esp_timer_get_time() - b->st_commit_us);
+                    b->st_kick_sum_us += d;
+                    b->st_kick_n++;
+                    if (d > b->st_kick_max_us) {
+                        b->st_kick_max_us = d;
+                    }
+                    b->st_commit_us = 0;
                 }
                 b->st_reads++;
                 if (got > b->st_max_read) {
@@ -778,14 +716,17 @@ void nc4_bus_task_entry(void *arg)
                     break;
                 }
                 busy = true;
-                // 這條路徑有兩次複製：slot→chunk，然後 feed 內 chunk→parser ring。
-                // 統計時一起算，0xF008 才看得出「零複製」省掉多少。
-                b->st_copied += (uint64_t)got * 2;
+                // 只剩一次複製：feed 內把資料寫入 parser ring（PUSH 唔再經 chunk）。
+                b->st_copied += (uint64_t)got;
                 b->st_frames++;
                 b->st_bytes += got;
                 const int64_t t0 = esp_timer_get_time();
-                nc4_parser_feed(b->parser, b->chunk, got);
+                nc4_parser_feed(b->parser, feed_src, got);
                 b->st_parse_us += (uint64_t)(esp_timer_get_time() - t0);
+                if (slot_ptr != NULL) {
+                    nc_buf_get_end(b->slots);   // 解析完才還格（producer 唔會提早覆寫）
+                    b->occ = (int)nc_buf_fill(b->slots);
+                }
             }
         }
 

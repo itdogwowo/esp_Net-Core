@@ -16,6 +16,7 @@ wire 格式：
     CRC 範圍 = VER..DATA（不含 SOF、不含 CRC）
 """
 import binascii
+import time
 import struct
 
 SOF = b"NC"
@@ -137,7 +138,16 @@ class Reader:
     def poll(self, timeout: float = 0.01):
         end = __import__("time").time() + timeout
         while __import__("time").time() < end:
-            chunk = self.ser.read(4096)
+            # 只讀「已經到的」bytes，而且**唔可以**用阻塞式 read：
+            #   · pyserial 的 read(N) 在不足 N bytes 時會等滿埠的 timeout 才返回
+            #     → 每次量到的延遲都多了一個 timeout（實測 +10～50 ms）；
+            #   · 用 read(1) 等資料又會在同一個 poll 內阻塞超過 timeout。
+            # 所以：有資料就讀走，冇資料就睡 1 ms 再問（量測粒度 1 ms）。
+            n = self.ser.in_waiting
+            if n == 0:
+                time.sleep(0.001)
+                continue
+            chunk = self.ser.read(n)
             if chunk:
                 self.buf += chunk
             self._trim()

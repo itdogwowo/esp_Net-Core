@@ -75,6 +75,8 @@ typedef struct {
 
     // 外部提供的 parser 緩衝（plan 給的記憶體）；NULL = 自己配
     void *rx_region;
+    // 由任務（管理器的資源宣告）建好的 parser 環；非 NULL 就直接用，唔再自己 nc_buf_at。
+    nc_buf_t *rx_buf;
     size_t rx_region_bytes;
 
     // ── 以下留 0 = 用框架預設 ──

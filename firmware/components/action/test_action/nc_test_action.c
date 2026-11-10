@@ -33,6 +33,7 @@
 #include "nc4_bus.h"
 #include "nc4.h"
 #include "nc4_link.h"
+#include "nc_buf.h"
 #include "nc_hub.h"
 
 static const char *TAG = "test_action";
@@ -3157,6 +3158,324 @@ static void on_i80_dma(nc4_ctx_t *ctx, const nc4_frame_t *f)
 }
 #endif  // SOC_LCD_I80_SUPPORTED
 
+// ── 0xF033／0xF034 RX_BENCH：板內最高速的收／解析量測（**完全唔經 USB**）──
+//
+// 為什麼要這支：主機量到的 RTT 一定夾住 USB（1 ms 幀 ＋ OS 驅動），睇唔到 firmware 的成本。
+// 這裡建一個**專用 parser**（send 用假 sink），一次過灌 N 幀，量「解析 + dispatch + handler」。
+//
+// ⚠️ **一定要用獨立任務跑**：handler 內再 feed → dispatch 會重入同一把 decoder 互斥鎖
+// （非遞迴）→ 自我死鎖。2026-11-10 實際撞到，板子要人手復位。
+//
+// 0xF033 [u16 frames][u16 payload_bytes] → 起一次 bench（回 started／busy）
+// 0xF034 → 上一次的結果
+#define NC4_CMD_RX_BENCH  0xF033
+#define NC4_CMD_RX_RESULT 0xF034
+#define NC4_CMD_RX_NOOP   0xF035
+
+static volatile uint32_t s_rxb_noop;
+static volatile uint32_t s_rxb_sent;
+static volatile int      s_rxb_busy;
+static struct {
+    volatile int done;
+    uint32_t frames, psize, plen, us, noop, send;
+} s_rxb;
+
+static esp_err_t rxb_sink(void *arg, const uint8_t *frame, size_t len)
+{
+    (void)arg;
+    (void)frame;
+    (void)len;
+    s_rxb_sent++;
+    return ESP_OK;
+}
+
+static void on_rx_noop(nc4_ctx_t *ctx, const nc4_frame_t *f)
+{
+    (void)ctx;
+    (void)f;
+    s_rxb_noop++;
+}
+
+static void rxb_task(void *arg)
+{
+    nc4_decoder_t *dec = (nc4_decoder_t *)arg;
+    const uint32_t frames = s_rxb.frames;
+    const uint32_t psize = s_rxb.psize;
+    const size_t total = NC4_HDR_LEN + psize + NC4_CRC_LEN;
+
+    nc4_parser_t *p = nc4_parser_create(dec, rxb_sink, NULL, "rbench", total + 64);
+    uint8_t *fr = malloc(total);
+    uint8_t *pl = malloc(psize ? psize : 1);
+    if (p != NULL && fr != NULL && pl != NULL) {
+        memset(pl, 0x5A, psize ? psize : 1);
+        const int plen = nc4_pack_into(fr, total, NC4_CMD_RX_NOOP, NC4_ADDR_BROADCAST,
+                                       pl, psize);
+        if (plen > 0) {
+            s_rxb_noop = 0;
+            s_rxb_sent = 0;
+            const int64_t t0 = esp_timer_get_time();
+            for (uint32_t i = 0; i < frames; i++) {
+                nc4_parser_feed(p, fr, (size_t)plen);
+            }
+            const int64_t t1 = esp_timer_get_time();
+            s_rxb.plen = (uint32_t)plen;
+            s_rxb.us = (uint32_t)(t1 - t0);
+            s_rxb.noop = s_rxb_noop;
+            s_rxb.send = s_rxb_sent;
+            s_rxb.done = 1;
+        }
+    }
+    free(fr);
+    free(pl);
+    nc4_parser_destroy(p);      // 順便驗 runtime release（環會除名）
+    s_rxb_busy = 0;
+    vTaskDelete(NULL);
+}
+
+static void on_rx_bench(nc4_ctx_t *ctx, const nc4_frame_t *f)
+{
+    if (s_rxb_busy) {
+        reply_json(ctx, NC4_CMD_RX_BENCH, "{\"err\":\"busy\"}");
+        return;
+    }
+    uint32_t frames = 1000;
+    uint32_t psize = 8;
+    if (f->len >= 2) {
+        frames = (uint32_t)(f->data[0] | (f->data[1] << 8));
+    }
+    if (f->len >= 4) {
+        psize = (uint32_t)(f->data[2] | (f->data[3] << 8));
+    }
+    if (frames == 0 || frames > 20000) {
+        frames = 20000;
+    }
+    if (psize > NC4_MAX_PAYLOAD) {
+        psize = NC4_MAX_PAYLOAD;
+    }
+
+    s_rxb.done = 0;
+    s_rxb.frames = frames;
+    s_rxb.psize = psize;
+    s_rxb_busy = 1;
+    if (xTaskCreatePinnedToCore(rxb_task, "rxbench", 4096, ctx->decoder, 2, NULL, 0) != pdPASS) {
+        s_rxb_busy = 0;
+        reply_json(ctx, NC4_CMD_RX_BENCH, "{\"err\":\"task\"}");
+        return;
+    }
+    char js[80];
+    snprintf(js, sizeof(js), "{\"started\":1,\"n\":%u,\"payload\":%u}",
+             (unsigned)frames, (unsigned)psize);
+    reply_json(ctx, NC4_CMD_RX_BENCH, js);
+}
+
+static void on_rx_result(nc4_ctx_t *ctx, const nc4_frame_t *f)
+{
+    (void)f;
+    const uint64_t us = s_rxb.us;
+    const double per = (s_rxb.frames != 0) ? (double)us / (double)s_rxb.frames : 0.0;
+    const double mbps = (us != 0) ? ((double)s_rxb.frames * (double)s_rxb.plen) / (double)us : 0.0;
+    char js[220];
+    snprintf(js, sizeof(js),
+             "{\"done\":%d,\"n\":%u,\"frame_b\":%u,\"us\":%u,\"us_frame\":%.2f,"
+             "\"mbps\":%.2f,\"noop\":%u,\"send\":%u}",
+             s_rxb.done, (unsigned)s_rxb.frames, (unsigned)s_rxb.plen, (unsigned)us,
+             per, mbps, (unsigned)s_rxb.noop, (unsigned)s_rxb.send);
+    reply_json(ctx, NC4_CMD_RX_RESULT, js);
+}
+
+// ── 0xF032 BUF_TEST：統一緩衝（nc_buf）的上板自測 ──
+//
+// 為什麼要有這支：host 測試（tools/hosttest/buf_test）只能證明「邏輯對」，
+// 只有上板才證明得到這四件事：
+//   ① PSRAM 的 buffer 真的拿得到、而且 64 B 對齊（DMA／cache line）
+//   ② S→P、P→S、P→P、S→S 四條 copy 路徑都通（PSRAM 寫入後的內容正確）
+//   ③ reserve（自己放表頭）之後 off/len 仍然對
+//   ④ 換手（handover）在真 buffer 上會成功、記憶體位置不變
+//
+// **唔 destroy**：正常路徑冇 destroy（見 docs/03_notes/buffers.md 的鐵律），
+// 測試都唔例外 —— 兩條測試 buffer 只建一次，之後每次重跑都重用。
+#define NC4_CMD_BUF_TEST 0xF032
+
+static nc_buf_t *s_t_sram;
+static nc_buf_t *s_t_psram;
+static nc_buf_t *s_t_stream;
+
+// 抽乾一條 buffer（測試用；正常路徑冇這個動作）
+static void buf_drain(nc_buf_t *b)
+{
+    for (int guard = 0; guard < 64; guard++) {
+        void *p = nc_buf_get(b, NULL, NULL);
+        if (p == NULL) {
+            return;
+        }
+        nc_buf_get_end(b);
+    }
+}
+
+static void on_buf_test(nc4_ctx_t *ctx, const nc4_frame_t *f)
+{
+    (void)f;
+    nc4_reply_t r;
+    char *js = reply_open(&r, ctx, NC4_CMD_BUF_TEST);
+    if (js == NULL) {
+        return;
+    }
+
+    // 只建一次（registry 有上限；而且冇 destroy 這回事）
+    if (s_t_sram == NULL) {
+        s_t_sram = nc_buf_find("t.sram");
+    }
+    if (s_t_psram == NULL) {
+        s_t_psram = nc_buf_find("t.psram");
+    }
+    if (s_t_sram == NULL) {
+        s_t_sram = nc_buf_create("t.sram", NC_BUF_SRAM, 256, 4, NC_BUF_F_FIFO);
+    }
+    if (s_t_psram == NULL) {
+        s_t_psram = nc_buf_create("t.psram", NC_BUF_PSRAM, 1024, 2, NC_BUF_F_FIFO);
+    }
+    if (s_t_stream == NULL) {
+        s_t_stream = nc_buf_find("t.stream");
+    }
+    if (s_t_stream == NULL) {
+        s_t_stream = nc_buf_create("t.stream", NC_BUF_SRAM, 1024, 1, NC_BUF_F_STREAM);
+    }
+
+    int ok_align = 0, ok_fifo = 0, ok_full = 0, ok_res = 0;
+    int ok_s2s = 0, ok_s2p = 0, ok_p2s = 0, ok_p2p = 0, ok_ho = 0;
+    int ok_stream = 0, ok_abort = 0;
+
+    uint8_t v[512];
+    if (s_t_sram != NULL && s_t_psram != NULL) {
+        buf_drain(s_t_sram);
+        buf_drain(s_t_psram);
+
+        // ① 對齊（64 B）
+        ok_align = (((uintptr_t)nc_buf_raw(s_t_sram, 0) % NC_BUF_ALIGN) == 0) &&
+                   (((uintptr_t)nc_buf_raw(s_t_psram, 0) % NC_BUF_ALIGN) == 0);
+
+        // ② FIFO 次序 ＋ 滿了回 NULL
+        for (int i = 0; i < 4; i++) {
+            memset(v, i + 1, 256);
+            nc_buf_put(s_t_sram, v, 256);
+        }
+        ok_full = (nc_buf_put(s_t_sram, v, 256) == ESP_ERR_NO_MEM);
+        ok_fifo = 1;
+        for (int i = 0; i < 4; i++) {
+            uint32_t len = 0;
+            const uint8_t *p = nc_buf_get(s_t_sram, &len, NULL);
+            if (p == NULL || len != 256 || p[0] != (uint8_t)(i + 1)) {
+                ok_fifo = 0;
+                break;
+            }
+            nc_buf_get_end(s_t_sram);
+        }
+        buf_drain(s_t_sram);
+
+        // ③ reserve（表頭在前）＋ len（實際用量）
+        uint8_t *base = nc_buf_put_begin(s_t_sram, 16);
+        if (base != NULL) {
+            *(uint32_t *)(base - 16) = 0xB0F0B0F0u;
+            memset(base, 0x5A, 100);
+            nc_buf_put_end(s_t_sram, 100);
+            uint32_t len = 0, off = 0;
+            uint8_t *p = nc_buf_get(s_t_sram, &len, &off);
+            ok_res = (p != NULL) && (off == 16) && (len == 100) &&
+                     (p[0] == 0x5A) && (*(uint32_t *)(p - 16) == 0xB0F0B0F0u);
+            nc_buf_get_end(s_t_sram);
+        }
+        buf_drain(s_t_sram);
+
+        // ④ 四條空間路徑
+        memset(v, 0x11, sizeof(v));
+        ok_s2p = (nc_buf_put(s_t_psram, v, sizeof(v)) == ESP_OK);            // S → P
+        if (ok_s2p) {
+            uint32_t len = 0;
+            const uint8_t *p = nc_buf_get(s_t_psram, &len, NULL);
+            ok_s2p = (p != NULL) && (len == sizeof(v)) && (p[0] == 0x11) && (p[511] == 0x11);
+            nc_buf_get_end(s_t_psram);
+        }
+        ok_p2p = (nc_buf_put(s_t_psram, nc_buf_raw(s_t_psram, 0), 64) == ESP_OK);  // P → P
+        ok_p2s = (nc_buf_put(s_t_sram, nc_buf_raw(s_t_psram, 0), 128) == ESP_OK);  // P → S
+        ok_s2s = (nc_buf_put(s_t_sram, v, 128) == ESP_OK);                        // S → S
+
+        // ⑤ S→P 的內容要真的一樣（copy 之後讀返出嚟對）
+        if (ok_p2s) {
+            uint32_t len = 0;
+            const uint8_t *p = nc_buf_get(s_t_sram, &len, NULL);
+            ok_p2s = (p != NULL) && (len == 128) && (p[0] == 0x11);
+            nc_buf_get_end(s_t_sram);
+        }
+        buf_drain(s_t_sram);
+        buf_drain(s_t_psram);
+
+        // ⑥ 串流：部分寫、部分讀、壓實、滿了部分寫入（總線的 parser 環用這個模式）
+        if (s_t_stream != NULL) {
+            nc_buf_skip(s_t_stream, nc_buf_pending(s_t_stream));
+            uint8_t sv[600];
+            memset(sv, 0x7E, sizeof(sv));
+            ok_stream = (nc_buf_write(s_t_stream, sv, 600) == 600) &&
+                        (nc_buf_pending(s_t_stream) == 600);
+            nc_buf_skip(s_t_stream, 100);
+            ok_stream = ok_stream && (nc_buf_pending(s_t_stream) == 500) &&
+                        (nc_buf_space(s_t_stream) == 524);
+            // 尾部只淨 524 → 寫 400 要壓實
+            ok_stream = ok_stream && (nc_buf_write(s_t_stream, sv, 400) == 400) &&
+                        (nc_buf_pending(s_t_stream) == 900);
+            uint32_t slen = 0;
+            const uint8_t *sp = nc_buf_read_ptr(s_t_stream, &slen);
+            ok_stream = ok_stream && (sp != NULL) && (slen == 900) && (sp[0] == 0x7E);
+            // 只剩 124 → 部分寫入，唔覆蓋未讀
+            ok_stream = ok_stream && (nc_buf_write(s_t_stream, sv, 600) == 124) &&
+                        (nc_buf_pending(s_t_stream) == 1024);
+            ok_stream = ok_stream && (nc_buf_write(s_t_stream, sv, 8) == 0);
+            nc_buf_skip(s_t_stream, 1024);
+            ok_stream = ok_stream && (nc_buf_pending(s_t_stream) == 0);
+        }
+
+        // ⑦ 中途放棄：唔會卡死環（nc4_bus 刻意唔標 writing，這裡跟同一個語義）
+        buf_drain(s_t_sram);
+        if (nc_buf_put_begin(s_t_sram, 0) != NULL) {
+            // 唔好喺上板測試撞 handover（會令 viol +1，污染診斷）；host test 已覆蓋。
+            ok_abort = (nc_buf_put_begin(s_t_sram, 0) == NULL) &&   // 一次只揸一格
+                       (nc_buf_put_abort(s_t_sram) == ESP_OK);
+            if (nc_buf_put_begin(s_t_sram, 0) != NULL) {
+                ok_abort = ok_abort && (nc_buf_put_end(s_t_sram, 8) == ESP_OK);
+            } else {
+                ok_abort = 0;
+            }
+        }
+        buf_drain(s_t_sram);
+
+        // ⑧ 換手：全部空 → 成功；位置不變
+        const void *before = nc_buf_raw(s_t_sram, 0);
+        ok_ho = (nc_buf_handover(s_t_sram, "t.hand") == ESP_OK) &&
+                (nc_buf_raw(s_t_sram, 0) == before) &&
+                (nc_buf_handover(s_t_sram, "t.sram") == ESP_OK);
+    }
+
+    const int bad = 11 - (ok_align + ok_fifo + ok_full + ok_res + ok_s2s + ok_s2p +
+                          ok_p2s + ok_p2p + ok_ho + ok_stream + ok_abort);
+
+    size_t off = 0;
+    jappend(js, NC4_REPLY_JSON_MAX + 1, &off,
+            "{\"ok\":%d,\"fail\":%d,\"align\":%d,\"fifo\":%d,\"full\":%d,"
+            "\"reserve\":%d,\"s2s\":%d,\"s2p\":%d,\"p2s\":%d,\"p2p\":%d,"
+            "\"handover\":%d,\"stream\":%d,\"abort\":%d,\"buf\":",
+            bad == 0, bad, ok_align, ok_fifo, ok_full, ok_res,
+            ok_s2s, ok_s2p, ok_p2s, ok_p2p, ok_ho, ok_stream, ok_abort);
+    jchain(js, NC4_REPLY_JSON_MAX + 1, &off, nc_buf_json);
+    jappend(js, NC4_REPLY_JSON_MAX + 1, &off, "}");
+
+    if (bad != 0) {
+        ESP_LOGW(TAG, "BUF_TEST %d 項失敗（align=%d fifo=%d full=%d res=%d "
+                      "s2s=%d s2p=%d p2s=%d p2p=%d ho=%d stream=%d abort=%d）",
+                 bad, ok_align, ok_fifo, ok_full, ok_res, ok_s2s, ok_s2p,
+                 ok_p2s, ok_p2p, ok_ho, ok_stream, ok_abort);
+    }
+    reply_send(&r, off);
+}
+
 // ── 註冊 ──
 static const nc_action_t k_actions[] = {
     { NC4_CMD_DEV_BENCH, on_dev_bench, "test" },
@@ -3198,6 +3517,10 @@ static const nc_action_t k_actions[] = {
     { NC4_CMD_I80_DMA, on_i80_dma, "test" },
 #endif
     { NC4_CMD_STRESS, on_stress, "test" },
+    { NC4_CMD_BUF_TEST, on_buf_test, "test" },
+    { NC4_CMD_RX_BENCH, on_rx_bench, "test" },
+    { NC4_CMD_RX_RESULT, on_rx_result, "test" },
+    { NC4_CMD_RX_NOOP, on_rx_noop, "test" },
 };
 
 NC_ACTION_TABLE_DEF(nc_test_action_table, "test", k_actions);

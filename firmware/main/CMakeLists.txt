@@ -55,8 +55,11 @@ endif()
 idf_component_register(
     SRCS "main.c" "nc_wifi.c" "boot.c"
     INCLUDE_DIRS "."
-    PRIV_REQUIRES fatfs esp_timer esp_partition esp_driver_gpio esp_driver_uart esp_driver_sdmmc wear_levelling esp_eth esp_netif lwip esp_event esp_psram nvs_flash
-                   espressif__esp_tinyusb nc4 mem config ota_action task_manager core transport store state nclog file_action
+    PRIV_REQUIRES fatfs esp_timer esp_partition esp_driver_gpio esp_driver_uart esp_driver_sdmmc
+              wear_levelling esp_eth esp_netif lwip esp_event esp_psram nvs_flash
+              # driver/：匯流排驅動器（對照舊專案 slave/driver/*_drv.py）
+              drv_uart bus_core bus_uart
+                   espressif__esp_tinyusb nc4 mem config ota_action task_manager core bus_net store state nclog file_action
                    ${_nc_priv_extra}
     ${_preset_args}
 )

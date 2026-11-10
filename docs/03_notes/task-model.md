@@ -49,6 +49,10 @@
 差別只有一處：上游的 `Task` 是 Python class（有方法）；我們的 `nc_task_t` 是**純資料 + 函式指標**，
 五個階段由管理器驅動。**語義一樣，實作方式不同**（C 沒有繼承，就把「子類」變成「一個 struct 實例」）。
 
+> **「記憶體」＝ 緩衝區**：`mem[]` / `declare()` 宣告的每一項都是一條 `nc_buf`。
+> 誰建立、幾時拿到、停止之後還在不在 —— 契約 C1–C11 在
+> [buffers.md §9](buffers.md)，怎麼搭配在 [buffer-patterns.md](buffer-patterns.md)。
+
 任務**不碰** `xTaskCreate`、不碰 registry —— 只回傳一個 `const nc_task_t *`。
 
 

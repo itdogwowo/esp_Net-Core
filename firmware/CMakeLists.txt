@@ -24,7 +24,13 @@ option(NC_STACK_ANALYSIS "產生 .su/.ci（給 tools/stack_depth.py 算最壞棧
 set(_nc_extra_dirs
     "${CMAKE_CURRENT_LIST_DIR}/components/sys"
     "${CMAKE_CURRENT_LIST_DIR}/components/action/file_action"
-    "${CMAKE_CURRENT_LIST_DIR}/components/action/ota_action")
+    "${CMAKE_CURRENT_LIST_DIR}/components/action/ota_action"
+    # ── 匯流排驅動器（對照舊專案 slave/driver/*_drv.py）──
+    # 一個周邊一個組件：driver/drv_uart、driver/drv_usb、driver/drv_sd、driver/drv_eth
+    "${CMAKE_CURRENT_LIST_DIR}/components/driver"
+    # ── 匯流排（通用：NC4 幀、LED(SPI)、LCD(I80) 都會用）──
+    # 一個「線的實作」一個組件：bus/net（TCP/WS/UDP）、之後 bus/nc4、bus/led、bus/lcd
+    "${CMAKE_CURRENT_LIST_DIR}/components/bus")
 # 測試組件（NC_ENABLE_TESTS=OFF 時唔加入 → 唔編譯、唔 link、唔存在）
 if(NC_ENABLE_TESTS)
     list(APPEND _nc_extra_dirs

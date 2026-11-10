@@ -57,6 +57,7 @@
 #include "nc4_link.h"
 #include "nc4_router.h"
 #include "nc_task.h"
+#include "nc_prio.h"
 #ifdef NC_ENABLE_TESTS
 #include "nc_hello.h"
 #include "nc_bench.h"
@@ -68,8 +69,9 @@
 #include "esp_mac.h"
 #include "nc_mem.h"
 #include "nc_plan.h"
-#include "nc_pool.h"
 #include "nc_hub.h"
+#include "nc_uart_drv.h"
+#include "nc_buf.h"
 #include "nc_ota_action.h"
 #include "nc4_ws.h"
 #include "nc4_udp.h"
@@ -112,8 +114,7 @@ static const char *TAG = "netcore";
 // 解碼跑在哪個核心：router 決定（`nc4.routes[].out` 的第一個 `decodeN`），沒有編譯期巨集。
 
 // UART 迴路（lazy 初始化：只有跑 UART 測試時才碰 IO7/8）
-static bool s_uart_ready;
-static esp_err_t uart_loop_init(uint32_t baud);
+// UART 的狀態由 driver 管（nc_uart_drv_ready()）。
 
 static uint16_t s_cid = NC4_ADDR_BROADCAST;   // 自己的 2B 協議位址
 
@@ -1242,8 +1243,10 @@ static size_t status_put_mem(char *buf, size_t cap)
     jchain(buf, cap, &off, nc_plan_json);
     jappend(buf, cap, &off, ",\"hub\":");
     jchain(buf, cap, &off, nc_hub_registry_json);
-    jappend(buf, cap, &off, ",\"pool\":");
-    jchain(buf, cap, &off, nc_pool_json);
+    // 統一緩衝（nc_buf）：格數／位置／off·len／換手 gén／四方向 copy 帳。
+    // 設計見 docs/03_notes/buffers.md；用法模式見 buffer-patterns.md。
+    jappend(buf, cap, &off, ",\"buf\":");
+    jchain(buf, cap, &off, nc_buf_json);
     jappend(buf, cap, &off, "}");
     return off;
 }
@@ -1508,79 +1511,11 @@ static void on_set_master(nc4_ctx_t *ctx, const nc4_frame_t *f)
 }
 
 
-// 這條通道「怎麼讀」—— 框架不關心它背後是 USB / UART / Wi-Fi
-static int uart_bus_read(void *arg, uint8_t *buf, size_t cap)
+// nc4_link 的出口簽名帶 arg；driver 那支唔需要 → 薄轉接
+static int nc_uart_link_adapter(void *arg, const uint8_t *frame, size_t len)
 {
     (void)arg;
-    if (!s_uart_ready) {
-        vTaskDelay(1);
-        return 0;       // 尚未安裝（driver 由 owner_init 在 bus 所屬核安裝）
-    }
-    // ★ 模仿 CDC：資料一到就搬走「現在環裡有的」，唔等 slot 填滿。
-    //
-    // 以前是 uart_read_bytes(port, buf, cap, portMAX_DELAY)。IDF 的實作是
-    //   while (length) { xRingbufferReceiveUpTo(..., ticks_to_wait, length) ... }
-    // 所以它會**一直等到收滿 cap 才返回**。cap = slot_size = 1 KB 的年代，
-    // 一幀 18 B 的指令要等 1 KB 到齊才被讀走 —— 等於 UART 的延遲沒有上限。
-    // 實測：送 1 幀（77 B）之後 producer 一直卡在 read，rx 永遠是 0。
-    //
-    // 現在：阻塞等「第一個 byte」（ISR 同核、wake 本地，portMAX_DELAY 安全），
-    // 然後把環裡已經有的全部搬走（最多 cap），立即返回。
-    const int n = uart_read_bytes(UART_TEST_PORT, buf, 1, portMAX_DELAY);
-    if (n <= 0) {
-        return n < 0 ? -1 : 0;
-    }
-    size_t avail = 0;
-    if (uart_get_buffered_data_len(UART_TEST_PORT, &avail) == ESP_OK && avail > 0 && cap > 1) {
-        const size_t want = (avail < cap - 1) ? avail : (cap - 1);
-        const int more = uart_read_bytes(UART_TEST_PORT, buf + 1, want, 0);
-        if (more > 0) {
-            return n + more;
-        }
-    }
-    return n;
-}
-
-static esp_err_t uart_loop_init(uint32_t baud)
-{
-    const uart_config_t cfg = {
-        .baud_rate = (int)baud,
-        .data_bits = UART_DATA_8_BITS,
-        .parity = UART_PARITY_DISABLE,
-        .stop_bits = UART_STOP_BITS_1,
-        .flow_ctrl = UART_HW_FLOWCTRL_DISABLE,
-        .source_clk = UART_SCLK_DEFAULT,
-    };
-    ESP_RETURN_ON_ERROR(uart_driver_install(UART_TEST_PORT, UART_TEST_RX_BUF,
-                                            UART_TEST_TX_BUF, 0, NULL, 0),
-                        TAG, "uart driver");
-    ESP_RETURN_ON_ERROR(uart_param_config(UART_TEST_PORT, &cfg), TAG, "uart param");
-    ESP_RETURN_ON_ERROR(uart_set_pin(UART_TEST_PORT, UART_TEST_TX_PIN, UART_TEST_RX_PIN,
-                                     UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE), TAG, "uart pins");
-    s_uart_ready = true;
-    ESP_LOGW(TAG, "UART 迴路已啟動：TX=%d RX=%d baud=%u", UART_TEST_TX_PIN, UART_TEST_RX_PIN,
-             (unsigned)baud);
-    return ESP_OK;
-}
-
-// 回覆／轉寄出口（UART）：整幀寫入 driver 的 TX 環（1 KB）。
-//
-// IDF 的 uart_write_bytes 會阻塞到「整幀都排入環」為止；1 KB 環、921600 bps 之下，
-// 一次 4 KB 的轉寄最壞要排 ~44 ms（= 線速）。這是「同步送」的取捨：
-// 要 decouple 就得把環擴到 4 KB（+3.2 KB 內部 RAM）—— 那是 tx-path-design §4／§7 的 6.2，
-// 等有 4 KB 轉寄需求再做。
-static int uart_link_write(void *arg, const uint8_t *frame, size_t len)
-{
-    (void)arg;
-    if (!s_uart_ready) {
-        return -1;      // 未安裝（例如 GPIO7 已經被 SD 的 CLK 佔用）
-    }
-    return uart_write_bytes(UART_TEST_PORT, (const char *)frame, len);
-}
-
-static esp_err_t uart_send(void *arg, const uint8_t *frame, size_t len)
-{
-    return (uart_link_write(arg, frame, len) == (int)len) ? ESP_OK : ESP_FAIL;
+    return nc_uart_drv_write(frame, len);
 }
 
 // bus 的 driver 初始化：只會在 UART bus 所屬的那個核上跑（owner_init）。
@@ -1600,7 +1535,11 @@ static esp_err_t uart_owner_init(void *arg)
             return ESP_ERR_INVALID_STATE;
         }
     }
-    return uart_loop_init(UART_TEST_DEF_BAUD);
+    const nc_uart_drv_cfg_t ucfg = {
+        .port = UART_TEST_PORT, .tx_pin = UART_TEST_TX_PIN, .rx_pin = UART_TEST_RX_PIN,
+        .rx_ring = UART_TEST_RX_BUF, .tx_ring = UART_TEST_TX_BUF,
+    };
+    return nc_uart_drv_install(&ucfg, UART_TEST_DEF_BAUD);
 }
 
 #if !CONFIG_IDF_TARGET_ESP32P4
@@ -1640,7 +1579,11 @@ static size_t cdc_region(size_t want)
 // 每 2 ms 自己醒一次，唔會斷線（RX 一斷就冇辦法用 OTA 救返呢點很關鍵）。
 #define CDC_RX_SLOT       256        // 實測每次 push 平均 68 B（USB FS 64 B 封包）⇒ 256 已有 3.7× 餘裕
 #define CDC_RX_SLOTS      4          // 4 × 256 = 1 KB（實測峰值 3 格）
-#define CDC_RX_TASK_PRIO  5
+// ⚠️ 一定要 **低於 decode**（decode = 4）。2026-11-10 實測：producer 5 > decode 4 時，
+// producer 會一路讀到冇資料才讓 decode 接手 → kick→decode 的平均喚醒延遲 478 µs、
+// 最大 1.77 ms。倒過來之後 producer 只在 decode 睡著（等 kick）時才跑。
+// 用保留區常數（見 nc_prio.h）：producer 一定要低過 decode。
+#define CDC_RX_TASK_PRIO  NC_PRIO_PRODUCER
 #define CDC_RX_TASK_STACK 1280       // 實測 844 B（4 KB 洪水下 HWM 692）；1280 留 436 B 餘裕
 #define CDC_RX_WAIT_MS    2
 
@@ -1714,10 +1657,13 @@ static void load_net_tuning(void)
 
 static void *s_nc4_rx_region;
 static size_t s_nc4_rx_bytes;
+static nc_buf_t *s_cdc_rx_buf;      // nc4.rx（STREAM，管理器建立）
+static nc_buf_t *s_uart_rx_buf;     // uart.rx
 static void *s_uart_rx_region;
 // UART 的 producer 要延後到 decode 任務起咗之後才建立（見 app_main 的說明）。
 static nc4_bus_handle_t s_uart_bus;
 #if CONFIG_IDF_TARGET_ESP32P4
+static nc_buf_t *s_tcp_rx_buf;      // tcp.rx
 static void *s_tcp_rx_region;      // 同上：S3 冇 TCP 通道
 #endif
 
@@ -1839,36 +1785,64 @@ static void cfg_probe_once(void)
 
 // ── nc4：CDC 那條線的 parser 緩衝 ──
 // P4 冇 USB OTG → CDC 永遠唔會建立，所以**唔宣告**（以前照宣告 8,205 B，永遠冇人用）。
+// 回覆幀的名字：每核一條（plan 要的是 static 字串指標）
+static const char *const k_reply_name[NC4_DECODERS] = { "nc4.reply0", "nc4.reply1" };
+
 static int task_nc4_declare(nc_task_res_t *out, int max)
 {
-#if CONFIG_IDF_TARGET_ESP32P4
-    (void)out;
-    (void)max;
-    return 0;
-#else
+    int n = 0;
+    // 回覆幀：每核一條（P，2,615 B）。以前係 decoder 自己 heap_caps_malloc，
+    // 所以 mem.buf 見唔到它；搬進 plan 之後帳面完整（契約 C8）。
+    for (int i = 0; i < NC4_DECODERS && n < max; i++) {
+        out[n++] = (nc_task_res_t){
+            .name = k_reply_name[i], .bytes = NC4_REPLY_FRAME_MAX,
+            .cls = NC_PLAN_PSRAM, .align = 64,
+            // P5：講「一格幾大、幾多格」，由管理器建成 nc_buf 交過來
+            .slot_bytes = NC4_REPLY_FRAME_MAX, .n = 1, .flags = 0,
+        };
+    }
+#if !CONFIG_IDF_TARGET_ESP32P4
     // 兩個條件都要：link 啟用（enable）＋ routes[] 有指去某個 decodeN。
     // 少咗後者，bus 建立處（link_core）會拒絕，呢 8,205 B 就白佔。
-    if (max < 1 || !link_enabled("CDC") || nc4_router_core("CDC") == NC4_ROUTE_NONE) {
-        return 0;
+    if (n < max && link_enabled("CDC") && nc4_router_core("CDC") != NC4_ROUTE_NONE) {
+        link_rx_t rx = { .region = CDC_RX_REGION_DEF };
+        cfg_probe_once();
+        const int ncfg = link_rx("CDC", &rx);
+        s_cdc_cfg_src = ncfg;
+        rx.region = cdc_region(rx.region);
+        out[n++] = (nc_task_res_t){
+            .name = "nc4.rx", .bytes = rx.region, .cls = NC_PLAN_INTERNAL, .align = 32,
+            // parser 環＝一條 STREAM 緩衝區（P5：由管理器建，bus 直接用它）
+            .slot_bytes = (uint32_t)rx.region, .n = 1, .flags = NC_BUF_F_STREAM,
+        };
     }
-    link_rx_t rx = { .region = CDC_RX_REGION_DEF };
-    cfg_probe_once();
-    const int ncfg = link_rx("CDC", &rx);
-    s_cdc_cfg_src = ncfg;
-    rx.region = cdc_region(rx.region);
-    out[0] = (nc_task_res_t){
-        .name = "nc4.rx", .bytes = rx.region, .cls = NC_PLAN_INTERNAL, .align = 32,
-    };
-    return 1;
 #endif
+    return n;
 }
 
 static esp_err_t task_nc4_start(const nc_task_res_view_t *res, int n)
 {
-    (void)res;
-    (void)n;
     // 用 plan 名字取，不用 view 次序：冇宣告 / 被 shed 就係 NULL（天然嘅「冇就唔要」）
-    s_nc4_rx_region = nc_plan_get("nc4.rx");
+    // 回覆幀：管理器已按「格 × 格數」建好 nc_buf（P5），這裡只接管
+    for (int i = 0; i < NC4_DECODERS && (size_t)i < (size_t)n; i++) {
+        nc_buf_t *rb = res[i].buf;
+        if (rb == NULL || s_decoder[i] == NULL) {
+            ESP_LOGW(TAG, "回覆幀 %s：冇 buffer（沿用在 decoder 建立時的 heap）", k_reply_name[i]);
+            continue;
+        }
+        if (nc4_decoder_set_reply(s_decoder[i], nc_buf_raw(rb, 0)) != ESP_OK) {
+            ESP_LOGW(TAG, "回覆幀 %s：接管失敗，沿用 heap", k_reply_name[i]);
+        }
+    }
+
+    // nc4.rx：宣告次序 = reply0、reply1、rx（S3）／只有 reply0、1（P4）
+    if (n > NC4_DECODERS) {
+        s_cdc_rx_buf = res[NC4_DECODERS].buf;
+        s_nc4_rx_region = res[NC4_DECODERS].ptr;
+    } else {
+        s_cdc_rx_buf = NULL;
+        s_nc4_rx_region = NULL;
+    }
     cfg_probe_once();          // STATUS 要的探測結果（S3／P4 都用得著）
 #if CONFIG_IDF_TARGET_ESP32P4
     // P4 冇 USB OTG → 唔會有 nc4.rx，亦冇 CDC 的 rx 參數可讀。
@@ -1900,6 +1874,7 @@ static int task_net_declare(nc_task_res_t *out, int max)
         link_rx("UART", &rx);
         out[n++] = (nc_task_res_t){
             .name = "uart.rx", .bytes = rx.region, .cls = NC_PLAN_INTERNAL, .align = 32,
+            .slot_bytes = (uint32_t)rx.region, .n = 1, .flags = NC_BUF_F_STREAM,
         };
     }
 #if CONFIG_IDF_TARGET_ESP32P4
@@ -1910,6 +1885,7 @@ static int task_net_declare(nc_task_res_t *out, int max)
         link_rx("TCP", &rx);
         out[n++] = (nc_task_res_t){
             .name = "tcp.rx", .bytes = rx.region, .cls = NC_PLAN_INTERNAL, .align = 32,
+            .slot_bytes = (uint32_t)rx.region, .n = 1, .flags = NC_BUF_F_STREAM,
         };
     }
 #endif
@@ -1918,13 +1894,15 @@ static int task_net_declare(nc_task_res_t *out, int max)
 
 static esp_err_t task_net_start(const nc_task_res_view_t *res, int n)
 {
-    (void)res;
     (void)n;
-    s_uart_rx_region = nc_plan_get("uart.rx");
+    // 宣告次序 = uart.rx、（P4）tcp.rx
+    s_uart_rx_buf = (res != NULL) ? res[0].buf : NULL;
+    s_uart_rx_region = (res != NULL) ? res[0].ptr : NULL;
     // 注意：UART driver **唔在這裡裝**。bus 綁邊個核，就由嗰個核的 decode task
     // 在開 loop 之前初始化（nc4_bus_cfg_t.owner_init）。
 #if CONFIG_IDF_TARGET_ESP32P4
-    s_tcp_rx_region = nc_plan_get("tcp.rx");
+    s_tcp_rx_buf = (res != NULL && n > 1) ? res[1].buf : NULL;
+    s_tcp_rx_region = (res != NULL && n > 1) ? res[1].ptr : NULL;
 #endif
     ESP_LOGI(TAG, "svc net: parser 緩衝 uart=%s tcp=%s",
              s_uart_rx_region ? "ok" : "-",
@@ -1968,10 +1946,10 @@ static const nc_task_loop_t s_nc4_loops[] = {
     { .name = "decode0", .fn = nc4_bus_task_entry, .arg = (void *)0,
       // 棧：全 handler 走遍實測 2,260 B（stack_cover），3072 留 812 B 餘裕。
       // 以前是 4096，而 2,615 B 的回覆幀還住在棧上時 HWM 只剩 124 B。
-      .stack = 3072, .prio = 4, .core = 0, .layer = 1,
+      .stack = 3072, .prio = NC_PRIO_DECODE, .core = 0, .layer = 1,
       .enabled = nc4_want_core0 },
     { .name = "decode1", .fn = nc4_bus_task_entry, .arg = (void *)1,
-      .stack = 3072, .prio = 4, .core = 1, .layer = 1,
+      .stack = 3072, .prio = NC_PRIO_DECODE, .core = 1, .layer = 1,
       .enabled = nc4_want_core1 },
 };
 
@@ -2952,6 +2930,8 @@ static int task_fx_declare(nc_task_res_t *out, int max)
     out[0] = (nc_task_res_t){
         .name = "fx.arena", .bytes = NC_FX_ARENA_MAX,
         .cls = NC_PLAN_PSRAM, .align = 32,
+        // P5：整塊 arena 就是「一格 512 KB」的緩衝區（`.fxe` 之後用 nc_buf_carve 由它切）
+        .slot_bytes = NC_FX_ARENA_MAX, .n = 1, .flags = 0,
     };
     return 1;
 }
@@ -3378,50 +3358,21 @@ static esp_err_t ph_hardware(void)
 }
 
 // 開機階段：declare
-// 開機階段：共用緩衝池（small／bulk／forward）
-// 放在 declare 之前：pool 先要記憶體，plan 之後才量剩餘量（順序就是資料）。
+// 開機階段：共用緩衝池 → 2026-11-10 已停用
+//
+// `nc_pool` 只有一個真用戶（跨核轉寄的 forward 格），而 small／bulk 兩個 class
+// **零呼叫者**，卻佔住 20.7 KB internal（system.json 預設 enable:1）。
+// 轉寄已改用每核一條 `nc_buf` FIFO（`fwd.c0`／`fwd.c1`，PSRAM、按需建立），
+// 所以這裡只剩一句 log；`nc4.pool` 的 config 仍然讀得入（唔會壞檔），但唔再建池。
 static esp_err_t ph_pool(void)
 {
     const nc_system_cfg_t *sys = nc_cfg_system();
-    nc_pool_class_cfg_t cfg[NC_POOL_MAX_CLASSES];
-    memset(cfg, 0, sizeof(cfg));
-
-    int parsed = 0;
-    for (int i = 0; i < sys->n_pools; i++) {
-        const nc_cfg_pool_t *p = &sys->pools[i];
-        if (!p->enable) {
-            continue;
-        }
-        nc_pool_class_t cls;
-        if (strcmp(p->name, "small") == 0) {
-            cls = NC_POOL_SMALL;
-        } else if (strcmp(p->name, "bulk") == 0) {
-            cls = NC_POOL_BULK;
-        } else if (strcmp(p->name, "forward") == 0) {
-            cls = NC_POOL_FORWARD;
-        } else {
-            ESP_LOGW(TAG, "pool class \"%s\" 唔認識（只支援 small/bulk/forward）", p->name);
-            continue;
-        }
-        if (cfg[cls].enable) {
-            ESP_LOGW(TAG, "pool class \"%s\" 重複，忽略第二個", p->name);
-            continue;
-        }
-        snprintf(cfg[cls].name, sizeof(cfg[cls].name), "%s", p->name);
-        cfg[cls].size = p->size;
-        cfg[cls].count = p->count;
-        cfg[cls].where = p->where ? NC_MEM_PSRAM : NC_MEM_INTERNAL;
-        cfg[cls].enable = true;
-        parsed++;
+    if (sys->n_pools > 0) {
+        ESP_LOGW(TAG, "nc4.pool 已停用（%u 個設定被忽略）：轉寄改用 nc_buf，"
+                      "small／bulk 冇用戶 → 見 docs/03_notes/buffers.md",
+                 (unsigned)sys->n_pools);
     }
-
-    if (parsed == 0) {
-        ESP_LOGW(TAG, "pool：config 冇有效 class，唔建立（轉寄會退回同步）");
-        return ESP_OK;
-    }
-    const esp_err_t e = nc_pool_init(cfg, NC_POOL_MAX_CLASSES);
-    ESP_LOGI(TAG, "pool init: %s", esp_err_to_name(e));
-    return ESP_OK;   // pool 失敗唔阻止開機（fail-visible，STATUS 看得到）
+    return ESP_OK;
 }
 
 static esp_err_t ph_declare(void)
@@ -3615,11 +3566,16 @@ static esp_err_t ph_channels(void)
                     .name = "CDC",
                     // PUSH：由 cdc_rx_task（同核）讀走放環，decode 只消費。
                     // 之前係 PULL → decode 每 10 ms 親自讀一次，實測 RTT = 10.0 ms。
+                    // 2026-11-10 更正：當時主機端 Reader 用阻塞式 read(N)，每次量測多算
+                    // 一個埠 timeout（+10～50 ms）。修好之後 PUSH 的真實 RTT = 1.6 ms
+                    // （p95 1.8 / max 2.6，n=60）；PULL 的 10 ms 仍然成立，因為那是
+                    // decode 迴圈自己睡 10 ms（DEFAULT_POLL_MS），係裝置側的輪詢。
                     .mode = NC4_BUS_PUSH,
                     .core = cdc_core,
                     .read = cdc_read,       // 由 cdc_rx_task 呼叫（非阻塞）
                     .send = cdc_send,
-                    .rx_region = s_nc4_rx_region,     // plan 給的緩衝
+                    .rx_region = s_nc4_rx_region,     // plan 給的區域
+                    .rx_buf = s_cdc_rx_buf,          // 管理器建好的 STREAM 環
                     .rx_region_bytes = s_nc4_rx_bytes,
                     .read_chunk = rx.chunk,
                     .budget_per_pass = rx.budget,
@@ -3680,14 +3636,15 @@ static esp_err_t ph_channels(void)
                 .mode = NC4_BUS_PUSH,
                 .core = uart_core,
                 .owner_init = uart_owner_init,   // driver 喺 bus 所屬核初始化
-                .read = uart_bus_read,
+                .read = nc_uart_drv_read,
                 .rx_region = s_uart_rx_region,
+                .rx_buf = s_uart_rx_buf,         // 管理器建好的 STREAM 環
                 .rx_region_bytes = rx.region,
                 // UART 以前是 NULL（只收不回）。接上之後：
                 //   · UART 上的指令會有回覆
                 //   · routes[].out 寫 "UART" 的轉寄有出口
                 // 環仍然 1 KB（零 RAM 成本）→ 4 KB 轉寄會阻塞 ~44 ms，見 tx-path-design §4。
-                .send = uart_send,
+                .send = nc_uart_drv_send,
                 .read_chunk = rx.chunk,
                 .budget_per_pass = rx.budget,
                 .rx_ring_size = rx.slot,
@@ -3700,7 +3657,8 @@ static esp_err_t ph_channels(void)
                 // 才可以開始讀。見 nc_task_boot() 之後的說明。
                 s_uart_bus = uart_handle;
                 nc4_bus_set_cfg_src(uart_handle, uapplied);   // STATUS 的 cfg_src
-                const esp_err_t lerr = nc4_link_register("UART", uart_link_write, NULL);
+                const esp_err_t lerr = nc4_link_register("UART",
+                                                     nc_uart_link_adapter, NULL);
                 ESP_LOGI(TAG, "link UART 出口：%s（TX 環 %d B）",
                          esp_err_to_name(lerr), UART_TEST_TX_BUF);
             }
@@ -3758,7 +3716,8 @@ static esp_err_t ph_channels(void)
         if (s_uart_bus != NULL) {
             // producer 只做「等第一個 byte → 搬走環裡有的 → push」：實測 884 B。
             // 以前是 4096，純粹是照 decode 的數字抄過來。
-            const esp_err_t perr = nc4_bus_start_producer(s_uart_bus, "uart.rx", 3, 1536);
+            const esp_err_t perr = nc4_bus_start_producer(s_uart_bus, "uart.rx",
+                                                 NC_PRIO_PRODUCER, 1536);
             ESP_LOGI(TAG, "UART producer: %s", esp_err_to_name(perr));
         }
     }

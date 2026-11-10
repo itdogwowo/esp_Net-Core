@@ -20,6 +20,7 @@
 #include "esp_log.h"
 #include "nc_cfg.h"
 #include "cJSON.h"
+#include "nc_buf.h"
 
 static const char *TAG = "tm";
 
@@ -521,12 +522,32 @@ int nc_task_declare_all(void)
 static bool gather_resources(tm_slot_t *s)
 {
     for (int i = 0; i < s->nreq; i++) {
-        s->view[i].ptr = nc_plan_get(s->req[i].name);
-        s->view[i].len = s->req[i].bytes;
-        if (s->view[i].ptr == NULL) {
+        nc_task_res_view_t *v = &s->view[i];
+        v->ptr = nc_plan_get(s->req[i].name);
+        v->len = s->req[i].bytes;
+        v->buf = NULL;
+        if (v->ptr == NULL) {
             ESP_LOGE(TAG, "[%s] 資源 %s（%u B）拿不到 → 這個任務不啟動",
                      s->name, s->req[i].name, (unsigned)s->req[i].bytes);
             return false;
+        }
+        // P5（2026-11-10）：宣告了「格 × 格數」就由管理器建立緩衝區，
+        // on_start 直接收 nc_buf_t *（契約 C1／C3 的目標形狀）。
+        if (s->req[i].slot_bytes > 0 && s->req[i].n > 0) {
+            nc_buf_where_t where = NC_BUF_SRAM;
+            if (s->req[i].cls == NC_PLAN_PSRAM) {
+                where = NC_BUF_PSRAM;
+            } else if (s->req[i].cls == NC_PLAN_DMA) {
+                where = NC_BUF_DMA;
+            }
+            v->buf = nc_buf_at(s->req[i].name, v->ptr, v->len, where,
+                               s->req[i].slot_bytes, s->req[i].n, s->req[i].flags);
+            if (v->buf == NULL) {
+                ESP_LOGE(TAG, "[%s] 資源 %s 建 buffer 失敗（%u × %u）→ 這個任務不啟動",
+                         s->name, s->req[i].name, (unsigned)s->req[i].slot_bytes,
+                         (unsigned)s->req[i].n);
+                return false;
+            }
         }
     }
     return true;
@@ -554,6 +575,7 @@ static void prepare_loops(tm_slot_t *s)
         nc_task_rt_t *rt = &s->loops[s->nloops++];
         memset(rt, 0, sizeof(*rt));
         rt->def = d;
+        rt->kind = (uint8_t)s->def->kind;   // 優先級治理用
         rt->enabled = true;
         rt->core = d->core;      // 完全照宣告；框架不改你的核
         if (s->cfg_aff[0] >= 0 || s->cfg_aff[1] >= 0) {
@@ -877,10 +899,11 @@ size_t nc_task_json(char *buf, size_t cap)
             const nc_task_loop_t *d = rt->def;
             off = jappend(buf, cap, off,
                           "%s{\"name\":\"%s\",\"core\":%d,\"layer\":%d,\"prio\":%d,"
-                          "\"period_ms\":%u,\"running\":%d,\"enabled\":%d}",
+                          "\"period_ms\":%u,\"running\":%d,\"enabled\":%d,\"b\":%u}",
                           k ? "," : "", d->name ? d->name : "?", rt->core, d->layer,
                           (int)d->prio, (unsigned)d->period_ms,
-                          rt->started ? 1 : 0, rt->enabled ? 1 : 0);
+                          rt->started ? 1 : 0, rt->enabled ? 1 : 0,
+                          (unsigned)rt->beats);
         }
         off = jappend(buf, cap, off, "]}");
     }

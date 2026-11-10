@@ -113,7 +113,7 @@ int main(void)
     ok("missing=1", st.missing == 1);
     ok("2 條預設 link（CDC/UART）", sys.n_links == 2);
     ok("CDC 是 cdc kind", sys.links[0].kind == NC_LINK_CDC);
-    ok("4 列預設 route", sys.n_routes == 4);
+    ok("5 列預設 route（nctx/outbound/CDC/UART/ESPNOW）", sys.n_routes == 5);
     ok("cID 空", sys.cid[0] == '\0');
     ok("frame_interval_ms=20", sys.frame_interval_ms == 20);
 

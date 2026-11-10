@@ -263,7 +263,7 @@ DIRAM 不變（S3 98,761／P4 129,863），flash 略減。
 
 ### 7.6 2026-11-04 晚（測試歸位：`test_*_tasks` ＋ `NC_ENABLE_TESTS`）
 
-按 [execution-rules §6](execution-rules.md) 的約定落實「測試唔污染功能結構」：
+按 [execution-rules §6](../03_notes/execution-rules.md) 的約定落實「測試唔污染功能結構」：
 
 | 動作 | 內容 |
 |---|---|
@@ -1330,3 +1330,549 @@ forward 成功路徑（要 UART 腳位或第二條可送 link）、pool 接到 R
 - 完整設計：[comm-buffers.md](../03_notes/comm-buffers.md)。
 - 下一步：`nc4_fwd` hub 版（P1），保留舊 queue 做 A/B；P2 才改預設。
 - 未做：tap／refcount（用 `nc_hub_generation`）、P4 8K 上板、per-link `max_frame`。
+
+### 7.31 2026-11-10（緩衝工具收斂成一個：`nc_buf`；先統一字眼）
+
+**背景**：討論 P1 時發現真正的問題不是「hub 版怎麼寫」，而是**同一類東西有四個名**
+（plan／pool／hub／環），`STATUS` 的帳散在四處，每加一條線都要重新決定用邊種。
+使用者要求「整個項目只用一個緩衝工具，不要零散的概念」。
+
+| 決定 | 內容 |
+|---|---|
+| 唯一工具 | **`nc_buf`** ＝ N 個等長格 ＋ 每格狀態。`where`（S／P／DMA）與順序（FIFO／隨機）是**參數**，不是型別 |
+| 三條鐵律 | ① 開機一次要齊 ② **永不釋放**（冇 `destroy`）③ 執行期只准在 arena 內 `carve`，唔准向 heap 要 |
+| 碎片 | **冇 free 就冇碎片** —— 舊文件把功勞歸給 plan 的「一次 carve」，更正為「冇 free」；plan 降級成 `nc_buf` 內部的 **arena** |
+| S2P／P2S／S2S／P2P | 不是四種 buffer，是同一個 `put()` 的四種引數（格在哪 × 資料由哪來）；`DMA` class 收到 PSRAM 指標強制 copy 入 S |
+| 退役 | `hub`（借來的名，易誤會成集線器）、`pool`（別處＝通用池）、`環`（兩種意思撞名）、`plan`（改名 arena） |
+| 帳 | `STATUS keys=mem` 只剩一個 `mem.buf`（含 `s2p/p2s/s2s/p2p` 累計 bytes、`viol`） |
+| 佈局 | 熱路徑→S、冷路徑→P、DMA→S；PSRAM 頻寬全核共用（兩核同時 copy 21→10 MB/s）；大幀用 S tile 做完再一次寫回 P |
+
+- 完整設計與 S3 逐條佈局表：[buffers.md](../03_notes/buffers.md)；字眼：[glossary.md](../03_notes/glossary.md)。
+- 取代 `buffer-manager.md`／`buffer-manager-status.md`／`buffer-pool.md`／`comm-buffers.md` 的**設計部分**
+  （後三者保留量測數字）。
+- 下一步 P1：`nc_buf` 核心（FIFO＋隨機＋S/P copy＋`mem.buf`）；**`NC_BUF_MAX` 滿了要回 NULL，不可靜默**
+  —— 這正是 `nc_hub` 今日的缺陷（registry 滿只係唔登記）。
+- 未做：可等待模式、tap／多讀者、per-link `max_frame`、arena 切法（S／P 各一個）。
+
+### 7.32 2026-11-10（`nc_buf` 落地＋上板驗收：統一緩衝的第一步）
+
+**背景**：§7.31 的定案（一個工具、永不 free、換手、`off`／`len`）要有可跑的實作。
+今天落的是**機制**（P1）；把 plan／pool／hub 搬過去是 P2–P5，未做。
+
+| # | 項目 | 內容 | 驗收 |
+|---|---|---|---|
+| 7.32.1 | `nc_buf` 核心 | `create`／`at`、FIFO／隨機、`put_begin(reserve)`／`put`／`put_end(len)`、`get`／`get_end`、`handover`、`nc_buf_json` | hosttest `buf_test`、上板 `0xF032` |
+| 7.32.2 | 全部 32-bit | `cap`／`len`／`off`／`gen` 一律 **uint32**（今日 `nc_pool` 的 uint16 在 LCD 一幀會爆、`gen` 5,000 幀／秒 13 秒就 wrap） | 上板建 100,000 B 的格、`put_end(100000)` 唔截斷 |
+| 7.32.3 | 每格範圍 | `off`（reserve，自己放表頭）＋`len`（實際用量）——`nc_hub` 今日完全冇 `len`，只能送滿格 | reserve 項：`off=16`、`len=100`、表頭冇被蓋 |
+| 7.32.4 | S／P 記帳 | `put` 時按「格在哪 × 來源在哪」分 `s2s`／`s2p`／`p2s`／`p2p` 累計 bytes | 上板四項各記到（64／512／128／64 B） |
+| 7.32.5 | 換手 | 全部格 FREE 才准；`generation++`；**記憶體位置不變** | 有格未還 → `INVALID_STATE`；還清 → OK |
+| 7.32.6 | `mem.buf` | STATUS `keys=mem` 多一段；零值欄位省略、放唔落有 `truncated`、**唔會出半條 JSON** | 上板 858 B（上限 2,600） |
+| 7.32.7 | 零複製監測 | `src_buf_of()` 判斷來源落在哪條 buffer；跨 buffer 的 copy 計入 **`xcopy`** —— 工具唔會自動幫你改寫，但「本來可以唔抄」會現形 | 上板 `xcopy=128`（P2S 由 `t.psram` 抄入 `t.sram`）、其餘路徑 `xcopy=0` |
+
+**上板結果**（S3、tests 映像、2026-11-10 11:14，`0xF032` ＋ `tools/buf_test.py`）
+
+- 9 項全 pass：`align`／`fifo`／`full`／`reserve`／`s2s`／`s2p`／`p2s`／`p2p`／`handover`，`viol=0`、`big=0`。
+- 測試 buffer：`t.sram` 256×4（S）、`t.psram` 1024×2（P），合計 **3,072 B**；重跑唔會再建（registry 唔漏，`count` 一直 2）。
+- `keys=mem` **858 B**（plan 360／hub 91／pool 262／buf 250 平均值 125 B 一條）；
+  13 條 buffer ≈ 1,600 B，仍然放得落 2,600。
+- 建置 **527.2 KB**（+336 B vs 上一顆）、**零 warning**；hosttest **10/10**。
+- 板子：`app` hash `ba926135`、`h_int` 211,507、`h_ps` 7,847,272、`rep_ps=1`。
+- **追加（同日）**：加 `xcopy` 之後重上板 —— 9 項仍然全 pass，`t.sram` 出現 `xcopy=128`、
+  `t.psram` 冇（因為 P2P 係同一條 buffer 內部，唔算跨 buffer）。設計說明見
+  [buffers.md §4.1](../03_notes/buffers.md)。
+
+**順手修的兩個既有測試問題**（同 `nc_buf` 無關，但「全套測試」要綠才睇得到）：
+
+- `tools/hosttest/cfgstruct_test/run.sh` 缺 `-D_POSIX_C_SOURCE=200809L` →
+  `nc_cfg.c` 的 `fileno()` 在 glibc 嚴格模式變成 implicit declaration → 整支**從未跑得過**。
+- 同一支測試的「4 列預設 route」已過時：預設在 11-10 加了 ESPNOW，實際 **5 列**。
+
+**未做**：arena（把 plan 吸收進來）、把回覆幀／TX 環／pool／hub 搬到 `nc_buf`（P2–P5）、
+`handover` 在生產路徑真正使用、可等待模式、tap／多讀者。
+
+### 7.33 2026-11-10（任務 ↔ 緩衝區契約成文；三份任務文件統一）
+
+**背景**：§7.32 把 `nc_buf` 上板了，但「任務怎麼拿緩衝區、停止之後還在不在、
+誰可以換手」只散在幾份文件裡，而且寫法互相矛盾。這一節把契約寫成**一份規範**，
+其餘三份任務文件改成指向它。
+
+| 文件 | 改什麼 |
+|---|---|
+| [buffers.md §9](../03_notes/buffers.md) | **新增契約 C1–C11**（宣告／建立／交付／生命／擁有權／讀寫權／熱路徑／對外可見／`.fxe`／上限／驗證）＋現況對照表＋「為什麼是這些條」 |
+| [writing-a-task.md](../03_notes/writing-a-task.md) | §0／§1／§2／§3.1／§3.6／§5／§6／§7／§8 全部改講「**資源＝緩衝區**」；`pulse` 範例由 `nc_hub` 改成 `nc_buf_at` |
+| [task-lifecycle.md](../03_notes/task-lifecycle.md) | 欄位表、四步圖、失敗語義、歸還表統一；**更正 `NC_PLAN_MAX_DECLS` 64 → 16**；補 `NC_BUF_MAX 32` |
+| [task-model.md](../03_notes/task-model.md) | 加「記憶體＝緩衝區」指引 |
+| [glossary.md](../03_notes/glossary.md) | 加「契約／宣告窗口／owner」三條 |
+| [next-steps.md](next-steps.md) §9 | 加 9.10 |
+
+**統一過程抓到的三個事實錯誤**（都已改）：
+
+1. `task-lifecycle.md` 寫 `NC_PLAN_MAX_DECLS = 64`，實際 **16**（[nc_plan.h](../../firmware/components/sys/mem/include/nc_plan.h)）。
+2. 原本的講法「逐項失敗 → 任務收到 NULL 自己退化」**是錯的**：實作是
+   **全有或全無** —— 一項拿不到，整個任務不啟動、`on_start` 不被呼叫
+   （[task-lifecycle.md §2 ③](../03_notes/task-lifecycle.md)）。契約已按實作改。
+3. `writing-a-task.md §6` 的範例仍然教人用 `nc_hub`（那是要被取代的舊路徑）。
+
+**契約的核心一句話**：*任務只宣告、管理器建立、`on_start` 之後只有一條指標；
+停止唔會消失，要給下一個用戶就 `handover`。*
+
+### 7.34 2026-11-10（總線盤點：工具補了 STREAM 與「唔會卡死」語義）
+
+**背景**：問「總線那邊需不需要更新這個工具」。盤點 `nc4_bus` 之後，答案係
+**總線有一份手寫的同類實作，而工具缺一個形狀**。
+
+| 總線的東西 | 形狀 | 對 `nc_buf` |
+|---|---|---|
+| PUSH 插槽（TCP／WS／UDP） | `slot_state[16]` ＋ `slot_len[16]` ＋ FIFO 指標 | **同 FIFO 模式一樣** → 重複實作，應該搬 |
+| PULL parser 環（CDC／UART） | 線性 ＋ `memmove` 壓實、可前移 1 byte | 需要 **STREAM 模式** |
+| TX 環 | driver 自己 | 唔搬 |
+| 回覆幀 | 2,615 B heap | 可搬（P2） |
+
+**工具補了兩樣**（都已上板）：
+
+| # | 補什麼 | 為什麼 |
+|---|---|---|
+| 7.34.1 | **STREAM 模式**：`write`／`read_ptr`／`skip`／`pending`／`space`，尾部唔夠位自動壓實 | parser 環要「部分寫、部分讀、重同步 `skip(1)`」；`read_ptr` 保證係**一段連續** |
+| 7.34.2 | **FIFO 唔標 WRITING ＋ `put_abort()`** | 總線的註解明講「少一個狀態就少一個可以卡死的地方」；工具原本 `put_begin` 會標 WRITING，producer 一死就永遠卡住 |
+| 7.34.3 | `mem.buf` 加 `stream`／`space`／`abort` | 串流的可觀察性 |
+
+**上板**（`0xF032` 擴充到 11 項）：全 pass —— `stream=1`、`abort=1`；
+`t.stream` 1024 B（`stream:1`、`space:1024`、`s2s:1124`）。
+建置 528.9 KB、零 warning；hosttest 仍 10/10（`buf_test` 加兩組：STREAM、abort）。
+
+**未做**：總線真正搬過去（B1 PUSH 插槽 → B2 parser 環 → B3 回覆幀／TX），
+見 [buffers.md §11.2](../03_notes/buffers.md)。
+
+### 7.35 2026-11-10（parser 環改成 STREAM：A/B 跑分結果）
+
+**做了什麼**：`nc4_parser` 內部由手寫 `{buf, start, end}` ＋ `memmove` 壓實，
+改成**一條 `nc_buf` STREAM**（`CDC.rx`／`UART.rx`／`TCP.rx` 出現在 `mem.buf`）。
+`nc4_parser_feed()` 改用 `nc_buf_write`／`read_ptr`／`skip`；framing 邏輯（SOF 掃描、
+壞幀前移 1 byte、過大幀跳過）**逐行保留**。為了 runtime 生命週期，`nc_buf` 加了
+`NC_BUF_F_RUNTIME` ＋ `nc_buf_release()`（只准還 runtime 建立的；開機建立的仍然拒絕）。
+
+**A/B 方法**：同一支腳本、同一塊板、同一個 workload（500 幀 STATUS_GET，burst 16）；
+「before」係把上一顆映像（`cd2e4223`）OTA 燒回去量的，「after」係新映像（`d968dc12`）。
+
+| 指標 | BEFORE `cd2e4223` | AFTER `d968dc12` | 判讀 |
+|---|---|---:|---|
+| RTT p50（n=40，keys=sys） | 15.811 ms | 15.854 ms | **一樣**（+0.3%，噪音內） |
+| RTT p95 | 16.226 ms | 16.765 ms | +3% |
+| RTT min | 1.66 ms | 1.25 ms | 稍快 |
+| 500 幀 → parser 實際見到 | 108、108 | 99、105、102 | −5%（方向一致） |
+| **`copied`（固定 18,036 B）** | 18,036 | **18,036** | **完全一樣 → copy 次數冇變** |
+| `parse_ms` | 222–223 | 231–237 | +4–6% |
+| `slot_full` | +299／+308 | +313／+328 | +5% |
+| `mem.buf` 可見性 | 冇 | **`CDC.rx` 4,192 STREAM** | 新增 |
+
+**結論**：
+1. **形狀改變係中性**：RTT 一樣、copy 次數一個 byte 都冇變（18,036 → 18,036）。
+   輕微的 +4–6% 開銷來自每次 feed 多了一次空間檢查與 `account_copy` 的 registry 掃描。
+2. **真正的瓶頸唔在 parser**：500 幀只有 ~100 幀入到 parser，`slot_full` 約 **300** ——
+   即係**六成幀在 slot 環就被丟掉**，根本冇到 parser。這個數字 before/after 都存在。
+3. **CDC 今日每個 byte 走 3 次 copy**：TinyUSB FIFO → slot → chunk → parser ring
+   （`st_copied` 每幀約 167 B ≈ 3×56 B）。真正的收益在「producer 直接寫 STREAM 環」，
+   可以做到 **1 次 copy ＋ 刪掉 slots**，而唔係改 parser。
+
+**下一步（改寫 §11.2 的 B1）**：唔係「PUSH 改 PULL」，而係
+**producer 讀到 bytes 就 `nc_buf_write` 入 STREAM 環，decode 直接 parse**
+—— 保留事件驅動的低延遲，同時省掉 2 次 copy 與 slot 環。
+
+### 7.36 2026-11-10（量測工具的真 bug：所有 RTT 都被多算 10–50 ms）
+
+**症狀**：PUSH 模式的 CDC 量到 RTT p50 = **15.8 ms**，但程式註解寫 PULL 當年係 10.0 ms
+—— 換成 PUSH 反而更慢，講唔通。
+
+**真正原因**：`tools/nc4_demux.py` 的 `Reader.poll()` 用 `ser.read(4096)`。
+pyserial 的 `read(N)` 在不足 N bytes 時會**等滿埠的 timeout** 才返回，
+所以每次量測都多了一個 timeout（工具用 0.01～0.2 s）。**唔關 firmware 事**。
+
+**怎麼驗證**：
+
+| 實驗 | 結果 | 說明 |
+|---|---|---|
+| 一次送 4 幀，看回覆到達時間 | 15.01／15.02／15.03／15.03 ms（**一起到**） | 4 幀一齊到 → 唔係每幀慢，是一個固定延遲 |
+| 改成只讀 `in_waiting`（唔用阻塞 read） | RTT p50 **1.63 / 1.68 ms**、p95 1.8–2.2、max 2.6、lost 0（n=60） | 真實延遲 |
+
+**修正**：`Reader.poll()` 改成「有資料就 `read(in_waiting)`，冇資料就睡 1 ms」。
+影響所有主機工具（nc4.py／ota.py／bench／selftest）—— 它們的延遲數字一齊變準。
+
+**更正兩個結論**：
+1. **PULL 的 10 ms 仍然成立**，但原因是**裝置側**：PULL 模式 decoder 自己
+   `ulTaskNotifyTake(pdMS_TO_TICKS(10))`（`DEFAULT_POLL_MS`），所以每 10 ms 才讀一次。
+   → **PUSH 比 PULL 快約 6 倍**（1.6 vs 10 ms），「PULL 比較快」係錯的。
+2. §7.35 的 A/B（15.811 → 15.854）**兩邊都用舊 reader**，差值仍然有效（形狀改變中性），
+   但絕對值要按這裡的修正理解。
+
+**未變**：CDC 每個 byte 仍然走 3 次 copy；`slot_full` 在洪水下仍然六成丟幀 ——
+那才是下一個要做的（producer 直接寫 STREAM 環）。
+
+### 7.37 2026-11-10（對照使用者 2026-11-05 的事件驅動紀錄：冇回歸，差別在平台）
+
+**背景**：[core-isolation.md §11](../03_notes/core-isolation.md) 記錄了 CDC 事件驅動 receiver 的成果
+—— RTT p50 **0.59 ms**（相對 PULL 10 ms 快 19 倍）。今日用修好的 reader 量到 **1.65 ms**，
+所以要查「係唔係回歸」。
+
+**量測（同一個 reader、同一塊板、同一個 `keys=sys`）**：
+
+| 映像 | RTT p50 | p95 | min |
+|---|---:|---:|---:|
+| 改 parser 之前 `cd2e4223` | **1.673 / 1.658 ms** | 1.86–1.90 | 1.23 |
+| 改 parser 之後 `d968dc12` | **1.649 / 1.648 / 1.665 ms** | 1.78–1.79 | 1.22 |
+
+→ **改 parser 唔係原因**（差 0.5%，噪音內）；`copied` 兩邊同為 18,036 B。
+
+**0.59 → 1.65 的真正差別：平台。** `core-isolation.md §11` 那批數字係 **macOS**
+（tools 原本寫死 `/dev/cu.usbmodem*`）；今日係 **Windows `usbser.sys`**，
+min RTT 1.20–1.23 ms 就係它的下限。所以當年的 0.59 ms 成果仍然成立，唔需要「恢復」。
+
+**順手更正一個危險的建議**：§7.35／§11.2 曾寫「producer 直接寫 STREAM 環」，
+這是**錯的** —— STREAM 寫入會 `memmove` 壓實，而 decode 在 `parser_dispatch()`
+期間仍揸住 ring 的指標；producer 一壓實，資料就喺指標腳下移動（靜默損壞）。
+使用者現時的設計（producer 寫 slots、decode 自己讀）正好把讀寫分開，係**正確**的。
+安全的一次性優化只剩：decode 直接由 slot 解析（省 `slot→chunk` 那一次 copy），見
+[buffers.md §11.2](../03_notes/buffers.md) 的 B1。
+
+### 7.38 2026-11-10（板內量測：撞到 decoder 互斥鎖自我死鎖）
+
+**動機**：主機量到的 RTT 一定夾住 USB（1 ms 幀 ＋ OS 驅動），睇唔到 firmware 自己的成本。
+所以加**板內量測**：專用 parser ＋ 假 send sink，一次灌 N 幀，量「解析 + dispatch + handler」；
+另外在 bus 加 `kick_us`（commit → decode 接手的喚醒延遲），直接量事件驅動那段。
+
+**踩到的坑（重要，已寫進程式註解）**：
+
+> **handler 內唔可以再 `nc4_parser_feed()` 同一個 decoder。**
+> `parser_dispatch()` 會 `decoder_lock()`，而 FreeRTOS 的 mutex **唔係遞迴**；
+> handler 已經持有那把鎖，再 feed → 再 dispatch → 再 lock → **自我死鎖，永遠卡住**。
+> 實測：`0xF033` 一發，整個 decoder 停住，連 `status` 都唔答；task watchdog 救唔到
+> （decode 只係 block，idle 仍然跑）⇒ 要人手 RST。
+
+**修正**：bench 改成**獨立任務**（prio 2、core 0）跑，唔喺 handler 裡面做。
+`0xF033` 只負責起任務（回 `started`），`0xF034` 讀結果。
+
+**學到什麼**：量測程式碼同樣要守「一個 decoder 一次一個 handler」的不變量；
+要跑第二條解碼路徑，就一定要用**另一個 decoder** 或**另一個任務**。
+
+### 7.39 2026-11-10（板內量測跑起來：一個優先級倒置令喚醒慢 7.7 倍、六成丟幀）
+
+**板內量測（完全唔經 USB）**：`0xF033` 起一條獨立任務，灌 N 幀進專用 parser（假 send sink），
+`0xF034` 讀結果。
+
+| 幀 | 每幀 | 吞吐 |
+|---:|---:|---:|
+| 21 B | **16.5–17.5 µs** | 1.2–1.3 MB/s |
+| 269 B | **44.1 µs** | 6.1 MB/s |
+| 4,109 B | **460 µs** | **8.9 MB/s** |
+
+→ 小幀成本固定（17 µs，主要係每幀一次 mutex ＋ dispatch）；大幀 460 µs 才是 CPU 上限。
+
+**事件驅動的喚醒延遲（`kick_us`：`push_commit` → decode 接手）**：
+
+| | 平均 | 最大 | `slot_full`（插槽滿而丟） |
+|---|---:|---:|---:|
+| 改之前（producer prio **5** > decode **4**） | **478 µs** | 1,772 µs | **+122**（300 幀 workload） |
+| 改之後（producer prio **3** < decode **4**） | **62 µs** | 250 µs | **0** |
+
+**根因**：producer 優先級高過 decode ⇒ 它會一路讀到冇資料才讓 decode 接手；
+改成「producer 低於 decode」之後，producer 只在 decode 睡著（等 kick）時才跑，
+push 完 notify 即刻被更高的 decode 搶佔。
+
+**副作用（好的）**：`slot_full` 變 0 —— 之前「洪水六成丟幀」其實是**這個優先級問題**造成，
+不是插槽太少。**唔需要**改插槽數量，也唔需要改 buffering 形狀。
+
+**未變**：RTT 仍然 1.66 ms（下限由 USB／Windows 驅動決定，min 1.28），
+`0xF032` 11/11、`selftest` 21/21、hosttest 10/10。
+
+### 7.40 2026-11-10（把 NC 核心抬到保留區 7–15：丟幀歸零、解析成本 3× 改善）
+
+**做法**：新增 [nc_prio.h](../../firmware/components/sys/task/include/nc_prio.h)，
+把「NC 核心（收 → 解 → 回）」訂成**保留區 7–15**：`decode0/1 = 8`、bus producer = 7、
+其他任務（含 TinyUSB 5／fx 2／log 2／app 1）一律 ≤ 6。規則寫進
+[execution-rules §1.3](../03_notes/execution-rules.md)。
+
+**為什麼要保留區**：核心是整個系統的節拍來源；沒有具名常數，下一個人會直接寫 `prio = 8`
+把核心擠掉，而且症狀只會是「偶爾慢」。實測也證明相對次序是硬規則（producer 高過 decode
+= 478 µs 喚醒 ＋ 插槽讀爆）。
+
+**量測（同一塊板、同一個 workload）**：
+
+| 指標 | decode 4 / producer 3 | **decode 8 / producer 7** |
+|---|---:|---:|
+| 300 幀 → 實際解析到 | ~100 | **301** |
+| `slot_full`（插槽滿而丟） | +122 | **0** |
+| `parse`（µs/幀） | 1,311–1,843 | **510–518** |
+| `kick_us`（平均 / 最大） | 62 / 250 | **42 / 130** |
+| `copied`（B/幀） | 138–182 | **36** |
+| RTT p50（主機，Windows） | 1.66 ms | 1.67 ms（USB 下限） |
+
+**注意**：`kick_max` 的**累積**值會被 `selftest` 的 256 幀 burst 拉高（看到 6.7 ms）——
+那是刻意的最壞情況壓力，唔係日常路徑；單獨跑 300 幀 benchmark 時最大 130 µs。
+
+**整合測試（同日，全部綠）**：
+
+| 測試 | 結果 |
+|---|---|
+| 解碼器一致性 `nc4_test.py` | **9/9**（正常／黏包／拆包／壞 CRC／假 SOF／錯 addr／錯版本／超長 LEN／純文字） |
+| 專案自測 `selftest.py` | **21/21**（含 burst 128/256、OTA 資訊） |
+| 統一緩衝 `0xF032` | **11/11** |
+| 路由表 `0x1105` | `set=1`、core0=2／core1=1、`nctx→decode0`、`CDC→decode0`、`UART→decode1` ✅ 與 system.json 一致 |
+| link 出口 `0xF01B` → UART | `ESP_FAIL`、`drops=1` —— **已知**：這塊板 SD 佔用 GPIO7/8，UART driver 未開 |
+| hosttest | **10/10** |
+
+**未做**：TCP／WS／UDP 只在 P4 才建立，S3 上冇法測那三條；UART 要等腳位。
+
+### 7.41 2026-11-10（三項調整：管理器管優先級、移除「隨機」、緩衝先做完）
+
+**使用者複審的三點，全部落實**：
+
+| # | 調整 | 實作 |
+|---|---|---|
+| 1 | **優先級改由任務管理器管** | `nc_task_loop.c` 在開 loop 前檢查：非 `SYSTEM` 任務的 prio 落入保留區 7–15 → **夾到 6 ＋ 印警告**。`nc_task_rt_t` 加 `kind` 欄位。規則：[contracts.md §3](../03_notes/contracts.md) |
+| 2 | **移除 `nc_buf` 的「隨機／任意空格」模式** | 只剩 **FIFO**（唯一格模式）＋ **STREAM**。理由：冇真實用戶，而且它要多一個 `WRITING` 狀態（writer 死掉就卡死環）。修正過程中 host test 抓到一個真 bug：`put_end`／`get_end` 只在 `FIFO` flag 存在時才推進指標，預設（flags=0）會永遠寫同一格 —— 已改成無條件推進 |
+| 3 | **緩衝區先做完** | 下一步順序固定為 P2（回覆幀）→ P3（pool／hub）→ P4（TX 環），見 [buffers.md §8](../03_notes/buffers.md) |
+
+**驗收（改完之後上板）**：
+
+| 項目 | 結果 |
+|---|---|
+| 優先級階梯 | `decode0/1 = 8`、`cdc.rx = 7`、`uart.rx = 7`、`TinyUSB 5`、`fx/nc_log 2`、`main/hello 1` ✅ |
+| `0xF032` | **11/11** |
+| 300 幀 burst | **301/300 幀**、`slot_full` **0**、`parse` 475 µs/幀 |
+| `kick_us` | **38 / 104 µs**（平均／最大） |
+| hosttest | **10/10** |
+| 建置 | 零 warning |
+
+### 7.42 2026-11-10（P2：回覆幀搬進 plan ＋ `nc_buf`；線路的緩衝現況）
+
+**做了什麼**：`nc4.reply0`／`nc4.reply1` 由 `task_nc4_declare()` 宣告（P，各 2,615 B），
+`task_nc4_start()` 用 `nc_buf_at()` 建成 n=1 的緩衝區，再經新 API
+`nc4_decoder_set_reply()` 交給 decoder（`destroy` 唔會 free 外部提供的）。
+plan 失敗時仍然退回原本的 heap 分配並印警告。
+
+**上板驗收**：`plan` 見到 `nc4.reply0/1`、`mem.buf` 見到兩條 P 緩衝區（2,615 B）、
+`rep_ps=1` 不變、RTT 1.678 ms、`0xF032` 11/11、`selftest` 21/21、hosttest 10/10。
+
+**線路的緩衝：邊啲已經用 `nc_buf`**（回答「線路是不是已經用了緩衝工具」）
+
+| 線路的緩衝 | 今日 | 用了 `nc_buf`？ |
+|---|---|---|
+| parser 環（RX 湊幀，CDC／UART／TCP） | `CDC.rx`／`UART.rx`（STREAM） | ✅ |
+| 回覆幀（每核一條） | `nc4.reply0/1`（P，n=1） | ✅（今日 P2） |
+| **PUSH 插槽環**（producer → decode） | `nc4_bus` 自己手寫 `slots` ＋ `slot_state[16]` ＋ `slot_len[16]` | ❌ |
+| **`chunk`**（decode 的中轉） | `b->chunk` | ❌ |
+| TX 環 | UART driver／CDC FIFO（driver 擁有） | ❌（唔搬） |
+| 跨核轉寄 | `nc_pool.forward` ＋ 每核 queue | ❌（P3） |
+
+→ **2026-11-10 晚已補齊**（見 §7.43）：插槽環亦已收進 `nc_buf`，線路只剩 TX 環（driver 擁有）。
+
+### 7.43 2026-11-10（P3：插槽環收進 `nc_buf`；壓力測試：4002 幀零丟、copy 減半）
+
+**做了什麼**：
+- `nc4_bus` 手寫的 `slot_state[16]`／`slot_len[16]`／`slot_w`／`slot_r`／`push_idx`／`rd_idx`／`rd_off`／`frame_idx`
+  全部刪除，改成一條 `nc_buf` FIFO（`<link>.slots`，例如 `CDC.slots`）。
+- `push_begin/commit/abort`、`frame_begin/end`、`reset` 全部走 `nc_buf`。
+- decode 迴圈 **直接由插槽解析**（`nc_buf_get` → `nc4_parser_feed(ptr)` → `nc_buf_get_end`），
+  唔再經 `b->chunk` —— 少一次 copy。`st_copied` 由 `got*2` 改成 `got`。
+- `nc_buf` 加三個診斷 accessor（`state_at`／`writing`／`reading`），STATUS 的 `slots` 陣列照舊有意義。
+
+**壓力測試（同一個 reader、同一塊板）**：
+
+| 測試 | 結果 |
+|---|---|
+| 2000 幀 burst 32（第一次） | **+2001 幀**、`slot_full` **0**、`copied` **18 B/幀**（改前 36）、`parse` 483 µs/幀 |
+| 2000 幀 burst 32（第二次） | **+2001 幀**、`slot_full` **0**、`copied` 18 B/幀、`parse` 487 µs/幀 |
+| 累積（含 selftest 的 128/256 burst） | frames 4,166、`us_per_frame` 533、`kick` 68 / 5,628 µs、`peak` 3/4、`crc_err` 2、`bad_hdr` 8（後兩者是 `nc4_test` 刻意餵的壞幀） |
+| 板內解析（`0xF033`） | 小幀 **17.8 µs**、4 KB **460 µs（8.9 MB/s）** —— 與 P2 前一樣 |
+| RTT | **1.663 ms**（p95 2.00、min 1.19） |
+| `mem.buf` | 9 條緩衝區：`nc4.reply0/1`、`CDC.slots`、`UART.slots`、`CDC.rx`、`UART.rx`、`t.sram`、`t.psram`、`t.stream` |
+| 其他測試 | `nc4_test` 9/9、`selftest` 21/21、`0xF032` 11/11、hosttest 10/10、零 warning |
+
+**結論**：線路的接收側（parser 環、插槽環）與回覆側（reply）**100% 走同一個緩衝工具**；
+只剩 TX 環（UART driver／CDC FIFO）—— 那是 driver 擁有，唔應該搬。
+
+### 7.44 2026-11-10（P4：刪掉 `nc_pool`；轉寄改成一條 `nc_buf` FIFO；internal +32.8 KB）
+
+**發現**：`nc_pool` 有三個 class，但 `nc_pool_alloc()` 的**唯一呼叫者**是跨核轉寄的
+`NC_POOL_FORWARD`；`small`／`bulk` **零用戶**，而 `system.json` 預設 `enable:1`
+—— 即係白佔 **28.3 KB internal**（8,192 + 12,480 + 8,320）。
+
+**做法**：
+1. **刪掉整個 `nc_pool`**（`nc_pool.c`／`.h` 移除，CMakeLists 同步）。
+   `ph_pool()` 只留一句 log；`nc4.pool` 的 config 仍然讀得入（唔會壞檔）但唔再建池。
+2. **跨核轉寄**改成每核一條 `nc_buf` FIFO（`fwd.c0`／`fwd.c1`，PSRAM、按需建立）：
+   格 = `NC4_LINK_NAME_MAX`(16) ＋ `NC4_MAX_FRAME`(8,205)，深度 4；
+   目的 link 名放格首（用 `put_begin(reserve)`），整幀放後面。
+   多個來源 task 同時轉寄 → 每核一把 mutex（契約 C6）。
+3. `net.fwd` 的 JSON 不變（frames／drops／err 照舊）。
+
+**上板驗收**：
+
+| 項目 | 結果 |
+|---|---|
+| `sys.h_int` | 209,467 → **242,239 B**（**+32.8 KB** internal） |
+| `mem` 段 | 只剩 `plan`／`hub`／`buf`（`pool` 消失） |
+| `net.fwd` | 仍然有 `core0/core1` 的 frames／drops／err（全 0，因為 S3 冇轉寄路由） |
+| `nc4_test` | **9/9** |
+| `selftest` | **21/21** |
+| `0xF032` | **11/11** |
+| hosttest | **10/10** |
+| RTT | **1.63 ms** |
+| 1000 幀 burst | 1001 幀、`slot_full` 0、`copied` 18 B/幀 |
+| 建置 | 零 warning |
+
+**未做（收尾清單）**：`nc_hub` 只剩測試用戶（probe／0xF003／0xF01F–0xF024）；
+`nc_buf_carve()` 未做；`nc_plan` 公開 API 仍在（P5）；UART TX 環決定**唔加大**（RX 優先）。
+
+### 7.45 2026-11-10（收尾：`nc_hub` 定位 ＋ loop 心跳落地）
+
+**`nc_hub` 的處置**：它只剩測試用戶（probe 的開機自測、`0xF003`、`0xF01F`–`0xF024` 共 7 條指令），
+生產路徑**零引用**。決定：**保留、明確標為測試專用**，唔搬去 `nc_buf`
+（搬 7 條測試指令風險高、收益低）；`mem.hub` 只會顯示測試用的環。
+
+**loop 心跳（停滯偵測）落地**：舊 `monitor` 任務 2026-11-04 已刪、`epoch` 2026-11-06 已移除，
+之後板上**完全冇機制**發現某條 loop 卡死。現在補一個最便宜的版本：
+
+| 項目 | 做法 |
+|---|---|
+| 計數 | 每 loop 一個 4 B `beats`（`nc_task_rt_t`） |
+| 短 fn | 管理器 trampoline 每輪 `++` |
+| **長跑 fn** | 自己叫 `nc_task_beat()`（`decode0/1`、`fx` 已加） |
+| 停滯判斷 | **主機**比對兩次 `STATUS keys=tasks` 的 `b` —— 板子零成本、零新任務 |
+| 曝光 | `keys=tasks` 每個 loop 多一個 `b` 欄位 |
+
+**上板實測（2 秒窗口）**：
+
+| loop | 心跳 |
+|---|---:|
+| `decode0` / `decode1` | **42 / 40**（閒置 ~21 Hz，受 50 ms 安全網限制） |
+| `fx` | **200**（10 ms 週期 ＝ 100 Hz） |
+| `hello` | 2（1 s 週期） |
+| `bench_a/b/c` | 0（`affinity [0,0]` 未啟用，符合預期） |
+
+**同時全綠**：`nc4_test` 9/9、`selftest` 21/21、`0xF032` 11/11、hosttest 10/10、
+RTT 1.619 ms、零 warning。
+
+### 7.46 2026-11-10（三個收尾：audit 文件更正、`nc_buf_carve()`、P5 第一刀）
+
+| # | 項目 | 結果 |
+|---|---|---|
+| 1 | **`claims[]` audit** | 程式**早已修好**（舊寫法在迴圈 `nclaims--` → 跳過一條且刪錯條；現用 `claim_off` 位元標記），`task_test` 亦有覆蓋（`gamma` 保留 `pin:16`、`delta` 被擋）。**差的是文件** — 已更正 |
+| 2 | **`nc_buf_carve()`** | ✅ 已實作：無狀態 bump（呼叫端自己保管 `size_t cursor`）、64 B 對齊、唔夠位回 NULL（唔會部分配置）、自動帶 `NC_BUF_F_RUNTIME`（可以 release）。hosttest 第 12 組 9 項全 pass |
+| 3 | **P5 第一刀** | `nc_task_res_t` 加 `slot_bytes`／`n`／`flags`；宣告 `slot_bytes > 0` 的資源由**管理器**建 `nc_buf`，`on_start` 直接收 `res[i].buf`。`nc4.reply0/1` 已改成這個形狀（任務唔再自己 `nc_buf_at`） |
+
+**上板驗收**：`nc4.reply0/1` 仍以 P 2,615 B 出現（由管理器建立）、`rep_ps=1`、
+`0xF032` 11/11、`selftest` 21/21、`nc4_test` 9/9、hosttest **10/10**（`task_test` 的
+run.sh 補了 `nc_buf.c`）、建置零 warning。
+
+### 7.47 2026-11-10（P5 完成：宣告「格 × 格數」，`on_start` 直接收 `nc_buf_t *`）
+
+| 資源 | 之前 | 現在 |
+|---|---|---|
+| `nc4.reply0/1` | 任務在 `on_start` 自己 `nc_buf_at()` | 宣告 `slot_bytes=2,615, n=1` → 管理器建 |
+| `nc4.rx` | 任務 `nc_plan_get()` → parser 自己 `nc_buf_at()` | 宣告 `slot_bytes=region, n=1, flags=STREAM` → 管理器建，bus 用 `cfg.rx_buf` 收 |
+| `uart.rx`／`tcp.rx` | 同上 | 同上 |
+| `fx.arena` | 純區域 | 宣告 `slot_bytes=512 KB, n=1` → 管理器建（`.fxe` 之後用 `nc_buf_carve()` 由它切） |
+| `probe.hub` | 純區域 | 保持（probe 自己建 hub，測試專用） |
+
+新增 API：`nc4_parser_create_buf()`（adopt 一個已存在的 STREAM buffer）＋
+`nc4_bus_cfg_t.rx_buf`。
+
+**結果：全 repo 已經冇任何任務 call `nc_plan_get()`** —— `nc_plan` 只剩管理器
+（declare／get）與開機 commit（`nc_plan_commit`／`nc_plan_json`）在用，對外等於內部實作。
+
+**上板驗收**：
+
+```
+plan: nc4.reply0, nc4.reply1, nc4.rx, uart.rx, probe.hub, fx.arena
+buf : nc4.reply0/1（P 2615 n=1）、nc4.rx（S 4192 stream）、uart.rx（S 1024 stream）、
+      fx.arena（P 524288 n=1）、CDC.slots、UART.slots、t.*
+```
+
+| 測試 | 結果 |
+|---|---|
+| `nc4_test` / `selftest` / `0xF032` / hosttest | **9/9 · 21/21 · 11/11 · 10/10** |
+| RTT | **1.637 ms** |
+| 1000 幀 burst | +1001、`slot_full` 0、`parse` 466 µs/幀 |
+| heap | 239,347 B |
+| 建置 | 零 warning |
+
+
+### 7.48 2026-11-10（驅動層開工：`components/driver/`，第一個 driver = UART）
+
+**背景**：`main.c` 3,793 行，一半是硬體細節（USB／SD／ETH／UART／GPIO 測試），同「組裝」混在一起。
+舊專案 `slave/driver/*_drv.py` 的分法很清楚：**driver（匯流排）→ lib/hw（晶片）→ lib/sys（owner 帳本）**。
+
+**做法**：
+- 新增 `firmware/components/driver/`，加入 `EXTRA_COMPONENT_DIRS`
+  （一個周邊一個 component，名字 `drv_<peripheral>`，避免同 IDF 撞名）。
+- 第一個抽出 **`drv_uart`**：`nc_uart_drv_install/ready/read/write/send`（~120 行），
+  阻塞語義（「等第一個 byte 再搬走現有的」）寫在 header。
+- **政策留組裝層**：SD 佔用 GPIO7/8 → 唔啟動 UART 這條檢查仍然在 `main.c`；
+  driver 只回「安裝成唔成功」。
+- `nc4_bus_cfg_t.read/.send` 與 `nc4_link_register` 改指 driver 的函式
+  （`nc4_link` 的簽名帶 arg，driver 那支唔需要 → 一支薄轉接）。
+
+**驗收**：建置零 warning、hosttest 10/10、`selftest` 21/21、
+UART bus 仍然存在（`mode=push-slot, core=1`，driver 未安裝 → `frames 0`，與改之前一樣）。
+
+**文件**：[driver-layer.md](../03_notes/driver-layer.md)（三層對照、六條規則、遷移順序）。
+
+**下一步**：SD → ETH（P4）→ **USB/CDC 最後做**（熱路徑剛調好，要重跑整套 RTT／burst）。
+
+### 7.49 2026-11-10（分層修正：`sys/transport` 移出 sys，成為通用匯流排 `bus/`）
+
+**背景**：使用者指出分類怪 —— 網絡相關（WiFi／transport）唔應該放 `sys`。
+再討論之後定清楚：中間應該有一層 **`bus/`（通用匯流排）**，**唔綁 NC4**：
+NC4 只是第一種 personality，將來 LED（SPI／I80 波形）同 LCD（I80／RGB 面板）都係同一層。
+
+**三層判準**：
+
+| 層 | 一句話 | 現況 |
+|---|---|---|
+| `driver/` | 怎麼讀寫一個硬體介面 | `drv_uart` ✅；`drv_usb`／`drv_sd`／`drv_eth` ⏸ |
+| `bus/` | 一條資料流怎麼排隊、誰擁有、幾時喚醒、每輪幾多 | `bus_net` ✅（今日）；`bus_nc4` ⏸；`bus_led`／`bus_lcd` 未有 |
+| `sys/` | 房東：解碼、任務、記憶體、config、store、log | 不變（但唔再放 transport） |
+
+**今日做了**：`firmware/components/sys/transport/` → `firmware/components/bus/bus_net/`
+（component 名 `bus_net`；`components/bus` 加入 `EXTRA_COMPONENT_DIRS`；
+`main` 的 REQUIRES 由 `transport` 改 `bus_net`）。
+
+**驗收**：建置零 warning、`selftest` 21/21、`0xF032` 11/11、
+500 幀 burst `slot_full` 0（`parse` 490 µs/幀）、hosttest 10/10。
+
+**未搬（下一輪）**：`sys/nc4/nc4_bus.c` ＋ `nc4_link.c` → `bus/bus_nc4`（熱路徑，要重跑整套）；
+`main/nc_wifi.c` → `sys/net`（PHY，唔係一條線）；`sys/transport/nc4_http.c` → 跟 WS 一起
+（設定頁同 httpd 同一個實例，暫時唔拆）。
+
+### 7.50 2026-11-10（分層再修正：`bus` = 統一線路 API；NC4 唔綁網絡）
+
+**使用者第二次修正**（第一次是「transport 唔應該在 sys」）：
+
+1. `bus` 不是「一條線的實作」，而是**統一線路 API** —— 用家唔需要知道底下是什麼總線
+   （對照舊專案 `lib/hw/TFT.py`：上面只管畫，下面 SPI／I80 一樣）。
+2. **雙重保障**：統一 API（read／write／ioctl）＋ `nc_bus_native()` 逃生門拿原生 handle。
+   唔會為統一而封印硬體能力。
+3. **NC4 是幀協議，唔應該同網絡協議綁定**：`sys/nc4` 只管幀／parser／router；
+   TCP／WS／UDP 只是 `bus` 的一種線（socket），NC4 是用家之一。
+
+**今日落地**：
+
+| 組件 | 內容 |
+|---|---|
+| `bus/bus_core` | `nc_bus_t`（name／kind／ops／ctx）＋ 統一 API ＋ `nc_bus_native()`；核心刻意做到最薄（只轉發＋檢查） |
+| `bus/bus_uart` | UART adapter：`nc_bus_uart_open()` 把 `drv_uart` 包成統一線路；`ioctl(SET_BAUD)` 留一個例子 |
+| `bus/bus_net` | 原 `sys/transport`（TCP／WS／UDP／HTTP），暫放；下一步改成 socket 線的 adapter |
+| `driver/drv_uart` | 已抽（原生 API） |
+
+**驗收**：建置零 warning、hosttest 10/10、`selftest` 21/21、`nc4_test` 9/9。
+
+**兩個操作注意（今日實測）**：
+
+1. **OTA 之後唔可以立即跑 burst 測試**：`up_s` 雖然已 10+ 秒，主機仍然會 write timeout；
+   等 ~30–60 秒再跑就正常（`selftest` 21/21）。已排除是 crash（`up_s` 單調上升、無 panic）。
+2. **未接線的組件會被 linker GC 掉**：`bus_core`／`bus_uart` 目前冇人引用 →
+   映像同之前**完全一樣**（`app` hash 不變是正常的，不是 OTA 冇生效）。
+   要真正驗證，下一步必須把 UART 線接上 `bus`。
+
+**下一步**：main 的 UART 線改經 `bus_uart`（低風險，本板 UART 未安裝）；
+然後 `bus_net` 改成 socket 線；最後才搬 `nc4_bus`／`nc4_link`（熱路徑）。

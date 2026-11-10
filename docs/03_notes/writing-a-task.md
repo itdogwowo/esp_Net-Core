@@ -17,7 +17,7 @@
 | 管理器做的事 | 你原本要自己做的 |
 |---|---|
 | 依 `level` 排開機順序 | 在 main 裡排呼叫順序 |
-| 把 `mem[]` / `declare()` 送進 `nc_plan`、取回指標 | `nc_plan_declare` / `nc_plan_get` |
+| 把 `mem[]` / `declare()` 的**緩衝區需求**建立好、在 `on_start` 交給你 | `nc_buf_create` / `nc_buf_at` |
 | 開 / 停 FreeRTOS task、綁核（core 由你決定，不改寫） | `xTaskCreatePinnedToCore` |
 | 量每輪時間（count / last / avg / max / 超支） | 自己加計時器 |
 | 開機帳本、狀態 JSON、runtime 換核 / 暫停 | 各寫一份 |
@@ -53,7 +53,7 @@ nc_task_register(&my_task);
 | 群 | 欄位 | 回答 |
 |---|---|---|
 | 身份 | `name` / `kind` / `level` | 我叫什麼、是哪一類、什麼時候起 |
-| 資源 | `mem[]` / `declare()` / `claims[]` / `provides[]` | 我要什麼、我給什麼 |
+| 資源 | `mem[]` / `declare()` / `claims[]` / `provides[]` | 我要哪些**緩衝區**、我給什麼 |
 | 執行 | `loops[]` | 跑哪一核、哪一層、多快、多少 stack |
 | 生命 | `on_start` / `on_stop` | 起的時候做什麼、停的時候收什麼 |
 
@@ -78,9 +78,13 @@ nc_task_register(&my_task);
   ① register            ② declare              ③ start               ④ boot
   ──────────────────────────────────────────────────────────────────────────
   nc_task_register() → nc_task_declare_all() → nc_task_start_all() → nc_task_boot()
-  只登記、排序          mem[] → nc_plan        資源到手 → on_start  依 layer 開 loop
+  只登記、排序          mem[] → nc_buf         資源到手 → on_start  依 layer 開 loop
                         + 帳本檢查              → 指令 → 準備 loop   （0 先）
 ```
+
+> 「資源」＝ **緩衝區**（`nc_buf`）。宣告 → 管理器建立 → `on_start` 接管，
+> 契約（C1–C11）見 [buffers.md §9](buffers.md)，搭配方式見
+> [buffer-patterns.md](buffer-patterns.md)。
 
 **為什麼 `start` 和 `boot` 分開**：`on_start()` 必須在「所有任務的資源都配好」之後、
 「任何 loop 開始跑」之前完成。例：`fx` 要先拿到 arena，render loop 才能開。
@@ -114,26 +118,50 @@ static void my_loop(void *arg)
 
 ## 3. 資源、指令、接線、提供
 
-### 3.1 資源（`mem[]` / `declare()`）
+### 3.1 資源（`mem[]` / `declare()`）＝ **緩衝區**
+
+你的資源就是**緩衝區**。宣告時講清楚：名字、在哪個記憶體、一格幾大、幾多格。
 
 ```c
 static int my_declare(nc_task_res_t *out, int max)
 {
-    if (max < 1) return 0;
-    out[0] = (nc_task_res_t){ .name = "my.buf", .bytes = 1024,
-                             .cls = NC_PLAN_INTERNAL, .align = 32 };
-    return 1;
+    if (max < 2) return 0;
+    out[0] = (nc_task_res_t){ .name = "my.cmd",   .bytes = 1024 * 8,
+                             .cls = NC_PLAN_INTERNAL, .align = 64 };
+    out[1] = (nc_task_res_t){ .name = "my.frame", .bytes = 38400 * 2,
+                             .cls = NC_PLAN_PSRAM,    .align = 64 };
+    return 2;
 }
 ```
 
-| class | 什麼時候用 |
-|---|---|
-| `NC_PLAN_DMA` | 要給 DMA 的緩衝 |
-| `NC_PLAN_INTERNAL` | 一般內部 RAM（最快） |
-| `NC_PLAN_PSRAM` | 大塊、不常存取 |
+| `cls` | 什麼時候用 | 對應的 `nc_buf` |
+|---|---|---|
+| `NC_PLAN_DMA` | 要給 DMA（I80／SPI／I2S） | `NC_BUF_DMA` |
+| `NC_PLAN_INTERNAL` | 熱路徑、小資料 | `NC_BUF_SRAM` |
+| `NC_PLAN_PSRAM` | 大而冷、跨核交棒 | `NC_BUF_PSRAM` |
 
-`on_start()` 的 `res[i]` 對應你宣告的第 i 塊（先 `mem[]` 再 `declare()`）。
-**不要自己呼叫 `nc_plan_get()`** —— 取用只有一個地方，才知道誰拿到、誰失敗。
+`on_start()` 的 `res[i]` 是 `{ptr,len}`，用 `nc_buf_at()` 接管成緩衝區：
+
+```c
+static esp_err_t my_on_start(const nc_task_res_view_t *res, int n)
+{
+    if (n < 2) return ESP_FAIL;          // 防禦：正常只有全部拿到才會被呼叫（契約 C2）
+    s_cmd = nc_buf_at("my.cmd", res[0].ptr, res[0].len,
+                      NC_BUF_SRAM, 1024, 8, 0);
+    s_frame = nc_buf_at("my.frame", res[1].ptr, res[1].len,
+                        NC_BUF_PSRAM, 38400, 2, NC_BUF_F_FIFO);
+    return (s_cmd != NULL && s_frame != NULL) ? ESP_OK : ESP_FAIL;
+}
+```
+
+- **唔准**自己 `malloc`；**唔准**在 `declare()` 裡 `nc_buf_create()`。
+- **唔准** `nc_plan_get()`，**唔准**用 `nc_buf_find()` 拿別人的。
+- `on_start` 只跑一次；指標放 `static`（停止／重啟會重用同一批 buffer，見契約 C4）。
+- 契約：[buffers.md §9](buffers.md)；怎麼搭配：[buffer-patterns.md](buffer-patterns.md)。
+
+> **過渡期**（P5 之前）：`mem[]` / `declare()` 的單位是 bytes（`{name,bytes,cls,align}`），
+> 所以你要自己算 `slot_bytes × n`；P5 之後直接宣告「格 × 格數」並由管理器交付
+> `nc_buf_t *`，`nc_buf_at()` 這一步就消失。
 
 ### 3.2 指令＝action，不是任務的財產
 
@@ -230,7 +258,7 @@ if (nc_provide_json("fx.info", json, sizeof(json)) > 0) { /* ... */ }
 | 你要什麼 | 怎麼做 |
 |---|---|
 | 讀一個由別人擁有的裝置 | 找那個任務的 `provides[]`（buffer / JSON / u32） |
-| 請它做一件事 | 送進它的 hub / 佇列（有 `nc_hub` 就用 hub） |
+| 請它做一件事 | 送進它的緩衝區（`nc_buf` FIFO 模式）／佇列 |
 | 兩個模組共用一條 bus | **不要**；由 bus 的 owner 統一管 CS 與時序 |
 | 你的任務自己擁有一個裝置 | 直接在自己的 loop 裡呼叫 driver（你就是 owner） |
 
@@ -253,7 +281,7 @@ static void on_xxx(nc4_ctx_t *ctx, const nc4_frame_t *f)
 }
 ```
 
-**回覆用的緩衝是靜態或堆疊**，不進 plan：
+**回覆用的緩衝是靜態或堆疊**，不宣告成緩衝區：
 
 | 地方 | 用什麼 | 大小 |
 |---|---|---|
@@ -264,12 +292,13 @@ static void on_xxx(nc4_ctx_t *ctx, const nc4_frame_t *f)
 **為什麼靜態 buffer 安全**：`nc4.c` 呼叫 handler 時持有 `s_dispatch_mutex`，
 所以兩個解碼核的 handler **不會同時執行** —— 靜態 TX buffer 不會被另一個核蓋掉。
 
-**什麼才要進 plan**：長命的東西 —— parser 區（`nc4.rx` / `uart.rx` / `tcp.rx`）、
-hub、arena、DMA 槽。一次性的 frame / 回覆不需要，也不該進。
+**什麼才要宣告成緩衝區**：長命的東西 —— parser 區（`nc4.rx` / `uart.rx` / `tcp.rx`）、
+轉寄／大頁（FIFO）、arena、DMA 槽。一次性的 frame / 回覆不需要，也不該宣告
+（一次性的東西用堆疊或 static，見上面的表）。
 
 注意兩個代價：
 - `reply_json` 需要約 4 KB 堆疊 → `decode0/1` 的 stack 是 6144，不是 4096。
-- `file_action` 的 8 KB 是 BSS，不是 plan 管的 —— 所以 `keys=mem` 看不到它。
+- `file_action` 的 8 KB 是 BSS，不在緩衝區的帳裡 —— 所以 `keys=mem` 看不到它。
 
 例外：`0xF001` 那組 bench handler 會 `malloc/free`（那是量測工具，不是常規路徑）。
 
@@ -324,7 +353,7 @@ attach 的限制（都是刻意的）：
 
 | 限制 | 為什麼 |
 |---|---|
-| 不能有 `mem[]` | plan 的宣告窗口在 commit 就關了；runtime 記憶體從父層 arena 切 |
+| 不能有 `mem[]` | 宣告窗口在 commit 就關了；runtime 記憶體只可以由父層 arena `nc_buf_carve()` 切（契約 C9） |
 | 不能是 `SYSTEM` | 系統層由韌體決定，不是由可替換的檔案決定 |
 | 指令已被別人註冊 → 整個 attach 失敗 | 不要半套 |
 | loop 停不下來 → detach 失敗 | 指標還活著就拆 = use-after-free |
@@ -337,10 +366,10 @@ attach 的限制（都是刻意的）：
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "nc_hub.h"
+#include "nc_buf.h"
 #include "nc_task.h"
 
-static nc_hub_t *s_hub;
+static nc_buf_t *s_buf;
 static volatile uint32_t s_ticks;
 
 static void pulse_loop(void *arg)          // ③ 迴圈
@@ -348,11 +377,7 @@ static void pulse_loop(void *arg)          // ③ 迴圈
     (void)arg;
     while (!nc_task_exit_requested()) {
         uint32_t v = ++s_ticks;
-        uint32_t *slot = nc_hub_write_begin(s_hub);   // 沒空位就跳過，不等待
-        if (slot != NULL) {
-            *slot = v;
-            nc_hub_write_commit(s_hub);
-        }
+        nc_buf_put(s_buf, &v, sizeof(v));   // 滿了回 NO_MEM，不等待、不覆蓋
         vTaskDelay(pdMS_TO_TICKS(10));
     }
 }
@@ -360,20 +385,21 @@ static void pulse_loop(void *arg)          // ③ 迴圈
 static int pulse_declare(nc_task_res_t *out, int max)   // ① 資源
 {
     if (max < 1) return 0;
-    out[0] = (nc_task_res_t){ .name = "pulse.hub", .bytes = 16 * sizeof(uint32_t),
-                             .cls = NC_PLAN_INTERNAL, .align = 32 };
+    out[0] = (nc_task_res_t){ .name = "pulse.buf",
+                             .bytes = 16 * sizeof(uint32_t),   // 格 × 格數
+                             .cls = NC_PLAN_INTERNAL, .align = 64 };
     return 1;
 }
 
 static esp_err_t pulse_start(const nc_task_res_view_t *res, int n)   // ② 拿資源
 {
-    (void)n;
-    s_hub = nc_hub_create_in(res[0].ptr, res[0].len, "pulse",
-                             sizeof(uint32_t), 16, 32);
-    return s_hub != NULL ? ESP_OK : ESP_FAIL;
+    if (n < 1) return ESP_FAIL;                 // 防禦：正常只有全部拿到才會被呼叫
+    s_buf = nc_buf_at("pulse.buf", res[0].ptr, res[0].len,
+                      NC_BUF_SRAM, sizeof(uint32_t), 16, NC_BUF_F_FIFO);
+    return s_buf != NULL ? ESP_OK : ESP_FAIL;
 }
 
-static void pulse_stop(void) { s_hub = NULL; }                   // ④ 收尾
+static void pulse_stop(void) { /* buffer 唔會消失（冇 destroy）；指標留著重用 */ }
 
 static const nc_task_loop_t pulse_loops[] = {
     { .name = "pulse", .fn = pulse_loop, .stack = 3072, .prio = 3,
@@ -399,13 +425,14 @@ nc_task_register(&pulse_task);
 
 ## 7. 檢查清單
 
-- [ ] 名字全系統唯一（任務、資源、loop、provide 都算）
+- [ ] 名字全系統唯一（任務、緩衝區、loop、provide 都算）；緩衝區用 `<任務>.<用途>`
 - [ ] loop 有看 `nc_task_exit_requested()`（否則管理器停不下來）
-- [ ] `on_start()` 裡用參數給的 `res[]`，不要 `nc_plan_get()`
-- [ ] `declare()` 裡沒有 `malloc`、沒有 `xTaskCreate`
-- [ ] `on_start()` 失敗回錯誤，而且不留半啟動狀態
-- [ ] 有東西要給別人就寫 `provides[]`，不要讓別人 include 你的 `.c`
+- [ ] `on_start()` 裡用參數給的 `res[]`；唔好 `nc_plan_get()`／`nc_buf_find()` 拿別人
+- [ ] `declare()` 裡沒有 `malloc`、沒有 `nc_buf_create()`、沒有 `xTaskCreate`
+- [ ] `on_start()` 失敗回錯誤（包括 `res` 少一項），不留半啟動狀態
+- [ ] 有東西要給別人就寫 `provides[]`；不要 include 你的 `.c`，也不要傳 `nc_buf_t *`
 - [ ] `period_ms` 有設就不要再自己 `vTaskDelay`（會變兩倍週期）
+- [ ] 這個用法對得上 [buffer-patterns.md](buffer-patterns.md) 的其中一個模式（契約 C11）
 
 ---
 
@@ -414,6 +441,6 @@ nc_task_register(&pulse_task);
 | 限制 | 影響 | 什麼時候補 |
 |---|---|---|
 | registry 沒有鎖 | attach/detach 與 status 同時發生時，status 可能少一個或重複一個（不會越界）。目前 attach 在開機、detach 在 fx task | 要從 decode task 直接載入 `.fxe` 時 |
-| `nc_plan` 沒有 release | 停機不會還記憶體 | 需要「停用後重配」時 |
+| `nc_buf` 冇 `destroy` | 停機不會還記憶體；重啟重用同一批指標（契約 C4） | 需要「停用後重配」時：用 `nc_buf_handover()` |
 | 一個任務最多 2 個 loop、8 塊記憶體、8 項 provide | 目前都夠 | 真的不夠再放寬 |
 | `on_stop` 只在「管理器停止」時呼叫 | `run_once` 自己結束的 loop 不會回呼 | 有需求時改成引用計數 |

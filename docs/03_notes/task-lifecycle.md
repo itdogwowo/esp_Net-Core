@@ -4,7 +4,7 @@
 > 結束時誰歸還什麼」。這份是**現況**（照 `sys/task` + `sys/task_manager` 的實作寫），不是提案。
 >
 > 相關：[task-model.md](task-model.md)（房東／租戶的分界）、[writing-a-task.md](writing-a-task.md)（怎麼寫）、
-> [memory.md](memory.md)（plan 的細節）
+> [buffers.md §9](buffers.md)（**任務 ↔ 緩衝區契約 C1–C11**）、[memory.md](memory.md)（heap class）
 
 ---
 
@@ -27,8 +27,8 @@
 | `name` | ✅ | 唯一鍵：slot / `tasks.json` / provide owner / log 全靠它 | `register` 拒絕（`ESP_ERR_INVALID_ARG`） |
 | `kind` | ✅ | `SYSTEM`（房東，不可卸載）／`NORMAL`／`EFFECT`（可由檔案載入） | 拒絕 |
 | `level` | 建議 | **宣告與 `on_start` 的次序**；`-1` = 完全唔啟動 | 當 0 |
-| `mem[]` / `nmem` | 選 | 靜態記憶體宣告（開機前就知道的量） | 0 項 |
-| `declare()` | 選 | 動態記憶體宣告（照**實際硬體**算，例如 ETH 起來才有 TCP 緩衝） | 0 項 |
+| `mem[]` / `nmem` | 選 | 靜態**緩衝區**需求（開機前就知道的量） | 0 項 |
+| `declare()` | 選 | 動態**緩衝區**需求（照**實際硬體**算，例如 ETH 起來才有 TCP 緩衝） | 0 項 |
 | `claims[]` / `nclaims` | 選 | 接線獨占宣告（`pin:16` / `bus:spi1`） | 0 條 |
 | `provides[]` / `nprovides` | 選 | 對外提供（`BUF` / `JSON` / `U32`） | 0 條 |
 | `loops[]` / `nloops` | 選 | 執行單位（0–2 個）；**冇 loop 的任務是合法的**（只做 `on_start`） | 冇 loop |
@@ -43,7 +43,8 @@
 | `NC_TASK_MEM_MAX` | 8 | 一個任務最多幾項記憶體（`mem[]` + `declare()` **合計**） |
 | `NC_TASK_LOOPS_MAX` | 2 | 一個任務最多幾個 loop（例：`nc4` 兩核各一個） |
 | `NC_TASK_LAYERS` | 8 | loop 的 layer 只有 0–7 |
-| `NC_PLAN_MAX_DECLS` | 64 | 全系統記憶體宣告總數 |
+| `NC_PLAN_MAX_DECLS` | **16** | 全系統宣告項數（2026-11-10 更正：一直係 16，舊版這裡寫 64 是錯的） |
+| `NC_BUF_MAX` | 32 | 全系統緩衝區條數（`nc_buf`；滿了建立失敗並印 log） |
 | `NC_PROVIDE_MAX` | 24 | 全系統 provide 總數 |
 
 > **`level` 與 `layer` 是兩個不同的東西**（見 §4）：`level` 在任務上，`layer` 在 loop 上。
@@ -56,7 +57,7 @@
    ① register              ② declare                ③ start                  ④ boot
    ───────────────────────────────────────────────────────────────────────────────────
    nc_task_register()  →  nc_task_declare_all()  →  nc_task_start_all()  →  nc_task_boot()
-   只登記、按 level 排序   宣告 → nc_plan           資源到手 → on_start      依 layer 開 loop
+   只登記、按 level 排序   宣告 → nc_buf            資源到手 → on_start      依 layer 開 loop
                            ＋帳本檢查               → provide → 準備 loop     （0 先）
 ```
 
@@ -115,11 +116,13 @@
 
 三句話：**你宣告、它加總、每個 class 只向系統要一次。**
 
+> 這一段講的是**現況的實作路徑**（plan 仍然是執行者）。對寫任務的人而言，它在契約裡的意思只有一句：**你宣告的是一片緩衝區**，見 [buffers.md §9](buffers.md)。
+
 ```text
 你的 declare()/mem[]
    │  nc_plan_declare(service, name, level, cls, bytes, align)
    ▼
-plan 的宣告表（全域 64 項，按 level 排序）
+宣告表（全域 16 項，按 level 排序）
    │  nc_plan_commit(avail[3], allow_shed)
    ▼
 每個 class：declared[] 加總 → 同 avail[class] 比 → 逐項成功／失敗
@@ -137,8 +140,10 @@ plan 的宣告表（全域 64 項，按 level 排序）
 **`avail[]` 是呼叫端給的**（`main.c` 用 `heap_caps_get_largest_free_block()` 量當下最大可用塊）。
 所以「夠不夠」不是寫死的數字，是**開機當下量出來的**。
 
-**失敗是逐項的，不是整批**：某一項塞不下 → 該項 `nc_plan_get()` 回 `NULL`，
-其他項照配。但對任務而言「有一項拿不到」= 整個任務不啟動（§2 ③ 第 1 步）。
+**失敗是逐項的，但不是逐項退化**：某一項塞不下 → 該項 `nc_plan_get()` 回 `NULL`，
+其他項照配；**對任務而言「有一項拿不到」＝ 整個任務不啟動**（§2 ③ 第 1 步），
+`on_start` 根本不會被呼叫。所以任務永遠見不到「少一項」的世界（契約 C2）。
+代價：已經配好的項**不會退回**（冇 free），下次重啟仍然沿用同一批。
 
 **宣告窗口在 `commit` 時關閉**：commit 之後 `nc_plan_declare()` 回 `ESP_ERR_INVALID_STATE`。
 這就是為什麼 **runtime attach 的任務不可以帶 `mem[]`**（`nc_task_attach` 會直接拒絕）——
@@ -254,17 +259,18 @@ static void my_loop(void *arg)
 | provide 條目 | 管理器（`prov_unregister`） | `shutdown_slot` |
 | slot（任務格） | 管理器 | `detach` 時 |
 | `claims[]` | 冇 runtime 資源，只是帳 | — |
-| **plan 的記憶體** | **冇人歸還** | `commit` 時一次 carve，永久屬於該 class |
+| **緩衝區（`nc_buf`）** | **冇人歸還** | 開機一次建立，永久存在；要給下一個用戶用 `handover`（契約 C5） |
 | **FXE 模組的記憶體** | FXE 引擎（arena 回收） | `nc_fx_unload()` |
 
-**「停止」≠「釋放記憶體」。** plan 沒有 release：開機 carve 一次，之後只有「誰拿到」，
-沒有「還回去」。所以：
+**「停止」≠「釋放記憶體」。** `nc_buf` 冇 destroy：開機建立一次，之後只有「誰拿到」，
+沒有「還回去」（契約 C4）。所以：
 
 - 停止一個任務 → 它的 loop 消失、provide 消失、`on_start` 拿到的指標**仍然有效**（但你不該再用）；
 - 重新啟動同一個任務 → `gather_resources()` 會拿到**同一批指標**（不是新配的）。
 
 這是刻意的：嵌入式不需要 heap 碎片，也不需要 runtime 重新規劃記憶體。
-runtime 要增減的東西（`.fxe` 模組）走 arena，不進 plan。
+runtime 要增減的東西（`.fxe` 模組）走父層 arena：`nc_buf_carve()` 切，換場用
+`nc_buf_handover()` 換 owner（契約 C9）。
 
 ---
 
@@ -273,7 +279,7 @@ runtime 要增減的東西（`.fxe` 模組）走 arena，不進 plan。
 ```text
          register            declare              start                boot
   ──► [已登記] ──────────► [已宣告] ──────────► [started=1] ────────► [running]
-       slot.used=1          plan 有記錄          on_start 完成          loop 在跑
+       slot.used=1          buffer 已建立        on_start 完成          loop 在跑
                                                   provide 已註冊
         │                     │                     │                    │
         │                     │  cfg_level < 0      │  affinity (0,0)    │
@@ -310,7 +316,7 @@ runtime 要增減的東西（`.fxe` 模組）走 arena，不進 plan。
 | 1 | **loop 之間冇 ready barrier** | layer N 的 loop 未初始化完，layer N+1 已開；依賴「上一層已就緒」的任務會踩空 | loop 增加 `nc_task_ready()`：初始化完呼叫一次；`boot` 在每層之後等全部 ready（有 timeout） |
 | 2 | **plan 冇 release** | 停止／重啟不會換記憶體；runtime 任務不能帶 `mem[]` | 保持現狀（刻意），但文件要寫明；runtime 一律走 arena |
 | 3 | **`level` 與 `layer` 兩套次序** | 同一個任務有兩個「先後」，容易填錯 | 文件寫明分工（§4）；長期考慮讓 `layer` 預設 = `level` |
-| 4 | **`audit()` 的 claims 迴圈有 bug** | `s_slots[i].nclaims--` 之後迴圈條件跟著變小 → **跳過剩下的 claim**，而且被「刪掉」的是最後一條，不是衝突那條 | 改成「標記該條失效」而不是減 `nclaims` |
+| 4 | ~~`audit()` 的 claims 迴圈有 bug~~ **已修（2026-11-10 核對）** | 舊寫法在迴圈裡 `nclaims--` → 跳過一條、而且刪錯條 | 已改成 `claim_off` 位元標記；`task_test` 有覆蓋（`gamma` 保留 `pin:16`、`delta` 被擋） |
 | 5 | `on_start` 失敗後記憶體不退回 | 該任務的記憶體永遠佔著 | 刻意（plan 無 release），但要在 log 講清楚 |
 | 6 | `nc_task_attach()` 失敗會自動 detach 回滾 | 正常；但若 `on_start` 已註冊了 provide，回滾會一併收回 | 保持 |
 

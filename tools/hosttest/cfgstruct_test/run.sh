@@ -12,6 +12,7 @@ mkdir -p "$OUT"
 cc -std=c11 -w -I"$CJSON" -c "$CJSON/cJSON.c" -o "$OUT/cJSON.o"
 
 cc -std=c11 -Wall -Wextra -Werror \
+   -D_POSIX_C_SOURCE=200809L \
    -I"$ROOT/tools/hosttest/cfgstruct_test/include" \
    -I"$ROOT/firmware/components/sys/config/include" \
    -I"$ROOT/firmware/components/sys/config" \

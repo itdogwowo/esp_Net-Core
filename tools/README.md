@@ -103,6 +103,7 @@ python3 tools/board.py new --chip S3 --board ESP32-S3-Matrix --flash 16 --psram 
 | `selftest.py --port …` | ✅ | 一鍵自測：STATUS / 解碼器 9 case / 效能 / 突發 / OTA（會匯入同層的 `ota.py`） |
 | `nc4_file.py --port … status\|query <path>\|claim\|release` | ✅ | 檔案查詢（0x2005）與儲存狀態（0x1103/0x1101）。讀取任何模式都通；只有寫入才要 claim，見 [fat-ownership](../docs/03_notes/fat-ownership.md) |
 | `nc4_test.py --port …` | ✅ | 解碼器一致性測試：正常幀 / 黏包 / 拆包 / 壞 CRC / 假 SOF / 錯 addr / 超大 LEN / 錯版本 |
+| `buf_test.py --port …` | ✅ | **統一緩衝（`nc_buf`）的上板自測**（`0xF032`）：64 B 對齊、FIFO 次序、滿了回 NULL、reserve 表頭 + `off`/`len`、S2S·S2P·P2S·P2P 四條 copy、換手；`--status` 順便印 `mem.buf` |
 | `fx.py pack / dump` | ❌ | **打包 `.fxe`**（header + manifest + payload + 指令表）與檢視；manifest 欄位＝模組的 kind/core/layer/fps/px/預算。`pack` 會先擋掉裝置端一定會拒的值 |
 
 firmware image 在 `firmware/build/esp_net_core.bin`（先 build 才有）。
@@ -136,6 +137,7 @@ tools/hosttest/task_test/run.sh    # 任務管理器：level 排序 / 帳本 / a
 tools/hosttest/cfg_test/run.sh     # nc_cfg_patch：token patch（巢狀 / 陣列 / 轉義）
 tools/hosttest/router_test/run.sh  # nc4_router.c：線 → 核、out 轉寄清單（decodeN／自我／重複）
 tools/hosttest/link_test/run.sh    # nc4_link.c：出口表、整幀送出、短送／錯誤 → drops、JSON
+tools/hosttest/buf_test/run.sh     # nc_buf.c：格狀態機 / FIFO / reserve / 32-bit / S·P 記帳 / 換手 / JSON 截斷
 ```
 
 Windows（MSVC）用同目錄的 `run.bat`。注意：目前只有 `cfg_test` / `fxm_test` / `task_test`

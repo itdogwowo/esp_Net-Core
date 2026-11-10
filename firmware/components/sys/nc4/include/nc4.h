@@ -19,6 +19,7 @@
 #include <stdint.h>
 
 #include "esp_err.h"
+#include "nc_buf.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -106,12 +107,21 @@ uint16_t nc4_reply_addr(const nc4_ctx_t *ctx);
 // 由 decoder 獨佔：同一個 decoder 一次只跑一個 handler（有鎖），所以安全。
 uint8_t *nc4_decoder_reply_buf(nc4_decoder_t *decoder);
 
+// 接管外部提供的回覆幀（2026-11-10：plan 的 nc4.replyN → nc_buf）。
+// 傳入之後 decoder 唔會再 free 它（生命週期由 plan／nc_buf 擁有）。
+esp_err_t nc4_decoder_set_reply(nc4_decoder_t *decoder, void *buf);
+
 // ── parser：每個通道一個 ──
 // max_frame = 這條通道的 parser 緩衝大小；0 → NC4_MAX_FRAME
 nc4_parser_t *nc4_parser_create(nc4_decoder_t *decoder, nc4_send_fn send, void *send_arg,
                                 const char *source, size_t max_frame);
 
-// 在「外部已配好的區域」上建 parser（plan 給的記憶體走這條）
+// 用一條已存在的 nc_buf（STREAM）當 parser 環 —— 管理器建好的 buffer 走這條
+nc4_parser_t *nc4_parser_create_buf(nc_buf_t *ring, nc4_decoder_t *decoder,
+                                    nc4_send_fn send, void *send_arg,
+                                    const char *source);
+
+// 在「外部已配好的區域」上建 parser（legacy：按 name 自己建 nc_buf）
 nc4_parser_t *nc4_parser_create_in(void *region, size_t region_bytes,
                                    nc4_decoder_t *decoder, nc4_send_fn send,
                                    void *send_arg, const char *source);

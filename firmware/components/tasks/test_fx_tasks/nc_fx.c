@@ -772,6 +772,7 @@ void nc_fx_task(void *arg)
             ESP_LOGI(TAG, "fx task 收到結束請求");
             break;
         }
+        nc_task_beat();     // 長跑 loop：自己報心跳（停滯偵測靠它）
         nc_fx_tick();
         // 節奏由 live 模組的 manifest 決定；沒有 manifest 就 10 ms（100 Hz）。
         // 用 vTaskDelay 而不是 Until：週期會隨模組改變，Until 會累積漂移。

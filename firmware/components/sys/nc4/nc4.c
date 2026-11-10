@@ -1,4 +1,5 @@
 #include "nc4.h"
+#include "nc_buf.h"
 #include "nc_action.h"
 #include "nc4_link.h"
 #include "nc4_router.h"
@@ -16,7 +17,6 @@
 #include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "nc4_bus.h"
-#include "nc_pool.h"
 
 // handler 的互斥**屬於 decoder，不是全域**：
 //   一個 decoder 一次執行一個 handler；多個 decoder（每核一個）可以同時各跑一個。
@@ -32,6 +32,7 @@ struct nc4_decoder {
     uint16_t master_cid;   // 我的上級（0xFFFF = 未設定）
     uint32_t dropped_addr; // 丟掉的「不是給我的」幀
     uint8_t *reply;        // 回覆幀（NC4_REPLY_FRAME_MAX B，見 nc4_reply_buf）
+    bool reply_external;   // true = 由 plan／nc_buf 提供，destroy 唔 free
 };
 
 static inline void decoder_lock(nc4_decoder_t *d)
@@ -49,11 +50,9 @@ static inline void decoder_unlock(nc4_decoder_t *d)
 }
 
 struct nc4_parser {
-    uint8_t *buf;
-    bool external;      // true = buf 由外部提供，destroy 不 free
-    size_t cap;
-    size_t start;
-    size_t end;
+    // 解析器環＝一條 STREAM 緩衝區（2026-11-10 由手寫 start/end 改成 nc_buf）
+    nc_buf_t *ring;
+    size_t cap;         // = 環容量（nc_buf_slot_bytes）
     nc4_ctx_t ctx;
 
     // 壞幀統計：以前 CRC 錯了只會靜靜前移 1 byte，外面完全看不出來。
@@ -125,6 +124,19 @@ uint8_t *nc4_decoder_reply_buf(nc4_decoder_t *decoder)
     return decoder ? decoder->reply : NULL;
 }
 
+esp_err_t nc4_decoder_set_reply(nc4_decoder_t *decoder, void *buf)
+{
+    if (decoder == NULL || buf == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (!decoder->reply_external) {
+        free(decoder->reply);      // 換走自己 malloc 的那塊
+    }
+    decoder->reply = (uint8_t *)buf;
+    decoder->reply_external = true;
+    return ESP_OK;
+}
+
 uint16_t nc4_reply_addr(const nc4_ctx_t *ctx)
 {
     if (ctx == NULL || ctx->decoder == NULL) {
@@ -141,7 +153,9 @@ void nc4_decoder_destroy(nc4_decoder_t *decoder)
     if (decoder->lock != NULL) {
         vSemaphoreDelete(decoder->lock);
     }
-    free(decoder->reply);
+    if (!decoder->reply_external) {
+        free(decoder->reply);      // 外部提供的不歸 decoder 管
+    }
     free(decoder);
 }
 
@@ -227,12 +241,35 @@ nc4_parser_t *nc4_parser_create(nc4_decoder_t *decoder, nc4_send_fn send, void *
     if (p == NULL) {
         return NULL;
     }
-    p->cap = max_frame;
-    p->buf = malloc(max_frame);
-    if (p->buf == NULL) {
+    char name[NC4_LINK_NAME_MAX + 4];
+    snprintf(name, sizeof(name), "%.*s.rx", NC4_LINK_NAME_MAX, source ? source : "p");
+    p->ring = nc_buf_create(name, NC_BUF_SRAM, (uint32_t)max_frame, 1,
+                            NC_BUF_F_STREAM | NC_BUF_F_RUNTIME);
+    if (p->ring == NULL) {
         free(p);
         return NULL;
     }
+    p->cap = max_frame;
+    p->ctx.decoder = decoder;
+    p->ctx.send = send;
+    p->ctx.send_arg = send_arg;
+    p->ctx.source = source ? source : "?";
+    return p;
+}
+
+nc4_parser_t *nc4_parser_create_buf(nc_buf_t *ring, nc4_decoder_t *decoder,
+                                    nc4_send_fn send, void *send_arg,
+                                    const char *source)
+{
+    if (ring == NULL || decoder == NULL) {
+        return NULL;
+    }
+    nc4_parser_t *p = calloc(1, sizeof(*p));
+    if (p == NULL) {
+        return NULL;
+    }
+    p->ring = ring;
+    p->cap = nc_buf_slot_bytes(ring);
     p->ctx.decoder = decoder;
     p->ctx.send = send;
     p->ctx.send_arg = send_arg;
@@ -251,9 +288,16 @@ nc4_parser_t *nc4_parser_create_in(void *region, size_t region_bytes,
     if (p == NULL) {
         return NULL;
     }
-    p->buf = region;            // 外部區域：destroy 不會 free
+    char name[NC4_LINK_NAME_MAX + 4];
+    snprintf(name, sizeof(name), "%.*s.rx", NC4_LINK_NAME_MAX, source ? source : "p");
+    // 外部區域（plan 給的）：owns=false，release 只會除名，唔會 free 區域
+    p->ring = nc_buf_at(name, region, region_bytes, NC_BUF_SRAM,
+                        (uint32_t)region_bytes, 1, NC_BUF_F_STREAM | NC_BUF_F_RUNTIME);
+    if (p->ring == NULL) {
+        free(p);
+        return NULL;
+    }
     p->cap = region_bytes;
-    p->external = true;
     p->ctx.decoder = decoder;
     p->ctx.send = send;
     p->ctx.send_arg = send_arg;
@@ -266,52 +310,51 @@ void nc4_parser_destroy(nc4_parser_t *parser)
     if (parser == NULL) {
         return;
     }
-    if (!parser->external) {
-        free(parser->buf);
-    }
+    // runtime 建立的環：除名（外部區域唔會 free；自己配置的才還返 heap）
+    nc_buf_release(parser->ring);
     free(parser);
 }
 
 // 轉寄限速警告（實作在下面；這裡先宣告）
 static void nc4_warn_throttled(const char *src, const char *fmt, ...);
 
-// ── 跨核轉寄 queue（2026-11-09）──
-// 來源核唔可以揸住 parser 環去等目的核送（會 block 整個 decode），所以：
-//   來源核 alloc 一格 forward pool → copy → 入目的核 queue → notify
-//   目的核 decode loop 每輪 poll，送完 release
+// ── 跨核轉寄（2026-11-10：nc_pool ＋ 手寫 queue → 一條 nc_buf FIFO）──
+//
+// 為什麼要轉寄：來源核唔可以揸住 parser 環去等目的核送（會 block 整個 decode）。
+// 舊做法：`nc_pool.forward` 借一格 → copy → 推入每核手寫環（深度 8）→ notify
+// 新做法：每核一條 **FIFO 緩衝**（`fwd.c0`／`fwd.c1`，PSRAM），
+//         格首 16 B 放目的 link 名（用 reserve），後面放整幀。
+//         一條 buffer 就是一個佇列 —— 唔再需要 slot 指標＋queue 兩份東西。
+//
 // 這是設計上**唯一允許**的跨核 notify（forward 專用）；bus producer 的 kick
 // 仍然係同核（nc4_bus_kick 會計 remote kick）。
-#define NC4_FWD_QMAX 8
-typedef struct {
-    nc_pool_slot_t *slot;
-    char dst[NC4_LINK_NAME_MAX];
-} nc4_fwd_entry_t;
+#define NC4_FWD_DEPTH 4
 
-static nc4_fwd_entry_t s_fwd_q[2][NC4_FWD_QMAX];
-static uint8_t s_fwd_head[2];
-static uint8_t s_fwd_tail[2];
-static portMUX_TYPE s_fwd_mux = portMUX_INITIALIZER_UNLOCKED;
+static nc_buf_t *s_fwd_buf[2];
+static SemaphoreHandle_t s_fwd_mtx[2];      // 多個來源 task 可能同時轉寄（契約 C6）
 static uint32_t s_fwd_frames[2];
 static uint32_t s_fwd_drops[2];
 static uint32_t s_fwd_err[2];
 
-static bool fwd_push(int core, nc_pool_slot_t *slot, const char *dst)
+static nc_buf_t *fwd_buf_get(int core)
 {
-    nc4_fwd_entry_t e;
-    memset(&e, 0, sizeof(e));
-    e.slot = slot;
-    snprintf(e.dst, sizeof(e.dst), "%s", dst);
-
-    bool ok = false;
-    portENTER_CRITICAL(&s_fwd_mux);
-    const uint8_t nh = (uint8_t)((s_fwd_head[core] + 1) % NC4_FWD_QMAX);
-    if (nh != s_fwd_tail[core]) {
-        s_fwd_q[core][s_fwd_head[core]] = e;
-        s_fwd_head[core] = nh;
-        ok = true;
+    if (core < 0 || core > 1) {
+        return NULL;
     }
-    portEXIT_CRITICAL(&s_fwd_mux);
-    return ok;
+    if (s_fwd_buf[core] != NULL) {
+        return s_fwd_buf[core];
+    }
+    char name[16];
+    snprintf(name, sizeof(name), "fwd.c%d", core);
+    const uint32_t slot = (uint32_t)NC4_LINK_NAME_MAX + (uint32_t)NC4_MAX_FRAME;
+    // PSRAM：轉寄只係 staging，最後都係 copy 入 driver 環（唔需要 DMA）
+    nc_buf_t *b = nc_buf_create(name, NC_BUF_PSRAM, slot, NC4_FWD_DEPTH,
+                                NC_BUF_F_RUNTIME);
+    if (b == NULL) {
+        return NULL;
+    }
+    s_fwd_buf[core] = b;
+    return b;
 }
 
 static void fwd_enqueue(int core, const char *dst, const uint8_t *base, size_t total)
@@ -320,56 +363,68 @@ static void fwd_enqueue(int core, const char *dst, const uint8_t *base, size_t t
         s_fwd_drops[0]++;
         return;
     }
-    nc_pool_slot_t *slot = nc_pool_alloc(NC_POOL_FORWARD, 0);
-    if (slot == NULL) {
+    nc_buf_t *b = fwd_buf_get(core);
+    if (b == NULL) {
         s_fwd_drops[core]++;
         return;
     }
-    if (total > slot->cap) {
-        nc_pool_release(slot);
-        s_fwd_drops[core]++;
+    if (total + NC4_LINK_NAME_MAX > nc_buf_slot_bytes(b)) {
+        s_fwd_drops[core]++;        // 正常唔會發生（parser 已擋超大幀）
         return;
     }
-    memcpy(slot->data, base, total);
-    nc_pool_commit(slot, (uint16_t)total);
-    if (!fwd_push(core, slot, dst)) {
-        nc_pool_release(slot);
-        s_fwd_drops[core]++;
-        return;
+    if (s_fwd_mtx[core] == NULL) {
+        s_fwd_mtx[core] = xSemaphoreCreateMutex();
     }
-    nc4_bus_kick_core(core);
+    if (s_fwd_mtx[core] != NULL) {
+        xSemaphoreTake(s_fwd_mtx[core], portMAX_DELAY);
+    }
+    uint8_t *p = nc_buf_put_begin(b, NC4_LINK_NAME_MAX);
+    if (p == NULL) {
+        s_fwd_drops[core]++;        // 佇列滿：丟（唔等，來源核唔可以停）
+    } else {
+        char *nm = (char *)(p - NC4_LINK_NAME_MAX);
+        memset(nm, 0, NC4_LINK_NAME_MAX);
+        snprintf(nm, NC4_LINK_NAME_MAX, "%s", dst ? dst : "");
+        memcpy(p, base, total);
+        if (nc_buf_put_end(b, (uint32_t)total) != ESP_OK) {
+            s_fwd_drops[core]++;
+        } else {
+            nc4_bus_kick_core(core);
+        }
+    }
+    if (s_fwd_mtx[core] != NULL) {
+        xSemaphoreGive(s_fwd_mtx[core]);
+    }
 }
 
-// 目的核 decode loop 呼叫：把 queue 裡的幀送出去（每次最多 8 幀）。
+// 目的核 decode loop 呼叫：把 FIFO 裡的幀送出去（每次最多 8 幀）。
 int nc4_fwd_poll(int core)
 {
     if (core < 0 || core > 1) {
         return 0;
     }
+    nc_buf_t *b = s_fwd_buf[core];
+    if (b == NULL) {
+        return 0;
+    }
     int n = 0;
-    for (;;) {
-        nc4_fwd_entry_t e;
-        bool got = false;
-        portENTER_CRITICAL(&s_fwd_mux);
-        if (s_fwd_tail[core] != s_fwd_head[core]) {
-            e = s_fwd_q[core][s_fwd_tail[core]];
-            s_fwd_tail[core] = (uint8_t)((s_fwd_tail[core] + 1) % NC4_FWD_QMAX);
-            got = true;
-        }
-        portEXIT_CRITICAL(&s_fwd_mux);
-        if (!got) {
+    for (; n < 8; n++) {
+        uint32_t len = 0;
+        uint32_t off = 0;
+        uint8_t *p = nc_buf_get(b, &len, &off);
+        if (p == NULL) {
             break;
         }
-        const esp_err_t err = nc4_link_send(e.dst, e.slot->data, e.slot->len);
+        const char *dst = (const char *)(p - off);   // 格首：目的 link 名
+        const esp_err_t err = nc4_link_send(dst, p, len);
         if (err == ESP_OK) {
             s_fwd_frames[core]++;
         } else {
             s_fwd_err[core]++;
             nc4_warn_throttled("fwd", "跨核轉寄 → %s 失敗：%s（整幀丟棄）",
-                               e.dst, esp_err_to_name(err));
+                               dst, esp_err_to_name(err));
         }
-        nc_pool_release(e.slot);
-        n++;
+        nc_buf_get_end(b);
     }
     return n;
 }
@@ -449,8 +504,7 @@ static void parser_dispatch(nc4_parser_t *parser, const uint8_t *base, uint16_t 
 void nc4_parser_reset(nc4_parser_t *parser)
 {
     if (parser != NULL) {
-        parser->start = 0;
-        parser->end = 0;
+        nc_buf_skip(parser->ring, nc_buf_pending(parser->ring));
     }
 }
 
@@ -549,48 +603,42 @@ static void nc4_warn_throttled(const char *src, const char *fmt, ...)
 
 esp_err_t nc4_parser_feed(nc4_parser_t *parser, const uint8_t *data, size_t len)
 {
-    if (parser == NULL || data == NULL) {
+    if (parser == NULL || data == NULL || parser->ring == NULL) {
         return ESP_ERR_INVALID_ARG;
     }
 
-    // 空間不夠先搬移未消費段（與 MP 版 StreamParser.compact 同語義）
-    if (parser->end + len > parser->cap) {
-        size_t keep = parser->end - parser->start;
-        if (keep + len > parser->cap) {
-            nc4_warn_throttled(parser->ctx.source, "rx 溢位，丟棄 %u bytes", (unsigned)keep);
-            parser->start = parser->end = 0;
-            return ESP_ERR_NO_MEM;
-        }
-        memmove(parser->buf, parser->buf + parser->start, keep);
-        parser->start = 0;
-        parser->end = keep;
+    // 空間唔夠（壓實之後都唔夠）→ 與舊版同語義：丟棄已緩衝的，回 NO_MEM。
+    // nc_buf_space() 已經計入「壓實之後」的可用量。
+    if (nc_buf_space(parser->ring) < len) {
+        nc4_warn_throttled(parser->ctx.source, "rx 溢位，丟棄 %u bytes",
+                           (unsigned)nc_buf_pending(parser->ring));
+        nc_buf_skip(parser->ring, nc_buf_pending(parser->ring));
+        return ESP_ERR_NO_MEM;
     }
-    memcpy(parser->buf + parser->end, data, len);
-    parser->end += len;
+    if (nc_buf_write(parser->ring, data, len) != len) {
+        return ESP_ERR_NO_MEM;      // 上面已檢查空間，正常唔會發生
+    }
 
     for (;;) {
-        size_t avail = parser->end - parser->start;
-        if (avail < NC4_HDR_LEN) {
+        uint32_t avail = 0;
+        // 一定係「一段連續」（STREAM 會先壓實），所以可以直接當陣列掃
+        const uint8_t *base = nc_buf_read_ptr(parser->ring, &avail);
+        if (base == NULL || avail < NC4_HDR_LEN) {
             return ESP_OK;
         }
 
         // 1. 找 SOF
-        uint8_t *base = parser->buf + parser->start;
-        size_t i = 0;
+        uint32_t i = 0;
         while (i + 1 < avail && !(base[i] == NC4_SOF_0 && base[i + 1] == NC4_SOF_1)) {
             i++;
         }
         if (i + 1 >= avail) {
-            parser->start = parser->end = 0;
+            nc_buf_skip(parser->ring, avail);   // 冇 SOF：整段丟（與舊版一致）
             return ESP_OK;
         }
         if (i != 0) {
-            parser->start += i;
-            avail -= i;
-            base = parser->buf + parser->start;
-            if (avail < NC4_HDR_LEN) {
-                return ESP_OK;
-            }
+            nc_buf_skip(parser->ring, i);       // 丟掉 SOF 之前的垃圾，重新拿 base
+            continue;
         }
 
         // 2. 標頭（不合就前移 1 byte 重找 —— 與 MP 版一致的寬鬆重同步）
@@ -602,18 +650,15 @@ esp_err_t nc4_parser_feed(nc4_parser_t *parser, const uint8_t *data, size_t len)
 
         if (ver != NC4_VERSION || dlen > NC4_MAX_PAYLOAD) {
             parser->n_bad_hdr++;
-            parser->start += 1;
+            nc_buf_skip(parser->ring, 1);
             continue;
         }
 
         const size_t total = NC4_HDR_LEN + dlen + NC4_CRC_LEN;
-        // 幀比 parser 緩衝大：永遠放唔落。以前會一直緩衝到溢位再整段丟，
-        // 一個 8 KB 幀（CDC 的 region 只有 4,192）就變成每 256 B 一次「rx 溢位」
-        // —— 洪水測試時 22 秒噴 627 行 log，塞爆 CDC TX，decode 的回覆全部被丟。
-        // 正確做法：認出「放唔落」就跳過這個 SOF，繼續找下一個，而且 log 要限速。
+        // 幀比 parser 緩衝大：永遠放唔落 → 跳過這個 SOF，繼續找下一個（log 限速）
         if (total > parser->cap) {
             parser->n_bad_hdr++;
-            parser->start += 1;
+            nc_buf_skip(parser->ring, 1);
             nc4_warn_throttled(parser->ctx.source, "幀過大（>%u B）", (unsigned)parser->cap);
             continue;
         }
@@ -626,7 +671,7 @@ esp_err_t nc4_parser_feed(nc4_parser_t *parser, const uint8_t *data, size_t len)
         const uint32_t got = esp_rom_crc32_le(0, base + 2, NC4_HDR_LEN - 2 + dlen);
         if (want != got) {
             parser->n_crc_err++;
-            parser->start += 1;
+            nc_buf_skip(parser->ring, 1);
             continue;
         }
 
@@ -634,10 +679,6 @@ esp_err_t nc4_parser_feed(nc4_parser_t *parser, const uint8_t *data, size_t len)
             parser->n_max_ok = dlen;
         }
         parser_dispatch(parser, base, dlen);
-
-        parser->start += total;
-        if (parser->start == parser->end) {
-            parser->start = parser->end = 0;
-        }
+        nc_buf_skip(parser->ring, (uint32_t)total);
     }
 }

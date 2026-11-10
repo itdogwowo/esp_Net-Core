@@ -4,7 +4,9 @@
 > [execution-model §8](../03_notes/execution-model.md)、
 > [status §7.2](status.md)、[memory-budget §9.5](../03_notes/memory-budget.md)。
 > P0（`router_from_cfg` UAF）已完成。
-> **Phase 1（1.1／1.2／1.3）已完成**：測試 task 開關、`0x1005` 修正、round watchdog。
+> **Phase 1 的 1.1／1.2 已完成**：測試 task 開關、`0x1005` 修正。
+> **1.3（round watchdog）已撤回**：`monitor` 任務 2026-11-04 已刪（status §7.7）、
+> `epoch` 2026-11-06 已移除 —— 現時板上**冇任何停滯偵測**，見 [buffers §9](../03_notes/buffers.md)。
 > **死碼清理已完成**（0.1）：見 [disposition](disposition.md) B2b／B3／B4／B5／B6，行為不變。
 > 剩下的 Phase 2 卡在一個 USB 事實確認（見 §3）。
 
@@ -14,11 +16,12 @@
 
 之前的文件寫「縮到 12 格可省 ~3 KB」。實際數：
 
-- 固定註冊 **10** 個任務（nc4、net、core、monitor、probe、fx、hello、bench_a/b/c）
+- 固定註冊 **8** 個任務（nc4、net、probe、fx、hello、bench_a/b/c）
+  —— 舊版這裡寫 10 個（含已刪的 `core`／`monitor`），2026-11-10 更正
 - `.fxe` 最多 attach **8** 個（`NC_FX_MAX_MODULES = 8`）
-- **10 + 8 = 18**
+- **8 + 8 = 16**
 
-所以 20 格是**必要的**（還要留 3 格緩衝）。縮到 12 會在載入第 4 個 `.fxe` 之後
+所以 20 格仍然**必要**（留 4 格緩衝）。縮到 12 會在載入第 5 個 `.fxe` 之後
 `nc_task_attach()` 直接回 `ESP_ERR_NO_MEM`，而且是**靜默的功能消失**。
 → **不做**，並已修正三份文件裡的說法。
 
@@ -30,7 +33,7 @@
 |---|---|---|---|---:|---|
 | ~~1.1~~ | ~~P4 測試 task 開關（sink×2／src×2）~~ | ✅ **24,576 B** | — | 已做：`CONFIG_NETCORE_TEST_TASKS` 預設 n；accept 係正式通道 |
 | ~~1.2~~ | ~~`0x1005` 768 B 截斷修正~~ | ✅ 0 | — | 已做：`nc_task_list_json()` 緊湊清單，保證合法 JSON |
-| ~~1.3~~ | ~~round watchdog~~ | ✅ +3,072 B runtime | — | 已做：`monitor` 任務（core0／1 s／`no_epoch`），只記錄 |
+| ~~1.3~~ | ~~round watchdog~~ | ❌ **已撤回** | — | `monitor` 2026-11-04 已刪、`epoch` 2026-11-06 已移除；現時冇停滯偵測 |
 | ~~0.1~~ | ~~死碼清理（`NC_DECODE_CORE`／`nc4_bus_start`／`0x1019`／重複 include／`DEV_BENCH` mode 2/3/4）~~ | ✅ 0 行為改動 | — | 已做：S3／P4 零 warning、hosttest 8/8 |
 | **2.1** | P4 排除 tinyusb（`nc_store` MSC） | **21.7 KB 靜態** | 中 | 本板冇 OTG（晶片有）→ MSC 用不到；要動 store |
 | **2.2** | `ssid_pw` 搬 NVS | 0 | 低 | 要決定 NVS key 格式 |
@@ -59,7 +62,11 @@
   或者直接叫主機用 `STATUS_GET keys=tasks`（但要保留 `0x1005` 的相容性）。
 - 驗收：`0x1005` 回覆一定是合法 JSON（host 端 json.loads 成功）。
 
-### 2.3 round watchdog
+### 2.3 round watchdog（**已撤回，保留作歷史**）
+
+> ⚠️ 這一節描述的做法**從未在板上生效**：`monitor` 任務 2026-11-04 已刪、
+> `epoch`／`budget_us`／`no_epoch` 2026-11-06 已移除。現時 `nc4_bus_loop_count()`
+> 仍然存在而且零呼叫者。要不要補回停滯偵測，見 [buffers.md §9](../03_notes/buffers.md)。
 
 - 每核用 `nc_epoch` 的 `rounds` 判斷停滯：
   `collecting && rounds 在 N 秒內沒有增加` → `ESP_LOGE` + 印當下 `epoch` 與各 loop 的
@@ -95,7 +102,7 @@
 ## 4. 需要你決定的事
 
 1. ~~測試 task 預設~~ → **n**（已實作；bench 要量時手動開）
-2. ~~watchdog 停滯時~~ → **只記錄**（已實作；`NC_MON_RESTART_S` 可覆蓋）
+2. ~~watchdog 停滯時~~ → **已撤回**（`monitor`／`NC_MON_RESTART_S` 都唔存在）
 3. **tinyusb 排除**：見 §3（要先確認板子的 USB 接線）
 
 ---
@@ -151,7 +158,7 @@
 | 7.2 | `nc4.pool` 設定 | ✅ 完成 | 0 | S3／P4 system.json；`where` internal／psram |
 | 7.3 | 跨核轉寄 queue | ✅ 完成 | queue 8 幀／核 | 目的核 `nc4_fwd_poll`；`net.fwd` 統計 |
 | 7.4 | `0xF01C MEM_BENCH` | ✅ 完成 | 測試映像 | internal 240／PSRAM 21 MB/s（copy） |
-| 7.5 | forward 成功路徑 | ⏸ 待 UART 腳位 | — | 現時 UART 被 SD GPIO7/8 佔用，測到 `err` 而非 `frames` |
+| 7.5 | forward 成功路徑 | ✅ **已驗**（2026-11-10） | — | 用 ESP-NOW 做第二條可送 link：`ESPNOW` frames 4／drops 0（[wifi-espnow-led-tests.md §2](../03_notes/wifi-espnow-led-tests.md)）；UART 仍待腳位 |
 | 7.6 | TTL／leak watchdog、tap | ⏸ 未做 | — | refcount 已在，未有 subscriber |
 | 7.7 | pool 接到 RX（header-first assembler） | ⏸ 未做 | 大改 | 現況仍用 per-link parser ring／PUSH slots |
 | 7.8 | 多實例（UART0/1/2、I2C、SPI） | ⏸ 未做 | 大改 | 要 pin map 與 per-instance owner |
@@ -170,3 +177,31 @@
 | 8.5 | `nc4.forward` config | ⏸ P0 待加 | `where=psram`、`depth=2`、`max_frame` |
 | 8.6 | tap／refcount | ⏸ P3 | 用 `nc_hub_generation` 防 ABA |
 | 8.7 | P4 8K／depth 4 | ⏸ P4 | slot 8,256；量 PSRAM 頻寬 |
+
+## 9. 2026-11-10：緩衝工具收斂成一個（`nc_buf`）
+
+> 依據：[buffers.md](../03_notes/buffers.md)、[glossary.md](../03_notes/glossary.md)、
+> [status §7.31](status.md)。
+
+**背景**：準備 P1（`nc4_fwd` 改 hub 版）時發現，真正的問題是**同一類東西有四個名**
+（plan／pool／hub／環），`STATUS` 的帳散在四處。使用者要求「整個項目只用一個緩衝工具」。
+所以 §8 的定案（轉發走 PSRAM、strict FIFO、per 目的 link × 來源核）**方向不變**，
+但載體由 `nc_hub` 改成 `nc_buf`，而且 plan／pool 一併收進去。
+
+| # | 項目 | 狀態 | 備註 |
+|---|---|---|---|
+| 9.1 | 術語與退役詞（hub／pool／環／plan） | ✅ 定案 | [glossary.md](../03_notes/glossary.md) |
+| 9.2 | 三條鐵律：開機要齊、永不 free、只管 carve | ✅ 定案 | 冇 free 就冇碎片（更正舊文件把功勞歸給 plan） |
+| 9.3 | plan 降級為 `nc_buf` 內部 arena | ✅ 定案 | `nc_plan_*` 公開 API 在 P5 刪 |
+| 9.4 | S2S／S2P／P2S／P2P 是 `put()` 的四種引數 | ✅ 定案 | 不是四種型別；`DMA` class 強制 copy 入 S |
+| 9.5 | `nc_buf` 核心（FIFO＋隨機＋S/P copy＋`mem.buf`） | ✅ **已完成**（2026-11-10） | 上板 `0xF032` 9 項全 pass、`mem.buf` 858 B；hosttest 10/10。見 [status §7.32](status.md) |
+| 9.6 | 回覆幀／TX 環／small·bulk 搬過去 | ⏸ P2 | 行為不變，逐項驗 |
+| 9.7 | 轉發搬過去（取代 `nc_pool.forward`＋跨核 queue） | ⏸ P3 | 即原 §8.4，改用 `nc_buf` |
+| 9.8 | parser 環搬過去（配 header-first assembler） | ⏸ P4 | — |
+| 9.9 | 可等待模式、tap／多讀者、per-link `max_frame` | ⏸ 未定 | 見 [buffers §10](../03_notes/buffers.md) |
+| 9.10 | **任務 ↔ 緩衝區契約（C1–C11）成文**、三份任務文件統一 | ✅ 完成（2026-11-10） | [buffers.md §9](../03_notes/buffers.md)；見 [status §7.33](status.md) |
+| 9.11 | **STREAM 模式**（parser 環用）＋ `put_abort`／FIFO 唔卡死 | ✅ 完成（2026-11-10） | 上板 `0xF032` 11/11；見 [status §7.34](status.md) |
+| 9.12 | **總線搬過來**：B1 PUSH 插槽 → B2 parser 環 → B3 回覆幀／TX | ⏸ 下一步（風險：B2） | [buffers.md §11.2](../03_notes/buffers.md) |
+
+**§8 的處理**：8.2／8.3 的**行為定案保留**，但「`nc_hub`」這個名字退役（改叫 FIFO 緩衝區），
+8.5 的 `nc4.forward` config 併入 9.5 的 buffer 宣告。

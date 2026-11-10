@@ -63,11 +63,20 @@ typedef struct {
     size_t      bytes;
     nc_plan_class_t cls;
     size_t      align;       // 0 → 32
+    // ── 2026-11-10（P5 第一刀）：宣告「格 × 格數」──
+    // slot_bytes > 0 → 管理器會把它建成一條 nc_buf，並在 on_start 交 `buf` 給你；
+    // = 0 → 保持舊行為（只交 ptr/len，由任務自己 nc_buf_at／parser_create_in 接管）。
+    uint32_t    slot_bytes;
+    uint16_t    n;
+    uint32_t    flags;       // nc_buf flags（NC_BUF_F_STREAM / NC_BUF_F_FIFO）
 } nc_task_res_t;
+
+struct nc_buf;               // 見 nc_buf.h；用前置宣告避免硬依賴
 
 typedef struct {
     void  *ptr;
     size_t len;
+    struct nc_buf *buf;      // 非 NULL = 管理器已按 slot_bytes×n 建好
 } nc_task_res_view_t;
 
 // ── 接線宣告（誰要什麼）──
@@ -183,6 +192,10 @@ esp_err_t nc_task_enable(const char *name, bool on);       // 暫停/恢復（lo
 // 執行期換核會同 router 的決定打架，而且「停 → 改 → 起」中間的狀態極難收拾。
 // 要換核就改宣告／改 config，然後重開機。
 bool      nc_task_exit_requested(void);                    // loop 裡查：有人請你結束
+// 心跳：**長跑**的 loop（fn 係 for(;;) 永遠唔返回，例如 decode0/1）要在每輪自己叫一次，
+// 否則管理器只會在進入 fn 之前計一次（看起來永遠係 1）。短 fn 由管理器自動計。
+// 停滯偵測由主機比對兩次 STATUS keys=tasks 的 `b` 差值 —— 板子唔開計時器、唔開任務。
+void      nc_task_beat(void);
 
 // ── 查詢 / 狀態 ──
 const nc_task_t *nc_task_find(const char *name);

@@ -89,6 +89,32 @@
 
 ---
 
+## 1.3 優先級保留區（2026-11-10 定案）
+
+**NC 核心（收 → 解 → 回）獨佔 7–15**，其他任務一律 ≤ 6。常數在
+[nc_prio.h](../../firmware/components/sys/task/include/nc_prio.h)。
+
+| 優先級 | 誰 |
+|---:|---|
+| 24 / 22 | `ipc1` / `esp_timer`（IDF 系統） |
+| **15–7** | **保留**：`decode0/1` = 8、bus producer（`cdc.rx`／`uart.rx`）= 7，其餘留白 |
+| 6 | 其他任務的上限（TinyUSB 5 之上留一格） |
+| 5 | `TinyUSB`（IDF） |
+| 2 | `fx` / `nc_log` |
+| 1 | `app_main` / `hello` / bench |
+
+**兩條硬規則**：
+
+1. **decode 一定要高過同核 producer。** 反過來（producer 高）實測：push→decode 接手
+   平均 **478 µs**、最大 1.77 ms，而且插槽環被讀爆（300 幀 workload 的 `slot_full` +122）。
+   倒過來之後 **42 µs / 130 µs、`slot_full` = 0、`parse` 由 1,500 降到 510 µs/幀**。
+2. **新任務唔可以入 7–15。** 要更快就提出來討論，唔可以自己搶。
+
+`nc4_bus_start_producer()` 會自動把 producer 夾到 `NC_PRIO_DECODE - 1` 並印警告 ——
+所以就算寫錯都唔會靜靜死鎖，但**唔應該靠它**。
+
+---
+
 ## 2. 核心隔離：跨核只准有「資料」，唔准有「喚醒」
 
 **設計目標：一個核完全獨立，兩核只透過緩衝區交換資料，互不干擾。**

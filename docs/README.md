@@ -7,10 +7,10 @@
 
 | 分類 | 看什麼的人 | 內容 | 份數 |
 |---|---|---|---|
-| **00_pm** 項目管理 | 想知道「做到哪、接下來做什麼」的人 | 現況、路線圖、決策與待辦 | 3 |
+| **00_pm** 項目管理 | 想知道「做到哪、接下來做什麼」的人 | 現況、路線圖、決策與待辦 | 6 |
 | **01_protocol** 協議層 | 對接方 / 寫 transport / 寫 PC 工具的人 | NC4 在哪些通道上跑、每個通道要自己做什麼 | 3 |
 | **02_guides** 使用教學 | 要 build / 燒錄 / 跑測試 / 選連線的人 | 工具怎麼用、測試怎麼跑、連線怎麼選、數字怎麼判讀、**量測方法怎麼重跑** | 4 |
-| **03_notes** 設計筆記 | 維護者 / 想了解設計脈絡的人 | 架構、分層、路由、任務模型、記憶體、研究、上板紀錄 | 24 |
+| **03_notes** 設計筆記 | 維護者 / 想了解設計脈絡的人 | 架構、分層、路由、任務模型、記憶體、研究、上板紀錄 | 42 |
 
 > **趕時間先看**：[00_pm/status.md](00_pm/status.md) —— 一頁涵蓋「已驗證的數字、已定案的架構、還沒做的事、要測的場景」。
 
@@ -21,7 +21,10 @@
 | 文件 | 內容 |
 |---|---|
 | [status.md](00_pm/status.md) | **單頁現況**：已驗證的數字（各通道吞吐／RTT／上限）、已定案架構、未完成事項、待測場景 |
+| [next-steps.md](00_pm/next-steps.md) | **下一步計劃（依序）**：已完成／已撤回／待決定的項目、每項的大小與風險、需要使用者拍板的清單。**§9 是緩衝工具收斂（`nc_buf`）的 P0–P5** |
 | [roadmap.md](00_pm/roadmap.md) | **重寫計劃（歷史分期）**：背景、已定案、非目標、Phase 0–5 現況、開放決策。Phase 0／1 已完成，近期清單看 status.md §7 |
+| [handoff-2026-11-04.md](00_pm/handoff-2026-11-04.md) | **交接單**：當時的系統全貌、五個未解問題、下一步建議（歷史文件，結論已併入 status／next-steps） |
+| [disposition.md](00_pm/disposition.md) | **死碼與文件處置表**：哪些留、哪些刪、哪些標為歷史（B2b／B3／B4／B5／B6） |
 | [README.md](00_pm/README.md) | 這一層放什麼、不放什麼（判準） |
 
 ## 01_protocol — 協議層
@@ -52,10 +55,19 @@
 
 | 文件 | 內容 |
 |---|---|
+| [driver-layer.md](03_notes/driver-layer.md) | **驅動與匯流排層（`driver/` / `bus/`）**：舊專案 `slave/driver/*_drv.py` 怎麼落地；**`bus/` 是通用匯流排（NC4／LED(SPI)／LCD(I80) 都係它的 personality，唔綁 NC4）**；driver／bus／sys 三層判準、六條 driver 規則、遷移順序 |
+| [contracts.md](03_notes/contracts.md) | **契約總表（單一入口）**：任務管理器界線與硬上限、任務↔緩衝區（C1–C11 摘要）、**優先級保留區 7–15**、解碼器／動作（handler 唔可以重入）、通道／路由、**初次開機與配置生命週期**、現況盤點、待決定清單 |
+| [glossary.md](03_notes/glossary.md) | **字彙表（術語一句話）**：任務 vs 線程、`level` vs `layer`、緩衝區／格／arena／S·P·DMA／S2P 四組合、退役的詞（hub／pool／環／plan）與改用什麼。**新名詞先查這裡** |
+| [buffers.md](03_notes/buffers.md) | **緩衝區 `nc_buf`（全項目唯一緩衝工具）**：三條鐵律（開機一次要齊／永不釋放／只管切）、為什麼冇碎片、S2S·S2P·P2S·P2P 四組合與成本、**佈局與搭配七原則＋S3 逐條 buffer 表**、`mem.buf` 帳、P0–P5 遷移。**取代下面 buffer-manager／buffer-manager-status／buffer-pool／comm-buffers 的設計部分** |
+| [buffer-patterns.md](03_notes/buffer-patterns.md) | **緩衝用法模式（10 個）＋ 小技巧 16 條**：什麼該進工具、什麼寫成模式；RX 流水／命令 staging／回覆打包／TX 環／跨核轉寄／LED 大頁／I80 波形／LCD 分塊／`.fxe` 換場／OTA 輪替，各自形狀、流程、陷阱與數字。**實作前先讀這份** |
 | [architecture-flow.md](03_notes/architecture-flow.md) | **執行期流程**：mode 決策、NC4 檔案編輯、frame pipeline、ownership matrix |
+| [execution-model.md](03_notes/execution-model.md) | **執行模型**：FreeRTOS 每 loop 一條 task vs 每核合作式大循環，兩者的取捨與選擇 |
+| [execution-rules.md](03_notes/execution-rules.md) | **執行規則**：搶佔的條件、核心隔離（跨核只准有資料、唔准有喚醒）、等待的三種形態、熱路徑零 log、緩衝與堆疊的宣告流程、測試歸類 |
+| [core-isolation.md](03_notes/core-isolation.md) | **核隔離不變式（2026-11-04 定義）**：兩個核各自擁有什麼、什麼可以跨、違規清單 |
+| [cross-core.md](03_notes/cross-core.md) | **跨核心：邊些中斷會打到另一個核**：中斷親和性與實際干擾來源 |
 | [decode-routes.md](03_notes/decode-routes.md) | **解碼路線與接收緩衝（現況）**：五條通道各自跑在哪一核、用哪塊緩衝、分派路徑；「執行完才能收下一個」對一半；heap/BSS 的隱形緩衝清單與優先序 |
 | [task-model.md](03_notes/task-model.md) | **任務模型（房東／租戶）**：核心 vs 任務的分界、三個 component、開機流程、`tasks.json` 格式與補寫規則、`.fxe` 怎麼變任務、已驗證清單 |
-| [task-lifecycle.md](03_notes/task-lifecycle.md) | **任務生命週期**：建立前要準備什麼（欄位／上限）、四步各做什麼與失敗路徑、資源怎麼加總與 carve、`level` vs `layer` 的實際保證（含缺口）、停止順序與**歸還表**（plan 記憶體不還）、狀態機與 log 對照、6 個已知缺口 |
+| [task-lifecycle.md](03_notes/task-lifecycle.md) | **任務生命週期**：建立前要準備什麼（欄位／上限）、四步各做什麼與失敗路徑（**全有或全無**）、資源怎麼加總與建立、`level` vs `layer` 的實際保證（含缺口）、停止順序與**歸還表**（緩衝區不還，靠 `handover` 換手）、狀態機與 log 對照、6 個已知缺口 |
 | [task-fx-open-questions.md](03_notes/task-fx-open-questions.md) | **任務與 fx 的未定問題清單**：已定的 20 條、待決定、已移出的 fx 細節 |
 | [routing.md](03_notes/routing.md) | **解碼路由表（Router × 引擎 × 任務）**：舊專案 `self` / `vbus` 在分什麼、引擎為何不用宣告（decode 由 routes 推、fx 由 manifest 推）、`out` 四種組合、舊→新對照、優先權與配額、開機表、`.fxe` 與 manifest 兩個格式、與現況程式的六項落差 |
 | [naming.md](03_notes/naming.md) | **命名慣例**：一個子系統一個前綴（`nc4_`/`nc_plan_`/`nc_task_`/`nc_store_`/`nc4_ws_`/`nc_fx_`）、**`<域>_task` 與 `<域>_action` 後綴**（同名域不混淆，例 pixel）、檔名＝前綴＋角色、型別與列舉規則、新舊對照、**§5 術語表（FXE 引擎／FXE 模組／FXE 容器／pixel 渲染器）** |
@@ -64,19 +76,21 @@
 | [tx-path-design.md](03_notes/tx-path-design.md) | **發送／轉寄路徑（2026-11-08 討論＋同日落地）**：各通道「交出去」的緩衝與阻塞行為（CDC 4 KB FIFO 不用等、UART 1 KB ring 會排空、P4 TCP >5.7 KB 會等）、`nc4_link` 出口表、`routes[].out` 轉寄（同步、先轉寄後本地）、零複製 vs copy-into-ring vs pin 插槽、4 KB／8 KB 的成本表、DMA 的事實（UART 無 TX DMA）、PSRAM 與 flash 停頓、**上板量測結果與仍未做的清單** |
 | [fat-ownership.md](03_notes/fat-ownership.md) | **FAT 擁有者（互斥模型）**：為什麼不能同時掛碟與讀檔、為什麼只切 mount_point 不夠、LUN 拆建＋USB 重新列舉、實測數據 |
 | [config-layers.md](03_notes/config-layers.md) | **配置分層（一個層一個檔案）**：`config/hardware.json`→`driver`→`system`→`network`→`tasks`→`effects`→`ui`；每層自己讀、缺檔用預設、壞檔只退化該層；開機順序（硬體先起來才讀分配）；`system.json` 的 `links[]` / `routes[]` 與 `tasks.json` 怎麼寫 |
+| [hardware-config.md](03_notes/hardware-config.md) | **硬體設定的三層結構**：preset → override → merged，以及為什麼不直接改 board 檔 |
 | [p4-bringup.md](03_notes/p4-bringup.md) | **ESP32-P4 上板紀錄**：IDF 版本、console/PSRAM 陷阱、乙太網吞吐調校（1.1 → 8 MB/s） |
 | [failure-policy.md](03_notes/failure-policy.md) | **失敗處理**：config 壞掉/超範圍、PHY 協商失敗、拔線、USB MSC 不支援時的替代路徑（HTTP/NC4 file） |
-| [writing-a-task.md](03_notes/writing-a-task.md) | **怎麼寫一個 Task（C）**：`nc_task_register()` 之後全交給管理器（plan 宣告 / 開 loop / 量測 / 狀態）；身份（kind）/接線（mem·claims·**provides**）/執行（loops：core·layer·節奏）/生命（on_start·on_stop·attach·detach）；**§3.2 指令＝action，不是任務的財產** |
+| [writing-a-task.md](03_notes/writing-a-task.md) | **怎麼寫一個 Task（C）**：`nc_task_register()` 之後全交給管理器（建立**緩衝區** / 開 loop / 狀態）；身份（kind）/接線（mem·claims·**provides**）/執行（loops：core·layer·節奏）/生命（on_start·on_stop·attach·detach）；**§3.1 資源＝緩衝區（契約 C1–C11）**、**§3.2 指令＝action，不是任務的財產** |
 | [hardware-bus.md](03_notes/hardware-bus.md) | **硬體歸屬（設計紀錄，未實作）**：現在是裝配層人工分配（一裝置一 owner）、為什麼不需要執行期仲裁、哪天要做時的形狀與位置（task 層），以及三個觸發條件 |
 | [rx-architecture.md](03_notes/rx-architecture.md) | **收／解路徑正式架構（規劃）**：分核／零複製的能力邊界、缺什麼、component 切法、config 與記憶體、P0–P5 遷移 |
-| [buffer-manager-status.md](03_notes/buffer-manager-status.md) | **緩衝管理器實作現況**：三個原語、N 的語義、不變量、測試結果、已知缺陷 |
-| [buffer-pool.md](03_notes/buffer-pool.md) | **共用緩衝池與 PSRAM 實測（2026-11-09）**：三個 size class（small／bulk／forward）、descriptor／refcount、`nc4.pool` 設定、跨核轉寄 queue、`0xF01C` 量到的 internal 240 MB/s vs PSRAM 21–33 MB/s、38.4 KB frame 的可行性計算、限制與未做 |
+| [buffer-manager-status.md](03_notes/buffer-manager-status.md) | **（設計已併入 [buffers.md](03_notes/buffers.md)）** 緩衝管理器實作現況：三個原語、N 的語義、不變量、測試結果、已知缺陷 |
+| [buffer-pool.md](03_notes/buffer-pool.md) | **（設計已併入 [buffers.md](03_notes/buffers.md)，本頁保留量測）** 共用緩衝池與 PSRAM 實測（2026-11-09）：三個 size class（small／bulk／forward）、descriptor／refcount、`nc4.pool` 設定、跨核轉寄 queue、`0xF01C` 量到的 internal 240 MB/s vs PSRAM 21–33 MB/s、38.4 KB frame 的可行性計算、限制與未做 |
 | [psram-surface.md](03_notes/psram-surface.md) | **PSRAM surface／pass 管理器（設計）**：什麼叫「用對 PSRAM」（數 pass、internal tile、分塊 bound latency，不是切細就快）、`nc_surface` 的 buffer／tile／sink／stats API、direct vs staging、38.4 KB frame 的預算、決策矩陣與落地順序 |
-| [comm-buffers.md](03_notes/comm-buffers.md) | **通訊緩衝最終定案（2026-11-09）**：RX 留 internal、轉發全部走 **PSRAM 的 `nc_hub`**（per 目的 link × 來源核、strict FIFO、writer mutex）、`nc_pool.forward` 取消、`nc4.forward` 設定、S3 138 KB／P4 132 KB PSRAM、失敗政策與 P0–P4 遷移 |
+| [comm-buffers.md](03_notes/comm-buffers.md) | **（設計已併入 [buffers.md](03_notes/buffers.md)）** 通訊緩衝定案（2026-11-09）：RX 留 internal、轉發走 PSRAM 的 `nc_hub`（per 目的 link × 來源核、strict FIFO、writer mutex）、`nc_pool.forward` 取消、S3 138 KB／P4 132 KB PSRAM、失敗政策與 P0–P4 遷移 |
 | [wifi-espnow-led-tests.md](03_notes/wifi-espnow-led-tests.md) | **Wi-Fi／ESP-NOW／I80 測試紀錄（2026-11-09）**：ESP-NOW P2P＋router 閉環、AP 模式、STA DHCP 未取 IP、本地 AP reset、GRBW/NeoPixelBus vs I80 16-lane 的判斷、16×600 50 FPS 預算與量測結構、PSRAM 競爭數據 |
 | [memory-budget.md](03_notes/memory-budget.md) | **記憶體預算（S3 實測 map）**：內部 SRAM 126 KB 靜態 + 40 KB 執行期、開機剩 ~168 KB、與 MicroPython 對比、**開 WiFi 的 90–120 KB 成本**（Espressif 官方表）、怎麼自己量 |
+| [memory-vs-micropython.md](03_notes/memory-vs-micropython.md) | **記憶體實測對照**：本專案 vs MicroPython（mp_Net-Core）的靜態／執行期用量 |
 | [buffer-tightening.md](03_notes/buffer-tightening.md) | **緩衝區貼身化（2026-11-08 實測）**：每條 link／任務的緩衝逐一量測再收斂（UART 4×256、RX/TX 1 KB、棧 1.5 KB；decode/main 3 KB）；抓到 UART「等收滿才返回」、測試回覆幀 2.6 KB 上棧兩個真問題；雙核隔離與前後吞吐對照 |
-| [buffer-manager.md](03_notes/buffer-manager.md) | **緩衝管理器（設計定案、未實作）**：三階段 declare→commit→take、四種機制、三層 tier、撇除規則、S3 記憶體圖、P0–P4 分期、待決事項。**接手實作先讀這份** |
+| [buffer-manager.md](03_notes/buffer-manager.md) | **（設計已被 [buffers.md](03_notes/buffers.md) 取代，保留作歷史）** 三階段 declare→commit→take、四種機制、三層 tier、撇除規則、S3 記憶體圖、P0–P4 分期 |
 | [memory.md](03_notes/memory.md) | **記憶體原語**：pool / arena 兩種壽命、三種 heap class、為什麼熱路徑不 malloc、緩衝能不能靠 config 改 |
 | [extension-architecture.md](03_notes/extension-architecture.md) | **擴充架構（兩個插槽、一個帳本、三個仲裁）**：為什麼 TFT 吃 config、LVGL 必須是 code；把 gpio_claim / hw=("lcd") / nc_plan 收斂成一個 ledger；接線 / 排程 / 畫面三個仲裁；六個現在就存在的衝突；P0–P5 計劃 |
 | [fx-contract.md](03_notes/fx-contract.md) | **fx 模組契約**：安全邊界（模組只能碰自己的線性記憶體）、交接緩衝區佈局與時序、ABI 表、失敗模型、狀態機、P0–P4 計劃 |

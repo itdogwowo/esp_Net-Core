@@ -1,6 +1,7 @@
 // loop 的執行層：建立 FreeRTOS task、跑使用者迴圈、停止。
 // 這是「任務管理器代管」的實際所在 —— 使用者只寫 fn(arg)，不碰 xTaskCreate。
 #include "nc_task_priv.h"
+#include "nc_prio.h"
 
 #include <string.h>
 
@@ -53,6 +54,7 @@ static void trampoline(void *arg)
 
     while (!rt->exit_req) {
         if (rt->enabled && d->fn != NULL) {
+            rt->beats++;            // 心跳：只係一個原子遞增（4 B）
             d->fn(d->arg);
         }
         if (d->run_once) {
@@ -86,13 +88,23 @@ esp_err_t nc_task_rt_start(nc_task_rt_t *rt)
     rt->exited = false;
     active_put(rt);
 
+    // 優先級由管理器治理（見 nc_prio.h）：保留區 7–15 只准 NC 核心（SYSTEM）用。
+    // 租戶（NORMAL／EFFECT）就算寫錯都會被夾到 NC_PRIO_OTHERS_MAX，並印警告 ——
+    // 唔可以靜靜讓未來某個任務把核心擠掉（症狀只會是「偶爾慢」，極難查）。
+    uint32_t prio = rt->def->prio;
+    if (rt->kind != NC_TASK_SYSTEM && prio >= NC_PRIO_BAND_MIN) {
+        ESP_LOGW(TAG, "loop [%s] prio %u 落入保留區（%d–%d）→ 夾到 %u",
+                 rt->def->name, (unsigned)prio, NC_PRIO_BAND_MIN, NC_PRIO_BAND_MAX,
+                 NC_PRIO_OTHERS_MAX);
+        prio = NC_PRIO_OTHERS_MAX;
+    }
+
     BaseType_t ok;
     if (rt->core == NC_TASK_CORE_ANY) {
-        ok = xTaskCreate(trampoline, rt->def->name, rt->def->stack, rt,
-                         rt->def->prio, &rt->handle);
+        ok = xTaskCreate(trampoline, rt->def->name, rt->def->stack, rt, prio, &rt->handle);
     } else {
         ok = xTaskCreatePinnedToCore(trampoline, rt->def->name, rt->def->stack, rt,
-                                     rt->def->prio, &rt->handle, rt->core);
+                                     prio, &rt->handle, rt->core);
     }
     if (ok != pdPASS) {
         active_del(rt);
@@ -129,6 +141,14 @@ esp_err_t nc_task_rt_stop(nc_task_rt_t *rt, uint32_t wait_ms)
         return ESP_ERR_TIMEOUT;
     }
     return ESP_OK;
+}
+
+void nc_task_beat(void)
+{
+    nc_task_rt_t *rt = active_by_handle(xTaskGetCurrentTaskHandle());
+    if (rt != NULL) {
+        rt->beats++;
+    }
 }
 
 bool nc_task_rt_exit_requested(void)
