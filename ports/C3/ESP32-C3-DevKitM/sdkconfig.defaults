@@ -1,0 +1,27 @@
+# ESP32-C3-DevKitM — 硬體事實（改這裡要重新 build）
+# 對應 board.json；tools/board.py check 會驗證兩者一致。
+#
+# 這一塊的價值是**驗證能力判斷**：C3 沒有 USB-OTG 控制器，
+# 所以 CONFIG_NETCORE_USB_OTG 應該自動 n → 整組 TinyUSB 服務組不編入。
+
+# ── flash（4 MB 內嵌）──
+CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
+CONFIG_ESPTOOLPY_FLASHFREQ_40M=y
+CONFIG_ESPTOOLPY_FLASHMODE_DIO=y
+
+# ── CPU（單核 160 MHz）──
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_160=y
+
+# ── console：UART0 主 ＋ USB-Serial-JTAG 次（同 P4 一樣）──
+# 只設 USB-JTAG 為主的話，bootloader 那一段仍然走 UART0，
+# 出錯時完全冇嘢睇；兩個都開比較安全。
+CONFIG_ESP_CONSOLE_UART_DEFAULT=y
+CONFIG_ESP_CONSOLE_SECONDARY_USB_SERIAL_JTAG=y
+
+# ── 分區表：全域那份是 16 MB（N16R8），C3 只有 4 MB，用自己一份 ──
+# 路徑相對 firmware/（專案根）。
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="../ports/C3/ESP32-C3-DevKitM/partitions.csv"
+
+# ── 沒有 PSRAM ──
+CONFIG_SPIRAM=n

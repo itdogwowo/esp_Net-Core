@@ -1,0 +1,58 @@
+{
+  "version": 1,
+  "_comment": [
+    "C3 專用設定表。與 S3／P4 的差別全部寫在這裡，程式碼不用改。",
+    "",
+    "── 核心 ──",
+    "C3 是單核：routes 一律 decode0，唔可以出現 decode1（單核上建立 core1 任務會 assert）。",
+    "雙核板要並行才寫 decode1；呢個表就是「哪個任務在哪個核」的唯一真相。",
+    "",
+    "── 通道 ──",
+    "C3 冇 USB OTG（無 CDC），所以 links 只有 UART。",
+    "寫 CDC 進去也不會建立：link 建立點在 #if NC_HAS_USB 裡面。",
+    "",
+    "── USB ──",
+    "usb.msc / usb.cdc_log 在冇 OTG 的晶片上沒有作用（編譯期整組不存在），",
+    "保留欄位只是讓同一份 schema 通用。"
+  ],
+  "cID": "",
+  "frame_interval_ms": 20,
+  "num_pixels": 0,
+  "log_debug_mode": 0,
+  "usb": {
+    "msc": 0,
+    "cdc_log": 0
+  },
+  "nc4": {
+    "links": [
+      {
+        "name": "UART",
+        "kind": "uart",
+        "enable": 1
+      },
+      {
+        "name": "usb_jtag",
+        "kind": "usb_jtag",
+        "enable": 1
+      }
+    ],
+    "routes": [
+      {
+        "in": "nctx",
+        "out": ["decode0"]
+      },
+      {
+        "in": "outbound",
+        "out": []
+      },
+      {
+        "in": "UART",
+        "out": ["decode0"]
+      },
+      {
+        "in": "usb_jtag",
+        "out": ["decode0"]
+      }
+    ]
+  }
+}

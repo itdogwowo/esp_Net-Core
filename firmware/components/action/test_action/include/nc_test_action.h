@@ -28,6 +28,8 @@ extern const nc_action_table_t nc_test_action_table;
 void nc_test_action_init(const nc_test_action_hooks_t *hooks);
 // 測試版開機自動起 ESP-NOW（B 冇 CDC 時也可以做兩板互轉）。
 void nc_test_action_espnow_boot(nc4_decoder_t *decoder);
+// P4 測試版：開機後自動對 peer 跑吞吐掃描（走 0xF050 同一條路徑）
+void nc_test_action_netauto_boot(void);
 
 #ifdef __cplusplus
 }

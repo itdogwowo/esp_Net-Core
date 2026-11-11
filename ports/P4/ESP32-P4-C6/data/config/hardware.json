@@ -1,0 +1,199 @@
+{
+  "version": 1,
+  "_comment": [
+    "用戶覆蓋層：這裡是「開機預設值」，可以直接改；只寫同 wiring 不同的欄位也可以。",
+    "板級 pins／buses 的 build-time 預設在 ports/<board>/wiring.json（不會出現在 USB）。",
+    "沒有寫的欄位 = 用 wiring；寫了 = 覆蓋該欄位。",
+    "GPIO/PIN、SPI、I2C、I80、UART、I2S、PWM、SDIO、ENC、XL9555 都在這裡。"
+  ],
+  "_gpio_convention": "兩種『未設定』寫法不能混用：-1 = 未設定／不啟用（driver 以 >= 0 判斷）；null = 沒接這條線（driver 以 is not None 判斷，寫 -1 會變成 Pin(-1) 而爆掉）。標 -1 的欄位可以安全留著；標 null 的欄位要填真實腳位才 enable。",
+  "ETH": {
+    "enable": 1,
+    "mdc": 31,
+    "mdio": 52,
+    "ref_clk": 50,
+    "phy_type": "IP101",
+    "phy_addr": 1,
+    "spi": -1,
+    "cs": -1,
+    "rst": -1,
+    "int": -1
+  },
+  "PIN": {
+    "enable": 0,
+    "list": [
+      {
+        "GPIO": null,
+        "label": "tft_dc",
+        "mode": "OUT",
+        "initial": 0
+      },
+      {
+        "GPIO": null,
+        "label": "tft_cs",
+        "mode": "OUT",
+        "initial": 1
+      },
+      {
+        "GPIO": null,
+        "label": "tft_rst",
+        "mode": "OUT",
+        "initial": 1
+      },
+      {
+        "GPIO": null,
+        "label": "tft_bl",
+        "mode": "OUT",
+        "initial": 0
+      },
+      {
+        "GPIO": null,
+        "label": "btn",
+        "mode": "IN",
+        "initial": 0,
+        "pull": "UP"
+      },
+      {
+        "GPIO": null,
+        "label": "touch_int",
+        "mode": "IN",
+        "initial": 0,
+        "pull": "UP"
+      }
+    ]
+  },
+  "SPI": {
+    "enable": 0,
+    "list": [
+      {
+        "baudrate": 80000000,
+        "phase": 0,
+        "polarity": 0,
+        "GPIO": {
+          "sck": null,
+          "mosi": null,
+          "miso": null
+        },
+        "data_pins": []
+      }
+    ]
+  },
+  "I2C": {
+    "enable": 0,
+    "list": [
+      {
+        "freq": 400000,
+        "GPIO": {
+          "scl": null,
+          "sda": null
+        }
+      }
+    ]
+  },
+  "I80": {
+    "enable": 0,
+    "list": [
+      {
+        "data": [],
+        "wr": -1,
+        "cs": -1,
+        "freq": 80000000
+      }
+    ]
+  },
+  "UART": {
+    "enable": 0,
+    "list": [
+      {
+        "baudrate": 115200,
+        "rxbuf": 16384,
+        "txbuf": 16384,
+        "en_settle_ms": 1,
+        "GPIO": {
+          "tx": null,
+          "rx": null,
+          "en": -1
+        }
+      }
+    ]
+  },
+  "I2S": {
+    "enable": 0,
+    "list": [
+      {
+        "GPIO": {
+          "sck": null,
+          "ws": null,
+          "sd": null
+        },
+        "config": {
+          "mode": "tx",
+          "bits": 16,
+          "format": "stereo",
+          "rate": 44100,
+          "ibuf": 40000
+        }
+      }
+    ]
+  },
+  "PWM": {
+    "enable": 0,
+    "list": [
+      {
+        "GPIO": null
+      }
+    ]
+  },
+  "SDIO": {
+    "enable": 0,
+    "list": [
+      {
+        "freq": 40000000,
+        "width": 4,
+        "GPIO": {
+          "sck": -1,
+          "cmd": -1,
+          "data": [
+            -1,
+            -1,
+            -1,
+            -1
+          ]
+        }
+      }
+    ]
+  },
+  "ENC": {
+    "enable": 0,
+    "list": [
+      {
+        "GPIO": {
+          "a": null,
+          "b": null
+        }
+      }
+    ]
+  },
+  "XL9555": {
+    "enable": 0,
+    "bus": {
+      "type": "i2c",
+      "index": -1
+    },
+    "addr": "0x20",
+    "list": [
+      {
+        "IO": 0,
+        "label": "LCD_RST",
+        "mode": "OUT",
+        "initial": 1
+      },
+      {
+        "IO": 1,
+        "label": "BL_CTR",
+        "mode": "OUT",
+        "initial": 0
+      }
+    ]
+  }
+}

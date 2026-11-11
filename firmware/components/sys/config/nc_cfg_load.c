@@ -147,6 +147,7 @@ static bool kind_parse(const char *s, nc_link_kind_t *out)
     static const char *const names[NC_LINK_KIND_MAX] = {
         [NC_LINK_CDC] = "cdc", [NC_LINK_UART] = "uart", [NC_LINK_TCP] = "tcp",
         [NC_LINK_WS] = "ws",   [NC_LINK_UDP] = "udp",
+        [NC_LINK_USBJTAG] = "usb_jtag",
     };
     if (s == NULL || out == NULL) {
         return false;
@@ -673,7 +674,8 @@ esp_err_t nc_cfg_apply_system(const cJSON *root, nc_system_cfg_t *out, nc_cfg_st
     }
 
     static const char *const root_keys[] = {
-        "version", "_comment", "cID", "frame_interval_ms", "num_pixels", "nc4", "log_debug_mode",
+        "version", "_comment", "cID", "frame_interval_ms", "num_pixels", "nc4",
+        "log_debug_mode", "usb",
     };
     note_unknown(root, root_keys, sizeof(root_keys) / sizeof(root_keys[0]), st);
 
@@ -681,6 +683,20 @@ esp_err_t nc_cfg_apply_system(const cJSON *root, nc_system_cfg_t *out, nc_cfg_st
     out->frame_interval_ms = (uint16_t)get_int(root, "frame_interval_ms", 20, 1, 1000, st);
     out->log_debug_mode = (uint8_t)get_int(root, "log_debug_mode", 0, 0, 1, st);
     out->num_pixels = (uint16_t)get_int(root, "num_pixels", 0, 0, 65535, st);
+
+    // ── usb：執行期開關（編譯期有沒有 USB 由 Kconfig 決定，這裡只決定要不要用）──
+    // 缺席 = 兩個都 1（跟 nc_cfg_defaults_system 一致）。
+    const cJSON *usb = item(root, "usb");
+    if (usb != NULL) {
+        if (!cJSON_IsObject(usb)) {
+            st->invalid++;
+        } else {
+            static const char *const usb_keys[] = { "msc", "cdc_log" };
+            note_unknown(usb, usb_keys, sizeof(usb_keys) / sizeof(usb_keys[0]), st);
+            out->usb_msc = (uint8_t)get_int(usb, "msc", out->usb_msc, 0, 1, st);
+            out->usb_cdc_log = (uint8_t)get_int(usb, "cdc_log", out->usb_cdc_log, 0, 1, st);
+        }
+    }
 
     const cJSON *nc4 = item(root, "nc4");
     if (nc4 == NULL) {

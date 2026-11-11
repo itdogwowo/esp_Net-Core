@@ -52,13 +52,24 @@ else()
     set(_has_tasks_preset 0)
 endif()
 
-# esp_wifi 是「編譯期可得」的相依：P4 冇 radio 所以完全唔要；
+# esp_wifi 是「編譯期可得」的相依：P4 冇 radio 所以唔要原生 esp_wifi；
 # 非 P4（S3）一定要有，否則 CONFIG_NETCORE_WIFI=y 時 nc_wifi.c 編唔過。
-# 真正決定「有冇 link 入 image」的是 CONFIG_NETCORE_WIFI：
-#   關閉 → nc_wifi.c 只編 stub，冇任何 esp_wifi 符號 → linker 唔會拉入（0 B）。
+# P4 走外掛協處理器時改要 esp_wifi_remote：它提供**同一個** esp_wifi.h，
+# 所以 nc_wifi.c 不需要任何 #ifdef。真正決定「有冇 link 入 image」的仍然是
+# CONFIG_NETCORE_WIFI：關閉 → nc_wifi.c 只編 stub → linker 唔會拉入（0 B）。
 set(_nc_priv_extra)
 if(NOT "${IDF_TARGET}" STREQUAL "esp32p4")
     list(APPEND _nc_priv_extra esp_wifi)
+else()
+    # P4：esp_wifi 是 remote shim，esp_hosted 才是傳輸層。兩個都列 —— 不能用
+    # CONFIG_NETCORE_WIFI_HOSTED 判斷：component CMake 第一輪 configure 睇唔到 CONFIG_*。
+    list(APPEND _nc_priv_extra esp_wifi esp_wifi_remote)
+endif()
+# USB（TinyUSB）只在有 USB OTG 控制器的晶片上存在。用 IDF_TARGET 而不是
+# CONFIG_NETCORE_USB_OTG：第一次 configure 時 CONFIG_* 還未生成（同上面 Wi-Fi 的理由）。
+# C3／C6／H2 沒有 OTG，TinyUSB 本身就編不過（tusb_mcu.h #error）→ 不能進依賴圖。
+if(IDF_TARGET STREQUAL "esp32s3" OR IDF_TARGET STREQUAL "esp32s2" OR IDF_TARGET STREQUAL "esp32p4")
+    list(APPEND _nc_priv_extra espressif__esp_tinyusb)
 endif()
 # 測試任務（test_*_tasks）只在 NC_ENABLE_TESTS=ON 時存在；OFF 時連 component 都冇。
 set(_nc_test_reqs)
@@ -73,7 +84,8 @@ idf_component_register(
               wear_levelling esp_eth esp_netif lwip esp_event esp_psram nvs_flash
               # driver/：匯流排驅動器（對照舊專案 slave/driver/*_drv.py）
               drv_uart drv_pwm bus_core bus_uart hw hw_gpio
-                   espressif__esp_tinyusb nc4 mem config ota_action task_manager core bus_net store state nclog file_action
+                   nc4 mem config ota_action task_manager core bus_net store state nclog file_action
+                   esp_driver_usb_serial_jtag
                    ${_nc_priv_extra}
     ${_preset_args}
 )
@@ -104,7 +116,7 @@ endif()
 # ★ 只可以在測試映像加 --wrap：__wrap_sdmmc_* 的定義在 main.c 的 NC_ENABLE_TESTS 區塊裡
 #   （0xF012–0xF019 的 SD bench 本身就是測試指令）。無條件加就會令 release 映像
 #   出現 undefined reference to `__wrap_sdmmc_write_sectors` —— 這裡之前就是這樣。
-if(NC_ENABLE_TESTS)
+if(NC_ENABLE_TESTS AND NOT IDF_TARGET STREQUAL "esp32p4")
     idf_build_set_property(LINK_OPTIONS "-Wl,--wrap=sdmmc_write_sectors" APPEND)
     idf_build_set_property(LINK_OPTIONS "-Wl,--wrap=sdmmc_read_sectors" APPEND)
 endif()

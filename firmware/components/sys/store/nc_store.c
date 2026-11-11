@@ -12,9 +12,11 @@
 #include "diskio_wl.h"
 #include "esp_vfs_fat.h"
 #include "ff.h"
-#include "tinyusb_msc.h"
 #include "wear_levelling.h"
+#if CONFIG_NETCORE_USB_OTG
+#include "tinyusb_msc.h"
 #include "tusb.h"              // tud_disconnect / tud_connect：強制 host 重新列舉
+#endif
 
 static const char *TAG = "store";
 
@@ -31,14 +33,20 @@ static const char *TAG = "store";
 
 static const esp_partition_t *s_part;
 static wl_handle_t s_wl = WL_INVALID_HANDLE;
+#if CONFIG_NETCORE_USB_OTG
 static tinyusb_msc_storage_handle_t s_msc;
+#endif
 static volatile nc_nc_store_mode_t s_mode = NC_STORE_MODE_UNAVAILABLE;
 static SemaphoreHandle_t s_lock;
 static bool s_driver_installed;
+#if CONFIG_NETCORE_USB_OTG
 static int s_usb_core = tskNO_AFFINITY;  // USB 服務組的核心（MSC driver 安裝時決定）
+#endif
 static bool s_app_mounted;
 static sdmmc_card_t *s_sd_card;        // 第二個 LUN 的卡（NULL = 冇 SD）
+#if CONFIG_NETCORE_USB_OTG
 static tinyusb_msc_storage_handle_t s_msc_sd;
+#endif
 static esp_err_t (*s_sd_mount_app)(void *arg);
 static esp_err_t (*s_sd_unmount_app)(void *arg);
 static void *s_sd_arg;
@@ -161,6 +169,10 @@ static void ro_close(void)
 }
 
 // ───────────────────────── USB：有 LUN 才算 ─────────────────────────
+// 沒有 USB OTG 的晶片（C3／C6／H2）整段不編：tinyusb 連 link 都沒有，
+// 這裡的 MSC 型別自然不存在。對外 API 在檔案尾給 stub。
+
+#if CONFIG_NETCORE_USB_OTG
 
 static void msc_event_cb(tinyusb_msc_storage_handle_t handle, tinyusb_msc_event_t *event, void *arg)
 {
@@ -358,6 +370,16 @@ esp_err_t nc_store_usb_driver(void)
     return ESP_OK;
 }
 
+#else   // !CONFIG_NETCORE_USB_OTG —— 這顆晶片沒有 USB OTG，整段不編
+
+// 對外仍然是同一組 API，呼叫端（main.c）不需要多一層 #if。
+// 沒有 USB 時 s_driver_installed 永遠 false，switch_to() 會直接回 NOT_SUPPORTED，
+// 所以 /data 的主人永遠是 APP。
+esp_err_t nc_store_usb_driver(void) { return ESP_ERR_NOT_SUPPORTED; }
+uint16_t nc_store_reconn_hwm(void) { return 0; }
+
+#endif  // CONFIG_NETCORE_USB_OTG
+
 esp_err_t nc_store_init(const esp_partition_t *part, bool allow_format)
 {
     if (s_lock == NULL) {
@@ -405,6 +427,7 @@ esp_err_t nc_store_format(const esp_partition_t *part)
     //   USB 模式：先拆 LUN／唯讀視圖，再放 WL
     //   APP 模式：先卸 VFS（連 WL 一起卸）
     ro_close();
+#if CONFIG_NETCORE_USB_OTG
     if (s_mode == NC_STORE_MODE_USB) {
         close_usb();
         close_app();
@@ -412,6 +435,9 @@ esp_err_t nc_store_format(const esp_partition_t *part)
         close_app();
         close_usb();
     }
+#else
+    close_app();            // 沒有 USB：只可能停在 APP
+#endif
     s_mode = NC_STORE_MODE_UNAVAILABLE;
 
     ESP_LOGW(TAG, "抹除 data 分區 0x%08" PRIx32 "（%u KB）→ 重新格式化",
@@ -474,6 +500,11 @@ const char *nc_store_fs_drive(void)
 
 static esp_err_t switch_to(nc_nc_store_mode_t want)
 {
+#if !CONFIG_NETCORE_USB_OTG
+    // 沒有 USB OTG：/data 的主人永遠是 APP，沒有任何東西要切（open_usb 也不存在）。
+    (void)want;
+    return ESP_ERR_NOT_SUPPORTED;
+#else
     if (s_part == NULL || !s_driver_installed) {
         return ESP_ERR_NOT_SUPPORTED;
     }
@@ -533,6 +564,7 @@ static esp_err_t switch_to(nc_nc_store_mode_t want)
 
     xSemaphoreGive(s_lock);
     return err;
+#endif  // CONFIG_NETCORE_USB_OTG
 }
 
 esp_err_t nc_store_sd_attach(sdmmc_card_t *card,

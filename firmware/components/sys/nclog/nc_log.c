@@ -176,7 +176,22 @@ static int log_hook(const char *fmt, va_list ap)
 
     const int core = (int)xPortGetCoreID();
     char text[NC_LOG_LINE_MAX + 1];
+#if CONFIG_NETCORE_USB_CONSOLE_TEE
+    // CONFIG_NETCORE_USB_CONSOLE_TEE：console 同 OTG 是**兩條獨立 PHY** 的板子
+    // （P4：USB-Serial-JTAG 24/25 ＋ OTG HS 50/49）才可以兩邊都出。
+    // S3 共用一條 PHY，TinyUSB 一 init JTAG 就沒了，tee 沒有意義（profile 不會開）。
+    // 為什麼要 tee：管道一開，console 就完全靜 → 主機冇開 CDC、或者管道卡住時，
+    // 連「板子還活著嗎」都看不到。留著 console 就係 main.c 那個「逃生門」的同一條原則。
+    va_list ap_console;
+    va_copy(ap_console, ap);
+#endif
     const int n = vsnprintf(text, sizeof(text), fmt, ap);   // 一定要在 critical 之外
+#if CONFIG_NETCORE_USB_CONSOLE_TEE
+    if (s_prev != NULL) {
+        (void)s_prev(fmt, ap_console);                      // 原樣再送一次 console
+    }
+    va_end(ap_console);
+#endif
     if (n < 0) {
         return 0;
     }

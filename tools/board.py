@@ -457,6 +457,7 @@ def cmd_new(args) -> int:
         + f"\n# ── CPU ──\nCONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_{args.cpu}=y\n"
         + f"\n# ── console ──\nCONFIG_{CONSOLE_SYM[args.console.lower()]}=y\n"
     )
+    cfg_dir = d / "data" / "config"
     cfg_dir.mkdir(parents=True, exist_ok=True)
     (cfg_dir / "system.json").write_text(json.dumps({
         "version": 1,

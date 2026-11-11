@@ -24,7 +24,14 @@ esp_err_t nc_core_run_on(int core, esp_err_t (*fn)(void *), void *arg)
     if (core == (int)xPortGetCoreID()) {
         return fn(arg);                 // 已經喺正確的核：直接跑，零成本
     }
+#if CONFIG_FREERTOS_UNICORE
+    // 單核（C3／C6／H2）：沒有「另一個核」，也沒有 esp_ipc。
+    // 上面那個分支一定會命中（core 只可能是 0），這裡只是把 esp_ipc 擋在編譯期外。
+    (void)core;
+    return fn(arg);
+#else
     core_job_t j = { .fn = fn, .arg = arg, .ret = ESP_FAIL };
     const esp_err_t e = esp_ipc_call_blocking((uint32_t)core, core_job, &j);
     return e == ESP_OK ? j.ret : e;     // 只喺開機 init 用
+#endif
 }

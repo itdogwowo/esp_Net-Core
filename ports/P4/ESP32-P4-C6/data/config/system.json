@@ -1,0 +1,7 @@
+{
+  "version": 1,
+  "_comment": "System 層：身份、開機、NC4 通道與解碼路線。",
+  "hostname": "",
+  "frame_interval_ms": 20,
+  "num_pixels": 0
+}

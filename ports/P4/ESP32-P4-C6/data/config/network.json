@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "_comment": [
+    "P4-C6：Wi-Fi 由外掛 ESP32-C6 提供（ESP-Hosted / SDIO），不是 P4 自己的 radio。",
+    "這裡是**測試預設**：P4 以 STA 加入 S3 開的 AP（NETCORE-TEST），用同一個 API 證明",
+    "無線路徑通了。正式部署時改成真實 AP 即可（wifi.enable/ssid 都可以用 /data/config 覆蓋）。",
+    "lan 保持關閉：這塊板目前 ETH 腳位未驗證（init mac failed），先不要把 IP 指向有線。"
+  ],
+  "hostname": "",
+  "priority": ["wifi"],
+  "lan": {
+    "enable": 0,
+    "driver": "RMII",
+    "phy_type": "IP101",
+    "phy_addr": 1,
+    "gpio": { "mdc": -1, "mdio": -1, "ref_clk": -1 },
+    "ip": { "mode": "dhcp", "addr": "", "mask": "", "gw": "" }
+  },
+  "wifi": {
+    "enable": 1,
+    "mode": "sta",
+    "ssid": "NETCORE-TEST",
+    "ssid_pw": "netcore123",
+    "timeout_s": 120,
+    "ip": { "mode": "dhcp", "addr": "", "mask": "", "gw": "" },
+    "credentials": []
+  },
+  "bt": { "enable": 0, "profile": "none", "fast": 0, "name": "", "pin": "", "bonding": 1 },
+  "espnow": { "enable": 0, "channel": 0, "encrypt": 0, "pmk": "", "peers": [] }
+}

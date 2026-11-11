@@ -179,6 +179,16 @@ tools/board.sh list            # 偵測現在插的是哪塊
 
 ## 5. 燒錄：三種模式
 
+### 5.0 先看這張表（免得再問「這塊板怎麼燒」）
+
+| 板子 | 平時更新 | 為什麼 |
+|---|---|---|
+| **S3-N16R8** | `tools/ota.py --port COM8 <bin>`（NC4 OTA 0x22xx） | USB 平時係 **TinyUSB CDC**，esptool 直接連會被當成資料埠。要 ROM 燒錄就對 CDC 送字串 `DFU`（或按住 BOOT 5 秒）令它重新枚舉成 download mode |
+| **P4-C6** | `tools/ota.py`（有網）／`esptool -p COM21`（USB-Serial-JTAG） | P4 冇 USB device（`board.json usb:false`），但 USB-Serial/JTAG **一直都在**，esptool 直接可用；console 是 UART0 主 ＋ USB-JTAG 次 |
+
+> **S3 不是「只能 CDC、燒不了」**：OTA 不需要 download mode，`DFU` 字串也不需要拆線。
+> 這一點以前漏記，導致重複問。
+
 | 指令 | 燒什麼 | 什麼時候用 |
 |---|---|---|
 | `idf.py app-flash` | 只燒 app | **日常**。不動 NVS、不動 data 分區（碟上的檔案會保留） |

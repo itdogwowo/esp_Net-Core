@@ -1,9 +1,56 @@
 menu "esp_Net-Core"
 
+    # ── USB device（TinyUSB 服務組）────────────────────────────────
+    # 三個符號一起決定「編譯期能不能有 USB」與「P4 用哪條 PHY」。
+    # 判斷一律用官方 SOC 能力符號（SOC_USB_OTG_SUPPORTED / SOC_USB_SERIAL_JTAG_SUPPORTED），
+    # 所以 C 檔不需要任何 CONFIG_IDF_TARGET_* —— 有硬體的晶片自動編進去，冇的完全不編。
+    # 執行期要不要真的開（交碟／log 管道）由 data/config/system.json 的 "usb" 段決定。
+
+    config NETCORE_USB_OTG
+        bool "USB device 服務組（TinyUSB：MSC + CDC）"
+        default y if IDF_TARGET_ESP32S3 || IDF_TARGET_ESP32S2 || IDF_TARGET_ESP32P4
+        default n
+        help
+            晶片有 USB OTG 控制器就預設編入（ESP32-S3／S2／P4 = y；C3／C6／H2 = n）。
+
+            注意：`SOC_USB_OTG_SUPPORTED` 是自動產生的 C 巨集，**不是 Kconfig 符號**，
+            Kconfig 表達式裡用不到它（用了會靜靜當成 n）。所以這裡列目標名。
+
+            關掉時整組定義都不編，連 tinyusb 都不會 link（省約 21.7 KB：
+            _cdcd_itf 12,532 + _mscd_epbuf 8,192 + _cdcd_epbuf 1,024）。
+
+            開著也**不代表會用**：開機仍然由 system.json 的 usb.msc / usb.cdc_log 決定，
+            兩個都可以 runtime 改成 0，不用重燒。
+
+    config NETCORE_USB_OTG_HS
+        bool "USB OTG 走 High-Speed PHY（P4：pin 50/49）"
+        depends on NETCORE_USB_OTG
+        default n
+        help
+            只有 P4 有 HS PHY（另外兩條 FS 是 USB-Serial-JTAG 與 FS_PHY2）。
+            S3／S2 只有 FS，這個符號對它們沒有意義。
+
+            選錯的症狀是「init 成功但主機見不到裝置」——因為 descriptor 沒錯，
+            只是訊號走錯一對 D+/D-。
+
+    config NETCORE_USB_CONSOLE_TEE
+        bool "log 除咗 CDC 之外，照樣寫 console"
+        depends on NETCORE_USB_OTG
+        default y if IDF_TARGET_ESP32P4
+        default n
+        help
+            log 管道一裝 hook，esp_log 就改走環＋CDC；呢個選項令同一行**同時**寫 console。
+
+            P4 的 console（USB-Serial-JTAG, GPIO24/25）同 OTG（HS, pin 50/49）是
+            **兩條獨立 PHY** → 可以兩邊都出，log 管道壞掉時仍然看得到板子在不在。
+
+            S3 的 JTAG 同 OTG **共用一條 PHY**，TinyUSB 一 init JTAG 就沒了，
+            tee 沒有意義（所以 S3 不列）。
+
     config NETCORE_WIFI
         bool "Wi-Fi 通道（會 link esp_wifi）"
         default n
-        depends on SOC_WIFI_SUPPORTED
+        depends on SOC_WIFI_SUPPORTED || NETCORE_WIFI_HOSTED
         help
             把 Wi-Fi 驅動編進影像。**預設關閉**：關閉時 esp_wifi 完全不會被
             link，靜態 BSS 與 flash 都是 0。
@@ -17,5 +64,21 @@ menu "esp_Net-Core"
               ② network.json 的 wifi.enable（決定會不會初始化）
 
             理由：只做②的話，一個永遠不用的功能仍然要付靜態 RAM 與 flash。
+
+    config NETCORE_WIFI_HOSTED
+        bool "P4：Wi-Fi 走外掛協處理器（ESP-Hosted：C6／C5／其他型號）"
+        default n
+        depends on IDF_TARGET_ESP32P4
+        help
+            P4 冇內建 radio。開啟後 Wi-Fi 由板上的協處理器提供：esp_wifi_remote
+            把 esp_wifi.h 的呼叫轉去 esp_hosted（預設 SDIO），所以 nc_wifi.c 與
+            network.json 的用法完全不變 —— 同 S3 的原生 Wi-Fi 是同一個 API。
+
+            兩件事要一起對：
+              ① 板子 profile：wifi-hosted-c6 / wifi-hosted-c5（決定 slave target
+                 與 SDIO 腳位），由 tools/board.py sync 寫進 sdkconfig.defaults
+              ② 協處理器上要跑**版本匹配**的 esp_hosted slave firmware
+
+            協處理器型號不只一種：換型號 = 換 profile，應用程式碼不動。
 
 endmenu

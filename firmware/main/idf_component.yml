@@ -1,4 +1,24 @@
 ## IDF Component Manager Manifest File
 dependencies:
-  espressif/esp_tinyusb: ^3.0.0
+  # TinyUSB 只支援有 USB OTG 控制器的晶片（S3／S2／P4）。
+  # C3／C6／H2 沒有 OTG，component 本身編不過（tusb_mcu.h #error），
+  # 所以要在這裡就擋掉 —— 只靠 main.c 的 #if 不足以讓它不進依賴圖。
+  espressif/esp_tinyusb:
+    version: ^3.0.0
+    rules:
+      - if: "target in [esp32s3, esp32s2, esp32p4]"
   espressif/cjson: '*'
+
+  # ── P4：Wi-Fi 由外掛協處理器提供（ESP-Hosted）────────────────────────
+  # P4 冇 radio，板上另有一顆 ESP32-C6／C5（或其他型號）做 Wi-Fi/BLE。
+  # esp_wifi_remote 提供與 esp_wifi 相同的 API（nc_wifi.c 一行都不用改），
+  # esp_hosted 是實際的傳輸層（預設 SDIO）。
+  # 只有 esp32p4 才拉進來：S3 走原生 esp_wifi，完全不受影響。
+  espressif/esp_wifi_remote:
+    version: '*'
+    rules:
+      - if: "target == esp32p4"
+  espressif/esp_hosted:
+    version: '*'
+    rules:
+      - if: "target == esp32p4"

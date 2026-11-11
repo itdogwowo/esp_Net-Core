@@ -1,0 +1,39 @@
+# 能力碎片：ESP32-P4 + 外掛 ESP32-C6（Wi-Fi via ESP-Hosted / SDIO）
+#
+# 由 board.json 的 profiles 引用，tools/board.py sync 寫進
+# ports/<board>/sdkconfig.defaults 的 marker 區塊。
+#
+# 來源：MicroPython ports/esp32/boards/sdkconfig.p4_wifi_common
+# （只取 Wi-Fi 部分；BLE 未接，所以拿掉 NimBLE／BT 那組）。
+#
+# ★ 協處理器型號是這個 profile 的軸，不是 firmware 的軸：
+#     wifi-hosted-c6 → CONFIG_SLAVE_IDF_TARGET_ESP32C6
+#     wifi-hosted-c5 → CONFIG_SLAVE_IDF_TARGET_ESP32C5
+#   換型號 = 換 profile（重建 sdkconfig），firmware 程式碼完全不動。
+#
+# ★ 前提：協處理器上要跑**版本匹配**的 esp_hosted slave firmware。
+#   版本差太遠時 host 會握手失敗（boot 時 log 會講）。
+
+CONFIG_NETCORE_WIFI=y
+CONFIG_NETCORE_WIFI_HOSTED=y
+
+CONFIG_ESP_HOSTED_ENABLED=y
+CONFIG_ESP_WIFI_REMOTE_ENABLED=y
+CONFIG_ESP_WIFI_REMOTE_LIBRARY_HOSTED=y
+CONFIG_SLAVE_IDF_TARGET_ESP32C6=y
+
+# 官方 P4 開發板的 SDIO 腳位組。板子接法不同時要覆蓋這幾個 GPIO，
+# 見 esp_hosted 的 CONFIG_ESP_HOSTED_SDIO_*（不要直接改 profile，另開一個）。
+CONFIG_ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD=y
+
+# 遠端 Wi-Fi 的緩衝是 WIFI_RMT_*；ESP_WIFI_* 那組是衍生值，寫了沒用。
+CONFIG_WIFI_RMT_STATIC_RX_BUFFER_NUM=16
+CONFIG_WIFI_RMT_DYNAMIC_RX_BUFFER_NUM=64
+CONFIG_WIFI_RMT_DYNAMIC_TX_BUFFER_NUM=64
+
+# lwIP：預設窗口太小，RTT 會把吞吐鎖死（同 eth-rmii 的理由）
+CONFIG_LWIP_TCP_SND_BUF_DEFAULT=65534
+CONFIG_LWIP_TCP_WND_DEFAULT=65534
+CONFIG_LWIP_TCP_RECVMBOX_SIZE=64
+CONFIG_LWIP_UDP_RECVMBOX_SIZE=64
+CONFIG_LWIP_TCPIP_RECVMBOX_SIZE=64

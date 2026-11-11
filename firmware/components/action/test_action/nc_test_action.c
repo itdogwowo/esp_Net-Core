@@ -29,6 +29,16 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "nvs.h"
+#include "lwip/sockets.h"
+#include <fcntl.h>
+
+// ESP-NOW 要有**真實 radio**：P4 的 Wi-Fi 在外掛協處理器（esp_hosted），
+// host 側冇 esp_now 符號。所以用 SOC_WIFI_SUPPORTED，唔可以只看 CONFIG_NETCORE_WIFI。
+#if CONFIG_NETCORE_WIFI && SOC_WIFI_SUPPORTED
+#define NC_HAVE_ESPNOW 1
+#else
+#define NC_HAVE_ESPNOW 0
+#endif
 
 #include "nc4_bus.h"
 #include "nc4.h"
@@ -2888,7 +2898,7 @@ static void on_wifi_cred(nc4_ctx_t *ctx, const nc4_frame_t *f)
 //   INIT  [ch:u8]（0 → 1）
 //   SEND  [len:u8][data]（1..250）
 //   STATS 無
-#if CONFIG_NETCORE_WIFI
+#if NC_HAVE_ESPNOW
 #define NC4_CMD_ESPNOW_INIT   0xF028
 #define NC4_CMD_ESPNOW_SEND   0xF029
 #define NC4_CMD_ESPNOW_STATS  0xF02A
@@ -3147,7 +3157,7 @@ static void on_espnow_stats(nc4_ctx_t *ctx, const nc4_frame_t *f)
 
 void nc_test_action_espnow_boot(nc4_decoder_t *decoder)
 {
-#if CONFIG_NETCORE_WIFI
+#if NC_HAVE_ESPNOW
     if (decoder == NULL) {
         return;
     }
@@ -3192,6 +3202,39 @@ static void wifi_ensure_netif_sta(void)
     }
 }
 
+// Wi-Fi 只初始化一次。S3（真 radio）走 now_ensure（它同時處理 ESP-NOW）；
+// P4（Wi-Fi 在外掛協處理器）冇 esp_now，所以只做通用初始化。
+static esp_err_t wifi_bringup_once(nc4_decoder_t *dec)
+{
+#if NC_HAVE_ESPNOW
+    return now_ensure(0, dec);
+#else
+    (void)dec;
+    static bool done;
+    if (done) {
+        return ESP_OK;
+    }
+    esp_err_t e = esp_netif_init();
+    if (e != ESP_OK && e != ESP_ERR_INVALID_STATE) {
+        return e;
+    }
+    e = esp_event_loop_create_default();
+    if (e != ESP_OK && e != ESP_ERR_INVALID_STATE) {
+        return e;
+    }
+    wifi_mode_t mode;
+    if (esp_wifi_get_mode(&mode) == ESP_ERR_WIFI_NOT_INIT) {
+        wifi_init_config_t ic = WIFI_INIT_CONFIG_DEFAULT();
+        e = esp_wifi_init(&ic);
+        if (e != ESP_OK) {
+            return e;
+        }
+    }
+    done = true;
+    return ESP_OK;
+#endif
+}
+
 static void on_wifi_sta(nc4_ctx_t *ctx, const nc4_frame_t *f)
 {
     if (f->len < 2) {
@@ -3212,7 +3255,7 @@ static void on_wifi_sta(nc4_ctx_t *ctx, const nc4_frame_t *f)
     }
     char pw[65]; memcpy(pw, f->data + off + 1, pl); pw[pl] = '\0';
 
-    esp_err_t e = now_ensure(0, ctx->decoder);
+    esp_err_t e = wifi_bringup_once(ctx->decoder);
     if (e != ESP_OK) {
         reply_json(ctx, NC4_CMD_HUB_RSP, "{\"err\":\"wifi_init\"}");
         return;
@@ -3256,7 +3299,7 @@ static void on_wifi_ap(nc4_ctx_t *ctx, const nc4_frame_t *f)
     char pw[65]; memcpy(pw, f->data + off + 1, pl); pw[pl] = '\0';
     const int ch = f->data[off + 1 + pl];
 
-    esp_err_t e = now_ensure(0, ctx->decoder);
+    esp_err_t e = wifi_bringup_once(ctx->decoder);
     if (e != ESP_OK) {
         reply_json(ctx, NC4_CMD_HUB_RSP, "{\"err\":\"wifi_init\"}");
         return;
@@ -3816,6 +3859,241 @@ static void on_buf_test(nc4_ctx_t *ctx, const nc4_frame_t *f)
 }
 
 // ── 註冊 ──
+
+// ── 0xF050 TCP_SEND：主動連 peer，送一批 NETBENCH 幀（量**單向**吞吐）──
+// payload: [ip:4][port:u16 LE][frames:u16 LE][size:u16 LE][flags:u8]
+//   flags bit0 = 送完之後問 peer 的 0xF040 op=2 取統計（peer 要係 Net-Core）
+// 回覆：{"sent":N,"bytes":B,"ms":T,"kbps":K,"rx":{...}|null}
+#define NC4_CMD_TCP_SEND 0xF050
+
+static int nc_tcp_dial(const uint8_t ip[4], uint16_t port, int timeout_ms)
+{
+    struct sockaddr_in a;
+    memset(&a, 0, sizeof(a));
+    a.sin_family = AF_INET;
+    a.sin_port = htons(port);
+    memcpy(&a.sin_addr.s_addr, ip, 4);
+
+    int fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (fd < 0) {
+        return -1;
+    }
+    int fl = fcntl(fd, F_GETFL, 0);
+    fcntl(fd, F_SETFL, fl | O_NONBLOCK);
+    int r = connect(fd, (struct sockaddr *)&a, sizeof(a));
+    if (r != 0) {
+        fd_set wf;
+        FD_ZERO(&wf);
+        FD_SET(fd, &wf);
+        struct timeval tv = { .tv_sec = timeout_ms / 1000,
+                              .tv_usec = (timeout_ms % 1000) * 1000 };
+        r = select(fd + 1, NULL, &wf, NULL, &tv);
+        if (r <= 0) {
+            close(fd);
+            return -1;
+        }
+        int err = 0;
+        socklen_t el = sizeof(err);
+        getsockopt(fd, SOL_SOCKET, SO_ERROR, &err, &el);
+        if (err != 0) {
+            close(fd);
+            return -1;
+        }
+    }
+    fcntl(fd, F_SETFL, fl);
+    struct timeval tv = { .tv_sec = 5, .tv_usec = 0 };
+    setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+    return fd;
+}
+
+// 送 frames 幀、每幀 size bytes 的 NETBENCH payload；回傳實際送出 bytes。
+static int64_t nc_tcp_blast(int fd, uint16_t frames, uint16_t size)
+{
+    const size_t cap = (size_t)size + 64;
+    uint8_t *buf = heap_caps_malloc(cap, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    if (buf == NULL) {
+        return -1;
+    }
+    uint8_t *pl = heap_caps_malloc((size_t)size + 5, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    if (pl == NULL) {
+        free(buf);
+        return -1;
+    }
+    memset(pl, 0x5A, (size_t)size + 5);
+    pl[0] = 0x03;    // NETBENCH op=3：只記帳、不回覆
+
+    // 先清對方的帳（op=0），否則 stats 係累加的
+    {
+        uint8_t r[16];
+        const int rn = nc4_pack_into(r, sizeof(r), 0xF040, 0xFFFF,
+                                     (const uint8_t *)"\x00", 1);
+        if (rn > 0) {
+            (void)send(fd, r, (size_t)rn, 0);
+        }
+    }
+
+    int64_t total = 0;
+    for (uint16_t i = 0; i < frames; i++) {
+        const uint32_t sq = i;
+        memcpy(pl + 1, &sq, sizeof(sq));
+        const int n = nc4_pack_into(buf, cap, 0xF040, 0xFFFF, pl, (size_t)size + 5);
+        if (n <= 0) {
+            break;
+        }
+        int off = 0;
+        while (off < n) {
+            const int w = send(fd, buf + off, (size_t)(n - off), 0);
+            if (w <= 0) {
+                goto done;
+            }
+            off += w;
+        }
+        total += n;
+    }
+done:
+    free(pl);
+    free(buf);
+    return total;
+}
+
+// 送 op=2，讀回 peer 的統計 JSON（找 "NC" + 0xF004 + CRC 不驗，測試用）
+static size_t nc_tcp_fetch_stats(int fd, char *out, size_t cap)
+{
+    uint8_t q[16];
+    const int n = nc4_pack_into(q, sizeof(q), 0xF040, 0xFFFF, (const uint8_t *)"\x02", 1);
+    if (n <= 0 || send(fd, q, (size_t)n, 0) != n) {
+        return 0;
+    }
+    uint8_t *rb = heap_caps_malloc(1024, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    if (rb == NULL) {
+        return 0;
+    }
+    size_t got = 0, off = 0;
+    const int64_t deadline = esp_timer_get_time() + 2000000;
+    while (esp_timer_get_time() < deadline && got < 1024) {
+        const int r = recv(fd, rb + got, 1024 - got, 0);
+        if (r <= 0) {
+            break;
+        }
+        got += (size_t)r;
+        while (off + 9 <= got) {
+            if (rb[off] != 'N' || rb[off + 1] != 'C') {
+                off++;
+                continue;
+            }
+            const uint16_t cmd = (uint16_t)(rb[off + 5] | (rb[off + 6] << 8));
+            const uint16_t len = (uint16_t)(rb[off + 7] | (rb[off + 8] << 8));
+            if (cmd != 0xF004 || off + 9 + len > got) {
+                off++;
+                continue;
+            }
+            const uint8_t *d = rb + off + 9;
+            size_t dl = len;
+            if (dl >= 2 && ((size_t)d[0] | ((size_t)d[1] << 8)) == dl - 2) {
+                d += 2;
+                dl -= 2;
+            }
+            if (dl >= cap) {
+                dl = cap - 1;
+            }
+            memcpy(out, d, dl);
+            out[dl] = '\0';
+            free(rb);
+            return dl;
+        }
+    }
+    free(rb);
+    return 0;
+}
+
+static void on_tcp_send(nc4_ctx_t *ctx, const nc4_frame_t *f)
+{
+    if (f->len < 11) {
+        reply_json(ctx, NC4_CMD_HUB_RSP, "{\"err\":\"args\"}");
+        return;
+    }
+    uint8_t ip[4];
+    memcpy(ip, f->data, 4);
+    uint16_t port, frames, size;
+    memcpy(&port, f->data + 4, 2);
+    memcpy(&frames, f->data + 6, 2);
+    memcpy(&size, f->data + 8, 2);
+    const uint8_t flags = f->data[10];
+    if (frames == 0 || frames > 4096 || size > NC4_MAX_PAYLOAD - 16) {
+        reply_json(ctx, NC4_CMD_HUB_RSP, "{\"err\":\"range\"}");
+        return;
+    }
+
+    const int fd = nc_tcp_dial(ip, port, 5000);
+    if (fd < 0) {
+        reply_json(ctx, NC4_CMD_HUB_RSP, "{\"err\":\"connect\"}");
+        return;
+    }
+    const int64_t t0 = esp_timer_get_time();
+    const int64_t sent = nc_tcp_blast(fd, frames, size);
+    const int64_t us = esp_timer_get_time() - t0;
+
+    char rx[512];
+    size_t rxn = 0;
+    if (flags & 1) {
+        rxn = nc_tcp_fetch_stats(fd, rx, sizeof(rx));
+    }
+    close(fd);
+
+    const double kbps = (us > 0 && sent > 0)
+                        ? (double)sent * 1000000.0 / (double)us / 1024.0 : 0.0;
+    char j[900];
+    snprintf(j, sizeof(j),
+             "{\"sent\":%lld,\"frames\":%u,\"size\":%u,\"us\":%lld,\"kbps\":%.0f,\"rx\":%s%s%s}",
+             (long long)sent, (unsigned)frames, (unsigned)size, (long long)us, kbps,
+             rxn ? "" : "null", rxn ? "" : "", rxn ? rx : "");
+    reply_json(ctx, NC4_CMD_HUB_RSP, j);
+}
+
+// P4 開機自動掃描：等 Wi-Fi 連上之後，對 peer 逐個 size 跑一次。
+// peer 寫死 192.168.4.1:6000（S3 的 AP + NC4 TCP listener），純測試用。
+#if CONFIG_IDF_TARGET_ESP32P4
+#define NETAUTO_PEER  "192.168.4.1"
+#define NETAUTO_PORT  6000
+
+static void netauto_task(void *arg)
+{
+    (void)arg;
+    vTaskDelay(pdMS_TO_TICKS(25000));      // 等 Wi-Fi 連上
+    static const uint16_t sizes[] = { 512, 1024, 2048, 4096, 8192 };
+    const uint8_t ip[4] = { 192, 168, 4, 1 };
+    for (size_t i = 0; i < sizeof(sizes) / sizeof(sizes[0]); i++) {
+        const int fd = nc_tcp_dial(ip, NETAUTO_PORT, 5000);
+        if (fd < 0) {
+            ESP_LOGE(TAG, "NETAUTO size=%u connect 失敗", (unsigned)sizes[i]);
+            vTaskDelay(pdMS_TO_TICKS(1000));
+            continue;
+        }
+        const int64_t t0 = esp_timer_get_time();
+        const int64_t sent = nc_tcp_blast(fd, 100, sizes[i]);
+        const int64_t us = esp_timer_get_time() - t0;
+        char rx[512];
+        const size_t rxn = nc_tcp_fetch_stats(fd, rx, sizeof(rx));
+        close(fd);
+        ESP_LOGW(TAG, "NETAUTO size=%u sent=%lld us=%lld kbps=%.0f rx=%s",
+                 (unsigned)sizes[i], (long long)sent, (long long)us,
+                 (us > 0) ? (double)sent * 1e6 / (double)us / 1024.0 : 0.0,
+                 rxn ? rx : "-");
+        vTaskDelay(pdMS_TO_TICKS(1500));
+    }
+    ESP_LOGW(TAG, "NETAUTO 完成");
+    vTaskDelete(NULL);
+}
+
+void nc_test_action_netauto_boot(void)
+{
+    xTaskCreatePinnedToCore(netauto_task, "netauto", 6144, NULL, 3, NULL, 1);
+}
+#else
+void nc_test_action_netauto_boot(void) { }
+#endif
+
 static const nc_action_t k_actions[] = {
     { NC4_CMD_DEV_BENCH, on_dev_bench, "test" },
     { NC4_CMD_HUB_BENCH, on_hub_bench, "test" },
@@ -3854,10 +4132,13 @@ static const nc_action_t k_actions[] = {
     { NC4_CMD_PWM_ZERO, on_pwm_zero, "test" },
     { NC4_CMD_NETBENCH, on_netbench, "test" },
     { NC4_CMD_NETBENCH_RESULT, on_netbench, "test" },
-#if CONFIG_NETCORE_WIFI
+    { NC4_CMD_TCP_SEND, on_tcp_send, "test" },
+#if NC_HAVE_ESPNOW
     { NC4_CMD_ESPNOW_INIT, on_espnow_init, "test" },
     { NC4_CMD_ESPNOW_SEND, on_espnow_send, "test" },
     { NC4_CMD_ESPNOW_STATS, on_espnow_stats, "test" },
+#endif
+#if CONFIG_NETCORE_WIFI
     { NC4_CMD_WIFI_STA, on_wifi_sta, "test" },
     { NC4_CMD_WIFI_AP, on_wifi_ap, "test" },
     { NC4_CMD_WIFI_INFO, on_wifi_info, "test" },

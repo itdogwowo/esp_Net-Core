@@ -1,0 +1,29 @@
+{
+  "_comment": "硬體事實。改這裡 = 要重新 build；runtime 可改的放 data/config/*.json。",
+  "name": "ESP32-P4-C6",
+  "chip": "esp32p4",
+  "flash": {
+    "size_mb": 16,
+    "freq_mhz": 40,
+    "mode": "dio"
+  },
+  "psram": {
+    "size_mb": 32,
+    "mode": "hex",
+    "speed_mhz": 200
+  },
+  "cpu_mhz": 360,
+  "console": "uart0",
+  "profiles": [
+    "eth-rmii",
+    "wifi-hosted-c6"
+  ],
+  "features": {
+    "eth": "rmii-ip101",
+    "wifi": "hosted-c6",
+    "usb": "otg-fs"
+  },
+  "verified": null,
+  "notes": "Firebird ESP32-P4 v1.0（P4 rev1.0 pre-rev3 + 外掛 ESP32-C6）。16 MB flash、32 MB HEX PSRAM @200 MHz。console 用 UART0；USB-Serial/JTAG 只是次 console。Wi-Fi 走 C6（esp_hosted，SDIO）。ETH 腳位尚未在這塊板驗證。"
+}
+

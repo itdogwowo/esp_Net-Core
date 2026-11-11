@@ -77,6 +77,10 @@ static const nc_system_cfg_t k_system = {
         { .name = "bulk",    .size = 4112, .count = 3, .where = 0, .enable = true },
         { .name = "forward", .size = 4112, .count = 2, .where = 0, .enable = true },
     },
+    // USB 的執行期開關（2026-11-11）。編譯期由 CONFIG_NETCORE_USB_OTG 決定「有沒有」，
+    // 這裡決定「要不要真的用」—— 兩個都可以改完即刻生效，不用重燒。
+    .usb_msc = 1,           // 開機把 FAT 交給 host（Windows 見到 D:）
+    .usb_cdc_log = 1,       // 開 log 管道（CDC）
 };
 
 static const nc_tasks_cfg_t k_tasks = {

@@ -916,3 +916,99 @@ tools/nc4.py --port /dev/cu.usbmodem* raw 0x1801 40006400   # 64 x 100
 | 2026-11-01 | 同上（加入 plan + 0x1105） | **22/22** | 9.53 MB/s | 8.8 µs | 152.9 KB/s | `nc_plan` 宣告/撇除/查詢；host 測試 6 場景 |
 | 2026-11-01 | 同上（加入 hub） | 20/20 | 9.53 MB/s | 8.8 µs | 153.5 KB/s | 雙核交換 138k/s、7.2 µs、torn=0 |
 | 2026-11-01 | 同上（管理器 v2：服務宣告） | **22/22** | 9.53 MB/s | 8.8 µs | 153.4 KB/s | 每 class 一次 carve、逐項失敗、hub 走 plan |
+
+### P4 USB / MSC / 緩衝（2026-11-11，`ad9790b9`，USB 走 HS PHY pin 50/49）
+
+全部經 CDC（`COM13`）。P4 的 Ethernet 仍未通，所以 `bench/` 裡 TCP/UDP/WS 那幾組跑不了。
+
+| 項目 | 指令 | 結果 |
+|---|---|---|
+| 解碼器一致性 | `nc4_test.py --port COM13` | **9/9** |
+| 一鍵自測 | `selftest.py --port COM13 --skip-ota` | **21/21** |
+| `nc_buf` 自檢 | `buf_test.py --port COM13 --status` | **ok=1 fail=0**（align/fifo/full/reserve/s2s/s2p/p2s/p2p/handover/stream/abort 全 1） |
+| 解碼 8 KB | `0xF001 8192 x 200` | **269.7 µs/幀、30.43 MB/s** |
+| 解碼 1 KB | `0xF001 1024 x 500` | 37.1 µs/幀、27.94 MB/s |
+| 解碼 64 B | `0xF001 64 x 2000` | 5.9 µs/幀、13.04 MB/s |
+| RTT（CDC） | `buf_probe.py rtt` | p50 **1.624** / p95 1.789 / max 2.633 ms（n=100, lost=0） |
+| CDC 裝置→主機 | `buf_probe.py txbench` | **4.35–4.38 MB/s**（1 MiB / 228 ms，chunk 4096，stalls 228） |
+| CDC 主機→裝置 | `session --storm 200:256` | **3.73 MB/s**、12,654 幀/s、`rx=200 lost=0` |
+| CDC 匯流排壓力 | `0xF008` | `peak=1/4`、`slot_full=0`、`crc_err=0`（4 槽 x 256 B 充足） |
+| MSC 寫 1 MB / 5 MB | 主機拖檔（WriteThrough） | **62.2 / 62.5 KB/s**（16.5 s / 80.4 s，hash 驗證 OK） |
+| MSC 讀 | 同上 | 命中 OS 快取（1.5 GB/s），未量到冷讀 |
+| 連續運行 | `STATUS sys` | **2013 s（33.5 min）、rst=11（USB 重啟，非 panic）、heap 350,571 前後相同** |
+
+判讀：
+
+- **P4 的 CDC 是 HS**：兩個方向都比 S3 的 FS 快 3.5–7 倍。本文件裡「CDC 實務上限 1.02 MB/s」只適用 S3。
+- **解碼 30.43 MB/s** ≈ `measurement-method.md` 記的 CPU 上限 30.7 MB/s → CPU 不是瓶頸。
+- **MSC 寫 62 KB/s** 同 S3 的 65–76 KB/s 同級（FAT-on-WL 的 erase 限制），不是 P4 退步。
+- 主機端**不讀** CDC 時，回覆型洪水會掉（200 幀只回 17 幀）：`cdc_send` 等 FIFO 100 ms 後
+  主動丟棄（設計如此，無 flow control）；接收端本身冇丟（`0xF0FE` 路徑 `rx=200 lost=0`）。
+
+待辦（本輪發現）：
+
+1. **log 環太小**：`lvl=0` 只有 2048 B，P4 開機 burst 就 `peak=2017/2048`、`dropped=208`。
+   建議 QUIET 改 4096（或開 `lvl=1` 的 8192）。
+2. **CDC 轉寄 ESPNOW 一直失敗**：預設 routes 有 `CDC -> ["decode0","ESPNOW"]`，但 ESPNOW 冇通道，
+   累計 1911 次 `ESP_ERR_NOT_FOUND`（每幀都試一次）。要嘛刪這條 out，要嘛開 ESPNOW 通道。
+3. STATUS 全部已超過 2600 B 上限（`truncated=1`），要按 `keys=` 分批問。
+#### 追加：CDC 上限是「每條 endpoint」，不是 PHY（2026-11-11）
+
+做法：`CONFIG_TINYUSB_CDC_COUNT=2` ＋ `tinyusb_cdcacm_init(TINYUSB_CDC_ACM_1)`（main.c 用 `#if` 閘住，
+預設 1 條），`0xF00D` 加 mode 3 = 每 4 KB 交替兩條介面；主機同時讀兩個埠。
+
+| 設定 | 8 MiB TX（裝置側） | stalls | 換算 |
+|---|---|---|---|
+| 1 條 CDC（mode 0） | 1.821 s | 1,821 | **4.39 MiB/s** |
+| 2 條 CDC 交替（mode 3） | 0.956 s | 956 | **8.37 MiB/s（1.91x）** |
+
+判讀：
+
+- **~4.2 MiB/s 是每條 bulk endpoint 的上限**（512 B x 8000 microframe/s），不是 PHY、也不是 FIFO 大小。
+  加大 FIFO 冇用（stall 次數等於 chunk 數，代表 FIFO 永遠滿，滿是因為下游排程慢）。
+- 加一條 endpoint 就線性加倍 → PHY（480 Mbps ≈ 60 MB/s）還遠未用盡。
+- 推論：**MSC 磁碟的讀取同樣 ~4.2 MiB/s 上限**（它也只有一條 bulk IN）；寫入另有 flash WL 限制（62 KB/s），
+  所以寫入時 USB 完全不是瓶頸。
+- 量完已還原成 1 條（多一條 CDC 會多一個 COM port ＋ 約 12 KB RAM）。
+#### 追加：`EP_BUFSIZE` 才是主旋鈕（2026-11-11，2.67 倍）
+
+`CONFIG_TINYUSB_CDC_EP_BUFSIZE` 一直停在預設 **512**。Kconfig 原文：
+「This low layer buffer has the most significant impact on performance. Set to 8192 for best performance.」
+
+| EP_BUFSIZE | chunk | 8 MiB TX（裝置側） | stalls |
+|---|---|---|---|
+| 512（原本） | 512 / 1024 / 2048 / 4096 | 全部 **4.39 MiB/s**（chunk 完全冇影響） | ~1,820 |
+| 8192 | 1024 | 8.78 | 911 |
+| 8192 | 2048 | 9.77 | 819 |
+| 8192 | 3072 | 8.79 | 909 |
+| **8192** | **4096** | **11.72 MiB/s** | 682 |
+| 8192 | 5120 | 7.78 | 1,026 |
+| 8192 | 8192 | 7.74 | 1,033 |
+
+- **2.67 倍**；三次重跑 11.71 / 11.72 / 11.73 MiB/s（±0.2%），非常穩。
+- 峰值在 **chunk = 4096 = EP_BUFSIZE / 2**；再大反而跌（8 KB 只剩 7.7）。
+  注意：EP=512 時 chunk 掃到 8 KB 都係 4.39 —— 所以「加大 chunk」本身冇用，
+  要先放寬 EP buffer，chunk 才有意義。
+- RTT 不變（1.61 ms）、RX（storm）亦冇變（~3.6 MB/s）→ 這個旋鈕主要幫 TX。
+- 已寫入 `firmware/sdkconfig.defaults`（`TX_BUFSIZE` 同時 4096 → 8192），
+  否則下次重建會退回 512。
+- 注意 11.72 MiB/s 是「一次 4 KB 連續寫」的上限；實際流量由幀大小決定
+  （log 管道批次 512 B、回覆是整幀），所以真實路徑會低於這個數。
+#### 追加 2：單 endpoint 的天花板在哪（2026-11-11）
+
+| 設定 | 8 MiB TX（chunk 4096） | 備註 |
+|---|---|---|
+| EP 512（原本） | 4.39 MiB/s | 預設值 |
+| **EP 8192** | **11.72 MiB/s** | 甜點 |
+| EP 10000（Kconfig 上限） | 11.72 MiB/s | **冇再快** |
+| EP 16384 | 編不過 | `RX_BUFSIZE` range 是 64–10000，EP 不能大於 RX |
+| EP 8192 ＋ **2 條 endpoint** | **23.37 MiB/s（1.99x）** | 仍然線性 |
+
+判讀：
+
+- 單 endpoint 上限 = **11.72 MiB/s = 12.29 MB/s = 98.3 Mbit/s = 正好 3 x 512 B 每 microframe**。
+- buffer 由 8192 加到 10000（上限）**完全冇再快** → 這是 driver / endpoint 排程的上限，不是 buffer 大小。
+- 2 條 endpoint 仍然 1.99x → 撞到的是「每 endpoint」，唔係全域（PHY 60 MB/s、USB 2.0 HS bulk 實務 30–40 MB/s 都仲未到）。
+- 對照 S3：CDC（FS）1.02 MB/s ＝ FS 上限的 68%；P4 現在 12.29 MB/s ＝ HS 的 20.5%。
+  相對效率仍然低，但已經是這套 esp_tinyusb 在單 endpoint 下的極限。
+- 結論：**要更快只有加 endpoint（線性）或者改 driver**；加大封包／buffer 這條路已經走到盡頭。

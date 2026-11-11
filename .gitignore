@@ -5,9 +5,17 @@ build/
 build_*/
 sdkconfig
 sdkconfig.old
+# 多 target 時用 -DSDKCONFIG=sdkconfig.<target>（p4c6 / s3 / c3 …）→ 一樣是生成物。
+# 但 sdkconfig.defaults 是**人編輯的輸入**，一定要進 git，所以下面要 negate 回來。
+sdkconfig.*
+!sdkconfig.defaults
 managed_components/
 dependencies.lock
 .devcontainer/
+
+# ── 建置日誌與手動備份（不是產物，也不該進 git）──
+*.log
+*.bak
 
 # ── 建置產物：make.py 的時間戳備份與日誌 ──
 # 想保留某一顆就自己複製出去；歷史不進 git

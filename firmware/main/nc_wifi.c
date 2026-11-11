@@ -325,7 +325,7 @@ static void wifi_event_cb(void *arg, esp_event_base_t base, int32_t id, void *da
         if (s_evt != NULL) {
             xEventGroupSetBits(s_evt, WIFI_BIT_FAIL);
         }
-        ESP_LOGW(TAG, "Wi-Fi 斷線（manager 會重試）");
+        ESP_LOGW(TAG, "Wi-Fi 斷線（唔會自動重連；要重連請用 0xF02C）");
     } else if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP) {
         const ip_event_got_ip_t *e = (const ip_event_got_ip_t *)data;
         s_got_ip = true;
@@ -452,9 +452,18 @@ static void wifi_mgr_task(void *arg)
             }
         }
 
+        // 開機只試一輪（掃描配對 → 盲連各一次）。
+        // 全部失敗就**停手**，唔會每 30 秒再掃一次、再盲連一次 ——
+        // 那樣會週期性鎖住 channel，把已經連上的 AP 也拖慢（實測：36 秒一次）。
+        // 對齊舊專案：連不上就停，重連由外部事件觸發（0xF02C WIFI_STA）。
+        ESP_LOGW(TAG, "Wi-Fi：所有憑證都連不上 → 停止自動重試（要重試請用 0xF02C）");
         s_wake = false;
-        for (int i = 0; i < 30 && !s_wake; i++) {
+        for (;;) {
             vTaskDelay(pdMS_TO_TICKS(1000));
+            if (s_wake) {
+                s_wake = false;
+                break;
+            }
         }
         continue;
 

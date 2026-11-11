@@ -38,6 +38,9 @@ typedef enum {
     NC_LINK_TCP,
     NC_LINK_WS,
     NC_LINK_UDP,
+    // USB-Serial-JTAG 的資料通道（C3／C6／H2：沒有 OTG，但同一顆 peripheral
+    // 本身就是一個 CDC-ACM，RX/TX 都是硬件 FIFO）。kind 名 = "usb_jtag"。
+    NC_LINK_USBJTAG,
     NC_LINK_KIND_MAX,
 } nc_link_kind_t;
 
@@ -178,6 +181,10 @@ typedef struct {
     uint8_t        n_pools;
     nc_cfg_pool_t  pools[NC_CFG_MAX_POOLS];
     uint8_t        log_debug_mode;  // 0 = 正常（2 KB、E/W/I、由 USB 起來開始記）｜1 = 除錯（8 KB、全部、連開機）
+    // ── USB（執行期）。編譯期由 CONFIG_NETCORE_USB_OTG 決定有沒有這組；
+    //    這裡決定要不要真的用，改完即時生效（唔使重燒）──
+    uint8_t        usb_msc;         // 0 = 唔交碟（/data 留在 APP）｜1 = 開機交俾 host
+    uint8_t        usb_cdc_log;     // 0 = log 只走 console｜1 = 開 log 管道（CDC）
 } nc_system_cfg_t;
 
 typedef struct {

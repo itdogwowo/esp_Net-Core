@@ -1,0 +1,21 @@
+{
+  "_comment": "硬體事實。改這裡 = 要重新 build；runtime 可改的放 data/config/*.json。",
+  "name": "ESP32-C3-DevKitM",
+  "chip": "esp32c3",
+  "flash": {
+    "size_mb": 4,
+    "freq_mhz": 80,
+    "mode": "dio"
+  },
+  "psram": null,
+  "cpu_mhz": 160,
+  "console": "usb-serial-jtag",
+  "profiles": [],
+  "features": {
+    "eth": null,
+    "wifi": true,
+    "usb": false
+  },
+  "verified": null,
+  "notes": "ESP32-C3 QFN32 rev v0.4，4 MB 內嵌 flash，單核 160 MHz，無 PSRAM。只有 USB-Serial-JTAG（沒有 USB-OTG）→ 用來驗證 Kconfig 的能力判斷：NETCORE_USB_OTG 應該自動 n，整組 TinyUSB 不編入。"
+}
