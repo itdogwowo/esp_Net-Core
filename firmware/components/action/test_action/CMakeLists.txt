@@ -8,6 +8,9 @@ endif()
 # CONFIG_*（sdkconfig 未生成），用 if(CONFIG_...) 會在第一輪漏掉、之後被 cache 住。
 # 代價只是多幾個 header 路徑；P4 接 esp_hosted 時 esp_wifi 元件本身就係 remote shim。
 list(APPEND _req esp_wifi esp_netif esp_event)
+# 0xF060 MATRIX 只喺 Kconfig NETCORE_RGB_MATRIX=y 時有內容；component 本身
+# 一定存在（測試映像），所以直接加依賴，唔靠 CONFIG_*（第一輪 configure 睇唔到）。
+list(APPEND _req test_rgb_led_matrix_tasks)
 idf_component_register(
     SRCS "nc_test_action.c"
     INCLUDE_DIRS "include"

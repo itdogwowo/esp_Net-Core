@@ -59,6 +59,7 @@
 | [hw-ownership.md](03_notes/hw-ownership.md) | **硬體門面 `nc_hw`（owner／command／snapshot）**：中央只做目錄＋命令入口＋最新 snapshot；真正寫硬體的是 owner task；UI／NC4 只讀 snapshot 或送 command；GPIO owner 已上板、`ph_hwcheck` 第一版、claim／保留腳位 |
 | [hw-pwm-uart.md](03_notes/hw-pwm-uart.md) | **PWM／UART／PIN 硬體設定與驅動**：舊專案 config 風格、typed `hardware.json`、LEDC PWM、UART／RS485 DE、`0xF039`–`0xF03B`；A 板上板結果 |
 | [led-controller-plan.md](03_notes/led-controller-plan.md) | **LED Controller 規劃（C 版，無 OOP）**：`nc_led` struct＋ops、frame／dStay、I80/SPI/PCA9685 backend、50 FPS 閘門；**尚未實作，等硬件** |
+| [rgb-matrix-dither.md](03_notes/rgb-matrix-dither.md) | **8×8 WS2812 矩陣（I80 ＋ 分區時間抖動）**：GPIO14 一條鏈、4 MHz／5 cycles 的 WS2812 波形、7,936 B ≈ 1.98 ms → 450 fps 閘門、8.8 定點＋誤差回饋抖動、8 區不同 rate／phase、`0xF060` 指令與上板驗證次序；**測試任務，未上板** |
 | [net-lines.md](03_notes/net-lines.md) | **統一網絡線路 TCP／UDP／WS → nc4_bus**：read/send 介面、單一 parser、S3 WiFi 上板 RTT（TCP 12.2 ms／UDP 11.9 ms／WS 21.4 ms）、burst 限制、P4 後續 |
 | [ota-web.md](03_notes/ota-web.md) | **網絡 OTA 與網頁 v0**：`POST /ota` raw `.bin`、`GET /` 最小頁、`/config.json`；**已上板：`/` 200、`/ota` 0.1.1→0.1.2**；安全只限可信 LAN |
 | [buffer-topology.md](03_notes/buffer-topology.md) | **目前緩衝結構**：`mem.buf` 14 個 buffer、SRAM／PSRAM 配置、CDC/UART 256 B×4 vs network 2 KB／24 KB、zero-copy producer 資料流 |

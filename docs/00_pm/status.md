@@ -2067,3 +2067,27 @@ S3 WiFi 連上後開 TCP 6000、UDP 6001、WS 8080。
 - 新 USB `/dev/cu.usbmodem1401` 用 esptool 確認是 **ESP32-P4 rev1.0**（MAC <P4-MAC>）；
   **P4 冇內建 Wi-Fi**，所以「P4 Wi-Fi」不能測。若係 P4+C6 companion 或 C6 板，
   要提供型號／接法；repo 目前只有 P4 ETH 和 S3 WiFi，沒有 C6 port。
+
+
+### 7.61 2026-11-11（8×8 WS2812 矩陣：I80 波形 ＋ 分區抖動，測試任務）
+
+- 新板 `ports/S3/ESP32-S3-Matrix`（4 MB、無 PSRAM、240 MHz、GPIO14 = LED_DIN）＋
+  4 MB 分割表（app 1.5 MB × 2 ＋ FAT 896 KB）。
+- 新任務 `test_rgb_led_matrix_tasks`：I80（4 MHz、5 cycles/bit、D0 = GPIO14）
+  送 64 顆 × 24 bit ＝ 7,936 B／幀（1.98 ms）→ 預設 **450 fps**，硬上限 460。
+- 抖動：效果算出 8.8 定點亮度 → 每幀誤差回饋送 floor／ceil；8 個邏輯區
+  （每區一橫行）各自 rate 1..2、phase 錯開。效果：OFF／ZONE1／BREATH／WAVE／
+  SOLID／RAMP。
+- 指令 `0xF060 MATRIX`（op：stats／effect／dither／color／gain／fps／zone／zmask）。
+- **已上板（2026-11-11 21:00）**：USB 首次 `--full` 燒錄、之後 **OTA over NC4**
+  （734 KB／4.1 s）。開機正常、CDC → decode0、`rgbmatrix` 跑 core1。
+- 時序修正：4 MHz／5 cycles 實測一幀 2.44 ms（只 408 fps，**每幀 late**）——
+  esp_lcd 的 I80 每筆交易有 0.24–0.45 ms 固定開銷。改成 **8.889 MHz／8 cycles**
+  （12,544 B／幀）＋ **3 格 DMA buffer** → **450.0 fps、late=0、tx_err=0**，全速 606 fps。
+- 配置持久化踩雷：舊 firmware 的 NVS `provisioned=1` 令第一次 boot 唔重建 FAT，
+  `tasks.json` 冇 seed → `rgbmatrix` 被補成 `[0,0]`（loop 唔開）。用
+  `0x1103 STATUS_SET {"System":{"fs_format":1}}` ＋ reboot 重建 FAT 之後正常。
+  之後更新一律 `tools/ota.py`。
+- 順手修：`tools/board.py list` 讀 `psram: null` 會 crash；C3 port 的
+  board.json 與 sdkconfig 對不上（flash 40M、console UART0）→ `board.py check` 0 錯誤。
+- 詳見 [rgb-matrix-dither.md](../03_notes/rgb-matrix-dither.md)。

@@ -81,4 +81,50 @@ menu "esp_Net-Core"
 
             協處理器型號不只一種：換型號 = 換 profile，應用程式碼不動。
 
+    # ── 8×8 WS2812 矩陣（測試任務）────────────────────────────────
+    # 板子事實放 ports/<board>/sdkconfig.defaults；程式只認符號。
+    # 只有測試映像（NC_ENABLE_TESTS=ON）才有這個任務。
+
+    config NETCORE_RGB_MATRIX
+        bool "8×8 WS2812 矩陣（I80 波形 + 分區時間抖動）"
+        depends on SOC_LCD_I80_SUPPORTED
+        default n
+        help
+            Waveshare ESP32-S3-Matrix：64 顆 WS2812B 串成 8×8，資料腳 GPIO14。
+            用 LCD_CAM 的 I80（GDMA）產生 WS2812 波形，一幀 7,936 B ≈ 1.98 ms，
+            所以上限 450 fps；效果亮度用 8.8 定點 + 逐幀誤差回饋抖動，
+            暗階等效多 8 bit 灰階。
+
+            注意 I80 一定要 8 條資料線 + WR + DC 都是有效 GPIO；
+            只有 D0 真正接燈，其餘 7 條資料線與 WR／DC 是 dummy（會出現在排針上）。
+
+    config NETCORE_RGB_MATRIX_I80_PINS
+        string "I80 腳位（D0..D7,WR,DC 共 10 個，逗號分隔）"
+        depends on NETCORE_RGB_MATRIX
+        default "14,38,39,40,41,42,47,48,1,2"
+        help
+            D0 是真正的燈資料線；D1..D7、WR、DC 只是 I80 需要的 dummy。
+            預設值避開 IMU（IO10–13）、USB（19/20）、UART0（43/44）、
+            flash（26–32）、nc_hw_reserved() 視為 PSRAM 的 33–37，
+            以及 strapping（0/3/45/46）。
+
+    config NETCORE_RGB_MATRIX_PCLK_HZ
+        int "I80 PCLK（Hz）"
+        depends on NETCORE_RGB_MATRIX
+        default 2500000
+        range 1000000 20000000
+        help
+            WS2812 一個 bit 用 3 個 PCLK 週期。預設 2.5 MHz
+            → bit 1.200 µs、T0H 0.400 µs、T1H 0.800 µs（最保守，同 demo 一致）。
+            確認燈食得到之後可以先升 pclk 追 fps。改這個等於改 WS2812 時序。
+
+    config NETCORE_RGB_MATRIX_FPS
+        int "目標幀率上限（fps）"
+        depends on NETCORE_RGB_MATRIX
+        default 450
+        range 60 460
+        help
+            資料本身 1.98 ms／幀（≈ 505 fps），加 reset 之後實際上限約 460 fps。
+            預設 450 fps，留 ~240 µs 給 reset 與排程抖動。
+
 endmenu

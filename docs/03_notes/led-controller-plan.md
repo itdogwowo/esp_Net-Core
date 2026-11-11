@@ -3,6 +3,8 @@
 > 2026-11-10。**性質：規劃／記錄，尚未實作。**
 > 目前沒有 LED 燈帶／16-lane 硬件可測，所以這一頁先把契約、backend、量測閘門寫清楚；
 > 不在沒有硬件的情況下盲寫 I80 backend。
+> **2026-11-11 進展**：8×8 WS2812（單 lane）已經用 I80 在測試任務落地，
+> 見 [rgb-matrix-dither.md](rgb-matrix-dither.md)；下面的 `nc_led`／16-lane 正式 backend **仍然未實作**。
 > 相關：[hw-pwm-uart.md](hw-pwm-uart.md)（PWM 是低層，不是 LED Controller）、
 > [buffers.md](buffers.md)（led.frame／led.wave）、[driver-layer.md](driver-layer.md)。
 

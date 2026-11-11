@@ -189,6 +189,7 @@ components/action/
 | `0xF01B` LINK_FWD | `name_len(u16) name(bytes) frame(bytes)` → `0xF004` `{link,len,err,frames,bytes,drops}`：把一段**已打包好的 NC4 幀**交給指定 link（走 `nc4_link_send`，與 router 轉寄同一條路）。未知 link → `err=ESP_ERR_NOT_FOUND` |
 | `0xF01C` MEM_BENCH | `[psram_kb:u16][iters:u16]`（預設 256 KB、4 次）→ `0xF004`：`{int:{kb,memset_mbps,read_mbps,copy_mbps}, psram:{...}, msync_us, msync_err, sum}`。量 internal／PSRAM 實際頻寬與 cache flush；用來決定 PSRAM 可否做 framebuffer |
 | `0xF01D` TILE_BENCH | `[total_kb:u16][tile_kb:u16][iters:u16]`（預設 40/8/8）→ `0xF004`：`{total_kb,tile_kb,iters,full_us,tile_us,full_mbps,tile_mbps,ratio_x10}`。整幀 streaming vs 分塊（cache-hot）的實測；證明單 pass 是 bus-bound、tiling 只快 1.3× |
+| `0xF060` MATRIX | `op(u8) [args]` → `0xF004` JSON。8×8 WS2812 矩陣（測試任務，`CONFIG_NETCORE_RGB_MATRIX`）。op：`0` STATS、`1` effect(u8)、`2` dither(u8)、`3` color(r,g,b)、`4` gain(u8)、`5` fps(u16 LE)、`6` zone(idx,rate,phase)、`7` zmask(u8)。回覆見 [rgb-matrix-dither.md](../03_notes/rgb-matrix-dither.md) |
 
 > ⚠️ 新增測試指令之前先查号：**指令碼重複時只會保留先登記的那一個**（`nc_action_init()`
 > 會在開機 `ESP_LOGE` 並丟棄後來者）。登記次序是 core →（測試的 bench／SD）→ test_action

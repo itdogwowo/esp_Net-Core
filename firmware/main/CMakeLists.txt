@@ -74,7 +74,8 @@ endif()
 # 測試任務（test_*_tasks）只在 NC_ENABLE_TESTS=ON 時存在；OFF 時連 component 都冇。
 set(_nc_test_reqs)
 if(NC_ENABLE_TESTS)
-    list(APPEND _nc_test_reqs test_fx_tasks test_hello_tasks test_bench_tasks)
+    list(APPEND _nc_test_reqs test_fx_tasks test_hello_tasks test_bench_tasks
+                            test_rgb_led_matrix_tasks)
 endif()
 
 idf_component_register(
@@ -102,6 +103,7 @@ if(NC_ENABLE_TESTS)
         "${CMAKE_CURRENT_LIST_DIR}/../components/tasks/test_hello_tasks/include"
         "${CMAKE_CURRENT_LIST_DIR}/../components/tasks/test_bench_tasks/include"
         "${CMAKE_CURRENT_LIST_DIR}/../components/tasks/test_probe_tasks/include"
+        "${CMAKE_CURRENT_LIST_DIR}/../components/tasks/test_rgb_led_matrix_tasks/include"
         "${CMAKE_CURRENT_LIST_DIR}/../components/tasks/test_tcp_tasks/include"
         "${CMAKE_CURRENT_LIST_DIR}/../components/action/test_action/include")
 endif()

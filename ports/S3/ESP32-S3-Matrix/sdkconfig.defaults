@@ -1,0 +1,29 @@
+# ESP32-S3-Matrix — 硬體事實（改這裡要重新 build）
+# 對應 board.json；tools/board.py check 會驗證兩者一致。
+
+# ── flash（4 MB 內嵌）──
+CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
+CONFIG_ESPTOOLPY_FLASHFREQ_80M=y
+CONFIG_ESPTOOLPY_FLASHMODE_DIO=y
+
+# ── 沒有 PSRAM（4 MB flash 版；8×8 燈板不需要）──
+CONFIG_SPIRAM=n
+
+# ── CPU ──
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
+
+# ── console：USB-Serial-JTAG（同 N16R8；USB-OTG 與它共用 PHY）──
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+
+# ── 分區表：全域那份是 16 MB（N16R8），這塊只有 4 MB，用自己一份 ──
+# 路徑相對 firmware/（專案根）。
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="../ports/S3/ESP32-S3-Matrix/partitions.csv"
+
+# ── 8×8 WS2812 矩陣（測試任務）──
+# 只有 NC_ENABLE_TESTS=ON 的映像才有；D0 = GPIO14 接燈，
+# 其餘 9 支（D1..D7／WR／DC）是 I80 必需的 dummy，預設揀未用過的腳。
+CONFIG_NETCORE_RGB_MATRIX=y
+CONFIG_NETCORE_RGB_MATRIX_I80_PINS="14,38,39,40,41,42,47,48,1,2"
+CONFIG_NETCORE_RGB_MATRIX_PCLK_HZ=2500000
+CONFIG_NETCORE_RGB_MATRIX_FPS=450

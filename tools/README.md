@@ -105,6 +105,7 @@ python3 tools/board.py new --chip S3 --board ESP32-S3-Matrix --flash 16 --psram 
 | `nc4_test.py --port …` | ✅ | 解碼器一致性測試：正常幀 / 黏包 / 拆包 / 壞 CRC / 假 SOF / 錯 addr / 超大 LEN / 錯版本 |
 | `buf_test.py --port …` | ✅ | **統一緩衝（`nc_buf`）的上板自測**（`0xF032`）：64 B 對齊、FIFO 次序、滿了回 NULL、reserve 表頭 + `off`/`len`、S2S·S2P·P2S·P2P 四條 copy、換手；`--status` 順便印 `mem.buf` |
 | `fx.py pack / dump` | ❌ | **打包 `.fxe`**（header + manifest + payload + 指令表）與檢視；manifest 欄位＝模組的 kind/core/layer/fps/px/預算。`pack` 會先擋掉裝置端一定會拒的值 |
+| `matrix.py --port … stats\|effect\|dither\|color\|gain\|fps\|zone\|zmask` | ✅ | **8×8 WS2812 矩陣**（`0xF060`）：切效果（第一區／呼吸／波浪／單色／色階）、抖動開關、每區 rate+phase、看實測 fps／late／tx_us。見 [rgb-matrix-dither](../docs/03_notes/rgb-matrix-dither.md) |
 
 firmware image 在 `firmware/build/esp_net_core.bin`（先 build 才有）。
 

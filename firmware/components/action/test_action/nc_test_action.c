@@ -46,6 +46,9 @@
 #include "nc_hw.h"
 #include "nc_hw_gpio.h"
 #include "nc_pwm_drv.h"
+#if CONFIG_NETCORE_RGB_MATRIX
+#include "nc_rgb_matrix.h"
+#endif
 #include "nc_uart_drv.h"
 #include "nc_buf.h"
 #include "nc_hub.h"
@@ -3858,7 +3861,122 @@ static void on_buf_test(nc4_ctx_t *ctx, const nc4_frame_t *f)
     reply_send(&r, off);
 }
 
+
+// ── 0xF060 MATRIX：8×8 WS2812 矩陣（測試任務，Kconfig NETCORE_RGB_MATRIX）──
+// payload [op:u8][args]
+//   0 STATS                       → 完整狀態 JSON
+//   1 EFFECT  [eff:u8]            → 切效果（0 熄 1 第一區 2 呼吸 3 波浪 4 單色 5 色階）
+//   2 DITHER  [on:u8]             → 抖動開／關（A/B 用）
+//   3 COLOR   [r][g][b]           → SOLID 顏色
+//   4 GAIN    [gain:u8]           → 整體亮度 0..255
+//   5 FPS     [fps:u16 LE]        → 幀率（上限 460）
+//   6 ZONE    [idx][rate][phase]  → 某一區的抖動週期／相位
+//   7 ZMASK   [mask:u8]           → bit k = 第 k 區輸出
+//   8 BITS    [bits:u8]           → 全域模擬位數 8..16（12 = 每級 1/16）
+//   9 SPEED   [ms:u16 LE]         → 呼吸每段毫秒（預設 4000）
+//  10 ZBITS   [8 × bits]          → 一次過設 8 區的模擬位數（並排比較用）
+//  11 ZEFF    [idx][eff]          → 單區效果（0xFF＝跟全域）
+//  12 ZEFFS   [8 × eff]           → 8 區效果一次過
+//  15 ZDITHER [8 × mode]          → 8 區抖動模式（0 off / 1 temporal / 2 spatial / 255 跟全域）
+//  16 FRAC    [frac:u8]           → SOLID 再加幾多 1/256 級（0..255）
+//  14 WSPEED  [ms:u16 LE]         → 波浪掃一個週期幾多 ms（預設 3000）
+//  13 DEMO    [on]                → 開／關自動 demo（10 段循環，任何手動 setter 會熄）
+#if CONFIG_NETCORE_RGB_MATRIX
+#define NC4_CMD_MATRIX 0xF060
+
+static void on_matrix(nc4_ctx_t *ctx, const nc4_frame_t *f)
+{
+    char j[600];
+    if (f->len < 1) {
+        reply_json(ctx, NC4_CMD_HUB_RSP, "{\"err\":\"args\"}");
+        return;
+    }
+    const uint8_t op = f->data[0];
+    switch (op) {
+    case 0:                                    // STATS：只是讀
+        break;
+    case 1:
+        if (f->len < 2) { goto bad_args; }
+        nc_rgb_matrix_set_effect(f->data[1]);
+        break;
+    case 2:
+        if (f->len < 2) { goto bad_args; }
+        nc_rgb_matrix_set_dither_mode(f->data[1]);
+        break;
+    case 3:
+        if (f->len < 4) { goto bad_args; }
+        nc_rgb_matrix_set_color(f->data[1], f->data[2], f->data[3]);
+        break;
+    case 4:
+        if (f->len < 2) { goto bad_args; }
+        nc_rgb_matrix_set_gain(f->data[1]);
+        break;
+    case 5:
+        if (f->len < 3) { goto bad_args; }
+        nc_rgb_matrix_set_fps((uint16_t)((uint16_t)f->data[1] | ((uint16_t)f->data[2] << 8)));
+        break;
+    case 6:                                    // 第 idx 區：rate、phase、[bits]
+        if (f->len < 4) { goto bad_args; }
+        nc_rgb_matrix_set_zone((int)f->data[1], f->data[2], f->data[3]);
+        if (f->len >= 5) {
+            nc_rgb_matrix_set_zone_bits((int)f->data[1], f->data[4]);
+        }
+        break;
+    case 8:                                    // 全域模擬位數 8..16（12 = 預設）
+        if (f->len < 2) { goto bad_args; }
+        nc_rgb_matrix_set_bits(f->data[1]);
+        break;
+    case 15:                                   // 8 區抖動模式一次過（8 bytes；0/1/2/255）
+        if (f->len < 9) { goto bad_args; }
+        nc_rgb_matrix_set_zone_dither_all(&f->data[1]);
+        break;
+    case 16:                                   // 純色再加 1/256 級：[frac]
+        if (f->len < 2) { goto bad_args; }
+        nc_rgb_matrix_set_fraction(f->data[1]);
+        break;
+    case 14:                                   // 波浪速度：[ms u16]（掃一個週期）
+        if (f->len < 3) { goto bad_args; }
+        nc_rgb_matrix_set_wave_speed((uint16_t)((uint16_t)f->data[1] | ((uint16_t)f->data[2] << 8)));
+        break;
+    case 13:                                   // 自動 demo：[on]
+        if (f->len < 2) { goto bad_args; }
+        nc_rgb_matrix_demo(f->data[1] != 0);
+        break;
+    case 11:                                   // 單區效果：[idx, eff]（0xFF＝跟全域）
+        if (f->len < 3) { goto bad_args; }
+        nc_rgb_matrix_set_zone_effect((int)f->data[1], f->data[2]);
+        break;
+    case 12:                                   // 8 區效果一次過（8 個 bytes）
+        if (f->len < 9) { goto bad_args; }
+        nc_rgb_matrix_set_zone_effects_all(&f->data[1]);
+        break;
+    case 10:                                   // 8 區模擬位數一次過（8 個 bytes）
+        if (f->len < 9) { goto bad_args; }
+        nc_rgb_matrix_set_zone_bits_all(&f->data[1]);
+        break;
+    case 9:                                    // 呼吸每段毫秒（u16 LE）
+        if (f->len < 3) { goto bad_args; }
+        nc_rgb_matrix_set_speed((uint16_t)((uint16_t)f->data[1] | ((uint16_t)f->data[2] << 8)));
+        break;
+    case 7:
+        if (f->len < 2) { goto bad_args; }
+        nc_rgb_matrix_set_zone_mask(f->data[1]);
+        break;
+    default:
+        reply_json(ctx, NC4_CMD_HUB_RSP, "{\"err\":\"op\"}");
+        return;
+    }
+    nc_rgb_matrix_json(j, sizeof(j));
+    reply_json(ctx, NC4_CMD_HUB_RSP, j);
+    return;
+
+bad_args:
+    reply_json(ctx, NC4_CMD_HUB_RSP, "{\"err\":\"args\"}");
+}
+#endif  // CONFIG_NETCORE_RGB_MATRIX
+
 // ── 註冊 ──
+
 
 // ── 0xF050 TCP_SEND：主動連 peer，送一批 NETBENCH 幀（量**單向**吞吐）──
 // payload: [ip:4][port:u16 LE][frames:u16 LE][size:u16 LE][flags:u8]
@@ -4149,6 +4267,9 @@ static const nc_action_t k_actions[] = {
 #endif
     { NC4_CMD_STRESS, on_stress, "test" },
     { NC4_CMD_BUF_TEST, on_buf_test, "test" },
+#if CONFIG_NETCORE_RGB_MATRIX
+    { NC4_CMD_MATRIX, on_matrix, "test" },
+#endif
     { NC4_CMD_RX_BENCH, on_rx_bench, "test" },
     { NC4_CMD_RX_RESULT, on_rx_result, "test" },
     { NC4_CMD_RX_NOOP, on_rx_noop, "test" },

@@ -354,7 +354,7 @@ def cmd_list(_args) -> int:
     print("─" * 104)
     for d in dirs:
         b = load_board(d)
-        f, p = b.get("flash", {}), b.get("psram", {})
+        f, p = (b.get("flash") or {}), (b.get("psram") or {})   # psram 可以是 null
         flash = f"{f.get('size_mb', '?')}MB@{f.get('freq_mhz', '?')}M {f.get('mode', '')}"
         psram = (f"{p.get('size_mb')}MB {p.get('mode')}@{p.get('speed_mhz')}M"
                  if p.get("size_mb") else "—")

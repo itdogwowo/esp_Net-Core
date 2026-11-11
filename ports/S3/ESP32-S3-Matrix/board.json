@@ -1,0 +1,21 @@
+{
+  "_comment": "硬體事實。改這裡 = 要重新 build；runtime 可改的放 data/config/*.json。",
+  "name": "ESP32-S3-Matrix",
+  "chip": "esp32s3",
+  "flash": {
+    "size_mb": 4,
+    "freq_mhz": 80,
+    "mode": "dio"
+  },
+  "psram": null,
+  "cpu_mhz": 240,
+  "console": "usb-serial-jtag",
+  "profiles": [],
+  "features": {
+    "eth": null,
+    "wifi": true,
+    "usb": true
+  },
+  "verified": null,
+  "notes": "Waveshare ESP32-S3-Matrix（SKU 27119）：4 MB flash、無 PSRAM、240 MHz；板載 64 顆 WS2812B-0807 串成 8×8，資料腳 GPIO14（Demo：Adafruit_NeoPixel(64, 14, NEO_RGB + NEO_KHZ800)），Dout 可再串。板載 QMI8658（IO10–13）。8×8 的驅動／抖動測試見 docs/03_notes/rgb-matrix-dither.md。"
+}

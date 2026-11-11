@@ -1,0 +1,112 @@
+{
+  "version": 1,
+  "_comment": [
+    "Driver 層（S3-Matrix）：掛在匯流排上的晶片與行為。腳位在 hardware.json。",
+    "這塊板實際只有 USB（CDC）與板載燈陣；燈陣由測試任務直接驅動 I80，不經這裡。",
+    "其餘全部 enable = 0，等有硬件再接。"
+  ],
+  "USB": {
+    "enable": 1,
+    "msc": 1,
+    "cdc": 1
+  },
+  "TFT": {
+    "enable": 0,
+    "bus": {
+      "type": "spi",
+      "index": -1
+    },
+    "pins": {
+      "dc": "tft_dc",
+      "cs": "tft_cs",
+      "rst": "tft_rst",
+      "bl": "tft_bl"
+    },
+    "xl9555": {
+      "rst": 0,
+      "bl": 1
+    },
+    "profile": "ST7789"
+  },
+  "APA102": {
+    "enable": 0,
+    "list": [
+      {
+        "bus": {
+          "type": "spi",
+          "index": -1
+        },
+        "profile": "APA102"
+      }
+    ]
+  },
+  "PCA9685": {
+    "enable": 0,
+    "list": [
+      {
+        "bus": {
+          "type": "i2c",
+          "index": -1
+        },
+        "profile": "PCA9685"
+      }
+    ]
+  },
+  "Audio": {
+    "mode": "block"
+  },
+  "PCM5102": {
+    "enable": 0,
+    "list": [
+      {
+        "bus": {
+          "type": "i2s",
+          "index": -1
+        },
+        "GPIO": {
+          "xsmt": null
+        },
+        "profile": "PCM5102"
+      }
+    ]
+  },
+  "GT1151Q": {
+    "enable": 0,
+    "bus": {
+      "type": "i2c",
+      "index": -1
+    },
+    "int": "touch_int",
+    "profile": "GT1151Q"
+  },
+  "HUSB238": {
+    "enable": 0,
+    "bus": {
+      "type": "i2c",
+      "index": -1
+    },
+    "profile": "HUSB238"
+  },
+  "uartMotor": {
+    "enable": 0,
+    "list": [
+      {
+        "bus": {
+          "type": "uart",
+          "index": -1
+        },
+        "profile": "UART_MOTOR"
+      }
+    ]
+  },
+  "LED": {
+    "_comment": "8×8 WS2812B 燈陣（GPIO14）。真正的驅動在 test_rgb_led_matrix_tasks，這裡只是宣告板上有什麼。",
+    "enable": 1,
+    "type": "ws2812b",
+    "count": 64,
+    "cols": 8,
+    "rows": 8,
+    "order": "RGB",
+    "gpio": 14
+  }
+}

@@ -101,6 +101,7 @@
 #include "nc_bench.h"
 #include "nc_probe.h"
 #include "nc_test_tcp.h"
+#include "nc_rgb_matrix.h"     // 8×8 WS2812 矩陣（I80 + 分區抖動），Kconfig 預設 n
 #endif
 #include "nvs.h"
 #include "nvs_flash.h"
@@ -3739,6 +3740,7 @@ static esp_err_t ph_declare(void)
 #ifdef NC_ENABLE_TESTS
     nc_task_register(nc_test_probe_task());   // L3：開機自測（hub 交換）
     nc_task_register(&s_task_fx);      // L4：效果 arena + render task
+    nc_task_register(nc_rgb_matrix_task());   // L4：8×8 WS2812（Kconfig 開咗才有 loop）
     nc_task_register(nc_hello_task());  // L6：最小框架自測（每秒 Hello World）
     nc_task_register(nc_bench_task_a()); // L4：量測驗證用（預設 (0,0) = 唔跑）
     nc_task_register(nc_bench_task_b());

@@ -221,3 +221,20 @@
 - 效能：TCP 12.2 ms／UDP 11.9 ms／WS 21.4 ms（p50）；burst 會 reset。
 - 下一步：PUSH producer／低延遲；P4 ETH 同層；多 client／peer registry。
 - 詳見 [net-lines.md](../03_notes/net-lines.md)。
+
+## 10. 2026-11-11：8×8 WS2812 矩陣（測試任務，第一版）
+
+> 依據：[rgb-matrix-dither.md](../03_notes/rgb-matrix-dither.md)。
+
+| # | 項目 | 狀態 | 備註 |
+|---|---|---|---|
+| 10.1 | `test_rgb_led_matrix_tasks`（I80 波形＋分區抖動＋6 個效果） | ✅ 建置通過 | `CONFIG_NETCORE_RGB_MATRIX`；測試映像 +11.5 KB |
+| 10.2 | `ports/S3/ESP32-S3-Matrix`（4 MB、無 PSRAM、GPIO14） | ✅ `board.py check` 通過 | 4 MB 分割表：app 1.5 MB × 2 ＋ FAT 896 KB |
+| 10.3 | `0xF060 MATRIX` 指令 | ✅ 實作 | stats／effect／dither／color／gain／fps／zone／zmask |
+| 10.4 | **上板**：示波器量 T0H／T1H／reset，ZONE1 不漏顆 | ⏸ 未做 | 需要真機；先驗第一區，再加區 |
+| 10.5 | 呼吸／色階 A/B 抖動（開 vs 關） | ⏸ 未做 | 這是「抖動有沒有效」的判據 |
+| 10.6 | 8 lane 版（一條 I80 bus 同時 8 條燈鏈） | ⏸ 未做 | 編碼器已按 byte 的 bit 分 lane，只差資料模型 |
+| 10.7 | 波形若出問題 → RMT + DMA 後備 | ⏸ 未做 | 抖動／效果／指令層不用改 |
+
+**明確不做（現在）**：`nc_led` 正式 backend、多實例 `drv_i80`、`hardware.json` 的 I80 型別化 ——
+等 8×8 的真機行為（波形、亮度、閃爍邊界）有數據再定。
