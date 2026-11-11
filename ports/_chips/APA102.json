@@ -1,0 +1,7 @@
+{
+  "kind": "led",
+  "name": "APA102",
+  "Q": 10,
+  "order": "BGRW",
+  "dStay": 0
+}

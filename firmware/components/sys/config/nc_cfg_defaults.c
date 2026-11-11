@@ -103,6 +103,9 @@ static const nc_hardware_cfg_t k_hw = {
         { .enable = false, .freq_hz = 40000000, .width = 4,
           .clk = -1, .cmd = -1, .d = { -1, -1, -1, -1 } },
     },
+    .n_pin = 0,
+    .n_pwm = 0,
+    .n_uart = 0,
 };
 
 const nc_hardware_cfg_t *nc_cfg_defaults_hardware(void)

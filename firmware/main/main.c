@@ -55,6 +55,10 @@
 #include "nc_action.h"
 #include "nc4_bus.h"
 #include "nc4_link.h"
+#include "nc4_line_net.h"
+#include "nc4_http.h"
+#include "nc4_ota_http.h"
+#include "nc4_web.h"
 #include "nc4_router.h"
 #include "nc_task.h"
 #include "nc_prio.h"
@@ -71,6 +75,9 @@
 #include "nc_plan.h"
 #include "nc_hub.h"
 #include "nc_uart_drv.h"
+#include "nc_pwm_drv.h"
+#include "nc_hw.h"
+#include "nc_hw_gpio.h"
 #include "nc_buf.h"
 #include "nc_ota_action.h"
 #include "nc4_ws.h"
@@ -155,7 +162,7 @@ static volatile uint32_t s_rx_frames;        // 成功收到的幀數
 #define UART_TEST_RX_BUF   1024
 #define UART_TEST_TX_BUF   1024      // TX 只由測試指令用（UART 的 send 未接）；1 KB 已足夠
 #define UART_TEST_DEF_BAUD 921600
-#define FW_VERSION         "0.1.1"
+#define FW_VERSION         "0.1.2"
 
 // ── 專屬測試域 0xFxxx（不屬於任何產品功能，可隨時刪）──
 // 0xF001 DEV_BENCH  size(u16) iters(u16) mode(u8) → 0xF002 DEV_RSP (str_u16len JSON)
@@ -197,6 +204,10 @@ static volatile uint32_t s_rx_frames;        // 成功收到的幀數
 // ports/<board>/data/config/*.json 由 EMBED_FILES 嵌進 firmware（一個層一個檔）
 extern const uint8_t preset_hardware_start[] asm("_binary_preset_hardware_json_start");
 extern const uint8_t preset_hardware_end[]   asm("_binary_preset_hardware_json_end");
+#if NETCORE_HAS_WIRING
+extern const uint8_t preset_wiring_start[] asm("_binary_preset_wiring_json_start");
+extern const uint8_t preset_wiring_end[]   asm("_binary_preset_wiring_json_end");
+#endif
 extern const uint8_t preset_system_start[]  asm("_binary_preset_system_json_start");
 extern const uint8_t preset_system_end[]    asm("_binary_preset_system_json_end");
 extern const uint8_t preset_network_start[] asm("_binary_preset_network_json_start");
@@ -1219,7 +1230,7 @@ static size_t status_put_sys(char *buf, size_t cap)
             "\"idf\":\"%s\",\"cid\":%u,"
             // 三種 heap 分開報：內部 / DMA 用 / PSRAM。冇呢三個數字，
             // 「搬去 PSRAM 到底有冇用」只能靠估。
-            "\"h_int\":%u,\"h_dma\":%u,\"h_ps\":%u,\"rep_ps\":%d}",
+            "\"h_int\":%u,\"h_dma\":%u,\"h_ps\":%u,\"rep_ps\":%d,\"rst\":%d}",
             FW_VERSION,
             (unsigned)esp_app_get_description()->app_elf_sha256[0],
             (unsigned)esp_app_get_description()->app_elf_sha256[1],
@@ -1232,7 +1243,8 @@ static size_t status_put_sys(char *buf, size_t cap)
             (unsigned)heap_caps_get_free_size(MALLOC_CAP_DMA),
             (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM),
             (s_decoder[0] != NULL && nc4_decoder_reply_buf(s_decoder[0]) != NULL &&
-             esp_ptr_external_ram(nc4_decoder_reply_buf(s_decoder[0]))) ? 1 : 0);
+             esp_ptr_external_ram(nc4_decoder_reply_buf(s_decoder[0]))) ? 1 : 0,
+            (int)esp_reset_reason());
     return off;
 }
 
@@ -1522,26 +1534,71 @@ static int nc_uart_link_adapter(void *arg, const uint8_t *frame, size_t len)
 static esp_err_t uart_owner_init(void *arg)
 {
     (void)arg;
-    // GPIO7 = SD 的 CLK。兩邊都設得「成功」，但 UART 一搶走腳位，之後 SD 的
-    // 每一次交易都會失敗（sdmmc_send_cmd 回 0x107），而症狀完全唔似腳位問題。
-    // 開機次序剛好是 SD 先、UART 後 —— 所以 SD 掛得上去，但幾百 ms 之後就死。
+    const nc_hardware_cfg_t *hw = nc_cfg_hardware();
+    const nc_uart_cfg_t *u = NULL;
+    if (hw != NULL) {
+        for (uint8_t i = 0; i < hw->n_uart; i++) {
+            if (hw->uart[i].enable) {
+                u = &hw->uart[i];
+                break;
+            }
+        }
+    }
+
+    int port;
+    int tx;
+    int rx;
+    int en = -1;
+    uint32_t baud;
+    int rx_ring;
+    int tx_ring;
+    uint16_t settle = 1;
+    if (u != NULL) {
+        port = u->id;
+        tx = u->tx;
+        rx = u->rx;
+        en = u->en;
+        baud = u->baud;
+        rx_ring = (int)u->rxbuf;
+        tx_ring = (int)u->txbuf;
+        settle = u->en_settle_ms;
+        ESP_LOGW(TAG, "UART：由 hardware.json 啟用（port %d TX %d RX %d DE %d）",
+                 port, tx, rx, en);
+    } else {
+#ifdef NC_ENABLE_TESTS
+        // 測試映像保留舊的 7/8 迴路；正式映像不再硬編碼腳位。
+        port = UART_TEST_PORT;
+        tx = UART_TEST_TX_PIN;
+        rx = UART_TEST_RX_PIN;
+        baud = UART_TEST_DEF_BAUD;
+        rx_ring = UART_TEST_RX_BUF;
+        tx_ring = UART_TEST_TX_BUF;
+#else
+        ESP_LOGW(TAG, "UART：hardware.json 沒有 enabled 的 UART → 不安裝");
+        return ESP_ERR_NOT_SUPPORTED;
+#endif
+    }
+
+    // GPIO7 = SD 的 CLK。UART 一旦搶走腳位，SD 交易會以 0x107 失敗，
+    // 而症狀完全不像腳位問題；所以這裡先擋。
     const nc_sdio_cfg_t *e = sd_hw();
     if (e != NULL) {
-        const bool clash = (e->clk == UART_TEST_TX_PIN) || (e->clk == UART_TEST_RX_PIN) ||
-                           (e->cmd == UART_TEST_TX_PIN) || (e->cmd == UART_TEST_RX_PIN);
+        const bool clash = (e->clk == tx) || (e->clk == rx) ||
+                           (e->cmd == tx) || (e->cmd == rx) ||
+                           (e->clk == en) || (e->cmd == en);
         if (clash) {
-            ESP_LOGE(TAG, "UART 測試迴路唔啟動：GPIO%d/%d 已經係 SD 的 clk/cmd（SD 開著）",
-                     UART_TEST_TX_PIN, UART_TEST_RX_PIN);
+            ESP_LOGE(TAG, "UART 唔啟動：TX=%d RX=%d DE=%d 同 SD clk/cmd 衝突",
+                     tx, rx, en);
             return ESP_ERR_INVALID_STATE;
         }
     }
     const nc_uart_drv_cfg_t ucfg = {
-        .port = UART_TEST_PORT, .tx_pin = UART_TEST_TX_PIN, .rx_pin = UART_TEST_RX_PIN,
-        .rx_ring = UART_TEST_RX_BUF, .tx_ring = UART_TEST_TX_BUF,
+        .port = port, .tx_pin = tx, .rx_pin = rx,
+        .rx_ring = rx_ring, .tx_ring = tx_ring,
+        .en_pin = en, .en_settle_ms = settle,
     };
-    return nc_uart_drv_install(&ucfg, UART_TEST_DEF_BAUD);
+    return nc_uart_drv_install(&ucfg, baud);
 }
-
 #if !CONFIG_IDF_TARGET_ESP32P4
 static int cdc_read(void *arg, uint8_t *buf, size_t cap)
 {
@@ -3291,7 +3348,13 @@ static esp_err_t ph_storage(void)
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "storage 初始化失敗: %s", esp_err_to_name(err));
     }
+#if NETCORE_HAS_WIRING
+    // 板級 wiring 當 base；/data/config/hardware.json 只覆蓋差異。
+    (void)nc_cfg_boot_ex((const char *)preset_wiring_start,
+                         (size_t)(preset_wiring_end - preset_wiring_start));
+#else
     (void)nc_cfg_boot();    // 永遠成功：最差 = 全部用預設
+#endif
     // system.json 的 "log_debug_mode"：
     //   0 = 正常（INFO、2 KB、USB 起來之後開始記 → 看到服務/bus 啟動）
     //   1 = 除錯（全部等級、8 KB、第一行開始）
@@ -3313,9 +3376,83 @@ static esp_err_t ph_storage(void)
     return ESP_OK;
 }
 
+// 開機階段：hwcheck
+//
+// 只做「由 config 收集腳位 → claim → 檢查」，不 init 任何硬體。
+// 真正的 owner 在 nc_task 的 on_start 才登記 resource；這裡先建立 claim 帳本，
+// 令腳位衝突在開機就 fail-visible，而不是等到 driver init 才爆。
+static char s_hw_json[768];
+
+static esp_err_t ph_hwcheck(void)
+{
+    (void)nc_hw_init();
+    const nc_hardware_cfg_t *hw = nc_cfg_hardware();
+    if (hw != NULL) {
+        for (uint8_t i = 0; i < hw->n_sdio; i++) {
+            const nc_sdio_cfg_t *sd = &hw->sdio[i];
+            if (!sd->enable) {
+                continue;
+            }
+            (void)nc_hw_claim(sd->clk, "sdio", "clk", NC_HW_CLAIM_WRITE);
+            (void)nc_hw_claim(sd->cmd, "sdio", "cmd", NC_HW_CLAIM_WRITE);
+            for (int d = 0; d < sd->width && d < 4; d++) {
+                (void)nc_hw_claim(sd->d[d], "sdio", "data", NC_HW_CLAIM_WRITE);
+            }
+        }
+        if (hw->eth.enable) {
+            (void)nc_hw_claim(hw->eth.mdc, "eth", "mdc", NC_HW_CLAIM_WRITE);
+            (void)nc_hw_claim(hw->eth.mdio, "eth", "mdio", NC_HW_CLAIM_WRITE);
+            (void)nc_hw_claim(hw->eth.ref_clk, "eth", "ref_clk", NC_HW_CLAIM_WRITE);
+        }
+        for (uint8_t i = 0; i < hw->n_pin; i++) {
+            (void)nc_hw_claim(hw->pin[i].pin, "gpio", hw->pin[i].label,
+                              (hw->pin[i].mode == 1) ? NC_HW_CLAIM_READ
+                                                     : NC_HW_CLAIM_WRITE);
+        }
+        for (uint8_t i = 0; i < hw->n_pwm; i++) {
+            (void)nc_hw_claim(hw->pwm[i].pin, "pwm", "out", NC_HW_CLAIM_WRITE);
+        }
+        for (uint8_t i = 0; i < hw->n_uart; i++) {
+            (void)nc_hw_claim(hw->uart[i].tx, "uart", "tx", NC_HW_CLAIM_WRITE);
+            (void)nc_hw_claim(hw->uart[i].rx, "uart", "rx", NC_HW_CLAIM_READ);
+            if (hw->uart[i].en >= 0) {
+                (void)nc_hw_claim(hw->uart[i].en, "uart", "en", NC_HW_CLAIM_WRITE);
+            }
+        }
+    }
+    (void)nc_hw_json(s_hw_json, sizeof(s_hw_json));
+    ESP_LOGI(TAG, "hwcheck: %s", s_hw_json);
+    if (!nc_hw_claim_ok()) {
+        ESP_LOGE(TAG, "hwcheck：有腳位衝突／保留腳位（仍然開機，但相關 driver 會 fail）");
+    }
+    return ESP_OK;
+}
+
+// PWM：由 typed hardware.json 的 PWM.list 安裝；enable=0 / 空 list → 0 通道。
+static esp_err_t pwm_boot(void)
+{
+    const nc_hardware_cfg_t *hw = nc_cfg_hardware();
+    if (hw == NULL || hw->n_pwm == 0) {
+        ESP_LOGI(TAG, "PWM：未啟用／沒有通道");
+        return ESP_OK;
+    }
+    nc_pwm_drv_cfg_t cfgs[NC_CFG_MAX_PWM];
+    for (uint8_t i = 0; i < hw->n_pwm; i++) {
+        cfgs[i].pin = hw->pwm[i].pin;
+        cfgs[i].freq_hz = hw->pwm[i].freq_hz;
+        cfgs[i].resolution_bits = hw->pwm[i].resolution_bits;
+        cfgs[i].duty = hw->pwm[i].duty;
+        cfgs[i].d_stay = hw->pwm[i].d_stay;
+    }
+    const esp_err_t e = nc_pwm_drv_install(cfgs, hw->n_pwm);
+    ESP_LOGW(TAG, "PWM：%s（%u 通道）", esp_err_to_name(e), (unsigned)hw->n_pwm);
+    return e;
+}
+
 // 開機階段：hardware
 static esp_err_t ph_hardware(void)
 {
+    (void)pwm_boot();
     // ── ③④ 硬體 / Driver：先確認「有沒有這個硬體」──
 #if CONFIG_IDF_TARGET_ESP32P4
     esp_err_t nerr = net_eth_start();
@@ -3395,9 +3532,9 @@ static esp_err_t ph_declare(void)
     if (s_decoder[0] != NULL) {
         actions_init();                    // 統計 → 一次配置 → 封存（不需要任何任務）
     }
-
     nc_task_register(&s_task_nc4);     // L0：parser 緩衝 + decode0/1
     nc_task_register(&s_task_net);     // L1：UART / TCP 緩衝（照 ETH 是否起來）
+    nc_task_register(nc_hw_gpio_task()); // L2：GPIO owner（nc_hw resource "gpio"）
 #ifdef NC_ENABLE_TESTS
     nc_task_register(nc_test_probe_task());   // L3：開機自測（hub 交換）
     nc_task_register(&s_task_fx);      // L4：效果 arena + render task
@@ -3434,6 +3571,12 @@ static esp_err_t ph_commit(void)
     // 放在 plan commit 之後：核心通道先要記憶體，Wi-Fi 係可選項。
     // 未啟用時 nc_wifi_boot() 只回報狀態，一個 byte 都唔配。
     nc_wifi_boot();
+#if CONFIG_NETCORE_WIFI
+    if (nc_wifi_used() && s_decoder[0] != NULL) {
+        const esp_err_t lerr = nc4_line_net_declare(s_decoder[0], 0);
+        ESP_LOGW(TAG, "network line declare：%s", esp_err_to_name(lerr));
+    }
+#endif
 #ifdef NC_ENABLE_TESTS
     // 測試版：Wi-Fi 初始化之後才起 ESP-NOW（先 STA 連 AP，再沿用它的 channel）。
     nc_test_action_espnow_boot(s_decoder[0]);
@@ -3522,6 +3665,18 @@ static esp_err_t ph_usb(void)
 // 開機階段：channels
 static esp_err_t ph_channels(void)
 {
+#if CONFIG_NETCORE_WIFI
+    if (nc_wifi_used()) {
+        const esp_err_t nerr = nc4_line_net_start();
+        ESP_LOGW(TAG, "network line start：%s", esp_err_to_name(nerr));
+        httpd_handle_t h = nc4_line_net_httpd();
+        if (h != NULL) {
+            (void)nc4_http_register(h);
+            (void)nc4_ota_http_register(h);
+            (void)nc4_web_register(h);
+        }
+    }
+#endif
     // 解碼器已在 ⑤ 宣告期建立；核心指令由 cmds 模組註冊（帶擁有權）。
     // 這裡只掛「需要硬體」的通道。
     if (s_decoder[0] != NULL) {
@@ -3761,6 +3916,7 @@ void app_main(void)
     static const nc_boot_phase_t phases[] = {
         { "banner+nvs", ph_boot },
         { "storage+cfg", ph_storage },
+        { "hwcheck", ph_hwcheck },
         { "hardware", ph_hardware },
         { "pool", ph_pool },
         { "declare", ph_declare },

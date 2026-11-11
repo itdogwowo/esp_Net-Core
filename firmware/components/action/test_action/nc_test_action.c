@@ -20,7 +20,7 @@
 #include "esp_wifi.h"
 #endif
 #include "esp_heap_caps.h"
-#if SOC_LCD_I80_SUPPORTED
+#if SOC_LCD_I80_SUPPORTED && !CONFIG_IDF_TARGET_ESP32P4
 #include "esp_lcd_io_i80.h"
 #include "esp_lcd_panel_io.h"
 #endif
@@ -33,6 +33,10 @@
 #include "nc4_bus.h"
 #include "nc4.h"
 #include "nc4_link.h"
+#include "nc_hw.h"
+#include "nc_hw_gpio.h"
+#include "nc_pwm_drv.h"
+#include "nc_uart_drv.h"
 #include "nc_buf.h"
 #include "nc_hub.h"
 
@@ -2541,6 +2545,341 @@ static void on_gpio_get(nc4_ctx_t *ctx, const nc4_frame_t *f)
     reply_json(ctx, NC4_CMD_HUB_RSP, json);
 }
 
+// ── 0xF035–0xF037：經 nc_hw owner 的 GPIO（不是直接 gpio_set_level）──
+//
+// 0xF035  [op][pin][mode][pull][level]  → 入 "gpio" command queue，回 queued
+// 0xF036  無                            → 讀 "gpio" snapshot
+// 0xF037  無                            → resource/claim 表
+#define NC4_CMD_HW_GPIO  0xF03E
+#define NC4_CMD_HW_SNAP  0xF036
+#define NC4_CMD_HW_INFO  0xF037
+
+static void on_hw_gpio(nc4_ctx_t *ctx, const nc4_frame_t *f)
+{
+    if (f->len < 2) {
+        reply_json(ctx, NC4_CMD_HUB_RSP, "{\"err\":\"args\"}");
+        return;
+    }
+    nc_hw_cmd_t c;
+    memset(&c, 0, sizeof(c));
+    c.op = f->data[0];
+    c.pin = f->data[1];
+    if (c.op == NC_HW_GPIO_CFG) {
+        if (f->len < 5) {
+            reply_json(ctx, NC4_CMD_HUB_RSP, "{\"err\":\"args\"}");
+            return;
+        }
+        c.arg = f->data[2];
+        c.data[0] = f->data[3];
+        c.data[1] = f->data[4];
+    } else if (c.op == NC_HW_GPIO_SET) {
+        if (f->len < 3) {
+            reply_json(ctx, NC4_CMD_HUB_RSP, "{\"err\":\"args\"}");
+            return;
+        }
+        c.arg = f->data[2];
+    } else {
+        reply_json(ctx, NC4_CMD_HUB_RSP, "{\"err\":\"op\"}");
+        return;
+    }
+    const esp_err_t e = nc_hw_send(NC_HW_GPIO_NAME, &c);
+    char j[128];
+    snprintf(j, sizeof(j), "{\"op\":%u,\"pin\":%u,\"queued\":%d,\"err\":\"%s\"}",
+             c.op, c.pin, e == ESP_OK ? 1 : 0, esp_err_to_name(e));
+    reply_json(ctx, NC4_CMD_HUB_RSP, j);
+}
+
+static void on_hw_snap(nc4_ctx_t *ctx, const nc4_frame_t *f)
+{
+    (void)f;
+    nc_hw_gpio_snap_t s;
+    const size_t n = nc_hw_snapshot(NC_HW_GPIO_NAME, &s, sizeof(s));
+    char j[256];
+    if (n != sizeof(s)) {
+        reply_json(ctx, NC4_CMD_HUB_RSP, "{\"err\":\"no_snapshot\"}");
+        return;
+    }
+    snprintf(j, sizeof(j), "{\"levels\":%llu,\"low\":%lu,\"high\":%lu}",
+             (unsigned long long)s.levels,
+             (unsigned long)(s.levels & 0xFFFFFFFFu),
+             (unsigned long)(s.levels >> 32));
+    reply_json(ctx, NC4_CMD_HUB_RSP, j);
+}
+
+static void on_hw_info(nc4_ctx_t *ctx, const nc4_frame_t *f)
+{
+    (void)f;
+    char j[768];
+    (void)nc_hw_json(j, sizeof(j));
+    reply_json(ctx, NC4_CMD_HUB_RSP, j);
+}
+
+// nc_wifi 在 main 元件；test_action 不 reverse-depend main，所以這裡只宣告用到的介面。
+// 未編入 WiFi 時 nc_wifi.c 仍有同名 stub（回 not_supported），所以不用 #if。
+int       nc_wifi_cred_count(void);
+esp_err_t nc_wifi_cred_add(const char *ssid, const char *pw);
+esp_err_t nc_wifi_cred_remove(const char *ssid);
+esp_err_t nc_wifi_cred_clear(void);
+size_t    nc_wifi_cred_json(char *buf, size_t cap);
+
+#define NC4_CMD_PWM_STAY  0xF03C
+#define NC4_CMD_PWM_ZERO  0xF03D
+
+static void pwm_report(nc4_ctx_t *ctx, int idx, esp_err_t e)
+{
+    char j[128];
+    snprintf(j, sizeof(j), "{\"idx\":%d,\"duty\":%u,\"err\":\"%s\"}",
+             idx, (unsigned)nc_pwm_drv_get(idx), esp_err_to_name(e));
+    reply_json(ctx, NC4_CMD_HUB_RSP, j);
+}
+
+static void on_pwm_stay(nc4_ctx_t *ctx, const nc4_frame_t *f)
+{
+    if (f->len < 1) {
+        reply_json(ctx, NC4_CMD_HUB_RSP, "{\"err\":\"args\"}");
+        return;
+    }
+    const int idx = f->data[0];
+    pwm_report(ctx, idx, nc_pwm_drv_stay(idx));
+}
+
+static void on_pwm_zero(nc4_ctx_t *ctx, const nc4_frame_t *f)
+{
+    if (f->len < 1) {
+        reply_json(ctx, NC4_CMD_HUB_RSP, "{\"err\":\"args\"}");
+        return;
+    }
+    const int idx = f->data[0];
+    pwm_report(ctx, idx, nc_pwm_drv_zero(idx));
+}
+
+#define NC4_CMD_UART_INFO 0xF03B
+
+static void on_uart_info(nc4_ctx_t *ctx, const nc4_frame_t *f)
+{
+    (void)f;
+    char j[160];
+    snprintf(j, sizeof(j), "{\"ready\":%d,\"port\":%d,\"baud\":%u}",
+             nc_uart_drv_ready() ? 1 : 0, nc_uart_drv_port(),
+             (unsigned)nc_uart_drv_baud());
+    reply_json(ctx, NC4_CMD_HUB_RSP, j);
+}
+
+// ── 0xF040／0xF041 NETBENCH：網絡 RX 真實統計 ──
+//
+// 主機連續送 [seq u32] + payload；每幀 handler 只記帳，不假裝成功：
+//   frames／bytes／seq_max／lost／ooo／elapsed
+// 主機最後送 op=2 取 result，跟實際送出的 seq 對照。
+#define NC4_CMD_NETBENCH        0xF040
+#define NC4_CMD_NETBENCH_RESULT 0xF041
+
+static struct {
+    bool     active;
+    uint32_t frames;
+    uint32_t bytes;
+    uint32_t seq_max;
+    uint32_t last_seq;
+    uint32_t lost;
+    uint32_t ooo;
+    int64_t  t0_us;
+    int64_t  t1_us;
+} s_nb;
+
+static uint32_t nb_u32(const uint8_t *p)
+{
+    return (uint32_t)p[0] | ((uint32_t)p[1] << 8) |
+           ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
+}
+
+static void on_netbench(nc4_ctx_t *ctx, const nc4_frame_t *f)
+{
+    if (f->len < 1) {
+        reply_json(ctx, NC4_CMD_HUB_RSP, "{\"err\":\"args\"}");
+        return;
+    }
+    const uint8_t op = f->data[0];
+    if (op == 0) {
+        memset(&s_nb, 0, sizeof(s_nb));
+        s_nb.active = true;
+        s_nb.t0_us = esp_timer_get_time();
+        reply_json(ctx, NC4_CMD_HUB_RSP, "{\"started\":1}");
+        return;
+    }
+    if (op == 1 || op == 3) {
+        if (f->len < 5) {
+            reply_json(ctx, NC4_CMD_HUB_RSP, "{\"err\":\"seq\"}");
+            return;
+        }
+        if (!s_nb.active) {
+            s_nb.active = true;
+            s_nb.t0_us = esp_timer_get_time();
+        }
+        const uint32_t seq = nb_u32(&f->data[1]);
+        if (s_nb.frames == 0) {
+            s_nb.seq_max = seq;
+            s_nb.last_seq = seq;
+        } else if (seq > s_nb.last_seq + 1u) {
+            s_nb.lost += seq - s_nb.last_seq - 1u;
+            s_nb.last_seq = seq;
+        } else if (seq <= s_nb.last_seq) {
+            s_nb.ooo++;
+        } else {
+            s_nb.last_seq = seq;
+        }
+        if (seq > s_nb.seq_max) {
+            s_nb.seq_max = seq;
+        }
+        s_nb.frames++;
+        s_nb.bytes += (uint32_t)(f->len - 5u);
+        s_nb.t1_us = esp_timer_get_time();
+        if (op == 1) {
+            char j[80];
+            snprintf(j, sizeof(j), "{\"seq\":%u,\"n\":%u}", (unsigned)seq,
+                     (unsigned)s_nb.frames);
+            reply_json(ctx, NC4_CMD_HUB_RSP, j);
+        }
+        return;
+    }
+    if (op == 2) {
+        s_nb.active = false;
+        const uint64_t us = (s_nb.t1_us > s_nb.t0_us) ?
+                            (uint64_t)(s_nb.t1_us - s_nb.t0_us) : 0;
+        const uint32_t expected = s_nb.seq_max + 1u;
+        const uint32_t missing = (expected > s_nb.frames) ? expected - s_nb.frames : 0;
+        const double fps = (us != 0) ? (double)s_nb.frames * 1000000.0 / (double)us : 0.0;
+        const double kbps = (us != 0) ? (double)s_nb.bytes * 1000000.0 / (double)us / 1024.0 : 0.0;
+        char j[320];
+        snprintf(j, sizeof(j),
+                 "{\"frames\":%u,\"bytes\":%u,\"seq_max\":%u,\"expected\":%u,"
+                 "\"lost\":%u,\"missing\":%u,\"ooo\":%u,\"us\":%llu,"
+                 "\"fps\":%.1f,\"kbps\":%.2f}",
+                 (unsigned)s_nb.frames, (unsigned)s_nb.bytes, (unsigned)s_nb.seq_max,
+                 (unsigned)expected, (unsigned)s_nb.lost, (unsigned)missing,
+                 (unsigned)s_nb.ooo, (unsigned long long)us, fps, kbps);
+        reply_json(ctx, NC4_CMD_HUB_RSP, j);
+        return;
+    }
+    reply_json(ctx, NC4_CMD_HUB_RSP, "{\"err\":\"op\"}");
+}
+
+// ── 0xF039–0xF03A：PWM（LEDC）測試 ──
+#define NC4_CMD_PWM_SET   0xF039
+#define NC4_CMD_PWM_INFO  0xF03A
+
+static void on_pwm_set(nc4_ctx_t *ctx, const nc4_frame_t *f)
+{
+    if (f->len < 4) {
+        reply_json(ctx, NC4_CMD_HUB_RSP, "{\"err\":\"args\"}");
+        return;
+    }
+    const int idx = f->data[0];
+    const uint32_t duty = (uint32_t)f->data[1] | ((uint32_t)f->data[2] << 8) |
+                          ((uint32_t)f->data[3] << 16);
+    const esp_err_t e = nc_pwm_drv_set(idx, duty);
+    char j[128];
+    snprintf(j, sizeof(j), "{\"idx\":%d,\"count\":%d,\"duty\":%u,\"err\":\"%s\"}",
+             idx, nc_pwm_drv_count(), (unsigned)nc_pwm_drv_get(idx),
+             esp_err_to_name(e));
+    reply_json(ctx, NC4_CMD_HUB_RSP, j);
+}
+
+static void on_pwm_info(nc4_ctx_t *ctx, const nc4_frame_t *f)
+{
+    (void)f;
+    char j[256];
+    int off = snprintf(j, sizeof(j), "{\"count\":%d,\"duty\":[", nc_pwm_drv_count());
+    for (int i = 0; i < nc_pwm_drv_count() && off > 0 && (size_t)off < sizeof(j); i++) {
+        off += snprintf(j + off, sizeof(j) - (size_t)off, "%s%u", i ? "," : "",
+                        (unsigned)nc_pwm_drv_get(i));
+    }
+    if (off > 0 && (size_t)off + 2 < sizeof(j)) {
+        j[off++] = ']';
+        j[off++] = '}';
+        j[off] = '\0';
+    }
+    reply_json(ctx, NC4_CMD_HUB_RSP, j);
+}
+
+// ── 0xF038：Wi-Fi 憑證管理（最多 10 組；只回 SSID，不回密碼）──
+//   [0] list
+//   [1][ssid_len][ssid][pw_len][pw] add/update
+//   [2][ssid_len][ssid] remove
+//   [3] clear
+#define NC4_CMD_WIFI_CRED  0xF038
+
+static void on_wifi_cred(nc4_ctx_t *ctx, const nc4_frame_t *f)
+{
+    if (f->len < 1) {
+        reply_json(ctx, NC4_CMD_HUB_RSP, "{\"err\":\"args\"}");
+        return;
+    }
+    const uint8_t op = f->data[0];
+    esp_err_t e = ESP_OK;
+    if (op == 0) {
+        /* list */
+    } else if (op == 1) {
+        if (f->len < 3) {
+            reply_json(ctx, NC4_CMD_HUB_RSP, "{\"err\":\"args\"}");
+            return;
+        }
+        const int sl = f->data[1];
+        if (sl < 1 || sl > 32 || 2 + sl >= f->len) {
+            reply_json(ctx, NC4_CMD_HUB_RSP, "{\"err\":\"ssid\"}");
+            return;
+        }
+        char ssid[33];
+        memcpy(ssid, f->data + 2, (size_t)sl);
+        ssid[sl] = '\0';
+        const int off = 2 + sl;
+        const int pl = f->data[off];
+        if (pl < 0 || pl > 64 || off + 1 + pl > f->len) {
+            reply_json(ctx, NC4_CMD_HUB_RSP, "{\"err\":\"pw\"}");
+            return;
+        }
+        char pw[65];
+        memcpy(pw, f->data + off + 1, (size_t)pl);
+        pw[pl] = '\0';
+        e = nc_wifi_cred_add(ssid, pw);
+    } else if (op == 2) {
+        if (f->len < 3) {
+            reply_json(ctx, NC4_CMD_HUB_RSP, "{\"err\":\"args\"}");
+            return;
+        }
+        const int sl = f->data[1];
+        if (sl < 1 || sl > 32 || 2 + sl > f->len) {
+            reply_json(ctx, NC4_CMD_HUB_RSP, "{\"err\":\"ssid\"}");
+            return;
+        }
+        char ssid[33];
+        memcpy(ssid, f->data + 2, (size_t)sl);
+        ssid[sl] = '\0';
+        e = nc_wifi_cred_remove(ssid);
+    } else if (op == 3) {
+        e = nc_wifi_cred_clear();
+    } else {
+        reply_json(ctx, NC4_CMD_HUB_RSP, "{\"err\":\"op\"}");
+        return;
+    }
+    // 唔好 j[512] + out[640] 兩份同時上棧：decode 任務棧只有幾 KB。
+    char out[640];
+    const int pre = snprintf(out, sizeof(out), "{\"err\":\"%s\",\"cred\":",
+                             esp_err_to_name(e));
+    if (pre < 0 || (size_t)pre >= sizeof(out) - 2) {
+        reply_json(ctx, NC4_CMD_HUB_RSP, "{\"err\":\"trunc\"}");
+        return;
+    }
+    size_t n = nc_wifi_cred_json(out + pre, sizeof(out) - (size_t)pre - 2);
+    if (n == 0) {
+        n = (size_t)snprintf(out + pre, sizeof(out) - (size_t)pre,
+                             "{\"count\":0,\"ssids\":[]}");
+    }
+    if (pre + (int)n + 1 < (int)sizeof(out)) {
+        out[pre + (int)n] = '}';
+        out[pre + (int)n + 1] = '\0';
+    }
+    reply_json(ctx, NC4_CMD_HUB_RSP, out);
+}
+
 // ── 0xF028–0xF02A：ESP-NOW 測試（S3 WiFi；P4 冇 radio）──
 //
 // 為什麼要有這幾支：ESP-NOW 唔需要連 AP，但需要 WiFi radio 起來、固定頻道。
@@ -3029,7 +3368,7 @@ static void on_stress(nc4_ctx_t *ctx, const nc4_frame_t *f)
 // 目的：回答「I80 用 DMA、一塊一塊發、換緩衝，CPU 是否真的空出來」。
 // 用 16-bit I80 bus + 28,800 B frame（16 lane × 600 LED × 3 B）做時序；
 // 只 toggle 測試 GPIO，不驅動真 LED。量 submit（CPU）／wire（DMA）／fill（換緩衝）。
-#if SOC_LCD_I80_SUPPORTED
+#if SOC_LCD_I80_SUPPORTED && !CONFIG_IDF_TARGET_ESP32P4
 #define NC4_CMD_I80_DMA     0xF030
 #define I80_FRAME_BYTES     28800      /* 16 × 600 × 3 */
 #define I80_SLICES          4
@@ -3505,6 +3844,16 @@ static const nc_action_t k_actions[] = {
     { NC4_CMD_GPIO_CFG, on_gpio_cfg, "test" },
     { NC4_CMD_GPIO_SET, on_gpio_set, "test" },
     { NC4_CMD_GPIO_GET, on_gpio_get, "test" },
+    { NC4_CMD_HW_GPIO, on_hw_gpio, "test" },
+    { NC4_CMD_HW_SNAP, on_hw_snap, "test" },
+    { NC4_CMD_HW_INFO, on_hw_info, "test" },
+    { NC4_CMD_PWM_SET, on_pwm_set, "test" },
+    { NC4_CMD_PWM_INFO, on_pwm_info, "test" },
+    { NC4_CMD_UART_INFO, on_uart_info, "test" },
+    { NC4_CMD_PWM_STAY, on_pwm_stay, "test" },
+    { NC4_CMD_PWM_ZERO, on_pwm_zero, "test" },
+    { NC4_CMD_NETBENCH, on_netbench, "test" },
+    { NC4_CMD_NETBENCH_RESULT, on_netbench, "test" },
 #if CONFIG_NETCORE_WIFI
     { NC4_CMD_ESPNOW_INIT, on_espnow_init, "test" },
     { NC4_CMD_ESPNOW_SEND, on_espnow_send, "test" },
@@ -3513,7 +3862,8 @@ static const nc_action_t k_actions[] = {
     { NC4_CMD_WIFI_AP, on_wifi_ap, "test" },
     { NC4_CMD_WIFI_INFO, on_wifi_info, "test" },
 #endif
-#if SOC_LCD_I80_SUPPORTED
+    { NC4_CMD_WIFI_CRED, on_wifi_cred, "test" },
+#if SOC_LCD_I80_SUPPORTED && !CONFIG_IDF_TARGET_ESP32P4
     { NC4_CMD_I80_DMA, on_i80_dma, "test" },
 #endif
     { NC4_CMD_STRESS, on_stress, "test" },

@@ -1,0 +1,8 @@
+{
+  "kind": "pwm",
+  "name": "PCA9685",
+  "address": [
+    "0x40"
+  ],
+  "dStay": 0
+}

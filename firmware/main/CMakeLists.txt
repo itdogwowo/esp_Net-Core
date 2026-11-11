@@ -13,6 +13,20 @@
 # driver.json **沒有** embed、也還沒有任何地方讀它。
 
 set(_preset_embed)
+set(_has_wiring 0)
+if(EXISTS "${PORT_DIR}/wiring.json")
+    # 板級 wiring 是 build-time 的硬體事實；不寫進 data/config、不給用戶改。
+    # 開機由 nc_cfg_boot_ex() 當 base，用戶 hardware.json 只覆蓋差異。
+    set(_wiring_out "${CMAKE_CURRENT_BINARY_DIR}/preset_wiring.json")
+    add_custom_command(
+        OUTPUT  "${_wiring_out}"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${PORT_DIR}/wiring.json" "${_wiring_out}"
+        DEPENDS "${PORT_DIR}/wiring.json"
+        COMMENT "wiring.json → build")
+    list(APPEND _preset_embed "${_wiring_out}")
+    set(_has_wiring 1)
+endif()
 foreach(_cfg hardware system network tasks)
     if(EXISTS "${PORT_DIR}/data/config/${_cfg}.json")
         # 用 build-time 的 copy_if_different，而唔係 configure_file：
@@ -58,13 +72,14 @@ idf_component_register(
     PRIV_REQUIRES fatfs esp_timer esp_partition esp_driver_gpio esp_driver_uart esp_driver_sdmmc
               wear_levelling esp_eth esp_netif lwip esp_event esp_psram nvs_flash
               # driver/：匯流排驅動器（對照舊專案 slave/driver/*_drv.py）
-              drv_uart bus_core bus_uart
+              drv_uart drv_pwm bus_core bus_uart hw hw_gpio
                    espressif__esp_tinyusb nc4 mem config ota_action task_manager core bus_net store state nclog file_action
                    ${_nc_priv_extra}
     ${_preset_args}
 )
 
 target_compile_definitions(${COMPONENT_LIB} PRIVATE NETCORE_HAS_PRESET_TASKS=${_has_tasks_preset})
+target_compile_definitions(${COMPONENT_LIB} PRIVATE NETCORE_HAS_WIRING=${_has_wiring})
 if(NC_ENABLE_TESTS)
     target_compile_definitions(${COMPONENT_LIB} PRIVATE NC_ENABLE_TESTS=1)
     # main 直接 include 測試任務的標頭（nc_fx.h / nc_bench.h …）。

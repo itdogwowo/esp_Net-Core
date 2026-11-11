@@ -56,6 +56,26 @@ static int32_t get_int(const cJSON *o, const char *key, int32_t def,
     return (int32_t)d;
 }
 
+// 選填腳位：null／缺欄位都當「未設定」，不計 invalid（hardware.json 用 null 表示沒接）。
+static int8_t get_pin_opt(const cJSON *o, const char *key, nc_cfg_stat_t *st)
+{
+    const cJSON *v = item(o, key);
+    if (v == NULL || cJSON_IsNull(v)) {
+        st->defaulted++;
+        return -1;
+    }
+    if (!cJSON_IsNumber(v)) {
+        st->invalid++;
+        return -1;
+    }
+    const int x = v->valueint;
+    if (x < -1 || x > NC_CFG_GPIO_MAX) {
+        st->invalid++;
+        return -1;
+    }
+    return (int8_t)x;
+}
+
 static bool get_bool(const cJSON *o, const char *key, bool def, nc_cfg_stat_t *st)
 {
     const cJSON *v = item(o, key);
@@ -442,6 +462,148 @@ static void apply_sdio(const cJSON *root, nc_hardware_cfg_t *out, nc_cfg_stat_t 
     }
 }
 
+// PIN：只有 enable 時才建立；GPIO null 跳過。
+static void apply_pin(const cJSON *root, nc_hardware_cfg_t *out, nc_cfg_stat_t *st)
+{
+    const cJSON *pin = item(root, "PIN");
+    if (pin == NULL) {
+        st->defaulted++;
+        return;
+    }
+    if (!cJSON_IsObject(pin)) {
+        st->invalid++;
+        return;
+    }
+    if (!get_bool(pin, "enable", false, st)) {
+        out->n_pin = 0;
+        return;
+    }
+    const cJSON *list = item(pin, "list");
+    if (!cJSON_IsArray(list)) {
+        st->defaulted++;
+        return;
+    }
+    const cJSON *it = NULL;
+    cJSON_ArrayForEach(it, list) {
+        if (out->n_pin >= NC_CFG_MAX_PIN) {
+            st->invalid++;
+            break;
+        }
+        const int8_t pinno = get_pin_opt(it, "GPIO", st);
+        if (pinno < 0) {
+            continue;
+        }
+        nc_pin_cfg_t e;
+        memset(&e, 0, sizeof(e));
+        e.pin = pinno;
+        char mode[8];
+        get_str(it, "mode", mode, sizeof(mode), "OUT", st);
+        e.mode = (strcasecmp(mode, "IN") == 0) ? 1u : 0u;
+        char pull[8];
+        get_str(it, "pull", pull, sizeof(pull), "NONE", st);
+        e.pull = (strcasecmp(pull, "UP") == 0) ? 1u :
+                 (strcasecmp(pull, "DOWN") == 0) ? 2u : 0u;
+        e.initial = (uint8_t)get_int(it, "initial", 0, 0, 1, st);
+        get_str(it, "label", e.label, sizeof(e.label), "", st);
+        out->pin[out->n_pin++] = e;
+    }
+}
+
+// PWM：LEDC。enable=0 → 保留 0 條；有 enable 才逐條建立。
+static void apply_pwm(const cJSON *root, nc_hardware_cfg_t *out, nc_cfg_stat_t *st)
+{
+    const cJSON *pwm = item(root, "PWM");
+    if (pwm == NULL) {
+        st->defaulted++;
+        return;
+    }
+    if (!cJSON_IsObject(pwm)) {
+        st->invalid++;
+        return;
+    }
+    if (!get_bool(pwm, "enable", false, st)) {
+        out->n_pwm = 0;
+        return;
+    }
+    const cJSON *list = item(pwm, "list");
+    if (!cJSON_IsArray(list)) {
+        st->defaulted++;
+        return;
+    }
+    const cJSON *it = NULL;
+    cJSON_ArrayForEach(it, list) {
+        if (out->n_pwm >= NC_CFG_MAX_PWM) {
+            st->invalid++;
+            break;
+        }
+        const int8_t pin = get_pin_opt(it, "GPIO", st);
+        if (pin < 0) {
+            continue;
+        }
+        nc_pwm_cfg_t e;
+        memset(&e, 0, sizeof(e));
+        e.pin = pin;
+        e.freq_hz = (uint32_t)get_int(it, "freq", 1000, 1, 40000000, st);
+        e.resolution_bits = (uint8_t)get_int(it, "resolution", 12, 1, 14, st);
+        const uint32_t max_duty = (1u << e.resolution_bits) - 1u;
+        e.duty = (uint16_t)get_int(it, "duty", 0, 0, (int32_t)max_duty, st);
+        e.d_stay = (uint16_t)get_int(it, "dStay", 0, 0, (int32_t)max_duty, st);
+        get_str(it, "label", e.label, sizeof(e.label), "", st);
+        out->pwm[out->n_pwm++] = e;
+    }
+}
+
+// UART：照舊專案；en >= 0 = RS485 DE 腳。
+static void apply_uart(const cJSON *root, nc_hardware_cfg_t *out, nc_cfg_stat_t *st)
+{
+    const cJSON *uart = item(root, "UART");
+    if (uart == NULL) {
+        st->defaulted++;
+        return;
+    }
+    if (!cJSON_IsObject(uart)) {
+        st->invalid++;
+        return;
+    }
+    if (!get_bool(uart, "enable", false, st)) {
+        out->n_uart = 0;
+        return;
+    }
+    const cJSON *list = item(uart, "list");
+    if (!cJSON_IsArray(list)) {
+        st->defaulted++;
+        return;
+    }
+    const cJSON *it = NULL;
+    cJSON_ArrayForEach(it, list) {
+        if (out->n_uart >= NC_CFG_MAX_UART) {
+            st->invalid++;
+            break;
+        }
+        const cJSON *g = item(it, "GPIO");
+        if (!cJSON_IsObject(g)) {
+            st->invalid++;
+            continue;
+        }
+        nc_uart_cfg_t e;
+        memset(&e, 0, sizeof(e));
+        e.enable = true;
+        e.id = (uint8_t)get_int(it, "id", 1, 0, 2, st);
+        e.baud = (uint32_t)get_int(it, "baudrate", 115200, 300, 5000000, st);
+        e.rxbuf = (uint32_t)get_int(it, "rxbuf", 16384, 256, 65536, st);
+        e.txbuf = (uint32_t)get_int(it, "txbuf", 16384, 256, 65536, st);
+        e.tx = get_pin_opt(g, "tx", st);
+        e.rx = get_pin_opt(g, "rx", st);
+        e.en = get_pin_opt(g, "en", st);
+        e.en_settle_ms = (uint16_t)get_int(it, "en_settle_ms", 1, 0, 1000, st);
+        if (e.tx < 0 || e.rx < 0) {
+            st->defaulted++;     // 未接線 → 這條不建立
+            continue;
+        }
+        out->uart[out->n_uart++] = e;
+    }
+}
+
 esp_err_t nc_cfg_apply_hardware(const cJSON *root, nc_hardware_cfg_t *out, nc_cfg_stat_t *st)
 {
     if (out == NULL || st == NULL) {
@@ -472,7 +634,10 @@ esp_err_t nc_cfg_apply_hardware(const cJSON *root, nc_hardware_cfg_t *out, nc_cf
     note_unknown(root, root_keys, sizeof(root_keys) / sizeof(root_keys[0]), st);
 
     apply_eth(root, out, st);    // 已型別化的段：改它 = 改行為
-    apply_sdio(root, out, st);   // 同上；其餘段未型別化 = 改它沒有作用（只計 unknown）
+    apply_sdio(root, out, st);
+    apply_pin(root, out, st);    // GPIO owner 開機套用
+    apply_pwm(root, out, st);    // LEDC
+    apply_uart(root, out, st);   // UART / RS485
     return ESP_OK;
 }
 
@@ -628,6 +793,11 @@ esp_err_t nc_cfg_apply_tasks(const cJSON *root, nc_tasks_cfg_t *out, nc_cfg_stat
 
 // ───────────────────────── 存取 ─────────────────────────
 
+esp_err_t nc_cfg_boot(void)
+{
+    return nc_cfg_boot_ex(NULL, 0);
+}
+
 const nc_system_cfg_t *nc_cfg_system(void)
 {
     return &s_sys;
@@ -697,7 +867,33 @@ bool nc_cfg_layer_bad(const char *layer)
 
 // ───────────────────────── 開機載入 ─────────────────────────
 
-esp_err_t nc_cfg_boot(void)
+// 板級 wiring（build-time）當 base，用戶 hardware.json 逐欄位覆蓋。
+// 物件遞迴合併；陣列／純量由用戶整個取代（wiring 的 list 不會被半套覆蓋）。
+static void merge_obj(cJSON *dst, const cJSON *src)
+{
+    if (!cJSON_IsObject(dst) || !cJSON_IsObject(src)) {
+        return;
+    }
+    const cJSON *it = NULL;
+    cJSON_ArrayForEach(it, src) {
+        cJSON *old = cJSON_GetObjectItemCaseSensitive(dst, it->string);
+        if (old != NULL && cJSON_IsObject(old) && cJSON_IsObject(it)) {
+            merge_obj(old, it);
+        } else {
+            cJSON *dup = cJSON_Duplicate(it, 1);
+            if (dup == NULL) {
+                continue;
+            }
+            if (old != NULL) {
+                cJSON_ReplaceItemInObjectCaseSensitive(dst, it->string, dup);
+            } else {
+                cJSON_AddItemToObject(dst, it->string, dup);
+            }
+        }
+    }
+}
+
+esp_err_t nc_cfg_boot_ex(const char *hw_base_json, size_t hw_base_len)
 {
     bool exists = false;
 
@@ -714,16 +910,38 @@ esp_err_t nc_cfg_boot(void)
     }
 
     exists = false;
-    f = nc_cfg_open_ex("hardware", &exists);
-    if (f != NULL) {
-        (void)nc_cfg_apply_hardware(nc_cfg_root(f), &s_hw, &s_hw_stat);
-        nc_cfg_close(f);
-    } else {
-        (void)nc_cfg_apply_hardware(NULL, &s_hw, &s_hw_stat);
-        if (exists) {
-            s_hw_stat.missing = 0;
-            s_hw_stat.bad_json = 1;
+    cJSON *base = NULL;
+    if (hw_base_json != NULL && hw_base_len > 0) {
+        base = cJSON_ParseWithLength(hw_base_json, hw_base_len);
+        if (base != NULL && !cJSON_IsObject(base)) {
+            cJSON_Delete(base);
+            base = NULL;
         }
+        if (base == NULL) {
+            ESP_LOGW(TAG, "wiring base JSON 解析失敗；只用用戶 hardware.json");
+        }
+    }
+    f = nc_cfg_open_ex("hardware", &exists);
+    cJSON *user = NULL;
+    if (f != NULL) {
+        user = cJSON_Duplicate(nc_cfg_root(f), 1);
+        nc_cfg_close(f);
+    }
+    if (base != NULL) {
+        if (user != NULL) {
+            merge_obj(base, user);       // 用戶覆蓋板級 wiring
+        }
+        (void)nc_cfg_apply_hardware(base, &s_hw, &s_hw_stat);
+    } else {
+        (void)nc_cfg_apply_hardware(user, &s_hw, &s_hw_stat);
+    }
+    cJSON_Delete(user);
+    cJSON_Delete(base);
+    if (exists && user == NULL && f == NULL) {
+        s_hw_stat.missing = 0;
+        s_hw_stat.bad_json = 1;
+    } else if (base != NULL) {
+        s_hw_stat.missing = 0;
     }
 
     exists = false;

@@ -1876,3 +1876,194 @@ NC4 只是第一種 personality，將來 LED（SPI／I80 波形）同 LCD（I80�
 
 **下一步**：main 的 UART 線改經 `bus_uart`（低風險，本板 UART 未安裝）；
 然後 `bus_net` 改成 socket 線；最後才搬 `nc4_bus`／`nc4_link`（熱路徑）。
+
+
+### 7.51 2026-11-10（`nc_hw` 第一版：owner／command／snapshot；GPIO owner 上板）
+
+**動機**：UI 同實操會同時需要硬體，但唔想每次讀寫都經中央管理器。定案係
+**中央門面＋分散執行**：owner task 係唯一 writer；UI／NC4 只送 command 或讀 snapshot。
+
+**落地**：
+
+| 組件 | 內容 |
+|---|---|
+| `sys/hw` | `nc_hw` registry（32）、command queue（8）、snapshot（256 B seqlock）、claim（64） |
+| `tasks/hw_gpio` | resource `"gpio"` owner；CFG／SET、10 ms 採樣、保留腳位／已 claim 腳位拒絕 |
+| `main` | `ph_hwcheck`（storage 之後、hardware 之前）：claim ETH／SDIO 腳位、validate |
+| 測試 | `0xF035 HW_GPIO`、`0xF036 HW_SNAP`、`0xF037 HW_INFO` |
+
+**上板（S3）**：
+
+- `claims`：SDIO 7／6／15／16／4／5；
+- CFG pin 21 output high → `levels=2097152`；SET low → `0`；
+- SET pin 7（SD clk）被 owner 拒絕；
+- `hw_gpio` heartbeat 正常；`nc4_test` 9/9、hosttest 全綠。
+
+**未做**：全部 `hardware.json` 段的 claim（等 driver 型別化）、UI／config owner、
+pixel／audio owner、board／wiring／user config 拆分。
+
+
+**2026-11-10 追加（config 分家第一版）**：
+
+- `ports/<board>/wiring.json`（build-time，CMake embed）成為板級接線 base；
+- `/data/config/hardware.json` 改成用戶覆蓋層；`nc_cfg_boot_ex()` 先 base 後 merge；
+- `driver.json` 移到 `ports/<board>/driver.json`（build-time；runtime 尚未讀）；
+- S3 以「minimal user hardware + wiring base」開機，`0xF037` 仍見 SDIO claims；
+- 2026-11-10 修正：`data/config/hardware.json` 的 seed 改成**完整 wiring 預設**
+  （GPIO／PWM／SPI／I2C／I80／UART／I2S／SDIO／ENC／XL9555 都在），
+  用戶可直接改；未寫的欄位仍由 wiring 補。A 板已用完整檔重開，SDIO claims 不變、WiFi 自動連線仍正常。
+- P4 release build 通過；S3 tests build 通過。
+
+
+**2026-11-10 追加（chip profile 表）**：
+
+- `ports/_chips/{ST7789,GT1151Q,PCM5102,APA102,PCA9685,HUSB238,UART_MOTOR}.json`
+  放「同一顆晶片的常識」；
+- 兩塊板的 `driver.json` 改成 `profile`＋板級差異；`tools/board.py check` 會驗證
+  `profile` 是否存在；
+- `driver.json` 仍在 build-time，runtime 未讀；profile merge 仍是下一刀。
+
+
+### 7.52 2026-11-10（Wi-Fi 憑證管理：NVS 最多 10 組＋掃描配對）
+
+**移植自**舊專案 `network_manager.py`：`CRED_MAX=10`、btree 持久化、move-to-end、
+掃描按 RSSI、已知 SSID 優先、hidden 盲連、成功才寫入。
+
+**落地**：
+
+| 項目 | 內容 |
+|---|---|
+| NVS | namespace `nccred`，key `creds`，blob 10 組 `{ssid[33], pw[65]}` |
+| API | `nc_wifi_cred_add/remove/clear/count/json` |
+| 設定 | `network.json` wifi `credentials[]`；`ssid_pw` 兼容 `password_pw`／`password` |
+| manager | `wifi_mgr`（core1、prio 3、stack 6144）；掃描／配對／盲連／30 s 重試 |
+| 指令 | `0xF038 WIFI_CRED`（list／add／remove／clear） |
+
+**上板（S3 B）**：add／list／remove／clear、重開機持久化 ✅。
+測試憑證只用 `TESTB`／`TESTB2`／`PERSIST`。
+
+**自動連線已驗（A 板）**：`wifi.enable=1`、NVS 一組憑證；開機後
+`state=on, ssid=TestAP, ip=1, rssi=-65, cred=1, connected=1`。
+修了兩個 reset：NVS namespace `wifi` → `nccred`；`wifi_ap_record_t aps[32]`
+由 task stack 移到 BSS、stack 4096→6144。
+**未完成**：AP fallback、`mode=ap/apsta` 未移植；B 板測試後未重新列舉。
+詳見 [wifi-credentials.md](../03_notes/wifi-credentials.md)。
+
+
+### 7.53 2026-11-10（PIN／PWM／UART typed config ＋ 驅動）
+
+**照舊專案補齊三段**：
+
+| 段 | 內容 |
+|---|---|
+| `PIN` | `{GPIO,label,mode,pull,initial}`；`hw_gpio` owner 開機套用、發佈 snapshot |
+| `PWM` | `{GPIO,freq,resolution,duty,label}`；LEDC driver（最多 8 通道，timer 共用；**預設 12-bit、duty 0–4095**） |
+| `UART` | `{id,baudrate,rxbuf,txbuf,en_settle_ms,GPIO{tx,rx,en}}`；RS485 DE 同步切換 |
+
+**上板（A）**：
+
+- `0xF03B UART_INFO` → `{"ready":1,"port":1,"baud":115200}`
+- `0xF03A PWM_INFO` → `count=1`；`0xF039` 設 12-bit duty 0／2048／4095 成功；`0xF03C PWM_STAY` 回 dStay=2048、`0xF03D PWM_ZERO` 回 0
+- `0xF036 HW_SNAP` → pin14（input pull-up）= 1
+- **OTA 換韌體後設定仍然保留**：`nc_boot` 不再因 `fw_hash` 變更格式化 data；
+  用戶 hardware/network config 保留，只補缺檔。
+
+**未 typed**：SPI／I2C／I80／I2S／ENC／XL9555；`driver.json` runtime merge 未做。
+詳見 [hw-pwm-uart.md](../03_notes/hw-pwm-uart.md)。
+
+
+### 7.54 2026-11-10（LED Controller 規劃，不盲寫 backend）
+
+**背景**：目前沒有 16-lane LED 硬件可測。先寫契約，不再在沒有硬件時盲寫 I80 backend。
+
+- `nc_led` = struct＋ops（init／show／clear／set_pixel）；`dStay` 是停止／歸零的中性值。
+- `led.frame`（P，38,400×2）、`led.wave`（S，28,800×2 或 38,400×2）。
+- backend 順序：mock（無硬件）→ I80 1 lane → 16 lane → pixel domain。
+- 50 FPS 閘門：24-bit 18 ms／55.5 FPS；GRBW 32-bit 24 ms／41.7 FPS；未拍板。
+- **只建議先做 L0**（interface＋mock＋host test）；L1 之後要真硬件。
+
+詳見 [led-controller-plan.md](../03_notes/led-controller-plan.md)。
+
+
+### 7.55 2026-11-11（TCP／UDP／WS 統一在 nc4_bus；S3 WiFi 首測）
+
+**做法**：新增 `nc4_line_net`，三條 adapter 只提供 `read()/send()`；
+NC4 framing／parser／link 全部走同一個 `nc4_bus`（**PUSH，跟 UART／CDC 一樣**）。
+每條線一個 producer → slots → kick decode。`NC4_MAX_BUSES` 4→8。
+S3 WiFi 連上後開 TCP 6000、UDP 6001、WS 8080。
+
+**上板（A，WiFi）**：
+
+| 線 | RTT p50 | p95 | reply/s |
+|---|---:|---:|---:|
+| TCP | **8.70 ms** | 80.51 | 57.4 |
+| UDP | **8.60 ms** | 66.48 | 51.3 |
+| WS | **16.75 ms** | 23.40 | 56.3 |
+
+- 已改成 PUSH producer（同 UART／CDC），p50 由 ~12 ms 降到 8.6–8.7 ms；WS 16.8 ms。
+- p95 仍 66–80 ms（WiFi／排程抖動）；burst 未重測，仍不可當高吞吐。
+- 流量（window=2、20 幀、STATUS sys）：TCP 14.13 KB/s、UDP 28.36 KB/s、WS 11.17 KB/s（NC4 payload）。
+- **緩衝管理器有實際用到**：`mem.buf` 見 TCP.slots／TCP.rx／UDP／WS；network 三條線約 57 KB internal，
+  `h_int` 只剩約 23 KB；`TCP.slots` abort 182,061（no-client spin）。
+  下一步要搬 PSRAM／縮 WS slot／修 abort，否則不可加負載。
+- 下一步：P4 ETH 接同一層；buffer 搬 PSRAM；producer／slot 調校。
+
+工具：`tools/net_bench.py`。詳見 [net-lines.md](../03_notes/net-lines.md)。
+
+
+### 7.56 2026-11-11（NETBENCH 真實統計；network 測試暴露 loss）
+
+- 新增 `0xF040 NETBENCH`：op3 一幀只記帳不回覆；op2 result 回
+  `frames／bytes／seq_max／expected／lost／missing／ooo／fps／kbps`。
+- **完整 batching 測試（內部 seq 驗證）**：
+  有效：TCP 1024 **2.17 MB/s**、WS 4096 **7.26 MB/s**、UDP 512 paced **147 KB/s**。
+  不通過：TCP 4096 39/50、WS 512 110/100、UDP 1024 invalid timer、UDP 無 pacing lost 18。
+- 50 KB/s 是「一幀一次 send」的 overhead；batching 後到 MB/s 級，但矩陣未全過。
+- PSRAM：network slots PSRAM，`h_int` 10.5 KB → 68 KB；lwIP 窗口／mailbox 已放大；
+  WiFi `WIFI_PS_NONE`；RSSI -47 dBm，天線不是主因。
+- 路由 network↔CDC 尚未完成可重現測試；repo routes 已還原。
+- 工具：`tools/net_oneway.py`。
+
+
+### 7.57 2026-11-11（CDC 式零複製 producer；路由測試卡住）
+
+- TCP/UDP 改 `select → push_begin → recv 直接入 slot`，同 CDC 一樣；WS 用 queue peek＋slot。
+- 有效速度：TCP 1024 **1.95 MB/s**、WS 1024 **6.57 MB/s**、UDP 512 paced **159 KB/s**。
+- `h_int` 約 68 KB；network slots PSRAM；lwIP/window/socket/WiFi PS 已調。
+- **路由 network↔CDC 測試失敗**：同時開 TCP/UDP/WS→CDC 與 CDC→TCP 後，
+  A 板 NC4 over USB 完全冇回覆（CDC log 仍出）。已還原 A 的 routes，但未 reboot；
+  需要 physical reset，之後一次只測一個方向。**路由器尚未 PASS。**
+
+
+### 7.58 2026-11-11（網絡 OTA＋網頁 v0；未上板）
+
+- `POST /ota`（raw `.bin`）→ `esp_ota_begin/write/end/set_boot` → reboot。
+- `GET /` 最小頁：上傳 `.bin`、看 `/config.json` 前 4000 B。
+- 同 WS／`/config.json` 共用 8080 httpd（S3）。
+- 安全：**冇 auth／TLS／簽章，只可信 LAN**。
+- A 板舊 image 的 8080 仍回 404（server 活著），NC4 無回應；需要 USB 重燒最新 image／physical reset 才可測。
+- 完整 Web UI 是獨立任務；v0 只做「開得到、可以 OTA」。
+
+
+### 7.59 2026-11-11（路由器 PASS；網絡 OTA 0.1.1→0.1.2）
+
+- 路由：network→CDC（TCP/UDP/WS）＋ CDC→network（TCP/UDP/WS）全部 PASS，
+  一次只開一個方向；測試 routes 已還原。
+- 網絡 OTA：`POST /ota` raw `.bin`，1.18 MB 約 **14.8 s**，0.1.1→0.1.2，
+  app hash 改變、reboot 正常；`GET /` 200。
+- reboot delay 800 ms → **3 s**，避免 curl 未收到 200 就斷。
+- 注意：HTTP 係 single-threaded；同時開雙向 routing 之前要再壓測。
+
+
+### 7.60 2026-11-11（雙向 stress；緩衝結構；P4 確認）
+
+- TCP↔CDC 雙向各 100 幀：**100/100、100/100**，0.567 s，板子正常。
+- 全線雙向（TCP/UDP/WS↔CDC，N=50）：
+  net→CDC **134/150**（有掉）；CDC→TCP/UDP/WS **50/50 each**；
+  另一次跑到一半 **IWDT reset（rst=5）**。**未 PASS**，要修 CDC TX／forwarding 或降載。
+- routes 已還原；A 板 0.1.2 正常。
+- 緩衝：`mem.buf` 14 個、total 643 KB；network slots PSRAM，parser rx 仍 SRAM；
+  `h_int` 約 80 KB。詳見 [buffer-topology.md](../03_notes/buffer-topology.md)。
+- 新 USB `/dev/cu.usbmodem1401` 用 esptool 確認是 **ESP32-P4 rev1.0**（MAC <P4-MAC>）；
+  **P4 冇內建 Wi-Fi**，所以「P4 Wi-Fi」不能測。若係 P4+C6 companion 或 C6 板，
+  要提供型號／接法；repo 目前只有 P4 ETH 和 S3 WiFi，沒有 C6 port。

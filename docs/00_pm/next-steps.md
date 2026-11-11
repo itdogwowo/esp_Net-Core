@@ -205,3 +205,19 @@
 
 **§8 的處理**：8.2／8.3 的**行為定案保留**，但「`nc_hub`」這個名字退役（改叫 FIFO 緩衝區），
 8.5 的 `nc4.forward` config 併入 9.5 的 buffer 宣告。
+
+
+## 10. 2026-11-10：LED Controller（規劃，等硬件）
+
+- 契約：[led-controller-plan.md](../03_notes/led-controller-plan.md)
+- 現階段只做 **L0**：`nc_led` interface＋mock＋host test。
+- L1（I80 1 lane）之後要有燈帶＋示波器；L2 16 lane 要有燈板。
+- 未拍板：24-bit WS2812 vs GRBW 32-bit；50 FPS 是否硬需求。
+
+
+## 11. 2026-11-11：網絡線路統一（S3 首版）
+
+- `nc4_line_net`：TCP/UDP/WS → `nc4_bus`；S3 WiFi 已上板。
+- 效能：TCP 12.2 ms／UDP 11.9 ms／WS 21.4 ms（p50）；burst 會 reset。
+- 下一步：PUSH producer／低延遲；P4 ETH 同層；多 client／peer registry。
+- 詳見 [net-lines.md](../03_notes/net-lines.md)。

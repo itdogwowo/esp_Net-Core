@@ -5,13 +5,27 @@
 > （`cID` / `links[]` / `routes[]` / `log_debug_mode`）、`network.json`（只讀 `bt.pin`）、
 > `hardware.json`（**只有 ETH 與 SDIO 兩段**，2026-11-08 起 ETH 的腳位與 enable 真的生效）。
 >
-> ⚠️ **`driver.json` 仍然沒有接**：`ports/*/data/config/` 有這個出廠檔，
-> 但 `firmware/main/CMakeLists.txt` 沒有 embed 它，firmware 也沒有任何程式讀它 ——
-> 插上隨身碟你看不到這個檔，改了也不會生效。
-> `hardware.json` 其餘段（`PIN`/`SPI`/`I2C`/`I80`/`UART`/`I2S`/`PWM`/`ENC`/`XL9555`）同理：
-> 只會被計入 config 的 `unknown`，改它沒有作用。
-> 下面 §2–§4 寫的是**目標設計**，不是現況。
+> ⚠️ **`driver.json` 仍未接 runtime**：2026-11-10 已由 `ports/*/data/config/`
+> 移到 `ports/<board>/driver.json`（build-time，不再出現在 USB），但 firmware 仍然
+> 沒有讀它；改了不會生效。`hardware.json` 其餘段（`PIN`/`SPI`/`I2C`/`I80`/`UART`/
+> `I2S`/`PWM`/`ENC`/`XL9555`）同理，等 driver 有型別才逐個接。
+> 下面 §2–§4 有一部分是**目標設計**，不是現況；以本頁頂部 2026-11-10 更新為準。
 >
+> **2026-11-10 現況更新（board／user 分家）**：
+> **編譯進去的 wiring／driver 是「預設」，不是鎖死**；用戶 `config/hardware.json`
+> 可以覆蓋 wiring 的任何欄位。已 typed：ETH／SDIO／**PIN／PWM／UART**；
+> 其餘段（SPI／I2C／I80／I2S／ENC／XL9555）等 driver 型別化。
+> `ports/<board>/wiring.json` 已成為 build-time 的板級接線，CMake embed；
+> `/data/config/hardware.json` 是**用戶覆蓋層**；seed 會寫入一份完整的
+> wiring 預設（GPIO／SPI／I2C／I80／UART／I2S／PWM／SDIO／ENC／XL9555 都看得見），
+> 用戶可以直接改、也可以只留差異；缺席／沒寫的欄位再由 wiring 補。
+> 開機由 `nc_cfg_boot_ex()` 先讀 wiring、再用戶 JSON 逐欄位覆蓋。
+> `ports/<board>/driver.json` 也移到 board package（build-time；目前 runtime 仍未讀）。
+> `sdkconfig.defaults` 永遠在 build-time，不會出現在 USB。
+> `ports/_chips/` 已建立第一批 chip profile（ST7789／GT1151Q／PCM5102／APA102／PCA9685／HUSB238／UART_MOTOR）；
+> 板子 `driver.json` 只寫 `profile`＋板級差異，`tools/board.py check` 會驗證引用。
+> **runtime 仍未讀 `driver.json`**，所以 profile 合併暫時是 build-time 資料結構，不是已生效的 driver 參數。
+
 > **參考**：mp_Net-Core 的 `config.json`（一個檔 24 個 section：System / Buffer / SPI / I2C / UART / TFT / WS2812 …）
 > **相關**：[decode-routes.md](decode-routes.md)、[writing-a-task.md](writing-a-task.md)、[component-layout.md](component-layout.md)
 
@@ -97,11 +111,21 @@ config 只能管租戶。** 但「冇 config 都開得機」不等於「config �
 ## 2. 檔案清單
 
 ```text
-/data/                       ← 隨身碟（FAT，卷標 NETCORE）
+【build-time，開發者；唔會出現在 USB】
+ports/
+  _chips/                    ← 同一顆 IC 的跨板 profile（未做）
+  <board>/
+    board.json               ← 不可變事實（chip/flash/PSRAM/console/features）
+    wiring.json              ← 板級 pins/buses（CMake embed，開機當 base）
+    driver.json              ← PHY/DMA/TFT/USB 參數（build-time，runtime 未讀）
+    sdkconfig.defaults       ← IDF build config
+    data/config/             ← 只放給用戶的 seed
+
+【runtime，USB 只看見這個】
+/data/
 ├─ config/
-│  ├─ hardware.json          腳位與 bus（硬體層 init 前讀）
-│  ├─ driver.json            PHY / DMA / TFT / USB 參數（driver init 前讀）
-│  ├─ system.json            身份、開機、NC4 通道與解碼路線（硬體起來後讀）
+│  ├─ hardware.json          完整預設（可改；沒寫的欄位回 wiring）
+│  ├─ system.json            身份、開機、NC4 通道與解碼路線
 │  ├─ network.json           IP / mask / gw / DHCP
 │  └─ tasks.json             任務 core / prio / stack 覆蓋
 └─ pixel/                    ★ 效果自己的樹（見 §5.1）
@@ -109,8 +133,9 @@ config 只能管租戶。** 但「冇 config 都開得機」不等於「config �
 
 | 檔案 | 擁有者 | 讀的時機 | 缺檔 / 壞檔 |
 |---|---|---|---|
-| `hardware.json` | 硬體層 | **硬體 init 之前** | 用 `board.json` 的板級預設 |
-| `driver.json` | driver 層 | driver init 之前 | 用 driver 內建預設 |
+| `wiring.json`（build-time） | 硬體層 | **硬體 init 之前**（`nc_cfg_boot_ex` base） | 用編譯期預設 |
+| `hardware.json`（user） | 硬體層 | 同上，覆蓋 wiring | 用 wiring |
+| `driver.json`（build-time） | driver 層 | 未接 | 用 driver 內建預設 |
 | `system.json` | 系統層（main） | **硬體起來之後**（分配要看實際硬體） | 只啟動硬體實際支援的通道 |
 | `network.json` | 網路層 | ETH/WiFi 起來前 | 用內建 IP 或 DHCP |
 | `tasks.json` | 任務管理器 | 任務登記前 | 用程式裡宣告的 core/prio |

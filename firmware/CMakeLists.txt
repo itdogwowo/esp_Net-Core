@@ -30,7 +30,9 @@ set(_nc_extra_dirs
     "${CMAKE_CURRENT_LIST_DIR}/components/driver"
     # ── 匯流排（通用：NC4 幀、LED(SPI)、LCD(I80) 都會用）──
     # 一個「線的實作」一個組件：bus/net（TCP/WS/UDP）、之後 bus/nc4、bus/led、bus/lcd
-    "${CMAKE_CURRENT_LIST_DIR}/components/bus")
+    "${CMAKE_CURRENT_LIST_DIR}/components/bus"
+    # ── 硬體 owner（生產任務，不是測試）──
+    "${CMAKE_CURRENT_LIST_DIR}/components/tasks/hw_gpio")
 # 測試組件（NC_ENABLE_TESTS=OFF 時唔加入 → 唔編譯、唔 link、唔存在）
 if(NC_ENABLE_TESTS)
     list(APPEND _nc_extra_dirs

@@ -39,6 +39,17 @@ bool nc_wifi_used(void);
 // STATUS_GET 的 "wifi" 區塊；不含密碼。
 size_t nc_wifi_json(char *buf, size_t cap);
 
+// ── Wi-Fi 憑證（最多 10 組；NVS 持久化；最近成功連線排最後）──
+// 對外只露 SSID，不露密碼。
+#define NC_WIFI_CRED_MAX 10
+int       nc_wifi_cred_count(void);
+int       nc_wifi_cred_ssids(char out[][33], int max);   // 回實際數量
+esp_err_t nc_wifi_cred_add(const char *ssid, const char *pw);
+esp_err_t nc_wifi_cred_remove(const char *ssid);
+esp_err_t nc_wifi_cred_clear(void);
+size_t    nc_wifi_cred_json(char *buf, size_t cap);      // {"count":N,"ssids":[...]}
+
+
 const char *nc_wifi_state_name(nc_wifi_state_t s);
 
 #ifdef __cplusplus

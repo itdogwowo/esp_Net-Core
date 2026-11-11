@@ -1,6 +1,5 @@
 {
   "version": 1,
-
   "_comment": [
     "Network 層：lan / wifi / bt / espnow 四者並列，只放連線參數，不決定誰來解碼。",
     "完整說明與怎麼選：docs/02_guides/connectivity.md",
@@ -22,6 +21,7 @@
     "wifi.enable：0/1",
     "wifi.mode：sta（連 AP）| ap（自己當熱點）| apsta（兩者同時）",
     "wifi.ssid / ssid_pw：要連的 AP 名稱與密碼；密碼最終要搬進 NVS",
+    "wifi.credentials：初始憑證清單（最多 10；成功連線後寫入 NVS，之後以 NVS 為準）",
     "wifi.timeout_s：連不上時重試多久才放棄",
     "wifi.ip.mode：dhcp | static",
     "",
@@ -46,10 +46,11 @@
     "espnow.pmk：主金鑰",
     "espnow.peers：允許通訊的對象清單，最多 20 個"
   ],
-
   "hostname": "",
-  "priority": ["lan", "wifi"],
-
+  "priority": [
+    "lan",
+    "wifi"
+  ],
   "lan": {
     "enable": 0,
     "driver": "RMII",
@@ -67,7 +68,6 @@
       "gw": ""
     }
   },
-
   "wifi": {
     "enable": 0,
     "mode": "sta",
@@ -79,9 +79,9 @@
       "addr": "",
       "mask": "",
       "gw": ""
-    }
+    },
+    "credentials": []
   },
-
   "bt": {
     "enable": 0,
     "profile": "none",
@@ -90,7 +90,6 @@
     "pin": "",
     "bonding": 1
   },
-
   "espnow": {
     "enable": 0,
     "channel": 0,

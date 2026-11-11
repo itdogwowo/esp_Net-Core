@@ -23,8 +23,11 @@ typedef struct {
     int port;          // UART_NUM_0/1/2
     int tx_pin;
     int rx_pin;
+    uint32_t baud;
     int rx_ring;       // driver RX 環大小
     int tx_ring;       // driver TX 環大小
+    int en_pin;        // RS485 DE/RE；-1 = 純 UART
+    uint16_t en_settle_ms;
 } nc_uart_drv_cfg_t;
 
 // 安裝（idempotent：已安裝就回 ESP_OK）。
@@ -32,6 +35,8 @@ esp_err_t nc_uart_drv_install(const nc_uart_drv_cfg_t *cfg, uint32_t baud);
 
 // 已安裝？（未安裝時 read 回 0、write 回 -1，呼叫端可以照跑）
 bool nc_uart_drv_ready(void);
+int  nc_uart_drv_port(void);
+uint32_t nc_uart_drv_baud(void);
 
 // 給 nc4_bus_cfg_t.read 用：回 bytes、-1 = 錯誤。
 int nc_uart_drv_read(void *arg, uint8_t *buf, size_t cap);

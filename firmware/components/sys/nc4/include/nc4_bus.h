@@ -39,7 +39,7 @@ extern "C" {
 // 同時存在的 bus 數。實測：S3 = CDC＋UART（2 條）、P4 = CDC＋UART＋TCP（3 條）；
 // 每格 struct nc4_bus 304 B。8 格＝2,432 B 的靜態分區只用 3 格（省 1,216 B）。
 // 4 格留 1 格餘裕；滿了 nc4_bus_add() 回 ESP_ERR_NO_MEM 並印 log（不是靜默）。
-#define NC4_MAX_BUSES        4
+#define NC4_MAX_BUSES        8
 
 typedef enum {
     NC4_BUS_PULL = 0,     // 解碼任務主動呼叫 read()
@@ -88,6 +88,9 @@ typedef struct {
     // 零複製：producer 一次 commit「剛好一整幀」，consumer 直接在插槽上解析
     // （不經 slot_pop、不進 parser ring）。RING 大小要 ≥ NC4_MAX_FRAME。
     uint8_t frame_aligned;
+    // PUSH slots 放 PSRAM（network 不是 DMA；S3 internal 不夠時用）。
+    // parser 用 rx_region 另外指定；兩者都不影響 semantics。
+    bool slots_psram;
 } nc4_bus_cfg_t;
 
 // 註冊一條通道（建立 parser / ring）。handle 可為 NULL（不需 push 時）。

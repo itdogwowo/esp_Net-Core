@@ -91,6 +91,11 @@ typedef struct {
 // 已型別化：ETH、SDIO。其他段（PIN/SPI/I2C/I80/UART/I2S/PWM/ENC/XL9555）
 // 只會被計入 unknown —— **改它們不會生效**，等有 driver 用到再逐個加型別。
 #define NC_CFG_MAX_SDIO 2
+#define NC_CFG_MAX_PWM  8
+#define NC_CFG_MAX_UART 3
+#define NC_CFG_MAX_PIN  16
+#define NC_CFG_PIN_LABEL_MAX 16
+#define NC_CFG_PWM_LABEL_MAX 16
 
 // ETH（RMII）：跟 SDIO 一樣只出現一次。
 // present 不是 enable 的別名，兩者語意不同：
@@ -116,11 +121,49 @@ typedef struct {
     int8_t   d[4];         // D0..D3（-1 = 未用）
 } nc_sdio_cfg_t;
 
+// PIN：舊專案 {GPIO,label,mode,pull,initial}；由 hw_gpio owner 在 on_start 套用。
+typedef struct {
+    int8_t   pin;
+    uint8_t  mode;       // 0=OUT 1=IN
+    uint8_t  pull;       // 0=none 1=up 2=down
+    uint8_t  initial;    // OUT 初始電平
+    char     label[NC_CFG_PIN_LABEL_MAX];
+} nc_pin_cfg_t;
+
+// PWM（LEDC）：舊專案只有 GPIO；freq／resolution／duty 係新增可選欄位。
+typedef struct {
+    int8_t   pin;              // -1 = 未設定
+    uint32_t freq_hz;
+    uint8_t  resolution_bits;  // 1..14
+    uint16_t duty;             // 0..(2^bits-1)
+    uint16_t d_stay;           // 停止／歸零時回到的 12-bit 中性值（舊專案 dStay）
+    char     label[NC_CFG_PWM_LABEL_MAX];
+} nc_pwm_cfg_t;
+
+// UART：照舊專案 { id, baudrate, rxbuf, txbuf, en_settle_ms, GPIO{tx,rx,en} }。
+typedef struct {
+    bool     enable;
+    uint8_t  id;               // UART port
+    uint32_t baud;
+    uint32_t rxbuf;
+    uint32_t txbuf;
+    int8_t   tx;
+    int8_t   rx;
+    int8_t   en;               // RS485 DE/RE；-1 = 純 UART
+    uint16_t en_settle_ms;
+} nc_uart_cfg_t;
+
 typedef struct {
     uint16_t      version;
     nc_eth_cfg_t  eth;
     uint8_t       n_sdio;
     nc_sdio_cfg_t sdio[NC_CFG_MAX_SDIO];
+    uint8_t       n_pin;
+    nc_pin_cfg_t  pin[NC_CFG_MAX_PIN];
+    uint8_t       n_pwm;
+    nc_pwm_cfg_t  pwm[NC_CFG_MAX_PWM];
+    uint8_t       n_uart;
+    nc_uart_cfg_t uart[NC_CFG_MAX_UART];
 } nc_hardware_cfg_t;
 
 typedef struct {

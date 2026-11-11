@@ -1,0 +1,11 @@
+{
+  "kind": "tft",
+  "name": "ST7789",
+  "driver": "ST7789",
+  "width": 240,
+  "height": 320,
+  "rotation": 0,
+  "color_order": "RGB",
+  "invert": 0,
+  "pixel_format": "RGB565_BE"
+}

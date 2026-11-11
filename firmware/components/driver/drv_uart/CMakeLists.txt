@@ -2,5 +2,5 @@
 idf_component_register(
     SRCS "nc_uart_drv.c"
     INCLUDE_DIRS "include"
-    REQUIRES esp_driver_uart freertos log
+    REQUIRES esp_driver_uart esp_driver_gpio freertos log
 )

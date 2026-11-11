@@ -224,7 +224,9 @@ static esp_err_t bus_alloc(struct nc4_bus *b)
         }
         char nm[NC_BUF_NAME_MAX];
         snprintf(nm, sizeof(nm), "%s.slots", b->cfg.name ? b->cfg.name : "bus");
-        b->slots = nc_buf_create(nm, NC_BUF_SRAM, (uint32_t)b->slot_size,
+        b->slots = nc_buf_create(nm,
+                                 b->cfg.slots_psram ? NC_BUF_PSRAM : NC_BUF_SRAM,
+                                 (uint32_t)b->slot_size,
                                  (uint16_t)b->slot_n, NC_BUF_F_RUNTIME);
         if (b->slots == NULL) {
             return ESP_ERR_NO_MEM;

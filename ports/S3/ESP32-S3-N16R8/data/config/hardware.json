@@ -1,13 +1,10 @@
 {
   "version": 1,
   "_comment": [
-    "Hardware 層：實體腳位與匯流排。enable = 0 就是「這塊板沒有這個東西」；填好腳位再開。",
-    "driver 用 bus = { type, index } 引用這裡的實例；index = 該類型 list 的次序（0,1,2…），跟註冊次序一致。",
-    "ETH 是特例：它不掛在任何匯流排上，所以整段放最頂（腳位 + PHY），不再拆去 driver。",
-    "XL9555 也在這層註冊（I2C + IO 標籤）；但 I80 面板的 rst/bl 是用 TFT.xl9555 填 IO 編號，不是 label。",
-    "ETH 的 DMA 大小（1600）與環數（16/16）是 build-time，寫在 ports/_profiles/eth-rmii.defaults，不在 config。",
-    "SDIO 的 GPIO.data 次序是 **D0,D1,D2,D3**（不是舊專案的 D3..D0）；width=1 只用 data[0]。",
-    "SD 卡只在這裡宣告一次（enable + 腳位 + 頻率 + 寬度）；system.json 沒有 SDcard 選項，掛載點固定 /sd。"
+    "用戶覆蓋層：這裡是「開機預設值」，可以直接改；只寫同 wiring 不同的欄位也可以。",
+    "板級 pins／buses 的 build-time 預設在 ports/<board>/wiring.json（不會出現在 USB）。",
+    "沒有寫的欄位 = 用 wiring；寫了 = 覆蓋該欄位。",
+    "GPIO/PIN、SPI、I2C、I80、UART、I2S、PWM、SDIO、ENC、XL9555 都在這裡。"
   ],
   "_gpio_convention": "兩種『未設定』寫法不能混用：-1 = 未設定／不啟用（driver 以 >= 0 判斷）；null = 沒接這條線（driver 以 is not None 判斷，寫 -1 會變成 Pin(-1) 而爆掉）。標 -1 的欄位可以安全留著；標 null 的欄位要填真實腳位才 enable。",
   "ETH": {
@@ -156,7 +153,12 @@
         "GPIO": {
           "sck": 7,
           "cmd": 6,
-          "data": [15, 16, 4, 5]
+          "data": [
+            15,
+            16,
+            4,
+            5
+          ]
         }
       }
     ]

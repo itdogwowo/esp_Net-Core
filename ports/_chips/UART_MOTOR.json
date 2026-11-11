@@ -1,0 +1,6 @@
+{
+  "kind": "motor",
+  "name": "uartMotor",
+  "version": 1,
+  "dStay": 2048
+}

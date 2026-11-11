@@ -62,6 +62,8 @@ esp_err_t nc_cfg_apply_tasks(const cJSON *root, nc_tasks_cfg_t *out, nc_cfg_stat
 esp_err_t nc_cfg_apply_hardware(const cJSON *root, nc_hardware_cfg_t *out, nc_cfg_stat_t *st);
 
 // 開機載入一次（永遠回 ESP_OK：最差 = 全部預設）。
+// hw_base_json = build-time 的 wiring.json；用戶 /data/config/hardware.json 逐欄位覆蓋。
+esp_err_t nc_cfg_boot_ex(const char *hw_base_json, size_t hw_base_len);
 esp_err_t nc_cfg_boot(void);
 
 // 之後全系統只讀這些。

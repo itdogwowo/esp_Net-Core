@@ -99,11 +99,6 @@ static uint32_t s_next_gen = 1;
 
 // ───────────────────────── 內部工具 ─────────────────────────
 
-static inline nc_buf_desc_t *desc_of(nc_buf_t *b, int idx)
-{
-    return &b->desc[(idx < 0) ? 0 : idx];
-}
-
 static inline uint8_t *slot_ptr(nc_buf_t *b, int idx)
 {
     return b->data + (size_t)idx * b->slot_bytes;

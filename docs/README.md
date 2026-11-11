@@ -10,7 +10,7 @@
 | **00_pm** 項目管理 | 想知道「做到哪、接下來做什麼」的人 | 現況、路線圖、決策與待辦 | 6 |
 | **01_protocol** 協議層 | 對接方 / 寫 transport / 寫 PC 工具的人 | NC4 在哪些通道上跑、每個通道要自己做什麼 | 3 |
 | **02_guides** 使用教學 | 要 build / 燒錄 / 跑測試 / 選連線的人 | 工具怎麼用、測試怎麼跑、連線怎麼選、數字怎麼判讀、**量測方法怎麼重跑** | 4 |
-| **03_notes** 設計筆記 | 維護者 / 想了解設計脈絡的人 | 架構、分層、路由、任務模型、記憶體、研究、上板紀錄 | 42 |
+| **03_notes** 設計筆記 | 維護者 / 想了解設計脈絡的人 | 架構、分層、路由、任務模型、記憶體、研究、上板紀錄 | 49 |
 
 > **趕時間先看**：[00_pm/status.md](00_pm/status.md) —— 一頁涵蓋「已驗證的數字、已定案的架構、還沒做的事、要測的場景」。
 
@@ -56,6 +56,12 @@
 | 文件 | 內容 |
 |---|---|
 | [driver-layer.md](03_notes/driver-layer.md) | **驅動與匯流排層（`driver/` / `bus/`）**：舊專案 `slave/driver/*_drv.py` 怎麼落地；**`bus/` 是通用匯流排（NC4／LED(SPI)／LCD(I80) 都係它的 personality，唔綁 NC4）**；driver／bus／sys 三層判準、六條 driver 規則、遷移順序 |
+| [hw-ownership.md](03_notes/hw-ownership.md) | **硬體門面 `nc_hw`（owner／command／snapshot）**：中央只做目錄＋命令入口＋最新 snapshot；真正寫硬體的是 owner task；UI／NC4 只讀 snapshot 或送 command；GPIO owner 已上板、`ph_hwcheck` 第一版、claim／保留腳位 |
+| [hw-pwm-uart.md](03_notes/hw-pwm-uart.md) | **PWM／UART／PIN 硬體設定與驅動**：舊專案 config 風格、typed `hardware.json`、LEDC PWM、UART／RS485 DE、`0xF039`–`0xF03B`；A 板上板結果 |
+| [led-controller-plan.md](03_notes/led-controller-plan.md) | **LED Controller 規劃（C 版，無 OOP）**：`nc_led` struct＋ops、frame／dStay、I80/SPI/PCA9685 backend、50 FPS 閘門；**尚未實作，等硬件** |
+| [net-lines.md](03_notes/net-lines.md) | **統一網絡線路 TCP／UDP／WS → nc4_bus**：read/send 介面、單一 parser、S3 WiFi 上板 RTT（TCP 12.2 ms／UDP 11.9 ms／WS 21.4 ms）、burst 限制、P4 後續 |
+| [ota-web.md](03_notes/ota-web.md) | **網絡 OTA 與網頁 v0**：`POST /ota` raw `.bin`、`GET /` 最小頁、`/config.json`；**已上板：`/` 200、`/ota` 0.1.1→0.1.2**；安全只限可信 LAN |
+| [buffer-topology.md](03_notes/buffer-topology.md) | **目前緩衝結構**：`mem.buf` 14 個 buffer、SRAM／PSRAM 配置、CDC/UART 256 B×4 vs network 2 KB／24 KB、zero-copy producer 資料流 |
 | [contracts.md](03_notes/contracts.md) | **契約總表（單一入口）**：任務管理器界線與硬上限、任務↔緩衝區（C1–C11 摘要）、**優先級保留區 7–15**、解碼器／動作（handler 唔可以重入）、通道／路由、**初次開機與配置生命週期**、現況盤點、待決定清單 |
 | [glossary.md](03_notes/glossary.md) | **字彙表（術語一句話）**：任務 vs 線程、`level` vs `layer`、緩衝區／格／arena／S·P·DMA／S2P 四組合、退役的詞（hub／pool／環／plan）與改用什麼。**新名詞先查這裡** |
 | [buffers.md](03_notes/buffers.md) | **緩衝區 `nc_buf`（全項目唯一緩衝工具）**：三條鐵律（開機一次要齊／永不釋放／只管切）、為什麼冇碎片、S2S·S2P·P2S·P2P 四組合與成本、**佈局與搭配七原則＋S3 逐條 buffer 表**、`mem.buf` 帳、P0–P5 遷移。**取代下面 buffer-manager／buffer-manager-status／buffer-pool／comm-buffers 的設計部分** |
@@ -87,6 +93,7 @@
 | [psram-surface.md](03_notes/psram-surface.md) | **PSRAM surface／pass 管理器（設計）**：什麼叫「用對 PSRAM」（數 pass、internal tile、分塊 bound latency，不是切細就快）、`nc_surface` 的 buffer／tile／sink／stats API、direct vs staging、38.4 KB frame 的預算、決策矩陣與落地順序 |
 | [comm-buffers.md](03_notes/comm-buffers.md) | **（設計已併入 [buffers.md](03_notes/buffers.md)）** 通訊緩衝定案（2026-11-09）：RX 留 internal、轉發走 PSRAM 的 `nc_hub`（per 目的 link × 來源核、strict FIFO、writer mutex）、`nc_pool.forward` 取消、S3 138 KB／P4 132 KB PSRAM、失敗政策與 P0–P4 遷移 |
 | [wifi-espnow-led-tests.md](03_notes/wifi-espnow-led-tests.md) | **Wi-Fi／ESP-NOW／I80 測試紀錄（2026-11-09）**：ESP-NOW P2P＋router 閉環、AP 模式、STA DHCP 未取 IP、本地 AP reset、GRBW/NeoPixelBus vs I80 16-lane 的判斷、16×600 50 FPS 預算與量測結構、PSRAM 競爭數據 |
+| [wifi-credentials.md](03_notes/wifi-credentials.md) | **Wi-Fi 憑證管理（SSID／Password）**：舊專案行為、NVS 最多 10 組、move-to-end、config `credentials[]` 兼容、掃描 RSSI 配對／hidden 盲連、`0xF038` 指令；A 板自動連線已驗 |
 | [memory-budget.md](03_notes/memory-budget.md) | **記憶體預算（S3 實測 map）**：內部 SRAM 126 KB 靜態 + 40 KB 執行期、開機剩 ~168 KB、與 MicroPython 對比、**開 WiFi 的 90–120 KB 成本**（Espressif 官方表）、怎麼自己量 |
 | [memory-vs-micropython.md](03_notes/memory-vs-micropython.md) | **記憶體實測對照**：本專案 vs MicroPython（mp_Net-Core）的靜態／執行期用量 |
 | [buffer-tightening.md](03_notes/buffer-tightening.md) | **緩衝區貼身化（2026-11-08 實測）**：每條 link／任務的緩衝逐一量測再收斂（UART 4×256、RX/TX 1 KB、棧 1.5 KB；decode/main 3 KB）；抓到 UART「等收滿才返回」、測試回覆幀 2.6 KB 上棧兩個真問題；雙核隔離與前後吞吐對照 |

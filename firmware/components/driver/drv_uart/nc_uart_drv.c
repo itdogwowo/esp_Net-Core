@@ -3,7 +3,9 @@
 
 #include <string.h>
 
+#include "driver/gpio.h"
 #include "driver/uart.h"
+#include "esp_rom_sys.h"
 #include "esp_check.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
@@ -37,17 +39,40 @@ esp_err_t nc_uart_drv_install(const nc_uart_drv_cfg_t *cfg, uint32_t baud)
     ESP_RETURN_ON_ERROR(uart_set_pin(cfg->port, cfg->tx_pin, cfg->rx_pin,
                                      UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE),
                         TAG, "uart pins");
+    if (cfg->en_pin >= 0) {
+        gpio_config_t io = {
+            .pin_bit_mask = (1ULL << cfg->en_pin),
+            .mode = GPIO_MODE_OUTPUT,
+            .pull_up_en = GPIO_PULLUP_DISABLE,
+            .pull_down_en = GPIO_PULLDOWN_DISABLE,
+            .intr_type = GPIO_INTR_DISABLE,
+        };
+        (void)gpio_config(&io);
+        gpio_set_level(cfg->en_pin, 0);      // idle = receive
+    }
     s_cfg = *cfg;
+    s_cfg.baud = baud;
     s_ready = true;
-    ESP_LOGW(TAG, "UART 迴路已啟動：port=%d TX=%d RX=%d baud=%u（ring %d/%d）",
+    ESP_LOGW(TAG, "UART 已啟動：port=%d TX=%d RX=%d baud=%u（ring %d/%d%s）",
              cfg->port, cfg->tx_pin, cfg->rx_pin, (unsigned)baud,
-             cfg->rx_ring, cfg->tx_ring);
+             cfg->rx_ring, cfg->tx_ring,
+             (cfg->en_pin >= 0) ? "，RS485 DE" : "");
     return ESP_OK;
 }
 
 bool nc_uart_drv_ready(void)
 {
     return s_ready;
+}
+
+int nc_uart_drv_port(void)
+{
+    return s_ready ? s_cfg.port : -1;
+}
+
+uint32_t nc_uart_drv_baud(void)
+{
+    return s_ready ? s_cfg.baud : 0;
 }
 
 int nc_uart_drv_read(void *arg, uint8_t *buf, size_t cap)
@@ -91,6 +116,21 @@ int nc_uart_drv_write(const uint8_t *frame, size_t len)
     }
     if (frame == NULL || len == 0) {
         return 0;
+    }
+    if (s_cfg.en_pin >= 0) {
+        // 舊專案 _Rs485Uart：拉高 DE → settle → 寫 → 等 TX 真正排空 → 等最後一個 byte
+        // 離開 shift register → 放低 DE。0 ms 實測會吃掉 start bit，預設 1 ms。
+        gpio_set_level(s_cfg.en_pin, 1);
+        esp_rom_delay_us((uint32_t)s_cfg.en_settle_ms * 1000u);
+        const int n = uart_write_bytes(s_cfg.port, (const char *)frame, len);
+        if (n > 0) {
+            const uint32_t baud = (s_cfg.baud > 0) ? s_cfg.baud : 115200;
+            const uint32_t ms = ((uint32_t)n * 10u * 1000u) / baud + 100u;
+            (void)uart_wait_tx_done(s_cfg.port, pdMS_TO_TICKS(ms));
+            esp_rom_delay_us((10u * 1000000u) / baud + 20u);
+        }
+        gpio_set_level(s_cfg.en_pin, 0);
+        return n;
     }
     // 阻塞到「整幀都排入環」為止（1 KB 環、921600 bps ⇒ 4 KB 最壞 ~44 ms）。
     return uart_write_bytes(s_cfg.port, (const char *)frame, len);

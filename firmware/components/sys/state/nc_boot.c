@@ -63,12 +63,12 @@ void nc_boot_init(void)
     const uint32_t old = s_rec.fw_hash;
     s_fw_changed = (old != now);
     if (s_fw_changed) {
-        // 換韌體 → 回到生命週期起點：這次開機格式化，然後重建底座。
-        // 不另寫「刪 config」的邏輯 —— 格式化之後它自然不存在。
+        // 換韌體**保留** data 分區：用戶調過的 hardware／network／tasks 不能因為
+        // OTA 就消失。config 缺的新欄位由 nc_cfg 逐層 fallback；真的壞檔也只退化該層。
+        // 只有第一次開機（provisioned=0）或用戶明確 fs_format=1 才格式化。
         s_rec.fw_hash = now;
-        s_rec.flags |= NC_BOOT_FORMAT_PENDING;
         nc_state_touch(s_state);
-        ESP_LOGW(TAG, "韌體 %08" PRIx32 " → %08" PRIx32 "：data 分區重建後重新建立底座",
+        ESP_LOGW(TAG, "韌體 %08" PRIx32 " → %08" PRIx32 "：保留 data/config（只補缺檔）",
                  old, now);
     }
 

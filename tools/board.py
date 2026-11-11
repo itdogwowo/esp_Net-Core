@@ -38,6 +38,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 PORTS = ROOT / "ports"
 PROFILES = PORTS / "_profiles"
+CHIPS = PORTS / "_chips"
 COMMON_DEFAULTS = ROOT / "firmware" / "sdkconfig.defaults"
 
 CHIP_DIR = {"s3": "esp32s3", "p4": "esp32p4", "c6": "esp32c6", "c3": "esp32c3",
@@ -210,6 +211,31 @@ def check_board(d: Path, cfg_common: dict, cfg_port: dict) -> Report:
     for prof in _blocks_in(text):
         if prof not in declared:
             r.warn(f"sdkconfig.defaults 有 {prof!r} 的區塊，但 board.json 沒宣告（sync 會移除）")
+
+    # --- build-time driver.json：每個 profile 都要有 _chips/<name>.json ---
+    drv_path = d / "driver.json"
+    if drv_path.exists():
+        try:
+            drv = json.loads(drv_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as e:
+            r.err(f"driver.json 不是合法 JSON：{e}")
+            drv = None
+        if isinstance(drv, dict):
+            def walk(o):
+                if isinstance(o, dict):
+                    for k, v in o.items():
+                        if k == "profile" and isinstance(v, str):
+                            yield v
+                        else:
+                            yield from walk(v)
+                elif isinstance(o, list):
+                    for v in o:
+                        yield from walk(v)
+            for prof in walk(drv):
+                if not (CHIPS / f"{prof}.json").exists():
+                    r.err(f"driver.json 引用 profile {prof!r}，但 ports/_chips/{prof}.json 不存在")
+    else:
+        r.warn("沒有 build-time driver.json（只有 USB 配置的板子可以沒有）")
 
     # --- L3 config/*.json：一個層一個檔；不准放 L1 的東西 ---
     cfg_dir = d / "data" / "config"

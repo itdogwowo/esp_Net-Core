@@ -1,0 +1,104 @@
+{
+  "version": 1,
+  "_comment": [
+    "Driver 層：掛在匯流排上的晶片與行為。腳位在 hardware.json。",
+    "全部 enable = 0（P4 除外），值是從舊項目照抄的輪廓。",
+    "ETH 的 DMA 大小（1600）與環數（16/16）是 build-time，寫在 ports/_profiles/eth-rmii.defaults，不在這裡。",
+    "引用匯流排一律用 bus = { type, index }：type 選種類、index 選第幾個實例（-1 = 未接）。",
+    "USB 排最前：它不掛在任何匯流排上，跟 ETH 在 hardware 的地位對稱。"
+  ],
+  "USB": {
+    "enable": 1,
+    "msc": 1,
+    "cdc": 1
+  },
+  "TFT": {
+    "enable": 0,
+    "bus": {
+      "type": "spi",
+      "index": -1
+    },
+    "pins": {
+      "dc": "tft_dc",
+      "cs": "tft_cs",
+      "rst": "tft_rst",
+      "bl": "tft_bl"
+    },
+    "xl9555": {
+      "rst": 0,
+      "bl": 1
+    },
+    "profile": "ST7789"
+  },
+  "APA102": {
+    "enable": 0,
+    "list": [
+      {
+        "bus": {
+          "type": "spi",
+          "index": -1
+        },
+        "profile": "APA102"
+      }
+    ]
+  },
+  "PCA9685": {
+    "enable": 0,
+    "list": [
+      {
+        "bus": {
+          "type": "i2c",
+          "index": -1
+        },
+        "profile": "PCA9685"
+      }
+    ]
+  },
+  "Audio": {
+    "mode": "block"
+  },
+  "PCM5102": {
+    "enable": 0,
+    "list": [
+      {
+        "bus": {
+          "type": "i2s",
+          "index": -1
+        },
+        "GPIO": {
+          "xsmt": null
+        },
+        "profile": "PCM5102"
+      }
+    ]
+  },
+  "GT1151Q": {
+    "enable": 0,
+    "bus": {
+      "type": "i2c",
+      "index": -1
+    },
+    "int": "touch_int",
+    "profile": "GT1151Q"
+  },
+  "HUSB238": {
+    "enable": 0,
+    "bus": {
+      "type": "i2c",
+      "index": -1
+    },
+    "profile": "HUSB238"
+  },
+  "uartMotor": {
+    "enable": 0,
+    "list": [
+      {
+        "bus": {
+          "type": "uart",
+          "index": -1
+        },
+        "profile": "UART_MOTOR"
+      }
+    ]
+  }
+}

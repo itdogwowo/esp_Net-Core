@@ -50,3 +50,10 @@ CONFIG_FATFS_VOLUME_COUNT=3
 # 2026-11-07 實測兩次：decode 卡在無界自旋（log 洪水／壓測工具被 kill）之後，
 # TWDT 只印警告（PANIC 關）→ 裝置永遠唔答指令，只能人手拔電。
 CONFIG_ESP_TASK_WDT_PANIC=y
+
+# 網絡吞吐：預設 lwIP 窗口／mailbox 太細（TCP 5,760 B、UDP 6 datagrams），
+# 一發多收會丟；這裡放大做 S3 WiFi 測速 baseline。
+CONFIG_LWIP_TCP_SND_BUF_DEFAULT=65535
+CONFIG_LWIP_TCP_WND_DEFAULT=65535
+CONFIG_LWIP_TCP_RECVMBOX_SIZE=64
+CONFIG_LWIP_UDP_RECVMBOX_SIZE=64
