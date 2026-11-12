@@ -355,17 +355,24 @@ static void demo_apply(int i)
     //   區 3–4（LED 24–39） ＝ 10 位、時間抖動（105 Hz）
     //   區 5–7（LED 40–63） ＝ 12 位、時間抖動（26 Hz）
     if (st->ab) {
+        // 四層（每層 2 行），200 fps：
+        //   第 0–1 行 = 8 位原生（唔抖）
+        //   第 2–3 行 = 10 位抖動（50 Hz）
+        //   第 4–5 行 = 11 位抖動（25 Hz）
+        //   第 6–7 行 = 12 位抖動（12.5 Hz）
         for (int z = 0; z < NC_RGB_ZONES; z++) {
-            if (z < 3) {
-                s_cfg.zone_bits[z] = 8;
-                s_cfg.zone_dither[z] = 0;
-            } else if (z < 5) {
-                s_cfg.zone_bits[z] = 10;
-                s_cfg.zone_dither[z] = 1;
+            uint8_t b;
+            if (z < 2) {
+                b = 8;
+            } else if (z < 4) {
+                b = 10;
+            } else if (z < 6) {
+                b = 11;
             } else {
-                s_cfg.zone_bits[z] = 12;
-                s_cfg.zone_dither[z] = 1;
+                b = 12;
             }
+            s_cfg.zone_bits[z] = b;
+            s_cfg.zone_dither[z] = (b == 8) ? 0 : 1;
             s_cfg.zone_rate[z] = 1;
             s_cfg.zone_phase[z] = 0;
         }
