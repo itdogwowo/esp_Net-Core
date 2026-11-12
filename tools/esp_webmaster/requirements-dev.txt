@@ -1,2 +1,4 @@
 pytest>=8
 pycparser>=2.21
+# starlette 的 TestClient 需要 httpx2；少了它 pytest 會在收集 test_server.py 時就失敗
+httpx2>=0.28

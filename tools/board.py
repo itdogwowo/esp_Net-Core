@@ -63,8 +63,10 @@ CONSOLE_SYM = {
 }
 # 每個 config 檔允許的頂層鍵（檔名 → 允許的鍵）；一個層一個檔
 RUNTIME_KEYS_BY_FILE = {
-    "system.json":   {"version", "_comment", "cID", "log_debug_mode",
-                      "frame_interval_ms", "boot_strict", "num_pixels", "nc4"},
+    # hostname 與 usb 都是 nc_cfg_apply_system() 認得的鍵；少了它們，
+    # 合法的 seed 會被 check 當成「未知鍵」而產生假警告。
+    "system.json":   {"version", "_comment", "cID", "log_debug_mode", "hostname",
+                      "frame_interval_ms", "boot_strict", "num_pixels", "nc4", "usb"},
     "network.json":  {"version", "_comment", "hostname", "priority", "lan", "wifi", "bt", "espnow"},
     "hardware.json": {"version", "_comment", "_gpio_convention", "ETH",
                       "PIN", "SPI", "I2C", "I80", "UART", "I2S", "PWM",

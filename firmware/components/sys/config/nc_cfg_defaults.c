@@ -26,6 +26,15 @@ void nc_cfg_rx_default(nc_link_kind_t kind, nc_link_rx_t *rx)
         *rx = (nc_link_rx_t){ .region = 4192, .chunk = 1024, .slot_size = 256,
                               .slots = 4, .budget = 8 };
         break;
+    case NC_LINK_USBJTAG:
+        // C3／C6／H2 沒有 OTG，USB-Serial-JTAG 就是**唯一**的 CDC（NC4）通道。
+        // region 一定要放得落 FILE_CHUNK 最大包：9 header + 6 chunk header +
+        // 4,096 data + 4 CRC = 4,115 B。以前跟 default 拿 4,096 → 每次 4 KB
+        // 上傳都差 19 B，parser 當「幀過大」跳過，主機只見到 timeout。
+        // 這個預設與 TinyUSB CDC 的 4,192 對齊，兩種 transport 的檔案語義才一樣。
+        *rx = (nc_link_rx_t){ .region = 4192, .chunk = 256, .slot_size = 256,
+                              .slots = 4, .budget = 8 };
+        break;
     case NC_LINK_UART:
         // 實測（921600 baud 迴路）：單次最多 242 B、slot 峰值 1 → 4×256 貼身。
         *rx = (nc_link_rx_t){ .region = 1024, .chunk = 256, .slot_size = 256,

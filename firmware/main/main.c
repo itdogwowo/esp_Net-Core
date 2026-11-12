@@ -2058,8 +2058,9 @@ static int task_nc4_declare(nc_task_res_t *out, int max)
 #if !NC_HAS_USB && CONFIG_SOC_USB_SERIAL_JTAG_SUPPORTED
     // USB-Serial-JTAG（C3／C6／H2）：與 CDC 同一個角色 —— parser 環。
     // 一致性：仍然要求「link 啟用」＋「routes[] 有指去 decodeN」，否則唔佔 RAM。
+    // region 4,192 = 容得下 FILE_CHUNK 最大幀（4 KB data → 4,115 B）。
     if (n < max && link_enabled("usb_jtag") && nc4_router_core("usb_jtag") != NC4_ROUTE_NONE) {
-        link_rx_t rx = { .region = 2048 };
+        link_rx_t rx = { .region = 4192 };
         (void)link_rx("usb_jtag", &rx);
         out[n++] = (nc_task_res_t){
             .name = "nc4.jtag", .bytes = rx.region, .cls = NC_PLAN_INTERNAL, .align = 32,
@@ -2097,7 +2098,7 @@ static esp_err_t task_nc4_start(const nc_task_res_view_t *res, int n)
 #if !NC_HAS_USB
     // 沒有 OTG：parser 緩衝由 usb_jtag link 提供（有啟用才會有）。
     if (s_nc4_rx_region != NULL) {
-        link_rx_t rx = { .region = 2048 };
+        link_rx_t rx = { .region = 4192 };
         (void)link_rx("usb_jtag", &rx);
         s_nc4_rx_bytes = rx.region;
         ESP_LOGI(TAG, "svc nc4: parser 緩衝 ok（usb_jtag）");

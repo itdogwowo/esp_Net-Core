@@ -8,12 +8,15 @@
     "雙核板要並行才寫 decode1；呢個表就是「哪個任務在哪個核」的唯一真相。",
     "",
     "── 通道 ──",
-    "C3 冇 USB OTG（無 CDC），所以 links 只有 UART。",
-    "寫 CDC 進去也不會建立：link 建立點在 #if NC_HAS_USB 裡面。",
+    "C3 冇 USB OTG，但有 USB-Serial-JTAG —— 它本身就是一個 CDC-ACM（303A:1001），",
+    "所以 NC4 的 USB 通道叫 usb_jtag（kind=usb_jtag），同 S3/P4 的 CDC 同一個角色。",
+    "CDC（kind=cdc）寫進去也不會建立：那條路徑只在 #if NC_HAS_USB 裡面。",
+    "usb_jtag 的 rx.region = 4192：要放得落 FILE_CHUNK 最大幀（4 KB data → 4,115 B）；",
+    "寫細過 4,115 的話，4 KB 檔案上傳會被 parser 當「幀過大」跳過。",
     "",
     "── USB ──",
-    "usb.msc / usb.cdc_log 在冇 OTG 的晶片上沒有作用（編譯期整組不存在），",
-    "保留欄位只是讓同一份 schema 通用。"
+    "C3 冇 OTG：usb.msc 不存在（編譯期整組唔編），保留欄位只是同一份 schema 通用。",
+    "usb.cdc_log 目前只對 OTG CDC 生效；usb_jtag 的 log 管道由 ph_usb 的 JTAG 分支處理。"
   ],
   "cID": "",
   "frame_interval_ms": 20,
@@ -33,7 +36,12 @@
       {
         "name": "usb_jtag",
         "kind": "usb_jtag",
-        "enable": 1
+        "enable": 1,
+        "cfg": {
+          "rx": {
+            "region": 4192
+          }
+        }
       }
     ],
     "routes": [
