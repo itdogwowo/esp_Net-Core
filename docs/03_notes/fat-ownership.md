@@ -98,24 +98,25 @@
 
 ---
 
-## 5. 寫入 session（還沒實作，這是約定）
+## 5. 寫入 session（2026-11-12 已實作）
 
 ```text
-0x2001 FILE_BEGIN ──► file_mode 自動切到 APP（收 FAT）
-0x2002 FILE_CHUNK ×N
-0x2003 FILE_END   ──► 驗 sha → 交還 FAT
-   閒置 N 秒沒有 CHUNK ──► abort + 交還 + 回 0x2010
-   任何時候 0x1103 {"System":{"file_mode":0}} ──► 強制交還（取消）
+0x2001 FILE_BEGIN ──► 需要 file_mode=1（APP）；開 <path>.part
+0x2002 FILE_CHUNK ×N ──► offset 檢查、寫入、sha256_update、ACK
+0x2003 FILE_END   ──► 驗 sha → 舊檔 .bak → 新檔上位 → 回 0x2006
+   閒置 30 秒沒有 CHUNK ──► abort + 刪 .part（下一個 BEGIN 可用）
+   任何時候 0x1103 {"System":{"file_mode":0}} ──► 交還 FAT
 ```
 
 規則：**接管時間越短越好**；主機在 APP 模式看到的碟是失效的。
+UI 進入檔案頁之前會先確認 `storage.mode`，必要時提示「接管 FAT」。
 
 ---
 
 ## 6. 還沒做的
 
-- `0x2001/0x2002/0x2003`（FILE_BEGIN/CHUNK/END）、`0x2007`（FILE_READ）、
-  `0x2009`（DELETE）、`0x200D`（MOVE）—— 讀取骨架已就位，寫入路徑還沒接。
-- `pending` 目前只當「唯讀視圖」旗標用；真正的 `.bak`/delta 機制未做。
-- `0x1103` 目前只實作 `System.file_mode` 一個 key，放在 `file_action` 裡；
-  等 config tree 落地要搬到獨立的 status 元件。
+- `0x200D`（MOVE）、`0x2011`（PROMOTE）、`0x200E/0x200F`（斷點續傳）。
+- `pending` 目前只當「唯讀視圖」旗標用；真正的 `.bak`/delta 機制未做
+  （CDC FAT 的 `.bak` 係 write session 自己留，唔經 delta）。
+- `0x1103` 目前只實作 `System.file_mode` / `fs_format` / `log_debug_mode`，
+  放在 `file_action` 裡；等 config tree 落地要搬到獨立的 status 元件。

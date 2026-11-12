@@ -1124,20 +1124,6 @@ void nc_rgb_matrix_set_bits(uint8_t bits) { (void)bits; }
 void nc_rgb_matrix_set_zone_bits(int idx, uint8_t bits) { (void)idx; (void)bits; }
 void nc_rgb_matrix_set_zone_bits_all(const uint8_t bits[NC_RGB_ZONES]) { (void)bits; }
 void nc_rgb_matrix_set_zone_effect(int idx, uint8_t eff) { (void)idx; (void)eff; }
-void nc_rgb_matrix_set_fraction(uint8_t frac8)
-{
-    s_demo = false;
-    s_cfg.frac = frac8;
-}
-
-void nc_rgb_matrix_set_zone_dither_all(const uint8_t mode[NC_RGB_ZONES])
-{
-    s_demo = false;
-    for (int i = 0; i < NC_RGB_ZONES; i++) {
-        s_cfg.zone_dither[i] = (mode[i] <= 3 || mode[i] == 0xFF) ? mode[i] : 0xFF;
-    }
-}
-
 void nc_rgb_matrix_set_zone_effects_all(const uint8_t eff[NC_RGB_ZONES]) { (void)eff; }
 void nc_rgb_matrix_set_fraction(uint8_t f) { (void)f; }
 void nc_rgb_matrix_set_zone_dither_all(const uint8_t mode[NC_RGB_ZONES]) { (void)mode; }
@@ -1145,22 +1131,6 @@ void nc_rgb_matrix_set_speed(uint16_t ms) { (void)ms; }
 void nc_rgb_matrix_set_wave_speed(uint16_t ms) { (void)ms; }
 void nc_rgb_matrix_demo(bool on) { (void)on; }
 uint8_t nc_rgb_matrix_stage(void) { return 0xFF; }
-
-void nc_rgb_matrix_demo(bool on)
-{
-    s_demo = on;
-    if (on) {
-        s_demo_stage = 0;
-        s_demo_t0 = esp_timer_get_time();
-        demo_apply(0);
-        ESP_LOGI(TAG, "demo 重開");
-    }
-}
-
-uint8_t nc_rgb_matrix_stage(void)
-{
-    return (uint8_t)(s_demo ? s_demo_stage : 0xFF);
-}
 
 size_t nc_rgb_matrix_json(char *out, size_t cap)
 {

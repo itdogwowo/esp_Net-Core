@@ -42,7 +42,7 @@ components/action/
 
 ---
 
-## 2. 目前已實作（全部重用既有指令）
+## 2. 目前已實作
 
 | CMD | 名稱 | 來源 schema | 狀態 |
 |---|---|---|---|
@@ -57,9 +57,18 @@ components/action/
 | `0x1813` | BENCH_RESULT | bench.json | ✅ |
 | `0x1814` | BENCH_REPORT | bench.json | ✅ |
 | `0x2201`–`0x2220` | OTA 子集（BEGIN/WRITE/END/ABORT/ACK/VERSION/CAPS/PROGRESS/STATE/ERROR/APPLY） | ota.json | ✅ |
-| `0x2005` | FILE_QUERY（path → 存在/sha256/size/free/pending） | file.json | ✅ 唯讀 |
+| `0x2001` | FILE_BEGIN（file_id/total/chunk/sha256/path → 開 `<path>.part`；成功回 `0x2004` offset=0） | file.json | ✅ |
+| `0x2002` | FILE_CHUNK（file_id/offset/data；成功回 `0x2004`） | file.json | ✅ |
+| `0x2003` | FILE_END（驗 sha → 舊檔 rename `.bak`、新檔上位 → 回 `0x2006`） | file.json | ✅ |
+| `0x2004` | FILE_ACK（file_id + offset） | file.json | ✅ |
+| `0x2005` | FILE_QUERY（path → 存在/sha256/size/free/pending） | file.json | ✅ |
 | `0x2006` | FILE_QUERY_RSP | file.json | ✅ |
-| `0x2010` | FILE_ERROR_RSP（`err_busy=1` = FAT 目前在 host 手上） | file.json | ✅ |
+| `0x2007` | FILE_READ（path/offset/length → 回 `0x2002`，file_id=0） | file.json | ✅ |
+| `0x2008` | FILE_CONFIRM（刪 `.bak`，清 pending） | file.json | ✅ |
+| `0x2009` | FILE_DELETE（刪檔＋`.bak`＋`.part`） | file.json | ✅ |
+| `0x200A` | FILE_UNDO（刪新檔，`.bak` 改回原名） | file.json | ✅ |
+| `0x200B` | FILE_SCAN（target u8；0=local／1=SD；walk 後寫 `/manifest.json`，冇回覆） | file.json | ✅ |
+| `0x2010` | FILE_ERROR_RSP（7 個 bool；`err_busy=1` = FAT 在 host 手上） | file.json | ✅ |
 | `0x1103` | STATUS_SET（`System.file_mode`：0=交還 host、1=裝置接管；`System.fs_format`：1=下次開機抹 data 分區重建 FAT） | status.json | ✅ 子集 |
 | `0x1104` | STATUS_ACK（`ok` + `message`） | status.json | ✅ |
 | `0x1105` | ROUTE_GET（空 payload → 回開機時定下的路由表） | status.json | ✅ |
@@ -253,8 +262,23 @@ components/action/
 | 查「誰提供什麼」（buffer / JSON / 數值） | `0x1101 STATUS_GET keys=provides` |
 | 查任務與綁核 | `0x1005 SYS_TASK_QUERY` |
 | 改 master 位址 | `0x1016 SET_MASTER` |
-| 檔案上傳 | MSC（拖檔），不需要 `0x20xx` |
+| 檔案傳輸 | **CDC FAT**：`0x2001`–`0x2003`＋`0x2007`–`0x200B`（冇 USB driver 都通）；有 USB 嘅板可選 MSC（拖檔） |
 | 效能量測 | `0x1811`–`0x1814`（產品域）＋ `0xF001`（開發用） |
+
+> **冇 directory listing 指令**：跟 mp 一樣，`0x200B FILE_SCAN` 會 walk `/data`
+> 並寫出 `/manifest.json`（`{path:{"s","h","p"}}`）；UI 用 `0x2007 FILE_READ`
+> 讀一次 manifest 就砌到樹。`0x2005` 只答單一 path。
+> 詳細語義見 [../03_notes/file-transfer.md](../03_notes/file-transfer.md)。
+
+### 檔案寫入的 .bak / pending 語義
+
+`FILE_END` 不會直接覆蓋舊檔：舊檔先 rename 成 `<path>.bak`，新檔才上位。
+`pending = .bak 存在`；UI 可以提示「待確認」：
+
+- `0x2008 FILE_CONFIRM` → 刪 `.bak`（正式生效）
+- `0x200A FILE_UNDO` → 刪新檔、`.bak` 改回原名（回滾）
+
+首次寫入（本來冇檔）唔會有 `.bak`，所以 `pending=0`。
 
 ---
 
@@ -265,4 +289,7 @@ components/action/
 | `0x1007` | SYS_TASK_SET | 要執行期改 task 的 affinity |
 | `0x100D/0x100E` | IDENTIFY_REQ/RSP | 多節點掃描配對 |
 | `0x1103/0x1104` | STATUS_SET / STATUS_ACK | ~~要遠端改設定並落盤~~ → 已實作 `System.file_mode` / `System.fs_format` 子集（見 §2） |
+| `0x200D` | FILE_MOVE | 要搬檔／改名 |
+| `0x200E/0x200F` | FILE_PARTIAL_QUERY/RSP | 要斷點續傳 |
+| `0x2011` | FILE_PROMOTE | SD 暫存 → root |
 | `0x2212`–`0x2217` | LAST / PARTITION_STATUS / VERIFY | 要 OTA 歷史與細節驗證 |

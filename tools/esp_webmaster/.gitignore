@@ -1,0 +1,11 @@
+__pycache__/
+.pytest_cache/
+_testtmp/
+.testtmp/
+.ptmp/
+_t1/
+.piptmp/
+.zig/
+pytest-cache-files-*/
+.simfs/
+*.pyc

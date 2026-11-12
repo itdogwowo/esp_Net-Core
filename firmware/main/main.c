@@ -1273,10 +1273,27 @@ static size_t status_put_storage(char *buf, size_t cap)
     size_t off = 0;
     char boot[96];
     nc_boot_json(boot, sizeof(boot));   // {"prov":1,"fmtq":0,"degr":0,"fw_new":0}
+
+    // UI 要一個「Free / Total」meter。f_getfree 回 free clusters；
+    // total = (n_fatent - 2) × cluster size（FatFS 的保留區）。單位 = bytes（同 UI 一致）。
+    uint32_t free_b = 0;
+    uint32_t total_b = 0;
+    const char *drv = nc_store_fs_drive();
+    if (drv != NULL) {
+        FATFS *fs = NULL;
+        DWORD nclst = 0;
+        if (f_getfree(drv, &nclst, &fs) == FR_OK && fs != NULL) {
+            const uint64_t csize = (uint64_t)fs->csize * fs->ssize;
+            free_b = (uint32_t)((uint64_t)nclst * csize);
+            total_b = (uint32_t)((uint64_t)(fs->n_fatent > 2 ? fs->n_fatent - 2 : 0) * csize);
+        }
+    }
+
     // FAT 現在在誰手上、裝置能不能直接讀；app_decl / cfg_errno = 宣告階段的探測結果。
     // boot = state manager 的開機狀態（provisioned / format_pending / degraded / fw_new）
     jappend(buf, cap, &off,
             "\"storage\":{\"mode\":\"%s\",\"app_ready\":%d,\"boot\":%s,"
+            "\"free\":%u,\"total\":%u,"
             "\"app_decl\":%d,\"cfg_errno\":%d,\"cfg_open\":%d,"
             "\"cfg_hdr\":\"%02X%02X%02X%02X\",\"fmt\":%d,\"reconn_hwm\":%u,"
             "\"sd\":{\"en\":%d,\"mnt\":\"%s\",\"mb\":%llu,\"vfs_mb\":%llu,"
@@ -1284,6 +1301,7 @@ static size_t status_put_storage(char *buf, size_t cap)
             "\"sv_err\":%d,\"err\":%d,"
             "\"drives\":%s}}",
             nc_store_mode_name(), nc_store_app_ready() ? 1 : 0, boot,
+            (unsigned)free_b, (unsigned)total_b,
             s_cfg_app_ready, s_cfg_errno, s_cfg_open_ok,
             (unsigned)(s_cfg_hdr & 0xFF), (unsigned)((s_cfg_hdr >> 8) & 0xFF),
             (unsigned)((s_cfg_hdr >> 16) & 0xFF), (unsigned)((s_cfg_hdr >> 24) & 0xFF),
@@ -1388,11 +1406,12 @@ static size_t status_put_sys(char *buf, size_t cap)
 {
     size_t off = 0;
     jappend(buf, cap, &off,
-            "\"sys\":{\"fw\":\"%s\",\"app\":\"%02x%02x%02x%02x\",\"heap\":%u,\"up_s\":%lld,"
+            "\"sys\":{\"chip\":\"%s\",\"fw\":\"%s\",\"app\":\"%02x%02x%02x%02x\",\"heap\":%u,\"up_s\":%lld,"
             "\"idf\":\"%s\",\"cid\":%u,"
             // 三種 heap 分開報：內部 / DMA 用 / PSRAM。冇呢三個數字，
             // 「搬去 PSRAM 到底有冇用」只能靠估。
             "\"h_int\":%u,\"h_dma\":%u,\"h_ps\":%u,\"rep_ps\":%d,\"rst\":%d}",
+            CONFIG_IDF_TARGET,
             FW_VERSION,
             (unsigned)esp_app_get_description()->app_elf_sha256[0],
             (unsigned)esp_app_get_description()->app_elf_sha256[1],
@@ -2886,6 +2905,7 @@ static void on_cdc_tx_bench(nc4_ctx_t *ctx, const nc4_frame_t *f)
     bool aborted = false;
     size_t left = bytes;
     uint32_t seq = 0;
+    (void)seq;      // 只有 CONFIG_TINYUSB_CDC_COUNT >= 2 的分支會用
     while (left > 0) {
         size_t n = (left > ch) ? ch : left;
         // mode 3 = 兩條 CDC 交替（每條一條獨立 bulk endpoint）：

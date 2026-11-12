@@ -12,6 +12,14 @@
 | **S3-N16R8** | ESP32-S3 | USB-Serial-JTAG（次要） | **UART0**（預設）／USB-Serial-JTAG／`DFU` 字串 | USB CDC（TinyUSB，`303A:4003`）、Wi-Fi |
 | **P4-C6** | ESP32-P4 rev1.0 | **UART0（主）** ＋ USB-JTAG（次） | **UART0**（預設）／USB-Serial-JTAG | Wi-Fi（外掛 C6，hosted）、ETH（未通）、UART1 |
 
+> ⚠️ **S3 同 P4 的 TinyUSB CDC 都係 `303A:4003`**，Windows 分唔出。
+> OTA／flash 之前一定要用 `STATUS_GET keys=sys` 的 `chip`（新 firmware）或
+> 實板確認，唔好靠 VID:PID。
+> 2026-11-12 真實事故：一塊 **ESP32-S3 4MB（Matrix 類）** 被推了 16MB N16R8
+> 映像，APPLY 後不再枚舉；`recover.py` 靠 ROM 的 chip/flash 偵測救返，
+> 但板子要人手拔插 USB 才離開 ROM。詳見
+> [esp-webmaster-test.md §6](../02_guides/esp-webmaster-test.md)。
+
 ---
 
 ## 1. P4 的 USB：**三條獨立 PHY**（不是共用）

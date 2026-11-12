@@ -1,0 +1,651 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ESP WebMaster — NC4 工作臺</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230b0c0e'/%3E%3Cpath d='M9 21V11h3.2l3.8 6 3.8-6H23v10h-2.6v-5.9L17.2 21h-2.4l-3.2-5.1V21z' fill='%232fe0a8'/%3E%3C/svg%3E">
+<style>
+/* ═══════════════════════════════════════════════════════════════════════
+   mp_Tools design tokens（同一套 bench / led / amber）
+   ═══════════════════════════════════════════════════════════════════════ */
+:root {
+  --bench-950: #0b0c0e;
+  --bench-900: #101216;
+  --bench-850: #15181d;
+  --bench-800: #1b1f26;
+  --bench-700: #262b34;
+  --bench-600: #39404d;
+  --bench-400: #6b7486;
+  --bench-200: #aeb6c4;
+  --bench-100: #e4e8ef;
+
+  --led: #2fe0a8;
+  --led-dim: #14654c;
+  --amber: #f0a53c;
+  --danger: #ff5a5f;
+  --solder: #58c4dc;
+
+  --font-display: "Archivo", system-ui, sans-serif;
+  --font-ui: "IBM Plex Sans", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", "Cascadia Code", ui-monospace, monospace;
+
+  --rail-w: 64px;
+  --strip-h: 56px;
+  --side-w: 288px;
+  --panel-h: 190px;
+  --status-h: 28px;
+  --t: cubic-bezier(.2,.8,.2,1);
+}
+
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+body {
+  margin: 0;
+  background: var(--bench-950);
+  color: var(--bench-200);
+  font: 400 13px/1.5 var(--font-ui);
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; }
+:focus-visible { outline: 2px solid var(--solder); outline-offset: 2px; }
+code { font-family: var(--font-mono); color: var(--bench-100); font-size: 11.5px; }
+
+.label {
+  font: 600 10px/1 var(--font-display);
+  letter-spacing: .09em;
+  text-transform: uppercase;
+  color: var(--bench-400);
+}
+.mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+.hidden { display: none !important; }
+
+/* ═══ 版面骨架 ═══ */
+#app {
+  display: grid;
+  grid-template-columns: var(--rail-w) 1fr;
+  grid-template-rows: var(--strip-h) 1fr var(--status-h);
+  grid-template-areas: "rail strip" "rail body" "rail status";
+  height: 100vh;
+}
+
+/* ── 左側 activity rail ── */
+.rail {
+  grid-area: rail;
+  background: var(--bench-900);
+  border-right: 1px solid var(--bench-700);
+  display: flex; flex-direction: column; align-items: center;
+  padding: 8px 0; gap: 4px;
+}
+.rail .mark {
+  width: 36px; height: 36px; margin-bottom: 8px;
+  display: grid; place-items: center;
+  border: 1px solid var(--bench-700); border-radius: 8px;
+  font: 700 12px/1 var(--font-display); color: var(--led);
+  letter-spacing: -.02em;
+}
+.rail button.nav {
+  position: relative;
+  width: 44px; height: 46px; border-radius: 8px;
+  display: grid; place-items: center; gap: 1px;
+  color: var(--bench-400);
+  transition: color 120ms ease-out, background 120ms ease-out;
+}
+.rail button.nav svg { width: 18px; height: 18px; }
+.rail button.nav span { font: 500 9px/1 var(--font-ui); }
+.rail button.nav:hover { color: var(--bench-200); background: var(--bench-850); }
+.rail button.nav[aria-current="true"] { color: var(--bench-100); background: var(--bench-850); }
+.rail button.nav[aria-current="true"]::before {
+  content: ""; position: absolute; left: -8px; top: 10px; bottom: 10px;
+  width: 2px; background: var(--led); border-radius: 2px;
+}
+.rail .dot {
+  position: absolute; top: 7px; right: 8px;
+  width: 6px; height: 6px; border-radius: 99px; background: var(--amber);
+}
+.rail .spacer { flex: 1; }
+
+/* ── 頂部 device strip ── */
+.strip {
+  grid-area: strip;
+  background: var(--bench-900);
+  border-bottom: 1px solid var(--bench-700);
+  display: flex; align-items: center; gap: 10px; padding: 0 16px;
+}
+.strip select {
+  height: 34px; padding: 0 10px; min-width: 240px;
+  border: 1px solid var(--bench-700); border-radius: 8px;
+  background: var(--bench-850); color: var(--bench-100);
+  font: 400 12px/1 var(--font-mono);
+}
+.strip .empty-slot {
+  display: flex; align-items: center; gap: 8px;
+  height: 34px; padding: 0 14px;
+  border: 1px dashed var(--bench-600); border-radius: 8px;
+  color: var(--bench-400); font-size: 12px;
+  transition: border-color 120ms, color 120ms;
+}
+.strip .empty-slot:hover { border-color: var(--solder); color: var(--bench-100); }
+.ticket {
+  position: relative;
+  display: flex; align-items: center; gap: 10px;
+  height: 34px; padding: 0 12px 0 24px;
+  background: var(--bench-850);
+  border: 1px solid var(--bench-700); border-radius: 8px;
+}
+.ticket[data-active="true"] { border-color: var(--bench-600); }
+.ticket[data-active="true"]::before {
+  content: ""; position: absolute; left: 8px; top: 6px; bottom: 6px;
+  width: 2px; border-radius: 2px; background: var(--led);
+}
+.ticket .name { font: 500 12px/1 var(--font-ui); color: var(--bench-100); }
+.ticket .meta { font: 400 11px/1 var(--font-mono); color: var(--bench-400); }
+.led {
+  width: 8px; height: 8px; border-radius: 99px; flex: 0 0 auto;
+  background: var(--bench-700);
+}
+.led[data-state="connecting"] { background: var(--led); animation: pulse 1.4s ease-in-out infinite; }
+.led[data-state="idle"] { background: var(--led); }
+.led[data-state="busy"] { background: var(--amber); animation: pulse .9s ease-in-out infinite; }
+.led[data-state="error"] { background: var(--danger); }
+@keyframes pulse {
+  0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgb(47 224 168 / .45); }
+  50% { opacity: .55; box-shadow: 0 0 0 5px rgb(47 224 168 / 0); }
+}
+.strip .grow { flex: 1; }
+
+/* ── 主體 ── */
+.body { grid-area: body; display: grid; grid-template-columns: var(--side-w) 1fr; min-height: 0; }
+
+.side {
+  background: var(--bench-900);
+  border-right: 1px solid var(--bench-700);
+  display: flex; flex-direction: column; min-height: 0;
+}
+.side-head {
+  height: 38px; flex: 0 0 auto;
+  display: flex; align-items: center; gap: 8px; padding: 0 12px;
+  background: linear-gradient(to bottom, transparent, rgb(38 43 52 / .55), transparent);
+  border-bottom: 1px solid var(--bench-700);
+}
+.side-head .grow { flex: 1; }
+.side-body { overflow-y: auto; padding: 12px; flex: 1; min-height: 0; }
+.side-foot { border-top: 1px solid var(--bench-700); padding: 8px; display: flex; gap: 6px; flex-wrap: wrap; }
+
+.dl { display: grid; grid-template-columns: 66px 1fr; gap: 8px 10px; margin: 0; align-items: start; }
+.dl dt { font: 600 9px/1.9 var(--font-display); letter-spacing: .08em; text-transform: uppercase; color: var(--bench-400); }
+.dl dd { margin: 0; font: 400 12px/1.4 var(--font-mono); color: var(--bench-200); word-break: break-all; }
+.meter { height: 4px; border-radius: 99px; background: var(--led-dim); overflow: hidden; margin-top: 5px; }
+.meter i { display: block; height: 100%; background: var(--led); }
+.meter[data-tone="amber"] { background: rgb(240 165 60 / .18); }
+.meter[data-tone="amber"] i { background: var(--amber); }
+
+.side .block { margin-top: 18px; }
+.side .sep { height: 1px; background: var(--bench-700); margin: 14px 0; }
+
+/* ── canvas + bottom panel ── */
+.canvas-wrap { display: grid; grid-template-rows: 1fr 6px var(--panel-h); min-height: 0; }
+.canvas {
+  position: relative; overflow: hidden; min-height: 0;
+  background-color: var(--bench-950);
+  background-image:
+    radial-gradient(120% 90% at 50% 0%, rgb(47 224 168 / .022), transparent 60%),
+    radial-gradient(circle at 1px 1px, rgb(38 43 52 / .55) 1px, transparent 0);
+  background-size: 100% 100%, 16px 16px;
+}
+.view { position: absolute; inset: 0; overflow-y: auto; display: none; }
+.view[data-on="true"] { display: block; }
+
+.grip { background: var(--bench-900); border-top: 1px solid var(--bench-700); cursor: row-resize; }
+.grip:hover { background: var(--bench-850); }
+
+.panel { background: var(--bench-900); border-top: 1px solid var(--bench-700); display: flex; flex-direction: column; min-height: 0; }
+.panel-head {
+  height: 34px; flex: 0 0 auto; display: flex; align-items: center; gap: 4px; padding: 0 8px 0 12px;
+  background: linear-gradient(to bottom, transparent, rgb(38 43 52 / .55), transparent);
+  border-bottom: 1px solid var(--bench-700);
+}
+.panel-head .grow { flex: 1; }
+.tab {
+  height: 24px; padding: 0 10px; border-radius: 4px;
+  font: 500 11px/24px var(--font-ui); color: var(--bench-400);
+  transition: color 120ms, background 120ms;
+}
+.tab:hover { color: var(--bench-200); }
+.tab[aria-selected="true"] { color: var(--bench-100); background: var(--bench-800); }
+.term { flex: 1; overflow-y: auto; padding: 10px 14px; font: 400 12.5px/1.6 var(--font-mono); min-height: 0; }
+.term .line { white-space: pre-wrap; word-break: break-all; color: var(--bench-200); }
+.term .info { color: #93c5fd; }
+.term .ok { color: var(--led); }
+.term .warn { color: var(--amber); }
+.term .err { color: var(--danger); }
+.term .dim { color: var(--bench-400); }
+.term .frame { color: #c792ea; }
+.quick {
+  display: flex; gap: 6px; align-items: center;
+  border-top: 1px solid var(--bench-700); padding: 7px 10px;
+}
+.quick::before { content: ">>>"; color: var(--led); font: 400 12px/1 var(--font-mono); }
+.quick input {
+  flex: 1; height: 28px; padding: 0 10px; border-radius: 5px;
+  border: 1px solid var(--bench-700); background: var(--bench-850);
+  color: var(--bench-100); font: 400 12px/1 var(--font-mono); outline: none;
+}
+
+/* ── 狀態列 ── */
+.status {
+  grid-area: status;
+  background: var(--bench-900); border-top: 1px solid var(--bench-700);
+  display: flex; align-items: center; gap: 14px; padding: 0 12px;
+  font: 400 11px/1 var(--font-mono); color: var(--bench-400);
+}
+.status .sep { width: 1px; height: 12px; background: var(--bench-700); }
+.status .grow { flex: 1; }
+.status kbd {
+  font: 500 10px/1 var(--font-mono); color: var(--bench-200);
+  border: 1px solid var(--bench-600); border-radius: 3px; padding: 2px 5px; background: var(--bench-850);
+}
+.status .on { color: var(--led); }
+.status .off { color: var(--bench-400); }
+
+/* ═══ 內容元件 ═══ */
+.pad { padding: 20px 24px 40px; }
+.wiz h1 { font: 600 20px/1.2 var(--font-display); color: var(--bench-100); margin: 0 0 4px; }
+.wiz .sub { color: var(--bench-400); margin: 0 0 20px; }
+.card { border: 1px solid var(--bench-700); border-radius: 8px; background: var(--bench-900); margin-bottom: 12px; }
+.card-h { padding: 10px 14px; border-bottom: 1px solid var(--bench-700); display: flex; align-items: center; gap: 10px; }
+.card-h .grow { flex: 1; }
+.card-b { padding: 14px; }
+.grid2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
+.grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+.field { display: flex; flex-direction: column; gap: 5px; }
+.field label { font: 600 9px/1.6 var(--font-display); letter-spacing: .07em; text-transform: uppercase; color: var(--bench-400); }
+.field input, .field select {
+  height: 32px; padding: 0 10px; border-radius: 6px;
+  border: 1px solid var(--bench-700); background: var(--bench-850);
+  color: var(--bench-100); font: 400 12px/1 var(--font-mono); outline: none;
+}
+.field input:focus, .field select:focus { border-color: var(--solder); }
+.field.span2 { grid-column: span 2; }
+.sel {
+  height: 30px; padding: 0 8px; border: 1px solid var(--bench-700); border-radius: 6px;
+  background: var(--bench-850); color: var(--bench-100);
+  font: 400 11px/1 var(--font-mono); max-width: 240px;
+}
+
+.btn {
+  height: 30px; padding: 0 13px; border-radius: 6px;
+  border: 1px solid var(--bench-600); background: var(--bench-800);
+  font: 500 12px/1 var(--font-ui); color: var(--bench-100);
+  display: inline-flex; align-items: center; gap: 7px;
+  transition: background 120ms, border-color 120ms;
+}
+.btn:hover { background: var(--bench-700); border-color: var(--bench-400); }
+.btn:disabled { opacity: .4; cursor: not-allowed; }
+.btn.primary { background: rgb(47 224 168 / .14); border-color: rgb(47 224 168 / .55); color: var(--led); font-weight: 600; }
+.btn.primary:hover { background: rgb(47 224 168 / .22); border-color: var(--led); }
+.btn.amber { border-color: rgb(240 165 60 / .5); color: var(--amber); background: rgb(240 165 60 / .08); }
+.btn.danger { border-color: rgb(255 90 95 / .5); color: var(--danger); background: rgb(255 90 95 / .08); }
+.btn.ghost { border-color: transparent; background: none; color: var(--bench-400); }
+.btn.ghost:hover { color: var(--bench-100); background: var(--bench-850); }
+.btn.sm { height: 26px; padding: 0 10px; font-size: 11px; }
+.btn-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+
+.chip {
+  display: inline-flex; align-items: center; flex: 0 0 auto;
+  width: max-content; max-width: 100%;
+  padding: 1px 6px; border-radius: 99px;
+  font: 500 10px/1.6 var(--font-ui); border: 1px solid var(--bench-600); color: var(--bench-200);
+  white-space: nowrap;
+}
+.chip.amber { color: var(--amber); border-color: rgb(240 165 60 / .45); background: rgb(240 165 60 / .08); }
+.chip.led { color: var(--led); border-color: rgb(47 224 168 / .45); background: rgb(47 224 168 / .08); }
+
+.bar { height: 6px; border-radius: 99px; background: var(--bench-800); overflow: hidden; }
+.bar i { display: block; height: 100%; background: var(--amber); width: 0; transition: width 120ms linear; }
+.bar[data-tone="led"] i { background: var(--led); }
+
+/* 檔案 */
+.crumb { font: 400 12px/1 var(--font-mono); color: var(--bench-400); padding: 10px 14px; border-bottom: 1px solid var(--bench-700); }
+.crumb a { color: var(--solder); cursor: pointer; text-decoration: none; }
+.crumb a:hover { text-decoration: underline; }
+.drop {
+  border: 1px dashed var(--bench-600); border-radius: 8px; padding: 10px;
+  text-align: center; color: var(--bench-400); background: var(--bench-850);
+  margin: 10px 14px;
+}
+.drop.hot { border-color: var(--solder); color: var(--bench-100); background: rgb(88 196 220 / .06); }
+.ftable { width: 100%; border-collapse: collapse; font: 400 12px/1.4 var(--font-mono); }
+.ftable th {
+  text-align: left; padding: 8px 14px; color: var(--bench-400);
+  font: 600 9px/1.6 var(--font-display); letter-spacing: .08em; text-transform: uppercase;
+  border-bottom: 1px solid var(--bench-700); background: var(--bench-850);
+}
+.ftable td { padding: 7px 14px; border-bottom: 1px solid var(--bench-700); color: var(--bench-200); }
+.ftable td:last-child { white-space: nowrap; }
+.ftable tr:last-child td { border-bottom: 0; }
+.ftable tbody tr:hover { background: var(--bench-850); }
+.ftable .nm { color: var(--bench-100); cursor: pointer; }
+.ftable .nm:hover { color: var(--solder); }
+.ftable .act { color: var(--bench-400); cursor: pointer; margin-right: 8px; font: 400 11px/1 var(--font-ui); }
+.ftable .act:hover { color: var(--bench-100); }
+.ftable .act.ok { color: var(--led); }
+.ftable .act.wn { color: var(--amber); }
+.ftable .act.er { color: var(--danger); }
+.ftable .muted { color: var(--bench-400); }
+
+/* 編輯器 */
+.editor-head { display: flex; align-items: center; gap: 8px; padding: 8px 14px; border-bottom: 1px solid var(--bench-700); background: var(--bench-900); }
+.editor-head .path { font: 400 12px/1 var(--font-mono); color: var(--bench-100); flex: 1; }
+.editor {
+  width: 100%; min-height: 380px; resize: vertical;
+  background: var(--bench-950); color: var(--bench-100);
+  border: 0; border-top: 1px solid var(--bench-700);
+  padding: 14px 16px; outline: none;
+  font: 400 13px/1.65 var(--font-mono); white-space: pre; overflow: auto;
+}
+.editor:focus { box-shadow: inset 2px 0 0 var(--led); }
+
+/* 燒錄 */
+.fwinfo { font: 400 11px/1.7 var(--font-mono); color: var(--bench-400); white-space: pre-wrap; word-break: break-all; }
+.result {
+  margin: 12px 0 0; padding: 12px; border-radius: 6px;
+  background: #090a0c; border: 1px solid var(--bench-700);
+  font: 400 11px/1.65 var(--font-mono); color: var(--bench-200);
+  max-height: 260px; overflow: auto; white-space: pre-wrap; word-break: break-all;
+}
+
+/* toast */
+#toasts { position: fixed; top: 72px; right: 16px; z-index: 70; display: flex; flex-direction: column; gap: 8px; }
+.toast {
+  width: 330px; padding: 11px 13px; border-radius: 8px;
+  background: var(--bench-850); border: 1px solid var(--bench-600);
+  box-shadow: 0 16px 48px -12px rgb(0 0 0 / .6);
+  display: flex; gap: 10px; align-items: flex-start;
+  animation: slide-in 180ms var(--t);
+}
+@keyframes slide-in { from { transform: translateX(12px); opacity: 0; } }
+.toast .tt { font: 500 12px/1.3 var(--font-ui); color: var(--bench-100); }
+.toast .tb { font: 400 11px/1.5 var(--font-ui); color: var(--bench-400); margin-top: 2px; }
+.toast .ic { flex: 0 0 auto; margin-top: 1px; }
+.toast[data-kind="ok"] .ic { color: var(--led); }
+.toast[data-kind="warn"] .ic { color: var(--amber); }
+.toast[data-kind="err"] .ic { color: var(--danger); }
+
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--bench-700); border-radius: 99px; border: 3px solid var(--bench-900); }
+::-webkit-scrollbar-thumb:hover { background: var(--bench-600); }
+
+@media (max-width: 1100px) {
+  :root { --side-w: 0px; }
+  .side { display: none; }
+}
+</style>
+</head>
+<body>
+<div id="app">
+
+  <!-- ═══ ACTIVITY RAIL ═══ -->
+  <nav class="rail" aria-label="主要功能">
+    <div class="mark" title="ESP WebMaster">esp</div>
+    <button class="nav" data-view="device" aria-current="true" title="設備">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M9 9h6v6H9zM4 9h0M4 15h0M20 9h0M20 15h0"/></svg>
+      <span>設備</span>
+    </button>
+    <button class="nav" data-view="files" aria-current="false" title="檔案">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
+      <span>檔案</span>
+    </button>
+    <button class="nav" data-view="drive" aria-current="false" title="隨身碟">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v10m0 0 3-3m-3 3-3-3M5 16v3a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-3"/></svg>
+      <span>隨身碟</span>
+    </button>
+    <button class="nav" data-view="flash" aria-current="false" title="固件">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2 4.5 13.5H11l-1 8.5 8.5-11.5H12z"/></svg>
+      <span>固件</span>
+    </button>
+    <button class="nav" data-view="monitor" aria-current="false" title="指令">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 15h3l3-9 4 15 3-9h5"/></svg>
+      <span>指令</span>
+    </button>
+    <div class="spacer"></div>
+  </nav>
+
+  <!-- ═══ DEVICE STRIP ═══ -->
+  <header class="strip">
+    <select id="portSelect" aria-label="序列埠"><option value="">（未偵測到序列埠）</option></select>
+    <button id="btnConnect" class="btn primary">連線</button>
+    <button id="btnDisconnect" class="btn" disabled>斷線</button>
+    <button id="btnSim" class="btn ghost">模擬裝置</button>
+    <div class="grow"></div>
+    <div class="ticket" id="ticket" data-active="false">
+      <span class="led" id="led" data-state="error"></span>
+      <span class="name" id="ticketName">未連線</span>
+      <span class="meta" id="ticketMeta">—</span>
+    </div>
+  </header>
+
+  <!-- ═══ BODY ═══ -->
+  <div class="body">
+    <aside class="side">
+      <div class="side-head"><span class="label">裝置</span><span class="grow"></span><span class="chip" id="sideMode">—</span></div>
+      <div class="side-body">
+        <dl class="dl">
+          <dt>晶片</dt><dd id="dlChip">—</dd>
+          <dt>版本</dt><dd id="dlVer">—</dd>
+          <dt>Uptime</dt><dd id="dlUp">—</dd>
+          <dt>Heap</dt><dd id="dlHeap">—</dd>
+          <dt>Port</dt><dd id="dlPort">—</dd>
+        </dl>
+        <div class="sep"></div>
+        <span class="label">儲存</span>
+        <dl class="dl" style="margin-top:8px">
+          <dt>Free</dt><dd id="dlFree">—</dd>
+          <dt>Total</dt><dd id="dlTotal">—</dd>
+          <dt>Pending</dt><dd id="dlPending">—</dd>
+        </dl>
+        <div class="meter" data-tone="amber" title="已用空間"><i id="usedMeter" style="width:0%"></i></div>
+        <div class="sep"></div>
+        <span class="label">Log</span>
+        <dl class="dl" style="margin-top:8px">
+          <dt>Produced</dt><dd id="dlProduced">—</dd>
+          <dt>Sent</dt><dd id="dlSent">—</dd>
+          <dt>Dropped</dt><dd id="dlDropped">—</dd>
+        </dl>
+      </div>
+      <div class="side-foot">
+        <button id="btnClaimFat" class="btn sm">接管 FAT</button>
+        <button id="btnReleaseFat" class="btn sm ghost">交還</button>
+        <button id="btnReboot" class="btn sm danger">重啟</button>
+      </div>
+    </aside>
+
+    <div class="canvas-wrap">
+      <div class="canvas">
+        <!-- 設備 -->
+        <section class="view" data-view="device" data-on="true">
+          <div class="pad wiz">
+            <h1>裝置</h1>
+            <p class="sub">NC4 over USB CDC（ESP 專用，唔經 Wi-Fi 都得）</p>
+            <div class="grid3">
+              <div class="card"><div class="card-h"><span class="label">系統</span></div><div class="card-b">
+                <dl class="dl"><dt>晶片</dt><dd id="stChip">—</dd><dt>版本</dt><dd id="stVer">—</dd><dt>Uptime</dt><dd id="stUptime">—</dd><dt>Heap</dt><dd id="stHeap">—</dd></dl>
+              </div></div>
+              <div class="card"><div class="card-h"><span class="label">儲存</span><span class="chip" id="stMode">—</span></div><div class="card-b">
+                <dl class="dl"><dt>Mode</dt><dd id="stModeText">—</dd><dt>Free</dt><dd id="stFree">—</dd><dt>Total</dt><dd id="stTotal">—</dd><dt>Pending</dt><dd id="stPending">—</dd></dl>
+              </div></div>
+              <div class="card"><div class="card-h"><span class="label">Log 管道</span></div><div class="card-b">
+                <dl class="dl"><dt>Level</dt><dd id="stLogLvl">—</dd><dt>Produced</dt><dd id="stLogProd">—</dd><dt>Sent</dt><dd id="stLogSent">—</dd><dt>Dropped</dt><dd id="stLogDrop">—</dd></dl>
+                <div class="btn-row" style="margin-top:12px"><button id="btnLogDebug" class="btn sm">切換除錯模式</button></div>
+              </div></div>
+            </div>
+            <div class="card"><div class="card-h"><span class="label">原始 STATUS</span><span class="grow"></span><button id="btnRefreshStatus" class="btn sm">重新讀取</button></div>
+              <div class="card-b"><pre id="statusRaw" class="result">—</pre></div>
+            </div>
+          </div>
+        </section>
+
+        <!-- 檔案 -->
+        <section class="view" data-view="files">
+          <div class="wiz" style="padding-bottom:0">
+            <h1>檔案</h1>
+            <p class="sub">CDC NC4 FAT：<code>FILE_SCAN(0x200B)</code> 建 manifest，UI 讀一次就砌樹；冇 extra 指令 ID。</p>
+          </div>
+          <div class="card" id="fileBrowser" style="margin:0 24px 12px">
+            <div class="card-h">
+              <span class="label">檔案總管</span><span class="grow"></span>
+              <button id="btnUpload" class="btn sm primary">⬆ 上載</button>
+              <button id="btnScan" class="btn sm">重建索引</button>
+              <button id="btnRefreshFiles" class="btn sm">⟳</button>
+              <input id="filePicker" type="file" multiple class="hidden">
+            </div>
+            <div id="filesModeBar" class="hint hidden" style="margin:0 14px 10px;display:flex;align-items:center;gap:10px">
+              <span style="flex:1">裝置目前 <b>USB 模式</b>（FAT 在 host）。上傳／編輯之前要接管 FAT。</span>
+              <button id="btnFilesClaim" class="btn sm primary">接管 FAT</button>
+            </div>
+            <div id="crumb" class="crumb">/</div>
+            <div id="dropzone" class="drop">拖拉檔案入嚟 → 上傳到目前資料夾（可多檔）</div>
+            <div class="bar hidden" id="fileProgressWrap" style="margin:0 14px 12px"><i id="fileProgress"></i></div>
+            <table class="ftable">
+              <thead><tr><th style="width:52%">名稱</th><th style="width:14%">大小</th><th style="width:14%">狀態</th><th>操作</th></tr></thead>
+              <tbody id="fileBody"><tr><td colspan="4" class="muted">未連線</td></tr></tbody>
+            </table>
+          </div>
+          <div class="card hidden" id="editorCard" style="margin:0 24px 12px">
+            <div class="editor-head">
+              <span class="path" id="editorTitle">編輯</span>
+              <span class="chip" id="editorMeta">—</span>
+              <button id="btnSaveFile" class="btn sm primary">儲存</button>
+              <button id="btnDownloadFile" class="btn sm">下載</button>
+              <button id="btnCloseEditor" class="btn sm ghost">✕</button>
+            </div>
+            <textarea id="editor" class="editor" spellcheck="false"></textarea>
+          </div>
+        </section>
+
+        <!-- 隨身碟（MSC 捷徑） -->
+        <section class="view" data-view="drive">
+          <div class="pad wiz">
+            <h1>隨身碟</h1>
+            <p class="sub">可選：有 USB 驅動、會枚舉成隨身碟嘅板先用。冇 USB 嘅 MCU 請用「檔案」頁（全程 CDC）。</p>
+
+            <div class="card">
+              <div class="card-h"><span class="label">1 · FAT 擁有權</span><span class="chip" id="driveMode">—</span></div>
+              <div class="card-b">
+                <div class="btn-row">
+                  <button id="btnMountDrive" class="btn primary">交還 FAT → 電腦見到碟</button>
+                  <button id="btnClaimDrive" class="btn">接管 FAT ← 套用</button>
+                  <button id="btnApplyReboot" class="btn amber">接管並重啟</button>
+                </div>
+                <p class="small muted" id="driveHint" style="margin-top:10px">未連線。先喺上面揀 port。</p>
+              </div>
+            </div>
+
+            <div class="card">
+              <div class="card-h">
+                <span class="label">2 · 本機資料夾</span><span class="grow"></span>
+                <select id="drivePick" class="sel"><option value="">（未偵測）</option></select>
+                <button id="btnDriveUse" class="btn sm primary">用</button>
+                <button id="btnRefreshDrive" class="btn sm">⟳</button>
+              </div>
+              <div class="card-b">
+                <div class="crumb" id="driveCrumb">未選擇資料夾</div>
+                <div id="driveDrop" class="drop">拖拉檔案入嚟 → 寫入目前資料夾（可多檔）</div>
+                <div class="bar hidden" id="driveProgressWrap" style="margin:8px 0"><i id="driveProgress"></i></div>
+                <table class="ftable">
+                  <thead><tr><th style="width:52%">名稱</th><th style="width:16%">大小</th><th>操作</th></tr></thead>
+                  <tbody id="driveBody"><tr><td colspan="3" class="muted">未選擇資料夾</td></tr></tbody>
+                </table>
+              </div>
+            </div>
+
+            <div class="card hidden" id="driveEditorCard">
+              <div class="editor-head">
+                <span class="path" id="driveEditorTitle">編輯</span>
+                <span class="chip" id="driveEditorMeta">—</span>
+                <button id="btnDriveSave" class="btn sm primary">儲存</button>
+                <button id="btnDriveClose" class="btn sm ghost">✕</button>
+              </div>
+              <textarea id="driveEditor" class="editor" spellcheck="false"></textarea>
+            </div>
+          </div>
+        </section>
+
+        <!-- 固件 -->
+        <section class="view" data-view="flash">
+          <div class="pad wiz">
+            <h1>固件</h1>
+            <p class="sub">NC4 OTA（0x22xx）：唔需要 download mode、唔需要按鍵。燒錄期間唔好拔線。</p>
+            <div class="card"><div class="card-h"><span class="label">1 · 揀 .bin</span></div><div class="card-b">
+              <div id="fwDrop" class="drop">拖拉 <code>.bin</code> 入嚟，或 <button id="btnPickFw" class="btn sm">揀檔案</button>
+                <input id="fwPicker" type="file" accept=".bin" class="hidden">
+              </div>
+              <div id="fwInfo" class="fwinfo hidden" style="margin-top:12px"></div>
+            </div></div>
+            <div class="card"><div class="card-h"><span class="label">2 · 選項</span></div><div class="card-b">
+              <label class="chip"><input type="checkbox" id="fwApply" checked> 完成後 APPLY（切換分區）</label>
+              <div class="btn-row" style="margin-top:12px"><button id="btnOta" class="btn primary" disabled>開始 OTA</button></div>
+              <div class="bar hidden" id="otaProgressWrap" style="margin-top:14px"><i id="otaProgress"></i></div>
+              <pre id="otaResult" class="result hidden"></pre>
+            </div></div>
+          </div>
+        </section>
+
+        <!-- 指令 -->
+        <section class="view" data-view="monitor">
+          <div class="pad wiz">
+            <h1>指令</h1>
+            <p class="sub">直接送 NC4 幀；回覆同時顯示 hex 同 JSON。</p>
+            <div class="card"><div class="card-h"><span class="label">NC4 Console</span></div><div class="card-b">
+              <div class="grid2">
+                <div class="field"><label>cmd</label><select id="cmdSelect"></select></div>
+                <div class="field"><label>timeout（秒）</label><input id="cmdTimeout" value="5"></div>
+                <div class="field span2"><label>payload（hex）</label><input id="cmdPayload" placeholder="例：0700737973 = str_u16('sys')"></div>
+                <div class="field span2"><label>expect（hex，逗號分隔，可空）</label><input id="cmdExpect" placeholder="例：0x1102"></div>
+              </div>
+              <div class="btn-row" style="margin-top:12px"><button id="btnSendCmd" class="btn primary">送出</button></div>
+              <pre id="cmdResult" class="result">尚未送出</pre>
+            </div></div>
+          </div>
+        </section>
+      </div>
+
+      <div class="grip" id="grip"></div>
+
+      <section class="panel">
+        <div class="panel-head">
+          <button class="tab" aria-selected="true" data-ptab="term">終端</button>
+          <span class="grow"></span>
+          <label class="chip"><input type="checkbox" id="logPause"> 暫停</label>
+          <button id="btnClearLog" class="btn sm ghost">清除</button>
+          <button id="btnSaveLog" class="btn sm ghost">下載</button>
+        </div>
+        <div class="term" id="terminal"></div>
+        <div class="quick">
+          <input id="quickCmd" placeholder="快速指令：0x1101 或 0x200B 00（唔填 = STATUS_GET）">
+          <button id="btnQuickSend" class="btn sm">送出</button>
+        </div>
+      </section>
+    </div>
+  </div>
+
+  <!-- ═══ STATUS ═══ -->
+  <footer class="status">
+    <span id="stOnline" class="off">● offline</span>
+    <span class="sep"></span>
+    <span id="stPort">port —</span>
+    <span class="sep"></span>
+    <span id="stMode2">mode —</span>
+    <span class="sep"></span>
+    <span id="stFree2">free —</span>
+    <span class="grow"></span>
+    <span id="stVer2">esp-webmaster 1.0</span>
+  </footer>
+</div>
+
+<div id="toasts"></div>
+<script src="/static/app.js"></script>
+</body>
+</html>

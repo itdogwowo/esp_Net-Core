@@ -36,7 +36,7 @@ extern "C" {
 #define NC4_MAX_PAYLOAD      8192
 #define NC4_MAX_FRAME        (NC4_HDR_LEN + NC4_MAX_PAYLOAD + NC4_CRC_LEN)
 // 指令表的格數。**要對得起實際註冊量**：core 5 + test 11 + test bench 9 +
-// ota 9 + file 2 = 36（測試映像）。曾經是 32 → 最後 4 條靜靜咁註冊失敗
+// ota 9 + file 10 = 44（測試映像）。曾經是 32 → 最後 4 條靜靜咁註冊失敗
 // （STATUS_SET / FILE_QUERY 永遠答不到）。塞爆會印 ESP_LOGE（見 nc4.c）。
 // 回覆幀的 JSON 上限。完整的 STATUS_GET（sys+mem+tasks+provides+storage+fx）
 // 大約 2.4 KB，用小了會**靜靜截斷成無效 JSON**。
