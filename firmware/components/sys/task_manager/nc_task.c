@@ -21,6 +21,7 @@
 #include "nc_cfg.h"
 #include "cJSON.h"
 #include "nc_buf.h"
+#include "nc_core.h"
 
 static const char *TAG = "tm";
 
@@ -577,7 +578,10 @@ static void prepare_loops(tm_slot_t *s)
         rt->def = d;
         rt->kind = (uint8_t)s->def->kind;   // 優先級治理用
         rt->enabled = true;
-        rt->core = d->core;      // 完全照宣告；框架不改你的核
+        // 完全照宣告，但核數才是硬體事實：藍圖／config 都只是「要求」。
+        // 收斂在這裡（而不是在每個 xTaskCreatePinnedToCore），單核板上寫 core1
+        // 只會得到一行警告，唔會在 FreeRTOS 裡 assert → reboot loop。
+        rt->core = nc_core_clamp(d->core);
         if (s->cfg_aff[0] >= 0 || s->cfg_aff[1] >= 0) {
             // 未寫的那一格當 0（不是 1）：null / 缺欄位 = 唔准跑嗰核。
             const int a0 = (s->cfg_aff[0] < 0) ? 0 : (s->cfg_aff[0] != 0);
@@ -588,7 +592,9 @@ static void prepare_loops(tm_slot_t *s)
                 ESP_LOGW(TAG, "[%s] affinity=(1,1) 唔合法（一個任務只跑一核）→ 照宣告 core %d",
                          s->name, rt->core);
             } else if (!((rt->core == 0 && a0) || (rt->core == 1 && a1))) {
-                rt->core = a0 ? 0 : 1;           // 宣告的核唔准 → 搬去准嗰個
+                // 宣告的核唔准 → 搬去准嗰個（tasks.json 寫 [0,1] 而本機單核時，
+                // 這裡會收斂到 core0，而不是把 core1 交給 FreeRTOS）
+                rt->core = nc_core_clamp(a0 ? 0 : 1);
             }
         }
         // 固件自己話事嘅開關（房東用）。放喺 affinity 之後：租約管唔到呢個，

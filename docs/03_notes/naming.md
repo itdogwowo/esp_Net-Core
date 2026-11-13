@@ -134,5 +134,96 @@ components/action/pixel_action/
    對應 `proto.StreamParser`、`nc4_bus.c` 對應 `NetBus` + `AtomicStreamHub` —— **已經同構**，
    不需要把 CRC 搬去 bus。
 
+---
+
+## 7. 講嘢用的 ID（B／T／R／L／C／M）
+
+> 前面幾節講的是「**寫程式時**符號叫乜」。這一節講「**講嘢時**點樣指住一樣東西」——
+> 開會、issue、commit message、log、圖，全部用同一套 token。
+
+### 7.1 問題：一個字有兩三個意思
+
+「`storage+cfg`」係**一個開機階段**，定係 storage 同 cfg **兩個功能**？同樣：
+
+| 講法 | 可能係 | 結果 |
+|---|---|---|
+| `storage+cfg` | 開機階段 B02／或者 store 同 config 兩個模塊 | 講咗五分鐘之後才發現講緊唔同東西 |
+| `channel` | bus 通道／NC4 的線（link）／HTTP 的連接 | 同上 |
+| `decode0` | 任務 T／decoder 物件／核心編號 | 同上 |
+| `pool` | B06 階段／nc4.pool（已停用）／heap 池 | 同上 |
+
+C 名字（`nc_boot_*`、`nc4_bus_*`）解決了「程式裡叫乜」，但**講嘢**仍然會撞。
+所以每個「可以指住講嘅東西」有一個 ID，而且**一定要帶前綴**。
+
+### 7.2 六個命名空間
+
+| 前綴 | 指乜 | 權威來源（唯一真相） | 例子 |
+|---|---|---|---|
+| `B01`–`B12` | **開機階段**（整輩子一次，順序） | `main.c` 的 `stages[]`、`boot.h` 的契約 | `B02 storage+cfg` |
+| `T.` | **任務**（有棧、有核、有 loop） | `nc_task_def.name`／`xTaskCreate` 的名 | `T.decode0`、`T.cdc.rx` |
+| `R.` | **plan 資源／緩衝**（宣告→carve） | `nc_task_res_t.name` | `R.nc4.rx`、`R.nc4.reply1` |
+| `L.` | **通道／線**（link 名） | `nc4_link_register()` 的名字 | `L.CDC`、`L.UART` |
+| `C.` | **協議指令** | `0x11xx` 指令表 | `C.0x1101` |
+| `M.` | **模塊／功能**（component 或一組行為） | component 目錄名 | `M.store`、`M.config` |
+
+`T.`／`R.`／`L.`／`C.`／`M.` 只是**講嘢用的前綴**，C 符號本身不改名 ——
+`decode0`、`nc4.rx`、`CDC` 這些字串本來就是穩定的，加了前綴反而多一層要對。
+
+### 7.3 B 對照表（log 直接查）
+
+| ID | name | 實測 | 一句話 |
+|---|---|---|---|
+| `B01` | banner+nvs | 9.66 ms | 橫幅、`nvs_flash_init`、讀開機計數 |
+| `B02` | storage+cfg | 126.92 ms | 掛 FAT／WL、寫 seed、config 三層解析 |
+| `B03` | capability | n/a | 探核數；決定 USB 模式／link 名（只寫 `nc_boot_ctx` 五個欄位） |
+| `B04` | hwcheck | n/a | `hardware.json` 的 claim 對帳 |
+| `B05` | hardware | 0.33 ms | ETH／SD／UART 腳位；收下路由表 |
+| `B06` | pool | n/a | 舊 `nc4.pool` 停用的位置（唔配記憶體） |
+| `B07` | declare | 10.45 ms | 向 plan 宣告要幾多（未 malloc） |
+| `B08` | commit | 0.76 ms | plan carve（緩衝真正落地）；`nc_wifi_boot()` |
+| `B09` | start | 5.39 ms | 建 decode0／1 任務（entry 停在閘前） |
+| `B10` | usb | 52.01 ms | TinyUSB 列舉；`nc_log_start()` |
+| `B11` | channels | 1.81 ms | 建 bus／producer；`nc_task_boot()` 放行 |
+| `B12` | account | 0.19 ms | 印「開機剩餘」，之後只剩心跳 |
+
+`n/a` ＝ 該階段是量測之後才拆出來的（原本混在別人的時間裡），**不是 0.0 ms**。
+來源見 [status.md](../00_pm/status.md) §7.23。
+
+### 7.4 三句唔同意思（同一件事的三層）
+
+| 講法 | 意思 | 去邊度查 |
+|---|---|---|
+| 「`B02` 慢」 | 開機第二階段慢（掛 FAT ＋讀 config ＝ 126.9 ms）→ 開機次序問題 | log `boot[B02] … 126.92 ms` |
+| 「`M.store` 慢」 | store 模塊本身慢（同開機次序無關，可能係 FAT 同步/flush） | `components/sys/store/` |
+| 「`R.nc4.rx` 唔夠」 | plan 派的 4,192 B parser 環太小 → 是**容量**問題，唔關階段事 | `nc_plan_json`／STATUS |
+
+呢三句以前都會講成「storage 慢」，然後三個人去改三個唔同嘅地方。
+
+### 7.5 規矩
+
+1. **講嘢帶前綴。**「`B11` 之後 core1 才有 loop」唔會有人誤會；「channels 之後」會。
+2 . **ID 是契約。** 寫落文件／log／圖之後就唔改。要改＝**換一個新 ID**，並且一齊改
+   引用它的地方（`tools/id_check.py` 掃）。
+3. **數字只代表先後，唔代表重要。** `B06` 唔係因為緊要所以排第六。
+4. **`NC_CAP_*` 是能力位，唔係階段。** 以前叫 `NC_STAGE_*`，同「階段」撞名 ——
+   2026-11-13 改名（`needs`／`gives` 用嘅位元）。
+
+### 7.6 已經落地
+
+| 位置 | 改咗乜 |
+|---|---|
+| `firmware/main/boot.h` | `nc_boot_stage_t.id`、`nc_boot_result_t.id`；命名空間寫在 header |
+| `firmware/main/boot.c` | `boot[B02] storage+cfg 126.92 ms ok`；摘要 `B01 9.66 \| B02 126.92 \| …` |
+| `firmware/main/main.c` | 12 行表加 `"B01"…"B12"`；`NC_STAGE_*` → `NC_CAP_*` |
+| `docs/00_pm/boot.svg`、`core-timeline.svg` | 兩張圖都用 B-id，同 log 對得上 |
+| `tools/id_check.py` | 掃 docs／SVG 的 ID token，對 code 是否存在（唔存在就 fail） |
+
+### 7.7 未做
+
+- `T.`／`R.`／`L.`／`C.` 目前只是約定，code 未有前綴、亦未強制檢查（`id_check.py`
+  只做「存在性」，唔知語義）。
+- STATUS 未印 B-id（`nc_boot_results()` 已經帶 `id`，接上去就有一行開機帳）。
+- 上游（MicroPython）那邊未有對應的 ID 表；跨 repo 講嘢暫時仍然用名字。
+
 
 

@@ -8,6 +8,7 @@
 #include "esp_log.h"
 
 #include "nc_cfg.h"
+#include "nc_core.h"
 #include "nc_wifi.h"
 
 static const char *TAG = "wifi";
@@ -602,7 +603,10 @@ nc_wifi_state_t nc_wifi_boot(void)
     }
     // 測速／低延遲：關 modem sleep。代價係 idle 功耗上升；正式產品可再 config 化。
     (void)esp_wifi_set_ps(WIFI_PS_NONE);
-    if (xTaskCreatePinnedToCore(wifi_mgr_task, "wifi_mgr", 6144, NULL, 3, &s_task, 1) != pdPASS) {
+    // 放第二核（Wi-Fi 驅動自己有 task／ISR，唔好同 decode0 爭 core0）。
+    // 單核板（C3／C6／H2）由 nc_core_clamp() 收斂到 core0 —— 以前寫死 1 會 assert。
+    if (xTaskCreatePinnedToCore(wifi_mgr_task, "wifi_mgr", 6144, NULL, 3, &s_task,
+                                (BaseType_t)nc_core_clamp(1)) != pdPASS) {
         err = ESP_ERR_NO_MEM;
         goto fail;
     }

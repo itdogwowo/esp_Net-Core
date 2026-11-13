@@ -6,5 +6,5 @@
 # （idf_component_register 會檢查目錄是否存在）。
 idf_component_register(
     SRCS "nc_task.c"
-    REQUIRES freertos mem esp_timer config task
+    REQUIRES freertos mem esp_timer config task core
 )
