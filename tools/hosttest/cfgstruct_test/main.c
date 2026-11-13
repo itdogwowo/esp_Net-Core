@@ -103,6 +103,16 @@ static const nc_link_cfg_t *link(const nc_system_cfg_t *s, const char *name)
     return NULL;
 }
 
+static const nc_route_cfg_t *route(const nc_system_cfg_t *s, const char *in)
+{
+    for (uint8_t i = 0; i < s->n_routes; i++) {
+        if (strcmp(s->routes[i].in, in) == 0) {
+            return &s->routes[i];
+        }
+    }
+    return NULL;
+}
+
 int main(void)
 {
     nc_system_cfg_t sys;
@@ -356,6 +366,74 @@ int main(void)
 #ifdef PRESET_HARDWARE_S3
     check_preset_hw(PRESET_HARDWARE_S3, 0);   // S3 沒有 ETH
 #endif
+
+    printf("[23] 晶片能力 → 出廠預設（CDC 先、貼身、單核）\n");
+    ok("S3 在表裡", nc_cfg_chip_find("esp32s3") != NULL);
+    ok("P4 在表裡", nc_cfg_chip_find("esp32p4") != NULL);
+    ok("新晶片查唔到 → NULL", nc_cfg_chip_find("esp32x9") == NULL);
+    ok("NULL id → NULL", nc_cfg_chip_find(NULL) == NULL);
+
+    // S3：出廠用 USJ（usb_jtag）＋ UART；雙核 → UART 去 decode1；出廠唔交 FAT。
+    nc_cfg_defaults_set_chip(nc_cfg_chip_find("esp32s3"));
+    (void)parse_sys(NULL, &sys);
+    const nc_link_cfg_t *usb = link(&sys, "usb_jtag");
+    ok("S3 預設 USB = usb_jtag（USJ 先，可改 config 換 cdc）",
+       usb != NULL && usb->kind == NC_LINK_USBJTAG && usb->enable);
+    ok("S3 usb_jtag region 4,128（貼身，4 KB chunk 幀 4,115）",
+       usb != NULL && usb->rx.region == NC_CFG_USB_RX_REGION);
+    ok("S3 預設冇 CDC link（要 OTG 才自己加）", link(&sys, "CDC") == NULL);
+    ok("S3 usb.msc=0 / cdc_log=1", sys.usb_msc == 0 && sys.usb_cdc_log == 1);
+    const nc_route_cfg_t *r = route(&sys, "usb_jtag");
+    ok("S3 usb_jtag 路由去 decode0", r != NULL && r->n_out == 1 &&
+                                      strcmp(r->out[0], "decode0") == 0);
+    r = route(&sys, "UART");
+    ok("S3 UART 路由去 decode1", r != NULL && r->n_out == 1 &&
+                                  strcmp(r->out[0], "decode1") == 0);
+
+    // C3：只有 USJ → usb_jtag；單核 → 所有路由去 decode0。
+    nc_cfg_defaults_set_chip(nc_cfg_chip_find("esp32c3"));
+    (void)parse_sys(NULL, &sys);
+    usb = link(&sys, "usb_jtag");
+    ok("C3 預設 USB = usb_jtag", usb != NULL && usb->kind == NC_LINK_USBJTAG && usb->enable);
+    ok("C3 usb_jtag region 4,128", usb != NULL && usb->rx.region == NC_CFG_USB_RX_REGION);
+    ok("C3 冇 CDC link", link(&sys, "CDC") == NULL);
+    r = route(&sys, "UART");
+    ok("C3 單核：UART 路由去 decode0", r != NULL && r->n_out == 1 &&
+                                        strcmp(r->out[0], "decode0") == 0);
+    ok("C3 冇任何 decode1 路由", route(&sys, "decode1") == NULL);
+
+    // P4：出廠也是 USJ（usb_jtag）；OTG 由用戶改 config。
+    nc_cfg_defaults_set_chip(nc_cfg_chip_find("esp32p4"));
+    (void)parse_sys(NULL, &sys);
+    usb = link(&sys, "usb_jtag");
+    ok("P4 預設 USB = usb_jtag", usb != NULL && usb->kind == NC_LINK_USBJTAG);
+    r = route(&sys, "UART");
+    ok("P4 UART 路由去 decode1", r != NULL && r->n_out == 1 &&
+                                  strcmp(r->out[0], "decode1") == 0);
+
+    // 冇 USB 的晶片：只剩 UART，兩個 USB 開關都關。
+    nc_cfg_defaults_set_chip(nc_cfg_chip_find("esp32"));
+    (void)parse_sys(NULL, &sys);
+    ok("ESP32 只有 1 條 link（UART）", sys.n_links == 1 &&
+                                       strcmp(sys.links[0].name, "UART") == 0);
+    ok("ESP32 usb.cdc_log=0", sys.usb_cdc_log == 0);
+
+    // 未知晶片：保守當 S3（CDC + 2 核），唔會砌出一條起唔到的線。
+    nc_cfg_defaults_set_chip(NULL);
+    (void)parse_sys(NULL, &sys);
+    ok("未知晶片 → 保守 CDC + 2 核", link(&sys, "CDC") != NULL &&
+                                      (route(&sys, "UART") != NULL &&
+                                       strcmp(route(&sys, "UART")->out[0], "decode1") == 0));
+
+    // kind 的字串名要同 config 檔寫的一模一樣（log／STATUS 靠它指路）。
+    ok("kind name cdc", strcmp(nc_cfg_kind_name(NC_LINK_CDC), "cdc") == 0);
+    ok("kind name usb_jtag", strcmp(nc_cfg_kind_name(NC_LINK_USBJTAG), "usb_jtag") == 0);
+
+    // 用戶明確寫 links[] 就唔受晶片預設影響（預設只在缺項時出現）。
+    nc_cfg_defaults_set_chip(nc_cfg_chip_find("esp32c3"));
+    (void)parse_sys("{\"version\":1,\"nc4\":{\"links\":["
+                    "{\"name\":\"UART\",\"kind\":\"uart\"}]}}", &sys);
+    ok("用戶只寫 UART → 冇 usb_jtag", link(&sys, "usb_jtag") == NULL);
 
     printf("\n%d/%d 項通過\n", checks - fails, checks);
     return fails == 0 ? 0 : 1;

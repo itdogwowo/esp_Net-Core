@@ -362,7 +362,7 @@
 | `hwm`（receiver stack 剩餘） | 696 / 1,536 | 實測最多用 840 B |
 | RTT p50 / p95 / p99 / max | 0.59 / 0.65 / **0.75** / 0.77 ms | 分佈極窄，冇抖動 |
 
-**配置**：`region 4,192`、環 4 × 256 B、stack 1,536、prio 5、core 0。
+**配置**：`region 4,128`、環 4 × 256 B、stack 1,536、prio 5、core 0。
 相對 PULL（10 ms、9,229 B）＝ **記憶體幾乎一樣（＋836 B），延遲快 19 倍**。
 
 > **注意**：`cdc.rx` 的 prio 5 同 **TinyUSB task 的 prio 5 同核** ⇒ 同 prio 會 1 ms tick

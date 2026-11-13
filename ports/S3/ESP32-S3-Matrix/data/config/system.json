@@ -10,8 +10,8 @@
   "nc4": {
     "links": [
       {
-        "name": "CDC",
-        "kind": "cdc",
+        "name": "usb_jtag",
+        "kind": "usb_jtag",
         "enable": 1
       }
     ],
@@ -47,12 +47,16 @@
         "out": []
       },
       {
-        "in": "CDC",
+        "in": "usb_jtag",
         "out": [
           "decode0"
         ]
       }
     ]
+  },
+  "usb": {
+    "msc": 0,
+    "cdc_log": 1
   },
   "log_debug_mode": 0
 }

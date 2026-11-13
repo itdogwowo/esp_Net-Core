@@ -39,7 +39,7 @@ static const char *TAG = "nc_file_action";
 #define PATH_MAX_LOCAL    192
 #define FILE_FULL_MAX     208      // /data/ + path + ".part" 仍夠位
 #define FILE_AUX_MAX      (FILE_FULL_MAX + 8)   // <path>.part / <path>.bak + NUL
-#define FILE_CHUNK_MAX    4096     // CDC rx.region 4,192；幀 = chunk + 17
+#define FILE_CHUNK_MAX    4096     // USB rx.region 4,128；幀 = chunk + 19（4,096 → 4,115）
 #define MANIFEST_MAX_FILES 200
 #define MANIFEST_MAX_BYTES (32 * 1024)
 #define MANIFEST_MAX_DEPTH 6

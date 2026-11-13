@@ -370,3 +370,18 @@ bool nc_cfg_append_obj(const char *layer, const char *array_key, const char *obj
     }
     return ok;
 }
+
+// link kind 的名字（"cdc" / "usb_jtag" …）。給 log 與 STATUS 用：
+// config 檔、`kind_parse()`、這裡三處要一致，否則使用者睇到嘅名同寫嘅名唔同。
+const char *nc_cfg_kind_name(nc_link_kind_t kind)
+{
+    switch (kind) {
+    case NC_LINK_CDC:     return "cdc";
+    case NC_LINK_UART:    return "uart";
+    case NC_LINK_TCP:     return "tcp";
+    case NC_LINK_WS:      return "ws";
+    case NC_LINK_UDP:     return "udp";
+    case NC_LINK_USBJTAG: return "usb_jtag";
+    default:              return "?";
+    }
+}

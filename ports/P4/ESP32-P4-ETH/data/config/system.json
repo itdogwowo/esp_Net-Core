@@ -136,5 +136,9 @@
       }
     ]
   },
+  "usb": {
+    "msc": 0,
+    "cdc_log": 0
+  },
   "log_debug_mode": 0
 }

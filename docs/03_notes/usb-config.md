@@ -1,6 +1,7 @@
 # USB 配置：能力、傳輸與 CDC 基線
 
 > 2026-11-12。檢查 CDC FAT 更新（`2084ef0`）之後，USB 這層的現況與目標模型。
+> 2026-11-13：出廠預設、啟動次序、貼身緩衝已落地 —— 先看 **§0.5**（它取代下面 P0 的止血描述）。
 >
 > 一句話：**板子事實（有冇 USB、用邊條 PHY、邊個介面接出來）是編譯期；
 > 用唔用、點用，才是執行期 config。**
@@ -28,6 +29,91 @@ USB 的兩條 transport 目前是**互斥編譯**（P4 硬件容許兩條並存�
 
 所以「大部分 ESP 都有 CDC」這件事，硬件上係真；但**config／板子／驗證**三邊都未有一致的基線。
 
+### 0.5 2026-11-13 已落地：出廠預設由晶片能力砌
+
+`nc_cfg_chip.c` 是新的**編譯期**能力表（數據來自 IDF v6.0.3 的 soc_caps.h）：
+
+| target | OTG | OTG HS | USJ | 出廠 USB link | kind | 核 |
+|---|---|---|---|---|---|---|
+| esp32s3 | ✅ | — | ✅（共用 PHY） | `usb_jtag`（可改 `cdc`） | usb_jtag | 2 |
+| esp32s2 | ✅ | — | — | `CDC`（冇 USJ 可選） | cdc | 1 |
+| esp32p4 | ✅ | ✅（UTMI） | ✅（獨立） | `usb_jtag`（可改 `cdc`） | usb_jtag | 2 |
+| esp32c3／c5／c6／c61／h2 | — | — | ✅ | `usb_jtag` | usb_jtag | 1 |
+| esp32 | — | — | — | （冇） | — | 2 |
+
+開機次序（`app_main`）：
+
+```text
+⓪ 晶片能力 → nc_cfg_defaults_set_chip()   ← 只決定「缺檔時用什麼」，未讀任何檔
+① nvs（boot 記錄：provisioned／fmq／fw_hash）
+② storage：掛 FAT →（第一次或明確重建才 seed）→ nc_cfg_boot() 讀 config
+③ hwcheck → hardware → declare → commit → start → usb → channels
+```
+
+**之後所有宣告（緩衝、bus、USB 服務組）只認 config 的 struct，不再碰檔案。**
+
+四條規則：
+
+1. **config 先於任何服務**：`nc_cfg_boot()` 在 `declare`／`start`／`usb` 之前完成；
+   之後全系統只讀 struct。今次只把「晶片能力」提前到階段 ⓪，讓預設本身就是對的。
+2. **出廠＝USJ 先**：有 USB-Serial-JTAG 的晶片（S3／P4／C3…）預設用 `usb_jtag`；
+   只有 OTG 的 S2 才用 `CDC`。`usb.msc` 預設 **0**（開機唔交 FAT）。
+   想用 OTG（CDC＋MSC）就改 `links[].kind = "cdc"`（link 名也改成 `CDC`）再重啟 ——
+   這就是「換 personality」，兩條 driver 不會同時 init。
+3. **冇登記＝唔佔**：`links[]` 冇這個名（或 `enable:0`）→ 唔宣告緩衝、唔建 bus；
+   CDC／MSC／log 三樣都冇人要 → **連 TinyUSB 都唔裝**（省 1,280 B task 棧＋driver heap）。
+   以前是反的：把 CDC 從 `links[]` 刪掉，`link_enabled()` 仍然回 true，8 KB 環照樣佔住。
+4. **貼身數字**：USB parser 緩衝 = `NC_CFG_USB_RX_REGION` = **4,128**
+   ＝ 4,096（FILE_CHUNK 上限）＋ 9（NC4 header）＋ 6（chunk header）＋ 4（CRC）
+   ＝ 4,115 向上 32 對齊。用戶唔應該需要填 `rx.region`；要塞更大 chunk 才改 config。
+
+**實測（2026-11-13，兩塊真板）**
+
+| 板 | transport | region | 4 KB 上傳 | `max_dlen` | `bad_hdr`／`crc_err` | 備註 |
+|---|---|---|---|---|---|---|
+| ESP32-C3-DevKitM（4 MB，全清後第一次開機） | USJ（pull） | 4,128 | 0.94 s | 4,102 | 0 / 0 | 出廠 seed 自動是 `usb_jtag`、`msc=0`；4 KB／3 KB／2 KB／再 4 KB 全部 SHA 對 |
+| ESP32-S3-N16R8（`kind=cdc`，OTG） | TinyUSB CDC（push-slot） | 4,128 | 0.35 s | 4,102 | 0 / 0 | `peak` 1 格、`slot_full` 0 |
+| ESP32-S3-N16R8（`kind=usb_jtag`，USJ） | USB-Serial-JTAG（pull） | 4,128 | 0.98 s | 4,102 | 0 / 0 | 與 C3 同一個 driver；`rt` 冇 TinyUSB／cdc.rx |
+
+兩塊板都係：payload 4,102（6 + 4,096）→ 幀 4,115 → 4,128 的環 **零丟幀**。
+S3 的 `/config/system.json` 是舊版（冇 `usb`、冇 `rx`），reboot 後仍然是 4,128 →
+證明「缺欄位 → 用預設」真的在每次開機發生，不是 seed 一次性的假象。
+
+**「冇登記就唔佔」實測（同一塊板，只改 config）**
+
+| 板／config | `mem.plan` 內部 bytes | 條目 | `rt` 的服務 |
+|---|---|---|---|
+| S3：`usb_jtag` ＋ UART | 10,382 | reply0/1、`nc4.jtag` 4,128、`uart.rx` 1,024 | decode0/1、`uart.rx` |
+| S3：`usb_jtag`，**刪掉 UART** | **9,358**（−1,024） | reply0/1、`nc4.jtag` | **冇 `uart.rx`、冇 `decode1`** |
+| C3：`usb_jtag` ＋ UART | 7,767 | reply0、`nc4.jtag`、`uart.rx` | decode0、`uart.rx` |
+| C3：`usb_jtag`，**刪掉 UART** | **6,743**（−1,024） | reply0、`nc4.jtag` | decode0（冇 `uart.rx`） |
+| S3：`kind=cdc` | 10,382 | reply0/1、`nc4.rx` 4,128、`uart.rx` | 有 `TinyUSB`、`cdc.rx`；**冇 usb_jtag bus** |
+
+另一邊（選 `usb_jtag` 時）`rt` 完全冇 `TinyUSB`／`cdc.rx`／`msc_async_io` ——
+未選的 transport 連 task 都唔會建立，唔止唔佔緩衝。
+
+> **S3 的 PHY mux 陷阱（2026-11-13 實測）**：OTG/USJ 的 mux 在 RTC domain，
+> **軟重啟（0x100F）不會重設**。上一次開機跑過 TinyUSB，改成 `usb_jtag` 再軟重啟 →
+> USJ 完全不會枚舉（主機見不到裝置）。修正：每次選 USJ 都呼叫
+> `usb_serial_jtag_ll_phy_enable_external(false)` 把 mux 指返 USJ（`main.c` 的 `ph_usb`）。
+> 修好之後同一個切換（cdc ↔ usb_jtag）雙向都通過，軟重啟亦保持可見。
+
+> 未測：P4（OTG FS/HS 與 USJ 三條 PHY）。P4 走的是與 S3 相同的 TinyUSB 分支，
+> 但 PHY／接線不同，仍要實板驗；USJ 那條在 P4 目前根本不編（`!NC_HAS_USB`）。
+
+**已知成本**：`usb.msc=0` 仍然會安裝 MSC driver（`msc_async_io` task）。
+TinyUSB 的 descriptor 是編譯期決定的（`CONFIG_TINYUSB_MSC_ENABLED`），
+跳過 driver 會令 MSC interface 有 descriptor 但沒有 backing —— 2026-11-13 實測
+CDC 模式會 reboot loop。要真正省掉，要連 descriptor 一起關（Phase 2）。
+
+單核板（C3／C6／C61／C5／H2／S2）：實際只建 1 個 decoder（上限仍然是 2）。
+C3 沒有 PSRAM，第二份回覆幀 2,610 B 是**內部 RAM**，以前由頭到尾冇人用。
+`routes[]` 若寫 `decode1`，開機會夾返 `decode0` 並印警告（單核根本沒有 core1）。
+
+仍未做：`usb.interfaces[]` 多介面 schema（§2.2–§2.4）、`max_chunk` 協商（§2.5）、
+P4 的 JTAG 第二條 link。今次只落地「出廠預設 ＋ 註冊語義 ＋ 貼身緩衝」。
+
+
 ---
 
 ## 1. 檢查發現（依風險）
@@ -43,12 +129,16 @@ USB 的兩條 transport 目前是**互斥編譯**（P4 硬件容許兩條並存�
 - 問題本質不是「region 要幾大」，而是 **host 從來冇問 device 可以收幾大**。
 - 這正是「冇 OTG、只有 CDC」的板子，亦是 CDC FAT 這個功能存在的理由。
 
-止血（已做）：
+止血（已做；數字已由 §0.5 取代）：
 
-- `nc_cfg_rx_default()` 加 `NC_LINK_USBJTAG` 專屬預設 `region=4192`；
-- C3 的 `system.json` 明確寫 `rx.region=4192`；
-- `main.c` 兩處 fallback 由 2048 改 4192（與實際宣告一致）。
+- `nc_cfg_rx_default()` 加 `NC_LINK_USBJTAG` 專屬預設，最初 4,192、現為 **4,128**；
+- C3 的 `system.json` 唔再寫 `rx.region`（改用預設 4,128，證明用戶唔使填）；
+- `main.c` 兩處 fallback 對齊（與實際宣告一致）。
 - 已用 ESP32-C3 建置驗證（`NETCORE_USB_OTG=n`、`SOC_USB_SERIAL_JTAG=y`）。
+
+> **+19 不是 +17**：FILE_CHUNK 的 payload header 是 `file_id(u16) + offset(u32)` = 6 B，
+> 所以幀 = 9 + 6 + chunk + 4 = **chunk + 19**；OTA_WRITE 只有 `offset(u32)` = 4 B，
+> 才是 chunk + 17。舊註解兩邊都寫 +17，正是 4,096 → 4,115 少 19 B 那個 bug 的來源。
 
 > 這只是把天花板抬到 4 KB，令現時 host 的預設放得落；**唔係協議的一部分**。
 > 長遠要按 §2.5 做 `max_chunk` 協商，host 的 4 KB 只是一個「preferred」值。
@@ -73,9 +163,9 @@ USB 的兩條 transport 目前是**互斥編譯**（P4 硬件容許兩條並存�
 - 反而 C3 這種「只有 JTAG」的板子可以。P4 是「多個 USB 接口」最複雜的一塊，
   現在卻是能力最少的一塊。
 
-### P1 — MSC 開機預設與「CDC 優先」相反
+### P1 — MSC 開機預設與「CDC 優先」相反（**2026-11-13 已改：預設 0**）
 
-- `usb_msc` 預設 1：開機就把 FAT 交給 host（`nc_cfg_defaults.c:91`）。
+- ~~`usb_msc` 預設 1~~ → 現在預設 **0**（`nc_cfg_defaults_system()`）：開機先把 `/data` 留在 APP。
 - 即使冇插線、冇 host，裝置都會失去 `/data` 寫入權；CDC 檔案工作臺第一步
   往往要「接管 FAT」。
 - 如果 CDC 是基線、MSC 是可選，較合理的預設是 **`msc=0`**（裝置持碟），
@@ -95,8 +185,10 @@ USB 的兩條 transport 目前是**互斥編譯**（P4 硬件容許兩條並存�
 
 ### P2 — 其他
 
-- `usb.cdc_log` 在 JTAG 路徑是**被忽略**的：`ph_usb()` 的 `!NC_HAS_USB` 分支
-  無條件 `nc_log_start()`（`main.c:3853`），C3 寫 `cdc_log=0` 也照開。
+- `usb.cdc_log` 在 JTAG 路徑是**刻意忽略**的（2026-11-13 確認）：`ph_usb()` 的
+  `!NC_HAS_USB` 分支無條件 `nc_log_start()`，因為 USJ 的 log 與 NC4 共用同一條 TX，
+  一定要經 arbiter 分流；直接寫 console 會同 NC4 幀交錯。C3 的 seed 已改寫 1（講真話），
+  但這個欄位只對 `kind=cdc` 生效。
 - host 與 device 冇 chunk 協商：device 只能默默丟 oversized frame。
 - `requirements-dev.txt` 缺 `httpx2`，fresh venv 會在收集 `test_server.py` 時失敗
   （已補；補齊後 36 passed / 1 skipped）。
@@ -107,6 +199,28 @@ USB 的兩條 transport 目前是**互斥編譯**（P4 硬件容許兩條並存�
 ---
 
 ## 2. 目標模型
+
+### 2.0 決策（2026-11-13）：兩種 USB transport **不合併**
+
+| | `kind=cdc`（OTG／TinyUSB） | `kind=usb_jtag`（USB-Serial-JTAG） |
+|---|---|---|
+| 驅動 | TinyUSB device stack | USJ 自帶的 CDC-ACM（LL FIFO） |
+| 同時提供的介面 | **CDC-ACM ＋ MSC**（一個 composite device） | 只有一條 CDC-ACM |
+| 檔案 | CDC FAT；可選把整塊碟交給 host（MSC） | CDC FAT；**冇 MSC** |
+| log | 獨立 CDC 管道，`usb.cdc_log` 控制 | 與 NC4 共用同一條 TX（arbiter 分流），`cdc_log` 無效 |
+| 出廠預設 | S2／S3／P4 | C3／C5／C6／C61／H2 |
+
+理由很簡單：**路徑真的不同** —— 不同驅動、不同 endpoint 數、不同能力
+（S3 可以交碟、C3 唔可以；P4 可以兩條並存、S3 共用 PHY 只能二選一）。
+把它們都叫 `CDC`，只會令「邊塊板交得到碟」變成隱藏規則。
+
+所以：
+
+- link 名、`kind`、能力全部**保持分開**，沒有 alias；
+- 晶片表（`nc_cfg_chip.c`）只決定「出廠預設寫邊一條」，不改變語義；
+- 寫錯 kind（C3 寫 `cdc`、S3 寫 `usb_jtag`）→ 開機 `usb_links_audit()`
+  直接 `ESP_LOGE` 指路，不再靜靜唔建立。
+
 
 ### 2.1 先確定硬件事實：USB 是「介面列表」，不是一個 bool
 
@@ -152,7 +266,7 @@ P4 的 USJ 同 OTG FS 各自有一條 FSLS PHY（PHY0／PHY1），
       "speed": "fs",
       "connector": "usb-c-1",
       "pins": {"dp": 25, "dm": 24},
-      "roles": ["data"]             // 也可以做第二條 CDC
+      "roles": ["data"]             // 也可以做第二條 USB link（kind=usb_jtag）
     }
   ],
   "conflicts": []                   // P4：兩條可以同時
@@ -206,11 +320,11 @@ P4 的 USJ 同 OTG FS 各自有一條 FSLS PHY（PHY0／PHY1），
 ### 2.3 執行期：`system.json` 也是 `usb.interfaces[]`
 
 ```jsonc
-// P4：OTG 做 CDC＋log；USJ 做第二條 CDC（CDC2）
+// P4：OTG 做 CDC（kind=cdc）＋log；USJ 做第二條 link（usb_jtag，kind=usb_jtag）
 "usb": {
   "interfaces": [
     {"id": "otg",  "link": "CDC",  "log": 1, "msc": 0},
-    {"id": "jtag", "link": "CDC2", "log": 0}
+    {"id": "jtag", "link": "usb_jtag", "log": 0}
   ]
 }
 ```
@@ -236,7 +350,7 @@ P4 的 USJ 同 OTG FS 各自有一條 FSLS PHY（PHY0／PHY1），
 規則：
 
 - `id` 對應 `board.json` 的同名 interface；對唔上 → warning，該項忽略。
-- `link` 是 `nc4.links[]` 裡的名字（`CDC`／`CDC2`）；冇寫 = 這條 interface 不做 NC4。
+- `link` 是 `nc4.links[]` 裡的名字（OTG → `CDC`；USJ → `usb_jtag`）；冇寫 = 這條 interface 不做 NC4。
   `nc4.links[]` 仍然是 rx.region／chunk 的唯一來源，USB 這邊只負責「邊條實體接口載住它」。
 - `log` 全機只可以有一條 interface 開；第二條要回 warning 並忽略。
 - `msc` 全機只可以有一條，而且該 interface 的 `roles` 要有 `msc`；否則 clamp 0。
@@ -245,8 +359,8 @@ P4 的 USJ 同 OTG FS 各自有一條 FSLS PHY（PHY0／PHY1），
 - **conflict**：同一個 conflict group 只可以開一個 interface。Resolver 揀 `primary`，
   另一個跳過並在 STATUS 記錄原因；**唔可以兩個都開**（S3 會死）。
 
-> `CDC` 這個 link 名從此在所有型號都代表「主要的 USB CDC」，
-> 由 interface 決定實際是 OTG 還是 USJ。舊的 `kind: usb_jtag` 保留為相容 alias。
+> `CDC` 只代表 OTG；USJ 是另一條 link（`usb_jtag`，kind=usb_jtag），**不是 alias**。
+> 見 §2.0 的決策與能力表。
 
 ### 2.4 固件：interface registry ＋ 每條 interface 一個 transport
 
@@ -264,7 +378,7 @@ typedef struct {
 
 - 每個 enabled interface 有自己的 read／send／tx_text；OTG 用 TinyUSB CDC，
   JTAG 用 LL FIFO。唔再是「一條 CDC，transport 換來換去」——
-  P4 可以同時有 `CDC`（OTG）同 `CDC2`（JTAG），兩條獨立 bus。
+  P4 可以同時有 `CDC`（OTG）同 `usb_jtag`（USJ），兩條獨立 bus、兩種 driver。
 - **S3**：兩個 interface 共用 FSLS PHY，編譯期兩邊都編，boot 時只 init 一個；
   要換 personality 就 reboot（software mux 可以切，但 TinyUSB／USJ 要重新 init，唔係 hot-swap）。
 - **P4**：USJ 同 OTG 可以同時 init；TinyUSB 只揀 `primary` 那個 OTG port。
@@ -276,7 +390,7 @@ typedef struct {
     {"id":"otg", "cap":{"ctrl":"otg","speed":"hs","msc":true},
      "active":{"link":"CDC","log":1,"msc":0}, "max_chunk":4096},
     {"id":"jtag","cap":{"ctrl":"serial_jtag","speed":"fs"},
-     "active":{"link":"CDC2","log":0}, "max_chunk":4096}
+     "active":{"link":"usb_jtag","log":0}, "max_chunk":4096}
   ]
 }
 ```
@@ -307,7 +421,7 @@ Host 側：
 為什麼不索性把 region 一律拉到 8,192：
 
 - region 是 `nc_plan` 的一部分（internal RAM），要為最壞情況埋單；
-- C3 冇 PSRAM；4,192 已經覆蓋 4 KB 檔案的絕大多數場景；
+- C3 冇 PSRAM；4,128 已經覆蓋 4 KB 檔案的絕大多數場景；
 - 把「上限」與「今次用幾大」分開：RAM 由板子決定、速度由 host 決定。
 
 ### 2.6 開機預設：CDC 在前，MSC 在後
@@ -328,7 +442,7 @@ P4-ETH 這一類冇 host 的板子也不會再失去 `/data`。
 
 ### Phase 0（本次已做）
 
-- C3／JTAG 的 rx region 抬到 4,192（**止血**，令現時 host 的 4 KB 放得落；
+- C3／JTAG 的 rx region 抬到 4,192（**止血**；§0.5 起改為 4,128）；
   正解是 §2.5 的協商）。
 - `tools/board.py` 的 `system.json` allowlist 補 `usb` / `hostname`。
 - `requirements-dev.txt` 補 `httpx2`。
@@ -351,7 +465,7 @@ S3 的 `conflicts` 有擋住兩個 interface 同時開。
 
 - `system.json` 的 `usb` 改成 `usb.interfaces[]`（`id` / `link` / `log` / `msc`）。
 - `nc_cfg_types.h` 加 interface policy struct；舊 `usb.msc` / `usb.cdc_log`
-  當 `primary` interface 的 alias（遷移期）。
+  當 `primary` interface 的 alias（遷移期；只限 OTG 兩個開關，不影響 kind 分家）。
 - 固件加 interface registry；OTG 用 TinyUSB、JTAG 用 LL；P4 可以兩條同時。
 - S3：boot 時由 policy 選 OTG 或 JTAG（software mux），只 init 一個。
 - `STATUS_GET` 的 `usb` 改成 interface 列表（cap / active / 每條 `max_chunk`）。
@@ -360,14 +474,14 @@ S3 的 `conflicts` 有擋住兩個 interface 同時開。
 - `FILE_BEGIN` 對超額 chunk 明碼拒絕。
 
 驗收：C3／S3／P4 用同一份 `system.json` 形狀；P4 可以同時有 `CDC`（OTG）
-與 `CDC2`（JTAG）；S3 切換 personality 只需改 config + reboot；
+與 `usb_jtag`（USJ）；S3 切換 personality 只需改 config + reboot；
 同一個 host 對 2 KB／3 KB／4 KB 上限的 device 都上傳成功。
 
 ### Phase 3：驗證與文件
 
 - C3：2 KB／3 KB／4 KB 上傳、下載、manifest（真機）；強制細 region 時要自動降級。
 - S3：CDC FAT、`msc=0` 與 `msc=1` 兩種模式；OTG 與 JTAG personality 各一次。
-- P4-C6：OTG HS 的 CDC；JTAG `CDC2` 同時存在；兩條 link 各自 route。
+- P4-C6：OTG HS 的 `CDC`；USJ 的 `usb_jtag` 同時存在；兩條 link 各自 route、各自 driver。
 - P4-ETH：開機後 `/data` 仍然在 APP（唔會被交出去）。
 - 更新 `failure-policy.md` §4、`config-layers.md`、`p4-usb.md` §14 的舊結論。
 

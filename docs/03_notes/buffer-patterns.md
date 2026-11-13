@@ -54,7 +54,7 @@
 
 **用途**：一條通道收到半幀、要重同步時，逐位元組推進。
 
-- 形狀：`where=S`、`NC_BUF_F_STREAM`；CDC 4,192／chunk 1,024／budget 8；UART 1,024／chunk 256。
+- 形狀：`where=S`、`NC_BUF_F_STREAM`；CDC 4,128／chunk 1,024／budget 8；UART 1,024／chunk 256。
 - 流程：`nc_buf_write`（驅動寫入，可部分）→ 解碼迴圈 `nc_buf_read_ptr` 拿到**一段連續**
   → parser 推進 → `nc_buf_skip(total)`；壞幀只 `skip(1)` 重同步。
 - 陷阱：

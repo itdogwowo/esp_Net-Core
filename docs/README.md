@@ -48,7 +48,7 @@
 | [testing.md](02_guides/testing.md) | **測試方法與結果**：環境、9 個解碼器 case、benchmark 怎麼打、OTA 怎麼推、怎麼重跑、未測清單、紀錄表 |
 | [measurement-method.md](02_guides/measurement-method.md) | **量測方法（可重跑）**：四條原則（含**用物理上限當參考線／達標率**）、S0–S7 流程、`buf_probe.py` 每個子命令回答什麼、尺寸公式（region/slot/slots/stack/環）、雙核＋同核隔離驗收、偶發事件追法、**十條踩過的陷阱**、紀錄模板（多了「物理上限／達標率」兩欄）、OTA-only 的安全規則 |
 | [connectivity.md](02_guides/connectivity.md) | **連線方式怎麼選**：`lan` / `wifi` / `bt` / `espnow` 的分別、每個參數的意思、能力矩陣（哪塊板支援什麼）、一起開會怎樣、藍牙專章 |
-[esp-webmaster-test.md](02_guides/esp-webmaster-test.md) | **ESP WebMaster 上板驗收（CDC FAT）**：build/flash、COM 選擇（P4 JTAG vs OTG）、列出／上傳／pending／confirm／undo／下載／刪除／OTA 的逐步預期結果、失敗模式對照、要留低嘅證據 |
+| [esp-webmaster-test.md](02_guides/esp-webmaster-test.md) | **ESP WebMaster 上板驗收（CDC FAT）**：build/flash、COM 選擇（P4 JTAG vs OTG）、列出／上傳／pending／confirm／undo／下載／刪除／OTA 的逐步預期結果、失敗模式對照、要留低嘅證據 |
 
 ---
 
@@ -63,7 +63,8 @@
 | [rgb-matrix-dither.md](03_notes/rgb-matrix-dither.md) | **8×8 WS2812 矩陣（I80 ＋ 分區時間抖動）**：GPIO14 一條鏈、4 MHz／5 cycles 的 WS2812 波形、7,936 B ≈ 1.98 ms → 450 fps 閘門、8.8 定點＋誤差回饋抖動、8 區不同 rate／phase、`0xF060` 指令與上板驗證次序；**測試任務，未上板** |
 | [net-lines.md](03_notes/net-lines.md) | **統一網絡線路 TCP／UDP／WS → nc4_bus**：read/send 介面、單一 parser、S3 WiFi 上板 RTT（TCP 12.2 ms／UDP 11.9 ms／WS 21.4 ms）、burst 限制、P4 後續 |
 | [ota-web.md](03_notes/ota-web.md) | **網絡 OTA 與網頁 v0**：`POST /ota` raw `.bin`、`GET /` 最小頁、`/config.json`；**已上板：`/` 200、`/ota` 0.1.1→0.1.2**；安全只限可信 LAN |
-[file-transfer.md](03_notes/file-transfer.md) | **CDC FAT（檔案指令）**：`0x2001–0x200B`（含 `FILE_SCAN` + `/manifest.json`）；`.part`→sha256→`.bak` 的寫入流程、pending／confirm／undo、FAT 擁有權、UI 對接欄位；**給冇 USB driver、只得 CDC 的 MCU** |
+| [file-transfer.md](03_notes/file-transfer.md) | **CDC FAT（檔案指令）**：`0x2001–0x200B`（含 `FILE_SCAN` + `/manifest.json`）；`.part`→sha256→`.bak` 的寫入流程、pending／confirm／undo、FAT 擁有權、UI 對接欄位；**給冇 USB driver、只得 CDC 的 MCU** |
+| [usb-config.md](03_notes/usb-config.md) | **USB 配置與出廠基線**：晶片 USB 能力表（S2/S3/P4/C3/C5/C6/C61/H2）、開機次序（晶片能力→config→宣告→start→usb）、出廠＝USJ 先（msc=0，OTG 由 config 換）、「冇登記就唔佔」的 link 語義、貼身 4,128 B parser；P4 多 PHY 與 `max_chunk` 協商係下一步 |
 | [buffer-topology.md](03_notes/buffer-topology.md) | **目前緩衝結構**：`mem.buf` 14 個 buffer、SRAM／PSRAM 配置、CDC/UART 256 B×4 vs network 2 KB／24 KB、zero-copy producer 資料流 |
 | [contracts.md](03_notes/contracts.md) | **契約總表（單一入口）**：任務管理器界線與硬上限、任務↔緩衝區（C1–C11 摘要）、**優先級保留區 7–15**、解碼器／動作（handler 唔可以重入）、通道／路由、**初次開機與配置生命週期**、現況盤點、待決定清單 |
 | [glossary.md](03_notes/glossary.md) | **字彙表（術語一句話）**：任務 vs 線程、`level` vs `layer`、緩衝區／格／arena／S·P·DMA／S2P 四組合、退役的詞（hub／pool／環／plan）與改用什麼。**新名詞先查這裡** |

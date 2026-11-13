@@ -26,6 +26,7 @@ cc -std=c11 -Wall -Wextra -Werror \
    "$ROOT/firmware/components/sys/config/nc_cfg_patch.c" \
    "$ROOT/firmware/components/sys/config/nc_cfg_load.c" \
    "$ROOT/firmware/components/sys/config/nc_cfg_defaults.c" \
+   "$ROOT/firmware/components/sys/config/nc_cfg_chip.c" \
    "$OUT/cJSON.o" \
    -o "$OUT/cfgstruct_test"
 "$OUT/cfgstruct_test"

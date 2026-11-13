@@ -58,7 +58,7 @@ FILE_END    →  close → hash_finish → 對 sha256
 - 一次只准一個 session（`s_active`）；第二個 BEGIN 回 `err_busy`。
 - **閒置 30 秒**（上一條連線斷咗、冇 END）會自動 abort 並刪 `.part`，
   唔會令裝置永遠 busy。
-- `chunk_size` 1–4096（CDC rx region 4,192；幀 = chunk + 17）。
+- `chunk_size` 1–4096（USB parser region 4,128；幀 = **chunk + 19**：4,096 → 4,115）。
 - `offset` 必須等於已寫入量；否則 `err_offset_mismatch`（可重試）。
 - 寫入需要 `nc_store_app_ready()`（裝置擁有 FAT）。
   USB 模式（host 掛住碟）寫入一律 `err_busy`；讀取仍然可以走 `/ro` 唯讀視圖。

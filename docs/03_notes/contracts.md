@@ -164,13 +164,19 @@
 |---|---|
 | **第一次開機**（NVS 冇 `PROVISIONED`） | 允許格式化 `/data`；格式化後 `seed_presets()` 寫入預置；成功才標記 `PROVISIONED=1` |
 | 已經初始化過、掛載失敗 | **唔會**自動抹分區（保護使用者資料）→ 由 host 修復，或 `STATUS_SET fs_format=1` ＋ REBOOT |
-| **換韌體**（`fw_hash` 變了） | 記 `FORMAT_PENDING` → 下次開機**格式化重建** ＋ 重新 seed（唔係逐個刪 config 檔） |
+| **換韌體**（`fw_hash` 變了） | **保留 `/data`**（2026-11-11 起）：只補缺檔；config 缺的新欄位逐層 fallback，壞檔只退化該層 |
 | 預置檔案 | `seed_presets()` **只補缺檔**，已有的檔一律唔動 |
 | 明確重建 | `STATUS_SET System.fs_format=1` ＋ REBOOT（只在開機路徑消費，唔會在解碼路徑抹 7 MB） |
+| 出廠預設的形狀 | 由**晶片能力**砌（`nc_cfg_chip.c` ＋ `nc_cfg_defaults.c`）：有 USJ 的（S3/P4/C3）預設 `usb_jtag`、只有 OTG 的（S2）用 `CDC`、`usb.msc=0`、USB parser `4,128 B` |
 | 判斷依據 | NVS 記錄：`PROVISIONED`／`FORMAT_PENDING`／`fw_hash`／`degraded` |
 
-**注意**：換韌體會清掉用戶改過的 `/data`（config／效果檔）—— 這是刻意設計（舊 config 蓋住新預設）。
-要保留就把檔案放喺 `/data` 之外（未做，見 §8）。
+**注意**：換韌體**唔會**清 `/data` —— 舊 config 會蓋住新預設，所以新增欄位一律要
+「缺欄位 → 用預設」（`nc_cfg` 已是這個行為）。要回到出廠狀態就明確寫
+`STATUS_SET System.fs_format=1` 再 REBOOT。
+
+**出廠預設不是常數**：`nc_cfg_defaults_set_chip()` 在 `app_main` 最前面被呼叫
+（早過 `nc_cfg_boot()`），所以「第一次開機長什麼樣」跟晶片一致 —— 詳見
+[usb-config.md](usb-config.md) §0.5。
 
 ---
 

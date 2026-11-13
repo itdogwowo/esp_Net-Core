@@ -80,6 +80,17 @@ config 只能管租戶。** 但「冇 config 都開得機」不等於「config �
 3. **核心不讀 config 也能開機**：`nc4` / `net` / `core` / FXE 引擎都是 `NC_TASK_SYSTEM`，
    照 C 宣告跑；`tasks.json` 只影響租戶。所以 ③ 全冇、② 也冇，板子仍然收得到指令。
 
+**2026-11-13 更新：出廠形狀由晶片能力決定。**
+`nc_cfg_defaults_system()` 不再是一份固定常數，而是由 `nc_cfg_chip.c`（IDF `soc_caps.h` 的事實表）
+砌出來：有 USB-Serial-JTAG 的板子（S3／P4／C3…）預設 `usb_jtag`、只有 OTG 的 S2 才預設 `CDC`、
+`usb.msc` 預設 0（CDC 先）、USB parser 4,128 B。`app_main` 第一行就把
+`CONFIG_IDF_TARGET` 交給預設，所以「第一次開機」與「config 壞掉」跑出來的形狀都對得上晶片。
+詳見 [usb-config.md](usb-config.md) §0.5。
+
+**「冇登記就唔佔」是第 ③ 層的規則**：`links[]` 冇這個名 → 唔宣告緩衝、唔建 bus；
+CDC／MSC／log 三樣都冇人要 → 連 TinyUSB 都唔裝。以前缺名會當成啟用，
+把一條線從 `links[]` 刪掉記憶體照樣佔住 —— 2026-11-13 已改（`main.c` 的 `link_enabled()`）。
+
 > ⚠️ **現況缺口**：目前只有第 ② 層（而且只有 `hardware` / `system` / `network` / `tasks` 四個檔）。
 > 第 ① 層**不存在** —— 如果某塊板冇 `ports/<board>/data/config/tasks.json`，
 > `NETCORE_HAS_PRESET_TASKS=0`，`tasks.json` 就**永遠不會被建立**（`nc_task` 只會補條目，

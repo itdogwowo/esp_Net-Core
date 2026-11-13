@@ -17,6 +17,7 @@
 
 #include "cJSON.h"
 #include "esp_err.h"
+#include "nc_cfg_chip.h"
 #include "nc_cfg_types.h"
 
 #ifdef __cplusplus
@@ -52,6 +53,12 @@ const nc_system_cfg_t *nc_cfg_defaults_system(void);
 const nc_tasks_cfg_t  *nc_cfg_defaults_tasks(void);
 const nc_hardware_cfg_t *nc_cfg_defaults_hardware(void);
 
+// 告訴預設「現在是哪顆晶片」：有 USJ 的用 usb_jtag、只有 OTG 的用 CDC、
+// 單核板唔砌 decode1。**要在 nc_cfg_boot() 之前呼叫**（main 在 app_main 最前面做）。
+// chip = NULL 或未知 → 保守用「CDC + 2 核」（跟舊行為一致）。
+// 已載入的 config 不受影響：這只改「缺檔／缺欄位時」的預設。
+void nc_cfg_defaults_set_chip(const nc_cfg_chip_t *chip);
+
 // 依 kind 給一條 link 的 rx 預設（config 只寫 name/kind/enable 時用）。
 void nc_cfg_rx_default(nc_link_kind_t kind, nc_link_rx_t *rx);
 
@@ -71,6 +78,9 @@ const nc_system_cfg_t *nc_cfg_system(void);
 const nc_tasks_cfg_t  *nc_cfg_tasks(void);
 const nc_hardware_cfg_t *nc_cfg_hardware(void);
 const nc_cfg_stat_t   *nc_cfg_stat_of(const char *layer);   // "system" / "tasks"
+
+// link kind 的字串名（"cdc" / "usb_jtag" …）；只給 log／STATUS，不參與解析。
+const char *nc_cfg_kind_name(nc_link_kind_t kind);
 
 // 查一條 link / 一列 route（找不到回 NULL）
 const nc_link_cfg_t  *nc_cfg_link(const char *name);

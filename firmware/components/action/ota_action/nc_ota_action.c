@@ -33,7 +33,8 @@ static const char *TAG = "nc_ota_action";
 #define OTA_APPLY           0x2220
 
 // CDC 上的上限；其他 transport 應該各自回報更小的值
-// 受 CDC 的 rx.region 限制：幀 = chunk + 17，region 4,192 ⇒ 上限 4,175，取 4,096 留餘裕。
+// 受 USB 的 rx.region 限制：OTA_WRITE 的 payload header 是 offset(u32)，
+// 幀 = chunk + 17；region 4,128 ⇒ 上限 4,111，取 4,096 留餘裕。
 // 正式版應該由 region 推導（見 docs），唔好兩邊各自硬編碼。
 #define OTA_MAX_CHUNK       4096
 

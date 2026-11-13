@@ -241,7 +241,7 @@ static void parse_links(const cJSON *root, nc_system_cfg_t *out, nc_cfg_stat_t *
 {
     const cJSON *arr = item(item(root, "nc4"), "links");
     if (arr == NULL) {
-        st->defaulted++;        // 整段缺失 → 保留預設的兩條（CDC / UART）
+        st->defaulted++;        // 整段缺失 → 保留預設的通道（USB ＋ UART；USB 名／kind 看晶片）
         return;
     }
     if (!cJSON_IsArray(arr)) {
@@ -685,7 +685,7 @@ esp_err_t nc_cfg_apply_system(const cJSON *root, nc_system_cfg_t *out, nc_cfg_st
     out->num_pixels = (uint16_t)get_int(root, "num_pixels", 0, 0, 65535, st);
 
     // ── usb：執行期開關（編譯期有沒有 USB 由 Kconfig 決定，這裡只決定要不要用）──
-    // 缺席 = 兩個都 1（跟 nc_cfg_defaults_system 一致）。
+    // 缺席 = 跟預設：msc 0（唔交 FAT，CDC 先）、cdc_log 1。
     const cJSON *usb = item(root, "usb");
     if (usb != NULL) {
         if (!cJSON_IsObject(usb)) {

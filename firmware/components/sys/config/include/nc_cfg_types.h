@@ -29,6 +29,14 @@ extern "C" {
 #define NC_CFG_TASK_NAME_MAX    24
 #define NC_CFG_CID_MAX          8      // "F5F9" + 餘裕
 #define NC_CFG_REGION_MAX       8300   // = NC4_MAX_FRAME（8205）向上取整；不直接 include nc4
+// USB（TinyUSB CDC 與 USB-Serial-JTAG 共用）的 parser 緩衝貼身值。
+//   最大 FILE_CHUNK 4,096 ＋ NC4 header 9 ＋ chunk header 6 ＋ CRC 4 = 4,115 B
+//   向上 32 對齊 → 4,128（留 13 B 餘裕）
+// 呢個係「今次 host 實際會送幾大」的答案，唔係協議上限：主機送更大的 chunk 時，
+// FILE_BEGIN 應該即時拒絕（未實作；見 docs/03_notes/usb-config.md §2.5）。
+// 以前的 4,192 係 4 KB + 96，純粹係手寫整數；4,128 一樣放得落 4 KB 檔，
+// 每條 USB link 省 64 B。
+#define NC_CFG_USB_RX_REGION    4128
 #define NC_CFG_GPIO_MAX         54     // P4 最大 GPIO54（S3 只到 48；超出的值留給 driver 判錯）
 #define NC_CFG_PHY_NAME_MAX     12     // "IP101" / "LAN8720" …
 

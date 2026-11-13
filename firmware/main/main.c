@@ -162,6 +162,11 @@ static const char *TAG = "netcore";
 
 static uint16_t s_cid = NC4_ADDR_BROADCAST;   // 自己的 2B 協議位址
 
+// 這顆晶片的 USB 能力（編譯期表，runtime 只讀）：app_main 最前面由
+// CONFIG_IDF_TARGET 查一次，之後預設、decoder 數量、STATUS 都用它。
+// NULL = 表裡沒有這個 target（新晶片）→ 一律走保守預設並在開機 log 講清楚。
+static const nc_cfg_chip_t *s_chip;
+
 // 零複製：RX task 一次 recv 進「剛好一整幀」，decode task 直接在插槽上解析
 // （PUSH 模式才有意義；NVS net/frame_align，預設 1）
 static bool s_frame_align = true;
@@ -505,6 +510,10 @@ static esp_err_t usb_install(void *arg)
     // P4 一樣會行 USB 服務組（NC_HAS_USB=1），但永遠冇人裝 MSC driver，
     // 之後 nc_store 的 switch_to() 見 s_driver_installed=0 就回
     // ESP_ERR_NOT_SUPPORTED（2026-11-11 實測：CDC 有、MSC 冇、storage 交唔到）。
+    // ⚠️ MSC driver 仍然無條件安裝（2026-11-13 實測）：TinyUSB 的 descriptor 係
+    // 編譯期決定（CONFIG_TINYUSB_MSC_ENABLED），跳過 driver 會令 MSC interface
+    // 有 descriptor 但冇 backing → 枚舉失敗／reboot loop（CDC 模式下實測）。
+    // 「msc=0 就唔裝」要連 descriptor 一起關，屬於 Phase 2 的工作。
     ESP_RETURN_ON_ERROR(nc_store_usb_driver(), TAG, "MSC driver 安裝失敗");
 #endif
     tinyusb_config_t tusb_cfg = TINYUSB_DEFAULT_CONFIG();
@@ -540,15 +549,15 @@ static esp_err_t usb_install(void *arg)
     return ESP_OK;
 }
 
-static esp_err_t usb_init(void)
+static esp_err_t usb_init(const char *cdc_link)
 {
-    // USB 服務組（TinyUSB + CDC + console）需要一條核：正常跟 CDC 的 routes[]。
-    // CDC 未路由時 USB 仍然要初始化（console 要活），退回 core0 並明確記錄。
+    // USB 服務組（TinyUSB + CDC + console）需要一條核：跟 config 那條 CDC 的 routes[]。
+    // 未路由時退回 core0 並明確記錄（服務放置，不代表數據走 core0）。
     int cdc_core = 0;
-    if (nc4_router_core("CDC") != NC4_ROUTE_NONE) {
-        cdc_core = nc4_router_core("CDC");
+    if (cdc_link != NULL && nc4_router_core(cdc_link) != NC4_ROUTE_NONE) {
+        cdc_core = nc4_router_core(cdc_link);
     } else {
-        ESP_LOGW(TAG, "CDC 未路由 → USB 服務組放 core0（服務放置，唔代表數據走 core0）");
+        ESP_LOGW(TAG, "CDC 未路由 → USB 服務組放 core0");
     }
     ESP_LOGI(TAG, "USB 服務組（TinyUSB + CDC + console）→ core %d", cdc_core);
     // 喺 CDC 所屬核執行：USB ISR、TinyUSB task、RX callback 之後全部同核
@@ -922,13 +931,13 @@ static nc_log_tx_result_t cdc_tx_text(const char *buf, size_t len)
 }
 #endif   // !CONFIG_IDF_TARGET_ESP32P4
 
-// ── USB-Serial-JTAG 資料通道（沒有 OTG 的晶片：C3／C6／H2）────────────
+// ── USB-Serial-JTAG 資料通道（C3／C6／H2；S3／P4 也可以選它）────────
 // 2026-11-11：C3 沒有 OTG，但 USB-Serial-JTAG 這個 peripheral **本身就是一個
 // CDC-ACM**（303A:1001），有自己的 RX/TX FIFO → 可以直接當 NC4 通道用。
 // 以前只用了 TX 那一半（當 console 印 log），RX 完全沒有人讀，
 // 所以主機送進去的幀爛在 FIFO 裡（看起來像「沒有 CDC」，其實是沒有消費者）。
 // 這就是 status.md #9「USB-Serial-JTAG 指令通道」。
-#if !NC_HAS_USB && CONFIG_SOC_USB_SERIAL_JTAG_SUPPORTED
+#if CONFIG_SOC_USB_SERIAL_JTAG_SUPPORTED
 // 用 LL（直接操作 peripheral FIFO）而唔用 usb_serial_jtag_driver_install()：
 //   · driver 會接管中斷，同 console 的 USB-Serial-JTAG 輸出衝突
 //   · 冇裝 driver 就呼叫 usb_serial_jtag_write_bytes() 會 null-deref
@@ -1012,7 +1021,7 @@ static int usb_jtag_link_write(void *arg, const uint8_t *frame, size_t len)
 {
     return (usb_jtag_send(arg, frame, len) == ESP_OK) ? (int)len : -1;
 }
-#endif  // !NC_HAS_USB && SOC_USB_SERIAL_JTAG_SUPPORTED
+#endif  // SOC_USB_SERIAL_JTAG_SUPPORTED
 
 // str_u16len 編碼（與 schema 的 str_u16len 一致：2B 長度前綴 + UTF-8）
 //
@@ -1200,10 +1209,9 @@ static int s_cfg_app_ready = -1;
 static int s_cfg_errno;
 static int s_cfg_open_ok;            // nc_cfg_open("system") 有冇成功（0 = NULL）
 static uint32_t s_cfg_hdr;           // 檔案頭 4 bytes（偵測 BOM／亂碼）
-#if NC_HAS_USB
-static int s_cdc_cfg_src = -9;       // CDC 的 rx 參數在「宣告階段」套用了幾多項
-                                     // （bus 建立嗰刻 FAT 已交咗俾 host，讀唔到 config）
-#endif
+// USB parser 的 rx 參數在「宣告階段」套用了幾多項（0 = 全部用預設）。
+// 兩種 transport（cdc／usb_jtag）共用同一個計數：同一時間只會有一條。
+static int s_usb_cfg_src = -9;
 
 // 設定檔宣稱的腳位對照（照 hardware.json，不是實測值）：
 //   "CLK7 CMD6 D0=15 D1=16 D2=4 D3=5"
@@ -1333,12 +1341,18 @@ static size_t status_put_cfg(char *buf, size_t cap)
 // 指令表（nc_action）是唯讀、全程序共用，所以 decoder 只管「執行與回覆」的狀態。
 #define NC4_DECODERS 2
 static nc4_decoder_t *s_decoder[NC4_DECODERS];
+// 實際要幾個 decoder：單核板（C3／C6／C61／C5／H2／S2）只建 0 號。
+// 2026-11-13：以前無論幾核都建兩個 —— C3 沒有 PSRAM，第二份回覆幀 2.6 KB
+// 直接食內部 RAM，而且 plan 也照樣宣告 reply1，總共 ~5.3 KB 由頭到尾冇人用。
+// 上限仍然是 NC4_DECODERS（陣列大小），實際數量由 app_main 依晶片核數決定。
+static int s_ndec = 1;
 
 // 取某個核的 decoder。第二個建立失敗時退回 decoder0（退化：回到共用鎖，但功能正常），
 // 並且在建立時已經印過 ESP_LOGE。
 static nc4_decoder_t *decoder_for_core(int core)
 {
-    const nc4_decoder_t *d = s_decoder[(core == 1) ? 1 : 0];
+    const int idx = (core == 1 && s_ndec > 1) ? 1 : 0;
+    const nc4_decoder_t *d = s_decoder[idx];
     return (nc4_decoder_t *)(d != NULL ? d : s_decoder[0]);
 }
 
@@ -1780,6 +1794,20 @@ static esp_err_t uart_owner_init(void *arg)
     };
     return nc_uart_drv_install(&ucfg, baud);
 }
+// parser 緩衝的協議層上限：任何 transport 共用（CDC／USJ／UART…）。
+// 一個幀唔可能大過 NC4_MAX_FRAME；超過就係 config 寫錯 → 夾住並 log。
+#define CDC_RX_REGION_CEIL NC4_MAX_FRAME
+
+static size_t cdc_region(size_t want)
+{
+    if (want > CDC_RX_REGION_CEIL) {
+        ESP_LOGW(TAG, "rx.region %u 超過協議上限 → 夾到 %u",
+                 (unsigned)want, (unsigned)CDC_RX_REGION_CEIL);
+        return CDC_RX_REGION_CEIL;
+    }
+    return want;
+}
+
 #if NC_HAS_USB
 static int cdc_read(void *arg, uint8_t *buf, size_t cap)
 {
@@ -1792,21 +1820,10 @@ static int cdc_read(void *arg, uint8_t *buf, size_t cap)
 }
 
 // CDC 的 rx 參數：唔需要寫入 config —— 已經量測好，直接做 code 預設。
-// 實測依據：RX 幀 = 9 + payload + 4；OTA chunk 4,096 ⇒ 幀 4,113 ⇒ region 4,192。
+// 實測依據：FILE_CHUNK 4,096 ⇒ 幀 = 9 header ＋ 6 chunk header ＋ 4,096 ＋ 4 CRC
+// = 4,115 B；4,128 是 32 對齊後的貼身值（NC_CFG_USB_RX_REGION）。
 // config 仍然可以覆寫（links[].cfg.rx.region 等），但正常情況唔應該寫。
-#define CDC_RX_REGION_DEF  4192
-// 安全上限只係協議層的理智檢查（一個幀唔可能大過 NC4_MAX_FRAME），唔係政策。
-#define CDC_RX_REGION_CEIL NC4_MAX_FRAME
-
-static size_t cdc_region(size_t want)
-{
-    if (want > CDC_RX_REGION_CEIL) {
-        ESP_LOGW(TAG, "CDC rx.region %u 超過協議上限 → 夾到 %u",
-                 (unsigned)want, (unsigned)CDC_RX_REGION_CEIL);
-        return CDC_RX_REGION_CEIL;
-    }
-    return want;
-}
+#define CDC_RX_REGION_DEF  NC_CFG_USB_RX_REGION
 
 // ── CDC 接收任務（receiver）：一條總線一條 task ──
 // decode 唔再親自讀 CDC（PULL 嘅 10 ms 輪詢，實測 RTT = 10.0 ms）。
@@ -1935,8 +1952,14 @@ static const nc_task_provide_t s_fx_provides[] = {
 // ── link 啟用狀態：config 是唯一真相 ──
 // system.json 的 nc4.links[] 每一條有 "enable"（缺省 = 1，向後相容）。
 // 開機讀到之後就決定「這條線存不存在」：
-//   冇啟用 → **唔宣告緩衝**（0 B）、唔建立 bus、路由表跳過嗰行
+//   冇登記（links[] 冇這個名字）→ **唔宣告緩衝**（0 B）、唔建立 bus、路由表跳過嗰行
+//   有登記但 enable=0        → 同上
 //   要中途開啟 → 改 config 再重啟（runtime 開開關關正是碎片來源）
+//
+// 2026-11-13 改語義：以前「links[] 冇這個名字」會當成啟用（怕 config 壞掉連通道都沒有），
+// 結果用戶把 CDC／UART 從 links[] 刪掉，緩衝照樣佔住 ——「冇註冊就唔佔」是空話。
+// 現在**預設**一定會砌齊 USB ＋ UART（見 nc_cfg_defaults.c），所以「查不到」
+// 只可能係用戶明確寫了一份沒有這條線的 links[]：那就是「唔要」。
 //
 // 為什麼要喺宣告之前問：宣告就係「向 plan 要記憶體」，
 // 一旦要咗就開機到 reset 都收唔返。
@@ -1944,10 +1967,7 @@ static bool link_enabled(const char *name)
 {
     const nc_link_cfg_t *l = nc_cfg_link(name);
     if (l == NULL) {
-        // 讀不到 config（或 links[] 冇這條線）→ 照硬體探測結果。
-        // 這是「最後保底」：config 壞掉時不應該連通道都沒有。
-        ESP_LOGW(TAG, "link %s：config 冇呢一條 → 當啟用（要關就寫 \"enable\": 0）", name);
-        return true;
+        return false;   // 冇登記 = 唔建立
     }
     return l->enable;
 }
@@ -1994,6 +2014,100 @@ static int link_rx(const char *name, link_rx_t *rx)
     return applied;
 }
 
+// ── 兩種 USB transport 是**不同驅動**，刻意分開（2026-11-13 定案）──
+//
+//   kind=cdc      TinyUSB／OTG：一個 device stack 可以同時有 CDC-ACM 與 MSC；
+//                 usb.msc／usb.cdc_log 只對它有意義。
+//   kind=usb_jtag USB-Serial-JTAG：原生 CDC-ACM，冇 MSC、冇第二條 endpoint；
+//                 log 與 NC4 共用同一條 TX（RS 前綴由 nc_log 的 arbiter 分流）。
+//
+// 出廠預設由晶片表決定（**有 USJ 就用 USJ**，冇才用 OTG）；用戶改 links[] 的 kind
+// 就是「換 personality」，重啟後由這裡揀 driver。兩條不會同時 init（S3 共用 PHY）。
+static bool usb_nc4_available(nc_link_kind_t kind)
+{
+    switch (kind) {
+    case NC_LINK_CDC:
+#if NC_HAS_USB
+        return true;
+#else
+        return false;
+#endif
+    case NC_LINK_USBJTAG:
+#if CONFIG_SOC_USB_SERIAL_JTAG_SUPPORTED
+        return true;
+#else
+        return false;
+#endif
+    default:
+        return false;
+    }
+}
+
+// config 揀的那條 USB link：第一條 enable 的 USB kind。
+// 同時寫兩條（P4 將來）→ 只取第一條並 warning；真正並存是 Phase 2。
+static const nc_link_cfg_t *usb_nc4_link(void)
+{
+    const nc_system_cfg_t *sys = nc_cfg_system();
+    const nc_link_cfg_t *first = NULL;
+    int n = 0;
+    if (sys == NULL) {
+        return NULL;
+    }
+    for (uint8_t i = 0; i < sys->n_links; i++) {
+        const nc_link_cfg_t *l = &sys->links[i];
+        if ((l->kind != NC_LINK_CDC && l->kind != NC_LINK_USBJTAG) || !l->enable) {
+            continue;
+        }
+        if (first == NULL) {
+            first = l;
+        }
+        n++;
+    }
+    if (n > 1) {
+        ESP_LOGW(TAG, "config 有 %d 條 USB link → 暫時只用第一條 %s（兩條並存未實作）",
+                 n, first->name);
+    }
+    return first;
+}
+
+// 開機稽核：config 寫的 USB kind 這個 build 冇 → 明講可以用哪一條；
+// 另加「usb.msc 只對 OTG 有意義」的提醒。
+static void usb_links_audit(void)
+{
+    const nc_system_cfg_t *sys = nc_cfg_system();
+    if (sys == NULL) {
+        return;
+    }
+    for (uint8_t i = 0; i < sys->n_links; i++) {
+        const nc_link_cfg_t *l = &sys->links[i];
+        if (l->kind != NC_LINK_CDC && l->kind != NC_LINK_USBJTAG) {
+            continue;
+        }
+        if (usb_nc4_available(l->kind)) {
+            continue;
+        }
+        ESP_LOGE(TAG, "link %s：kind=%s 在這個 build 冇實作 → 唔會建立",
+                 l->name, nc_cfg_kind_name(l->kind));
+        if (l->kind == NC_LINK_CDC) {
+            if (s_chip != NULL && s_chip->usb_serial_jtag) {
+                ESP_LOGE(TAG, "  %s 冇 OTG：USB 通道要寫 kind=usb_jtag（USJ 就是 CDC-ACM）",
+                         s_chip->id);
+            } else {
+                ESP_LOGE(TAG, "  這顆晶片冇 USB OTG；請確認 target 與 sdkconfig");
+            }
+        } else if (s_chip != NULL && s_chip->usb_otg) {
+            ESP_LOGE(TAG, "  %s 冇 USJ：USB 通道要寫 kind=cdc（OTG）", s_chip->id);
+        } else {
+            ESP_LOGE(TAG, "  這個 build 冇 USJ transport；請確認 target");
+        }
+    }
+    // usb.msc 只在「選了 OTG」時有意義：USJ 沒有 MSC。
+    const nc_link_cfg_t *usb = usb_nc4_link();
+    if (sys->usb_msc != 0 && (usb == NULL || usb->kind != NC_LINK_CDC)) {
+        ESP_LOGW(TAG, "usb.msc=1 但 USB link 不是 kind=cdc（OTG）→ 冇碟可交");
+    }
+}
+
 // ── config 探測：一次性，結果經 STATUS 回報（開機 log 搶唔到，因為 USB 會重列舉）──
 static void cfg_probe_once(void)
 {
@@ -2031,7 +2145,7 @@ static int task_nc4_declare(nc_task_res_t *out, int max)
     int n = 0;
     // 回覆幀：每核一條（P，2,615 B）。以前係 decoder 自己 heap_caps_malloc，
     // 所以 mem.buf 見唔到它；搬進 plan 之後帳面完整（契約 C8）。
-    for (int i = 0; i < NC4_DECODERS && n < max; i++) {
+    for (int i = 0; i < s_ndec && n < max; i++) {
         out[n++] = (nc_task_res_t){
             .name = k_reply_name[i], .bytes = NC4_REPLY_FRAME_MAX,
             .cls = NC_PLAN_CLS_BULK, .align = 64,
@@ -2039,31 +2153,24 @@ static int task_nc4_declare(nc_task_res_t *out, int max)
             .slot_bytes = NC4_REPLY_FRAME_MAX, .n = 1, .flags = 0,
         };
     }
-#if NC_HAS_USB
-    // 兩個條件都要：link 啟用（enable）＋ routes[] 有指去某個 decodeN。
-    // 少咗後者，bus 建立處（link_core）會拒絕，呢 8,205 B 就白佔。
-    if (n < max && link_enabled("CDC") && nc4_router_core("CDC") != NC4_ROUTE_NONE) {
-        link_rx_t rx = { .region = CDC_RX_REGION_DEF };
+#if NC_HAS_USB || CONFIG_SOC_USB_SERIAL_JTAG_SUPPORTED
+    // USB 通道（CDC 或 usb_jtag）：由 config 的 kind 決定用邊個 driver。
+    // 條件：link 有 enable（usb_nc4_link 已過濾）＋ routes[] 指去 decodeN
+    //        ＋ 這個 build 有實作該 transport。少任何一個都唔佔 RAM。
+    const nc_link_cfg_t *usb = usb_nc4_link();
+    if (n < max && usb != NULL && usb_nc4_available(usb->kind) &&
+        nc4_router_core(usb->name) != NC4_ROUTE_NONE) {
+        nc_link_rx_t d;
+        nc_cfg_rx_default(usb->kind, &d);
+        link_rx_t rx = { .region = d.region, .chunk = d.chunk, .budget = d.budget,
+                         .slots = d.slots, .slot = d.slot_size };
         cfg_probe_once();
-        const int ncfg = link_rx("CDC", &rx);
-        s_cdc_cfg_src = ncfg;
+        s_usb_cfg_src = link_rx(usb->name, &rx);
         rx.region = cdc_region(rx.region);
         out[n++] = (nc_task_res_t){
-            .name = "nc4.rx", .bytes = rx.region, .cls = NC_PLAN_INTERNAL, .align = 32,
+            .name = (usb->kind == NC_LINK_USBJTAG) ? "nc4.jtag" : "nc4.rx",
+            .bytes = rx.region, .cls = NC_PLAN_INTERNAL, .align = 32,
             // parser 環＝一條 STREAM 緩衝區（P5：由管理器建，bus 直接用它）
-            .slot_bytes = (uint32_t)rx.region, .n = 1, .flags = NC_BUF_F_STREAM,
-        };
-    }
-#endif
-#if !NC_HAS_USB && CONFIG_SOC_USB_SERIAL_JTAG_SUPPORTED
-    // USB-Serial-JTAG（C3／C6／H2）：與 CDC 同一個角色 —— parser 環。
-    // 一致性：仍然要求「link 啟用」＋「routes[] 有指去 decodeN」，否則唔佔 RAM。
-    // region 4,192 = 容得下 FILE_CHUNK 最大幀（4 KB data → 4,115 B）。
-    if (n < max && link_enabled("usb_jtag") && nc4_router_core("usb_jtag") != NC4_ROUTE_NONE) {
-        link_rx_t rx = { .region = 4192 };
-        (void)link_rx("usb_jtag", &rx);
-        out[n++] = (nc_task_res_t){
-            .name = "nc4.jtag", .bytes = rx.region, .cls = NC_PLAN_INTERNAL, .align = 32,
             .slot_bytes = (uint32_t)rx.region, .n = 1, .flags = NC_BUF_F_STREAM,
         };
     }
@@ -2075,7 +2182,7 @@ static esp_err_t task_nc4_start(const nc_task_res_view_t *res, int n)
 {
     // 用 plan 名字取，不用 view 次序：冇宣告 / 被 shed 就係 NULL（天然嘅「冇就唔要」）
     // 回覆幀：管理器已按「格 × 格數」建好 nc_buf（P5），這裡只接管
-    for (int i = 0; i < NC4_DECODERS && (size_t)i < (size_t)n; i++) {
+    for (int i = 0; i < s_ndec && (size_t)i < (size_t)n; i++) {
         nc_buf_t *rb = res[i].buf;
         if (rb == NULL || s_decoder[i] == NULL) {
             ESP_LOGW(TAG, "回覆幀 %s：冇 buffer（沿用在 decoder 建立時的 heap）", k_reply_name[i]);
@@ -2086,37 +2193,31 @@ static esp_err_t task_nc4_start(const nc_task_res_view_t *res, int n)
         }
     }
 
-    // nc4.rx：宣告次序 = reply0、reply1、rx（S3）／只有 reply0、1（P4）
-    if (n > NC4_DECODERS) {
-        s_cdc_rx_buf = res[NC4_DECODERS].buf;
-        s_nc4_rx_region = res[NC4_DECODERS].ptr;
+    // USB parser：宣告次序 = reply0（、reply1）、USB
+    if (n > s_ndec) {
+        s_cdc_rx_buf = res[s_ndec].buf;
+        s_nc4_rx_region = res[s_ndec].ptr;
     } else {
         s_cdc_rx_buf = NULL;
         s_nc4_rx_region = NULL;
     }
-    cfg_probe_once();          // STATUS 要的探測結果（S3／P4 都用得著）
-#if !NC_HAS_USB
-    // 沒有 OTG：parser 緩衝由 usb_jtag link 提供（有啟用才會有）。
-    if (s_nc4_rx_region != NULL) {
-        link_rx_t rx = { .region = 4192 };
-        (void)link_rx("usb_jtag", &rx);
+    cfg_probe_once();          // STATUS 要的探測結果
+    // parser 大小：跟宣告時同一條 link、同一個夾法（config 冇寫 rx 就用該 kind 預設）。
+    const nc_link_cfg_t *usb = usb_nc4_link();
+    s_nc4_rx_bytes = 0;
+    if (s_nc4_rx_region != NULL && usb != NULL && usb_nc4_available(usb->kind)) {
+        nc_link_rx_t d;
+        nc_cfg_rx_default(usb->kind, &d);
+        link_rx_t rx = { .region = d.region, .chunk = d.chunk, .budget = d.budget,
+                         .slots = d.slots, .slot = d.slot_size };
+        (void)link_rx(usb->name, &rx);
+        rx.region = cdc_region(rx.region);
         s_nc4_rx_bytes = rx.region;
-        ESP_LOGI(TAG, "svc nc4: parser 緩衝 ok（usb_jtag）");
+        ESP_LOGI(TAG, "svc nc4: parser 緩衝 %u B（%s / kind=%s）",
+                 (unsigned)rx.region, usb->name, nc_cfg_kind_name(usb->kind));
     } else {
-        s_nc4_rx_bytes = 0;
-        ESP_LOGW(TAG, "svc nc4: 冇 parser 緩衝（usb_jtag 未啟用）");
+        ESP_LOGW(TAG, "svc nc4: 冇 USB parser 緩衝（冇 enable 的 USB link／未路由／transport 未編）");
     }
-#else
-    link_rx_t rx = { .region = CDC_RX_REGION_DEF };
-    link_rx("CDC", &rx);
-    rx.region = cdc_region(rx.region);
-    s_nc4_rx_bytes = (s_nc4_rx_region != NULL) ? rx.region : 0;
-    if (s_nc4_rx_region != NULL) {
-        ESP_LOGI(TAG, "svc nc4: parser 緩衝 ok");
-    } else {
-        ESP_LOGW(TAG, "svc nc4: 冇 parser 緩衝（CDC 未啟用 / 本板冇 USB）");
-    }
-#endif
     return ESP_OK;
 }
 
@@ -2197,7 +2298,8 @@ static esp_err_t task_net_start(const nc_task_res_view_t *res, int n)
 // SHA-256 的 2 KB 讀取緩衝 —— 現在分別歸 decoder（PSRAM）和 heap。
 // 實測最差 2,876 B（FILE_QUERY + 完整 STATUS），留 1.2 KB 餘裕。
 static bool nc4_want_core0(void) { return nc4_router_core_used(0); }
-static bool nc4_want_core1(void) { return nc4_router_core_used(1); }
+// 單核板連 core1 都不存在：唔止「冇線就唔開」，係根本上唔准開。
+static bool nc4_want_core1(void) { return s_ndec > 1 && nc4_router_core_used(1); }
 
 static const nc_task_loop_t s_nc4_loops[] = {
     { .name = "decode0", .fn = nc4_bus_task_entry, .arg = (void *)0,
@@ -3119,8 +3221,21 @@ static int router_defaults(nc4_route_t *out, int max)
 {
     int n = 0;
 #if NC_HAS_USB
-    // 有 USB：CDC 走 core0。雙核時 UART 擺 core1，單核時全部 core0。
-    if (n < max) out[n++] = (nc4_route_t){ .line = "CDC", .core = 0 };
+    // 有 USB：USB link 走 core0（名字由晶片預設決定：S3/P4 = usb_jtag、S2 = CDC）。
+    // 雙核時 UART 擺 core1，單核時全部 core0。
+    {
+        const nc_system_cfg_t *d = nc_cfg_defaults_system();
+        const char *usb_line = NULL;
+        for (uint8_t i = 0; d != NULL && i < d->n_links; i++) {
+            if (d->links[i].kind == NC_LINK_CDC || d->links[i].kind == NC_LINK_USBJTAG) {
+                usb_line = d->links[i].name;
+                break;
+            }
+        }
+        if (n < max && usb_line != NULL) {
+            out[n++] = (nc4_route_t){ .line = usb_line, .core = 0 };
+        }
+    }
     if (n < max) out[n++] = (nc4_route_t){ .line = "UART", .core = NC_ROUTE_CORE1 };
 #else
     // 冇 USB：只有乙太網才有第二條線。
@@ -3591,6 +3706,29 @@ static esp_err_t ph_storage(void)
                      (unsigned)sys->log_debug_mode);
         }
     }
+    // 一行講清楚「這次開機的 config 到底登記了什麼」：之後所有宣告（緩衝、bus、
+    // USB 服務組）都照這一行；想用 CDC 但這塊板沒有 OTG，在這裡就看得見。
+    {
+        const nc_system_cfg_t *sys = nc_cfg_system();
+        const nc_link_cfg_t *usb = NULL;
+        for (uint8_t i = 0; sys != NULL && i < sys->n_links; i++) {
+            const nc_link_cfg_t *l = &sys->links[i];
+            if (l->kind == NC_LINK_CDC || l->kind == NC_LINK_USBJTAG) {
+                usb = l;
+                if (l->enable) {
+                    break;      // 優先報 enable 那條
+                }
+            }
+        }
+        ESP_LOGW(TAG, "cfg 生效：usb=%s(%s) msc=%u log=%u links=%u routes=%u",
+                 (usb != NULL) ? usb->name : "冇",
+                 (usb != NULL) ? (usb->enable ? "on" : "off") : "-",
+                 (unsigned)((sys != NULL) ? sys->usb_msc : 0),
+                 (unsigned)((sys != NULL) ? sys->usb_cdc_log : 0),
+                 (unsigned)((sys != NULL) ? sys->n_links : 0),
+                 (unsigned)((sys != NULL) ? sys->n_routes : 0));
+    }
+    usb_links_audit();        // 寫錯 USB kind（C3 寫 cdc／S3 寫 usb_jtag）→ 開機就講
     node_identity_init();     // 要先有 cID：SD 的卷標（NCSD-XXXX）同 flash 一樣靠它
     (void)sd_boot();          // enable=0 → 直接返回，不佔 RAM、不碰 GPIO
     MAIN_HWM("post-ident");
@@ -3703,6 +3841,26 @@ static esp_err_t ph_hardware(void)
             n = router_defaults(routes, NC4_ROUTE_MAX);
             ESP_LOGW(TAG, "router：system.json 冇有效 routes[] → 用預設表（%d 列）", n);
         }
+        // 單核板（C3／C6／C61／C5／H2／S2）根本冇 core1：把 S3 的 config 直接搬過來時，
+        // 這裡把 decode1 夾返 decode0 並明講。唔夾的話 decode1 任務會建立失敗／assert。
+        if (s_chip != NULL && s_chip->cores < 2) {
+            int clamped = 0;
+            for (int i = 0; i < n; i++) {
+                for (int j = 0; j < routes[i].n_out; j++) {
+                    if (routes[i].out[j] != NULL && strcmp(routes[i].out[j], "decode1") == 0) {
+                        routes[i].out[j] = "decode0";
+                        clamped++;
+                    }
+                }
+                if (routes[i].core == 1) {
+                    routes[i].core = 0;
+                    clamped++;
+                }
+            }
+            if (clamped > 0) {
+                ESP_LOGW(TAG, "單核板：%d 個 decode1 已夾返 decode0", clamped);
+            }
+        }
         const esp_err_t rerr = nc4_router_set(routes, n);
         if (rerr != ESP_OK) {
             ESP_LOGE(TAG, "路由表無效: %s → 只保留 core0", esp_err_to_name(rerr));
@@ -3740,12 +3898,23 @@ static esp_err_t ph_declare(void)
     // ── ⑤ 宣告（照「實際存在的硬體」決定）──
     // 這個 registry 管兩件事：記憶體（nc_plan）、迴圈（nc_task）。
     // 指令不在這裡 —— 它是 decoder 的表，下面 actions_register() 一次註冊完。
+
+    // 幾多個 decoder 由**晶片核數**決定，而且一定要在 nc_task_declare_all() 之前定好：
+    // task_nc4_declare 用同一個數字決定要向 plan 要幾多塊回覆幀。
+    // 只有「雙核」而且「真係有線去 core1」才建第二個 decoder／回覆幀。
+    // 以前只看核數：S3 把 UART 刪掉之後 decode1 唔開，但 reply1 仍然佔 2,615 B。
+    {
+        const bool two_cores = (s_chip == NULL) || (s_chip->cores > 1);
+        s_ndec = (two_cores && nc4_router_core_used(1)) ? NC4_DECODERS : 1;
+    }
+
     nc_plan_reset();
     nc_task_reset();
 
     // 每個核心一個 decoder：兩個 decode 任務的 handler 可以同時執行（互不等待）。
-    // 指令表只有一份（唯讀）；第二份 decoder 只多 2.6 KB PSRAM 的回覆幀。
-    for (int i = 0; i < NC4_DECODERS; i++) {
+    // 指令表只有一份（唯讀）；第二份 decoder 只多 2.6 KB 的回覆幀。
+    // 單核板只建 0 號：第二份由頭到尾都冇人叫到（見 s_ndec 的說明）。
+    for (int i = 0; i < s_ndec; i++) {
         s_decoder[i] = nc4_decoder_create();
         if (s_decoder[i] == NULL) {
             ESP_LOGE(TAG, "decoder%d 建立失敗%s", i,
@@ -3838,75 +4007,90 @@ static esp_err_t ph_start(void)
 }
 
 // 開機階段：usb
+//
+// 2026-11-13：USB 服務組由 config 的 USB link 決定，而 link 有兩種 driver：
+//   kind=usb_jtag → USJ（ROM 自帶 CDC-ACM）：唔裝 TinyUSB，log 走 arbiter
+//   kind=cdc      → TinyUSB（OTG）：CDC ＋ 可選 MSC
+// 兩條不會同時 init（S3 的 OTG／USJ 共用同一條 PHY）。
 static esp_err_t ph_usb(void)
 {
-    esp_err_t err;
-#if !NC_HAS_USB
-    // 診斷結論（2026-11-02）：這塊板子的 USB-C 只接 USB-Serial-JTAG，沒有接 USB-OTG。
-    // 啟用 TinyUSB 後裝置照跑、但主機端完全沒有新裝置（列舉不到），
-    // 而且 tinyusb_console_init() 會把 console 搬走 → 連 log 都看不到。
-    err = ESP_ERR_NOT_SUPPORTED;
+    const nc_system_cfg_t *scfg = nc_cfg_system();
+    const nc_link_cfg_t *usb = usb_nc4_link();
+    const bool use_jtag = (usb != NULL && usb->kind == NC_LINK_USBJTAG);
+    esp_err_t err = ESP_ERR_NOT_SUPPORTED;
+
 #if CONFIG_SOC_USB_SERIAL_JTAG_SUPPORTED
-    // 沒有 OTG，但有 USB-Serial-JTAG：log 改走它的 TX（RS 前綴分流），
-    // 同一條線之後還要跑 NC4（ph_channels 建 bus）。同 S3 的 CDC 是同一套模型。
-    {
+    // USJ 這條線：log 一定經它（RS 前綴 arbiter），同 NC4 共用 TX。
+    // 即使 config 冇選它（例如 C3 寫錯 kind），log 仍然要活 → 無條件起。
+#if NC_HAS_USB
+    const bool usj_log_always = false;   // 有 OTG：log 只在選了 USJ 時走它
+#else
+    const bool usj_log_always = true;    // 冇 OTG：USJ 是唯一出口，log 一定要起
+#endif
+    if (use_jtag || usj_log_always) {
+#if CONFIG_IDF_TARGET_ESP32S3
+        // S3：OTG 與 USJ 共用同一條 FSLS PHY，而 mux（RTCCNTL.usb_conf）**survives
+        // software reset**。上一次開機如果跑了 TinyUSB（OTG），軟重啟之後 PHY 仍然
+        // 指住 OTG → USJ 完全不會枚舉（2026-11-13 實測：config 改 usb_jtag + 0x100F
+        // 之後主機完全見不到裝置，只有拔電重插才回來）。
+        // 所以每次選 USJ 都要把 mux 指返 USJ；power-on 預設雖然是 USJ，但不可以靠它。
+        usb_serial_jtag_ll_phy_enable_external(false);
+#endif
         const esp_err_t lerr = nc_log_start(0, usb_jtag_tx_text);
         if (lerr != ESP_OK) {
             ESP_LOGW(TAG, "log 管道未啟動：%s → 仍然直出 console", esp_err_to_name(lerr));
+        } else {
+            ESP_LOGI(TAG, "USB：log 走 USB-Serial-JTAG（%s）",
+                     use_jtag ? "NC4＋log 共用 TX" : "只做 console");
         }
-    }
-#endif
-#else
-    err = usb_init();
-    MAIN_HWM("post-usb");
-#endif
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "USB 初始化失敗: %s", esp_err_to_name(err));
-    }
-
-#if NC_HAS_USB
-    // 兩道閘：編譯期（CONFIG_NETCORE_USB_OTG）決定「有沒有這組」，
-    // 這裡的 system.json usb.* 決定「要不要真的用」—— 改完即時生效，不用重燒。
-    const nc_system_cfg_t *scfg = nc_cfg_system();
-    const bool want_cdc_log = (scfg == NULL) || (scfg->usb_cdc_log != 0);
-    const bool want_msc     = (scfg == NULL) || (scfg->usb_msc != 0);
-
-    // log 管道要在 TinyUSB 起來之後、FAT 交接之前啟動：
-    //   · 之前：log 直接去 console（UART0／USB-Serial-JTAG）
-    //   · 之後：log 改走 CDC 環（同一條出口，由 arbiter 仲裁回覆與 log）
-    // 沒有這條管道的板子（例如 S3 共用 PHY）或者 usb.cdc_log=0 就跳過，log 照舊走 console。
-    if (err == ESP_OK && want_cdc_log) {
-        int lc = nc4_router_core("CDC");
-        if (lc < 0) {
-            lc = 0;      // CDC 未路由：仍要有一條出路，記錄喺 boot log
-        }
-        const esp_err_t lerr = nc_log_start(lc, cdc_tx_text);
-        if (lerr != ESP_OK) {
-            ESP_LOGW(TAG, "log 管道未啟動：%s → 仍然直出 console", esp_err_to_name(lerr));
-        }
-    } else if (err == ESP_OK) {
-        ESP_LOGI(TAG, "usb.cdc_log=0 → log 只走 console");
     }
 #endif
 
-#if !NC_HAS_USB
-    // 這顆晶片／這塊板沒有 USB OTG（或編譯期關掉了）→ 不要把 FAT 交給 USB，
-    // 否則裝置自己與網路都讀不到 /data（就沒有替代的檔案存取方式了）。
-    err = ESP_ERR_NOT_SUPPORTED;
-    ESP_LOGW(TAG, "無 USB OTG → /data 留在 APP，改用 http://<ip>:8080/config.json");
-#else
-    if (err == ESP_OK && want_msc) {
-        const esp_err_t herr = storage_hand_over_to_usb();
-        ESP_LOGI(TAG, "碟交給 host: %s", esp_err_to_name(herr));
-    } else if (err == ESP_OK) {
-        // usb.msc=0：主機看不到碟，但裝置自己保留 /data（config／seed／HTTP 照用）。
-        ESP_LOGI(TAG, "usb.msc=0 → /data 留在 APP（唔交 FAT）");
+#if NC_HAS_USB
+    if (use_jtag) {
+        // S3 的 OTG 與 USJ 共用同一條 PHY：TinyUSB 一開就搶走 USJ。
+        ESP_LOGW(TAG, "USB：config 選 usb_jtag → 唔裝 TinyUSB（PHY 留給 USJ）");
+        if (scfg != NULL && scfg->usb_msc != 0) {
+            ESP_LOGW(TAG, "  usb.msc=1 無效：USJ 沒有 MSC");
+        }
     } else {
-        // USB 沒起來就不要交 FAT：主機看不到碟，裝置自己也會失去 /data。
-        // 留在 APP 至少 config／seed／HTTP 都仍然可用，唔會兩邊都拿唔到。
-        ESP_LOGE(TAG, "USB 未起來 → /data 留在 APP（唔交 FAT）");
+        const bool want_cdc = (usb != NULL && usb->kind == NC_LINK_CDC &&
+                               nc4_router_core(usb->name) != NC4_ROUTE_NONE);
+        const bool want_msc = (scfg == NULL) || (scfg->usb_msc != 0);
+        const bool want_log = (scfg == NULL) || (scfg->usb_cdc_log != 0);
+        if (!want_cdc && !want_msc) {
+            ESP_LOGW(TAG, "config 冇 USB 服務（CDC 未登記、msc=0）→ 唔裝 TinyUSB"
+                          "（log 留在 USB-Serial-JTAG）");
+            return ESP_OK;
+        }
+        err = usb_init(usb->name);
+        MAIN_HWM("post-usb");
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "USB 初始化失敗: %s", esp_err_to_name(err));
+        } else if (want_log && want_cdc) {
+            const int lc = nc4_router_core(usb->name);   // want_cdc 已保證有路由
+            const esp_err_t lerr = nc_log_start(lc, cdc_tx_text);
+            if (lerr != ESP_OK) {
+                ESP_LOGW(TAG, "log 管道未啟動：%s → 仍然直出 console", esp_err_to_name(lerr));
+            }
+        } else if (!want_log) {
+            ESP_LOGI(TAG, "usb.cdc_log=0 → log 只走 console");
+        }
+        if (err == ESP_OK && want_msc) {
+            const esp_err_t herr = storage_hand_over_to_usb();
+            ESP_LOGI(TAG, "碟交給 host: %s", esp_err_to_name(herr));
+        } else if (err == ESP_OK) {
+            ESP_LOGI(TAG, "usb.msc=0 → /data 留在 APP（唔交 FAT）");
+        }
     }
+#else
+    // 冇 OTG：FAT 永遠留在 APP。
+    ESP_LOGW(TAG, "無 USB OTG → /data 留在 APP");
 #endif
+
+    if (err != ESP_OK && !use_jtag) {
+        ESP_LOGW(TAG, "USB 未起來 → /data 留在 APP（唔交 FAT）");
+    }
     return ESP_OK;
 }
 
@@ -3949,24 +4133,21 @@ static esp_err_t ph_channels(void)
     }
 
     if (s_decoder[0] != NULL) {
-#if !NC_HAS_USB
-        // P4 冇 USB OTG：連 initializer 都唔要有 ——
-        // 一旦喺 initializer 取 cdc_read/cdc_send 的址，linker 就會拉入 tinyusb（21.7 KB）。
         esp_err_t berr = ESP_ERR_NOT_SUPPORTED;
-#else
-        esp_err_t berr = ESP_ERR_NOT_SUPPORTED;
-        if (link_enabled("CDC")) {
+        const nc_link_cfg_t *usb = usb_nc4_link();   // config 揀的那條 USB link（enable 才有）
+#if NC_HAS_USB
+        if (usb != NULL && usb->kind == NC_LINK_CDC) {
             int cdc_core = 0;
             // config 已型別化：link_rx 只係由 struct 抄數，冇檔案 I/O，
             // 所以「FAT 交咗俾 host」唔再影響這裡（舊問題已消失）。
             link_rx_t rx = { .region = CDC_RX_REGION_DEF };
-            (void)link_rx("CDC", &rx);
+            (void)link_rx(usb->name, &rx);
             rx.region = cdc_region(rx.region);
-            if (s_nc4_rx_region == NULL || !link_core("CDC", &cdc_core)) {
+            if (s_nc4_rx_region == NULL || !link_core(usb->name, &cdc_core)) {
                 berr = ESP_ERR_INVALID_STATE;   // 冇緩衝，或者 routes[] 冇指去 decodeN
             } else {
                 const nc4_bus_cfg_t cdc_bus = {
-                    .name = "CDC",
+                    .name = usb->name,
                     // PUSH：由 cdc_rx_task（同核）讀走放環，decode 只消費。
                     // 之前係 PULL → decode 每 10 ms 親自讀一次，實測 RTT = 10.0 ms。
                     // 2026-11-10 更正：當時主機端 Reader 用阻塞式 read(N)，每次量測多算
@@ -3990,8 +4171,8 @@ static esp_err_t ph_channels(void)
                 if (berr == ESP_OK) {
                     s_cdc_bus_for_stats = cdc_handle;   // 只給 TX 尺寸量測用
                     s_cdc_tx_lock = xSemaphoreCreateMutex();   // 跨核轉寄的整幀獨佔
-                    const esp_err_t lerr = nc4_link_register("CDC", cdc_link_write, NULL);
-                    ESP_LOGI(TAG, "link CDC 出口：%s", esp_err_to_name(lerr));
+                    const esp_err_t lerr = nc4_link_register(usb->name, cdc_link_write, NULL);
+                    ESP_LOGI(TAG, "link %s 出口：%s", usb->name, esp_err_to_name(lerr));
                 }
                 if (berr == ESP_OK && cdc_handle != NULL) {
                     if (xTaskCreatePinnedToCore(cdc_rx_task, "cdc.rx", CDC_RX_TASK_STACK,
@@ -4002,7 +4183,7 @@ static esp_err_t ph_channels(void)
                         berr = ESP_ERR_NO_MEM;
                     } else {
                         nc4_bus_set_producer(cdc_handle, (void *)s_cdc_rx_task);
-                        nc4_bus_set_cfg_src(cdc_handle, s_cdc_cfg_src);
+                        nc4_bus_set_cfg_src(cdc_handle, s_usb_cfg_src);
                         // 核心隔離的開機自檢：receiver 同 decode 必須同核，
                         // 否則 kick 會變成跨核 notify（設計禁止）。
                         const int rcore = (int)xTaskGetCoreID(s_cdc_rx_task);
@@ -4022,8 +4203,11 @@ static esp_err_t ph_channels(void)
                 }
             }
         } else {
-            ESP_LOGW(TAG, "CDC：links[].enable=0 → 唔建立（連緩衝都冇要）");
+            ESP_LOGW(TAG, "CDC：config 未選 kind=cdc → 唔建立（連緩衝都冇要）");
         }
+#else
+        // 這個 build 冇 OTG：CDC 這條 driver 不存在（audit 已經講過）。
+        ESP_LOGI(TAG, "CDC：這個 build 冇 OTG transport");
 #endif
 
         int uart_core = -1;
@@ -4070,35 +4254,46 @@ static esp_err_t ph_channels(void)
             ESP_LOGW(TAG, "UART：未啟用（links[].enable=0）或冇緩衝 → 唔建立");
         }
 
-#if !NC_HAS_USB && CONFIG_SOC_USB_SERIAL_JTAG_SUPPORTED
-        // USB-Serial-JTAG：PULL 模式（read 是非阻塞的，唔需要 producer task）。
-        // 回覆與 log 共用同一條 TX，由 s_jtag_tx_lock 保證整幀獨佔。
-        int jtag_core = -1;
-        if (s_nc4_rx_region != NULL && link_core("usb_jtag", &jtag_core)) {
-            link_rx_t rx = { .region = 2048, .chunk = 256, .budget = 8 };
-            (void)link_rx("usb_jtag", &rx);
-            const nc4_bus_cfg_t jtag_bus = {
-                .name = "usb_jtag",
-                .mode = NC4_BUS_PULL,
-                .core = jtag_core,
-                .read = usb_jtag_read,
-                .send = usb_jtag_send,
-                .rx_region = s_nc4_rx_region,
-                .rx_region_bytes = s_nc4_rx_bytes,
-                .read_chunk = rx.chunk,
-                .budget_per_pass = rx.budget,
-            };
-            nc4_bus_handle_t jtag_handle = (nc4_bus_handle_t)0;
-            const esp_err_t jerr = nc4_bus_add(decoder_for_core(jtag_core), &jtag_bus, &jtag_handle);
-            if (jerr == ESP_OK) {
-                const esp_err_t lerr = nc4_link_register("usb_jtag", usb_jtag_link_write, NULL);
-                ESP_LOGI(TAG, "link usb_jtag 出口：%s（core %d）",
-                         esp_err_to_name(lerr), jtag_core);
+#if CONFIG_SOC_USB_SERIAL_JTAG_SUPPORTED
+        if (usb != NULL && usb->kind == NC_LINK_USBJTAG) {
+            // USJ：PULL 模式（read 非阻塞，不需要 producer task）。
+            // 回覆與 log 共用同一條 TX，由 s_jtag_tx_lock 保證整幀獨佔。
+            int jtag_core = -1;
+            if (s_nc4_rx_region != NULL && link_core(usb->name, &jtag_core)) {
+                nc_link_rx_t d;
+                nc_cfg_rx_default(usb->kind, &d);
+                link_rx_t rx = { .region = d.region, .chunk = d.chunk, .budget = d.budget,
+                                 .slots = d.slots, .slot = d.slot_size };
+                (void)link_rx(usb->name, &rx);
+                const nc4_bus_cfg_t jtag_bus = {
+                    .name = usb->name,
+                    .mode = NC4_BUS_PULL,
+                    .core = jtag_core,
+                    .read = usb_jtag_read,
+                    .send = usb_jtag_send,
+                    .rx_region = s_nc4_rx_region,
+                    .rx_region_bytes = s_nc4_rx_bytes,
+                    .read_chunk = rx.chunk,
+                    .budget_per_pass = rx.budget,
+                };
+                nc4_bus_handle_t jtag_handle = (nc4_bus_handle_t)0;
+                const esp_err_t jerr = nc4_bus_add(decoder_for_core(jtag_core), &jtag_bus, &jtag_handle);
+                berr = jerr;
+                if (jerr == ESP_OK) {
+                    const esp_err_t lerr = nc4_link_register(usb->name, usb_jtag_link_write, NULL);
+                    ESP_LOGI(TAG, "link %s 出口：%s（core %d）",
+                             usb->name, esp_err_to_name(lerr), jtag_core);
+                }
+                ESP_LOGI(TAG, "%s bus: %s（parser %u B）",
+                         usb->name, esp_err_to_name(jerr), (unsigned)s_nc4_rx_bytes);
+            } else {
+                berr = ESP_ERR_INVALID_STATE;
+                ESP_LOGW(TAG, "%s：冇 parser 緩衝或 routes[] 未指向 decodeN → 唔建立", usb->name);
             }
-            ESP_LOGI(TAG, "usb_jtag bus: %s（parser %u B）",
-                     esp_err_to_name(jerr), (unsigned)s_nc4_rx_bytes);
         } else {
-            ESP_LOGW(TAG, "usb_jtag：未啟用或冇 parser 緩衝 → 唔建立");
+#if !NC_HAS_USB
+            ESP_LOGW(TAG, "usb_jtag：config 未選 kind=usb_jtag → 唔建立");
+#endif
         }
 #endif
 
@@ -4190,6 +4385,24 @@ void app_main(void)
         prev = now;
     }
 #endif
+
+    // ── ⓪ 晶片能力 → 預設形狀（**一定要早過任何 config 讀取**）──
+    // 真正讀 config 是 ph_storage；但「缺檔／缺欄位時用什麼」是在第一次
+    // nc_cfg_defaults_system() 被叫到時砌的。所以先把「這顆晶片有冇 USB、
+    // 用 CDC 還是 usb_jtag、幾多核」告訴預設，之後 ph_storage 讀到的
+    // 就是一份「出廠就用得到原生 USB」的 config。
+    s_chip = nc_cfg_chip_find(CONFIG_IDF_TARGET);
+    nc_cfg_defaults_set_chip(s_chip);
+    if (s_chip != NULL) {
+        ESP_LOGI(TAG, "晶片能力：%s｜%u 核｜USB=%s｜OTG=%d USJ=%d%s",
+                 s_chip->id, (unsigned)s_chip->cores,
+                 (s_chip->usb_link != NULL) ? s_chip->usb_link : "冇",
+                 s_chip->usb_otg ? 1 : 0, s_chip->usb_serial_jtag ? 1 : 0,
+                 s_chip->usb_shared_phy ? "（共用 PHY：OTG/USJ 二選一）" : "");
+    } else {
+        ESP_LOGW(TAG, "晶片 %s 不在 nc_cfg_chip.c 的表裡 → 保守預設（CDC + 2 核）",
+                 CONFIG_IDF_TARGET);
+    }
 
     // 開機階段表：**順序就是資料**。加一步就在這裡加一行，
     // 唔需要再記住「它應該放喺邊」。計時與結果由 boot.c 負責。

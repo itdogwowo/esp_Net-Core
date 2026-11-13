@@ -11,12 +11,12 @@
     "C3 冇 USB OTG，但有 USB-Serial-JTAG —— 它本身就是一個 CDC-ACM（303A:1001），",
     "所以 NC4 的 USB 通道叫 usb_jtag（kind=usb_jtag），同 S3/P4 的 CDC 同一個角色。",
     "CDC（kind=cdc）寫進去也不會建立：那條路徑只在 #if NC_HAS_USB 裡面。",
-    "usb_jtag 的 rx.region = 4192：要放得落 FILE_CHUNK 最大幀（4 KB data → 4,115 B）；",
+    "rx 唔使寫：預設 NC_CFG_USB_RX_REGION = 4,128，剛好放得落 FILE_CHUNK 最大幀（4 KB → 4,115 B）；",
     "寫細過 4,115 的話，4 KB 檔案上傳會被 parser 當「幀過大」跳過。",
     "",
     "── USB ──",
     "C3 冇 OTG：usb.msc 不存在（編譯期整組唔編），保留欄位只是同一份 schema 通用。",
-    "usb.cdc_log 目前只對 OTG CDC 生效；usb_jtag 的 log 管道由 ph_usb 的 JTAG 分支處理。"
+    "usb.cdc_log 只對 OTG CDC 生效；usb_jtag 的 log 有自己一條（同 NC4 幀共用 TX，經 arbiter 分流）。"
   ],
   "cID": "",
   "frame_interval_ms": 20,
@@ -24,7 +24,7 @@
   "log_debug_mode": 0,
   "usb": {
     "msc": 0,
-    "cdc_log": 0
+    "cdc_log": 1
   },
   "nc4": {
     "links": [
@@ -36,12 +36,7 @@
       {
         "name": "usb_jtag",
         "kind": "usb_jtag",
-        "enable": 1,
-        "cfg": {
-          "rx": {
-            "region": 4192
-          }
-        }
+        "enable": 1
       }
     ],
     "routes": [
