@@ -512,7 +512,7 @@ image 各少約 2.4 KB（S3 391.6 KB、P4 661.3 KB）。
 | CDC→decode1、UART→decode0（對調） | `cdc.rx 同 decode1 同喺 core 1`、`[UART] owner_init on core 0` | 跟住換 |
 | 兩條都→decode0 | 只有 `解碼任務啟動（core 0）` | decode1 唔建立；heap +6,260 B（≈6,144 棧） |
 
-緩衝同綁定無關：三組 `keys=mem` 都係 `nc4.rx 4,192` ＋ `uart.rx 1,024` ＝ 5,216 B（每條 link 一份）。
+緩衝同綁定無關：三組 `keys=mem` 都係 `usb.rx 4,192` ＋ `uart.rx 1,024` ＝ 5,216 B（每條 link 一份）。
 
 **decode stack：6,144 → 5,120**
 
@@ -1426,7 +1426,7 @@ forward 成功路徑（要 UART 腳位或第二條可送 link）、pool 接到 R
 | PUSH 插槽（TCP／WS／UDP） | `slot_state[16]` ＋ `slot_len[16]` ＋ FIFO 指標 | **同 FIFO 模式一樣** → 重複實作，應該搬 |
 | PULL parser 環（CDC／UART） | 線性 ＋ `memmove` 壓實、可前移 1 byte | 需要 **STREAM 模式** |
 | TX 環 | driver 自己 | 唔搬 |
-| 回覆幀 | 2,615 B heap | 可搬（P2） |
+| 回覆幀 | plan 的 `nc4.reply0/1`（2,615 B） | ✅ 已搬（P2） |
 
 **工具補了兩樣**（都已上板）：
 
@@ -1769,7 +1769,7 @@ run.sh 補了 `nc_buf.c`）、建置零 warning。
 | 資源 | 之前 | 現在 |
 |---|---|---|
 | `nc4.reply0/1` | 任務在 `on_start` 自己 `nc_buf_at()` | 宣告 `slot_bytes=2,615, n=1` → 管理器建 |
-| `nc4.rx` | 任務 `nc_plan_get()` → parser 自己 `nc_buf_at()` | 宣告 `slot_bytes=region, n=1, flags=STREAM` → 管理器建，bus 用 `cfg.rx_buf` 收 |
+| `usb.rx` | 任務 `nc_plan_get()` → parser 自己 `nc_buf_at()` | 宣告 `slot_bytes=region, n=1, flags=STREAM` → 管理器建，bus 用 `cfg.rx_buf` 收 |
 | `uart.rx`／`tcp.rx` | 同上 | 同上 |
 | `fx.arena` | 純區域 | 宣告 `slot_bytes=512 KB, n=1` → 管理器建（`.fxe` 之後用 `nc_buf_carve()` 由它切） |
 | `probe.hub` | 純區域 | 保持（probe 自己建 hub，測試專用） |
@@ -1783,8 +1783,8 @@ run.sh 補了 `nc_buf.c`）、建置零 warning。
 **上板驗收**：
 
 ```
-plan: nc4.reply0, nc4.reply1, nc4.rx, uart.rx, probe.hub, fx.arena
-buf : nc4.reply0/1（P 2615 n=1）、nc4.rx（S 4192 stream）、uart.rx（S 1024 stream）、
+plan: nc4.reply0, nc4.reply1, usb.rx, uart.rx, probe.hub, fx.arena
+buf : nc4.reply0/1（P 2615 n=1）、usb.rx（S 4192 stream）、uart.rx（S 1024 stream）、
       fx.arena（P 524288 n=1）、CDC.slots、UART.slots、t.*
 ```
 

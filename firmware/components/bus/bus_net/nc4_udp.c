@@ -17,6 +17,11 @@ static const char *TAG = "nc4_udp";
 // 超過 MTU 會由 IP 分片（LAN 上可接受，實測見 testing.md §2.16）。
 #define UDP_MAX_MSG   (16 * 1024)
 
+// 解碼任務釘喺邊個核。decoder 由 main 傳入（已經係收斂後的：只有一個 decoder
+// 時一定係 decoder0），所以「有第二個 decoder」= pin core1；單核 build 一定要
+// 落 core0，否則 xTaskCreatePinnedToCore 會 assert（同 nc_core_clamp 同一規則）。
+#define NC4_NET_TASK_CORE ((CONFIG_FREERTOS_NUMBER_OF_CORES > 1) ? 1 : 0)
+
 static int               s_sock = -1;
 static uint16_t          s_port;
 static nc4_parser_t     *s_parser;
@@ -175,7 +180,8 @@ esp_err_t nc4_udp_start(nc4_decoder_t *decoder, uint16_t port)
     }
 
     // blocking recvfrom：睡在 lwIP，不輪詢
-    if (xTaskCreatePinnedToCore(udp_task, "nc4_udp", 6144, NULL, 10, &s_task, 1) != pdPASS) {
+    if (xTaskCreatePinnedToCore(udp_task, "nc4_udp", 6144, NULL, 10, &s_task,
+                                NC4_NET_TASK_CORE) != pdPASS) {
         close(s_sock);
         s_sock = -1;
         nc4_parser_destroy(s_parser);

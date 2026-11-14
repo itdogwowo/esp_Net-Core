@@ -95,7 +95,7 @@ typedef enum {
 const char *nc_provide_kind_name(nc_provide_kind_t kind);
 
 typedef struct {
-    const char *name;        // 全系統唯一："nc4.rx" / "fx.info"
+    const char *name;        // 全系統唯一："usb.rx" / "fx.info"
     nc_provide_kind_t kind;
     const char *desc;
     bool   (*buf)(void **ptr, size_t *bytes);   // BUF：回 false = 目前沒有

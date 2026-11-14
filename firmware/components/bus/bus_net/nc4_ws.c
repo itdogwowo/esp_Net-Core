@@ -19,6 +19,11 @@ static const char *TAG = "nc4_ws";
 // （見 §batching）：24 KB 可以放 2 個 8K 幀、4 個 4K、或 16 個 1K。
 #define WS_MAX_MSG   (24 * 1024)
 
+// 解碼／解析跑喺 httpd task 上。釘核跟「decoder 有幾多個」的同一條規則：
+// 有第二個 decoder 才用 core1（避開 core0 的 decode 引擎與 lwIP）；
+// 單核 build 一定要落 core0，否則 httpd 起唔到（FreeRTOS 會 assert）。
+#define NC4_NET_TASK_CORE ((CONFIG_FREERTOS_NUMBER_OF_CORES > 1) ? 1 : 0)
+
 static httpd_handle_t    s_server;
 static nc4_parser_t     *s_parser;
 static SemaphoreHandle_t s_tx_lock;
@@ -228,9 +233,10 @@ esp_err_t nc4_ws_start(nc4_decoder_t *decoder, uint16_t port)
     cfg.lru_purge_enable = true;
     cfg.stack_size = 6144;         // handler 會走 reply_json（frame 2 KB）
     // 解析跑在 httpd 這個 task 上：把它抬到跟 TCP RX 一樣的優先序，
-    // 並釘到 core1（core0 有 decode 引擎與 lwIP），避免每則訊息都排隊等排程
+    // 並釘到 NC4_NET_TASK_CORE（有第二個 decoder 才用 core1；
+    // core0 有 decode 引擎與 lwIP），避免每則訊息都排隊等排程
     cfg.task_priority = 10;
-    cfg.core_id = 1;
+    cfg.core_id = NC4_NET_TASK_CORE;
     cfg.recv_wait_timeout = 10;
     cfg.send_wait_timeout = 10;
 

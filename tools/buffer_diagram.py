@@ -91,14 +91,14 @@ ROWS = [
     ("CDC（OTG）", C_CORE0,
      ("TinyUSB", ["CDC-ACM · USB FS", "主機寫入 OUT 端點"], F_DRV, S_DRV),
      ("CDC.slots", ["4 × 256 B = 1 KB", "heap（nc_buf，runtime）", "寫：cdc.rx（同核）"], F_HEAP, S_HEAP),
-     ("nc4.rx", ["4,192 B · plan INTERNAL", "STREAM，容得落 4,115 B 幀", "本通道的 parser 環"], F_PLAN_I, S_PLAN_I),
+     ("usb.rx", ["4,192 B · plan INTERNAL", "STREAM，容得落 4,115 B 幀", "本通道的 parser 環"], F_PLAN_I, S_PLAN_I),
      ("decode0", ["PUSH：producer kick 叫醒", "parser 解析 → handler", "棧 3,072 B · prio 4"], F_PLAN_I, C_CORE0),
      ("回覆 + TX", ["回覆幀 2,615 B（plan BULK）", "TinyUSB TX FIFO", "s_tx_reply 仲裁：回覆優先"], F_PLAN_P, S_PLAN_P)),
 
     ("usb_jtag（JTAG）", C_CORE0,
      ("USB-Serial-JTAG", ["303A:1001 · 無 OTG 的板", "LL 直讀 RX FIFO"], F_DRV, S_DRV),
      ("（無暫存）", ["PULL：冇 producer task", "decode 自己讀 FIFO", "一次 256 B"], F_NONE, S_NONE),
-     ("nc4.jtag", ["4,192 B · plan INTERNAL", "chunk 256 × budget 8", "每輪最多搬 2,048 B"], F_PLAN_I, S_PLAN_I),
+     ("usb.rx", ["4,192 B · plan INTERNAL", "chunk 256 × budget 8", "每輪最多搬 2,048 B"], F_PLAN_I, S_PLAN_I),
      ("decode0", ["每 10 ms 輪詢一次", "parser 解析 → handler", "單核：只有這一個"], F_PLAN_I, C_CORE0),
      ("回覆 + TX", ["回覆幀 2,615 B（plan BULK）", "LL TX FIFO · 100 ms 上限", "s_jtag_tx_lock 同 log 共用"], F_PLAN_P, S_PLAN_P)),
 
@@ -207,7 +207,7 @@ def build():
          "decode1 與 decoder1 唔建立；nc4.reply1 唔宣告（省 2,615 B）；全部 link 的 core 都收斂到 0；"
          "fwd.c1 永遠用不到。", 11, INK2)
     text(L + 16, PANEL_Y + 162,
-         "nc4.rx／nc4.jtag 仍然是 4,192 B —— 它跟核數無關，跟「主機的 chunk 有幾大」有關。", 11, MUTED)
+         "usb.rx 仍然是 4,192 B —— 它跟核數無關，跟「主機的 chunk 有幾大」有關。", 11, MUTED)
     text(L + 16, PANEL_Y + 182,
          "heap 那兩層（slots、read chunk）在單核一樣存在：它們由「有冇 producer」決定，唔係由核數。", 11, MUTED)
 

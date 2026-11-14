@@ -10,7 +10,7 @@
 
 | 通道 | 誰在跑 | 核心 | 接收緩衝 | 分派方式 |
 |---|---|---|---|---|
-| **CDC** | `decode0`（bus, PULL） | 0（`bus.cfg.core`） | plan `nc4.rx` 8,205 + `chunk` 1,024（heap） | decoder 表 |
+| **CDC** | `decode0`（bus, PULL） | 0（`bus.cfg.core`） | plan `usb.rx` 8,205 + `chunk` 1,024（heap） | decoder 表 |
 | **UART** | `decode1`（bus, PULL） | 1（`bus.cfg.core`） | plan `uart.rx` 1,024 + `chunk` 512（heap） | 同上 |
 | **TCP（PULL）** | `decode0` | 0（`bus.cfg.core`） | plan `tcp.rx` 16,410 + `chunk` 8,192（heap） | 同上 |
 | **TCP（PUSH）** | producer `tcp_nc4_rx`（NVS `rx_core`）→ consumer `decode0` | rx_core → 0 | **插槽 8 × 8,205 = 65,640（heap）** + parser plan 16,410 | 同上（frame-aligned） |

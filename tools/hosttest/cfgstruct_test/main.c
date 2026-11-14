@@ -310,27 +310,22 @@ int main(void)
     ok("unknown>0", hs.unknown > 0);
     ok("仍然 present + enable", hw.eth.present && hw.eth.enable);
 
-    printf("[22] system：nc4.pool 解析（size/count/where/enable）\n");
+    printf("[22] system：nc4.pool 已移除（2026-11-14）→ 只計 unknown，不影響解析\n");
     {
+        // 舊檔仍然讀得入：pool 當未知鍵（unknown++），links／routes 照常。
         nc_system_cfg_t ps;
         nc_cfg_stat_t st = parse_sys(
-            "{\"version\":1,\"nc4\":{\"pool\":["
-            "{\"name\":\"small\",\"size\":512,\"count\":6},"
-            "{\"name\":\"bulk\",\"size\":8208,\"count\":2,\"where\":\"psram\"},"
-            "{\"name\":\"forward\",\"size\":4112,\"count\":3,\"enable\":0}]}}",
+            "{\"version\":1,\"nc4\":{"
+            "\"pool\":[{\"name\":\"small\",\"size\":512,\"count\":6}],"
+            "\"links\":[{\"name\":\"UART\",\"kind\":\"uart\"}],"
+            "\"routes\":[{\"in\":\"UART\",\"out\":[\"decode0\"]}]}}",
             &ps);
-        ok("n_pools=3", ps.n_pools == 3);
-        ok("small 512/6/internal", ps.pools[0].size == 512 && ps.pools[0].count == 6 &&
-                                   ps.pools[0].where == 0 && ps.pools[0].enable);
-        ok("bulk 8208/2/psram", ps.pools[1].size == 8208 && ps.pools[1].count == 2 &&
-                                 ps.pools[1].where == 1);
-        ok("forward enable=0", !ps.pools[2].enable && ps.pools[2].count == 3);
-        ok("零 invalid", st.invalid == 0);
-
-        nc_system_cfg_t bad;
-        st = parse_sys("{\"version\":1,\"nc4\":{\"pool\":["
-                       "{\"name\":\"x\",\"where\":\"vram\"}]}}", &bad);
-        ok("where 錯 → internal + invalid", bad.pools[0].where == 0 && st.invalid >= 1);
+        ok("pool 只係未知鍵（unknown>0）", st.unknown > 0);
+        ok("唔算 invalid（舊檔唔會壞）", st.invalid == 0);
+        ok("links 照解析（1 條 UART）", ps.n_links == 1 &&
+           strcmp(ps.links[0].name, "UART") == 0);
+        ok("routes 照解析（1 列）", ps.n_routes == 1 &&
+           strcmp(ps.routes[0].in, "UART") == 0);
     }
 
 #ifndef PRESET_SYSTEM
@@ -434,6 +429,44 @@ int main(void)
     (void)parse_sys("{\"version\":1,\"nc4\":{\"links\":["
                     "{\"name\":\"UART\",\"kind\":\"uart\"}]}}", &sys);
     ok("用戶只寫 UART → 冇 usb_jtag", link(&sys, "usb_jtag") == NULL);
+
+    printf("[24] 核數收斂（B03 capability）：單核把「兩核」的 config 併成一核\n");
+    {
+        nc_system_cfg_t ms;
+        nc_tasks_cfg_t mt;
+        (void)parse_sys("{\"version\":1,\"nc4\":{\"routes\":["
+                        "{\"in\":\"UART\",\"out\":[\"decode1\",\"TCP\"]},"
+                        "{\"in\":\"CDC\",\"out\":[\"decode0\"]},"
+                        "{\"in\":\"nctx\",\"out\":[\"decode10\"]}]}}", &ms);
+        (void)parse_tasks("{\"version\":1,\"tasks\":["
+                          "{\"name\":\"a\",\"affinity\":[0,1]},"
+                          "{\"name\":\"b\",\"affinity\":[1,0]},"
+                          "{\"name\":\"c\",\"affinity\":[1,1]},"
+                          "{\"name\":\"d\"}]}", &mt);
+
+        // 雙核：一個 byte 都唔改（用戶寫咩就係咩）。
+        const nc_cfg_merge_t m2 = nc_cfg_merge_cores_in(&ms, &mt, 2);
+        ok("雙核：routes/tasks 都 0", m2.routes == 0 && m2.tasks == 0);
+        ok("雙核：UART 仍然 decode1", strcmp(ms.routes[0].out[0], "decode1") == 0);
+        ok("雙核：a 仍然 (0,1)", !mt.tasks[0].aff[0] && mt.tasks[0].aff[1]);
+
+        // 單核：routes 的 decode1 → decode0，任務的 core1 → core0。
+        const nc_cfg_merge_t m1 = nc_cfg_merge_cores_in(&ms, &mt, 1);
+        ok("單核：1 條 route 的 decode1 被收斂", m1.routes == 1);
+        ok("單核：UART → decode0", strcmp(ms.routes[0].out[0], "decode0") == 0);
+        ok("單核：同一列的轉寄目的地（TCP）不動",
+           strcmp(ms.routes[0].out[1], "TCP") == 0);
+        ok("單核：decode10 唔會當成 decode1",
+           strcmp(ms.routes[2].out[0], "decode10") == 0);
+        ok("單核：2 條任務搬核（a、c；b 本來就喺 core0）", m1.tasks == 2);
+        ok("單核：a (0,1) → (1,0)", mt.tasks[0].aff[0] && !mt.tasks[0].aff[1]);
+        ok("單核：b (1,0) 不動", mt.tasks[1].aff[0] && !mt.tasks[1].aff[1]);
+        ok("單核：c 非法 (1,1) → (1,0)", mt.tasks[2].aff[0] && !mt.tasks[2].aff[1]);
+        ok("單核：d 未寫 (0,0) 仍然唔跑（合併 ≠ 幫你開任務）",
+           !mt.tasks[3].aff[0] && !mt.tasks[3].aff[1]);
+        const nc_cfg_merge_t again = nc_cfg_merge_cores_in(&ms, &mt, 1);
+        ok("單核：再跑一次 = 0（冪等）", again.routes == 0 && again.tasks == 0);
+    }
 
     printf("\n%d/%d 項通過\n", checks - fails, checks);
     return fails == 0 ? 0 : 1;

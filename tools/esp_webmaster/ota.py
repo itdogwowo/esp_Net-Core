@@ -75,7 +75,7 @@ def ota_update(link, data: bytes, chunk_size: int = 4096, apply: bool = True,
 
     payload = struct.pack("<IH", len(data), chunk_size) + digest + nc4.str_u16(fw_ver)
     cmd, rsp = link.request(CMD_OTA_BEGIN, payload,
-                            expect={CMD_OTA_ACK, CMD_OTA_ERROR_RSP}, timeout=8.0)
+                            expect={CMD_OTA_ACK, CMD_OTA_ERROR_RSP}, timeout=30.0)
     if cmd == CMD_OTA_ERROR_RSP:
         raise _parse_error(rsp)
 
@@ -95,7 +95,7 @@ def ota_update(link, data: bytes, chunk_size: int = 4096, apply: bool = True,
             progress(off, len(data))
 
     cmd, rsp = link.request(CMD_OTA_END, b"",
-                            expect={CMD_OTA_STATE_RSP, CMD_OTA_ERROR_RSP}, timeout=30.0)
+                            expect={CMD_OTA_STATE_RSP, CMD_OTA_ERROR_RSP}, timeout=90.0)
     if cmd == CMD_OTA_ERROR_RSP:
         raise _parse_error(rsp)
     idle, writing, verified = rsp[0], rsp[1], rsp[2]

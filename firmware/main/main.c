@@ -161,6 +161,9 @@ static const char *TAG = "netcore";
 // UART 的狀態由 driver 管（nc_uart_drv_ready()）。
 
 static uint16_t s_cid = NC4_ADDR_BROADCAST;   // 自己的 2B 協議位址
+// master_cid 只存「這次開機讀到的值」：decoder 要到 B07 才建立，
+// 所以身份一定要記住、等建立之後再套（見 ph_declare 的 decoders_set_identity）。
+static uint16_t s_master_cid = NC4_ADDR_BROADCAST;
 
 // 這顆晶片的 USB 能力（編譯期表，runtime 只讀）：app_main 最前面由
 // CONFIG_IDF_TARGET 查一次，之後預設、decoder 數量、STATUS 都用它。
@@ -614,12 +617,12 @@ static esp_err_t usb_install(void *arg)
 
 static esp_err_t usb_init(void)
 {
-    const nc_boot_ctx_t *b = nc_boot_ctx();     // USB 模式／link 名（capability 已定）
-    // USB 服務組（TinyUSB + CDC + console）需要一條核：正常跟 USB 那條 link 的 routes[]。
-    // CDC 未路由時 USB 仍然要初始化（console 要活），退回 core0 並明確記錄。
+    const nc_boot_ctx_t *b = nc_boot_ctx();     // USB 的組（B05 已定）
+    // USB 服務組（TinyUSB + CDC + console）跟 USB 那條線所屬的組。
+    // 未路由時 USB 仍然要初始化（console 要活），退回 core0 並明確記錄。
     int cdc_core = 0;
-    if (b->usb_link != NULL && nc4_router_core(b->usb_link) != NC4_ROUTE_NONE) {
-        cdc_core = nc_core_clamp(nc4_router_core(b->usb_link));
+    if (b->usb_core != NC4_ROUTE_NONE) {
+        cdc_core = nc_core_clamp(b->usb_core);
     } else {
         ESP_LOGW(TAG, "CDC 未路由 → USB 服務組放 core0");
     }
@@ -1406,31 +1409,65 @@ static size_t status_put_cfg(char *buf, size_t cap)
 //
 // 2026-11-13：**個數由核數決定**。單核（C3／C6／H2）只有一個 decode 任務，
 // 第二個 decoder 同它的回覆幀（2,615 B 內部 RAM，無 PSRAM）一生都用不到。
-// 陣列用編譯期上限，實際個數用 nc4_decoders()（執行期，由 nc_core_count() 答）。
+// 陣列用編譯期上限，實際個數由 B07 決定（s_ndec），唔再問 core 數 ——
+// 「有幾多核」同「實際起咗幾個 decoder」係兩件事（雙核但 core1 冇線 → 只有 1 個）。
 #define NC4_DECODER_SLOTS 2      // 陣列上限 = 框架支援的最大核數
 static nc4_decoder_t *s_decoder[NC4_DECODER_SLOTS];
 // 實際建立的 decoder 數（ph_declare 在 router 之後才算）：雙核而且 core1 有線 → 2。
-// 身份設定（decoders_set_identity）早過 router，所以那里仍然用 nc4_decoders()（核數）。
 static int s_ndec = 1;
 
-// 要建立／要巡的 decoder 個數：雙核 2、單核 1。
-// 所有迴圈與「第幾個資源」的索引都由它算，唔可以再用 NC4_DECODER_SLOTS ——
-// 否則單核時 res[] 的次序會對不上（見 task_nc4_start）。
-static int nc4_decoders(void)
+// 「要 core N 的解碼器」→ 實際有嘅 decoder slot。
+//
+// 只有一個 decoder 時，core1 的解碼要求全部落到 decoder0（連核都係 0）。
+// 呢個收斂**只准喺呢度做**：bus 的 cfg.core、producer 的釘核、回覆幀的索引
+// 全部跟它。否則會出現最難查的一種死線 —— bus 記住 core1、但 core1 冇
+// decode 任務：owner_init 永遠唔會跑，decode0 又只會巡自己嗰核。
+// 只警告一次：開機期間同一個要求會被問幾次，每次都印會蓋過第一因。
+static int decoder_slot(int core)
 {
-    return (nc_core_count() > 1) ? NC4_DECODER_SLOTS : 1;
+    static uint8_t s_warned;
+    if (core != 1) {
+        return 0;
+    }
+    // s_decoder[1] 真的存在才算有第二個 decoder：建立失敗（OOM）時
+    // 一樣要收斂，否則 bus 會記住 core1 而用 decoder0（跨核鎖，慢而難查）。
+    if (s_ndec > 1 && s_decoder[1] != NULL) {
+        return 1;
+    }
+    if ((s_warned & 1u) == 0) {
+        s_warned |= 1u;
+        ESP_LOGW(TAG, "decoder：本機只有 1 個 decoder（core0）→ core1 的解碼要求併入 decoder0");
+    }
+    return 0;
 }
 
-// 取某個核的 decoder。第二個建立失敗（或單核）時退回 decoder0
+// 某個 decoder 實際跑喺邊個核。decoder 是每核一個，所以 slot 就係核。
+// 保留成獨立函式：將來 decoder 唔再「一核一個」時，只改這裡。
+static int decoder_core(int core)
+{
+    return decoder_slot(core);
+}
+
+// 取某個核的 decoder。第二個建立失敗（或只有一個）時退回 decoder0
 //（退化：回到共用鎖，但功能正常），建立時已經印過 ESP_LOGE。
 static nc4_decoder_t *decoder_for_core(int core)
 {
-    const int idx = (core == 1 && s_ndec > 1) ? 1 : 0;
+    const int idx = decoder_slot(core);
     const nc4_decoder_t *d = s_decoder[idx];
     return (nc4_decoder_t *)(d != NULL ? d : s_decoder[0]);
 }
 
-// 兩個 decoder 共用同一個身份：cid 過濾與 master_cid（回覆位址）必須一致。
+// 實際有幾個 decoder（身份／master 要套用到**真正存在**的那幾個）。
+// 以前這裡回核數：雙核但只建 1 個 decoder 時，它仍然說 2 —— 兩個真相。
+static int nc4_decoders(void)
+{
+    return s_ndec;
+}
+
+// 所有 decoder 共用同一個身份：cid 過濾與 master_cid（回覆位址）必須一致。
+// ⚠️ 時序：呼叫點一定要在 nc4_decoder_create() **之後**（B07）——
+// node_identity_init() 喺 B02 跑，那時 s_decoder[] 全部係 NULL，
+// 喺那裡設定等於把 cid／master 掉進黑洞（decoder 一生都用 0xFFFF）。
 static void decoders_set_identity(uint16_t cid, uint16_t master)
 {
     for (int i = 0; i < nc4_decoders(); i++) {
@@ -1495,7 +1532,7 @@ static size_t status_put_sys(char *buf, size_t cap)
     size_t off = 0;
     jappend(buf, cap, &off,
             "\"sys\":{\"chip\":\"%s\",\"fw\":\"%s\",\"app\":\"%02x%02x%02x%02x\",\"heap\":%u,\"up_s\":%lld,"
-            "\"idf\":\"%s\",\"cid\":%u,"
+            "\"idf\":\"%s\",\"cid\":%u,\"ndec\":%d,"
             // 三種 heap 分開報：內部 / DMA 用 / PSRAM。冇呢三個數字，
             // 「搬去 PSRAM 到底有冇用」只能靠估。
             "\"h_int\":%u,\"h_dma\":%u,\"h_ps\":%u,\"rep_ps\":%d,\"rst\":%d}",
@@ -1507,7 +1544,7 @@ static size_t status_put_sys(char *buf, size_t cap)
             (unsigned)esp_app_get_description()->app_elf_sha256[3],
             (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
             (long long)(esp_timer_get_time() / 1000000),
-            esp_get_idf_version(), (unsigned)s_cid,
+            esp_get_idf_version(), (unsigned)s_cid, s_ndec,
             (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
             (unsigned)heap_caps_get_free_size(MALLOC_CAP_DMA),
             (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM),
@@ -1770,8 +1807,12 @@ static void node_identity_init(void)
     }
 
     s_cid = cid;
-    decoders_set_identity(cid, master);
-    ESP_LOGI(TAG, "cid=0x%04X（config） master_cid=0x%04X（NVS）", cid, master);
+    s_master_cid = master;
+    // decoder 喺 B07 才建立 → 這裡只記住身份；套用喺 ph_declare（建立之後）。
+    // 以前喺這裡呼叫 decoders_set_identity()：s_decoder[] 全部係 NULL，
+    // 等於冇做 —— decoder 一生都用 0xFFFF，單播到本機 cid 的幀會被丟。
+    ESP_LOGI(TAG, "cid=0x%04X（config） master_cid=0x%04X（NVS，B07 套到 decoder）",
+             cid, master);
 }
 
 static void on_set_master(nc4_ctx_t *ctx, const nc4_frame_t *f)
@@ -1995,7 +2036,7 @@ static void load_net_tuning(void)
 
 static void *s_nc4_rx_region;
 static size_t s_nc4_rx_bytes;
-static nc_buf_t *s_cdc_rx_buf;      // nc4.rx（STREAM，管理器建立）
+static nc_buf_t *s_usb_rx_buf;      // usb.rx（STREAM，管理器建立；唔分 CDC／USJ）
 static nc_buf_t *s_uart_rx_buf;     // uart.rx
 static void *s_uart_rx_region;
 // UART 的 producer 要延後到 decode 任務起咗之後才建立（見 app_main 的說明）。
@@ -2019,7 +2060,7 @@ static bool prov_nc4_rx(void **ptr, size_t *bytes)
 }
 
 static const nc_task_provide_t s_nc4_provides[] = {
-    { .name = "nc4.rx", .kind = NC_PROVIDE_BUF, .desc = "CDC parser 緩衝",
+    { .name = "usb.rx", .kind = NC_PROVIDE_BUF, .desc = "USB（CDC／USJ）parser 緩衝",
       .buf = prov_nc4_rx },
     { .name = "nc4.busstats", .kind = NC_PROVIDE_JSON, .desc = "每條通道的 frames/copied",
       .json = nc4_bus_stats_json },
@@ -2238,10 +2279,11 @@ static int task_nc4_declare(nc_task_res_t *out, int max)
             .slot_bytes = NC4_REPLY_FRAME_MAX, .n = 1, .flags = 0,
         };
     }
-    // USB 那條：模式／名字由 capability 階段（usb_resolve）寫進 ctx。
-    // 條件：link 啟用（ctx 已選）＋ routes[] 指去 decodeN；少一個都唔佔 RAM。
+    // USB 那條：模式／名字由 capability 階段（usb_resolve）寫進 ctx；
+    // 它屬於哪一組由 B05 的「線 → 組」表寫進 ctx（b->usb_core）。
+    // 條件：link 啟用（ctx 已選）＋ 有路由；少一個都唔佔 RAM。
     if (b->usb_link != NULL && n < max && link_enabled(b->usb_link) &&
-        nc4_router_core(b->usb_link) != NC4_ROUTE_NONE) {
+        b->usb_core != NC4_ROUTE_NONE) {
         const nc_link_cfg_t *ul = nc_cfg_link(b->usb_link);
         const nc_link_kind_t kind = (ul != NULL) ? ul->kind : NC_LINK_CDC;
         nc_link_rx_t d;
@@ -2252,7 +2294,8 @@ static int task_nc4_declare(nc_task_res_t *out, int max)
         s_usb_cfg_src = link_rx(b->usb_link, &rx);
         rx.region = usb_region(rx.region);
         out[n++] = (nc_task_res_t){
-            .name = (kind == NC_LINK_USBJTAG) ? "nc4.jtag" : "nc4.rx",
+            // 兩種 USB 人格共用同一個 plan 名（見 docs/03_notes/buffers.md §2.3）。
+            .name = "usb.rx",
             .bytes = rx.region, .cls = NC_PLAN_INTERNAL, .align = 32,
             // parser 環＝一條 STREAM 緩衝區（P5：由管理器建，bus 直接用它）
             .slot_bytes = (uint32_t)rx.region, .n = 1, .flags = NC_BUF_F_STREAM,
@@ -2269,22 +2312,25 @@ static esp_err_t task_nc4_start(const nc_task_res_view_t *res, int n)
     for (int i = 0; i < s_ndec && (size_t)i < (size_t)n; i++) {
         nc_buf_t *rb = res[i].buf;
         if (rb == NULL || s_decoder[i] == NULL) {
-            ESP_LOGW(TAG, "回覆幀 %s：冇 buffer（沿用在 decoder 建立時的 heap）", k_reply_name[i]);
+            // decoder 自己唔配回覆幀（見 nc4_decoder_create 的說明），所以冇 plan
+            // 緩衝 = 這個 decoder 收得到指令但回唔到。正常唔會發生：資源拿不到時
+            // gather_resources() 會令整個 nc4 任務不啟動。
+            ESP_LOGE(TAG, "回覆幀 %s：plan 冇提供 → 這個 decoder 唔會回覆", k_reply_name[i]);
             continue;
         }
         if (nc4_decoder_set_reply(s_decoder[i], nc_buf_raw(rb, 0)) != ESP_OK) {
-            ESP_LOGW(TAG, "回覆幀 %s：接管失敗，沿用 heap", k_reply_name[i]);
+            ESP_LOGE(TAG, "回覆幀 %s：接管失敗 → 這個 decoder 唔會回覆", k_reply_name[i]);
         }
     }
 
-    // nc4.rx／nc4.jtag：宣告次序 = reply0、（雙核）reply1、USB 那條。
+    // usb.rx：宣告次序 = reply0、（雙核）reply1、USB 那條。
     // 「第幾個」一定要用 nc4_decoders()：單核只宣告一條回覆幀，
     // 用固定 2 會指去 usb 那條的 buffer（靜靜讀錯記憶體）。
     if (n > s_ndec) {
-        s_cdc_rx_buf = res[s_ndec].buf;
+        s_usb_rx_buf = res[s_ndec].buf;
         s_nc4_rx_region = res[s_ndec].ptr;
     } else {
-        s_cdc_rx_buf = NULL;
+        s_usb_rx_buf = NULL;
         s_nc4_rx_region = NULL;
     }
     cfg_probe_once();          // STATUS 要的探測結果
@@ -2386,7 +2432,12 @@ static esp_err_t task_net_start(const nc_task_res_view_t *res, int n)
 // 實測最差 2,876 B（FILE_QUERY + 完整 STATUS），留 1.2 KB 餘裕。
 static bool nc4_want_core0(void) { return nc4_router_core_used(0); }
 // 單核板連 core1 都不存在：唔止「冇線就唔開」，係根本上唔准開。
-static bool nc4_want_core1(void) { return s_ndec > 1 && nc4_router_core_used(1); }
+// decode1 任務只在「真的有 decoder1 而且 core1 有線」時建立：
+// decoder1 建立失敗（OOM）時一樣唔建立 —— 否則會多一個永遠冇 bus 的任務。
+static bool nc4_want_core1(void)
+{
+    return s_ndec > 1 && s_decoder[1] != NULL && nc4_router_core_used(1);
+}
 
 static const nc_task_loop_t s_nc4_loops[] = {
     { .name = "decode0", .fn = nc4_bus_task_entry, .arg = (void *)0,
@@ -3214,6 +3265,12 @@ static char s_route_names[NC4_ROUTE_MAX][NC4_ROUTE_NAME_MAX];
 // main 棧只有 3 KB，而且這份 JSON 只在開機印一次（唔需要每次進函式都佔）。
 static char s_route_json[768];
 
+// 開機一次性文字緩衝（plan JSON／任務帳本）。刻意用 static 而唔係 malloc：
+// plan carve 之後再 malloc／free，會在 heap 中間留一個洞，之後任務用不同大小
+// 再申請就會開始碎片化。緩衝的原則是「開機一次要齊、永不釋放」——
+// 這兩行 log 也遵守同一條。兩個階段先後使用，所以共用一塊就夠。
+static char s_boot_txt[900];
+
 static int router_from_cfg(nc4_route_t *out, int max)
 {
     const nc_system_cfg_t *sys = nc_cfg_system();
@@ -3243,6 +3300,8 @@ static int router_from_cfg(nc4_route_t *out, int max)
                 // 核數是硬體事實：單核板上寫 decode1 會被收斂成 decode0。
                 // **名字要一齊換**，否則 nc4_router_set() 會因為
                 // 「out=decode1 但 core=0」矛盾而整張表拒收（→ 一條線都冇）。
+                // B03 已把 config 的 decode1 改成 decode0；這裡的 clamp 是留給
+                // router_defaults／其他來源的最後防線（正常路徑上係 no-op）。
                 int want_core = s[6] - '0';
                 const int got_core = nc_core_clamp(want_core);
                 if (got_core != want_core) {
@@ -3825,24 +3884,42 @@ static esp_err_t ph_storage(void)
 // 開機階段：capability
 //
 // **開機的第一個決定**：這塊板實際上能做什麼。之後每一個階段都只服從它，
-// 唔再各自看 #if、各自再猜一次 config。
-//   ① 核數（1／2）    → nc_core_count()；路由器與任務管理器用它收斂「要求某個核」
-//   ② USB 模式        → ctx 的 usb_*；declare、ph_usb、ph_channels 讀它
-//   ③ log／碟兩個閘   → ctx 的 usb_log／usb_msc（config 的 usb.* 在這裡落地一次）
+// 唔再各自看 #if、各自再猜一次 config。次序固定，三步：
+//   ① 核數（1／2）    → nc_core_count()（硬體事實）
+//   ② 核數的後果      → 單核：把 config 的「兩核」一次過併成一核
+//                        （routes 的 decode1、tasks 的 core1；只改 RAM）
+//   ③ USB 人格        → ctx 的 usb_*；declare、ph_usb、ph_channels 讀它
+//
+// ② 排在 ③ 之前是刻意的：先把「硬體事實的後果」全部落地，再決定「用哪一條人格」
+//    （CDC ／ USJ）。之後 B05 router／B07 declare／B09 start 讀到的都是**同一份
+//    已收斂的表**，唔會各自再夾一次（以前那件事散在 router、decoder 個數、
+//    任務管理器、USB 服務組四個地方）。
 //
 // 位置有兩個限制：放在 storage+cfg 之後（② 要讀 config），放在 declare 之前
-// （declare 要問 ② 才知道要宣告哪一條 parser 緩衝）。
+// （declare 要問 ③ 才知道要宣告哪一條 parser 緩衝）。
 static esp_err_t ph_capability(void)
 {
     nc_boot_ctx_t *b = nc_boot_ctx();
-    b->cores = nc_core_probe();        // ① 核數（真相在 nc_core_count()，這裡是記帳）
-    usb_resolve();                     // ② USB 模式 + link 名 + log/msc（寫進 ctx）
 
+    // ① 核數：唯一的真相是 nc_core_count()（晶片表只係「預設用幾多核」）。
+    b->cores = nc_core_probe();
+
+    // ② 單核：把「兩個核」的要求併成一核。只改 RAM；/data/config/*.json 不變。
+    //    雙核時 merge 一定係 0，唔會靜靜改咗用戶寫的東西。
+    const nc_cfg_merge_t merge = nc_cfg_merge_cores(b->cores);
     if (b->cores > 1) {
         ESP_LOGW(TAG, "能力：%d 核 → core0／core1 都可以派任務", b->cores);
+    } else if (merge.routes == 0 && merge.tasks == 0) {
+        ESP_LOGW(TAG, "能力：單核 → config 已經是單核形狀（冇 decode1／core1 要併）");
     } else {
-        ESP_LOGW(TAG, "能力：單核 → 所有任務收斂到 core0（config 寫 core1 會被夾並警告）");
+        ESP_LOGW(TAG, "能力：單核 → config 的兩核要求併成一核"
+                      "（routes %u 條 decode1→decode0、任務 %u 條 core1→core0；"
+                      "之後唔再各自夾）",
+                 (unsigned)merge.routes, (unsigned)merge.tasks);
     }
+
+    // ③ USB：CDC（OTG）定 USB-Serial-JTAG；log／msc 兩個閘。讀的是已收斂的 config。
+    usb_resolve();
     return ESP_OK;
 }
 
@@ -3950,26 +4027,10 @@ static esp_err_t ph_hardware(void)
             n = router_defaults(routes, NC4_ROUTE_MAX);
             ESP_LOGW(TAG, "router：system.json 冇有效 routes[] → 用預設表（%d 列）", n);
         }
-        // 單核板（C3／C6／C61／C5／H2／S2）根本冇 core1：把 S3 的 config 直接搬過來時，
-        // 這裡把 decode1 夾返 decode0 並明講。唔夾的話 decode1 任務會建立失敗／assert。
-        if (s_chip != NULL && s_chip->cores < 2) {
-            int clamped = 0;
-            for (int i = 0; i < n; i++) {
-                for (int j = 0; j < routes[i].n_out; j++) {
-                    if (routes[i].out[j] != NULL && strcmp(routes[i].out[j], "decode1") == 0) {
-                        routes[i].out[j] = "decode0";
-                        clamped++;
-                    }
-                }
-                if (routes[i].core == 1) {
-                    routes[i].core = 0;
-                    clamped++;
-                }
-            }
-            if (clamped > 0) {
-                ESP_LOGW(TAG, "單核板：%d 個 decode1 已夾返 decode0", clamped);
-            }
-        }
+        // 單核板的 decode1 → decode0 已經喺 B03 capability 一次過收斂（config 的
+        // routes 已被改寫）；這裡唔再逐條夾 —— 同一件事喺兩個階段各做一次，
+        // 只會令人以為「夾」係 router 的職責。router_from_cfg() 仍然保留
+        // nc_core_clamp() 作最後防線（router_defaults 的路由唔經 config）。
         const esp_err_t rerr = nc4_router_set(routes, n);
         if (rerr != ESP_OK) {
             ESP_LOGE(TAG, "路由表無效: %s → 只保留 core0", esp_err_to_name(rerr));
@@ -3980,40 +4041,38 @@ static esp_err_t ph_hardware(void)
         }
         nc4_router_json(s_route_json, sizeof(s_route_json));
         ESP_LOGI(TAG, "router: %s", s_route_json);
+
+        // USB 那條線屬於哪一組：就在這張表裡，**這裡一次講清楚**。
+        // 之後 B07（回覆幀）、B10（TinyUSB／log）、B11（bus＋producer）全部讀
+        // ctx 的 usb_core，唔再各自問一次 router（以前問四次，仲各自帶 fallback）。
+        // USB 的人格（CDC／USJ、log／msc）是 B03 的事；「入邊一組」是這張表的事 ——
+        // 兩件事分開，唔係重複決定 USB。
+        nc_boot_ctx_t *b = nc_boot_ctx();
+        b->usb_core = (b->usb_link != NULL) ? nc4_router_core(b->usb_link)
+                                            : NC4_ROUTE_NONE;
+        ESP_LOGW(TAG, "線→組：USB=%s → %s",
+                 (b->usb_link != NULL) ? b->usb_link : "（冇）",
+                 (b->usb_core == NC4_ROUTE_NONE) ? "未路由"
+                                                 : ((b->usb_core == 1) ? "core1" : "core0"));
     }
     return ESP_OK;
 }
 
 // 開機階段：declare
-// 開機階段：共用緩衝池 → 2026-11-10 已停用
-//
-// `nc_pool` 只有一個真用戶（跨核轉寄的 forward 格），而 small／bulk 兩個 class
-// **零呼叫者**，卻佔住 20.7 KB internal（system.json 預設 enable:1）。
-// 轉寄已改用每核一條 `nc_buf` FIFO（`fwd.c0`／`fwd.c1`，PSRAM、按需建立），
-// 所以這裡只剩一句 log；`nc4.pool` 的 config 仍然讀得入（唔會壞檔），但唔再建池。
-static esp_err_t ph_pool(void)
-{
-    const nc_system_cfg_t *sys = nc_cfg_system();
-    if (sys->n_pools > 0) {
-        ESP_LOGW(TAG, "nc4.pool 已停用（%u 個設定被忽略）：轉寄改用 nc_buf，"
-                      "small／bulk 冇用戶 → 見 docs/03_notes/buffers.md",
-                 (unsigned)sys->n_pools);
-    }
-    return ESP_OK;
-}
-
 static esp_err_t ph_declare(void)
 {
     // ── ⑤ 宣告（照「實際存在的硬體」決定）──
     // 這個 registry 管兩件事：記憶體（nc_plan）、迴圈（nc_task）。
     // 指令不在這裡 —— 它是 decoder 的表，下面 actions_register() 一次註冊完。
 
-    // 幾多個 decoder 由**晶片核數**決定，而且一定要在 nc_task_declare_all() 之前定好：
+    // 幾多個 decoder 由**核數**決定，而且一定要在 nc_task_declare_all() 之前定好：
     // task_nc4_declare 用同一個數字決定要向 plan 要幾多塊回覆幀。
     // 只有「雙核」而且「真係有線去 core1」才建第二個 decoder／回覆幀。
     // 以前只看核數：S3 把 UART 刪掉之後 decode1 唔開，但 reply1 仍然佔 2,615 B。
+    // 核數讀 B03 的 ctx（= nc_core_count()）；以前讀晶片表，等於第二個真相。
     {
-        const bool two_cores = (s_chip == NULL) || (s_chip->cores > 1);
+        const nc_boot_ctx_t *b = nc_boot_ctx();
+        const bool two_cores = (b->cores > 1);
         s_ndec = (two_cores && nc4_router_core_used(1)) ? NC4_DECODER_SLOTS : 1;
     }
 
@@ -4030,6 +4089,12 @@ static esp_err_t ph_declare(void)
                      (i == 1) ? "（core1 會退回共用 decoder0）" : " → 裝置收不到任何指令");
         }
     }
+    // decoder 的「身上設定」只能在建立之後套：cid（ADDR 過濾）＋ master_cid（回覆位址）。
+    // B02 的 node_identity_init() 只把值記住，這裡才真正落到 decoder 上。
+    decoders_set_identity(s_cid, s_master_cid);
+    ESP_LOGW(TAG, "decoder：%d 個（core0%s）｜cid=0x%04X master=0x%04X",
+             s_ndec, (s_ndec > 1) ? "、core1" : "；core1 的解碼要求併入 decoder0",
+             (unsigned)s_cid, (unsigned)s_master_cid);
     if (s_decoder[0] != NULL) {
         actions_init();                    // 統計 → 一次配置 → 封存（不需要任何任務）
     }
@@ -4060,13 +4125,9 @@ static esp_err_t ph_commit(void)
     avail[NC_PLAN_PSRAM] = heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM);
     esp_err_t perr = nc_plan_commit(avail, false);
     {
-        // 開機一次用：唔應該為咗印一行 log 長期佔住 700 B SRAM。
-        char *pj = malloc(700);
-        if (pj != NULL) {
-            nc_plan_json(pj, 700);
-            ESP_LOGI(TAG, "plan(%s): %s", esp_err_to_name(perr), pj);
-            free(pj);
-        }
+        // 共用 static 文字緩衝（見 s_boot_txt 的說明）：唔喺 carve 之後碰 heap。
+        nc_plan_json(s_boot_txt, sizeof(s_boot_txt));
+        ESP_LOGI(TAG, "plan(%s): %s", esp_err_to_name(perr), s_boot_txt);
     }
 
     // ── Wi-Fi：兩道閘（編譯期 CONFIG_NETCORE_WIFI ＋ network.json wifi.enable）──
@@ -4105,12 +4166,8 @@ static esp_err_t ph_start(void)
 #endif
 
     {
-        char *ledger = malloc(900);
-        if (ledger != NULL) {
-            nc_task_ledger(ledger, 900);
-            ESP_LOGI(TAG, "帳本：\n%s", ledger);
-            free(ledger);
-        }
+        nc_task_ledger(s_boot_txt, sizeof(s_boot_txt));
+        ESP_LOGI(TAG, "帳本：\n%s", s_boot_txt);
     }
     return ESP_OK;
 }
@@ -4125,6 +4182,8 @@ static esp_err_t ph_start(void)
 //   · OTG 只有「CDC 有登記」或「msc=1」才裝 TinyUSB
 static esp_err_t ph_usb(void)
 {
+    // 每次開機**只會走到這裡一次**：driver／線由 B03 讀 config 決定，B10 init。
+    // 沒有 runtime 切換 —— 要換線就改 config 再重啟（下次 B03 重算、B10 重新 init）。
     const nc_boot_ctx_t *b = nc_boot_ctx();
     esp_err_t err = ESP_ERR_NOT_SUPPORTED;
     (void)err;   // 冇 OTG 的建置只有 JTAG 分支，err 唔會被讀
@@ -4155,8 +4214,9 @@ static esp_err_t ph_usb(void)
 
     if (b->usb_mode == NC_USB_OTG) {
 #if NC_HAS_USB
+        // cdc_wanted：USB 線存在、啟用、而且有組（B05 已把它的落點寫入 ctx）。
         const bool cdc_wanted = (b->usb_link != NULL) && link_enabled(b->usb_link) &&
-                                nc4_router_core(b->usb_link) != NC4_ROUTE_NONE;
+                                b->usb_core != NC4_ROUTE_NONE;
         if (!cdc_wanted && !b->usb_msc) {
             ESP_LOGW(TAG, "config 冇 USB 服務（CDC 未登記、msc=0）→ 唔裝 TinyUSB");
             return ESP_OK;
@@ -4169,10 +4229,7 @@ static esp_err_t ph_usb(void)
             return ESP_OK;
         }
         if (b->usb_log && cdc_wanted) {
-            int lc = nc4_router_core(b->usb_link);
-            if (lc < 0) {
-                lc = 0;      // CDC 未路由：仍要有一條出路，記錄喺 boot log
-            }
+            const int lc = b->usb_core;   // B05 已定；cdc_wanted 保證唔係 NONE
             const esp_err_t lerr = nc_log_start(nc_core_clamp(lc), cdc_tx_text);
             if (lerr != ESP_OK) {
                 ESP_LOGW(TAG, "log 管道未啟動：%s → 仍然直出 console", esp_err_to_name(lerr));
@@ -4247,9 +4304,17 @@ static esp_err_t ph_channels(void)
             link_rx_t rx = { .region = USB_RX_REGION_DEF };
             (void)link_rx(b->usb_link, &rx);
             rx.region = usb_region(rx.region);
-            if (s_nc4_rx_region == NULL || !link_core(b->usb_link, &cdc_core)) {
-                berr = ESP_ERR_INVALID_STATE;   // 冇緩衝，或者 routes[] 冇指去 decodeN
+            // 這條線屬於哪一組：B05 已經寫入 ctx（唔再自己問 router）。
+            if (s_nc4_rx_region == NULL || b->usb_core == NC4_ROUTE_NONE) {
+                if (s_nc4_rx_region != NULL) {
+                    ESP_LOGE(TAG, "link %s：routes[] 冇指去任何 decodeN → 唔建立", b->usb_link);
+                }
+                berr = ESP_ERR_INVALID_STATE;   // 冇緩衝，或者未路由
             } else {
+                cdc_core = nc_core_clamp(b->usb_core);
+                // 呢條線的解碼核 = 實際有嘅 decoder 嗰核（只有 1 個 decoder 時係 core0）。
+                // bus 的 core、producer 的釘核、decoder 的索引三者必須同一個數。
+                cdc_core = decoder_core(cdc_core);
                 const nc4_bus_cfg_t cdc_bus = {
                     .name = b->usb_link,
                     // PUSH：由 cdc_rx_task（同核）讀走放環，decode 只消費。
@@ -4263,7 +4328,7 @@ static esp_err_t ph_channels(void)
                     .read = cdc_read,       // 由 cdc_rx_task 呼叫（非阻塞）
                     .send = cdc_send,
                     .rx_region = s_nc4_rx_region,     // plan 給的區域
-                    .rx_buf = s_cdc_rx_buf,          // 管理器建好的 STREAM 環
+                    .rx_buf = s_usb_rx_buf,          // 管理器建好的 STREAM 環（usb.rx）
                     .rx_region_bytes = s_nc4_rx_bytes,
                     .read_chunk = rx.chunk,
                     .budget_per_pass = rx.budget,
@@ -4316,6 +4381,9 @@ static esp_err_t ph_channels(void)
 
         int uart_core = -1;
         if (s_uart_rx_region != NULL && link_core("UART", &uart_core)) {
+            // 解碼核 = 實際有嘅 decoder 嗰核。bus 的 core、owner_init 的核、
+            // producer 的核都由這一個數決定（唔可以同 decoder 索引分家）。
+            uart_core = decoder_core(uart_core);
             // 實測：max_read 242 B、slot 峰值 1 格、slot_full 0 → 4×256 就貼身。
             // region 保留 1024（可收 ≤1011 B 的指令；要 4 KB 指令就改 config）。
             link_rx_t rx = { .region = 1024, .chunk = 256, .budget = 8, .slots = 4, .slot = 256 };
@@ -4360,10 +4428,11 @@ static esp_err_t ph_channels(void)
 
 #if CONFIG_SOC_USB_SERIAL_JTAG_SUPPORTED
         // USB-Serial-JTAG：PULL 模式（read 非阻塞，不需要 producer task）。
-        // 名字／region 都由 capability 階段決定（ctx 的 usb_link）。
+        // 名字／region 由 capability 階段決定；組由 B05 寫入 ctx。
         int jtag_core = -1;
         if (b->usb_mode == NC_USB_JTAG && b->usb_link != NULL && s_nc4_rx_region != NULL &&
-            link_core(b->usb_link, &jtag_core)) {
+            b->usb_core != NC4_ROUTE_NONE) {
+            jtag_core = decoder_core(b->usb_core);   // 解碼核 = 實際 decoder 嗰核
             link_rx_t rx = { .region = USB_RX_REGION_DEF, .chunk = 256, .budget = 8 };
             (void)link_rx(b->usb_link, &rx);
             const nc4_bus_cfg_t jtag_bus = {
@@ -4397,6 +4466,7 @@ static esp_err_t ph_channels(void)
         // TCP 傳輸只在 P4（乙太網）且「ETH 真的起來」時建立
         int tcp_core = -1;
         if (s_eth_ok && s_tcp_rx_region != NULL && link_core("TCP", &tcp_core)) {
+            tcp_core = decoder_core(tcp_core);   // 解碼核 = 實際 decoder 嗰核
             link_rx_t rx = { .region = 16410, .chunk = 8192, .budget = 8, .slots = 8, .slot = 8205 };
             link_rx("TCP", &rx);
             const nc4_bus_cfg_t tcp_bus = {
@@ -4488,23 +4558,43 @@ void app_main(void)
     // 用 CDC 還是 usb_jtag、幾多核」告訴預設，之後 ph_storage 讀到的
     // 就是一份「出廠就用得到原生 USB」的 config。
     s_chip = nc_cfg_chip_find(CONFIG_IDF_TARGET);
-    nc_cfg_defaults_set_chip(s_chip);
-    if (s_chip != NULL) {
-        ESP_LOGI(TAG, "晶片能力：%s｜%u 核｜USB=%s｜OTG=%d USJ=%d%s",
-                 s_chip->id, (unsigned)s_chip->cores,
-                 (s_chip->usb_link != NULL) ? s_chip->usb_link : "冇",
-                 s_chip->usb_otg ? 1 : 0, s_chip->usb_serial_jtag ? 1 : 0,
-                 s_chip->usb_shared_phy ? "（共用 PHY：OTG/USJ 二選一）" : "");
-    } else {
-        ESP_LOGW(TAG, "晶片 %s 不在 nc_cfg_chip.c 的表裡 → 保守預設（CDC + 2 核）",
-                 CONFIG_IDF_TARGET);
+    if (s_chip == NULL) {
+        // 未知晶片（表裡未有）：用**編譯期能力**砌一個臨時表，唔盲猜 CDC。
+        // 規則同晶片表一致：有 USJ 就用 USJ（所有人的預設）；冇 USJ 才用 OTG；
+        // 兩樣都冇 → 冇 USB。這樣「新 target 未入表」不會靜靜預設成 OTG。
+        static nc_cfg_chip_t s_unknown_chip;
+        s_unknown_chip.id = CONFIG_IDF_TARGET;
+        s_unknown_chip.cores = (uint8_t)NC_CORE_COUNT;
+#if CONFIG_SOC_USB_SERIAL_JTAG_SUPPORTED
+        s_unknown_chip.usb_serial_jtag = true;
+        s_unknown_chip.usb_link = "usb_jtag";
+        s_unknown_chip.usb_kind = NC_LINK_USBJTAG;
+#if NC_HAS_USB
+        s_unknown_chip.usb_otg = true;
+#endif
+#elif NC_HAS_USB
+        s_unknown_chip.usb_otg = true;
+        s_unknown_chip.usb_link = "CDC";
+        s_unknown_chip.usb_kind = NC_LINK_CDC;
+#endif
+        s_chip = &s_unknown_chip;
+        ESP_LOGW(TAG, "晶片 %s 不在 nc_cfg_chip.c 的表裡 → 用編譯期能力推預設（USB=%s）",
+                 CONFIG_IDF_TARGET, (s_chip->usb_link != NULL) ? s_chip->usb_link : "冇");
     }
+    nc_cfg_defaults_set_chip(s_chip);
+    ESP_LOGI(TAG, "晶片能力：%s｜%u 核｜USB=%s｜OTG=%d USJ=%d%s",
+             s_chip->id, (unsigned)s_chip->cores,
+             (s_chip->usb_link != NULL) ? s_chip->usb_link : "冇",
+             s_chip->usb_otg ? 1 : 0, s_chip->usb_serial_jtag ? 1 : 0,
+             s_chip->usb_shared_phy ? "（共用 PHY：OTG/USJ 二選一）" : "");
 
     // 開機階段表：**順序就是資料**。加一步就在這裡加一行，
     // 唔需要再記住「它應該放喺邊」。計時與結果由 boot.c 負責。
     // 開機階段的**契約**：一張表睇完「有什麼、先後、誰要等誰」。
     //   needs／gives = 依賴（執行器驗；缺了就 SKIP 並講明缺什麼）
     //   次序仍然由這張表的行序決定 —— 但現在改錯次序，契約會喊。
+    //   B06（pool）已於 2026-11-14 整組移除（nc4.pool 冇任何用戶）。
+    //   **ID 唔重編號**：B07–B12 保持原號，中間跳號是刻意的（見 naming.md §7）。
     // 加一步：這裡加一行 + 寫一個 ph_*；搬資料：ctx 加欄位（見 boot.h 的三層說明）。
     static const nc_boot_stage_t stages[] = {
         // ID    name             needs                                        gives                           fn
@@ -4513,7 +4603,6 @@ void app_main(void)
         { "B03", "capability",   NC_CAP_CONFIG,                               NC_CAP_CORES | NC_CAP_USB,       ph_capability, false },
         { "B04", "hwcheck",      NC_CAP_CONFIG,                               0,                               ph_hwcheck, false },
         { "B05", "hardware",     NC_CAP_CONFIG,                               NC_CAP_ROUTER,                   ph_hardware, false },
-        { "B06", "pool",         0,                                           0,                               ph_pool, false },
         { "B07", "declare",      NC_CAP_CONFIG | NC_CAP_CORES | NC_CAP_USB | NC_CAP_ROUTER,
                                                                              NC_CAP_DECLARED,                 ph_declare, false },
         { "B08", "commit",       NC_CAP_DECLARED,                             NC_CAP_PLAN,                     ph_commit, false },

@@ -4,6 +4,8 @@
 > 任何一個核都唔應該因為另一個核而收到中斷、被阻塞、或者被改變。
 >
 > 呢份係**要求**；現況證據同逐條位置喺 [cross-core.md](cross-core.md)。
+> 「為什麼會切成這樣」的上層理念（System 組件 → 每個核一個核心組）見
+> [system-model.md](system-model.md)。
 
 ---
 

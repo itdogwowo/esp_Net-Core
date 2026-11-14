@@ -9,7 +9,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_rom_crc.h"
 #include "esp_timer.h"
@@ -50,7 +49,8 @@ static inline void decoder_unlock(nc4_decoder_t *d)
 }
 
 struct nc4_parser {
-    // 解析器環＝一條 STREAM 緩衝區（2026-11-10 由手寫 start/end 改成 nc_buf）
+    // 解析器環＝一條 nc_buf（2026-11-10 由手寫 start/end 改成 nc_buf；
+    // 2026-11-14 內部環改用 RING；外部傳入的 ring 可以是線性 STREAM）
     nc_buf_t *ring;
     size_t cap;         // = 環容量（nc_buf_slot_bytes）
     nc4_ctx_t ctx;
@@ -64,6 +64,7 @@ struct nc4_parser {
     // n_max_ok   = 真正通過 CRC 並 dispatch 的最大 payload
     uint32_t n_max_dlen;
     uint32_t n_max_ok;
+    uint32_t n_frames;      // 成功 dispatch 的幀數（bench／診斷）
 };
 
 // ───────────────────────── decoder ─────────────────────────
@@ -81,17 +82,18 @@ nc4_decoder_t *nc4_decoder_create(void)
         free(d);
         return NULL;
     }
-    // 回覆幀：優先 PSRAM（它只被 CPU 讀寫，不經 DMA），冇 PSRAM 才落內部。
-    // 這 2.6 KB 以前在每個 decode 任務的棧上 —— 搬出來之後棧可以細一半。
-    d->reply = heap_caps_malloc(NC4_REPLY_FRAME_MAX, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    if (d->reply == NULL) {
-        d->reply = malloc(NC4_REPLY_FRAME_MAX);
-    }
-    if (d->reply == NULL) {
-        vSemaphoreDelete(d->lock);
-        free(d);
-        return NULL;
-    }
+    // 回覆幀：**不自己配**，由呼叫端交入（開機時是 plan 的 nc_buf）。
+    //
+    // 以前這裡先 malloc 2,615 B（PSRAM 優先、冇就內部），B09 再由 plan 的緩衝
+    // 換走並 free 返 —— 那個 free 發生在 plan carve **之後**，會在 heap 中間
+    // 留一個洞（C3 冇 PSRAM，就是內部 RAM）。租用／釋放一次就會多一個洞，
+    // 同「開機一次要齊、永不釋放」的緩衝原則相反。現在由 plan 直接提供，
+    // create 不含任何配置（除了 decoder 本身與 lock）。
+    //
+    // 時間序：create（B07）→ plan carve（B08）→ nc4_decoder_set_reply()（B09）。
+    // 指令要等 loop 開跑（B11）才可能到達，所以中間沒有任何 handler 會碰 reply。
+    d->reply = NULL;
+    d->reply_external = false;
     return d;
 }
 
@@ -243,8 +245,10 @@ nc4_parser_t *nc4_parser_create(nc4_decoder_t *decoder, nc4_send_fn send, void *
     }
     char name[NC4_LINK_NAME_MAX + 4];
     snprintf(name, sizeof(name), "%.*s.rx", NC4_LINK_NAME_MAX, source ? source : "p");
+    // 2026-11-14：內部 parser 環改用真 RING（唔壓實）。
+    // 外部傳入的 ring（create_buf／create_in）可能是線性 STREAM；feed 兩者都支援。
     p->ring = nc_buf_create(name, NC_BUF_SRAM, (uint32_t)max_frame, 1,
-                            NC_BUF_F_STREAM | NC_BUF_F_RUNTIME);
+                            NC_BUF_F_STREAM | NC_BUF_F_RING | NC_BUF_F_RUNTIME);
     if (p->ring == NULL) {
         free(p);
         return NULL;
@@ -479,7 +483,7 @@ static void parser_dispatch(nc4_parser_t *parser, const uint8_t *base, uint16_t 
     };
 
     // 轉寄（routes[].out 裡的 link 名）：**先出去，後本地執行**。
-    // 一定要在 handler 之前：frame.data 指向 parser 環／PUSH 插槽，
+    // 一定要在 handler 之前：frame.data 指向 parser 環／PUSH 插槽／跨環 scratch，
     // handler 一返回就會被下一幀覆寫，到時想 copy 已經冇得 copy。
     // 位址過濾放在轉寄之後：hub 轉出去的幀，目的地不一定是自己。
     parser_forward(parser, base, (size_t)NC4_HDR_LEN + dlen + NC4_CRC_LEN);
@@ -601,6 +605,168 @@ static void nc4_warn_throttled(const char *src, const char *fmt, ...)
     ESP_LOGW(TAG, "[%s] %s（累計 %u 次，每秒最多 1 行）", src, msg, (unsigned)s_count);
 }
 
+// 跨環 frame 的線性化暫存：每個 core 一塊（feed 在該核的 decode task 內同步跑）。
+// 只有「frame 跨環」才用；平常 frame 直接由環指標 dispatch，零複製。
+static uint8_t s_parse_scratch[CONFIG_FREERTOS_NUMBER_OF_CORES][NC4_MAX_FRAME]
+    __attribute__((aligned(64)));
+
+static inline uint8_t *parser_scratch(void)
+{
+    int core = (int)xPortGetCoreID();
+    if (core < 0 || core >= CONFIG_FREERTOS_NUMBER_OF_CORES) {
+        core = 0;
+    }
+    return s_parse_scratch[core];
+}
+
+// 在兩段（或一段）之內找 SOF；回傳「由環頭起算」的 offset，冇就 0xFFFFFFFF。
+static uint32_t parser_find_sof(const uint8_t *p0, uint32_t n0,
+                                const uint8_t *p1, uint32_t n1)
+{
+    for (uint32_t i = 0; i + 1 < n0; i++) {
+        if (p0[i] == NC4_SOF_0 && p0[i + 1] == NC4_SOF_1) {
+            return i;
+        }
+    }
+    if (n0 > 0 && n1 > 0 && p0[n0 - 1] == NC4_SOF_0 && p1[0] == NC4_SOF_1) {
+        return n0 - 1;              // SOF 跨段
+    }
+    for (uint32_t i = 0; i + 1 < n1; i++) {
+        if (p1[i] == NC4_SOF_0 && p1[i + 1] == NC4_SOF_1) {
+            return n0 + i;
+        }
+    }
+    return 0xFFFFFFFFu;
+}
+
+// 造一個合法 NC4 frame（cmd 0x1FFF 未註冊，dispatch 只會 debug log）。
+static size_t selftest_frame(uint8_t *out, uint16_t dlen, uint8_t fill)
+{
+    out[0] = NC4_SOF_0;
+    out[1] = NC4_SOF_1;
+    out[2] = NC4_VERSION;
+    out[3] = 0xFF;              // addr = broadcast (LE)
+    out[4] = 0xFF;
+    out[5] = 0xFF;              // cmd = 0x1FFF (LE)
+    out[6] = 0x1F;
+    out[7] = (uint8_t)(dlen & 0xFF);
+    out[8] = (uint8_t)(dlen >> 8);
+    memset(out + NC4_HDR_LEN, fill, dlen);
+    const uint32_t crc = esp_rom_crc32_le(0, out + 2, NC4_HDR_LEN - 2 + dlen);
+    memcpy(out + NC4_HDR_LEN + dlen, &crc, sizeof(crc));
+    return (size_t)NC4_HDR_LEN + dlen + NC4_CRC_LEN;
+}
+
+bool nc4_parser_selftest(void)
+{
+    nc4_decoder_t *dec = nc4_decoder_create();
+    if (dec == NULL) {
+        return false;
+    }
+    nc4_parser_t *p = nc4_parser_create(dec, NULL, NULL, "selftest", 256);
+    if (p == NULL) {
+        nc4_decoder_destroy(dec);
+        return false;
+    }
+
+    uint8_t a[256], c[256];
+    const size_t na = selftest_frame(a, 180, 0xA5);   // total 193
+    const size_t nc = selftest_frame(c, 170, 0x5A);   // total 183
+    bool ok = (na <= sizeof(a)) && (nc <= sizeof(c));  // 兩個 frame 都放得落
+
+    if (ok) {
+        // 第一次餵 A 全幀 + C 的前 40 B：A 會被 dispatch，C 留在環尾。
+        uint8_t feed[512];
+        memcpy(feed, a, na);
+        memcpy(feed + na, c, 40);
+        ok = (nc4_parser_feed(p, feed, na + 40) == ESP_OK);
+
+        // 第二次餵 C 剩下的 143 B：由環尾繞回開頭（跨環）。
+        ok = ok && (nc4_parser_feed(p, c + 40, nc - 40) == ESP_OK);
+    }
+
+    uint32_t crc_err = 0, bad_hdr = 0;
+    nc4_parser_errors(p, &crc_err, &bad_hdr);
+    ok = ok && (crc_err == 0) && (bad_hdr == 0) && (p->n_max_ok == 180);
+
+    nc4_parser_destroy(p);
+    nc4_decoder_destroy(dec);
+    return ok;
+}
+
+static bool parser_bench_one(bool ring, uint32_t frames, uint32_t payload,
+                             uint32_t cap, uint32_t *us_out, uint32_t *n_out)
+{
+    nc4_decoder_t *dec = nc4_decoder_create();
+    if (dec == NULL) {
+        return false;
+    }
+    nc4_parser_t *p;
+    if (ring) {
+        p = nc4_parser_create(dec, NULL, NULL, "pbench", cap);
+    } else {
+        nc_buf_t *rb = nc_buf_create("pbench.lin", NC_BUF_SRAM, cap, 1,
+                                     NC_BUF_F_STREAM | NC_BUF_F_RUNTIME);
+        p = (rb != NULL) ? nc4_parser_create_buf(rb, dec, NULL, NULL, "pbench.lin") : NULL;
+    }
+    if (p == NULL) {
+        nc4_decoder_destroy(dec);
+        return false;
+    }
+
+    const uint32_t total = NC4_HDR_LEN + payload + NC4_CRC_LEN;
+    uint8_t *frame = (uint8_t *)malloc(total);
+    if (frame == NULL) {
+        nc4_parser_destroy(p);
+        nc4_decoder_destroy(dec);
+        return false;
+    }
+    (void)selftest_frame(frame, (uint16_t)payload, 0x33);
+
+    // 每個 frame 切三段餵入，讓 parser 跨 feed 累積、也讓線性版踩到壓實。
+    const uint32_t c1 = payload / 3u + 1u;
+    const uint32_t c2 = c1 * 2u;
+    const int64_t t0 = esp_timer_get_time();
+    for (uint32_t i = 0; i < frames; i++) {
+        (void)nc4_parser_feed(p, frame, c1);
+        (void)nc4_parser_feed(p, frame + c1, c2 - c1);
+        (void)nc4_parser_feed(p, frame + c2, total - c2);
+    }
+    *us_out = (uint32_t)(esp_timer_get_time() - t0);
+    *n_out = p->n_frames;
+
+    free(frame);
+    nc4_parser_destroy(p);
+    nc4_decoder_destroy(dec);
+    return *n_out == frames;
+}
+
+bool nc4_parser_bench(uint32_t frames, uint32_t payload,
+                      uint32_t *ring_us, uint32_t *lin_us,
+                      uint32_t *ring_n, uint32_t *lin_n)
+{
+    if (frames == 0 || payload == 0 || payload > NC4_MAX_PAYLOAD) {
+        return false;
+    }
+    uint32_t rus = 0, lus = 0, rn = 0, ln = 0;
+    const uint32_t cap = (uint32_t)NC4_MAX_FRAME;
+    const bool ok_ring = parser_bench_one(true, frames, payload, cap, &rus, &rn);
+    const bool ok_lin = parser_bench_one(false, frames, payload, cap, &lus, &ln);
+    if (ring_us != NULL) {
+        *ring_us = rus;
+    }
+    if (lin_us != NULL) {
+        *lin_us = lus;
+    }
+    if (ring_n != NULL) {
+        *ring_n = rn;
+    }
+    if (lin_n != NULL) {
+        *lin_n = ln;
+    }
+    return ok_ring && ok_lin;
+}
+
 esp_err_t nc4_parser_feed(nc4_parser_t *parser, const uint8_t *data, size_t len)
 {
     if (parser == NULL || data == NULL || parser->ring == NULL) {
@@ -620,34 +786,39 @@ esp_err_t nc4_parser_feed(nc4_parser_t *parser, const uint8_t *data, size_t len)
     }
 
     for (;;) {
-        uint32_t avail = 0;
-        // 一定係「一段連續」（STREAM 會先壓實），所以可以直接當陣列掃
-        const uint8_t *base = nc_buf_read_ptr(parser->ring, &avail);
-        if (base == NULL || avail < NC4_HDR_LEN) {
+        const uint8_t *p0 = NULL, *p1 = NULL;
+        uint32_t n0 = 0, n1 = 0;
+        const uint32_t pending = nc_buf_read_segments(parser->ring, &p0, &n0, &p1, &n1);
+        if (pending < NC4_HDR_LEN) {
             return ESP_OK;
         }
 
-        // 1. 找 SOF
-        uint32_t i = 0;
-        while (i + 1 < avail && !(base[i] == NC4_SOF_0 && base[i + 1] == NC4_SOF_1)) {
-            i++;
-        }
-        if (i + 1 >= avail) {
-            nc_buf_skip(parser->ring, avail);   // 冇 SOF：整段丟（與舊版一致）
+        // 1. 找 SOF（最多兩段；線性 ring 的 n1 永遠 0）
+        const uint32_t sof = parser_find_sof(p0, n0, p1, n1);
+        if (sof == 0xFFFFFFFFu) {
+            nc_buf_skip(parser->ring, pending);   // 冇 SOF：整段丟（與舊版一致）
             return ESP_OK;
         }
-        if (i != 0) {
-            nc_buf_skip(parser->ring, i);       // 丟掉 SOF 之前的垃圾，重新拿 base
+        if (sof != 0) {
+            nc_buf_skip(parser->ring, sof);       // 丟掉 SOF 之前的垃圾
             continue;
         }
 
-        // 2. 標頭（不合就前移 1 byte 重找 —— 與 MP 版一致的寬鬆重同步）
-        const uint8_t ver = base[2];
-        const uint16_t dlen = (uint16_t)(base[7] | (base[8] << 8));
-        if (dlen > parser->n_max_dlen) {
-            parser->n_max_dlen = dlen;   // 貼身化：連「放唔落」的都要記，那是真實需求
+        // 2. 標頭：跨段就先抄 9 B 到細暫存
+        uint8_t hdr[NC4_HDR_LEN];
+        const uint8_t *hp;
+        if (n0 >= NC4_HDR_LEN) {
+            hp = p0;
+        } else {
+            memcpy(hdr, p0, n0);
+            memcpy(hdr + n0, p1, NC4_HDR_LEN - n0);
+            hp = hdr;
         }
-
+        const uint8_t ver = hp[2];
+        const uint16_t dlen = (uint16_t)(hp[7] | (hp[8] << 8));
+        if (dlen > parser->n_max_dlen) {
+            parser->n_max_dlen = dlen;
+        }
         if (ver != NC4_VERSION || dlen > NC4_MAX_PAYLOAD) {
             parser->n_bad_hdr++;
             nc_buf_skip(parser->ring, 1);
@@ -655,18 +826,31 @@ esp_err_t nc4_parser_feed(nc4_parser_t *parser, const uint8_t *data, size_t len)
         }
 
         const size_t total = NC4_HDR_LEN + dlen + NC4_CRC_LEN;
-        // 幀比 parser 緩衝大：永遠放唔落 → 跳過這個 SOF，繼續找下一個（log 限速）
         if (total > parser->cap) {
             parser->n_bad_hdr++;
             nc_buf_skip(parser->ring, 1);
             nc4_warn_throttled(parser->ctx.source, "幀過大（>%u B）", (unsigned)parser->cap);
             continue;
         }
-        if (avail < total) {
+        if (pending < total) {
             return ESP_OK;   // 等更多資料
         }
 
-        // 3. CRC32（esp_rom_crc32_le(0,…) 與 MP 版 binascii.crc32(x,0) 等價）
+        // 3. frame 跨環？跨就只抄「這一幀」到 per-core 暫存；否則零複製。
+        const uint8_t *base;
+        if (n0 >= total) {
+            base = p0;
+        } else {
+            uint8_t *sc = parser_scratch();
+            const uint32_t first = (n0 < total) ? n0 : (uint32_t)total;
+            memcpy(sc, p0, first);
+            if (total > first) {
+                memcpy(sc + first, p1, total - first);
+            }
+            base = sc;
+        }
+
+        // 4. CRC32（esp_rom_crc32_le(0,…) 與 MP 版 binascii.crc32(x,0) 等價）
         const uint32_t want = rd_u32le(base + NC4_HDR_LEN + dlen);
         const uint32_t got = esp_rom_crc32_le(0, base + 2, NC4_HDR_LEN - 2 + dlen);
         if (want != got) {
@@ -678,6 +862,7 @@ esp_err_t nc4_parser_feed(nc4_parser_t *parser, const uint8_t *data, size_t len)
         if (dlen > parser->n_max_ok) {
             parser->n_max_ok = dlen;
         }
+        parser->n_frames++;
         parser_dispatch(parser, base, dlen);
         nc_buf_skip(parser->ring, (uint32_t)total);
     }

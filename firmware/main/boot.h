@@ -24,7 +24,7 @@
 // 階段之間**不要**再用 main.c 的 static 互相傳 —— 那些是實作細節，
 // 它們的壽命、誰先寫誰先讀，全靠閱讀順序去猜。
 //
-// 現在 ctx 只收得落「核數 + USB」五個欄位（2026-11-13）。其餘階段**刻意未搬**：
+// 現在 ctx 只收得落「核數 + USB（人格＋組）」六個欄位（2026-11-13）。其餘階段**刻意未搬**：
 // 每搬一個欄位 = 一個階段從「static 互傳」變成「契約的一部份」。
 // 搬的時候只改三處：ctx 加欄位、階段寫它、讀者改讀它 —— 一次一個。
 //
@@ -46,9 +46,9 @@ extern "C" {
 // 由 capability 階段決定一次（編譯期能力 + 執行期 config 的合成結果）。
 // 這個 enum 屬於契約而不是 main.c 的細節：STATUS、log、測試都會用同一組字。
 typedef enum {
-    NC_USB_NONE = 0,      // 兩條都沒有（或編譯期關掉）
-    NC_USB_JTAG,          // 只有 USB-Serial-JTAG（C3／C6／H2）
-    NC_USB_OTG,           // 有 OTG（S3／S2／P4）→ TinyUSB CDC／MSC
+    NC_USB_NONE = 0,      // 這次開機沒有 USB 線（或編譯期關掉）
+    NC_USB_JTAG,          // 這條線走 USB-Serial-JTAG（USJ）：C3 類晶片，或 S3／P4 改 config
+    NC_USB_OTG,           // 這條線走 USB-OTG：TinyUSB CDC（＋可選 MSC）；S2／S3／P4
 } nc_usb_mode_t;
 
 // "none" / "jtag" / "otg"（boot 與 STATUS 共用同一個字串，避免兩處寫法不同）
@@ -65,6 +65,12 @@ typedef struct {
     const char *usb_link;   // "CDC" / "usb_jtag" / NULL
     bool usb_log;           // 要不要開 log 管道
     bool usb_msc;           // 要不要把 FAT 交給 host（只有 OTG 有）
+
+    // ③ USB 這條線屬於哪一組（NC_CAP_ROUTER）：B05 建完「線 → 組」表之後寫入。
+    //    -1 = 這條線未路由（config 的 routes[] 沒有它）。之後 B07（回覆幀）、
+    //    B10（TinyUSB／log）、B11（bus）全部讀這裡 —— 唔再各自去問 router，
+    //    否則同一個決定會問四次，仲各自帶 fallback。
+    int usb_core;
 
     // 帳：目前已具備什麼（執行器維護，階段只讀）
     uint16_t ready;
@@ -97,8 +103,9 @@ const char *nc_cap_name(uint16_t bit);
 // 命名空間（全專案共用；文件、log、圖、commit message 都用同一個 token）：
 //
 //   B01…   開機階段（下表；順序執行，整輩子一次）      B03 ＝ storage+cfg
+//          B06（pool）已於 2026-11-14 移除 → B06 跳號，B07–B12 不重編號
 //   T.xxx  任務（nc_task_def.name；有棧、有核）        T.decode0、T.cdc.rx
-//   R.xxx  plan 資源／緩衝（nc_task_res_t.name）       R.nc4.rx、R.reply1
+//   R.xxx  plan 資源／緩衝（nc_task_res_t.name）       R.usb.rx、R.reply1
 //   L.xxx  通道／線（link 名；NC4 的線名）             L.CDC、L.UART
 //   C.xxxx 協議指令（16-bit）                          C.0x1101
 //   M.xxx  模塊／功能（component 或一組行為）          M.store、M.config

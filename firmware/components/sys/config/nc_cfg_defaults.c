@@ -125,7 +125,10 @@ static void system_build(void)
     s->version = NC_CFG_SCHEMA_VERSION;
     s->frame_interval_ms = 20;
 
-    // 出廠 = CDC 先：開機唔交 FAT（msc=0），log 走 USB（有 USB 的話）。
+    // 出廠 = USJ 先（所有人的預設）：有 USB-Serial-JTAG 就用 usb_jtag，
+    // 冇 USJ 才用 CDC（S2）；這由晶片表（nc_cfg_chip.c）決定。
+    // 未知晶片由 main 用編譯期能力砌一個臨時表；真的兩樣都冇 → 沒 USB。
+    // 開機唔交 FAT（msc=0），log 走 USB（有 USB 的話）。
     s->usb_msc = 0;
     s->usb_cdc_log = 1;
 
@@ -164,16 +167,6 @@ static void system_build(void)
     // 預設就把 USB 的幀同時轉去 ESPNOW：沒有 SD 設定的板子也可以做兩板互轉。
     add_route(s, "ESPNOW", "decode0");
 
-    // 2026-11-09：共用緩衝池（small／bulk／forward）。
-    // 預設全部 internal；forward 要給 UART/TCP 送，不可放 PSRAM。
-    // 2026-11-10 起 ph_pool 唔再建池（zero caller），保留形狀只為 schema 兼容。
-    s->n_pools = 3;
-    s->pools[0] = (nc_cfg_pool_t){ .name = "small", .size = 1024, .count = 8,
-                                   .where = 0, .enable = true };
-    s->pools[1] = (nc_cfg_pool_t){ .name = "bulk", .size = 4112, .count = 3,
-                                   .where = 0, .enable = true };
-    s->pools[2] = (nc_cfg_pool_t){ .name = "forward", .size = 4112, .count = 2,
-                                   .where = 0, .enable = true };
 }
 
 const nc_system_cfg_t *nc_cfg_defaults_system(void)

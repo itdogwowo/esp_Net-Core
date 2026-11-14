@@ -70,7 +70,9 @@ bool nc_core_has(int core)
     return core >= 0 && core < nc_core_count();
 }
 
-// 收斂點：所有「要求某個核」的地方都經過這裡。
+// 核心組落點（設計理念見 docs/03_notes/system-model.md §4）：
+// 所有「要求某個核」的地方都經過這裡。
+// 核唔存在 → 該核的整組（解碼器＋任務）喺仍然存在嘅核建立（現時 = core0）。
 // 同一個非法核只警告一次 —— 開機時同一個 config 錯誤可能被問好幾次，
 // 每次都印會把真正的第一因淹沒。
 int nc_core_clamp(int core)

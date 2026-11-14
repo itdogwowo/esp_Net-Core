@@ -185,58 +185,6 @@ static bool rx_take(const cJSON *rx, const char *key, int32_t lo, int32_t hi,
 
 // ───────────────────────── system ─────────────────────────
 
-static void parse_pools(const cJSON *root, nc_system_cfg_t *out, nc_cfg_stat_t *st)
-{
-    const cJSON *arr = item(item(root, "nc4"), "pool");
-    if (arr == NULL) {
-        st->defaulted++;
-        return;
-    }
-    if (!cJSON_IsArray(arr)) {
-        st->invalid++;
-        return;
-    }
-
-    out->n_pools = 0;
-    const cJSON *it = NULL;
-    cJSON_ArrayForEach(it, arr) {
-        if (out->n_pools >= NC_CFG_MAX_POOLS) {
-            st->invalid++;
-            break;
-        }
-        nc_cfg_pool_t p;
-        memset(&p, 0, sizeof(p));
-
-        const cJSON *nm = item(it, "name");
-        if (!cJSON_IsString(nm) || nm->valuestring == NULL ||
-            nm->valuestring[0] == '\0' || strlen(nm->valuestring) >= NC_CFG_NAME_MAX) {
-            st->invalid++;
-            continue;
-        }
-        snprintf(p.name, sizeof(p.name), "%s", nm->valuestring);
-        p.size  = (uint16_t)get_int(it, "size", 1024, 64, NC_CFG_REGION_MAX, st);
-        p.count = (uint8_t)get_int(it, "count", 4, 1, 32, st);
-        p.enable = get_bool(it, "enable", true, st);
-
-        const cJSON *w = item(it, "where");
-        if (w == NULL) {
-            st->defaulted++;
-            p.where = 0;
-        } else if (cJSON_IsString(w) && w->valuestring != NULL &&
-                   strcmp(w->valuestring, "psram") == 0) {
-            p.where = 1;
-        } else if (cJSON_IsString(w) && w->valuestring != NULL &&
-                   strcmp(w->valuestring, "internal") == 0) {
-            p.where = 0;
-        } else {
-            st->invalid++;
-            p.where = 0;
-        }
-
-        out->pools[out->n_pools++] = p;
-    }
-}
-
 static void parse_links(const cJSON *root, nc_system_cfg_t *out, nc_cfg_stat_t *st)
 {
     const cJSON *arr = item(item(root, "nc4"), "links");
@@ -707,12 +655,16 @@ esp_err_t nc_cfg_apply_system(const cJSON *root, nc_system_cfg_t *out, nc_cfg_st
         st->invalid++;
         return ESP_OK;
     }
-    static const char *const nc4_keys[] = { "links", "routes", "pool" };
+    static const char *const nc4_keys[] = { "links", "routes" };
     note_unknown(nc4, nc4_keys, sizeof(nc4_keys) / sizeof(nc4_keys[0]), st);
+    // 2026-11-14：nc4.pool 整組移除（small／bulk 冇用戶、forward 改用 nc_buf）。
+    // 舊 config 見到唔好壞檔：只忽略＋講一句（上面的 note_unknown 已計一筆）。
+    if (item(nc4, "pool") != NULL) {
+        ESP_LOGW(TAG, "nc4.pool 已移除（2026-11-14）→ 忽略；轉寄用 nc_buf／fwd.cN");
+    }
 
     parse_links(root, out, st);
     parse_routes(root, out, st);
-    parse_pools(root, out, st);
     return ESP_OK;
 }
 
@@ -879,6 +831,58 @@ bool nc_cfg_layer_bad(const char *layer)
         return true;
     }
     return st->missing != 0 || st->bad_json != 0 || st->bad_version != 0;
+}
+
+// ───────────────────────── 核數收斂（單核板） ─────────────────────────
+//
+// 「decode0」／「decode1」是固定字串：decode10 唔可以當成 decode1（長度要一齊比）。
+static bool is_decode(const char *s, int core)
+{
+    return s != NULL && strncmp(s, "decode", 6) == 0 &&
+           s[6] == (char)('0' + core) && s[7] == '\0';
+}
+
+nc_cfg_merge_t nc_cfg_merge_cores_in(nc_system_cfg_t *sys, nc_tasks_cfg_t *tasks,
+                                     int cores)
+{
+    nc_cfg_merge_t m = { .routes = 0, .tasks = 0 };
+    if (cores >= 2) {
+        return m;          // 雙核：config 寫咩就係咩，一個 byte 都唔改
+    }
+
+    // ① routes：decode1 → decode0。字串同長度，原位改寫（name 上限 16，夠位）。
+    if (sys != NULL) {
+        for (uint8_t i = 0; i < sys->n_routes && i < NC_CFG_MAX_ROUTES; i++) {
+            nc_route_cfg_t *r = &sys->routes[i];
+            for (uint8_t k = 0; k < r->n_out && k < NC_CFG_MAX_OUT; k++) {
+                if (!is_decode(r->out[k], 1)) {
+                    continue;
+                }
+                memcpy(r->out[k], "decode0", sizeof("decode0"));
+                m.routes++;
+            }
+        }
+    }
+
+    // ② tasks：affinity 由 core1 搬到 core0。非法 (1,1) 亦只留 core0。
+    //    未寫過的 (0,0)（= 唔跑）保持原樣 —— 合併唔等於「幫你開任務」。
+    if (tasks != NULL) {
+        for (uint8_t i = 0; i < tasks->n_tasks && i < NC_CFG_MAX_TASKS; i++) {
+            nc_task_cfg_t *t = &tasks->tasks[i];
+            if (!t->aff[1]) {
+                continue;
+            }
+            t->aff[1] = false;
+            t->aff[0] = true;
+            m.tasks++;
+        }
+    }
+    return m;
+}
+
+nc_cfg_merge_t nc_cfg_merge_cores(int cores)
+{
+    return nc_cfg_merge_cores_in(&s_sys, &s_tasks, cores);
 }
 
 // ───────────────────────── 開機載入 ─────────────────────────

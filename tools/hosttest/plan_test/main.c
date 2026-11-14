@@ -23,7 +23,7 @@ static void decl(const char *svc, const char *n, int lvl, nc_plan_class_t c, siz
 
 static void decl_system(void)
 {
-    decl("nc4",   "nc4.rx",   0, NC_PLAN_INTERNAL, 8205);
+    decl("nc4",   "usb.rx",   0, NC_PLAN_INTERNAL, 8205);
     decl("probe", "probe.hub",3, NC_PLAN_INTERNAL, 512);
     decl("pixel", "pixel.slots", 2, NC_PLAN_DMA, 10816);
     decl("asset", "assets",   3, NC_PLAN_PSRAM, 65536);
@@ -40,7 +40,7 @@ int main(void)
     avail[NC_PLAN_DMA] = 64 * 1024; avail[NC_PLAN_INTERNAL] = 128 * 1024; avail[NC_PLAN_PSRAM] = 256 * 1024;
     CHECK(nc_plan_commit(avail, false) == ESP_OK, "commit 成功");
     CHECK(nc_plan_report()->fail_count == 0, "沒有失敗項");
-    CHECK(nc_plan_get("nc4.rx") != NULL, "拿得到 nc4.rx");
+    CHECK(nc_plan_get("usb.rx") != NULL, "拿得到 usb.rx");
     CHECK(nc_plan_get("pixel.slots") != NULL, "拿得到 pixel.slots");
     CHECK(plan_host_allocs() == 3, "三個 class 各 carve 一次（共 3 次 alloc）");
 
@@ -51,7 +51,7 @@ int main(void)
     avail[NC_PLAN_DMA] = 64 * 1024; avail[NC_PLAN_INTERNAL] = 8500; avail[NC_PLAN_PSRAM] = 256 * 1024;
     CHECK(nc_plan_commit(avail, false) == ESP_OK, "commit 仍成功（不是整批失敗）");
     CHECK(nc_plan_report()->fail_count == 1, "剛好一項失敗");
-    CHECK(nc_plan_get("nc4.rx") != NULL, "level 0 先拿到");
+    CHECK(nc_plan_get("usb.rx") != NULL, "level 0 先拿到");
     CHECK(nc_plan_get("probe.hub") == NULL, "後面的 probe 被標記失敗");
     CHECK(nc_plan_was_shed("probe.hub"), "was_shed 回報正確");
     CHECK(nc_plan_get("pixel.slots") != NULL, "其他 class 不受影響");
@@ -60,9 +60,9 @@ int main(void)
     nc_plan_reset();
     plan_host_reset(64 * 1024, 8500, 256 * 1024);
     decl("probe", "probe.hub", 3, NC_PLAN_INTERNAL, 512);   // 先宣告
-    decl("nc4",   "nc4.rx",    0, NC_PLAN_INTERNAL, 8205);  // 後宣告但 level 小
+    decl("nc4",   "usb.rx",    0, NC_PLAN_INTERNAL, 8205);  // 後宣告但 level 小
     CHECK(nc_plan_commit(avail, false) == ESP_OK, "commit 成功");
-    CHECK(nc_plan_get("nc4.rx") != NULL, "level 0 仍然拿到");
+    CHECK(nc_plan_get("usb.rx") != NULL, "level 0 仍然拿到");
     CHECK(nc_plan_get("probe.hub") == NULL, "level 3 失敗");
 
     printf("\n[4] 宣告窗口 / 重名\n");

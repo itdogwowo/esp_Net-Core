@@ -18,7 +18,7 @@ boot.svg 講「有幾多階段、各自做乜」；buffers.svg 講「一條通�
 --------------------------------
 · 毫秒：2026-11-08 的九階實測（docs/00_pm/status.md §7.23）。capability／hwcheck／
   pool 三個階段係之後才拆出嚟，**當時唔存在** → 標「未量測」，唔會假裝係 0.0 ms。
-· 位元組：main.c 的 plan 宣告（nc4.rx 4,192、nc4.reply0/1 2,615、uart.rx 1,024、
+· 位元組：main.c 的 plan 宣告（usb.rx 4,128、nc4.reply0/1 2,615、uart.rx 1,024、
   tcp.rx 16,410、fwd.cX 4×8,221）＋ 各處 xTaskCreate 的 stack 常數。
 · 「0」唔等於冇成本：IDF 自己的（NVS 頁快取、FAT／WL、ETH DMA 51.2 KB、TinyUSB、
   Wi-Fi ~50 KB）刻意唔計入，因為嗰啲唔係我們的表可以控制；圖右下角有寫明。
@@ -166,7 +166,7 @@ ROWS = [
      ["nc_core_probe() → ctx.cores（1／2）",
       "usb_resolve() → ctx.usb_mode／usb_link／usb_log／usb_msc"],
      None, C_CAP, 0, 0,
-     ["0 B：只寫 nc_boot_ctx 五個欄位，一個 heap_caps_malloc 都冇"]),
+     ["0 B：只寫 nc_boot_ctx 六個欄位，一個 heap_caps_malloc 都冇"]),
 
     ("hwcheck", None,
      ["hardware.json 的 claim 對帳（腳位衝突開機即見）"],
@@ -174,17 +174,12 @@ ROWS = [
      ["0 B：只稽核，唔配置"]),
 
     ("hardware", 0.33,
-     ["ETH／PHY、SD、UART 腳位；nc4_router_set() 收下路由表"],
+     ["ETH／PHY、SD 起來；線→組表（nc4_router_set）；USB 那條線的組 → ctx.usb_core"],
      None, C_HW, 6144, 0,
      ["tcp_nc4 接受連線任務 6,144 B 棧（P4-ETH 才有；C3 冇）"]),
 
-    ("pool", None,
-     ["nc4.pool 已停用 → 舊設定全部忽略（唔配記憶體）"],
-     None, C_MEM, 0, 0,
-     ["0 B：留返個位，但已經冇人用"]),
-
     ("declare", 10.45,
-     ["nc_task_declare_all()：decode0／1、nc4.rx、reply0／1、uart.rx、tcp.rx",
+     ["nc_task_declare_all()：decode0／1、usb.rx、reply0／1、uart.rx、tcp.rx",
       "只登記「要幾大」，仲未 malloc"],
      None, C_MEM, 0, 0,
      ["0 B：帳面而已 —— 好處係 commit 之前就知夠唔夠"]),
@@ -193,8 +188,8 @@ ROWS = [
      ["nc_plan_commit()：每個 class 一次 carve → 緩衝真正落地",
       "nc_wifi_boot()（有 Wi-Fi 才會配）"],
      ["wifi_mgr 6,144 B 棧（nc_wifi_boot，如有 Wi-Fi）"],
-     C_MEM, 21626, 5230,
-     ["nc4.rx 4,192 ＋ uart.rx 1,024 ＋ tcp.rx 16,410 ＝ 內部 21,626",
+     C_MEM, 21562, 5230,
+     ["usb.rx 4,128 ＋ uart.rx 1,024 ＋ tcp.rx 16,410 ＝ 內部 21,562",
       "reply0／1 2,615×2 ＝ PSRAM 5,230（BULK 類；冇 PSRAM 就落返內部）"]),
 
     ("start", 5.39,
@@ -230,6 +225,13 @@ FWD_ROW = ("runtime", None,
            C_MEM, 0, 32884,
            ["nc_buf PSRAM 4 格 × 8,221 B（16 名字 ＋ 8,205 幀）＝ 32,884／核",
             "唔轉寄就一個 byte 都唔配（單核／冇 PSRAM 直接唔建）"])
+
+
+# B 的號碼是契約（見 naming.md §7）：B06（pool）已於 2026-11-14 移除，
+# 所以這裡保留跳號，不重編號。順序 = ROWS 的順序。
+STAGE_IDS = ["B01", "B02", "B03", "B04", "B05",
+             "B07", "B08", "B09", "B10", "B11", "B12"]
+assert len(STAGE_IDS) == len(ROWS), "STAGE_IDS 同 ROWS 數量對不上"
 
 
 def build():
@@ -284,13 +286,13 @@ def build():
     head_y = ROWS_Y - 14
     text(AX_RAIL, head_y, "累計 ms", 10.5, FAINT, 500, mono=True, anchor="end")
     text(C0_X + 12, head_y, "core 0", 13, C0, 700)
-    text(C0_X + 78, head_y, "app_main 喺呢個核跑 → 十二個階段全部順序喺呢邊", 10.5, MUTED)
+    text(C0_X + 78, head_y, "app_main 喺呢個核跑 → 十一個階段全部順序喺呢邊", 10.5, MUTED)
     text(C1_X + 12, head_y, "core 1", 13, C1, 700)
     text(C1_X + 78, head_y, "大部分人以為嘅「雙核開機」其實好靜", 10.5, MUTED)
 
     # ── 時段脊柱（左側）────────────────────────────────────────────
-    periods = [("準備", 0, 2, C_PREP), ("決定", 2, 6, C_CAP),
-               ("落地", 6, 9, C_MEM), ("開通道", 9, 12, C_LINK)]
+    periods = [("準備", 0, 2, C_PREP), ("決定", 2, 5, C_CAP),
+               ("落地", 5, 8, C_MEM), ("開通道", 8, 11, C_LINK)]
     for pname, a, b, col in periods:
         y0, y1 = spans[a][0], spans[b - 1][1]
         out.append(f'<rect x="{SPINE_X:.1f}" y="{y0:.1f}" width="13" '
@@ -321,7 +323,7 @@ def build():
         rect(C0_X, bx0, C0_W, bh, WHITE, RULE, 1, 5)
         out.append(f'<rect x="{C0_X:.1f}" y="{bx0:.1f}" width="3.5" height="{bh:.1f}" '
                    f'rx="1.75" fill="{col}"/>')
-        text(C0_X + 14, bx0 + 17, f"B{i + 1:02d}  {name}", 12.5, INK, 600, mono=True)
+        text(C0_X + 14, bx0 + 17, f"{STAGE_IDS[i]}  {name}", 12.5, INK, 600, mono=True)
         if ms is not None:
             text(C0_X + C0_W - 12, bx0 + 17, f"{ms:.2f} ms", 10, MUTED, 500,
                  mono=True, anchor="end")
@@ -345,8 +347,8 @@ def build():
 
     # ── 等閘：start 建任務 → channels 才放行 ───────────────────────
     # 條帶畫喺兩條核道之間的縫，唔會蓋住任何階段的方塊。
-    gate_y = spans[10][0]                       # channels 行頂 = usb 結束
-    wait_top = spans[8][0]                      # start 行頂
+    gate_y = spans[9][0]                        # channels 行頂 = usb 結束
+    wait_top = spans[7][0]                      # start 行頂
     for sx in (C0_X + C0_W + 6, C1_X + C1_W + 6):
         out.append(f'<rect x="{sx:.1f}" y="{wait_top + 3:.1f}" width="8" '
                    f'height="{gate_y - wait_top - 6:.1f}" fill="url(#hatch)" '
@@ -489,7 +491,7 @@ def build():
 
     yy = BUF_Y + 78
     for i, (name, ms, c0, c1, col, bi, bp, btxt) in enumerate(ROWS):
-        buf_row(yy, f"B{i + 1:02d} {name}", col, bi, bp, btxt)
+        buf_row(yy, f"{STAGE_IDS[i]} {name}", col, bi, bp, btxt)
         yy += BUF_ROW_H
     buf_row(yy, "—  " + FWD_ROW[0], FWD_ROW[4], FWD_ROW[5], FWD_ROW[6], FWD_ROW[7],
             dim=True)
@@ -501,18 +503,18 @@ def build():
     line(40, yy + 4, W - 40, yy + 4, INK2, 1.2)
     text(50, yy + 24, "合計（雙核 P4-ETH）", 11.5, INK, 700)
     text(250, yy + 24,
-         "內部 41,338 B（40.4 KB）＋ PSRAM 5,230 B（5.1 KB）；轉寄按需再加 32,884 B／核",
+         "內部 41,274 B（40.3 KB）＋ PSRAM 5,230 B（5.1 KB）；轉寄按需再加 32,884 B／核",
          10.5, INK2)
     text(VAL_X_I, yy + 24, f"{tot_i:,}", 11, INK, 700, mono=True, anchor="end")
     text(VAL_X_P, yy + 24, f"{tot_p:,}", 11, INK, 700, mono=True, anchor="end")
 
     text(50, yy + 48,
-         "單核 C3 同一份表：nc4.jtag 4,192 ＋ reply0 2,615（冇 PSRAM → BULK 落返內部）"
-         "＋ uart.rx 1,024 ＋ decode0 3,072 ＋ nc_log 2,560 ＝ 13,463 B（13.1 KB）",
+         "單核 C3 同一份表：usb.rx 4,128 ＋ reply0 2,615（冇 PSRAM → BULK 落返內部）"
+         "＋ uart.rx 1,024 ＋ decode0 3,072 ＋ nc_log 2,560 ＝ 13,399 B（13.1 KB）",
          10.5, C0)
     text(50, yy + 66,
          "少咗乜：decode1（3,072）、tcp.rx（16,410）、tcp_nc4（6,144）、cdc.rx（1,280，"
-         "JTAG 係 PULL 冇 producer）、fwd（32,884）—— 差 27.3 KB 就係「雙核值唔值」。",
+         "JTAG 係 PULL 冇 producer）、fwd（32,884）—— 差 27.2 KB 就係「雙核值唔值」。",
          10.5, C0)
 
     # 右下角：唔計入嘅東西
@@ -529,7 +531,7 @@ def build():
     rich(40, H - 36, [
         ("簡寫", MUTED, 600, False),
         ("：B01–B12 ＝ 開機階段（數字只代表先後）｜"
-         "ctx ＝ nc_boot_ctx（跨階段唯一一份，只五個欄位）｜"
+         "ctx ＝ nc_boot_ctx（跨階段唯一一份，只六個欄位；usb_core 由 B05 寫）｜"
          "usb_mode／link／log／msc ＝ USB 模式／線名／log 閘／MSC 閘｜"
          "MSC ＝ Mass Storage Class（把 FAT 當隨身碟）｜"
          "capability 係階段名，唔係 NC_CAP_* 能力位", FAINT, 400, False),

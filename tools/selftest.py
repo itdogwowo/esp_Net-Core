@@ -176,7 +176,7 @@ def main():
         if f:
             body = s16(f[1])
             record("  含 plan 與 hub", "\"plan\"" in body and "\"hub\"" in body)
-            record("  plan 有 nc4.rx 且成功", "nc4.rx" in body and "\"fail\":0" in body)
+            record("  plan 有 usb.rx 且成功", "usb.rx" in body and "\"fail\":0" in body)
             record("  hub 有 probe", "probe" in body)
 
         print("\n[解碼器]")

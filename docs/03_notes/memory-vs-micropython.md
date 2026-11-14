@@ -23,7 +23,7 @@
 | **燒錄 bin** | **677,168** | | |
 
 - **開機可用 heap ≈ 443,392 B（433 KB）** = `sram_low` 剩 50,176 + `sram_high` 393,216。
-- **plan 之後 ≈ 397,702 B（388 KB）**：`nc4.rx` 4,192 + `uart.rx` 1,024 + `tcp.rx` 16,410 +
+- **plan 之後 ≈ 397,702 B（388 KB）**：`usb.rx` 4,192 + `uart.rx` 1,024 + `tcp.rx` 16,410 +
   `probe.hub` 512 + 任務堆疊 ~23,552（decode 2×6,144 + slow 4,096 + fx 4,096 + hello 3,072）。
 - **PSRAM 32 MB**（hex 200 MHz）靜態 0；`fx.arena` 512 KB 開機由 plan 從 PSRAM 拿，其餘幾乎全空。
 - 靜態最大三塊仍然是 USB：`_cdcd_itf` 12,548 + `_mscd_epbuf` 8,192 + `_cdcd_epbuf` 1,024 ≈ 21.3 KB，

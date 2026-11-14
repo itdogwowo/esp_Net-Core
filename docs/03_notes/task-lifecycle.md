@@ -326,7 +326,7 @@ runtime 要增減的東西（`.fxe` 模組）走父層 arena：`nc_buf_carve()` 
 
 1. `name` 唯一、`kind` 選對（房東 = `SYSTEM`，租戶 = `NORMAL`/`EFFECT`）。
 2. 記憶體：能用 `declare()` 就唔好用寫死的 `mem[]`（照實際硬體算）。
-   每一項都要有**全系統唯一**的名字（`<域>.<用途>`，例如 `nc4.rx`）。
+   每一項都要有**全系統唯一**的名字（`<域>.<用途>`，例如 `usb.rx`）。
 3. 需要 loop 才寫 `loops[]`；只做初始化就唔要 loop。
 4. `on_start` 是**唯一**拿資源指標的地方；不要在別處 `nc_plan_get()`。
 5. loop 一定要 `while (!nc_task_exit_requested())`，並且**有阻塞**（`vTaskDelay` / queue / semaphore）。

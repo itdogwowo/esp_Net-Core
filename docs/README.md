@@ -10,7 +10,7 @@
 | **00_pm** 項目管理 | 想知道「做到哪、接下來做什麼」的人 | 現況、路線圖、決策與待辦 | 6 |
 | **01_protocol** 協議層 | 對接方 / 寫 transport / 寫 PC 工具的人 | NC4 在哪些通道上跑、每個通道要自己做什麼 | 3 |
 | **02_guides** 使用教學 | 要 build / 燒錄 / 跑測試 / 選連線的人 | 工具怎麼用、測試怎麼跑、連線怎麼選、數字怎麼判讀、**量測方法怎麼重跑** | 4 |
-| **03_notes** 設計筆記 | 維護者 / 想了解設計脈絡的人 | 架構、分層、路由、任務模型、記憶體、研究、上板紀錄 | 49 |
+| **03_notes** 設計筆記 | 維護者 / 想了解設計脈絡的人 | 架構、分層、路由、任務模型、記憶體、研究、上板紀錄 | 57 |
 
 > **趕時間先看**：[00_pm/status.md](00_pm/status.md) —— 一頁涵蓋「已驗證的數字、已定案的架構、還沒做的事、要測的場景」。
 
@@ -64,7 +64,8 @@
 | [net-lines.md](03_notes/net-lines.md) | **統一網絡線路 TCP／UDP／WS → nc4_bus**：read/send 介面、單一 parser、S3 WiFi 上板 RTT（TCP 12.2 ms／UDP 11.9 ms／WS 21.4 ms）、burst 限制、P4 後續 |
 | [ota-web.md](03_notes/ota-web.md) | **網絡 OTA 與網頁 v0**：`POST /ota` raw `.bin`、`GET /` 最小頁、`/config.json`；**已上板：`/` 200、`/ota` 0.1.1→0.1.2**；安全只限可信 LAN |
 | [file-transfer.md](03_notes/file-transfer.md) | **CDC FAT（檔案指令）**：`0x2001–0x200B`（含 `FILE_SCAN` + `/manifest.json`）；`.part`→sha256→`.bak` 的寫入流程、pending／confirm／undo、FAT 擁有權、UI 對接欄位；**給冇 USB driver、只得 CDC 的 MCU** |
-| [usb-config.md](03_notes/usb-config.md) | **USB 配置與出廠基線**：晶片 USB 能力表（S2/S3/P4/C3/C5/C6/C61/H2）、開機次序（晶片能力→config→宣告→start→usb）、出廠＝USJ 先（msc=0，OTG 由 config 換）、「冇登記就唔佔」的 link 語義、貼身 4,128 B parser；P4 多 PHY 與 `max_chunk` 協商係下一步 |
+| [usb-config.md](03_notes/usb-config.md) | **USB 配置與出廠基線**：晶片 USB 能力表（S2/S3/P4/C3/C5/C6/C61/H2）、開機次序（晶片能力→config→B03 capability（核數→單核併核→USB 人格）→宣告→start→usb）、出廠＝USJ 先（msc=0，OTG 由 config 換）、「冇登記就唔佔」的 link 語義、貼身 4,128 B parser；P4 多 PHY 與 `max_chunk` 協商係下一步 |
+| [boot-log.md](03_notes/boot-log.md) | **開機 log 的兩個出口**：console（通電就有）vs nc_log 管道（B10 才開）；正常／除錯模式差別、S3 換 OTG 時舊 USJ 的行不會補到新 CDC、C3 UART0 在 B10 後停、冇 USB 板＋debug=1 會完全冇 output |
 | [buffer-topology.md](03_notes/buffer-topology.md) | **目前緩衝結構**：`mem.buf` 14 個 buffer、SRAM／PSRAM 配置、CDC/UART 256 B×4 vs network 2 KB／24 KB、zero-copy producer 資料流 |
 | [contracts.md](03_notes/contracts.md) | **契約總表（單一入口）**：任務管理器界線與硬上限、任務↔緩衝區（C1–C11 摘要）、**優先級保留區 7–15**、解碼器／動作（handler 唔可以重入）、通道／路由、**初次開機與配置生命週期**、現況盤點、待決定清單 |
 | [glossary.md](03_notes/glossary.md) | **字彙表（術語一句話）**：任務 vs 線程、`level` vs `layer`、緩衝區／格／arena／S·P·DMA／S2P 四組合、退役的詞（hub／pool／環／plan）與改用什麼。**新名詞先查這裡** |
@@ -74,6 +75,7 @@
 | [execution-model.md](03_notes/execution-model.md) | **執行模型**：FreeRTOS 每 loop 一條 task vs 每核合作式大循環，兩者的取捨與選擇 |
 | [execution-rules.md](03_notes/execution-rules.md) | **執行規則**：搶佔的條件、核心隔離（跨核只准有資料、唔准有喚醒）、等待的三種形態、熱路徑零 log、緩衝與堆疊的宣告流程、測試歸類 |
 | [core-isolation.md](03_notes/core-isolation.md) | **核隔離不變式（2026-11-04 定義）**：兩個核各自擁有什麼、什麼可以跨、違規清單 |
+| [system-model.md](03_notes/system-model.md) | **系統模型（設計理念）**：System 組件 → 每個核一個「核心組」（解碼器是根＋其上任務）；兩組完全分離；落點只有一條規則（核不存在 → 整組落 core0）；與 B01–B12 的對照、現況落差 |
 | [cross-core.md](03_notes/cross-core.md) | **跨核心：邊些中斷會打到另一個核**：中斷親和性與實際干擾來源 |
 | [decode-routes.md](03_notes/decode-routes.md) | **解碼路線與接收緩衝（現況）**：五條通道各自跑在哪一核、用哪塊緩衝、分派路徑；「執行完才能收下一個」對一半；heap/BSS 的隱形緩衝清單與優先序 |
 | [task-model.md](03_notes/task-model.md) | **任務模型（房東／租戶）**：核心 vs 任務的分界、三個 component、開機流程、`tasks.json` 格式與補寫規則、`.fxe` 怎麼變任務、已驗證清單 |
@@ -93,7 +95,7 @@
 | [hardware-bus.md](03_notes/hardware-bus.md) | **硬體歸屬（設計紀錄，未實作）**：現在是裝配層人工分配（一裝置一 owner）、為什麼不需要執行期仲裁、哪天要做時的形狀與位置（task 層），以及三個觸發條件 |
 | [rx-architecture.md](03_notes/rx-architecture.md) | **收／解路徑正式架構（規劃）**：分核／零複製的能力邊界、缺什麼、component 切法、config 與記憶體、P0–P5 遷移 |
 | [buffer-manager-status.md](03_notes/buffer-manager-status.md) | **（設計已併入 [buffers.md](03_notes/buffers.md)）** 緩衝管理器實作現況：三個原語、N 的語義、不變量、測試結果、已知缺陷 |
-| [buffer-pool.md](03_notes/buffer-pool.md) | **（設計已併入 [buffers.md](03_notes/buffers.md)，本頁保留量測）** 共用緩衝池與 PSRAM 實測（2026-11-09）：三個 size class（small／bulk／forward）、descriptor／refcount、`nc4.pool` 設定、跨核轉寄 queue、`0xF01C` 量到的 internal 240 MB/s vs PSRAM 21–33 MB/s、38.4 KB frame 的可行性計算、限制與未做 |
+| [buffer-pool.md](03_notes/buffer-pool.md) | **（`nc4.pool` 已於 2026-11-14 整組移除；設計已併入 [buffers.md](03_notes/buffers.md)，本頁保留量測）** 共用緩衝池與 PSRAM 實測（2026-11-09）：三個 size class（small／bulk／forward）、descriptor／refcount、`nc4.pool` 設定、跨核轉寄 queue、`0xF01C` 量到的 internal 240 MB/s vs PSRAM 21–33 MB/s、38.4 KB frame 的可行性計算、限制與未做 |
 | [psram-surface.md](03_notes/psram-surface.md) | **PSRAM surface／pass 管理器（設計）**：什麼叫「用對 PSRAM」（數 pass、internal tile、分塊 bound latency，不是切細就快）、`nc_surface` 的 buffer／tile／sink／stats API、direct vs staging、38.4 KB frame 的預算、決策矩陣與落地順序 |
 | [comm-buffers.md](03_notes/comm-buffers.md) | **（設計已併入 [buffers.md](03_notes/buffers.md)）** 通訊緩衝定案（2026-11-09）：RX 留 internal、轉發走 PSRAM 的 `nc_hub`（per 目的 link × 來源核、strict FIFO、writer mutex）、`nc_pool.forward` 取消、S3 138 KB／P4 132 KB PSRAM、失敗政策與 P0–P4 遷移 |
 | [wifi-espnow-led-tests.md](03_notes/wifi-espnow-led-tests.md) | **Wi-Fi／ESP-NOW／I80 測試紀錄（2026-11-09）**：ESP-NOW P2P＋router 閉環、AP 模式、STA DHCP 未取 IP、本地 AP reset、GRBW/NeoPixelBus vs I80 16-lane 的判斷、16×600 50 FPS 預算與量測結構、PSRAM 競爭數據 |

@@ -5,6 +5,7 @@
 >
 > 相關：[task-lifecycle.md](task-lifecycle.md)（建立／啟動／停止的完整流程與歸還規則）、
 > [task-fx-open-questions.md](task-fx-open-questions.md)（未定問題）、
+> [system-model.md](system-model.md)（在上層：System 組件與核心組——任務是組的一部分）、
 > [routing.md](routing.md)（解碼路由）、[writing-a-task.md](writing-a-task.md)（怎麼寫任務）
 
 ---

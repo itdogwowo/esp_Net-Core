@@ -152,6 +152,16 @@ void nc4_parser_reset(nc4_parser_t *parser);
 //   bad_hdr：VER 不對或 LEN 超上限（多半是根本沒對上 SOF）
 void nc4_parser_errors(const nc4_parser_t *parser, uint32_t *crc_err, uint32_t *bad_hdr);
 
+// 自我測試：建立一個小 RING parser，餵兩個 frame（第二個跨環），
+// 檢查 CRC／header 都對、max payload 有更新。回 true = 通過。
+bool nc4_parser_selftest(void);
+
+// A/B：同一批 frame 分別餵 RING parser 與線性 STREAM parser，量 us 與完成幀數。
+// 只在 tests 指令用；回 true = 兩邊都完成 frames 幀。
+bool nc4_parser_bench(uint32_t frames, uint32_t payload,
+                      uint32_t *ring_us, uint32_t *lin_us,
+                      uint32_t *ring_n, uint32_t *lin_n);
+
 // 尺寸量測：這條線收過的最大 payload（max_dlen 含被丟棄的超大幀，max_ok 只算成功 dispatch 的）。
 // 用途：parser region = 13 + max_dlen + 餘裕 —— 用實測取代「先給 8 KB」。
 void nc4_parser_peaks(const nc4_parser_t *parser, uint32_t *max_dlen, uint32_t *max_ok);

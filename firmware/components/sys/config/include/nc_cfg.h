@@ -79,6 +79,32 @@ const nc_tasks_cfg_t  *nc_cfg_tasks(void);
 const nc_hardware_cfg_t *nc_cfg_hardware(void);
 const nc_cfg_stat_t   *nc_cfg_stat_of(const char *layer);   // "system" / "tasks"
 
+// ───────────────────── 核數收斂：單核板的「兩核 → 一核」 ─────────────────────
+// config 是按「最多幾多核」寫的（S3 的 system.json 寫 decode1）；同一份檔搬到
+// 單核板（C3／C6／H2）時，要在同一個地方收斂成硬體真的有的核數。
+//
+// **為什麼在 config 層做**：這是「用戶的要求 vs 硬體的事實」的決定，唔應該由每個
+// 消費者（router、decoder 個數、任務管理器、USB 服務組）各自再夾一次 —— 那樣同一個
+// 決定會喺四個地方各判一次、各印一句，時間同講法都唔同。
+//
+// 收斂的兩件事（cores < 2 時）：
+//   · routes[].out[] 的 decode1 → decode0
+//   · tasks[].affinity 的 core1 → core0（兩核的任務併成一核；(1,1) 亦只留 core0）
+// 只改 RAM 裡的 struct，**唔寫返 /data/config**：檔案永遠是用戶那一份，
+// 每塊板各自按自己的核數開機（換板、換 build 都唔會改到用戶的設定）。
+typedef struct {
+    uint8_t routes;   // 幾條 route 的 decode1 被收斂
+    uint8_t tasks;    // 幾條任務的 affinity 被搬到 core0
+} nc_cfg_merge_t;
+
+// 純函數（host test 用）：對任意兩份 struct 收斂。cores >= 2 → 全 0、一個 byte 都唔改。
+// sys／tasks 可以傳 NULL（只想處理其中一層）。
+nc_cfg_merge_t nc_cfg_merge_cores_in(nc_system_cfg_t *sys, nc_tasks_cfg_t *tasks,
+                                     int cores);
+
+// 對這次開機載入的 config 套用同一件事（B03 capability 呼叫一次）。
+nc_cfg_merge_t nc_cfg_merge_cores(int cores);
+
 // link kind 的字串名（"cdc" / "usb_jtag" …）；只給 log／STATUS，不參與解析。
 const char *nc_cfg_kind_name(nc_link_kind_t kind);
 

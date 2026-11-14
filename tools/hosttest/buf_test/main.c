@@ -285,6 +285,52 @@ static void test_carve(void)
     CHECK(nc_buf_count() == 0, "清空");
 }
 
+static void test_ring(void)
+{
+    printf("\n-- RING：真環形、read_segments 兩段 --\n");
+    nc_buf_t *b = nc_buf_create("r.ring", NC_BUF_SRAM, 64, 1,
+                                NC_BUF_F_RUNTIME | NC_BUF_F_STREAM | NC_BUF_F_RING);
+    CHECK(b != NULL, "建立 RING 64 B");
+    uint8_t src[64];
+    for (int i = 0; i < 64; i++) {
+        src[i] = (uint8_t)i;
+    }
+    CHECK(nc_buf_write(b, src, 40) == 40, "寫 40");
+    CHECK(nc_buf_pending(b) == 40 && nc_buf_space(b) == 24, "pending 40 / space 24");
+
+    const uint8_t *p0 = NULL, *p1 = NULL;
+    uint32_t n0 = 0, n1 = 0;
+    CHECK(nc_buf_read_segments(b, &p0, &n0, &p1, &n1) == 40, "讀 40");
+    CHECK(n0 == 40 && n1 == 0, "一段");
+    CHECK(p0 != NULL && p0[0] == 0 && p0[39] == 39, "內容正確");
+
+    const uint8_t *rp = nc_buf_read_ptr(b, NULL);
+    CHECK(rp == p0, "read_ptr 回第一段");
+    CHECK(nc_buf_skip(b, 32) == ESP_OK, "消費 32");
+    CHECK(nc_buf_pending(b) == 8, "剩 8");
+
+    CHECK(nc_buf_write(b, src, 40) == 40, "再寫 40（跨環）");
+    CHECK(nc_buf_pending(b) == 48, "pending 48");
+    CHECK(nc_buf_read_segments(b, &p0, &n0, &p1, &n1) == 48, "回 48");
+    CHECK(n0 == 32 && n1 == 16, "兩段 32 + 16");
+    CHECK(p0 == nc_buf_raw(b, 0) + 32 && p1 == nc_buf_raw(b, 0), "第二段由頭開始");
+    CHECK(nc_buf_skip(b, 48) == ESP_OK, "全部消費");
+    CHECK(nc_buf_pending(b) == 0 && nc_buf_space(b) == 64, "歸零");
+
+    CHECK(nc_buf_write(b, src, 40) == 40, "歸零後再寫");
+    CHECK(nc_buf_skip(b, 40) == ESP_OK, "再清空");
+    CHECK(nc_buf_release(b) == ESP_OK, "release RING");
+
+    // 線性 STREAM 的 read_segments 仍然只有一段。
+    nc_buf_t *l = nc_buf_create("r.lin", NC_BUF_SRAM, 64, 1,
+                                NC_BUF_F_RUNTIME | NC_BUF_F_STREAM);
+    CHECK(l != NULL, "建立線性 STREAM 64 B");
+    CHECK(nc_buf_write(l, src, 10) == 10, "寫 10");
+    CHECK(nc_buf_read_segments(l, &p0, &n0, &p1, &n1) == 10, "回 10");
+    CHECK(n0 == 10 && n1 == 0 && p1 == NULL, "線性永遠一段");
+    CHECK(nc_buf_release(l) == ESP_OK, "release 線性");
+}
+
 int main(void)
 {
     test_basic();
@@ -297,6 +343,7 @@ int main(void)
     test_registry_full();
     test_json_truncation();
     test_stream();
+    test_ring();
     test_abort();
     test_carve();
 

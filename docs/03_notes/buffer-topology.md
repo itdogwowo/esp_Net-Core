@@ -17,7 +17,7 @@
 | `UART.slots` | S | 256 | 4 | UART PUSH slots |
 | `nc4.reply0` | P | 2615 | 1 | NC4 回覆緩衝（core0） |
 | `nc4.reply1` | P | 2615 | 1 | NC4 回覆緩衝（core1） |
-| `nc4.rx` | S | 4192 | 1 | NC4 plan 的 RX stream |
+| `usb.rx` | S | 4192 | 1 | NC4 plan 的 RX stream |
 | `uart.rx` | S | 1024 | 1 | UART RX plan |
 | `ESPNOW.rx` | S | 64 | 1 | ESP-NOW 小訊息 |
 | `probe.hub` | S | 512 | 1 | probe/hub |

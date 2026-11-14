@@ -88,6 +88,10 @@ struct nc_buf {
     uint32_t st_off;       // 讀起點
     uint32_t st_end;       // 寫終點（st_end - st_off = pending）
 
+    // RING 模式：單調計數（st_in - st_out = pending）；容量 = slot_bytes
+    uint32_t st_in;
+    uint32_t st_out;
+
     uint32_t generation;   // 每次 publish（put_end）＋1；換手再＋1
     uint32_t puts, gets, fail_full, fail_big, viol, aborts;
     uint32_t by_s2s, by_s2p, by_p2s, by_p2p;   // 各方向的累計 bytes
@@ -96,6 +100,30 @@ struct nc_buf {
 
 static nc_buf_t *s_reg[NC_BUF_MAX];
 static uint32_t s_next_gen = 1;
+
+// registry 的整體位址範圍：來源指標唔在這個範圍內就唔使逐條掃。
+static uintptr_t s_reg_lo = UINTPTR_MAX;
+static uintptr_t s_reg_hi;
+
+static void reg_range_recalc(void)
+{
+    s_reg_lo = UINTPTR_MAX;
+    s_reg_hi = 0;
+    for (int i = 0; i < NC_BUF_MAX; i++) {
+        const nc_buf_t *b = s_reg[i];
+        if (b == NULL) {
+            continue;
+        }
+        const uintptr_t lo = (uintptr_t)b->data;
+        const uintptr_t hi = lo + (size_t)b->slot_bytes * b->n;
+        if (lo < s_reg_lo) {
+            s_reg_lo = lo;
+        }
+        if (hi > s_reg_hi) {
+            s_reg_hi = hi;
+        }
+    }
+}
 
 // ───────────────────────── 內部工具 ─────────────────────────
 
@@ -116,6 +144,10 @@ static bool range_has(const void *base, size_t bytes, const void *p)
 // 這一條就是「工具可以自動判斷」的部分：指標在不在我們自己的緩衝區、哪一條、哪個空間。
 static const nc_buf_t *src_buf_of(const void *p)
 {
+    const uintptr_t v = (uintptr_t)p;
+    if (v < s_reg_lo || v >= s_reg_hi) {
+        return NULL;                    // 絕大多數來源（static／heap）走這條
+    }
     for (int i = 0; i < NC_BUF_MAX; i++) {
         const nc_buf_t *b = s_reg[i];
         if (b != NULL && range_has(b->data, (size_t)b->slot_bytes * b->n, p)) {
@@ -125,17 +157,13 @@ static const nc_buf_t *src_buf_of(const void *p)
     return NULL;
 }
 
-static bool src_is_psram(const void *p)
-{
-    const nc_buf_t *sb = src_buf_of(p);
-    return (sb != NULL) ? (sb->where == NC_BUF_PSRAM) : buf_is_ext_ram(p);
-}
 
 static void account_copy(nc_buf_t *b, const void *src, uint32_t len)
 {
     const nc_buf_t *sb = src_buf_of(src);
     const bool dst_p = (b->where == NC_BUF_PSRAM);
-    const bool src_p = (sb != NULL) ? (sb->where == NC_BUF_PSRAM) : src_is_psram(src);
+    // 唔好再叫 src_is_psram()：它會再掃一次 registry。sb 已經分類好了。
+    const bool src_p = (sb != NULL) ? (sb->where == NC_BUF_PSRAM) : buf_is_ext_ram(src);
     // 來源係「另一條 buffer」→ 這次 copy 有可能是可以避免的（改用 borrow 或 handover）。
     // 工具唔會自動幫你改，但會計出來，令「隱形 copy」在 mem.buf 現形。
     if (sb != NULL && sb != b) {
@@ -193,8 +221,8 @@ static nc_buf_t *buf_init(const char *name, void *region, size_t region_bytes,
         BUF_LOGE("nc_buf_create: 參數唔合法");
         return NULL;
     }
-    if ((flags & NC_BUF_F_STREAM) && n != 1) {
-        BUF_LOGE("nc_buf_create: STREAM 模式的 n 必須係 1（收到 %u）", (unsigned)n);
+    if ((flags & (NC_BUF_F_STREAM | NC_BUF_F_RING)) && n != 1) {
+        BUF_LOGE("nc_buf_create: STREAM／RING 模式的 n 必須係 1（收到 %u）", (unsigned)n);
         return NULL;
     }
     const size_t bytes = (size_t)slot_bytes * n;
@@ -247,9 +275,11 @@ static nc_buf_t *buf_init(const char *name, void *region, size_t region_bytes,
     b->generation = 0;
 
     s_reg[slot] = b;
+    reg_range_recalc();
     BUF_LOGI("buf %-10s %u x %u B（%s，%s，合計 %u B）", b->name, (unsigned)n,
              (unsigned)slot_bytes, where_name(b->where),
-             (flags & NC_BUF_F_STREAM) ? "STREAM" : "FIFO", (unsigned)bytes);
+             (flags & NC_BUF_F_RING) ? "RING" :
+             ((flags & NC_BUF_F_STREAM) ? "STREAM" : "FIFO"), (unsigned)bytes);
     return b;
 }
 
@@ -312,6 +342,7 @@ void *nc_buf_put_begin(nc_buf_t *b, uint32_t reserve)
         b->fail_full++;
         return NULL;
     }
+    __atomic_thread_fence(__ATOMIC_ACQUIRE);   // 見到 FREE 才覆寫這一格
     const int idx = b->w;
 
     nc_buf_desc_t *d = &b->desc[idx];
@@ -344,6 +375,7 @@ esp_err_t nc_buf_put_end(nc_buf_t *b, uint32_t len)
     }
     d->len = len;
     d->gen = ++s_next_gen;
+    __atomic_thread_fence(__ATOMIC_RELEASE);   // 資料／len 先寫完，才標 READY
     d->state = NC_BUF_ST_READY;
     b->generation++;
     b->puts++;
@@ -390,6 +422,7 @@ void *nc_buf_get(nc_buf_t *b, uint32_t *len, uint32_t *off)
     const int idx = b->r;
 
     nc_buf_desc_t *d = &b->desc[idx];
+    __atomic_thread_fence(__ATOMIC_ACQUIRE);   // 見到 READY 才讀資料
     d->state = NC_BUF_ST_READING;
     b->rd = (int16_t)idx;
     b->gets++;
@@ -411,6 +444,7 @@ esp_err_t nc_buf_get_end(nc_buf_t *b)
         return ESP_ERR_INVALID_STATE;
     }
     const int idx = b->rd;
+    __atomic_thread_fence(__ATOMIC_RELEASE);   // 讀完才把格還給 producer
     b->desc[idx].state = NC_BUF_ST_FREE;
     b->desc[idx].len = 0;
     b->desc[idx].off = 0;
@@ -440,6 +474,9 @@ uint32_t nc_buf_pending(const nc_buf_t *b)
     if (b == NULL || !(b->flags & NC_BUF_F_STREAM)) {
         return 0;
     }
+    if (b->flags & NC_BUF_F_RING) {
+        return b->st_in - b->st_out;
+    }
     return b->st_end - b->st_off;
 }
 
@@ -447,6 +484,9 @@ uint32_t nc_buf_space(const nc_buf_t *b)
 {
     if (b == NULL || !(b->flags & NC_BUF_F_STREAM)) {
         return 0;
+    }
+    if (b->flags & NC_BUF_F_RING) {
+        return b->slot_bytes - (b->st_in - b->st_out);
     }
     // 壓實之後一定有位：容量 - 未讀量
     return b->slot_bytes - (b->st_end - b->st_off);
@@ -457,6 +497,35 @@ uint32_t nc_buf_write(nc_buf_t *b, const void *src, uint32_t len)
     if (b == NULL || src == NULL || len == 0 || !(b->flags & NC_BUF_F_STREAM)) {
         return 0;
     }
+    __atomic_thread_fence(__ATOMIC_ACQUIRE);
+
+    if (b->flags & NC_BUF_F_RING) {
+        const uint32_t used = b->st_in - b->st_out;
+        const uint32_t space = b->slot_bytes - used;
+        if (len > space) {
+            len = space;                    // 部分寫入（唔覆蓋未讀資料）
+            b->fail_full++;
+        }
+        if (len == 0) {
+            return 0;
+        }
+        const uint32_t off = b->st_in % b->slot_bytes;
+        uint32_t first = b->slot_bytes - off;
+        if (first > len) {
+            first = len;
+        }
+        memcpy(b->data + off, src, first);
+        if (len > first) {
+            memcpy(b->data, (const uint8_t *)src + first, len - first);
+        }
+        account_copy(b, src, len);
+        __atomic_thread_fence(__ATOMIC_RELEASE);   // 資料先寫完，才發佈 st_in
+        b->st_in += len;
+        b->generation++;
+        b->puts++;
+        return len;
+    }
+
     if (b->st_end + len > b->slot_bytes) {
         // 尾部唔夠位：先把未讀的搬到前面（同 nc4_parser_feed 的做法一致）
         const uint32_t used = b->st_end - b->st_off;
@@ -475,26 +544,87 @@ uint32_t nc_buf_write(nc_buf_t *b, const void *src, uint32_t len)
     }
     account_copy(b, src, len);
     memcpy(b->data + b->st_end, src, len);
+    __atomic_thread_fence(__ATOMIC_RELEASE);       // 資料先寫完，才發佈 st_end
     b->st_end += len;
     b->generation++;
     b->puts++;
     return len;
 }
 
+uint32_t nc_buf_read_segments(nc_buf_t *b, const uint8_t **p0, uint32_t *n0,
+                              const uint8_t **p1, uint32_t *n1)
+{
+    if (p0 != NULL) {
+        *p0 = NULL;
+    }
+    if (n0 != NULL) {
+        *n0 = 0;
+    }
+    if (p1 != NULL) {
+        *p1 = NULL;
+    }
+    if (n1 != NULL) {
+        *n1 = 0;
+    }
+    if (b == NULL || !(b->flags & NC_BUF_F_STREAM)) {
+        return 0;
+    }
+    __atomic_thread_fence(__ATOMIC_ACQUIRE);       // 見到新資料才讀
+
+    if (b->flags & NC_BUF_F_RING) {
+        const uint32_t used = b->st_in - b->st_out;
+        if (used == 0) {
+            return 0;
+        }
+        const uint32_t off = b->st_out % b->slot_bytes;
+        uint32_t first = b->slot_bytes - off;
+        if (first > used) {
+            first = used;
+        }
+        if (p0 != NULL) {
+            *p0 = b->data + off;
+        }
+        if (n0 != NULL) {
+            *n0 = first;
+        }
+        if (p1 != NULL) {
+            *p1 = b->data;
+        }
+        if (n1 != NULL) {
+            *n1 = used - first;
+        }
+        return used;
+    }
+
+    const uint32_t used = b->st_end - b->st_off;
+    if (used == 0) {
+        return 0;
+    }
+    if (p0 != NULL) {
+        *p0 = b->data + b->st_off;
+    }
+    if (n0 != NULL) {
+        *n0 = used;
+    }
+    return used;
+}
+
 const uint8_t *nc_buf_read_ptr(nc_buf_t *b, uint32_t *len)
 {
-    if (b == NULL || !(b->flags & NC_BUF_F_STREAM)) {
-        return NULL;
-    }
-    const uint32_t used = b->st_end - b->st_off;
+    const uint8_t *p0 = NULL, *p1 = NULL;
+    uint32_t n0 = 0, n1 = 0;
+    const uint32_t used = nc_buf_read_segments(b, &p0, &n0, &p1, &n1);
     if (used == 0) {
         return NULL;
     }
+    (void)p1;
+    (void)n1;
     if (len != NULL) {
-        *len = used;
+        // RING 模式只回第一段（跨環請用 read_segments）；線性模式 = 全部 pending。
+        *len = n0;
     }
     b->gets++;
-    return b->data + b->st_off;
+    return p0;
 }
 
 esp_err_t nc_buf_skip(nc_buf_t *b, uint32_t n)
@@ -502,10 +632,24 @@ esp_err_t nc_buf_skip(nc_buf_t *b, uint32_t n)
     if (b == NULL || !(b->flags & NC_BUF_F_STREAM)) {
         return ESP_ERR_INVALID_ARG;
     }
+    if (b->flags & NC_BUF_F_RING) {
+        const uint32_t used = b->st_in - b->st_out;
+        if (n > used) {
+            n = used;
+        }
+        __atomic_thread_fence(__ATOMIC_RELEASE);   // 先讀完，才把空間還給 producer
+        b->st_out += n;
+        if (b->st_out == b->st_in) {
+            b->st_in = 0;
+            b->st_out = 0;
+        }
+        return ESP_OK;
+    }
     const uint32_t used = b->st_end - b->st_off;
     if (n > used) {
         n = used;
     }
+    __atomic_thread_fence(__ATOMIC_RELEASE);
     b->st_off += n;
     if (b->st_off == b->st_end) {
         b->st_off = 0;
@@ -555,6 +699,10 @@ esp_err_t nc_buf_handover(nc_buf_t *b, const char *new_owner)
     b->r = 0;
     b->wr = -1;
     b->rd = -1;
+    b->st_off = 0;
+    b->st_end = 0;
+    b->st_in = 0;
+    b->st_out = 0;
     BUF_LOGI("buf %s 換手 → %s（gen %u）", b->name, new_owner, (unsigned)b->generation);
     return ESP_OK;
 }
@@ -753,6 +901,7 @@ esp_err_t nc_buf_release(nc_buf_t *b)
             break;
         }
     }
+    reg_range_recalc();
     buf_free(b);
     return ESP_OK;
 }
@@ -765,4 +914,5 @@ void nc_buf_reset(void)
             s_reg[i] = NULL;
         }
     }
+    reg_range_recalc();
 }

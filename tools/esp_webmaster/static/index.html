@@ -4,6 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>ESP WebMaster — NC4 工作臺</title>
+<link rel="stylesheet" href="/static/vendor/codemirror/codemirror.min.css">
+<link rel="stylesheet" href="/static/vendor/codemirror/addon/lint/lint.css">
+<link rel="stylesheet" href="/static/vendor/codemirror/theme/material-darker.css">
+<link rel="stylesheet" href="/static/vendor/codemirror/theme/dracula.css">
+<link rel="stylesheet" href="/static/vendor/codemirror/theme/nord.css">
+<link rel="stylesheet" href="/static/vendor/codemirror/theme/solarized.css">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230b0c0e'/%3E%3Cpath d='M9 21V11h3.2l3.8 6 3.8-6H23v10h-2.6v-5.9L17.2 21h-2.4l-3.2-5.1V21z' fill='%232fe0a8'/%3E%3C/svg%3E">
 <style>
 /* ═══════════════════════════════════════════════════════════════════════
@@ -382,6 +388,93 @@ code { font-family: var(--font-mono); color: var(--bench-100); font-size: 11.5px
   :root { --side-w: 0px; }
   .side { display: none; }
 }
+
+/* ══════════════════════════ IDE ══════════════════════════ */
+.view[data-view="ide"] { overflow: hidden; }
+.ide-shell {
+  position: absolute; inset: 12px 14px;
+  display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: 10px;
+  min-height: 0;
+}
+.ide-tree, .ide-main {
+  background: var(--bench-900); border: 1px solid var(--bench-700);
+  border-radius: 8px; min-height: 0; display: flex; flex-direction: column;
+}
+.ide-tree-head, .ide-toolbar {
+  display: flex; align-items: center; gap: 6px; padding: 7px 9px;
+  border-bottom: 1px solid var(--bench-700); flex: 0 0 auto;
+}
+.ide-tree-body { flex: 1; overflow: auto; padding: 6px 4px; font: 400 12px/1.65 var(--font-mono); }
+.ide-tree-foot { border-top: 1px solid var(--bench-700); padding: 5px 9px; color: var(--bench-400); font-size: 10.5px; }
+.ide-node { display: flex; align-items: center; gap: 4px; padding: 1px 6px; border-radius: 4px; cursor: pointer; white-space: nowrap; color: var(--bench-200); }
+.ide-node:hover { background: var(--bench-800); }
+.ide-node.active { background: rgb(47 224 168 / .12); color: var(--bench-100); }
+.ide-node .ico { width: 14px; text-align: center; opacity: .9; }
+.ide-node .ext {
+  width: 20px; flex: 0 0 20px; text-align: center; border-radius: 3px;
+  font: 700 7.5px/14px var(--font-mono); letter-spacing: .02em;
+  background: var(--bench-800); color: var(--bench-200);
+}
+.ide-node .ext.json { color: #f0a53c; background: rgb(240 165 60 / .12); }
+.ide-node .ext.c { color: #58c4dc; background: rgb(88 196 220 / .12); }
+.ide-node .ext.py { color: #2fe0a8; background: rgb(47 224 168 / .12); }
+.ide-node .ext.md { color: #c792ea; background: rgb(199 146 234 / .12); }
+.ide-node .ext.sh { color: #aeb6c4; }
+.ide-node .ext.js { color: #f7df1e; background: rgb(247 223 30 / .1); }
+.ide-node .ext.bin { color: var(--danger); background: rgb(255 90 95 / .1); }
+.ide-node .sz { margin-left: auto; color: var(--bench-400); font-size: 9.5px; }
+.ide-folder-children { margin-left: 10px; border-left: 1px solid var(--bench-800); padding-left: 4px; }
+.ide-tabs { display: flex; align-items: stretch; gap: 1px; min-height: 32px; overflow-x: auto; border-bottom: 1px solid var(--bench-700); background: var(--bench-950); }
+.ide-tab {
+  display: flex; align-items: center; gap: 7px; padding: 0 9px; height: 32px;
+  border-right: 1px solid var(--bench-800); color: var(--bench-400);
+  font: 500 11.5px/1 var(--font-mono); cursor: pointer; white-space: nowrap;
+}
+.ide-tab:hover { color: var(--bench-200); background: var(--bench-900); }
+.ide-tab.active { color: var(--bench-100); background: var(--bench-850); box-shadow: inset 0 -2px 0 var(--led); }
+.ide-tab .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--amber); }
+.ide-tab .tab-dot { width: 6px; height: 6px; border-radius: 2px; background: var(--bench-600); }
+.ide-tab.ext-json .tab-dot { background: #f0a53c; }
+.ide-tab.ext-c .tab-dot { background: #58c4dc; }
+.ide-tab.ext-py .tab-dot { background: #2fe0a8; }
+.ide-tab.ext-md .tab-dot { background: #c792ea; }
+.ide-tab.ext-js .tab-dot { background: #f7df1e; }
+.ide-tab.ext-bin .tab-dot { background: var(--danger); }
+.ide-tab .x { opacity: .55; font: 400 13px/1 var(--font-ui); padding: 0 2px; }
+.ide-tab .x:hover { opacity: 1; color: var(--danger); }
+.ide-path { color: var(--bench-100); font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 42%; }
+.ide-editor-wrap { flex: 1; min-height: 0; position: relative; }
+.ide-empty { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; color: var(--bench-400); font-size: 13px; text-align: center; pointer-events: none; }
+.ide-statusbar { display: flex; align-items: center; gap: 12px; padding: 3px 10px; border-top: 1px solid var(--bench-700); color: var(--bench-400); font-size: 10.5px; flex: 0 0 auto; }
+.ide-statusbar .grow { flex: 1; }
+.ide-editor-wrap .CodeMirror {
+  height: 100%; font: 400 12.5px/1.55 var(--font-mono);
+}
+.ide-shell[data-theme="bench"] .ide-editor-wrap .CodeMirror {
+  background: #0b0e12; color: var(--bench-100);
+}
+.ide-shell[data-theme="bench"] .ide-editor-wrap .CodeMirror-gutters { background: #090c10; border-right: 1px solid var(--bench-800); }
+.ide-shell[data-theme="bench"] .ide-editor-wrap .CodeMirror-linenumber { color: #4b5563; }
+.ide-shell[data-theme="bench"] .ide-editor-wrap .CodeMirror-cursor { border-left: 2px solid var(--led); }
+.ide-shell[data-theme="bench"] .ide-editor-wrap .CodeMirror-selected { background: rgb(47 224 168 / .18) !important; }
+.ide-shell[data-theme="bench"] .ide-editor-wrap .CodeMirror-activeline-background { background: rgb(255 255 255 / .025); }
+.ide-shell[data-theme="bench"] .ide-editor-wrap .cm-keyword { color: #c792ea; }
+.ide-shell[data-theme="bench"] .ide-editor-wrap .cm-string { color: #a7f3d0; }
+.ide-shell[data-theme="bench"] .ide-editor-wrap .cm-number { color: #f0a53c; }
+.ide-shell[data-theme="bench"] .ide-editor-wrap .cm-comment { color: #5b6472; font-style: italic; }
+.ide-shell[data-theme="bench"] .ide-editor-wrap .cm-def { color: #93c5fd; }
+.ide-shell[data-theme="bench"] .ide-editor-wrap .cm-variable,
+.ide-shell[data-theme="bench"] .ide-editor-wrap .cm-property { color: #e4e8ef; }
+.ide-shell[data-theme="bench"] .ide-editor-wrap .cm-tag { color: #f0a53c; }
+.ide-shell[data-theme="bench"] .ide-editor-wrap .cm-attribute { color: #93c5fd; }
+.ide-editor-wrap .CodeMirror-lint-marker-error { content: "●"; color: var(--danger); }
+.ide-editor-wrap .CodeMirror-lint-mark-error { border-bottom: 1px dotted var(--danger); }
+#ideLint.err { color: #ffb4b6; border-color: rgb(255 90 95 / .5); }
+#ideLint.ok { color: var(--led); border-color: rgb(47 224 168 / .4); }
+#activity .line { white-space: pre-wrap; }
+#activity .act-ai { color: #93c5fd; }
+#activity .act-ui { color: var(--bench-200); }
+#activity .act-note { color: var(--amber); }
 </style>
 </head>
 <body>
@@ -394,9 +487,9 @@ code { font-family: var(--font-mono); color: var(--bench-100); font-size: 11.5px
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M9 9h6v6H9zM4 9h0M4 15h0M20 9h0M20 15h0"/></svg>
       <span>設備</span>
     </button>
-    <button class="nav" data-view="files" aria-current="false" title="檔案">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
-      <span>檔案</span>
+    <button class="nav" data-view="ide" aria-current="false" title="IDE">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="m8 9-3 3 3 3M16 9l3 3-3 3M14 6l-4 12"/></svg>
+      <span>IDE</span>
     </button>
     <button class="nav" data-view="drive" aria-current="false" title="隨身碟">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v10m0 0 3-3m-3 3-3-3M5 16v3a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-3"/></svg>
@@ -416,9 +509,10 @@ code { font-family: var(--font-mono); color: var(--bench-100); font-size: 11.5px
   <!-- ═══ DEVICE STRIP ═══ -->
   <header class="strip">
     <select id="portSelect" aria-label="序列埠"><option value="">（未偵測到序列埠）</option></select>
-    <button id="btnConnect" class="btn primary">連線</button>
+    <button id="btnConnect" class="btn primary">連線／新增</button>
     <button id="btnDisconnect" class="btn" disabled>斷線</button>
     <button id="btnSim" class="btn ghost">模擬裝置</button>
+    <select id="deviceSelect" class="hidden" aria-label="已連線裝置" title="切換已連線裝置"></select>
     <div class="grow"></div>
     <div class="ticket" id="ticket" data-active="false">
       <span class="led" id="led" data-state="error"></span>
@@ -525,6 +619,59 @@ code { font-family: var(--font-mono); color: var(--bench-100); font-size: 11.5px
           </div>
         </section>
 
+        <!-- IDE -->
+        <section class="view" data-view="ide">
+          <div class="ide-shell" data-theme="bench">
+            <aside class="ide-tree">
+              <div class="ide-tree-head">
+                <span class="label">檔案</span><span class="grow"></span>
+                <button id="btnIdeScan" class="btn sm ghost" title="FILE_SCAN 重建索引">⟳</button>
+                <button id="btnIdeNew" class="btn sm ghost" title="新檔">＋</button>
+                <button id="btnIdeUpload" class="btn sm ghost" title="上載">⬆</button>
+                <input id="ideFilePicker" type="file" multiple class="hidden">
+              </div>
+              <div id="ideTree" class="ide-tree-body"><p class="muted" style="padding:12px">未連線／未建立索引。</p></div>
+              <div class="ide-tree-foot"><span id="ideTreeMeta" class="mono">—</span></div>
+            </aside>
+            <div class="ide-main">
+              <div id="ideTabs" class="ide-tabs"></div>
+              <div class="ide-toolbar">
+                <span id="idePath" class="ide-path mono">未開啟檔案</span>
+                <span id="ideDirty" class="chip amber hidden">未儲存</span>
+                <span class="grow"></span>
+                <button id="btnIdeSave" class="btn sm primary" disabled>儲存</button>
+                <button id="btnIdeConfirm" class="btn sm" disabled>確認</button>
+                <button id="btnIdeUndo" class="btn sm" disabled>復原</button>
+                <button id="btnIdeDownload" class="btn sm" disabled>下載</button>
+                <button id="btnIdeDelete" class="btn sm danger" disabled>刪除</button>
+                <button id="btnIdeFormat" class="btn sm" disabled title="JSON 格式化（Ctrl/Cmd-Shift-F）">格式化</button>
+                <button id="btnIdeValidate" class="btn sm" disabled title="JSON 驗證">驗證</button>
+                <span id="ideLint" class="chip hidden">—</span>
+                <select id="ideTheme" class="sel" title="配色" style="max-width:130px">
+                  <option value="bench">Bench</option>
+                  <option value="material-darker">Material</option>
+                  <option value="dracula">Dracula</option>
+                  <option value="nord">Nord</option>
+                  <option value="solarized">Solarized</option>
+                </select>
+              </div>
+              <div class="ide-editor-wrap" id="ideEditorWrap">
+                <textarea id="ideEditor" spellcheck="false"></textarea>
+                <div id="ideEmpty" class="ide-empty">
+                  <div>從左邊揀檔案，或按 <b>＋</b> 新檔。<br>
+                  <span class="mono">Ctrl/Cmd+S 儲存</span></div>
+                </div>
+              </div>
+              <div class="ide-statusbar">
+                <span id="ideCursor" class="mono">—</span>
+                <span class="grow"></span>
+                <span id="ideMode" class="mono">—</span>
+                <span id="ideSize" class="mono">—</span>
+              </div>
+            </div>
+          </div>
+        </section>
+
         <!-- 隨身碟（MSC 捷徑） -->
         <section class="view" data-view="drive">
           <div class="pad wiz">
@@ -590,6 +737,26 @@ code { font-family: var(--font-mono); color: var(--bench-100); font-size: 11.5px
               <div class="bar hidden" id="otaProgressWrap" style="margin-top:14px"><i id="otaProgress"></i></div>
               <pre id="otaResult" class="result hidden"></pre>
             </div></div>
+            <div class="card"><div class="card-h"><span class="label">3 · ESPTOOL（ROM／USB-Serial-JTAG）</span><span class="chip amber">進階</span></div><div class="card-b">
+              <p class="small muted" style="margin-top:0">同 esptool-js 同等功能，但由 server 暫放序列埠再燒，所以 UI／AI 可以共用同一條線。
+                <b>S3 的 TinyUSB CDC 請用上面 NC4 OTA</b>；呢個係 P4 USJ／ROM 模式或已經入 download mode 的板。</p>
+              <div class="grid2">
+                <div class="field"><label>offset</label><input id="espOffset" value="0x0"></div>
+                <div class="field"><label>baud</label><input id="espBaud" value="460800"></div>
+                <div class="field"><label>chip（空 = 自動）</label><input id="espChip" placeholder="esp32p4"></div>
+                <div class="field"><label>before</label><select id="espBefore"><option>usb_reset</option><option>default_reset</option><option>no_reset</option></select></div>
+              </div>
+              <label class="chip" style="margin-top:8px"><input type="checkbox" id="espErase"> 只 erase flash（唔燒 image）</label>
+              <div class="btn-row" style="margin-top:10px">
+                <input id="espPicker" type="file" accept=".bin" class="hidden">
+                <button id="btnEspPick" class="btn sm">揀 .bin</button>
+                <span id="espFileInfo" class="chip">未揀檔</span>
+                <button id="btnEspInfo" class="btn sm">探測晶片</button>
+                <button id="btnEspFlash" class="btn primary">ESPTOOL 燒錄</button>
+              </div>
+              <div class="bar hidden" id="espProgressWrap" style="margin-top:14px"><i id="espProgress"></i></div>
+              <pre id="espResult" class="result hidden"></pre>
+            </div></div>
           </div>
         </section>
 
@@ -616,13 +783,15 @@ code { font-family: var(--font-mono); color: var(--bench-100); font-size: 11.5px
 
       <section class="panel">
         <div class="panel-head">
-          <button class="tab" aria-selected="true" data-ptab="term">終端</button>
+          <button class="tab" aria-selected="true" data-ptab="term" id="tabTerm">終端</button>
+          <button class="tab" aria-selected="false" data-ptab="activity" id="tabActivity">活動</button>
           <span class="grow"></span>
           <label class="chip"><input type="checkbox" id="logPause"> 暫停</label>
           <button id="btnClearLog" class="btn sm ghost">清除</button>
           <button id="btnSaveLog" class="btn sm ghost">下載</button>
         </div>
         <div class="term" id="terminal"></div>
+        <div class="term hidden" id="activity"></div>
         <div class="quick">
           <input id="quickCmd" placeholder="快速指令：0x1101 或 0x200B 00（唔填 = STATUS_GET）">
           <button id="btnQuickSend" class="btn sm">送出</button>
@@ -646,6 +815,16 @@ code { font-family: var(--font-mono); color: var(--bench-100); font-size: 11.5px
 </div>
 
 <div id="toasts"></div>
+<script src="/static/vendor/codemirror/codemirror.min.js"></script>
+<script src="/static/vendor/codemirror/addon/lint/lint.js"></script>
+<script src="/static/vendor/codemirror/mode/javascript/javascript.min.js"></script>
+<script src="/static/vendor/codemirror/mode/xml/xml.min.js"></script>
+<script src="/static/vendor/codemirror/mode/python/python.min.js"></script>
+<script src="/static/vendor/codemirror/mode/clike/clike.min.js"></script>
+<script src="/static/vendor/codemirror/mode/markdown/markdown.min.js"></script>
+<script src="/static/vendor/codemirror/mode/shell/shell.min.js"></script>
+<script src="/static/vendor/codemirror/addon/edit/closebrackets.min.js"></script>
+<script src="/static/vendor/codemirror/addon/edit/matchbrackets.min.js"></script>
 <script src="/static/app.js"></script>
 </body>
 </html>

@@ -436,7 +436,6 @@ STEPS = [
     ("storage+cfg", C_ASM, "掛 FAT；wiring 做 base"),
     ("hwcheck", C_HW, "腳位 claim＋驗，不 init"),
     ("hardware", C_HW, "PWM／ETH；router 定核"),
-    ("pool", C_BUF, "已停用（nc_pool 退役）"),
     ("declare", C_BUF, "每核 decoder；任務登記"),
     ("commit", C_BUF, "carve；Wi-Fi＋net bus"),
     ("start", C_NC4, "on_start；掃 .fxe"),

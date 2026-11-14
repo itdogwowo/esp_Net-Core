@@ -50,7 +50,13 @@ typedef enum {
 #define NC_BUF_F_FIFO  (1u << 0)   // 保留給明確標注；預設已經係 FIFO
 // STREAM：唔係一格一格，係一條連續位元組流（解析器環、位元組流水）。
 // 用 slot_bytes 當「環容量」，n 必須係 1。唔支援 put/get（格 API）。
+// 預設係「線性＋必要時 memmove 壓實」：read_ptr 永遠係一段連續。
 #define NC_BUF_F_STREAM (1u << 1)
+// RING（要同時帶 STREAM）：真正環形，in/out 單調計數，**唔會壓實／搬資料**。
+// producer 只寫 in 側，consumer 揸住 out 側的指標時資料唔會被移動。
+// read_ptr 只回第一段；跨環請用 nc_buf_read_segments()（兩段）。
+// 量測（2026-11-14，S3）：backlog 一半時，線性版 17.6 MB/s、ring 346 MB/s。
+#define NC_BUF_F_RING   (1u << 3)
 // RUNTIME：執行期建立（例如 parser 隨通道開關）。只有帶這個 flag 的 buffer
 // 可以用 nc_buf_release() 還返；開機建立的一律唔可以（鐵律 R2）。
 #define NC_BUF_F_RUNTIME (1u << 2)
@@ -87,8 +93,12 @@ esp_err_t nc_buf_put_abort(nc_buf_t *b);
 // ── 串流（NC_BUF_F_STREAM）：連續位元組，可以部分寫／部分讀 ──
 // 回實際寫入的 bytes：空間唔夠會**部分寫入**（並計 fail_full），唔會覆蓋未讀資料。
 uint32_t nc_buf_write(nc_buf_t *b, const void *src, uint32_t len);
-// 看得到的那一段（一定連續：必要時工具會先壓實）。
+// 看得到的那一段（線性模式一定連續；RING 模式只回第一段）。
 const uint8_t *nc_buf_read_ptr(nc_buf_t *b, uint32_t *len);
+// RING／線性通用：回傳最多兩段（p0/n0 一定有；p1 可以 NULL）。
+// 回傳值 = 總 pending bytes。線性模式的 n1 永遠 0。
+uint32_t nc_buf_read_segments(nc_buf_t *b, const uint8_t **p0, uint32_t *n0,
+                              const uint8_t **p1, uint32_t *n1);
 // 消費 n bytes（重同步 = nc_buf_skip(b, 1)）。n 大過可讀量就全部消費。
 esp_err_t nc_buf_skip(nc_buf_t *b, uint32_t n);
 uint32_t nc_buf_pending(const nc_buf_t *b);   // 已寫未讀

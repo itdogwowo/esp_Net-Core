@@ -150,7 +150,7 @@ components/action/pixel_action/
 | `storage+cfg` | 開機階段 B02／或者 store 同 config 兩個模塊 | 講咗五分鐘之後才發現講緊唔同東西 |
 | `channel` | bus 通道／NC4 的線（link）／HTTP 的連接 | 同上 |
 | `decode0` | 任務 T／decoder 物件／核心編號 | 同上 |
-| `pool` | B06 階段／nc4.pool（已停用）／heap 池 | 同上 |
+| `pool` | 第六階段（已移除）／`nc4.pool`（已移除）／heap 池 | 同上 |
 
 C 名字（`nc_boot_*`、`nc4_bus_*`）解決了「程式裡叫乜」，但**講嘢**仍然會撞。
 所以每個「可以指住講嘅東西」有一個 ID，而且**一定要帶前綴**。
@@ -161,13 +161,25 @@ C 名字（`nc_boot_*`、`nc4_bus_*`）解決了「程式裡叫乜」，但**講
 |---|---|---|---|
 | `B01`–`B12` | **開機階段**（整輩子一次，順序） | `main.c` 的 `stages[]`、`boot.h` 的契約 | `B02 storage+cfg` |
 | `T.` | **任務**（有棧、有核、有 loop） | `nc_task_def.name`／`xTaskCreate` 的名 | `T.decode0`、`T.cdc.rx` |
-| `R.` | **plan 資源／緩衝**（宣告→carve） | `nc_task_res_t.name` | `R.nc4.rx`、`R.nc4.reply1` |
+| `R.` | **plan 資源／緩衝**（宣告→carve） | `nc_task_res_t.name` | `R.usb.rx`、`R.nc4.reply1` |
 | `L.` | **通道／線**（link 名） | `nc4_link_register()` 的名字 | `L.CDC`、`L.UART` |
 | `C.` | **協議指令** | `0x11xx` 指令表 | `C.0x1101` |
 | `M.` | **模塊／功能**（component 或一組行為） | component 目錄名 | `M.store`、`M.config` |
 
 `T.`／`R.`／`L.`／`C.`／`M.` 只是**講嘢用的前綴**，C 符號本身不改名 ——
-`decode0`、`nc4.rx`、`CDC` 這些字串本來就是穩定的，加了前綴反而多一層要對。
+`decode0`、`usb.rx`、`CDC` 這些字串本來就是穩定的，加了前綴反而多一層要對。
+
+plan 資源的命名規則：**`<擁有者>.<用途>`**。
+
+- 線的收幀／parser 環 → 線名：`usb.rx`、`uart.rx`、`tcp.rx`。
+- 任務的緩衝 → 任務名：`fx.arena`、`probe.hub`。
+- 協議引擎每核的狀態 → `nc4.reply0/1`（每核一格回覆幀，2,615 B）。
+
+**NC4 是協議**（分幀、指令、回覆），不是通道、也不是資源的擁有者 ——
+所以一條線的收幀緩衝不可以叫 `nc4.*`。舊名 `nc4.rx`（OTG）／`nc4.jtag`（USJ）
+就是這個錯：同一個資源、兩個 transport 名，而且都不是 owner。2026-11-13 統一成
+`usb.rx`（兩種 USB 人格共用；尺寸同位置一樣，換人格不動 layout）。
+USB 的三層詞（線／transport／driver）見 [usb-config.md §0.1](usb-config.md)。
 
 ### 7.3 B 對照表（log 直接查）
 
@@ -175,16 +187,20 @@ C 名字（`nc_boot_*`、`nc4_bus_*`）解決了「程式裡叫乜」，但**講
 |---|---|---|---|
 | `B01` | banner+nvs | 9.66 ms | 橫幅、`nvs_flash_init`、讀開機計數 |
 | `B02` | storage+cfg | 126.92 ms | 掛 FAT／WL、寫 seed、config 三層解析 |
-| `B03` | capability | n/a | 探核數；決定 USB 模式／link 名（只寫 `nc_boot_ctx` 五個欄位） |
+| `B03` | capability | n/a | 探核數；單核時 core1 的核心組（解碼器＋其上任務）落到 core0（config 只改 RAM）；再定 USB 人格（模式／link／log／msc） |
 | `B04` | hwcheck | n/a | `hardware.json` 的 claim 對帳 |
-| `B05` | hardware | 0.33 ms | ETH／SD／UART 腳位；收下路由表 |
-| `B06` | pool | n/a | 舊 `nc4.pool` 停用的位置（唔配記憶體） |
+| `B05` | hardware | 0.33 ms | ETH／SD 起來；建「線 → 組」表；USB 那條線的組寫入 ctx（usb_core） |
 | `B07` | declare | 10.45 ms | 向 plan 宣告要幾多（未 malloc） |
 | `B08` | commit | 0.76 ms | plan carve（緩衝真正落地）；`nc_wifi_boot()` |
 | `B09` | start | 5.39 ms | 建 decode0／1 任務（entry 停在閘前） |
 | `B10` | usb | 52.01 ms | TinyUSB 列舉；`nc_log_start()` |
 | `B11` | channels | 1.81 ms | 建 bus／producer；`nc_task_boot()` 放行 |
 | `B12` | account | 0.19 ms | 印「開機剩餘」，之後只剩心跳 |
+
+> **第六階段（pool）已於 2026-11-14 整組移除**：`nc4.pool` 的 stage、config schema、
+> seed 全部刪除（small／bulk 冇用戶、forward 早已改用 `nc_buf`）。
+> 後面的階段**保持原號**，所以號碼由 05 跳到 07 —— 這是刻意的；
+> 唔要為咗靚號碼重編號（ID 是契約）。
 
 `n/a` ＝ 該階段是量測之後才拆出來的（原本混在別人的時間裡），**不是 0.0 ms**。
 來源見 [status.md](../00_pm/status.md) §7.23。
@@ -195,7 +211,7 @@ C 名字（`nc_boot_*`、`nc4_bus_*`）解決了「程式裡叫乜」，但**講
 |---|---|---|
 | 「`B02` 慢」 | 開機第二階段慢（掛 FAT ＋讀 config ＝ 126.9 ms）→ 開機次序問題 | log `boot[B02] … 126.92 ms` |
 | 「`M.store` 慢」 | store 模塊本身慢（同開機次序無關，可能係 FAT 同步/flush） | `components/sys/store/` |
-| 「`R.nc4.rx` 唔夠」 | plan 派的 4,192 B parser 環太小 → 是**容量**問題，唔關階段事 | `nc_plan_json`／STATUS |
+| 「`R.usb.rx` 唔夠」 | plan 派的 4,192 B parser 環太小 → 是**容量**問題，唔關階段事 | `nc_plan_json`／STATUS |
 
 呢三句以前都會講成「storage 慢」，然後三個人去改三個唔同嘅地方。
 
@@ -204,7 +220,7 @@ C 名字（`nc_boot_*`、`nc4_bus_*`）解決了「程式裡叫乜」，但**講
 1. **講嘢帶前綴。**「`B11` 之後 core1 才有 loop」唔會有人誤會；「channels 之後」會。
 2 . **ID 是契約。** 寫落文件／log／圖之後就唔改。要改＝**換一個新 ID**，並且一齊改
    引用它的地方（`tools/id_check.py` 掃）。
-3. **數字只代表先後，唔代表重要。** `B06` 唔係因為緊要所以排第六。
+3. **數字只代表先後，唔代表重要。** `B07` 唔係因為緊要所以排第七。
 4. **`NC_CAP_*` 是能力位，唔係階段。** 以前叫 `NC_STAGE_*`，同「階段」撞名 ——
    2026-11-13 改名（`needs`／`gives` 用嘅位元）。
 

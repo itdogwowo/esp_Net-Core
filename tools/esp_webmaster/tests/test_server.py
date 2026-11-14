@@ -45,6 +45,11 @@ def test_manifest_scan_and_upload_download(client):
     assert got.status_code == 200
     assert got.content == b'{"x":1}'
 
+    empty = client.put("/api/file?path=/config/empty.bin", content=b"")
+    assert empty.status_code == 200, empty.text
+    assert empty.json()["size"] == 0
+    assert client.get("/api/file?path=/config/empty.bin").content == b""
+
 
 def test_confirm_undo_delete(client):
     client.put("/api/file?path=/config/a.txt", content=b"old")
@@ -109,10 +114,41 @@ def test_ws_log_streams_lines(client):
         hello = ws.receive_json()
         assert hello["type"] == "hello"
         assert hello["connected"] is True
+        # 連上後可能先收到 backlog（sim 連線時已有 log）；吃掉它再測即時流。
+        msg = ws.receive_json()
+        if msg["type"] == "backlog":
+            msg = None
         state.broadcast({"type": "line", "text": "I (1) sim: hello", "ts": 1.0})
         ev = ws.receive_json()
         assert ev["type"] == "line"
         assert "hello" in ev["text"]
+
+
+def test_shared_log_tail_and_activity(client):
+    # 先讓 sim 產生一些 device log
+    client.get("/api/status?keys=sys")
+    tail = client.get("/api/log/tail?n=50").json()["events"]
+    assert isinstance(tail, list) and tail
+    last_seq = tail[-1]["seq"]
+    more = client.get(f"/api/log/tail?n=50&since={last_seq}").json()["events"]
+    assert all(e["seq"] > last_seq for e in more)
+
+    r = client.post("/api/reboot", headers={"X-Actor": "ai"})
+    assert r.status_code == 200
+    acts = client.get("/api/activity?n=20").json()["events"]
+    assert any(e.get("actor") == "ai" and "reboot" in e.get("action", "")
+               for e in acts)
+
+    client.post("/api/log/note", json={"actor": "ai", "text": "hello from agent"})
+    acts = client.get("/api/activity?n=20").json()["events"]
+    assert any(e.get("type") == "activity" and e.get("text") == "hello from agent"
+               for e in acts)
+
+    # AI 的讀取也要出現在活動（X-Actor: ai）
+    client.get("/api/status?keys=sys", headers={"X-Actor": "ai"})
+    acts = client.get("/api/activity?n=20").json()["events"]
+    assert any(e.get("actor") == "ai" and e.get("action") == "GET /api/status"
+               for e in acts)
 
 
 def test_not_connected_returns_409(workdir):
@@ -158,3 +194,37 @@ def test_drive_rejects_traversal(workdir):
         assert r.status_code == 400
         r = c.get("/api/drive/file", params={"root": str(root), "path": "/../../etc/passwd"})
         assert r.status_code == 400
+
+
+def test_devices_and_select(client):
+    j = client.get("/api/devices").json()
+    assert j["active"] == "sim"
+    assert [d["device"] for d in j["devices"]] == ["sim"]
+    assert client.get("/api/log/tail?n=5&device=sim").status_code == 200
+    assert client.get("/api/log/tail?n=5&device=nope").status_code == 404
+    r = client.post("/api/select", json={"device": "nope"})
+    assert r.status_code == 404
+
+    d = client.post("/api/disconnect").json()
+    assert d["ok"] is True
+    assert d["active"] is None
+    assert d["devices"] == []
+    assert client.get("/api/info").json()["connected"] is False
+
+
+def test_empty_file_and_file_changed_ws(client):
+    client.put("/api/file?path=/config/empty2.bin", content=b"")
+    assert client.get("/api/file?path=/config/empty2.bin").content == b""
+    with client.websocket_connect("/ws/log") as ws:
+        assert ws.receive_json()["type"] == "hello"
+        msg = ws.receive_json()
+        if msg["type"] == "backlog":
+            msg = None
+        client.put("/api/file?path=/config/changed.txt", content=b"x")
+        for _ in range(20):
+            ev = ws.receive_json()
+            if ev.get("type") == "file_changed" and ev.get("path") == "/config/changed.txt":
+                assert ev.get("device") == "sim"
+                break
+        else:
+            assert False, "冇收到 file_changed"

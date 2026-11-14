@@ -2,6 +2,10 @@
 
 > 2026-11-12。對象：有 ESP-IDF 的機器 ＋ S3 或 P4 板。
 > UI：`tools/esp_webmaster/`；協議：[file-transfer.md](../03_notes/file-transfer.md)。
+>
+> **2026-11-14 更新**：序列埠由 WebMaster server 獨佔；AI／其他工具請用 REST API
+> （`X-Actor: ai`），唔好再直接開 COM。共享 log／IDE／ESPTOOL 見
+> [`tools/esp_webmaster/README.md`](../../tools/esp_webmaster/README.md)。
 
 ---
 
@@ -99,7 +103,7 @@ COM13）；JTAG 孔（COM21）只係 console。
 
 | 症狀 | 檢查 |
 |---|---|
-| 開唔到 COM | 係咪被其他程式（燒錄器／Putty／舊 WebMaster）佔用 |
+| 開唔到 COM | server 已獨佔；先停舊 server／燒錄器。AI 用 REST，唔好直接開 COM |
 | `err_busy` | `storage.mode=usb` → 先接管 FAT；或上一個 session 未清（等 30 秒） |
 | `err_no_space` | `storage.free` 太細；先刪舊 effects |
 | `err_sha_mismatch` | 傳輸掉包／CRC；重試由頭再上（v1 冇續傳） |

@@ -24,6 +24,10 @@ esp_err_t nc_core_run_on(int core, esp_err_t (*fn)(void *), void *arg);
 // 都只是「要求」，一律要經 nc_core_clamp() 收斂成合法值 ——
 // 單核板上寫 core1 會變成 core0 ＋ 一行警告，而不是在 xTaskCreatePinnedToCore 裡 assert。
 //
+// 這個收斂就是**核心組落點**（設計理念見 docs/03_notes/system-model.md §4）：
+// 一個核 = 一組（解碼器作根 ＋ 其上任務）；核唔存在 → 整組落到仍然存在嘅核。
+// 所以「要求某個核」的地方全部共用同一條規則，唔可以喺別處再判一次。
+//
 // 為什麼要集中在這裡：散落的 #if CONFIG_FREERTOS_UNICORE 每個地方都要記得寫；
 // 集中在一個函式之後，加一種新晶片只改 nc_core_probe()。
 #define NC_CORES_MAX   2       // 框架只認 core0／core1（decode0／decode1）

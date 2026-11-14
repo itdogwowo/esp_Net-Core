@@ -62,6 +62,29 @@
 保留 plan 的三個好處（逐項可失敗、有名字、總量睇得到），但對外只剩 `nc_buf`。
 `nc_plan_*` 公開 API 在 P5 移除。
 
+### 2.3 換 personality 不會「先租後還」——USB 實例（2026-11-13）
+
+S3 的 OTG 與 USJ 共用同一條 FSLS PHY；但「換人格」是**重開機**的決定：
+config 在 B02 讀一次、B03 定 USB 人格、B07 之後才宣告 plan。所以一次開機
+**只會宣告其中一個** USB parser 租約；另一個從未存在 —— 不是「先租後還」，
+而是「一開始就只租一個」。
+
+而且兩種 USB 的 parser 租約**尺寸一樣**（`NC_USB_RX_REGION` = 4,128）、
+宣告位置一樣，連租約名都一樣（`usb.rx`）—— 所以換人格之後 plan 的 layout 不變。
+（舊名 `nc4.rx`（OTG）／`nc4.jtag`（USJ）已於 2026-11-13 統一成 `usb.rx`：
+兩者本來就是同一個東西 —— USB 線的收幀／parser 環。）
+
+同一原則也用在開機尾段的臨時字串（carve 之後**不准再碰 heap**）：
+
+| 位置 | 以前 | 現在 |
+|---|---|---|
+| decoder 回覆幀 | `nc4_decoder_create()` 先 malloc 2,615 B，B09 再被 plan 緩衝換走並 `free` → **carve 之後才 free**，在 heap 留洞 | create 不配；回覆幀只由 plan 的 `nc4.reply0/1` 提供（`nc4_decoder_set_reply`） |
+| plan JSON（700 B）、任務帳本（900 B） | 各自 `malloc`＋`free` | 共用一塊 static `s_boot_txt[900]` |
+
+**仍然會在開機階段 free 的只有一處**：log 環由 2 KB 換成 8 KB（只在
+`log_debug_mode=1` 時），發生在 plan carve **之前**，所以不影響租約 layout。
+要完全消除，就要在 B01 之前讀到 log level（目前要等 B02 的 config）。
+
 ---
 
 ## 3. 概念（只需識三個屬性 ＋ 五個動詞）
@@ -80,7 +103,8 @@
 
 **形狀**（只有兩種）：
 - **FIFO**（預設）＝ 嚴格先入先出、單寫單讀（今日的 hub、轉寄、LED 雙緩衝）
-- **STREAM**（`NC_BUF_F_STREAM`）＝ 一條連續位元組流，可以部分寫、部分讀、重同步（parser 環）。
+- **STREAM**（`NC_BUF_F_STREAM`）＝ 一條連續位元組流，可以部分寫、部分讀、重同步。
+  預設「線性＋memmove 壓實」；加 `NC_BUF_F_RING` 就係真環形（parser 環，2026-11-14）。
 
 > **「隨機／任意空格」模式已移除（2026-11-10）**：冇真實用戶，而且它要多一個 `WRITING`
 > 狀態（writer 死掉就卡死整條環）。`nc_pool` 將來要用「緩衝池」語義時，再按實際需求決定。
@@ -161,7 +185,7 @@
 
 | buffer | where | 格 × N | 總量 | 理由 |
 |---|---|---|---:|---|
-| `nc4.rx`（CDC parser） | S | 4,128 × 1 | 4.0 KB | 熱路徑，逐位元組掃 |
+| `usb.rx`（USB parser） | S | 4,128 × 1 | 4.0 KB | 熱路徑，逐位元組掃 |
 | `uart.rx` | S | 1,024 × 1 | 1 KB | 同上 |
 | `tcp.rx`（P4） | S | 8,205 × 2 | 16.4 KB | 同上（2 幀餘裕） |
 | `uart.tx`（環） | S | 1,024 × 1 | 1 KB | driver 要 S；4 KB 轉寄會阻塞 44 ms @921600 |
@@ -169,7 +193,7 @@
 | `reply`（每核一格） | **P** | 2,615 × 2 | 5.1 KB | 現時是 2 份 heap，唔在帳內；改成一個 n=2 的 buffer |
 | `fwd`（轉發） | **P** | 4,160 × 32（16 條 × 2） | 130 KB | 跨核交棒；來源核只寫 0.2 ms／4 KB |
 | `fx.arena` | **P** | 524,288 × 1 | 512 KB | `.fxe` 從這裡 carve（R3） |
-| `（→）nc4.rx`／`uart.rx` 的形狀 | S | STREAM | 4,128／1,024 | 今日已經是「線性環 ＋ 壓實」＝ STREAM 模式（§11） |
+| `（→）usb.rx`／`uart.rx` 的形狀 | S | STREAM＋RING | 4,128／1,024 | 2026-11-14 起 parser 環係真 RING（外部 `create_in` 仍可線性；§12） |
 | `small`（命令 staging） | S | 1,024 × 8 | 8 KB | **目標：預設關**（現況開住）；等 header-first assembler 真正用才開 |
 | `bulk`（OTA／FILE） | S 或 P | 4,160 × 3 | 12.2 KB | **目標：預設關**；大而冷，可放 P |
 | `pool.forward`（現況，**P3 移走**） | S | 4,160 × 2 | 8.3 KB | 跨核轉寄的舊路徑；P3 由上面 `fwd` 取代 |
@@ -185,8 +209,9 @@ PSRAM ≈ **647 KB**（回覆 5.1 ＋ 轉發 130 ＋ fx 512），佔 8 MB 的 **
 
 ### 5.3 搭配的三個具體決定
 
-1. **回覆幀合併成一條 `reply`（P，n=2）**：今日是每核 `heap_caps_malloc(2,615)`，
-   `keys=mem` 睇唔到。合併後帳面出現一行，而且兩核各佔一格、不會互撞。
+1. **回覆幀合併成一條 `reply`（P，n=2）**：✅ 已完成（P2）—— 現時是 plan 的
+   `nc4.reply0/1`（各 2,615 B），decoder 用 `nc4_decoder_set_reply()` 接管，
+   自己**不再** `heap_caps_malloc`（見 nc4.c 的 create 說明）。
 2. **轉發用 16 條 FIFO buffer（P）不是一條**：per（目的 link × 來源核）。
    一條的話，慢 UART 會 head-of-line 塞住同核的 TCP。
 3. **`small`／`bulk` 預設 `enable:0`**：現時冇 header-first assembler 接上，
@@ -259,20 +284,20 @@ size_t    nc_buf_json(char *out, size_t cap);         // STATUS keys=mem → mem
 
 | 項目 | 狀態 |
 |---|---|
-| `nc_buf` 機制（`firmware/components/sys/mem/nc_buf.{h,c}`） | ✅ **已實作**：FIFO（唯一格模式）＋ STREAM、`put_begin(reserve)`、`put/put_end(len)`、`get/get_end`、`handover`、`nc_buf_json` |
+| `nc_buf` 機制（`firmware/components/sys/mem/nc_buf.{h,c}`） | ✅ **已實作**：FIFO（唯一格模式）＋ STREAM（線性）＋ RING、`put_begin(reserve)`、`put/put_end(len)`、`get/get_end`、`handover`、`nc_buf_json` |
 | `off`／`len`／`gen`／`cap` 32-bit | ✅（`nc_pool` 的 uint16 是對照組：LCD 一幀會爆、`gen` 13 秒 wrap） |
 | `STATUS keys=mem` → `mem.buf` | ✅ 上板 858 B／上限 2,600；零值欄位省略，放唔落會標 `truncated` |
 | 上板驗收 | ✅ `0xF032 BUF_TEST` 9 項全 pass；`tools/buf_test.py` 一鍵跑 |
 | hosttest | ✅ `tools/hosttest/buf_test`（9 組、全綠；含 registry 滿、JSON 截斷） |
 | `nc_buf_carve()`（`.fxe` 換場） | ✅ **已實作（2026-11-10）**：無狀態 bump，64 B 對齊、唔夠位回 NULL；hosttest 有覆蓋 |
-| **宣告路徑（P5）** | ✅ **已完成（2026-11-10）**：`nc4.reply0/1`、`nc4.rx`、`uart.rx`、`fx.arena` 全部由管理器建立，`on_start` 收 `res[i].buf`；**全 repo 已冇任務 call `nc_plan_get()`** |
+| **宣告路徑（P5）** | ✅ **已完成（2026-11-10）**：`nc4.reply0/1`、`usb.rx`、`uart.rx`、`fx.arena` 全部由管理器建立，`on_start` 收 `res[i].buf`；**全 repo 已冇任務 call `nc_plan_get()`** |
 | arena（把 `nc_plan` 吸收） | ⏸ `nc_plan` 只剩管理器與開機 commit 在用（對外等於內部實作） |
 | **回覆幀**搬過來（P2） | ✅ **已完成（2026-11-10）**：`nc4.reply0/1`（plan 宣告、P、各 2,615 B、n=1），decoder 用 `nc4_decoder_set_reply()` 接管 |
 | **bus 插槽環／chunk**（P3） | ✅ **已完成（2026-11-10）**：`<link>.slots`（FIFO），decode 直接由 slot 解析（唔再經 `chunk`）；手寫的 `slot_state[16]`／`slot_len[16]`／w·r·push_idx 全部刪除 |
 | **`nc_pool` 與跨核轉寄佇列**（P4） | ✅ **已完成（2026-11-10）**：`nc_pool` 整個刪除（small／bulk 零用戶但仍佔 28.3 KB internal）；轉寄改成每核一條 `nc_buf` FIFO（`fwd.c0`／`fwd.c1`，PSRAM、按需建立、格首 16 B 放目的 link 名） |
 | `nc_hub`／TX 環（P5） | ⏸ `nc_hub` 只剩測試用戶；TX 環由 driver 擁有（唔搬） |
 | `handover` 在生產路徑使用 | ⏸ 未做（現時只有測試用 `t.sram`／`t.psram`／`t.stream`） |
-| **STREAM 模式**（連續位元組、部分寫／讀、壓實） | ✅ **已實作**（2026-11-10，總線盤點之後加的） |
+| **STREAM 模式**（連續位元組、部分寫／讀） | ✅ **已實作**（2026-11-10）；**RING**（真環形、唔壓實）2026-11-14 加 |
 | **`put_abort` ＋ FIFO 唔標 WRITING**（唔會卡死環） | ✅ **已實作**（同上） |
 | 總線（`nc4_bus`）搬過來 | ⏸ 未做（§11） |
 
@@ -298,7 +323,12 @@ size_t    nc_buf_json(char *out, size_t cap);         // STATUS keys=mem → mem
 > `slot_bytes × n` 要自己算成一個 bytes 數；`where` 用 `cls` 表達（對照表見
 > [writing-a-task.md §3.1](writing-a-task.md)）。
 
-- 名字**全系統唯一**，前綴用任務名：`nc4.rx`／`uart.rx`／`fx.arena`／`probe.hub`。
+- 名字**全系統唯一**，前綴用**擁有者**（不是協議名）：
+  - 線的收幀環 → 線名：`usb.rx`／`uart.rx`／`tcp.rx`
+  - 任務的緩衝 → 任務名：`fx.arena`／`probe.hub`
+  - 協議引擎每核的狀態 → 協議引擎名＋核號：`nc4.reply0`／`nc4.reply1`
+- **NC4 是協議**（分幀、指令、回覆），不是通道、不是 owner —— 所以一條線的
+  收幀緩衝**不可以**叫 `nc4.*`（那正是舊名 `nc4.rx`／`nc4.jtag` 的錯）。
   這樣 `mem.buf` 一眼看得出邊個的。
 - **`declare()` 裡唔准** `malloc`、唔准 `nc_buf_create()`（那時管理器未排序、未檢查重名）。
 
@@ -422,15 +452,16 @@ size_t    nc_buf_json(char *out, size_t cap);         // STATUS keys=mem → mem
 | 總線的東西 | 今日放在哪 | 形狀 | 對 `nc_buf` |
 |---|---|---|---|
 | **PUSH 插槽**（TCP／WS／UDP 之類） | `nc4_bus.c`：`slots` ＋ `slot_state[16]`（0 free／1 ready／2 writing／3 reading）＋ `slot_len[16]` ＋ `slot_w`／`slot_r` | N 個等長格、FIFO | **同 FIFO 模式一模一樣** → 應該搬（C8：帳面只可以有一份） |
-| **PULL parser 環**（CDC／UART） | plan 的 `nc4.rx`／`uart.rx` ＋ `nc4_parser{start,end}`（線性 ＋ `memmove` 壓實） | 連續位元組、部分讀、壞幀前移 1 byte | 需要 **STREAM 模式**（已加） |
+| **PULL parser 環**（CDC／UART） | plan 的 `usb.rx`／`uart.rx` ＋ `nc4_parser_feed`（RING；跨環 frame 線性化到 per-core scratch） | 連續位元組、部分讀、壞幀前移 1 byte | **STREAM＋RING**（2026-11-14） |
 | **TX 環** | 各 transport／driver 自己 | 位元組環 | **唔搬**：driver 擁有，它自己管 DMA／FIFO |
-| 回覆幀 | decoder 自己 `heap_caps_malloc`（2,615 B P） | 單格 | 可以變成 n=2 的 P 緩衝區（P2） |
+| 回覆幀 | plan 的 `nc4.reply0/1`（2,615 B ×1/核） | 單格 | ✅ 已搬（P2） |
 
 ### 11.1 總線指出工具**兩個要改**的地方（都已改）
 
 1. **缺 STREAM 模式** —— parser 環係「部分寫、部分讀、可以前移 1 byte 重同步」，
    完全唔係格。今日補了：`write`／`read_ptr`／`skip`／`pending`／`space`，
-   內部用同一個做法（尾部唔夠位就 `memmove` 壓實），所以 `read_ptr` 永遠係**一段連續**。
+   2026-11-10 先用「線性＋`memmove` 壓實」；2026-11-14 再改成 **RING**（`st_in/st_out`、
+   `nc_buf_read_segments`），跨環 frame 只抄該幀到 per-core scratch。
 2. **`put_begin` 會標 WRITING → producer 死掉就卡死整條環**。
    總線的註解明講「少一個狀態就少一個可以卡死的地方」，所以它刻意唔標。
    工具已跟：**唔標 WRITING**，並補 `put_abort()`（錯誤路徑要明確放棄）。
@@ -439,11 +470,117 @@ size_t    nc_buf_json(char *out, size_t cap);         // STATUS keys=mem → mem
 
 | 步 | 內容 | 風險 | 為什麼排這裡 |
 |---|---|---|---|
-| **B1**（**2026-11-10 第二次更正**） | **decode 直接由 slot 解析**（`slot_peek` → `nc4_parser_feed(slot)` → `slot_release`），省掉 `slot→chunk` 那一次 copy；slots 保留 | 低 | ⚠️ **唔可以**叫 producer 直接寫 STREAM 環：STREAM 寫入時會 `memmove` 壓實，而 decode 在 `parser_dispatch()` 期間仍然揸住 ring 的指標 → producer 一壓實，資料就在指標腳下移動（靜默損壞）。現時的 slots 正好把「寫」與「讀」分開，係**正確**的設計。（2026-11-10 追加：`slot_full` 的六成丟幀其實是**producer 優先級高過 decode**，把 producer 降到 decode 之下就變 0、喚醒延遲 478→62 µs。見 [status §7.39](../00_pm/status.md)）|
-| **B2** | parser 環改用 `nc_buf`（STREAM） | 中 | ✅ **已完成（2026-11-10）**：A/B 見 [status §7.35](../00_pm/status.md)；RTT 一樣、copy 次數不變、`CDC.rx` 開始出現在 `mem.buf` |
+| **B1**（**2026-11-10 第二次更正**） | **decode 直接由 slot 解析**（`slot_peek` → `nc4_parser_feed(slot)` → `slot_release`），省掉 `slot→chunk` 那一次 copy；slots 保留 | 低 | ⚠️ **唔可以**叫 producer 直接寫（線性）STREAM 環：線性 STREAM 寫入時會 `memmove` 壓實，而 decode 在 `parser_dispatch()` 期間仍然揸住 ring 的指標 → producer 一壓實，資料就在指標腳下移動（靜默損壞）。現時的 slots 正好把「寫」與「讀」分開，係**正確**的設計。**RING（2026-11-14）冇這個限制**：producer 只寫 `in` 側，唔會移動 consumer 正在讀的資料。（2026-11-10 追加：`slot_full` 的六成丟幀其實是**producer 優先級高過 decode**，把 producer 降到 decode 之下就變 0、喚醒延遲 478→62 µs。見 [status §7.39](../00_pm/status.md)）|
+| **B2** | parser 環改用 `nc_buf`（STREAM → **RING**） | 中 | ✅ **2026-11-10 用 STREAM；2026-11-14 改用 RING**（見 §12.5）：跨環 frame 只抄該幀到 per-core scratch，平常零複製；`0xF02F` 自我測試在 S3／P4 都回 true |
 | **B3** | 回覆幀、TX 環 | 低 | 純帳面統一 |
 
 **唔會搬**：framing 狀態（每條線自己的半幀位置）、TX 環（driver 擁有）、
 `budget`／`chunk` 這些排程參數（它們不是緩衝區）。
 
 **驗收**：每個通道收幀數不變、`net.links` 與 `mem.buf` 對得上、`0xF032` 仍然全 pass。
+
+---
+
+## 12. 量測與落地：slot FIFO vs ring STREAM（2026-11-14）
+
+**怎麼重跑**：燒 `--tests` 映像，然後
+
+```
+tools/nc4.py --port <port> raw 0xF02B          # 預設 30,000 × 1,024 B
+tools/nc4.py --port <port> raw 0xF02B <u32>    # 自訂 iterations（1,000–500,000）
+```
+
+量測在 decode0 的 handler 內跑：單 task、producer 與 consumer 同一個 loop、
+資料在**內部 SRAM**、1,024 B/幀；每個 test 都做「寫入 → 消費」完整循環。
+`ns`＝每幀；`mb`＝B/µs（十進位 MB/s）。
+
+### 12.1 改動後（同一支 benchmark，兩塊板）
+
+| test | 意思 | S3-Matrix 240 MHz | P4-C6 360 MHz |
+|---|---|---|---|
+| `slot_pct` | 最小格環，`% n` | 337.6 MB/s | 496.8 MB/s |
+| `slot_mask` | 同上，`& (n-1)` | 335.0 | 494.8 |
+| `slot_mask_f` | 同上＋release/acquire fence | 335.5 | 487.5 |
+| `fifo_real` | **`nc_buf` FIFO**（零複製交格） | **277.1** | **419.4** |
+| `stream_real` | **`nc_buf` STREAM**（線性＋壓實，無 backlog） | **279.2** | **325.6** |
+| `stream_real_wrap` | 同上，backlog ≈ 環一半 | **18.3** | 203.5 |
+| `kfifo_frame` | kfifo 式 byte ring（copy in＋copy out） | 178.4 | 255.4 |
+| `stream_kf` | byte ring（copy in＋原地掃描，無 backlog） | 354.2 | 506.4 |
+| `stream_kf_wrap` | byte ring，backlog ≈ 環一半 | 346.0 | 530.2 |
+| `lin_nowrap` | 最小線性實作，無 backlog | 355.0 | 513.5 |
+| `lin_wrap` | 最小線性實作，backlog ≈ 環一半 | 18.6 | 276.0 |
+| **`ring_real`** | **`nc_buf` RING（新，opt-in）**，無 backlog | **264.6** | **312.7** |
+| **`ring_real_wrap`** | **`nc_buf` RING，backlog ≈ 環一半** | **257.0** | **306.1** |
+
+### 12.2 這次實際改了什麼
+
+| 改動 | 位置 | 結果 |
+|---|---|---|
+| FIFO publish／consume fence | `nc_buf_put_begin/put_end/get/get_end` | 正確性；FIFO 成本 −1.5%（S3）／−2.8%（P4） |
+| `account_copy` 只掃一次 registry ＋ 整體位址範圍快篩 | `nc_buf.c` `src_buf_of`／`account_copy` | **STREAM 無 backlog：S3 174.7 → 279.2（+60%）、P4 271.4 → 325.6（+20%）** |
+| 新增 `NC_BUF_F_RING`（`st_in/st_out`、`nc_buf_read_segments`） | `nc_buf.[ch]` | buffer backlog 下 S3 18.3 → 257.0（**14×**）、P4 203.5 → 306.1（**1.5×**）；parser 穩態則 ≈ 線性（見 §12.4） |
+| RING 不壓實／不搬資料 | 同上 | 解決 §11.2「consumer 揸住指標時 producer 唔可以寫」的限制 |
+| `% n` → mask | — | **唔做**：量測顯示冇收益 |
+| parser 內部環改 RING＋跨環處理 | `nc4.c` `nc4_parser_create`／`nc4_parser_feed` | 跨環 frame 只抄該幀到 per-core scratch；平常零複製；`0xF02F` 驗證 |
+
+RING 係 **opt-in**：`nc_buf_create(..., NC_BUF_F_STREAM | NC_BUF_F_RING, ...)`。
+**2026-11-14：`nc4_parser_create()` 建立的 parser 環已改用 RING**；
+外部傳入的 ring（`nc4_parser_create_buf/in`）可以仍然是線性 STREAM，
+`nc4_parser_feed()` 兩種都支援（線性時 `n1 == 0`，走原本的一段路徑）。
+
+### 12.3 讀出來的四件事
+
+1. **`% n` → `& (n-1)` 冇用**：S3 337.6 → 335.0、P4 496.8 → 494.8（在噪音內）。
+   除數不是瓶頸，1 KB 的搬運才是 → **不要做這個「優化」**。
+2. **fence 便宜**：S3 FIFO 281.3 → 277.1（−1.5%）；P4 431.4 → 419.4（−2.8%）。
+   為了跨核可見性，這個代價值得付。
+3. **零複製格 FIFO 仍然贏**：`fifo_real` 277 vs `kfifo_frame`（copy out）178（S3）、
+   419 vs 255（P4）。唔應該把 FIFO 改成 kfifo 的 copy 語義。
+4. **RING 在 backlog 下大幅勝出**：S3 線性 18.3 vs ring 257.0（**14×**）；
+   P4 203.5 vs 306.1（**1.5×**）。無 backlog 時 ring 反而略慢（264.6 vs 279.2；
+   312.7 vs 325.6，−4～−5%），因為每次寫讀都要 `% slot_bytes` 與多一次函式呼叫。
+   P4 的 memmove 快得多，所以線性版的崩塌冇 S3 咁嚴重。
+5. **`lin_nowrap` ≈ `stream_kf`**（355.0 vs 354.2；513.5 vs 506.4）→ 線性本身唔慢，
+   之前的 2× 差距主要是 API／記帳；`account_copy` 修完之後，`stream_real` 已經追回大半
+   （279 vs 355，剩 ~21%）。
+
+### 12.4 parser 遷移與驗證（2026-11-14）
+
+`nc4_parser_create()` 的內部環已由線性 STREAM 改成 **RING**。
+`nc4_parser_feed()` 不再假設「一定一段連續」：
+
+1. 用 `nc_buf_read_segments()` 拿最多兩段，跨段找 SOF（包括 SOF 剛好跨邊界）。
+2. 標頭 9 B 如果跨段，只抄 9 B 到 stack 暫存讀 `ver`／`dlen`。
+3. 整個 frame 如果跨環，只把**這一幀**（≤ `NC4_MAX_FRAME` 8,205 B）抄到
+   per-core scratch，再 dispatch；平常 frame 仍然零複製。
+4. dispatch 完 `nc_buf_skip(total)`；下一輪重新拿 segments。
+
+代價：`static uint8_t s_parse_scratch[cores][NC4_MAX_FRAME]` =
+**8,205 B／core**（S3／P4 16.4 KB、C3 8.2 KB BSS；不佔 plan）。
+好處：producer 可以在 consumer 揸住指標時繼續寫（RING 不會搬資料），
+backlog 下亦不會出現線性版的 memmove 崩塌。
+
+**驗證**：新指令 `0xF02F PARSER_SELFTEST` 做兩件事：
+
+1. 建一個 256 B RING parser，餵兩個 frame（第二個由環尾繞回開頭），
+   檢查 CRC／header 與 `n_max_ok`。S3／P4 都回 `{"parser_ring":true}`。
+2. 同一批 2,000 × 1,024 B frame（每個切 3 段餵入）跑 RING vs 線性 parser：
+
+| parser | S3-Matrix | P4-C6 |
+|---|---:|---:|
+| RING | 164.7 ms（12,146 fps） | 75.6 ms（26,446 fps） |
+| 線性 STREAM | 163.9 ms（12,199 fps） | 75.2 ms（26,590 fps） |
+
+兩邊都完成 2,000 幀；RING 只慢 **0.4–0.5%**。所以**穩態 parser 沒有吞吐優勢**：
+RING 的價值是**最壞情況**（backlog／大量 pending 時免 memmove）與**所有權**
+（consumer 揸住指標時 producer 可以繼續寫）；buffer-level 的 14× 是 backlog 壓力案例，
+不是 parser 穩態。`0xF008` 的 `crc_err`／`bad_hdr` 為 0。
+
+### 12.4 邊界
+
+- 這是**微基準**：單 task、內部 SRAM、固定 1 KB 幀、冇跨核、冇真實 parser／driver。
+  真實吞吐仍要以 `0xF008`／`buf_probe.py` 的通道量測為準。
+- backlog 版是刻意把 pending 維持在環一半（`> cap/2` 就 skip 一幀），
+  令線性版每次都踩到壓實；真實系統的 backlog 取決於 decode 是否追得上。
+- P4 是用 ROM USB（USJ）連線跑的；偶有回覆遺失（與 iterations 無固定關係），
+  但 5,000／20,000 兩輪數字一致。

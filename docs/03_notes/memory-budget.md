@@ -87,7 +87,7 @@
 | `uart.rx` 棧 | 1,536 | `nc4_bus_start_producer`（實測 888） |
 | `nc_log` 棧 | 2,560 | `nc_log_start`（實測 1,804） |
 | main task 棧 | 3,072 | `CONFIG_ESP_MAIN_TASK_STACK_SIZE`（實測 2,120） |
-| `nc4.rx`（CDC parser） | 4,192 | plan（INTERNAL）—— OTA 的 4 KB chunk |
+| `usb.rx`（CDC parser） | 4,192 | plan（INTERNAL）—— OTA 的 4 KB chunk |
 | `uart.rx`（parser） | 1,024 | plan（INTERNAL） |
 | CDC 插槽 | 4 × 256 = 1,024 | heap（零複製收斂） |
 | UART 插槽 | 4 × 256 = 1,024 | heap |

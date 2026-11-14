@@ -292,7 +292,7 @@ static void on_xxx(nc4_ctx_t *ctx, const nc4_frame_t *f)
 **為什麼靜態 buffer 安全**：`nc4.c` 呼叫 handler 時持有 `s_dispatch_mutex`，
 所以兩個解碼核的 handler **不會同時執行** —— 靜態 TX buffer 不會被另一個核蓋掉。
 
-**什麼才要宣告成緩衝區**：長命的東西 —— parser 區（`nc4.rx` / `uart.rx` / `tcp.rx`）、
+**什麼才要宣告成緩衝區**：長命的東西 —— parser 區（`usb.rx` / `uart.rx` / `tcp.rx`）、
 轉寄／大頁（FIFO）、arena、DMA 槽。一次性的 frame / 回覆不需要，也不該宣告
 （一次性的東西用堆疊或 static，見上面的表）。
 

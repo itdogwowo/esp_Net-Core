@@ -100,7 +100,7 @@ FatFS 的 rename 是同目錄的目錄項改寫（一個 sector），配合上�
 |---|---|---|
 | NC4 payload 上限 | 8,192 B | `FILE_CHUNK` = file_id(2) + offset(4) + data → data ≤ **8,186 B** |
 | 每包 ACK | 0x2004 | 8 KB/包、100–140 KB/s → 每包 ~58 ms；RTT 佔比 < 10%，**不需要 pipeline** |
-| CDC RX 緩衝 | plan 給 `nc4.rx` 8,205 B | 剛好夠一幀；與 OTA 相同（OTA 用 4 KB 更保守） |
+| CDC RX 緩衝 | plan 給 `usb.rx` 8,205 B | 剛好夠一幀；與 OTA 相同（OTA 用 4 KB 更保守） |
 
 ---
 

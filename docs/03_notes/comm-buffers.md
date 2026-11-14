@@ -1,5 +1,7 @@
 # 通訊緩衝（最終定案）
 
+> 2026-11-14：本文的 `nc4.pool` 已整組移除；以下 pool 設定只作歷史對照。
+>
 > 2026-11-09。範圍：**bus frame 的收、解、轉、發**。
 > 像素／音效 buffer 是另一條線（[psram-surface.md](psram-surface.md)），不要混在一起。
 >

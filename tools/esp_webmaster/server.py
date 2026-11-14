@@ -15,16 +15,19 @@ import os
 import shutil
 import struct
 import sys
+import tempfile
 import threading
 import time
 from pathlib import Path
 from typing import Any
 
-from fastapi import Body, FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
+from fastapi import Body, FastAPI, Header, HTTPException, Query, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
+import events
 import files
+import flash
 import nc4
 import ota
 from link import LinkError, SerialLink, SimLink, list_ports
@@ -51,19 +54,97 @@ COMMANDS = [
 ]
 
 
+class Device:
+    """一個已連線的裝置：自己的 link、lock、log ring、session。"""
+
+    def __init__(self, key: str, link, port: str, sim: bool):
+        self.key = key
+        self.link = link
+        self.port = port
+        self.sim = sim
+        self.lock = threading.RLock()
+        self.events = events.EventLog(4000)
+        self.session = f"{int(time.time() * 1000):x}-{os.getpid():x}-{key}"
+
+
 class State:
     def __init__(self, sim_root: Path | None):
-        self.lock = threading.RLock()
-        self.link = None
-        self.port: str | None = None
-        self.is_sim = False
+        self._admin = threading.RLock()
+        self.devices: dict[str, Device] = {}
+        self.active: str | None = None
+        self._empty_events = events.EventLog(8)
+        self._fallback_lock = threading.RLock()
         self.sim_root = sim_root or (BASE_DIR / ".simfs")
         self.loop: asyncio.AbstractEventLoop | None = None
         self.clients: set[WebSocket] = set()
 
+    # ── 作用中裝置的 facade（現有 endpoint 不用逐個改）──
+    @property
+    def dev(self) -> Device | None:
+        return self.devices.get(self.active) if self.active else None
+
+    @property
+    def link(self):
+        return self.dev.link if self.dev is not None else None
+
+    @property
+    def port(self) -> str | None:
+        return self.dev.port if self.dev is not None else None
+
+    @property
+    def is_sim(self) -> bool:
+        return self.dev.sim if self.dev is not None else False
+
+    @property
+    def lock(self):
+        return self.dev.lock if self.dev is not None else self._fallback_lock
+
+    @property
+    def events(self):
+        return self.dev.events if self.dev is not None else self._empty_events
+
+    @property
+    def session(self) -> str:
+        return self.dev.session if self.dev is not None else ""
+
+    def device_list(self) -> list[dict[str, Any]]:
+        return [{"device": d.key, "port": d.port, "sim": d.sim,
+                 "connected": bool(d.link and d.link.connected),
+                 "active": d.key == self.active}
+                for d in self.devices.values()]
+
+    def bind(self, d: Device) -> None:
+        d.link.on_line = lambda text: self.log_line(d, text)
+        d.link.on_frame = lambda cmd, payload: self.log_frame(d, cmd, payload)
+        d.link.on_close = lambda reason: self.log_close(d, reason)
+
+    def log_line(self, d: Device, text: str) -> None:
+        ev = d.events.add("line", text, device=d.key)
+        self.broadcast(ev)
+
+    def log_frame(self, d: Device, cmd: int, payload: bytes) -> None:
+        # 大型資料幀只記長度，避免把 16 KB payload 塞進 log ring。
+        hexdata = payload.hex() if len(payload) <= 256 else ""
+        ev = d.events.add("frame", cmd=f"0x{cmd:04X}", hex=hexdata,
+                          len=len(payload), device=d.key)
+        self.broadcast(ev)
+
+    def log_close(self, d: Device, reason: str) -> None:
+        self.broadcast({"type": "disconnected", "device": d.key, "reason": reason})
+
+    def activity(self, actor: str, action: str, **detail: Any) -> None:
+        d = self.dev
+        if d is None:
+            return
+        ev = d.events.add("activity", actor=actor, action=action,
+                          device=d.key, **detail)
+        self.broadcast(ev)
+
     def broadcast(self, ev: dict[str, Any]) -> None:
         if self.loop is None or not self.clients:
             return
+        if "device" not in ev and self.active:
+            ev = {**ev, "device": self.active}
 
         async def go() -> None:
             for ws in list(self.clients):
@@ -83,6 +164,7 @@ class State:
         return self.link
 
 
+
 def _json_or_none(payload: bytes):
     text = nc4.decode_str_u16(payload)
     if text is None:
@@ -94,37 +176,53 @@ def _json_or_none(payload: bytes):
 
 
 def _connect(state: State, body: dict) -> dict:
-    with state.lock:
-        if state.link is not None:
+    sim = bool(body.get("sim"))
+    port = "sim" if sim else str(body.get("port") or "").strip()
+    if not port:
+        raise HTTPException(status_code=400, detail="缺 port")
+    key = "sim" if sim else port
+
+    with state._admin:
+        d = state.devices.get(key)
+        if d is not None and d.link is not None and d.link.connected:
+            if bool(body.get("activate")):
+                state.active = key
+            return {"ok": True, "port": d.port, "sim": d.sim,
+                    "device": d.key, "active": state.active,
+                    "devices": state.device_list()}
+
+        if d is not None and d.link is not None:
             try:
-                state.link.close()
+                d.link.close()
             except Exception:
                 pass
-            state.link = None
-        if body.get("sim"):
-            dev = SimDevice(state.sim_root)
-            link = SimLink(dev)
-            state.is_sim = True
-            state.port = "sim"
-        else:
-            port = str(body.get("port") or "").strip()
-            if not port:
-                raise HTTPException(status_code=400, detail="缺 port")
-            try:
-                link = SerialLink(port)
-            except LinkError as e:
-                raise HTTPException(status_code=400, detail=str(e))
-            state.is_sim = False
-            state.port = port
+            d.link = None
 
-        link.on_line = lambda text: state.broadcast(
-            {"type": "line", "text": text, "ts": time.time()})
-        link.on_frame = lambda cmd, payload: state.broadcast(
-            {"type": "frame", "cmd": f"0x{cmd:04X}", "hex": payload.hex()})
-        link.on_close = lambda reason: state.broadcast(
-            {"type": "disconnected", "reason": reason})
-        state.link = link
-    return {"ok": True, "port": state.port, "sim": state.is_sim}
+        try:
+            if sim:
+                link = SimLink(SimDevice(state.sim_root))
+            else:
+                link = SerialLink(port)
+        except LinkError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+
+        if d is None:
+            d = Device(key, link, port, sim)
+            state.devices[key] = d
+        else:
+            d.link = link
+            d.port = port
+            d.sim = sim
+        state.bind(d)
+        cur = state.dev
+        cur_ok = cur is not None and cur.link is not None and cur.link.connected
+        if bool(body.get("activate")) or state.active is None or not cur_ok:
+            state.active = key
+        state.broadcast({"type": "devices", "active": state.active,
+                         "devices": state.device_list()})
+    return {"ok": True, "port": d.port, "sim": d.sim,
+            "device": d.key, "active": state.active,
+            "devices": state.device_list()}
 
 
 def create_app(sim_root: str | Path | None = None,
@@ -144,24 +242,45 @@ def create_app(sim_root: str | Path | None = None,
             "connected": bool(state.link and state.link.connected),
             "port": state.port,
             "sim": state.is_sim,
+            "device": state.active,
+            "devices": state.device_list(),
             "version": "1.0.0",
         }
+
+    @app.get("/api/devices")
+    def api_devices():
+        return {"ok": True, "active": state.active, "devices": state.device_list()}
+
+    @app.post("/api/select")
+    def api_select(body: dict = Body(...)):
+        key = str(body.get("device") or "")
+        with state._admin:
+            if key not in state.devices:
+                raise HTTPException(status_code=404, detail="冇這台裝置")
+            state.active = key
+        state.broadcast({"type": "devices", "active": state.active,
+                         "devices": state.device_list()})
+        return {"ok": True, "active": state.active, "devices": state.device_list()}
 
     @app.post("/api/connect")
     def api_connect(body: dict = Body(...)):
         return _connect(state, body)
 
     @app.post("/api/disconnect")
-    def api_disconnect():
-        with state.lock:
-            if state.link is not None:
+    def api_disconnect(device: str = Query("")):
+        with state._admin:
+            key = device or state.active
+            d = state.devices.pop(key, None) if key else None
+            if d is not None and d.link is not None:
                 try:
-                    state.link.close()
+                    d.link.close()
                 except Exception:
                     pass
-                state.link = None
-            state.port = None
-        return {"ok": True}
+            if key is not None and state.active == key:
+                state.active = next(iter(state.devices), None)
+        state.broadcast({"type": "devices", "active": state.active,
+                         "devices": state.device_list()})
+        return {"ok": True, "active": state.active, "devices": state.device_list()}
 
     # ── 狀態 ──
     @app.get("/api/status")
@@ -219,7 +338,8 @@ def create_app(sim_root: str | Path | None = None,
                         headers={"Content-Disposition": f'attachment; filename="{name}"'})
 
     @app.put("/api/file")
-    def api_file_put(path: str = Query(...), body: bytes = Body(...)):
+    def api_file_put(path: str = Query(...), body: bytes = Body(b""),
+                     x_actor: str = Header("")):
         link = state.require()
         total = len(body)
 
@@ -244,6 +364,9 @@ def create_app(sim_root: str | Path | None = None,
                 "kind": e.kind, "msg": str(e), **e.detail})
         except LinkError as e:
             raise HTTPException(status_code=504, detail=str(e))
+        state.broadcast({"type": "file_changed", "path": q["path"],
+                         "actor": x_actor or "api", "size": q["size"],
+                         "deleted": False})
         return {
             "ok": True, "path": q["path"], "size": q["size"],
             "sha256": q["sha256"].hex(), "pending": q["pending"], "free": q["free"],
@@ -251,16 +374,16 @@ def create_app(sim_root: str | Path | None = None,
         }
 
     @app.post("/api/file/delete")
-    def api_file_delete(body: dict = Body(...)):
-        return _simple_file_op(state, files.delete, body.get("path", ""))
+    def api_file_delete(body: dict = Body(...), x_actor: str = Header("")):
+        return _simple_file_op(state, files.delete, body.get("path", ""), x_actor, True)
 
     @app.post("/api/file/confirm")
-    def api_file_confirm(body: dict = Body(...)):
-        return _simple_file_op(state, files.confirm, body.get("path", ""))
+    def api_file_confirm(body: dict = Body(...), x_actor: str = Header("")):
+        return _simple_file_op(state, files.confirm, body.get("path", ""), x_actor)
 
     @app.post("/api/file/undo")
-    def api_file_undo(body: dict = Body(...)):
-        return _simple_file_op(state, files.undo, body.get("path", ""))
+    def api_file_undo(body: dict = Body(...), x_actor: str = Header("")):
+        return _simple_file_op(state, files.undo, body.get("path", ""), x_actor)
 
     # ── 固件 ──
     @app.post("/api/firmware")
@@ -298,6 +421,186 @@ def create_app(sim_root: str | Path | None = None,
             raise HTTPException(status_code=504, detail=str(e))
         return {"ok": True, "data": res}
 
+    # ── 共享 log／activity（Web UI 與 AI 同一份）──
+    def _events_of(device: str):
+        if device:
+            d = state.devices.get(device)
+            if d is None:
+                raise HTTPException(status_code=404, detail="冇這台裝置")
+            return d.events
+        return state.events
+
+    @app.get("/api/log/tail")
+    def api_log_tail(n: int = 200, since: int = 0, device: str = ""):
+        return {"ok": True, "events": _events_of(device).tail(n=n, since=since)}
+
+    @app.get("/api/activity")
+    def api_activity(n: int = 100, since: int = 0, device: str = ""):
+        return {"ok": True, "events": _events_of(device).tail(n=n, since=since, kind="activity")}
+
+    @app.post("/api/log/note")
+    def api_log_note(body: dict = Body(...)):
+        actor = str(body.get("actor") or "ai")
+        text = str(body.get("text") or "").strip()
+        if not text:
+            raise HTTPException(status_code=400, detail="缺 text")
+        state.activity(actor, "note", text=text[:2000])
+        return {"ok": True}
+
+    # AI／工具用的能力清單（人類看 README，AI 看這個）。
+    @app.get("/api/ai")
+    def api_ai():
+        return {
+            "ok": True,
+            "mode": "single-owner serial broker",
+            "note": "序列埠由 server 獨佔；AI 不要再開 COM port，請用本 API。"
+                    "請帶 X-Actor: ai，活動會出現在 UI 的 Activity。",
+            "endpoints": [
+                {"method": "GET", "path": "/api/info"},
+                {"method": "GET", "path": "/api/devices"},
+                {"method": "POST", "path": "/api/select", "body": {"device": "..."}},
+                {"method": "GET", "path": "/api/log/tail?n=200&since=0&device=..."},
+                {"method": "GET", "path": "/api/activity?n=100"},
+                {"method": "POST", "path": "/api/log/note", "body": {"text": "..."}},
+                {"method": "GET", "path": "/api/status?keys=sys,storage,log"},
+                {"method": "GET", "path": "/api/manifest"},
+                {"method": "POST", "path": "/api/scan?target=0"},
+                {"method": "GET", "path": "/api/file?path=/config/system.json"},
+                {"method": "PUT", "path": "/api/file?path=/config/x.json", "body": "raw bytes"},
+                {"method": "POST", "path": "/api/file/confirm", "body": {"path": "..."}},
+                {"method": "POST", "path": "/api/file/undo", "body": {"path": "..."}},
+                {"method": "POST", "path": "/api/file/delete", "body": {"path": "..."}},
+                {"method": "POST", "path": "/api/reboot"},
+                {"method": "POST", "path": "/api/cmd", "body": {"cmd": "0x1101", "payload_hex": ""}},
+                {"method": "POST", "path": "/api/firmware?apply=1&expect_chip=esp32s3", "body": "app bin"},
+                {"method": "GET", "path": "/api/flash/info?chip=esp32p4&before=usb_reset"},
+                {"method": "POST", "path": "/api/flash/esptool?offset=0x0&baud=460800&chip=esp32p4&before=usb_reset", "body": "bin"},
+                {"method": "POST", "path": "/api/log/note", "body": {"text": "..."}},
+            ],
+        }
+
+    @app.middleware("http")
+    async def activity_middleware(request, call_next):
+        started = time.monotonic()
+        response = await call_next(request)
+        try:
+            path = request.url.path
+            actor_hdr = request.headers.get("x-actor")
+            mutating = request.method in {"POST", "PUT", "DELETE", "PATCH"}
+            # AI 的讀取也要看得見（X-Actor: ai），但避免 log/activity 自己回音。
+            quiet = {"/api/log/tail", "/api/activity", "/api/info", "/api/ports",
+                     "/api/commands", "/api/ai", "/api/cmd", "/api/log/note"}
+            skip_mut = path in {"/api/cmd", "/api/log/note", "/api/flash/esptool"}
+            watch = (mutating and not skip_mut) or (actor_hdr == "ai" and path not in quiet)
+            if path.startswith("/api/") and watch:
+                actor = actor_hdr or ("ui" if request.headers.get("referer") else "api")
+                detail = {k: v for k, v in request.query_params.items()}
+                state.activity(actor, f"{request.method} {path}",
+                               status=response.status_code,
+                               ms=round((time.monotonic() - started) * 1000, 1),
+                               **detail)
+        except Exception:
+            pass
+        return response
+
+    @app.get("/api/flash/info")
+    def api_flash_info(chip: str = Query(""), before: str = Query("usb_reset")):
+        if state.is_sim or not state.port:
+            raise HTTPException(status_code=409, detail="模擬模式／未連線")
+        d = state.dev
+        if d is None:
+            raise HTTPException(status_code=409, detail="未連線")
+        port = d.port
+        lines: list[str] = []
+        try:
+            with d.lock:
+                if d.link is not None:
+                    try:
+                        d.link.close()
+                    except Exception:
+                        pass
+                    d.link = None
+            cmd = flash.build_info_cmd(port, chip=chip, before=before)
+            rc = flash.run_flash(cmd, timeout=60,
+                                 on_line=lambda line: lines.append(line))
+            try:
+                _connect(state, {"port": port})
+            except Exception:
+                pass
+            return {"ok": rc == 0, "rc": rc, "lines": lines}
+        except flash.FlashError as e:
+            try:
+                _connect(state, {"port": port})
+            except Exception:
+                pass
+            raise HTTPException(status_code=504, detail=str(e))
+
+    # ── ESPTOOL（ROM／USB-Serial-JTAG）──
+    @app.post("/api/flash/esptool")
+    def api_flash_esptool(offset: str = Query("0x0"), baud: int = Query(460800),
+                          chip: str = Query(""), before: str = Query("usb_reset"),
+                          erase: int = Query(0), image: bytes = Body(b""),
+                          x_actor: str = Header("")):
+        if state.is_sim or not state.port:
+            raise HTTPException(status_code=409, detail="模擬模式／未連線：唔可以 esptool 燒錄")
+        if not erase and not image:
+            raise HTTPException(status_code=400, detail="冇 image 又冇 erase")
+        d = state.dev
+        if d is None:
+            raise HTTPException(status_code=409, detail="未連線")
+        port = d.port
+        try:
+            off = int(str(offset), 0)
+        except ValueError:
+            raise HTTPException(status_code=400, detail=f"offset 唔係整數：{offset}")
+        tmp = None
+        try:
+            if image:
+                fd, tmp = tempfile.mkstemp(suffix=".bin", prefix="espwm-")
+                with os.fdopen(fd, "wb") as f:
+                    f.write(image)
+            cmd = flash.build_cmd(port, tmp, offset=off, baud=baud,
+                                  chip=chip, before=before, erase=bool(erase))
+            state.activity(x_actor or "ui", "FLASH esptool", port=port,
+                           bytes=len(image), offset=hex(off), erase=bool(erase))
+            # 放開序列埠（一個 port 只可以一個 owner），燒完再連返。
+            with d.lock:
+                if d.link is not None:
+                    try:
+                        d.link.close()
+                    except Exception:
+                        pass
+                    d.link = None
+            state.broadcast({"type": "flash", "phase": "start", "port": port,
+                             "bytes": len(image)})
+            rc = flash.run_flash(
+                cmd,
+                on_line=lambda line: state.broadcast({"type": "line", "text": line, "flash": True}),
+                on_progress=lambda pct: state.broadcast({"type": "progress", "op": "esptool",
+                                                         "done": pct, "total": 100}),
+            )
+            state.broadcast({"type": "flash", "phase": "done", "rc": rc})
+            # 重新連線（硬重置後同一個 port 通常會返嚟；失敗就交由 UI 手動重連）
+            try:
+                _connect(state, {"port": port})
+            except Exception as e:
+                state.broadcast({"type": "disconnected", "reason": f"flash 後重連失敗：{e}"})
+            if rc != 0:
+                raise HTTPException(status_code=500, detail=f"esptool exit {rc}")
+            return {"ok": True, "rc": rc}
+        except flash.FlashError as e:
+            try:
+                _connect(state, {"port": port})
+            except Exception:
+                pass
+            raise HTTPException(status_code=504, detail=str(e))
+        finally:
+            if tmp:
+                try:
+                    os.unlink(tmp)
+                except Exception:
+                    pass
+
     # ── 其他 ──
     @app.post("/api/reboot")
     def api_reboot():
@@ -314,7 +617,7 @@ def create_app(sim_root: str | Path | None = None,
         return {"ok": True, "data": COMMANDS}
 
     @app.post("/api/cmd")
-    def api_cmd(body: dict = Body(...)):
+    def api_cmd(body: dict = Body(...), x_actor: str = Header("")):
         link = state.require()
         try:
             cmd = int(str(body.get("cmd", "0")), 0)
@@ -328,7 +631,11 @@ def create_app(sim_root: str | Path | None = None,
             try:
                 rcmd, rsp = link.request(cmd, payload, expect=exp, timeout=timeout)
             except LinkError as e:
+                state.activity(x_actor or "api", "NC4 cmd",
+                               cmd=f"0x{cmd:04X}", bytes=len(payload), ok=False)
                 raise HTTPException(status_code=504, detail=str(e))
+        state.activity(x_actor or "api", "NC4 cmd",
+                       cmd=f"0x{cmd:04X}", bytes=len(payload), rsp=f"0x{rcmd:04X}", ok=True)
         return {"ok": True, "cmd": f"0x{rcmd:04X}", "hex": rsp.hex(),
                 "json": _json_or_none(rsp), "len": len(rsp)}
 
@@ -427,7 +734,13 @@ def create_app(sim_root: str | Path | None = None,
         state.loop = asyncio.get_running_loop()
         state.clients.add(ws)
         await ws.send_json({"type": "hello", "connected": bool(
-            state.link and state.link.connected), "port": state.port, "sim": state.is_sim})
+            state.link and state.link.connected), "port": state.port, "sim": state.is_sim,
+            "session": state.session, "device": state.active,
+            "devices": state.device_list()})
+        # 後連上的人先收 backlog；AI 也用 REST 讀同一份 ring。
+        backlog = state.events.tail(300)
+        if backlog:
+            await ws.send_json({"type": "backlog", "events": backlog})
         try:
             while True:
                 await ws.receive_text()
@@ -459,7 +772,7 @@ def create_app(sim_root: str | Path | None = None,
     return app
 
 
-def _simple_file_op(state: State, fn, path: str):
+def _simple_file_op(state: State, fn, path: str, actor: str = "", deleted: bool = False):
     if not path:
         raise HTTPException(status_code=400, detail="缺 path")
     link = state.require()
@@ -470,6 +783,9 @@ def _simple_file_op(state: State, fn, path: str):
         raise HTTPException(status_code=400, detail={"kind": e.kind, "msg": str(e)})
     except LinkError as e:
         raise HTTPException(status_code=504, detail=str(e))
+    state.broadcast({"type": "file_changed", "path": q.get("path", path),
+                     "actor": actor or "api", "size": q.get("size", 0),
+                     "deleted": deleted})
     return {"ok": True, "data": {
         "path": q["path"], "exists": q["exists"], "size": q["size"],
         "sha256": q["sha256"].hex(), "pending": q["pending"], "free": q["free"],

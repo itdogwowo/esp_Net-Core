@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate docs/00_pm/boot.svg — 開機 12 個階段：做什麼、用什麼模塊、契約。
+"""Generate docs/00_pm/boot.svg — 開機 11 個階段（B06 已移除）：做什麼、用什麼模塊、契約。
 
 Single source of truth: 手寫的內容清單 + 固定幾何，輸出獨立 SVG（無外部字型／圖片）。
     python tools/boot_diagram.py [out.svg]
@@ -112,19 +112,18 @@ ROWS = [
      ["store", "config", "sdmmc"], "nvs", "storage, config",
      "三層 config 之後人人都讀", C_PREP),
 
-    ("capability", ["探測核數；決定 USB 模式與 link 名"],
-     ["core", "config"], "config", "cores, usb", "decoder 個數、router／任務的 core 夾", C_CAP),
+    ("capability", ["探測核數 → 單核：core1 組（解碼器＋任務）落 core0",
+                     "USB：預設 USJ；手動改 links[].kind 才用 OTG"],
+     ["core", "config"], "config", "cores, usb", "router／decoder／任務都用同一份落點", C_CAP),
 
     ("hwcheck", ["按 hardware.json claim 腳位（衝突開機即見）"],
      ["hw"], "config", "∅", "只稽核：即報，唔阻開機", C_HW),
 
-    ("hardware", ["PWM、ETH 起來；寫路由表（線 → 核）"],
-     ["drv_pwm", "esp_eth", "nc4_router"], "config", "router", "決定每條線跑哪個核", C_HW),
+    ("hardware", ["ETH 起來；建「線 → 組」表；USB 的組寫入 ctx（usb_core）"],
+     ["drv_pwm", "esp_eth", "nc4_router"], "config", "router", "USB 線的組由此定，之後只讀 ctx", C_HW),
 
-    ("pool", ["共用池已停用，只印一行說明"],
-     ["—"], "∅", "∅", "—", C_MEM),
-
-    ("declare", ["建 decoder × 核數；登記任務；向 plan 要記憶體"],
+    ("declare", ["建 decoder（只有有線的核）＋套 cid／master",
+                 "登記任務；向 plan 宣告記憶體"],
      ["nc4", "task_manager", "plan"], "config, cores, usb, router", "declared",
      "commit 才有東西可 carve", C_MEM),
 
@@ -134,7 +133,8 @@ ROWS = [
     ("start", ["派資源（nc_buf）、跑 on_start、註冊指令"],
      ["task_manager", "mem", "action"], "plan, config", "tasks", "usb／channels 等它", C_TASK),
 
-    ("usb", ["TinyUSB 裝 CDC+MSC，或 JTAG log；交碟給 host"],
+    ("usb", ["USB 只 init 一次：OTG 裝 TinyUSB／CDC，或 USJ 開 log",
+             "換線 = 改 config 重啟（沒有 runtime 切換）"],
      ["tinyusb", "store", "nclog", "core"], "usb, router", "∅",
      "log 管道與 /data 歸屬從此定案", C_LINK),
 
@@ -145,6 +145,11 @@ ROWS = [
     ("account", ["印剩餘 heap（內部／PSRAM）"],
      ["esp_heap"], "∅", "∅", "—", C_LINK),
 ]
+
+# B 的號碼是契約（naming.md §7）：B06（pool）於 2026-11-14 移除，保留跳號。
+STAGE_IDS = ["B01", "B02", "B03", "B04", "B05",
+             "B07", "B08", "B09", "B10", "B11", "B12"]
+assert len(STAGE_IDS) == len(ROWS), "STAGE_IDS 同 ROWS 數量對不上"
 # ── 幾何 ───────────────────────────────────────────────────────────────
 L, R = 44, W - 44
 COL_IDX, COL_DO, COL_MOD, COL_CON, COL_USE = L + 8, L + 176, L + 640, L + 950, L + 1288
@@ -163,7 +168,7 @@ def build():
     rect(0, 0, W, H, PAPER, PAPER, 0, 0)
 
     # 標題
-    text(L, 52, "開機：12 個階段、10 個依賴位元、1 個 ctx", 25, INK, 600)
+    text(L, 52, "開機：11 個階段、10 個依賴位元、1 個 ctx", 25, INK, 600)
     text(L, 78, "boot.h 是契約（needs／gives）、boot.c 是執行器、main.c 是實作。"
                 "下面每一行 = main.c 的 stages[] 一行。", 12.5, MUTED)
     text(R, 78, "來源：firmware/main/boot.h · boot.c · main.c", 11, FAINT, 400, anchor="end")
@@ -184,7 +189,7 @@ def build():
                    f'rx="2" fill="{color}"/>')
         # 序號
         # 階段 ID（B01…）＝ 對外溝通用嘅 token，與 log 的 boot[B02] 一致
-        text(COL_IDX, y + 24, f"B{i + 1:02d}", 11, FAINT, 500, mono=True)
+        text(COL_IDX, y + 24, STAGE_IDS[i], 11, FAINT, 500, mono=True)
         text(COL_IDX + 36, y + 24, name, 13, INK, 600, mono=True)
         # 做什麼
         for k, ln in enumerate(what[:2]):
@@ -211,18 +216,18 @@ def build():
 
     # ── 面板 A：ctx ──────────────────────────────────────────────────
     rect(L, PANEL_A_Y, R - L, PANEL_A_H, WHITE)
-    text(L + 16, PANEL_A_Y + 24, "ctx（nc_boot_ctx）—— 跨階段的資料只有這五個欄位", 12.5, INK, 600)
+    text(L + 16, PANEL_A_Y + 24, "ctx（nc_boot_ctx）—— 跨階段的資料只有這六個欄位", 12.5, INK, 600)
     text(L + 16, PANEL_A_Y + 44,
-         "寫入者只有 capability 一個；讀者全部經 nc_boot_ctx() 拿，沒有第二份 static。",
+         "寫入者：capability（核數／USB 人格）＋ B05 hardware（USB 線的組）；讀者經 nc_boot_ctx()。",
          11.5, MUTED)
 
     rich(L + 16, PANEL_A_Y + 72,
          [("cores", INK, 600, True), ("  (1／2)   ", MUTED, 400, False),
           ("讀：", FAINT, 400, False),
-          ("nc4_decoders()、router 的 decodeN 夾、任務管理器的 loop core 夾", INK2, 400, False)],
+          ("B07 的 s_ndec／router（讀落點化嘅 config）／nc_task 的 loop core 落點", INK2, 400, False)],
          fs=11.5)
     rich(L + 16, PANEL_A_Y + 92,
-         [("usb_mode／usb_link／usb_log／usb_msc   ", MUTED, 400, False),
+         [("usb_mode／usb_link／usb_log／usb_msc／usb_core   ", MUTED, 400, False),
           ("讀：", FAINT, 400, False),
           ("declare、ph_usb、ph_channels、router_defaults、usb_init", INK2, 400, False)],
          fs=11.5)

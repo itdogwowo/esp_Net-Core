@@ -213,9 +213,21 @@ UART ──▶│ decode1（拆幀 → 執行）                │
 | 同一個 `in` 兩行 | 開機錯誤，兩行都不生效 |
 | `out` 有未宣告的通道 | 警告 + 忽略該項，其餘照做 |
 | `out` 有 `fxN` | 警告 + 忽略（fx 不吃幀） |
-| `out` 有 `decodeN`，但板子沒有第 N 核 | 開機錯誤（S3/P4 都是 2 核，所以只接受 0/1） |
+| `out` 有 `decodeN`，但板子沒有第 N 核 | 單核板：B03 會把 `decode1` 併入 `decode0`（只改 RAM，開機 log 會講）；雙核板只接受 0/1 |
 | `out` 含 `in` 自己 | 警告 + 忽略（自我反射） |
 | 某條 link 沒有 route | 預設 `out = ["decode0"]`，開機表標 `default` |
+
+**核心組與 decoder**（理念見 [system-model.md](system-model.md) §4，這裡只列路由相關的部分）：
+
+- 落點只有一條規則：要求的那個核不存在 → 落到仍然存在的核（現時 core0）＝
+  `nc_core_clamp()`。`routes` 的 `decode1` 在 B03 已收斂；`bus.cfg.core`、producer 的釘核、
+  回覆幀索引由 `decoder_slot()`／`decoder_core()` 一起答 —— 它們另外回答
+  「這個核有冇 decoder」，核不存在時答案同 core0（見 §4 的第二條問題）。
+- decoder 數 = 「core1 真的有一條線」→ 2，否則 1（`s_ndec`，B07 決定）。
+  「有幾多核」同「實際起幾多個 decoder」是兩件事 —— 單核建第二份是純浪費
+  （回覆幀 2,615 B × 2），雙核但 core1 冇線一樣。
+- identity（cid／master）屬於組：一定要在 decoder 建立**之後**套（B07）。
+  在 B02 的 `node_identity_init()` 套等於冇套（`s_decoder[]` 全部 NULL）。
 
 **與舊專案的差異**：舊 Router 沒配對＝丟棄；新表沒配對＝給 `decode0`。
 路由是必要資訊，靜默丟幀比默默指派更難查。要嚴格就開 `boot_strict: 1`。

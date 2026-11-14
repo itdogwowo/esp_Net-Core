@@ -18,6 +18,7 @@ const state = {
   logPaused: false,
   logs: [],
   fwFile: null,
+  espFile: null,
   commands: [],
   logDebug: false,
   manifest: {},
@@ -25,6 +26,15 @@ const state = {
   drivePath: "/",
   driveFile: null,
   driveDirty: false,
+  // IDE
+  ideTabs: [],
+  ideActive: null,
+  ideCM: null,
+  ideSilent: false,
+  lastSeq: 0,
+  session: "",
+  device: "",
+  switching: false,
 };
 
 // ── 格式化 ─────────────────────────────────────────────
@@ -95,7 +105,8 @@ function toast(msg, kind = "ok", ms = 3400) {
 }
 
 async function api(url, opts = {}) {
-  const r = await fetch(url, opts);
+  const headers = { "X-Actor": "ui", ...(opts.headers || {}) };
+  const r = await fetch(url, { ...opts, headers });
   const ct = r.headers.get("content-type") || "";
   if (!r.ok) {
     let msg = `${r.status} ${r.statusText}`;
@@ -119,7 +130,7 @@ function setConnected(ok, port = null, sim = false) {
   $("#ticketName").textContent = ok ? (sim ? "模擬裝置" : "ESP") : "未連線";
   $("#ticketMeta").textContent = ok ? `${port || "—"}${sim ? " · sim" : ""}` : "—";
   $("#btnDisconnect").disabled = !ok;
-  $("#btnConnect").disabled = ok;
+  $("#btnConnect").disabled = false;   // 可以繼續新增第二台
   $("#btnSim").disabled = ok;
   $("#stOnline").textContent = ok ? "● online" : "● offline";
   $("#stOnline").className = ok ? "on" : "off";
@@ -168,34 +179,134 @@ async function refreshPorts() {
 }
 
 async function connect(port) {
+  if (state.ideTabs.some((t) => t.dirty) &&
+      !confirm("有未儲存的 IDE 檔案；新增／切換裝置會關閉它們，繼續？")) {
+    return;
+  }
   $("#led").dataset.state = "connecting";
+  state.switching = true;
   try {
     const j = await api("/api/connect", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(port === "sim" ? { sim: true } : { port }),
+      body: JSON.stringify(port === "sim" ? { sim: true, activate: true }
+                                           : { port, activate: true }),
     });
-    setConnected(true, j.port, j.sim);
     logLine(`連線 ${j.port}${j.sim ? "（模擬）" : ""}`, "ok");
     openWS();
-    await refreshStatus();
-    if (!(await loadManifest({ quiet: true }))) {
-      logLine("未有 manifest：自動重建索引…", "warn");
-      await rescan();
-    }
-    switchView("files");
+    state.device = "";
+    await selectDevice(j.device, { force: true });
+    state.switching = false;
+    switchView("ide");
   } catch (e) {
-    setConnected(false);
+    state.switching = false;
+    $("#led").dataset.state = "error";
     toast(`連線失敗：${e.message}`, "err", 6000);
     logLine(`連線失敗：${e.message}`, "err");
   }
 }
 
+async function refreshDevices() {
+  try {
+    const j = await api("/api/devices");
+    const devices = j.devices || [];
+    const sel = $("#deviceSelect");
+    if (!sel) return;
+    if (!devices.length) {
+      sel.classList.add("hidden");
+      sel.innerHTML = "";
+      state.device = "";
+      return;
+    }
+    sel.classList.remove("hidden");
+    sel.innerHTML = "";
+    for (const d of devices) {
+      const o = document.createElement("option");
+      o.value = d.device;
+      o.textContent = `${d.port}${d.sim ? " · sim" : ""}${d.connected ? "" : "（斷）"}`;
+      sel.appendChild(o);
+    }
+    if (!state.device) state.device = j.active || "";
+    sel.value = state.device || j.active || "";
+  } catch (_) { /* 未連線／server 未起 */ }
+}
+
+async function selectDevice(key, { force = false } = {}) {
+  if (!key) { await refreshDevices(); return; }
+  if (!force && key === state.device) { await refreshDevices(); return; }
+  if (state.ideTabs.some((t) => t.dirty) &&
+      !confirm("切換裝置會關閉未儲存的 IDE 檔案，繼續？")) {
+    await refreshDevices();
+    return;
+  }
+  state.switching = true;
+  try {
+    await api("/api/select", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ device: key }),
+    });
+  } catch (e) {
+    state.switching = false;
+    toast(`切換失敗：${e.message}`, "err", 5000);
+    return;
+  }
+  state.device = key;
+  state.lastSeq = 0;
+  state.session = "";
+  state.logs = [];
+  state.ideTabs = [];
+  state.ideActive = null;
+  const term = $("#terminal");
+  if (term) term.innerHTML = "";
+  const act = $("#activity");
+  if (act) act.innerHTML = "";
+  if (state.ideCM) {
+    state.ideSilent = true;
+    state.ideCM.setValue("");
+    state.ideSilent = false;
+  }
+  if ($("#ideEmpty")) $("#ideEmpty").classList.remove("hidden");
+  ideRenderTabs();
+
+  try {
+    const info = await api("/api/info");
+    setConnected(!!info.connected, info.port, info.sim);
+    await refreshDevices();
+    try {
+      const t = await api(`/api/log/tail?n=300&device=${encodeURIComponent(key)}`);
+      for (const ev of (t.events || [])) handleEvent(ev);
+    } catch (_) { /* */ }
+    if (info.connected) {
+      try { await refreshStatus(); } catch (_) { /* */ }
+      try { await loadManifest({ quiet: true }); } catch (_) { /* */ }
+    }
+  } finally {
+    state.switching = false;
+  }
+}
+
 async function disconnect() {
-  try { await api("/api/disconnect", { method: "POST" }); } catch (_) { /* ignore */ }
-  closeWS();
-  setConnected(false);
-  logLine("已斷線", "warn");
+  if (state.ideTabs.some((t) => t.dirty) &&
+      !confirm("有未儲存的 IDE 檔案；斷線會關閉它們，繼續？")) {
+    return;
+  }
+  let active = null;
+  state.switching = true;
+  try {
+    const j = await api("/api/disconnect", { method: "POST" });
+    active = j.active;
+  } catch (_) { /* ignore */ }
+  await refreshDevices();
+  if (active) {
+    state.device = "";
+    await selectDevice(active, { force: true });
+    logLine("已斷線，切換到另一台", "warn");
+  } else {
+    closeWS();
+    setConnected(false);
+    state.switching = false;
+    logLine("已斷線（冇其他裝置）", "warn");
+  }
 }
 
 // ── WebSocket ──────────────────────────────────────────
@@ -220,16 +331,90 @@ function closeWS() {
 }
 
 function handleEvent(ev) {
+  if (ev.type === "backlog") {
+    for (const e of (ev.events || [])) handleEvent(e);
+    return;
+  }
+  if (ev.type === "devices") {
+    // devices 事件本身就帶 device=active；唔可以落入下面的 active 過濾。
+    refreshDevices().then(async () => {
+      if (state.switching || !ev.active || ev.active === state.device) return;
+      if (state.ideTabs.some((t) => t.dirty)) {
+        toast("另一邊切換了裝置；你有未儲存檔案，已切回原本裝置", "warn", 9000);
+        try {
+          await api("/api/select", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ device: state.device }),
+          });
+        } catch (_) { /* */ }
+        await refreshDevices();
+      } else {
+        await selectDevice(ev.active, { force: true });
+      }
+    });
+    return;
+  }
+  if (ev.seq != null) {
+    if (ev.seq <= state.lastSeq) return;
+    state.lastSeq = ev.seq;
+  }
+  // 多裝置：只顯示目前 active 的事件；背景裝置的事件留在 server ring。
+  if (ev.device && state.device && ev.device !== state.device) {
+    if (ev.type === "disconnected") refreshDevices();
+    return;
+  }
   switch (ev.type) {
     case "hello":
+      if (ev.device && !state.device) state.device = ev.device;
+      if (ev.devices) refreshDevices();
+      if (ev.session && ev.session !== state.session) {
+        // server 重啟 → seq 由 1 再開始；清掉舊畫面，否則新事件會被 lastSeq 擋掉。
+        state.session = ev.session;
+        state.lastSeq = 0;
+        state.logs = [];
+        const term = $("#terminal");
+        if (term) term.innerHTML = "";
+        const act = $("#activity");
+        if (act) act.innerHTML = "";
+      }
       if (ev.connected && !state.connected) setConnected(true, ev.port, ev.sim);
       break;
     case "line":
       logLine(ev.text);
+      if (ev.flash) {
+        const box = $("#espResult");
+        if (box) {
+          box.classList.remove("hidden");
+          box.textContent = (box.textContent === "esptool 啟動中…" ? "" : box.textContent)
+            + ev.text + "\n";
+          box.scrollTop = box.scrollHeight;
+        }
+      }
       break;
-    case "frame":
-      logLine(`«frame ${ev.cmd}  ${(ev.hex || "").length / 2} B»`, "frame");
+    case "frame": {
+      const n = (ev.len != null) ? ev.len : ((ev.hex || "").length / 2);
+      logLine(`«frame ${ev.cmd}  ${n} B»`, "frame");
       break;
+    }
+    case "activity":
+      activityLine(ev);
+      break;
+    case "file_changed": {
+      const tab = state.ideTabs.find((t) => t.path === ev.path);
+      if (!tab) break;
+      if (ev.deleted) {
+        if (!tab.dirty) ideClose(tab.path);
+        else toast(`${ev.actor || "?"} 刪除了 ${ev.path}（你這邊有未儲存修改）`, "warn", 8000);
+      } else if (tab.dirty) {
+        // 自己儲存時 server 也會廣播 file_changed（actor=ui）；唔好對自己彈警告。
+        if (ev.actor && ev.actor !== "ui") {
+          toast(`${ev.actor} 改了 ${ev.path}；你這邊有未儲存修改，儲存會覆蓋`, "warn", 8000);
+        }
+      } else {
+        ideRefreshPath(tab.path);
+      }
+      break;
+    }
     case "progress":
       if (ev.op === "upload") {
         setProgress("#fileProgress", "#fileProgressWrap", ev.done, ev.total);
@@ -243,9 +428,22 @@ function handleEvent(ev) {
           setTimeout(() => $("#otaProgressWrap").classList.add("hidden"), 800);
         }
       }
+      if (ev.op === "esptool") {
+        setProgress("#espProgress", "#espProgressWrap", ev.done, ev.total);
+      }
+      break;
+    case "flash":
+      if (ev.phase === "start") {
+        logLine(`ESPTOOL 開始（${ev.bytes || 0} B，port ${ev.port || "?"}）`, "warn");
+        toast("ESPTOOL 燒錄中…", "warn", 5000);
+      } else if (ev.phase === "done") {
+        logLine(`ESPTOOL 完成（rc ${ev.rc}）`, ev.rc === 0 ? "ok" : "err");
+        setTimeout(() => $("#espProgressWrap").classList.add("hidden"), 1200);
+      }
       break;
     case "disconnected":
       setConnected(false);
+      refreshDevices();
       logLine(`連線中斷：${ev.reason || "unknown"}`, "err");
       break;
     default:
@@ -388,6 +586,7 @@ async function loadManifest({ quiet = false } = {}) {
     state.manifest = j.data || {};
     renderCrumb(state.cwd);
     renderFiles(entriesFor(state.cwd));
+    ideTreeRender();
     return true;
   } catch (e) {
     const msg = String(e.message || "");
@@ -613,6 +812,7 @@ function putRaw(path, data, onProgress) {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.open("PUT", `/api/file?path=${encodeURIComponent(path)}`);
+    xhr.setRequestHeader("X-Actor", "ui");
     xhr.responseType = "json";
     xhr.upload.onprogress = (e) => {
       if (e.lengthComputable && onProgress) onProgress(e.loaded, e.total);
@@ -985,6 +1185,7 @@ async function startOta() {
   const q = `apply=${apply}` + (expected ? `&expect_chip=${expected}` : "");
   const xhr = new XMLHttpRequest();
   xhr.open("POST", `/api/firmware?${q}`);
+  xhr.setRequestHeader("X-Actor", "ui");
   xhr.responseType = "json";
   $("#btnOta").disabled = true;
   $("#led").dataset.state = "busy";
@@ -1018,6 +1219,70 @@ async function startOta() {
     toast("OTA 網絡錯誤", "err");
   };
   xhr.send(state.fwFile);
+}
+
+
+// ── ESPTOOL（ROM／USJ）────────────────────────────────
+function pickEspFile(file) {
+  if (!file) return;
+  state.espFile = file;
+  $("#espFileInfo").textContent = `${file.name} · ${fmtBytes(file.size)}`;
+  $("#btnEspFlash").disabled = false;
+  $("#espErase").checked = false;
+}
+
+function startEsptool() {
+  if (state.sim) { toast("模擬模式唔可以 esptool 燒錄", "warn"); return; }
+  const erase = $("#espErase").checked;
+  if (!erase && !state.espFile) { toast("先揀 .bin（或勾選 erase）", "warn"); return; }
+  if (!confirm(erase
+    ? "只 erase flash？（所有資料／FAT 會清空）"
+    : `ESPTOOL 燒錄 ${state.espFile.name} @ ${$("#espOffset").value}？\n燒錄期間會斷線，完成後自動重連。`)) return;
+
+  const q = new URLSearchParams({
+    offset: $("#espOffset").value || "0x0",
+    baud: $("#espBaud").value || "460800",
+    chip: $("#espChip").value || "",
+    before: $("#espBefore").value || "usb_reset",
+    erase: erase ? "1" : "0",
+  });
+  const xhr = new XMLHttpRequest();
+  xhr.open("POST", `/api/flash/esptool?${q}`);
+  xhr.setRequestHeader("X-Actor", "ui");
+  xhr.responseType = "json";
+  $("#btnEspFlash").disabled = true;
+  $("#led").dataset.state = "busy";
+  $("#espResult").classList.remove("hidden");
+  $("#espResult").textContent = "esptool 啟動中…";
+  setProgress("#espProgress", "#espProgressWrap", 0, 100);
+  xhr.upload.onprogress = (e) => {
+    if (e.lengthComputable) setProgress("#espProgress", "#espProgressWrap", e.loaded, e.total);
+  };
+  xhr.onload = async () => {
+    $("#btnEspFlash").disabled = false;
+    let msg = xhr.response?.detail ?? xhr.statusText;
+    if (xhr.status >= 200 && xhr.status < 300) {
+      $("#espResult").textContent = "ESPTOOL 完成";
+      toast("ESPTOOL 完成", "ok", 5000);
+      try {
+        const info = await api("/api/info");
+        setConnected(!!info.connected, info.port, info.sim);
+        if (info.connected) { openWS(); await refreshStatus(); }
+      } catch (_) { /* */ }
+    } else {
+      $("#espResult").textContent = `失敗：${JSON.stringify(msg)}`;
+      toast(`ESPTOOL 失敗：${JSON.stringify(msg)}`, "err", 9000);
+      setConnected(false);
+    }
+    $("#led").dataset.state = state.connected ? "idle" : "error";
+    setTimeout(() => $("#espProgressWrap").classList.add("hidden"), 1200);
+  };
+  xhr.onerror = () => {
+    $("#btnEspFlash").disabled = false;
+    setConnected(false);
+    toast("ESPTOOL 網絡錯誤", "err");
+  };
+  xhr.send(erase ? new Blob([]) : state.espFile);
 }
 
 // ── Console / quick command ───────────────────────────
@@ -1130,7 +1395,9 @@ function statusSet(obj, label, persist = 0) {
 
 // ── 版面 ───────────────────────────────────────────────
 function switchView(name) {
+  if (name === "files") name = "ide";   // 舊「檔案」頁已併入 IDE
   state.view = name;
+  if (location.hash !== `#${name}`) history.replaceState(null, "", `#${name}`);
   $$(".rail .nav[data-view]").forEach((b) =>
     b.setAttribute("aria-current", b.dataset.view === name ? "true" : "false"));
   $$(".view").forEach((v) => v.dataset.on = v.dataset.view === name ? "true" : "false");
@@ -1139,6 +1406,15 @@ function switchView(name) {
     else { renderCrumb(state.cwd); renderFiles(entriesFor(state.cwd)); }
   }
   if (name === "drive" && state.driveRoot) loadDrive(state.drivePath);
+  if (name === "ide") {
+    const cm = ideEnsureCM();
+    if (state.connected && !Object.keys(state.manifest || {}).length) {
+      loadManifest().then(() => ideTreeRender()).catch(() => {});
+    } else {
+      ideTreeRender();
+    }
+    if (cm) setTimeout(() => cm.refresh(), 0);
+  }
 }
 
 function bindUI() {
@@ -1151,6 +1427,7 @@ function bindUI() {
   };
   $("#btnSim").onclick = () => connect("sim");
   $("#btnDisconnect").onclick = disconnect;
+  $("#deviceSelect").onchange = (e) => selectDevice(e.target.value);
   $("#btnReboot").onclick = async () => {
     if (!confirm("重啟裝置？連線會斷。")) return;
     try {
@@ -1209,6 +1486,35 @@ function bindUI() {
   $("#btnCloseEditor").onclick = closeEditor;
   $("#editor").addEventListener("input", () => { state.dirty = true; });
 
+  // IDE
+  $("#btnIdeSave").onclick = ideSave;
+  $("#btnIdeConfirm").onclick = () => ideFileOp("confirm");
+  $("#btnIdeUndo").onclick = () => ideFileOp("undo");
+  $("#btnIdeDownload").onclick = ideDownload;
+  $("#btnIdeDelete").onclick = ideDelete;
+  $("#btnIdeFormat").onclick = ideFormat;
+  $("#btnIdeValidate").onclick = () => ideLintStatus(true);
+  $("#ideTheme").onchange = (e) => ideApplyTheme(e.target.value);
+  $("#btnIdeScan").onclick = () => rescan().then(() => ideTreeRender());
+  $("#btnIdeNew").onclick = ideNew;
+  $("#btnIdeUpload").onclick = () => $("#ideFilePicker").click();
+  $("#ideFilePicker").onchange = (e) => {
+    ideUpload(e.target.files);
+    e.target.value = "";
+  };
+  const ideShell = document.querySelector(".ide-shell");
+  if (ideShell) {
+    ideShell.addEventListener("dragover", (e) => { e.preventDefault(); });
+    ideShell.addEventListener("drop", (e) => {
+      e.preventDefault();
+      if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length) {
+        ideUpload(e.dataTransfer.files);
+      }
+    });
+  }
+  $("#tabTerm").onclick = () => showPanelTab("term");
+  $("#tabActivity").onclick = () => showPanelTab("activity");
+
   $("#btnPickFw").onclick = () => $("#fwPicker").click();
   $("#fwPicker").onchange = (e) => pickFirmware(e.target.files[0]);
   const fw = $("#fwDrop");
@@ -1220,6 +1526,35 @@ function bindUI() {
     pickFirmware(e.dataTransfer.files[0]);
   });
   $("#btnOta").onclick = startOta;
+  $("#btnEspPick").onclick = () => $("#espPicker").click();
+  $("#espPicker").onchange = (e) => pickEspFile(e.target.files[0]);
+  $("#btnEspFlash").onclick = startEsptool;
+  $("#btnEspInfo").onclick = async () => {
+    if (state.sim) { toast("模擬模式唔可以探測", "warn"); return; }
+    $("#btnEspInfo").disabled = true;
+    $("#espResult").classList.remove("hidden");
+    $("#espResult").textContent = "探測中（會短暫放開序列埠）…";
+    try {
+      const q = new URLSearchParams({
+        chip: $("#espChip").value || "",
+        before: $("#espBefore").value || "usb_reset",
+      });
+      const j = await api(`/api/flash/info?${q}`);
+      $("#espResult").textContent = (j.lines || []).join("\n") || "（冇輸出）";
+      toast(j.ok ? "晶片探測完成" : `探測失敗 rc=${j.rc}`,
+            j.ok ? "ok" : "err", 5000);
+      try {
+        const info = await api("/api/info");
+        setConnected(!!info.connected, info.port, info.sim);
+        if (info.connected) { openWS(); await refreshStatus(); }
+      } catch (_) { /* */ }
+    } catch (e) {
+      $("#espResult").textContent = `失敗：${e.message}`;
+      toast(`探測失敗：${e.message}`, "err", 7000);
+    } finally {
+      $("#btnEspInfo").disabled = false;
+    }
+  };
 
   $("#btnSendCmd").onclick = onSendCmd;
   $("#btnQuickSend").onclick = onQuickSend;
@@ -1247,15 +1582,29 @@ function bindUI() {
     document.documentElement.style.setProperty("--panel-h", `${h}px`);
   });
 
-  // 快捷鍵：Ctrl/Cmd-1..5 切 view
+  // 快捷鍵：Ctrl/Cmd-1..6 切 view；IDE 內 Ctrl/Cmd-S 儲存
   window.addEventListener("keydown", (e) => {
     if (!(e.ctrlKey || e.metaKey)) return;
-    const map = { "1": "device", "2": "files", "3": "drive", "4": "flash", "5": "monitor" };
+    if (e.key.toLowerCase() === "s" && state.view === "ide") {
+      e.preventDefault();
+      ideSave();
+      return;
+    }
+    if (e.shiftKey && e.key.toLowerCase() === "f" && state.view === "ide") {
+      e.preventDefault();
+      ideFormat();
+      return;
+    }
+    const map = { "1": "device", "2": "ide", "3": "drive", "4": "flash",
+                  "5": "monitor" };
     if (map[e.key]) { e.preventDefault(); switchView(map[e.key]); }
   });
 
   window.addEventListener("beforeunload", (e) => {
-    if (state.dirty || state.driveDirty) { e.preventDefault(); e.returnValue = ""; }
+    if (state.dirty || state.driveDirty || state.ideTabs.some((t) => t.dirty)) {
+      e.preventDefault();
+      e.returnValue = "";
+    }
   });
 }
 
@@ -1268,22 +1617,536 @@ function closeEditor() {
   $("#editor").value = "";
 }
 
+
+// ═══════════════════════ IDE ═══════════════════════
+function ideExtInfo(path) {
+  const ext = String(path || "").split(".").pop().toLowerCase();
+  const map = {
+    json: { cls: "json", label: "{}" },
+    js: { cls: "js", label: "JS" }, mjs: { cls: "js", label: "JS" },
+    c: { cls: "c", label: "C" }, h: { cls: "c", label: "H" },
+    cpp: { cls: "c", label: "C+" }, hpp: { cls: "c", label: "H+" },
+    py: { cls: "py", label: "PY" },
+    md: { cls: "md", label: "MD" }, markdown: { cls: "md", label: "MD" },
+    sh: { cls: "sh", label: "SH" }, bash: { cls: "sh", label: "SH" },
+    bin: { cls: "bin", label: "BIN" }, fxe: { cls: "bin", label: "FXE" },
+    txt: { cls: "txt", label: "TXT" },
+  };
+  return map[ext] || { cls: "txt", label: (ext.slice(0, 3) || "•").toUpperCase() };
+}
+
+function ideModeFor(path) {
+  const p = String(path).toLowerCase();
+  if (p.endsWith(".json") || p.endsWith(".js") || p.endsWith(".mjs")) return "application/json";
+  if (p.endsWith(".py")) return "text/x-python";
+  if (/\.(c|h|cpp|hpp|cc)$/.test(p)) return "text/x-csrc";
+  if (/\.(xml|html|htm|svg)$/.test(p)) return "application/xml";
+  if (p.endsWith(".md") || p.endsWith(".markdown")) return "text/x-markdown";
+  if (/\.(sh|bash|zsh)$/.test(p)) return "text/x-sh";
+  return "text/plain";
+}
+
+function ideActiveTab() {
+  return state.ideTabs.find((t) => t.path === state.ideActive) || null;
+}
+
+function ideEnsureCM() {
+  if (state.ideCM) return state.ideCM;
+  if (!window.CodeMirror) {
+    toast("CodeMirror 未載入：只可以用純文字編輯", "warn", 6000);
+    return null;
+  }
+  const cm = window.CodeMirror.fromTextArea($("#ideEditor"), {
+    lineNumbers: true, lineWrapping: false, indentUnit: 2, tabSize: 2,
+    mode: "text/plain", autoCloseBrackets: true, matchBrackets: true,
+    gutters: ["CodeMirror-lint-markers"],
+    viewportMargin: 40,
+  });
+  cm.setSize("100%", "100%");
+  cm.setOption("lint", { getAnnotations: () => ideLintAnnotations(cm) });
+  let savedTheme = "bench";
+  try { savedTheme = localStorage.getItem("espwm.ideTheme") || "bench"; } catch (_) { /* */ }
+  ideApplyTheme(savedTheme);
+  cm.on("change", () => {
+    if (state.ideSilent) return;
+    const tab = ideActiveTab();
+    if (!tab) return;
+    tab.text = cm.getValue();
+    if (!tab.dirty) {
+      tab.dirty = true;
+      ideRenderTabs();
+    }
+    ideSyncBar();
+    ideLintStatus();
+  });
+  cm.on("cursorActivity", ideSyncBar);
+  state.ideCM = cm;
+  return cm;
+}
+
+function ideSyncBar() {
+  const tab = ideActiveTab();
+  const cm = state.ideCM;
+  $("#idePath").textContent = tab ? tab.path : "未開啟檔案";
+  $("#ideDirty").classList.toggle("hidden", !(tab && tab.dirty));
+  $("#btnIdeSave").disabled = !tab;
+  $("#btnIdeConfirm").disabled = !tab;
+  $("#btnIdeUndo").disabled = !tab;
+  $("#btnIdeDownload").disabled = !tab;
+  $("#btnIdeDelete").disabled = !tab;
+  $("#btnIdeFormat").disabled = !tab;
+  $("#btnIdeValidate").disabled = !tab;
+  if (!tab) $("#ideLint").classList.add("hidden");
+  $("#ideMode").textContent = tab ? (tab.mode || "text/plain") : "—";
+  if (cm && tab) {
+    const c = cm.getCursor();
+    $("#ideCursor").textContent = `Ln ${c.line + 1}, Col ${c.ch + 1}`;
+    $("#ideSize").textContent = `${cm.getValue().length} B`;
+  } else {
+    $("#ideCursor").textContent = "—";
+    $("#ideSize").textContent = "—";
+  }
+}
+
+function ideRenderTabs() {
+  const box = $("#ideTabs");
+  if (!box) return;
+  box.innerHTML = "";
+  for (const tab of state.ideTabs) {
+    const el = document.createElement("div");
+    const ext = ideExtInfo(tab.path);
+    el.className = "ide-tab ext-" + ext.cls + (tab.path === state.ideActive ? " active" : "");
+    el.title = tab.path;
+    const dot = document.createElement("span");
+    dot.className = "tab-dot";
+    el.appendChild(dot);
+    const name = document.createElement("span");
+    name.textContent = baseName(tab.path);
+    el.appendChild(name);
+    if (tab.dirty) {
+      const d = document.createElement("span");
+      d.className = "dot";
+      el.appendChild(d);
+    }
+    const x = document.createElement("span");
+    x.className = "x";
+    x.textContent = "×";
+    x.onclick = (e) => { e.stopPropagation(); ideClose(tab.path); };
+    el.appendChild(x);
+    el.onclick = () => ideActivate(tab.path);
+    box.appendChild(el);
+  }
+  ideSyncBar();
+  ideTreeActive();
+}
+
+function ideTreeActive() {
+  $$("#ideTree .ide-node").forEach((n) =>
+    n.classList.toggle("active", n.dataset.path === state.ideActive));
+}
+
+function ideActivate(path) {
+  const tab = state.ideTabs.find((t) => t.path === path);
+  if (!tab) return;
+  state.ideActive = path;
+  const cm = ideEnsureCM();
+  if (cm) {
+    state.ideSilent = true;
+    cm.setValue(tab.text);
+    cm.setOption("mode", tab.mode || "text/plain");
+    state.ideSilent = false;
+    $("#ideEmpty").classList.add("hidden");
+    cm.focus();
+  }
+  ideRenderTabs();
+  ideSyncBar();
+  ideLintStatus();
+}
+
+async function ideOpen(path) {
+  const existing = state.ideTabs.find((t) => t.path === path);
+  if (existing) { ideActivate(path); return; }
+  try {
+    const r = await fetch(`/api/file?path=${encodeURIComponent(path)}`);
+    if (!r.ok) {
+      let msg = `${r.status}`;
+      try { const j = await r.json(); msg = JSON.stringify(j.detail ?? j); } catch (_) { /* */ }
+      throw new Error(msg);
+    }
+    const buf = new Uint8Array(await r.arrayBuffer());
+    const text = decodeText(buf);
+    if (text === null) {
+      toast("二進位檔：改為下載", "warn");
+      downloadFile(path);
+      return;
+    }
+    state.ideTabs.push({ path, text, dirty: false, mode: ideModeFor(path) });
+    ideActivate(path);
+  } catch (e) {
+    toast(`開檔失敗：${e.message}`, "err", 6000);
+  }
+}
+
+function ideClose(path) {
+  const idx = state.ideTabs.findIndex((t) => t.path === path);
+  if (idx < 0) return;
+  if (state.ideTabs[idx].dirty && !confirm(`${baseName(path)} 有未儲存修改，關閉？`)) return;
+  state.ideTabs.splice(idx, 1);
+  if (state.ideActive === path) {
+    const next = state.ideTabs[Math.max(0, idx - 1)] || state.ideTabs[0];
+    state.ideActive = next ? next.path : null;
+    const cm = ideEnsureCM();
+    if (next) {
+      ideActivate(next.path);
+    } else {
+      if (cm) { state.ideSilent = true; cm.setValue(""); state.ideSilent = false; }
+      $("#ideEmpty").classList.remove("hidden");
+      ideRenderTabs();
+    }
+  } else {
+    ideRenderTabs();
+  }
+}
+
+function ideTreeRender() {
+  const box = $("#ideTree");
+  if (!box) return;
+  const paths = Object.keys(state.manifest || {}).filter((p) => p !== "/manifest.json");
+  $("#ideTreeMeta").textContent = paths.length ? `${paths.length} 個檔` : "—";
+  if (!paths.length) {
+    box.innerHTML = '<p class="muted" style="padding:12px">未建立索引：連線後按 ⟳。</p>';
+    return;
+  }
+  const root = { dirs: new Map(), files: [] };
+  for (const path of paths) {
+    if (!path.startsWith("/")) continue;
+    const segs = path.slice(1).split("/").filter(Boolean);
+    if (!segs.length) continue;
+    let node = root;
+    for (let i = 0; i < segs.length - 1; i++) {
+      if (!node.dirs.has(segs[i])) node.dirs.set(segs[i], { dirs: new Map(), files: [] });
+      node = node.dirs.get(segs[i]);
+    }
+    node.files.push({ name: segs[segs.length - 1], path, size: Number(state.manifest[path]?.s || 0) });
+  }
+  box.innerHTML = "";
+  const makeFile = (f) => {
+    const el = document.createElement("div");
+    el.className = "ide-node";
+    el.dataset.path = f.path;
+    const ex = ideExtInfo(f.path);
+    const ic = document.createElement("span");
+    ic.className = `ico ext ${ex.cls}`;
+    ic.textContent = ex.label;
+    el.appendChild(ic);
+    const n = document.createElement("span");
+    n.textContent = f.name;
+    el.appendChild(n);
+    const s = document.createElement("span");
+    s.className = "sz";
+    s.textContent = fmtBytes(f.size);
+    el.appendChild(s);
+    el.onclick = () => ideOpen(f.path);
+    return el;
+  };
+  const makeDir = (name, node, prefix) => {
+    const wrap = document.createElement("div");
+    const head = document.createElement("div");
+    head.className = "ide-node";
+    head.innerHTML = '<span class="ico">📁</span>';
+    const n = document.createElement("span");
+    n.textContent = name;
+    head.appendChild(n);
+    const kids = document.createElement("div");
+    kids.className = "ide-folder-children";
+    const fill = () => {
+      if (kids.childElementCount) return;
+      for (const [dn, dnode] of [...node.dirs.entries()].sort()) kids.appendChild(makeDir(dn, dnode, prefix + "/" + dn));
+      for (const f of node.files.sort((a, b) => a.name.localeCompare(b.name))) kids.appendChild(makeFile(f));
+    };
+    fill();
+    head.onclick = () => {
+      kids.classList.toggle("hidden");
+      head.querySelector(".ico").textContent = kids.classList.contains("hidden") ? "📁" : "📂";
+    };
+    wrap.appendChild(head);
+    wrap.appendChild(kids);
+    return wrap;
+  };
+  for (const [dn, dnode] of [...root.dirs.entries()].sort()) box.appendChild(makeDir(dn, dnode, "/" + dn));
+  for (const f of root.files.sort((a, b) => a.name.localeCompare(b.name))) box.appendChild(makeFile(f));
+  ideTreeActive();
+}
+
+function ideLintAnnotations(cm) {
+  const path = state.ideActive || "";
+  if (!/\.json$/i.test(path) || !cm) return [];
+  const text = cm.getValue();
+  try {
+    JSON.parse(text);
+    return [];
+  } catch (e) {
+    const msg = String(e.message || e);
+    const m = msg.match(/position (\d+)/i);
+    let idx = m ? Number(m[1]) : 0;
+    idx = Math.max(0, Math.min(idx, text.length));
+    const before = text.slice(0, idx);
+    const line = before.split("\n").length - 1;
+    const col = idx - (before.lastIndexOf("\n") + 1);
+    return [{ from: CodeMirror.Pos(line, col), to: CodeMirror.Pos(line, col + 1),
+              message: msg, severity: "error" }];
+  }
+}
+
+function ideLintStatus(showToast = false) {
+  const chip = $("#ideLint");
+  const tab = ideActiveTab();
+  if (!chip) return;
+  if (!tab || !/\.json$/i.test(tab.path)) {
+    chip.classList.add("hidden");
+    return;
+  }
+  const errs = ideLintAnnotations(state.ideCM);
+  chip.classList.remove("hidden");
+  if (errs.length) {
+    chip.textContent = "JSON ✗";
+    chip.classList.add("err");
+    chip.classList.remove("ok");
+    if (showToast) toast(errs[0].message, "err", 7000);
+  } else {
+    chip.textContent = "JSON ✓";
+    chip.classList.remove("err");
+    chip.classList.add("ok");
+    if (showToast) toast("JSON 語法正確", "ok", 3000);
+  }
+}
+
+function ideApplyTheme(name) {
+  const shell = document.querySelector(".ide-shell");
+  if (!shell) return;
+  shell.dataset.theme = name;
+  if (state.ideCM) {
+    state.ideCM.setOption("theme", name === "bench" ? "default" : name);
+    setTimeout(() => state.ideCM.refresh(), 0);
+  }
+  const sel = $("#ideTheme");
+  if (sel) sel.value = name;
+  try { localStorage.setItem("espwm.ideTheme", name); } catch (_) { /* */ }
+}
+
+function ideFormat() {
+  const tab = ideActiveTab();
+  const cm = state.ideCM;
+  if (!tab || !cm) return;
+  if (!/\.json$/i.test(tab.path)) {
+    toast("格式化目前支援 JSON（其他語言交畀 linter／編輯器）", "warn", 5000);
+    return;
+  }
+  try {
+    const value = JSON.parse(cm.getValue());
+    const out = JSON.stringify(value, null, 2) + "\n";
+    if (out === cm.getValue()) {
+      toast("已經係標準格式", "ok", 2500);
+      return;
+    }
+    cm.setValue(out);
+    tab.dirty = true;
+    ideRenderTabs();
+    ideSyncBar();
+    ideLintStatus();
+    toast("已格式化 JSON", "ok", 2500);
+  } catch (e) {
+    toast(`JSON 無效，唔可以格式化：${e.message}`, "err", 7000);
+  }
+}
+
+async function ideSave() {
+  const tab = ideActiveTab();
+  const cm = state.ideCM;
+  if (!tab || !cm) return;
+  const data = new TextEncoder().encode(cm.getValue());
+  try {
+    $("#ideSize").textContent = "儲存中…";
+    await putRaw(tab.path, data);
+    tab.text = cm.getValue();
+    tab.dirty = false;
+    ideRenderTabs();
+    toast(`已儲存 ${tab.path}`, "ok");
+    logLine(`IDE 儲存 ${tab.path}（${fmtBytes(data.length)}，已自動確認）`, "ok");
+    await loadManifest({ quiet: true });
+  } catch (e) {
+    toast(`儲存失敗：${e.message}`, "err", 7000);
+    logLine(`IDE 儲存失敗：${e.message}`, "err");
+  } finally {
+    ideSyncBar();
+  }
+}
+
+async function ideRefreshPath(path) {
+  const tab = state.ideTabs.find((t) => t.path === path);
+  if (!tab || tab.dirty) return;
+  try {
+    const r = await fetch(`/api/file?path=${encodeURIComponent(path)}`);
+    if (!r.ok) return;
+    const text = decodeText(new Uint8Array(await r.arrayBuffer()));
+    if (text === null) return;
+    tab.text = text;
+    if (path === state.ideActive && state.ideCM) {
+      state.ideSilent = true;
+      state.ideCM.setValue(text);
+      state.ideSilent = false;
+      ideSyncBar();
+    }
+    ideRenderTabs();
+  } catch (_) { /* 下次再算 */ }
+}
+
+async function ideReload() {
+  const tab = ideActiveTab();
+  if (!tab) return;
+  try {
+    const r = await fetch(`/api/file?path=${encodeURIComponent(tab.path)}`);
+    if (!r.ok) throw new Error(`${r.status}`);
+    const text = decodeText(new Uint8Array(await r.arrayBuffer()));
+    if (text === null) { toast("二進位檔", "warn"); return; }
+    tab.text = text;
+    tab.dirty = false;
+    state.ideSilent = true;
+    state.ideCM.setValue(text);
+    state.ideSilent = false;
+    ideRenderTabs();
+    toast("已重新載入", "ok");
+  } catch (e) {
+    toast(`重新載入失敗：${e.message}`, "err", 6000);
+  }
+}
+
+async function ideFileOp(op) {
+  const tab = ideActiveTab();
+  if (!tab) return;
+  const label = { confirm: "確認", undo: "復原" }[op] || op;
+  try {
+    await api(`/api/file/${op}`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path: tab.path }),
+    });
+    toast(`${label}完成：${tab.path}`, "ok");
+    logLine(`IDE ${label} ${tab.path}`, "ok");
+    await ideReload();
+    await loadManifest({ quiet: true });
+  } catch (e) {
+    toast(`${label}失敗：${e.message}`, "err", 6000);
+  }
+}
+
+async function ideDelete() {
+  const tab = ideActiveTab();
+  if (!tab) return;
+  if (!confirm(`刪除 ${tab.path}？（裝置上的 .bak 會一併處理）`)) return;
+  try {
+    await api("/api/file/delete", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path: tab.path }),
+    });
+    ideClose(tab.path);
+    toast(`已刪除 ${tab.path}`, "ok");
+    logLine(`IDE 刪除 ${tab.path}`, "ok");
+    await loadManifest({ quiet: true });
+  } catch (e) {
+    toast(`刪除失敗：${e.message}`, "err", 6000);
+  }
+}
+
+async function ideNew() {
+  const path = prompt("新檔路徑（以 / 開始）", "/config/new.txt");
+  if (!path) return;
+  try {
+    await putRaw(path, new TextEncoder().encode(""));
+    await loadManifest({ quiet: true });
+    await ideOpen(path);
+    toast(`已建立 ${path}`, "ok");
+    logLine(`IDE 新檔 ${path}`, "ok");
+  } catch (e) {
+    toast(`建立失敗：${e.message}`, "err", 6000);
+  }
+}
+
+function ideDownload() {
+  const tab = ideActiveTab();
+  if (tab) downloadFile(tab.path);
+}
+
+async function ideUpload(files) {
+  for (const f of files) {
+    try {
+      const data = new Uint8Array(await f.arrayBuffer());
+      await putRaw("/" + f.name, data);
+      logLine(`IDE 上載 ${f.name}（${fmtBytes(data.length)}）`, "ok");
+    } catch (e) {
+      toast(`上載 ${f.name} 失敗：${e.message}`, "err", 7000);
+    }
+  }
+  await loadManifest({ quiet: true });
+}
+
+// ── 活動（AI 操作）────────────────────────────────────
+function activityLine(ev) {
+  const box = $("#activity");
+  if (!box) return;
+  const line = document.createElement("div");
+  const actor = ev.actor || "?";
+  const cls = actor === "ai" ? "act-ai" : (ev.action === "note" ? "act-note" : "act-ui");
+  line.className = `line ${cls}`;
+  const ts = new Date((ev.ts || Date.now() / 1000) * 1000).toLocaleTimeString();
+  if (ev.action === "note") {
+    line.textContent = `${ts}  [${actor}] ✎ ${ev.text || ""}`;
+  } else {
+    const status = ev.status != null ? ` → ${ev.status}` : "";
+    const ms = ev.ms != null ? ` ${ev.ms}ms` : "";
+    line.textContent = `${ts}  [${actor}] ${ev.action || ""}${status}${ms}`;
+  }
+  box.appendChild(line);
+  while (box.childElementCount > 800) box.removeChild(box.firstChild);
+  box.scrollTop = box.scrollHeight;
+}
+
+function showPanelTab(which) {
+  const term = which === "term";
+  $("#tabTerm").setAttribute("aria-selected", term ? "true" : "false");
+  $("#tabActivity").setAttribute("aria-selected", term ? "false" : "true");
+  $("#terminal").classList.toggle("hidden", !term);
+  $("#activity").classList.toggle("hidden", term);
+}
+
 // ── 啟動 ───────────────────────────────────────────────
 async function init() {
   bindUI();
+  const deep = location.hash.replace("#", "");
+  if (["device", "files", "drive", "flash", "monitor", "ide"].includes(deep)) {
+    switchView(deep);
+  }
   loadCommands();
   refreshPorts();
   loadDrives();
   setInterval(() => { if (!state.connected) refreshPorts(); }, 4000);
 
   logLine("ESP WebMaster 已啟動。揀 port → 連線，或按『模擬裝置』。", "info");
+  const qs = new URLSearchParams(location.search);
+  const deepFile = qs.get("file");
+  if (qs.get("panel") === "activity") showPanelTab("activity");
   try {
     const j = await api("/api/info");
+    if (j.device) state.device = j.device;
+    await refreshDevices();
     if (j.connected) {
       setConnected(true, j.port, j.sim);
       openWS();
       await refreshStatus();
       if (!(await loadManifest({ quiet: true }))) await rescan();
+      if (deepFile) {
+        switchView("ide");
+        await ideOpen(deepFile);
+      }
     }
   } catch (e) {
     logLine(`伺服器狀態讀取失敗：${e.message}`, "err");

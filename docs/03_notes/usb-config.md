@@ -9,6 +9,51 @@
 > 基線：**任何型號第一次 bring-up，第一步都是一條可用的 CDC（NC4）**。
 > MSC（隨身碟）只是「這塊板有 OTG ＋ 有 FAT ＋ 想交碟」時的可選項。
 
+### 0.1 術語：線（line）、driver、預設 USJ
+
+「USB」在專案裡橫跨三層；不分清楚，`usb.rx`、`CDC`、`usb_jtag` 就會互相打架。
+
+| 層 | 叫法 | 出現在哪 | 由誰決定 |
+|---|---|---|---|
+| **線**（板子上的一條 USB PHY／接口） | USB 線 `usb` | `usb.rx`、`usb_core`、`usb.msc`、`usb.cdc_log` | 板子（有幾條線）＋ config（用哪條） |
+| **driver／transport** | USB-OTG（TinyUSB）或 USB-Serial-JTAG（USJ LL） | `links[].kind`；`nc_usb_mode_t` | config；**預設一律 USJ** |
+| **NC4 通道** | 這條線上的一條 link（`CDC`／`usb_jtag`） | `links[]` 的 `name`／`enable` | config |
+
+六條規則：
+
+1. **一條線只會有一個 driver**。同一條線不會同時跑 TinyUSB 與 USJ；
+   換 driver = 改 `kind` ＋ 重啟。
+2. **預設一律 USJ**：凡是有 USJ 的線，出廠就是 `usb_jtag`；**只有用戶手動把
+   `kind` 改成 `cdc`** 才走 OTG。S2 冇 USJ，所以只有 CDC（那不是「選 OTG」，
+   是沒有選擇）。
+3. **有幾條線，看板子**：
+   - **S3**：OTG 與 USJ 共用同一條 FSLS PHY → **一條線**，二選一。
+   - **P4**：三條獨立線（USJ FS 24/25、OTG FS 26/27、OTG HS 49/50）→ 每條可各自
+     配一個 driver（例如 USJ console ＋ OTG CDC）。
+   - **現況**：固件仍只揀一條 USB link（`usb_nc4_link()` 取第一條 `enable`，
+     多過一條警告）；P4 的多線並存屬 Phase 2（`usb.interfaces[]`，見 §2.2–2.4）。
+4. **`usb.*` 前綴指「這條線」**，不是 driver：`usb.rx`（收幀環）、`usb_core`
+   （所屬核心組）、`usb.msc`／`usb.cdc_log`（兩個開關）。
+5. **資源名不按 driver 分**：收幀環叫 `usb.rx`，不叫 `cdc.rx`／`usb_jtag.rx`。
+   ⚠️ 今日只有一條 USB 線，所以一個 `usb.rx` 就夠；P4 多線並存時**每條線要自己
+   一份**，命名到時按線分（不能共用同一個 `usb.rx`）。
+6. **兩個開關只對 OTG 有意義**：MSC（交碟）與獨立 log 管道（`cdc_log`）。
+   USJ 冇 MSC；log 與 NC4 共用 TX（arbiter），`cdc_log` 無效。
+
+生命週期：`usb_core` 在 B05 由「線 → 組」表寫入；`usb.rx` 在 B07 宣告、B08 carve、
+B09 租用（交給 nc4 任務）；USB 真正上線（TinyUSB 列舉／log 管道）在 B10。
+
+> log 由 B01 就在產生（走 console）；B10 開的是**管道出口** —— 兩者的時間線與板子差異見
+> [boot-log.md](boot-log.md)。
+
+**一次開機只初始化一次**：B03 先讀 config 決定這條線用哪個 driver，B10 才 init
+（OTG 裝 TinyUSB；USJ 唔使裝，本身已經係 CDC-ACM，只開 log 管道）。
+之後**沒有 runtime 切換 API**；要換線就改 `links[]`（或 `usb.*`）再重啟 ——
+下次開機 B03 用新 config 重算，B10 用新 driver init。init 失敗不會在同一次
+開機重試（USB 這次就係冇）。
+
+兩種 transport 的完整能力對照見 §2.0，這裡只釘死「USB 這個字指哪一層」。
+
 ---
 
 ## 0. 現況：三層，但 USB 只落在其中兩層
@@ -19,13 +64,14 @@
 | **板子／編譯期** | `ports/<board>/sdkconfig.defaults` | OTG 走 FS/HS（`NETCORE_USB_OTG_HS`） | 手寫、沒有 profile、`board.py` 不驗；`board.json` 的 `features.usb` 完全冇人讀 |
 | **執行期** | `system.json` 的 `usb.{msc,cdc_log}` ＋ `nc4.links[]` | 交唔交碟、log 走唔走 CDC、CDC 通唔通 | `cdc_log` 只管 OTG；`msc` 預設 1；CDC 通道藏在 `links[].enable`，不是一個「USB 基線」概念 |
 
-USB 的兩條 transport 目前是**互斥編譯**（P4 硬件容許兩條並存，
-但現時程式仍是二選一，見 §1 的 P1）：
+兩條 transport 在 S3／P4 都會編入（USJ 看 `SOC_USB_SERIAL_JTAG_SUPPORTED`），
+但**執行期只會 init 一條**（`usb_nc4_link()` 只取第一條；同一條 PHY 的板子
+也只能二選一 —— 見 §0.1）：
 
 | transport | 晶片 | 程式位置 | 條件 |
 |---|---|---|---|
 | OTG CDC（TinyUSB） | S3／S2／P4 | `main.c` `usb_install()` | `NC_HAS_USB`（= `CONFIG_NETCORE_USB_OTG`） |
-| USB-Serial-JTAG CDC | C3／C6／H2 | `main.c` 的 `usb_jtag_*` | `!NC_HAS_USB && SOC_USB_SERIAL_JTAG_SUPPORTED` |
+| USB-Serial-JTAG CDC | C3／C6／H2；S3／P4 也可選 | `main.c` 的 `usb_jtag_*` | `SOC_USB_SERIAL_JTAG_SUPPORTED`（不依賴 `NC_HAS_USB`） |
 
 所以「大部分 ESP 都有 CDC」這件事，硬件上係真；但**config／板子／驗證**三邊都未有一致的基線。
 
@@ -41,14 +87,36 @@ USB 的兩條 transport 目前是**互斥編譯**（P4 硬件容許兩條並存�
 | esp32c3／c5／c6／c61／h2 | — | — | ✅ | `usb_jtag` | usb_jtag | 1 |
 | esp32 | — | — | — | （冇） | — | 2 |
 
+未知晶片（表裡未有）：`main` 用**編譯期能力**砌一個臨時表 —— 有 USJ 就用 USJ，
+冇 USJ 才用 OTG，兩樣都冇就冇 USB；不再盲猜 CDC。
+
 開機次序（`app_main`）：
 
 ```text
 ⓪ 晶片能力 → nc_cfg_defaults_set_chip()   ← 只決定「缺檔時用什麼」，未讀任何檔
 ① nvs（boot 記錄：provisioned／fmq／fw_hash）
 ② storage：掛 FAT →（第一次或明確重建才 seed）→ nc_cfg_boot() 讀 config
-③ hwcheck → hardware → declare → commit → start → usb → channels
+③ capability（B03，第一個決定，內部次序固定）：
+     (a) 核數（nc_core_probe）
+     (b) 單核 → 把 config 的兩核要求併成一核（只改 RAM）
+     (c) USB 人格：CDC（OTG）定 USB-Serial-JTAG；log／msc 兩個閘
+④ hwcheck → hardware → declare → commit → start → usb → channels
 ```
+
+B05 的 hardware 在建立「線 → 組」表時，會把 **USB 那條線的組**寫入
+`ctx.usb_core`（一次）。之後 B07（回覆幀）、B10（TinyUSB／log 管道）、
+B11（bus＋producer）只讀 ctx，不再各自去問一次 router ——
+人格（B03）與組（B05）是兩個問題，不是重複決定。
+
+② 與 ③ 的分工：`B02` 只負責**讀**（JSON → struct，之後全系統只讀 struct）；
+`B03` 負責**落地**「這塊板做得到什麼」——核數是硬體事實，USB 是人格。
+兩者都只決定，不建立任何 driver／task。
+
+單核的併核在 ③(b)、**早過 USB 的決定**：
+`routes[].out[]` 的 `decode1` → `decode0`、`tasks[].affinity` 的 core1 → core0
+（`nc_cfg_merge_cores()`，只改 RAM，`/data/config/*.json` 一個 byte 都唔郁）。
+之後 router、decoder 個數、任務管理器、USB 服務組全部讀同一份已收斂的表，
+唔會各自再夾一次、各自再印一句。
 
 **之後所有宣告（緩衝、bus、USB 服務組）只認 config 的 struct，不再碰檔案。**
 
@@ -56,10 +124,12 @@ USB 的兩條 transport 目前是**互斥編譯**（P4 硬件容許兩條並存�
 
 1. **config 先於任何服務**：`nc_cfg_boot()` 在 `declare`／`start`／`usb` 之前完成；
    之後全系統只讀 struct。今次只把「晶片能力」提前到階段 ⓪，讓預設本身就是對的。
-2. **出廠＝USJ 先**：有 USB-Serial-JTAG 的晶片（S3／P4／C3…）預設用 `usb_jtag`；
-   只有 OTG 的 S2 才用 `CDC`。`usb.msc` 預設 **0**（開機唔交 FAT）。
+2. **出廠＝USJ 先（所有人的預設）**：凡是有 USB-Serial-JTAG 的晶片（S3／P4／C3…）
+   預設一律用 `usb_jtag`，不是 OTG；想用 OTG 要自己改 `links[].kind`。
+   只有 OTG、冇 USJ 的 S2 才用 `CDC`。`usb.msc` 預設 **0**（開機唔交 FAT）。
    想用 OTG（CDC＋MSC）就改 `links[].kind = "cdc"`（link 名也改成 `CDC`）再重啟 ——
-   這就是「換 personality」，兩條 driver 不會同時 init。
+   這就是「換 driver」。**同一條線**上兩條 driver 不會同時 init：S3 只有一條線，
+   所以整顆晶片只能二選一；P4 有多條獨立線，可以各自 init（Phase 2）。
 3. **冇登記＝唔佔**：`links[]` 冇這個名（或 `enable:0`）→ 唔宣告緩衝、唔建 bus；
    CDC／MSC／log 三樣都冇人要 → **連 TinyUSB 都唔裝**（省 1,280 B task 棧＋driver heap）。
    以前是反的：把 CDC 從 `links[]` 刪掉，`link_enabled()` 仍然回 true，8 KB 環照樣佔住。
@@ -83,11 +153,11 @@ S3 的 `/config/system.json` 是舊版（冇 `usb`、冇 `rx`），reboot 後仍
 
 | 板／config | `mem.plan` 內部 bytes | 條目 | `rt` 的服務 |
 |---|---|---|---|
-| S3：`usb_jtag` ＋ UART | 10,382 | reply0/1、`nc4.jtag` 4,128、`uart.rx` 1,024 | decode0/1、`uart.rx` |
-| S3：`usb_jtag`，**刪掉 UART** | **9,358**（−1,024） | reply0/1、`nc4.jtag` | **冇 `uart.rx`、冇 `decode1`** |
-| C3：`usb_jtag` ＋ UART | 7,767 | reply0、`nc4.jtag`、`uart.rx` | decode0、`uart.rx` |
-| C3：`usb_jtag`，**刪掉 UART** | **6,743**（−1,024） | reply0、`nc4.jtag` | decode0（冇 `uart.rx`） |
-| S3：`kind=cdc` | 10,382 | reply0/1、`nc4.rx` 4,128、`uart.rx` | 有 `TinyUSB`、`cdc.rx`；**冇 usb_jtag bus** |
+| S3：`usb_jtag` ＋ UART | 10,382 | reply0/1、`usb.rx` 4,128、`uart.rx` 1,024 | decode0/1、`uart.rx` |
+| S3：`usb_jtag`，**刪掉 UART** | **9,358**（−1,024） | reply0/1、`usb.rx` | **冇 `uart.rx`、冇 `decode1`** |
+| C3：`usb_jtag` ＋ UART | 7,767 | reply0、`usb.rx`、`uart.rx` | decode0、`uart.rx` |
+| C3：`usb_jtag`，**刪掉 UART** | **6,743**（−1,024） | reply0、`usb.rx` | decode0（冇 `uart.rx`） |
+| S3：`kind=cdc` | 10,382 | reply0/1、`usb.rx` 4,128、`uart.rx` | 有 `TinyUSB`、`cdc.rx`；**冇 usb_jtag bus** |
 
 另一邊（選 `usb_jtag` 時）`rt` 完全冇 `TinyUSB`／`cdc.rx`／`msc_async_io` ——
 未選的 transport 連 task 都唔會建立，唔止唔佔緩衝。
@@ -99,7 +169,8 @@ S3 的 `/config/system.json` 是舊版（冇 `usb`、冇 `rx`），reboot 後仍
 > 修好之後同一個切換（cdc ↔ usb_jtag）雙向都通過，軟重啟亦保持可見。
 
 > 未測：P4（OTG FS/HS 與 USJ 三條 PHY）。P4 走的是與 S3 相同的 TinyUSB 分支，
-> 但 PHY／接線不同，仍要實板驗；USJ 那條在 P4 目前根本不編（`!NC_HAS_USB`）。
+> 但 PHY／接線不同，仍要實板驗。USJ 那條在 P4 已編入（`SOC_USB_SERIAL_JTAG_SUPPORTED`），
+> 只是未上板實測。
 
 **已知成本**：`usb.msc=0` 仍然會安裝 MSC driver（`msc_async_io` task）。
 TinyUSB 的 descriptor 是編譯期決定的（`CONFIG_TINYUSB_MSC_ENABLED`），
@@ -108,7 +179,10 @@ CDC 模式會 reboot loop。要真正省掉，要連 descriptor 一起關（Phas
 
 單核板（C3／C6／C61／C5／H2／S2）：實際只建 1 個 decoder（上限仍然是 2）。
 C3 沒有 PSRAM，第二份回覆幀 2,610 B 是**內部 RAM**，以前由頭到尾冇人用。
-`routes[]` 若寫 `decode1`，開機會夾返 `decode0` 並印警告（單核根本沒有 core1）。
+`routes[]` 寫 `decode1`、或 `tasks.json` 寫 core1：B03 capability 一次過併到 core0
+（單核根本沒有 core1），只改 RAM、唔寫盤。firmware 自己宣告的 system loop
+（`decode1`、fx 等）仍然是 `nc_core_clamp()` 在 B09 收斂 —— 那些是程式碼，
+不是 config，租約管不到它們。
 
 仍未做：`usb.interfaces[]` 多介面 schema（§2.2–§2.4）、`max_chunk` 協商（§2.5）、
 P4 的 JTAG 第二條 link。今次只落地「出廠預設 ＋ 註冊語義 ＋ 貼身緩衝」。

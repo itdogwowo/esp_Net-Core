@@ -4212,6 +4212,465 @@ void nc_test_action_netauto_boot(void)
 void nc_test_action_netauto_boot(void) { }
 #endif
 
+
+// ── 0xF02B BUF_BENCH：nc_buf 現況 vs（mask＋barrier）vs kfifo 式 ring ──
+//
+// 同一輪、同一塊板、同一個 task 內跑完，避免跨 build／跨板比較。
+// 每個 test 都做「寫入 1,024 B → 消費」的完整循環，量 us／ns·frame／MB·s⁻¹。
+//   fifo_real    nc_buf FIFO（現況：% n、state machine、零複製交格）
+//   slot_pct     同一種格算法的最小實作，% n
+//   slot_mask    同上，n 是 2 的冪 → & (n-1)
+//   slot_mask_f  同 slot_mask，publish／consume 加 release／acquire fence
+//   kfifo_frame  kfifo 式 byte ring（mask、in/out、fence、copy in＋copy out）
+//   stream_real  nc_buf STREAM（線性＋memmove 壓實）
+//   stream_kf    kfifo 式 byte ring 的串流版（copy in、原地掃描 consume）
+//
+// 注意：slot 系是**零複製**（consumer 直接讀格）；kfifo 系是 copy out。
+// 這個差別就是兩邊最大的語義差異，不是量測誤差。
+#define NC4_CMD_BUF_BENCH 0xF02B
+
+#define BB_SLOT   1024u
+#define BB_SLOTS  8u
+
+static uint8_t s_bb_src[BB_SLOT] __attribute__((aligned(64)));
+static uint8_t s_bb_slot_mem[BB_SLOT * BB_SLOTS] __attribute__((aligned(64)));
+static uint8_t s_bb_stream[8192] __attribute__((aligned(64)));
+static uint8_t s_bb_kf[8192] __attribute__((aligned(64)));
+static uint8_t s_bb_scratch[BB_SLOT] __attribute__((aligned(64)));
+static bool s_bb_src_ready;
+
+static void bb_src_init(void)
+{
+    if (s_bb_src_ready) {
+        return;
+    }
+    for (uint32_t i = 0; i < BB_SLOT; i++) {
+        s_bb_src[i] = (uint8_t)(i * 31u + 7u);
+    }
+    s_bb_src_ready = true;
+}
+
+// 最小格環：同 nc_buf FIFO 同一種索引寫法，但沒有 descriptor／state machine 開銷。
+typedef struct {
+    uint8_t *mem;
+    uint16_t n, mask;
+    uint16_t w, r;
+    uint8_t  ready[BB_SLOTS];
+} bb_slot_t;
+
+static void bb_slot_ring(uint32_t iters, int mode, uint64_t *us, uint32_t *chk)
+{
+    bb_slot_t s = { .mem = s_bb_slot_mem, .n = (uint16_t)BB_SLOTS,
+                    .mask = (uint16_t)(BB_SLOTS - 1u), .w = 0, .r = 0 };
+    memset(s.ready, 0, sizeof(s.ready));
+    uint32_t c = 0;
+    const int64_t t0 = esp_timer_get_time();
+    for (uint32_t i = 0; i < iters; i++) {
+        memcpy(s.mem + (size_t)s.w * BB_SLOT, s_bb_src, BB_SLOT);
+        if (mode == 2) {
+            __atomic_thread_fence(__ATOMIC_RELEASE);
+        }
+        s.ready[s.w] = 1u;
+        s.w = (mode == 0) ? (uint16_t)((s.w + 1u) % s.n)
+                          : (uint16_t)((s.w + 1u) & s.mask);
+        if (mode == 2) {
+            __atomic_thread_fence(__ATOMIC_ACQUIRE);
+        }
+        if (s.ready[s.r]) {
+            c ^= ((const uint32_t *)(s.mem + (size_t)s.r * BB_SLOT))[0];
+            s.ready[s.r] = 0u;
+            s.r = (mode == 0) ? (uint16_t)((s.r + 1u) % s.n)
+                              : (uint16_t)((s.r + 1u) & s.mask);
+        }
+    }
+    *us = (uint64_t)(esp_timer_get_time() - t0);
+    *chk = c;
+}
+
+// kfifo 式 byte ring：in/out 單調計數、size 2 的冪、mask 繞回、release/acquire。
+typedef struct {
+    uint8_t *mem;
+    uint32_t size, mask;
+    uint32_t in, out;
+} bb_kf_t;
+
+static inline uint32_t bb_kf_put(bb_kf_t *f, const void *src, uint32_t len)
+{
+    const uint32_t in = f->in, out = f->out;
+    uint32_t space = f->size - (in - out);
+    if (len > space) {
+        len = space;
+    }
+    uint32_t off = in & f->mask;
+    uint32_t first = f->size - off;
+    if (first > len) {
+        first = len;
+    }
+    memcpy(f->mem + off, src, first);
+    if (len > first) {
+        memcpy(f->mem, (const uint8_t *)src + first, len - first);
+    }
+    __atomic_thread_fence(__ATOMIC_RELEASE);
+    f->in = in + len;
+    return len;
+}
+
+static inline uint32_t bb_kf_get(bb_kf_t *f, void *dst, uint32_t len)
+{
+    __atomic_thread_fence(__ATOMIC_ACQUIRE);
+    const uint32_t in = f->in, out = f->out;
+    const uint32_t used = in - out;
+    if (len > used) {
+        len = used;
+    }
+    uint32_t off = out & f->mask;
+    uint32_t first = f->size - off;
+    if (first > len) {
+        first = len;
+    }
+    memcpy(dst, f->mem + off, first);
+    if (len > first) {
+        memcpy((uint8_t *)dst + first, f->mem, len - first);
+    }
+    f->out = out + len;
+    return len;
+}
+
+
+// 線性 STREAM 的最小實作：同 nc_buf STREAM 一樣「尾巴唔夠位就 memmove 壓實」。
+typedef struct {
+    uint8_t *mem;
+    uint32_t cap, off, end;
+} bb_lin_t;
+
+static inline uint32_t bb_lin_write(bb_lin_t *s, const void *src, uint32_t len)
+{
+    if (s->end + len > s->cap) {
+        const uint32_t used = s->end - s->off;
+        if (s->off > 0) {
+            memmove(s->mem, s->mem + s->off, used);
+            s->off = 0;
+            s->end = used;
+        }
+        if (len > s->cap - s->end) {
+            len = s->cap - s->end;
+        }
+    }
+    memcpy(s->mem + s->end, src, len);
+    s->end += len;
+    return len;
+}
+
+static inline void bb_lin_skip(bb_lin_t *s, uint32_t n)
+{
+    const uint32_t used = s->end - s->off;
+    if (n > used) {
+        n = used;
+    }
+    s->off += n;
+    if (s->off == s->end) {
+        s->off = s->end = 0;
+    }
+}
+
+static void bb_lin_wrap(uint32_t iters, uint64_t *us, uint32_t *chk)
+{
+    bb_lin_t s = { .mem = s_bb_stream, .cap = sizeof(s_bb_stream), .off = 0, .end = 0 };
+    uint32_t c = 0;
+    const int64_t t0 = esp_timer_get_time();
+    for (uint32_t i = 0; i < iters; i++) {
+        if (s.end - s.off > s.cap / 2u) {
+            bb_lin_skip(&s, BB_SLOT);
+        }
+        (void)bb_lin_write(&s, s_bb_src, BB_SLOT);
+        c ^= s.mem[s.off];
+    }
+    *us = (uint64_t)(esp_timer_get_time() - t0);
+    *chk = c;
+}
+
+static void bb_ncbuf_stream_wrap(uint32_t iters, uint64_t *us, uint32_t *chk)
+{
+    nc_buf_t *b = nc_buf_create("bb.swrap", NC_BUF_SRAM, sizeof(s_bb_stream), 1,
+                                NC_BUF_F_RUNTIME | NC_BUF_F_STREAM);
+    if (b == NULL) {
+        *us = 0;
+        *chk = 0;
+        return;
+    }
+    uint32_t c = 0;
+    const int64_t t0 = esp_timer_get_time();
+    for (uint32_t i = 0; i < iters; i++) {
+        if (nc_buf_pending(b) > sizeof(s_bb_stream) / 2u) {
+            (void)nc_buf_skip(b, BB_SLOT);
+        }
+        (void)nc_buf_write(b, s_bb_src, BB_SLOT);
+        uint32_t len = 0;
+        const uint8_t *p = nc_buf_read_ptr(b, &len);
+        if (p != NULL) {
+            c ^= p[0];
+        }
+    }
+    *us = (uint64_t)(esp_timer_get_time() - t0);
+    *chk = c;
+    (void)nc_buf_release(b);
+}
+
+static void bb_kf_stream_wrap(uint32_t iters, uint64_t *us, uint32_t *chk)
+{
+    bb_kf_t f = { .mem = s_bb_kf, .size = sizeof(s_bb_kf),
+                  .mask = (uint32_t)(sizeof(s_bb_kf) - 1u), .in = 0, .out = 0 };
+    uint32_t c = 0;
+    const int64_t t0 = esp_timer_get_time();
+    for (uint32_t i = 0; i < iters; i++) {
+        __atomic_thread_fence(__ATOMIC_ACQUIRE);
+        if (f.in - f.out > f.size / 2u) {
+            f.out += BB_SLOT;
+        }
+        (void)bb_kf_put(&f, s_bb_src, BB_SLOT);
+        c ^= f.mem[f.out & f.mask];
+    }
+    *us = (uint64_t)(esp_timer_get_time() - t0);
+    *chk = c;
+}
+
+
+static void bb_lin_nowrap(uint32_t iters, uint64_t *us, uint32_t *chk)
+{
+    bb_lin_t s = { .mem = s_bb_stream, .cap = sizeof(s_bb_stream), .off = 0, .end = 0 };
+    uint32_t c = 0;
+    const int64_t t0 = esp_timer_get_time();
+    for (uint32_t i = 0; i < iters; i++) {
+        (void)bb_lin_write(&s, s_bb_src, BB_SLOT);
+        c ^= s.mem[s.off];
+        bb_lin_skip(&s, BB_SLOT);
+    }
+    *us = (uint64_t)(esp_timer_get_time() - t0);
+    *chk = c;
+}
+
+static void bb_ncbuf_ring(uint32_t iters, uint64_t *us, uint32_t *chk, bool wrap)
+{
+    nc_buf_t *b = nc_buf_create("bb.ring", NC_BUF_SRAM, sizeof(s_bb_stream), 1,
+                                NC_BUF_F_RUNTIME | NC_BUF_F_STREAM | NC_BUF_F_RING);
+    if (b == NULL) {
+        *us = 0;
+        *chk = 0;
+        return;
+    }
+    uint32_t c = 0;
+    const int64_t t0 = esp_timer_get_time();
+    for (uint32_t i = 0; i < iters; i++) {
+        if (wrap && nc_buf_pending(b) > sizeof(s_bb_stream) / 2u) {
+            (void)nc_buf_skip(b, BB_SLOT);
+        }
+        (void)nc_buf_write(b, s_bb_src, BB_SLOT);
+        const uint8_t *p0 = NULL, *p1 = NULL;
+        uint32_t n0 = 0, n1 = 0;
+        (void)nc_buf_read_segments(b, &p0, &n0, &p1, &n1);
+        if (p0 != NULL) {
+            c ^= p0[0];
+        }
+        if (!wrap) {
+            (void)nc_buf_skip(b, BB_SLOT);
+        }
+    }
+    *us = (uint64_t)(esp_timer_get_time() - t0);
+    *chk = c;
+    (void)nc_buf_release(b);
+}
+
+static void bb_ncbuf_ring_nowrap(uint32_t iters, uint64_t *us, uint32_t *chk)
+{
+    bb_ncbuf_ring(iters, us, chk, false);
+}
+
+static void bb_ncbuf_ring_wrap(uint32_t iters, uint64_t *us, uint32_t *chk)
+{
+    bb_ncbuf_ring(iters, us, chk, true);
+}
+
+static void bb_ncbuf_fifo(uint32_t iters, uint64_t *us, uint32_t *chk)
+{
+    nc_buf_t *b = nc_buf_create("bb.fifo", NC_BUF_SRAM, BB_SLOT, (uint16_t)BB_SLOTS,
+                                NC_BUF_F_RUNTIME | NC_BUF_F_FIFO);
+    if (b == NULL) {
+        *us = 0;
+        *chk = 0;
+        return;
+    }
+    uint32_t c = 0;
+    const int64_t t0 = esp_timer_get_time();
+    for (uint32_t i = 0; i < iters; i++) {
+        void *p = nc_buf_put_begin(b, 0);
+        if (p == NULL) {
+            continue;
+        }
+        memcpy(p, s_bb_src, BB_SLOT);
+        (void)nc_buf_put_end(b, BB_SLOT);
+        uint32_t len = 0, off = 0;
+        const void *q = nc_buf_get(b, &len, &off);
+        if (q != NULL) {
+            c ^= ((const uint32_t *)q)[0];
+            (void)nc_buf_get_end(b);
+        }
+    }
+    *us = (uint64_t)(esp_timer_get_time() - t0);
+    *chk = c;
+    (void)nc_buf_release(b);
+}
+
+static void bb_ncbuf_stream(uint32_t iters, uint64_t *us, uint32_t *chk)
+{
+    nc_buf_t *b = nc_buf_create("bb.strm", NC_BUF_SRAM, sizeof(s_bb_stream), 1,
+                                NC_BUF_F_RUNTIME | NC_BUF_F_STREAM);
+    if (b == NULL) {
+        *us = 0;
+        *chk = 0;
+        return;
+    }
+    uint32_t c = 0;
+    const int64_t t0 = esp_timer_get_time();
+    for (uint32_t i = 0; i < iters; i++) {
+        (void)nc_buf_write(b, s_bb_src, BB_SLOT);
+        uint32_t len = 0;
+        const uint8_t *p = nc_buf_read_ptr(b, &len);
+        if (p != NULL) {
+            c ^= p[0];
+            (void)nc_buf_skip(b, len);
+        }
+    }
+    *us = (uint64_t)(esp_timer_get_time() - t0);
+    *chk = c;
+    (void)nc_buf_release(b);
+}
+
+static void bb_kf_frames(uint32_t iters, uint64_t *us, uint32_t *chk)
+{
+    bb_kf_t f = { .mem = s_bb_kf, .size = sizeof(s_bb_kf),
+                  .mask = (uint32_t)(sizeof(s_bb_kf) - 1u), .in = 0, .out = 0 };
+    uint32_t c = 0;
+    const int64_t t0 = esp_timer_get_time();
+    for (uint32_t i = 0; i < iters; i++) {
+        (void)bb_kf_put(&f, s_bb_src, BB_SLOT);
+        if (bb_kf_get(&f, s_bb_scratch, BB_SLOT) != 0) {
+            c ^= ((const uint32_t *)s_bb_scratch)[0];
+        }
+    }
+    *us = (uint64_t)(esp_timer_get_time() - t0);
+    *chk = c;
+}
+
+static void bb_kf_stream(uint32_t iters, uint64_t *us, uint32_t *chk)
+{
+    bb_kf_t f = { .mem = s_bb_kf, .size = sizeof(s_bb_kf),
+                  .mask = (uint32_t)(sizeof(s_bb_kf) - 1u), .in = 0, .out = 0 };
+    uint32_t c = 0;
+    const int64_t t0 = esp_timer_get_time();
+    for (uint32_t i = 0; i < iters; i++) {
+        (void)bb_kf_put(&f, s_bb_src, BB_SLOT);
+        __atomic_thread_fence(__ATOMIC_ACQUIRE);
+        const uint32_t out = f.out, in = f.in;
+        const uint32_t used = in - out;
+        if (used > 0) {
+            const uint32_t off = out & f.mask;
+            c ^= f.mem[off];
+            f.out = out + used;
+        }
+    }
+    *us = (uint64_t)(esp_timer_get_time() - t0);
+    *chk = c;
+}
+
+static int bb_put(char *buf, size_t cap, const char *name,
+                  uint64_t us, uint32_t chk, uint32_t iters)
+{
+    const double bytes = (double)iters * (double)BB_SLOT;
+    const double mb_s = (us > 0) ? bytes / (double)us : 0.0;   // B/µs = MB/s（十進位）
+    const double ns = (iters > 0) ? (double)us * 1000.0 / (double)iters : 0.0;
+    return snprintf(buf, cap, "\"%s\":{\"us\":%llu,\"ns\":%.1f,\"mb\":%.1f,\"c\":%u}",
+                    name, (unsigned long long)us, ns, mb_s, (unsigned)chk);
+}
+
+static void on_buf_bench(nc4_ctx_t *ctx, const nc4_frame_t *f)
+{
+    uint32_t iters = 30000;
+    if (f->len >= 4) {
+        const uint32_t v = (uint32_t)f->data[0] | ((uint32_t)f->data[1] << 8) |
+                           ((uint32_t)f->data[2] << 16) | ((uint32_t)f->data[3] << 24);
+        if (v >= 1000 && v <= 500000) {
+            iters = v;
+        }
+    }
+    bb_src_init();
+
+    uint64_t us[13] = {0};
+    uint32_t ck[13] = {0};
+    bb_slot_ring(iters, 0, &us[0], &ck[0]);        // slot_pct
+    bb_slot_ring(iters, 1, &us[1], &ck[1]);        // slot_mask
+    bb_slot_ring(iters, 2, &us[2], &ck[2]);        // slot_mask_f
+    bb_ncbuf_fifo(iters, &us[3], &ck[3]);          // fifo_real
+    bb_ncbuf_stream(iters, &us[4], &ck[4]);        // stream_real
+    bb_kf_frames(iters, &us[5], &ck[5]);           // kfifo_frame
+    bb_kf_stream(iters, &us[6], &ck[6]);           // stream_kf
+    bb_lin_wrap(iters, &us[7], &ck[7]);            // lin_wrap
+    bb_ncbuf_stream_wrap(iters, &us[8], &ck[8]);   // stream_real_wrap
+    bb_kf_stream_wrap(iters, &us[9], &ck[9]);      // stream_kf_wrap
+    bb_lin_nowrap(iters, &us[10], &ck[10]);        // lin_nowrap
+    bb_ncbuf_ring_nowrap(iters, &us[11], &ck[11]); // ring_real
+    bb_ncbuf_ring_wrap(iters, &us[12], &ck[12]);   // ring_real_wrap
+
+    static char j[2600];
+    int off = snprintf(j, sizeof(j), "{\"n\":%u,\"slot\":%u,", (unsigned)iters, (unsigned)BB_SLOT);
+    if (off < 0) {
+        return;
+    }
+    static const char *names[13] = { "slot_pct", "slot_mask", "slot_mask_f", "fifo_real",
+                                     "stream_real", "kfifo_frame", "stream_kf",
+                                     "lin_wrap", "stream_real_wrap", "stream_kf_wrap",
+                                     "lin_nowrap", "ring_real", "ring_real_wrap" };
+    for (int i = 0; i < 13 && off > 0 && (size_t)off < sizeof(j); i++) {
+        const int w = bb_put(j + off, sizeof(j) - (size_t)off, names[i],
+                             us[i], ck[i], iters);
+        if (w > 0) {
+            off += w;
+            if ((size_t)off < sizeof(j) - 1) {
+                j[off++] = ',';
+                j[off] = '\0';
+            }
+        }
+    }
+    if (off > 0 && j[off - 1] == ',') {
+        j[off - 1] = '}';
+    } else if (off > 0 && (size_t)off < sizeof(j) - 1) {
+        j[off++] = '}';
+        j[off] = '\0';
+    }
+    reply_json(ctx, NC4_CMD_DEV_RSP, j);
+}
+
+
+// ── 0xF02F PARSER_SELFTEST：環形 parser 的跨環 frame ──
+#define NC4_CMD_PARSER_SELFTEST 0xF02F
+
+static void on_parser_selftest(nc4_ctx_t *ctx, const nc4_frame_t *f)
+{
+    (void)f;
+    const bool ok = nc4_parser_selftest();
+    uint32_t rus = 0, lus = 0, rn = 0, ln = 0;
+    const bool okb = nc4_parser_bench(2000, 1024, &rus, &lus, &rn, &ln);
+    char j[256];
+    snprintf(j, sizeof(j),
+             "{\"parser_ring\":%s,\"bench_ok\":%s,\"n\":2000,"
+             "\"ring_us\":%u,\"lin_us\":%u,\"ring_n\":%u,\"lin_n\":%u,"
+             "\"ring_fps\":%.1f,\"lin_fps\":%.1f}",
+             ok ? "true" : "false", okb ? "true" : "false",
+             (unsigned)rus, (unsigned)lus, (unsigned)rn, (unsigned)ln,
+             rus ? 2000.0e6 / (double)rus : 0.0,
+             lus ? 2000.0e6 / (double)lus : 0.0);
+    reply_json(ctx, NC4_CMD_DEV_RSP, j);
+}
+
 static const nc_action_t k_actions[] = {
     { NC4_CMD_DEV_BENCH, on_dev_bench, "test" },
     { NC4_CMD_HUB_BENCH, on_hub_bench, "test" },
@@ -4267,6 +4726,8 @@ static const nc_action_t k_actions[] = {
 #endif
     { NC4_CMD_STRESS, on_stress, "test" },
     { NC4_CMD_BUF_TEST, on_buf_test, "test" },
+    { NC4_CMD_BUF_BENCH, on_buf_bench, "test" },
+    { NC4_CMD_PARSER_SELFTEST, on_parser_selftest, "test" },
 #if CONFIG_NETCORE_RGB_MATRIX
     { NC4_CMD_MATRIX, on_matrix, "test" },
 #endif
