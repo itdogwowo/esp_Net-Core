@@ -2091,3 +2091,52 @@ S3 WiFi 連上後開 TCP 6000、UDP 6001、WS 8080。
 - 順手修：`tools/board.py list` 讀 `psram: null` 會 crash；C3 port 的
   board.json 與 sdkconfig 對不上（flash 40M、console UART0）→ `board.py check` 0 錯誤。
 - 詳見 [rgb-matrix-dither.md](../03_notes/rgb-matrix-dither.md)。
+
+
+### 7.62 2026-11-14（RING 的 SPSC 修正：consumer 唔再 reset producer）
+
+- 覆核 §7.61 之後的 RING 提交時發現：`nc_buf_skip()` 在消費清空時把 `st_in`／`st_out`
+  一齊歸零，違反「producer 只寫 in 側、consumer 只寫 out 側」的 SPSC 契約。
+  producer 在 `memcpy` 與發佈 `st_in` 之間被歸零，發布的位置就會指錯。
+- Host 兩 thread 重現（64 B RING、每次 1 B）：3,000,001 B 錯位 **2,226 次**；
+  修正後三次都 0。
+- 修法：加 `st_rd`／`st_wr` 物理位置各自維護（`nc_buf_t` +8 B），熱路徑少一次 `%`；
+  `nc_buf_handover()` 同步歸零。
+- 驗證：`buf_test` 新增單 thread 斷言＋`RING SPSC` 兩 thread 測試（舊實作 FAIL）；
+  `run_all.sh` **10/10**；
+  S3-Matrix（`--tests`）、P4-C6、C3 建置通過。**板上未驗**（今日冇接板）。
+  現時 parser 係同 task 寫入＋解析，所以板上未見症狀；B1 改成跨 task 才會踩到。
+- 詳見 [buffers.md §12.6](../03_notes/buffers.md)。
+
+### 7.63 2026-11-14（上板驗證 RING 修正；0xF032 支援無 PSRAM 板）
+
+- 兩塊板都換成含 §7.62 修正的 `--tests` 映像（S3 `08ca63ad`、P4 `359bd9b8`）。
+- `0xF02F PARSER_SELFTEST`：S3／P4 都 `parser_ring:true`、2,000 幀全到
+  （S3 ring 157.2 ms vs 線性 165.0 ms；P4 76.7 vs 75.2 ms）。
+- `0xF032 BUF_TEST`：P4 **11/11**；S3-Matrix（4 MB、無 PSRAM）修正前因
+  `t.psram` 建不到，整個測試被外層 `if` 跳過、誤報 11 項失敗。改成
+  「SRAM 照跑、PSRAM 三項（s2p／p2p／p2s）標 skipped」之後，S3 回
+  `fail:0, total:8, psram:0`。
+- P4 第一次經 USJ OTA 1.06 MB：**175 s（~6 KB/s）**；S3 CDC 661 KB：6.8 s
+  （~97 KB/s）。根因量到了：主機 raw write 4 KB 到 USJ = **640 ms**（6.4 KB/s）
+  ＝ 64 B USB packet × 10 ms FreeRTOS tick；不是 flash／OTA handler。
+  與 [usb-config §0.1](../03_notes/usb-config.md) 的「USJ 4 KB 上傳 0.94 s」
+  同一個數量級，是拉取式輪詢的既有上限。
+- P4 下載模式（ROM `rst:0x17`、`boot:0x317 DOWNLOAD`）用 esptool 燒 app 至
+  `0x20000`，讀回 SHA-256 與 artifact 一致；燒完要**放開 BOOT** 才會離開
+  download mode 並 boot 新 app。
+
+### 7.64 2026-11-14（mutex 成本、atomic A/B、USJ 大回覆）
+
+- 新測試指令 `0xF042 MUTEX_BENCH`：無競爭 mutex `take+give` 一對
+  **S3 4,051 ns／P4 3,956–3,985 ns**（約 2 µs/op）。
+  decoder 鎖每個有 handler 的幀一次（1 KB 幀 parse ~78 µs → ~5%）；
+  forward 鎖每轉寄幀一次（＋一次 copy）。
+- `NC_BUF_RING_ATOMIC`（0=plain、1=C11 atomic）A/B：
+  S3 `ring_real` 261.5→259.8 MB/s（**−0.6%**）、`0xF02F` 量不到差；
+  P4 的 ring／linear 同步快 5%（linear 唔經 RING），屬 build／環境變異，
+  無法從 P4 分辨 macro 效果。**default 保持 plain**，見
+  [buffers.md §12.7–12.8](../03_notes/buffers.md)。
+- P4 USJ 的 `0xF02B`（~2–3 KB 回覆）會 timeout：`usb_jtag_send` 100 ms deadline
+  截斷；`0xF02F`／`0xF032` 等小回覆正常。要量 P4 大結果，先處理 TX deadline
+  或分塊回覆。

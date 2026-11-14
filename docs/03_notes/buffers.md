@@ -471,7 +471,7 @@ size_t    nc_buf_json(char *out, size_t cap);         // STATUS keys=mem → mem
 | 步 | 內容 | 風險 | 為什麼排這裡 |
 |---|---|---|---|
 | **B1**（**2026-11-10 第二次更正**） | **decode 直接由 slot 解析**（`slot_peek` → `nc4_parser_feed(slot)` → `slot_release`），省掉 `slot→chunk` 那一次 copy；slots 保留 | 低 | ⚠️ **唔可以**叫 producer 直接寫（線性）STREAM 環：線性 STREAM 寫入時會 `memmove` 壓實，而 decode 在 `parser_dispatch()` 期間仍然揸住 ring 的指標 → producer 一壓實，資料就在指標腳下移動（靜默損壞）。現時的 slots 正好把「寫」與「讀」分開，係**正確**的設計。**RING（2026-11-14）冇這個限制**：producer 只寫 `in` 側，唔會移動 consumer 正在讀的資料。（2026-11-10 追加：`slot_full` 的六成丟幀其實是**producer 優先級高過 decode**，把 producer 降到 decode 之下就變 0、喚醒延遲 478→62 µs。見 [status §7.39](../00_pm/status.md)）|
-| **B2** | parser 環改用 `nc_buf`（STREAM → **RING**） | 中 | ✅ **2026-11-10 用 STREAM；2026-11-14 改用 RING**（見 §12.5）：跨環 frame 只抄該幀到 per-core scratch，平常零複製；`0xF02F` 自我測試在 S3／P4 都回 true |
+| **B2** | parser 環改用 `nc_buf`（STREAM → **RING**） | 中 | ✅ **2026-11-10 用 STREAM；2026-11-14 改用 RING**（見 §12.4）：跨環 frame 只抄該幀到 per-core scratch，平常零複製；`0xF02F` 自我測試在 S3／P4 都回 true |
 | **B3** | 回覆幀、TX 環 | 低 | 純帳面統一 |
 
 **唔會搬**：framing 狀態（每條線自己的半幀位置）、TX 環（driver 擁有）、
@@ -576,7 +576,7 @@ RING 的價值是**最壞情況**（backlog／大量 pending 時免 memmove）�
 （consumer 揸住指標時 producer 可以繼續寫）；buffer-level 的 14× 是 backlog 壓力案例，
 不是 parser 穩態。`0xF008` 的 `crc_err`／`bad_hdr` 為 0。
 
-### 12.4 邊界
+### 12.5 邊界
 
 - 這是**微基準**：單 task、內部 SRAM、固定 1 KB 幀、冇跨核、冇真實 parser／driver。
   真實吞吐仍要以 `0xF008`／`buf_probe.py` 的通道量測為準。
@@ -584,3 +584,83 @@ RING 的價值是**最壞情況**（backlog／大量 pending 時免 memmove）�
   令線性版每次都踩到壓實；真實系統的 backlog 取決於 decode 是否追得上。
 - P4 是用 ROM USB（USJ）連線跑的；偶有回覆遺失（與 iterations 無固定關係），
   但 5,000／20,000 兩輪數字一致。
+
+### 12.6 SPSC 修正：consumer 唔可以 reset producer（2026-11-14）
+
+**症狀**：`nc_buf_skip()` 在消費到空（`st_out == st_in`）時，會把 `st_in`／`st_out`
+一齊歸零。consumer 咁做等於改寫 producer 的計數：producer 已經用 `used` 計好寫入位置、
+`memcpy` 完但未 `st_in += len` 的時候，consumer 一歸零，producer 發布的 `st_in` 就指錯
+位置（重讀舊資料／新資料被覆蓋）。
+
+**重現**（host，兩個 thread，64 B RING，每次 1 B）：
+
+| | 讀 3,000,001 B 的內容錯位 |
+|---|---:|
+| 修正前 | **2,226 次** |
+| 修正後（3 次） | **0** |
+
+同一組場景已收成 `buf_test` 的 `RING SPSC` 測試（1,000,000 B、POSIX 才編）；
+舊實作 FAIL、新實作 PASS，所以呢條契約以後有回歸測試守住。
+
+**修法**：加 `st_rd`／`st_wr` 兩個物理位置（永遠 < `slot_bytes`）：
+
+- producer 只改 `st_in`／`st_wr`，consumer 只改 `st_out`／`st_rd`；任何一邊都唔 reset 對方。
+- 計數自然 wrap，`st_in - st_out` 仍然係 pending；物理位置每次最多繞一圈，
+  一次減法就夠（唔再需要 `%`，熱路徑順便少一次除法）。
+- `nc_buf_t` **+8 B**；`nc_buf_handover()` 一併歸零四個計數。
+
+**驗證**：`buf_test` 另有「清空後再寫，位置接住上次（唔 reset 返 0）」的單 thread
+斷言；`run_all.sh` 10/10；S3-Matrix（`--tests`）／P4-C6／C3 三塊板都建置通過。
+**上板（2026-11-14 晚）**：S3-Matrix 與 P4-C6 換上含此修正的 `--tests` 映像，
+`0xF02F` 都回 `parser_ring:true`（2,000 幀全到；S3 ring 157.2 ms／線性 165.0 ms，
+P4 76.7 ms／75.2 ms）；P4 的 `0xF032` 11/11。
+
+**影響範圍**：現時 parser 由同一個 decode task 寫入＋解析，所以板上未見症狀；
+但 `NC_BUF_F_RING` 係通用緩衝工具，B1（PUSH producer 直接寫 ring）一改成跨 task
+就會中。契約已寫入 [nc_buf.h](../../firmware/components/sys/mem/include/nc_buf.h)。
+
+### 12.7 A/B：plain 32-bit vs C11 atomic（2026-11-14）
+
+`nc_buf.c` 加了一個編譯期開關 `NC_BUF_RING_ATOMIC`（0 = plain ＋ fence，
+1 = `__atomic_load_n`／`__atomic_store_n`），同一份 code、同一個 object 大小。
+同一塊 S3-Matrix、同一支 `0xF02B`（30,000 × 1,024 B）、每個變體跑 3 次：
+
+| test | plain（0） | atomic（1） | 差 |
+|---|---:|---:|---:|
+| `ring_real` | 261.5–261.6 MB/s | 259.3–260.0 | **−0.6%** |
+| `ring_real_wrap` | 253.8 | 252.1–252.4 | **−0.6%** |
+| `fifo_real` | 277.4–277.5 | 277.5–277.6 | 0 |
+| `stream_real` | 279.6 | 279.0–279.3 | −0.15% |
+| `0xF02F` ring | 156.8–157.0 ms | 156.8–156.9 ms | 0 |
+
+Image 大小一樣（0xa1750）；hosttest 兩個變體都 ALL PASS。
+結論：atomic 只在最貼身的 RING 微基準慢 0.6%（1 KB 幀約 23 ns），parser
+端到端量不到。**default 仍係 plain**；要 C11 嚴格就將 macro 設 1。
+
+P4-C6（USJ）同一組 A/B：plain `0xF02F` ring 81.3 ms／linear 79.4 ms；
+atomic 77.0 ms／75.0 ms。但 **linear（唔經 RING）都同步快 5%**，所以係
+build／環境變異，唔係 macro 效果；ring/linear 比值 plain 1.024 vs atomic 1.027，
+同 S3 的 −0.6% 一致。P4 的 `0xF02B`（~2–3 KB 回覆）在 USJ 會 timeout
+（`usb_jtag_send` 100 ms deadline），所以 P4 用 `0xF02F` 量。
+
+注意：atomic 只覆蓋四個 SPSC 計數。`generation`／`puts`／`gets`／`by_*` 統計
+同 `account_copy` 的跨 buffer 記帳仍然係 plain，所以**未等於整個 struct
+TSAN-clean**；要「全 C11」是另一個（較大）的工程。
+
+### 12.8 mutex 成本（2026-11-14）
+
+新測試 `0xF042 MUTEX_BENCH`（無競爭 `xSemaphoreTake`＋`Give`，1,000,000 次）：
+
+| 板 | ns/對（take+give） | ns/op |
+|---|---:|---:|
+| S3-Matrix 240 MHz | 4,051 | 2,025 |
+| P4-C6 360 MHz | 3,956–3,985 | 1,978–1,992 |
+
+用途與影響：
+- **decoder mutex**：每個有註冊 handler 的 NC4 幀一次（`parser_dispatch`）。
+  1 KB 幀 parse 約 77–78 µs → 鎖約 **5%**；8 KB 幀約 0.6%。
+- **forward mutex**：每轉寄一幀一次（multi-producer 保護）＋一次 copy；
+  以 forwarding 7k fps 計約佔 3% 單核 CPU。
+
+要再壓的話，方向是「一個 decoder 一個 task」拿掉 decoder 鎖、forward 改
+per-source queue／MPSC（記憶體換鎖）；今次只量、未改。

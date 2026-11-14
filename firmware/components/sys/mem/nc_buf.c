@@ -88,15 +88,58 @@ struct nc_buf {
     uint32_t st_off;       // 讀起點
     uint32_t st_end;       // 寫終點（st_end - st_off = pending）
 
-    // RING 模式：單調計數（st_in - st_out = pending）；容量 = slot_bytes
+    // RING 模式：單調計數（st_in - st_out = pending）；容量 = slot_bytes。
+    // st_rd／st_wr 係各自的物理位置（永遠 < slot_bytes）。producer 只改
+    // st_in／st_wr，consumer 只改 st_out／st_rd —— 任何一邊都唔會 reset 對方
+    // 的計數（SPSC 契約；見 nc_buf.h 的 RING 說明）。
     uint32_t st_in;
     uint32_t st_out;
+    uint32_t st_rd;
+    uint32_t st_wr;
 
     uint32_t generation;   // 每次 publish（put_end）＋1；換手再＋1
     uint32_t puts, gets, fail_full, fail_big, viol, aborts;
     uint32_t by_s2s, by_s2p, by_p2s, by_p2p;   // 各方向的累計 bytes
     uint32_t by_xcopy;     // 由「另一條 buffer」抄過來的 bytes（本來可能可以零複製）
 };
+
+// RING 計數的記憶體模型（A/B 用）：
+//   0 = plain 32-bit ＋ __atomic_thread_fence（現行）
+//   1 = __atomic_load_n／__atomic_store_n（C11 嚴格；32-bit 仍然 lock-free）
+#ifndef NC_BUF_RING_ATOMIC
+#define NC_BUF_RING_ATOMIC 0
+#endif
+
+// RING 的 peer 計數：讀的一方要 acquire，寫的一方要 release。
+static inline uint32_t ring_load_acq(const uint32_t *p)
+{
+#if NC_BUF_RING_ATOMIC
+    return __atomic_load_n(p, __ATOMIC_ACQUIRE);
+#else
+    __atomic_thread_fence(__ATOMIC_ACQUIRE);
+    return *p;
+#endif
+}
+
+// 自己那一邊的計數：relaxed 就夠（只有自己寫）。
+static inline uint32_t ring_load_rlx(const uint32_t *p)
+{
+#if NC_BUF_RING_ATOMIC
+    return __atomic_load_n(p, __ATOMIC_RELAXED);
+#else
+    return *p;
+#endif
+}
+
+static inline void ring_store_rel(uint32_t *p, uint32_t v)
+{
+#if NC_BUF_RING_ATOMIC
+    __atomic_store_n(p, v, __ATOMIC_RELEASE);
+#else
+    __atomic_thread_fence(__ATOMIC_RELEASE);
+    *p = v;
+#endif
+}
 
 static nc_buf_t *s_reg[NC_BUF_MAX];
 static uint32_t s_next_gen = 1;
@@ -475,7 +518,7 @@ uint32_t nc_buf_pending(const nc_buf_t *b)
         return 0;
     }
     if (b->flags & NC_BUF_F_RING) {
-        return b->st_in - b->st_out;
+        return ring_load_acq(&b->st_in) - ring_load_rlx(&b->st_out);
     }
     return b->st_end - b->st_off;
 }
@@ -486,7 +529,7 @@ uint32_t nc_buf_space(const nc_buf_t *b)
         return 0;
     }
     if (b->flags & NC_BUF_F_RING) {
-        return b->slot_bytes - (b->st_in - b->st_out);
+        return b->slot_bytes - (ring_load_acq(&b->st_in) - ring_load_rlx(&b->st_out));
     }
     // 壓實之後一定有位：容量 - 未讀量
     return b->slot_bytes - (b->st_end - b->st_off);
@@ -497,10 +540,9 @@ uint32_t nc_buf_write(nc_buf_t *b, const void *src, uint32_t len)
     if (b == NULL || src == NULL || len == 0 || !(b->flags & NC_BUF_F_STREAM)) {
         return 0;
     }
-    __atomic_thread_fence(__ATOMIC_ACQUIRE);
-
     if (b->flags & NC_BUF_F_RING) {
-        const uint32_t used = b->st_in - b->st_out;
+        const uint32_t in = ring_load_rlx(&b->st_in);
+        const uint32_t used = in - ring_load_acq(&b->st_out);
         const uint32_t space = b->slot_bytes - used;
         if (len > space) {
             len = space;                    // 部分寫入（唔覆蓋未讀資料）
@@ -509,7 +551,7 @@ uint32_t nc_buf_write(nc_buf_t *b, const void *src, uint32_t len)
         if (len == 0) {
             return 0;
         }
-        const uint32_t off = b->st_in % b->slot_bytes;
+        const uint32_t off = b->st_wr;
         uint32_t first = b->slot_bytes - off;
         if (first > len) {
             first = len;
@@ -518,14 +560,20 @@ uint32_t nc_buf_write(nc_buf_t *b, const void *src, uint32_t len)
         if (len > first) {
             memcpy(b->data, (const uint8_t *)src + first, len - first);
         }
+        // 物理位置各自前進（最多繞一圈，所以一次減法就夠）。
+        uint32_t wr = off + len;
+        if (wr >= b->slot_bytes) {
+            wr -= b->slot_bytes;
+        }
+        b->st_wr = wr;
         account_copy(b, src, len);
-        __atomic_thread_fence(__ATOMIC_RELEASE);   // 資料先寫完，才發佈 st_in
-        b->st_in += len;
+        ring_store_rel(&b->st_in, in + len);   // 資料先寫完，才發佈 st_in
         b->generation++;
         b->puts++;
         return len;
     }
 
+    __atomic_thread_fence(__ATOMIC_ACQUIRE);
     if (b->st_end + len > b->slot_bytes) {
         // 尾部唔夠位：先把未讀的搬到前面（同 nc4_parser_feed 的做法一致）
         const uint32_t used = b->st_end - b->st_off;
@@ -569,14 +617,13 @@ uint32_t nc_buf_read_segments(nc_buf_t *b, const uint8_t **p0, uint32_t *n0,
     if (b == NULL || !(b->flags & NC_BUF_F_STREAM)) {
         return 0;
     }
-    __atomic_thread_fence(__ATOMIC_ACQUIRE);       // 見到新資料才讀
 
     if (b->flags & NC_BUF_F_RING) {
-        const uint32_t used = b->st_in - b->st_out;
+        const uint32_t used = ring_load_acq(&b->st_in) - ring_load_rlx(&b->st_out);
         if (used == 0) {
             return 0;
         }
-        const uint32_t off = b->st_out % b->slot_bytes;
+        const uint32_t off = b->st_rd;
         uint32_t first = b->slot_bytes - off;
         if (first > used) {
             first = used;
@@ -596,6 +643,7 @@ uint32_t nc_buf_read_segments(nc_buf_t *b, const uint8_t **p0, uint32_t *n0,
         return used;
     }
 
+    __atomic_thread_fence(__ATOMIC_ACQUIRE);       // 見到新資料才讀
     const uint32_t used = b->st_end - b->st_off;
     if (used == 0) {
         return 0;
@@ -633,16 +681,18 @@ esp_err_t nc_buf_skip(nc_buf_t *b, uint32_t n)
         return ESP_ERR_INVALID_ARG;
     }
     if (b->flags & NC_BUF_F_RING) {
-        const uint32_t used = b->st_in - b->st_out;
+        const uint32_t out = ring_load_rlx(&b->st_out);
+        const uint32_t used = ring_load_acq(&b->st_in) - out;
         if (n > used) {
             n = used;
         }
-        __atomic_thread_fence(__ATOMIC_RELEASE);   // 先讀完，才把空間還給 producer
-        b->st_out += n;
-        if (b->st_out == b->st_in) {
-            b->st_in = 0;
-            b->st_out = 0;
+        // 只前進 consumer 自己的兩個計數；唔 reset、唔碰 st_in（SPSC）。
+        uint32_t rd = b->st_rd + n;
+        if (rd >= b->slot_bytes) {
+            rd -= b->slot_bytes;
         }
+        b->st_rd = rd;
+        ring_store_rel(&b->st_out, out + n);   // 先讀完，才把空間還給 producer
         return ESP_OK;
     }
     const uint32_t used = b->st_end - b->st_off;
@@ -703,6 +753,8 @@ esp_err_t nc_buf_handover(nc_buf_t *b, const char *new_owner)
     b->st_end = 0;
     b->st_in = 0;
     b->st_out = 0;
+    b->st_rd = 0;
+    b->st_wr = 0;
     BUF_LOGI("buf %s 換手 → %s（gen %u）", b->name, new_owner, (unsigned)b->generation);
     return ESP_OK;
 }

@@ -192,16 +192,16 @@
 |---|---|---|---|
 | 9.1 | 術語與退役詞（hub／pool／環／plan） | ✅ 定案 | [glossary.md](../03_notes/glossary.md) |
 | 9.2 | 三條鐵律：開機要齊、永不 free、只管 carve | ✅ 定案 | 冇 free 就冇碎片（更正舊文件把功勞歸給 plan） |
-| 9.3 | plan 降級為 `nc_buf` 內部 arena | ✅ 定案 | `nc_plan_*` 公開 API 在 P5 刪 |
+| 9.3 | plan 降級為 `nc_buf` 內部 arena | ✅ 基本完成 | `nc_plan_*` 公開 API **未刪**：task_manager 仍然用 `nc_plan_declare()`／`nc_plan_get()`，屬遺留（不是行為問題） |
 | 9.4 | S2S／S2P／P2S／P2P 是 `put()` 的四種引數 | ✅ 定案 | 不是四種型別；`DMA` class 強制 copy 入 S |
-| 9.5 | `nc_buf` 核心（FIFO＋隨機＋S/P copy＋`mem.buf`） | ✅ **已完成**（2026-11-10） | 上板 `0xF032` 9 項全 pass、`mem.buf` 858 B；hosttest 10/10。見 [status §7.32](status.md) |
-| 9.6 | 回覆幀／TX 環／small·bulk 搬過去 | ⏸ P2 | 行為不變，逐項驗 |
-| 9.7 | 轉發搬過去（取代 `nc_pool.forward`＋跨核 queue） | ⏸ P3 | 即原 §8.4，改用 `nc_buf` |
-| 9.8 | parser 環搬過去（配 header-first assembler） | ⏸ P4 | — |
-| 9.9 | 可等待模式、tap／多讀者、per-link `max_frame` | ⏸ 未定 | 見 [buffers §10](../03_notes/buffers.md) |
+| 9.5 | `nc_buf` 核心（FIFO＋STREAM／RING＋S/P copy＋`mem.buf`） | ✅ **已完成**（2026-11-10；RING 2026-11-14） | 隨機模式已移除；上板 `0xF032`、`0xF02F` 見 [status §7.32／§7.63](status.md) |
+| 9.6 | 回覆幀／TX 環／small·bulk 搬過去 | ✅ 完成（2026-11-10，P2／§7.42） | 回覆幀已搬；small／bulk **取消**；TX 環明確唔搬（driver 擁有） |
+| 9.7 | 轉發搬過去（取代 `nc_pool.forward`＋跨核 queue） | ✅ 完成（2026-11-10，P4／§7.44） | 每核一條 `nc_buf` FIFO；`nc_pool` 整組刪除 |
+| 9.8 | parser 環搬過去（配 header-first assembler） | ✅ 完成（2026-11-14，RING／§7.61） | `usb.rx`／`uart.rx` 為 STREAM＋RING；`0xF02F` S3／P4 都 true |
+| 9.9 | 可等待模式、tap／多讀者、per-link `max_frame` | ⏸ **仍未做**（未定） | 見 [buffers §10](../03_notes/buffers.md)；現時全部非阻塞、單讀者、max_frame 全域 |
 | 9.10 | **任務 ↔ 緩衝區契約（C1–C11）成文**、三份任務文件統一 | ✅ 完成（2026-11-10） | [buffers.md §9](../03_notes/buffers.md)；見 [status §7.33](status.md) |
 | 9.11 | **STREAM 模式**（parser 環用）＋ `put_abort`／FIFO 唔卡死 | ✅ 完成（2026-11-10） | 上板 `0xF032` 11/11；見 [status §7.34](status.md) |
-| 9.12 | **總線搬過來**：B1 PUSH 插槽 → B2 parser 環 → B3 回覆幀／TX | ⏸ 下一步（風險：B2） | [buffers.md §11.2](../03_notes/buffers.md) |
+| 9.12 | **總線搬過來**：B1 PUSH 插槽 → B2 parser 環 → B3 回覆幀／TX | ✅ 完成（B1 §7.43、B2 §7.61、B3 §7.42） | TX 環唔搬（driver 擁有）；[buffers.md §11.2](../03_notes/buffers.md) |
 
 **§8 的處理**：8.2／8.3 的**行為定案保留**，但「`nc_hub`」這個名字退役（改叫 FIFO 緩衝區），
 8.5 的 `nc4.forward` config 併入 9.5 的 buffer 宣告。
@@ -238,3 +238,8 @@
 
 **明確不做（現在）**：`nc_led` 正式 backend、多實例 `drv_i80`、`hardware.json` 的 I80 型別化 ——
 等 8×8 的真機行為（波形、亮度、閃爍邊界）有數據再定。
+
+> **2026-11-14 上板狀態**：`nc_buf` 已是全部通道（PUSH 插槽、parser 環、回覆幀、轉寄）
+> 唯一的緩衝工具；`0xF032` P4 11/11、S3-Matrix（無 PSRAM）8/8，`0xF02F` S3／P4 都
+> `parser_ring:true`。仍留白的是 **9.9**（可等待／tap／per-link max_frame）與
+> plan 公開 API 未收；這些係規劃取捨，不是已知 bug。

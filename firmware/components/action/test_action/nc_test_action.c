@@ -28,6 +28,7 @@
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "freertos/semphr.h"
 #include "nvs.h"
 #include "lwip/sockets.h"
 #include <fcntl.h>
@@ -3729,15 +3730,24 @@ static void on_buf_test(nc4_ctx_t *ctx, const nc4_frame_t *f)
     int ok_align = 0, ok_fifo = 0, ok_full = 0, ok_res = 0;
     int ok_s2s = 0, ok_s2p = 0, ok_p2s = 0, ok_p2p = 0, ok_ho = 0;
     int ok_stream = 0, ok_abort = 0;
+    // 冇 PSRAM 的板（例如 4 MB 的 S3-Matrix）：只跳過三條 PSRAM 路徑，
+    // SRAM／FIFO／STREAM／換手照跑。以前整個測試掛在 t.psram != NULL，
+    // 結果 11 項一齊報 FAIL。
+    const int has_ps = (s_t_psram != NULL);
 
     uint8_t v[512];
-    if (s_t_sram != NULL && s_t_psram != NULL) {
+    if (s_t_sram != NULL) {
         buf_drain(s_t_sram);
-        buf_drain(s_t_psram);
+        if (has_ps) {
+            buf_drain(s_t_psram);
+        }
 
-        // ① 對齊（64 B）
-        ok_align = (((uintptr_t)nc_buf_raw(s_t_sram, 0) % NC_BUF_ALIGN) == 0) &&
-                   (((uintptr_t)nc_buf_raw(s_t_psram, 0) % NC_BUF_ALIGN) == 0);
+        // ① 對齊（64 B；有 PSRAM 就兩條都驗）
+        ok_align = (((uintptr_t)nc_buf_raw(s_t_sram, 0) % NC_BUF_ALIGN) == 0);
+        if (has_ps) {
+            ok_align = ok_align &&
+                       (((uintptr_t)nc_buf_raw(s_t_psram, 0) % NC_BUF_ALIGN) == 0);
+        }
 
         // ② FIFO 次序 ＋ 滿了回 NULL
         for (int i = 0; i < 4; i++) {
@@ -3771,20 +3781,22 @@ static void on_buf_test(nc4_ctx_t *ctx, const nc4_frame_t *f)
         }
         buf_drain(s_t_sram);
 
-        // ④ 四條空間路徑
+        // ④ 空間路徑：S→S 永遠測；S→P／P→P／P→S 只有 PSRAM 板才測
         memset(v, 0x11, sizeof(v));
-        ok_s2p = (nc_buf_put(s_t_psram, v, sizeof(v)) == ESP_OK);            // S → P
-        if (ok_s2p) {
-            uint32_t len = 0;
-            const uint8_t *p = nc_buf_get(s_t_psram, &len, NULL);
-            ok_s2p = (p != NULL) && (len == sizeof(v)) && (p[0] == 0x11) && (p[511] == 0x11);
-            nc_buf_get_end(s_t_psram);
-        }
-        ok_p2p = (nc_buf_put(s_t_psram, nc_buf_raw(s_t_psram, 0), 64) == ESP_OK);  // P → P
-        ok_p2s = (nc_buf_put(s_t_sram, nc_buf_raw(s_t_psram, 0), 128) == ESP_OK);  // P → S
         ok_s2s = (nc_buf_put(s_t_sram, v, 128) == ESP_OK);                        // S → S
+        if (has_ps) {
+            ok_s2p = (nc_buf_put(s_t_psram, v, sizeof(v)) == ESP_OK);            // S → P
+            if (ok_s2p) {
+                uint32_t len = 0;
+                const uint8_t *p = nc_buf_get(s_t_psram, &len, NULL);
+                ok_s2p = (p != NULL) && (len == sizeof(v)) && (p[0] == 0x11) && (p[511] == 0x11);
+                nc_buf_get_end(s_t_psram);
+            }
+            ok_p2p = (nc_buf_put(s_t_psram, nc_buf_raw(s_t_psram, 0), 64) == ESP_OK);  // P → P
+            ok_p2s = (nc_buf_put(s_t_sram, nc_buf_raw(s_t_psram, 0), 128) == ESP_OK);  // P → S
+        }
 
-        // ⑤ S→P 的內容要真的一樣（copy 之後讀返出嚟對）
+        // ⑤ P→S 的內容要真的一樣（copy 之後讀返出嚟對）
         if (ok_p2s) {
             uint32_t len = 0;
             const uint8_t *p = nc_buf_get(s_t_sram, &len, NULL);
@@ -3792,7 +3804,9 @@ static void on_buf_test(nc4_ctx_t *ctx, const nc4_frame_t *f)
             nc_buf_get_end(s_t_sram);
         }
         buf_drain(s_t_sram);
-        buf_drain(s_t_psram);
+        if (has_ps) {
+            buf_drain(s_t_psram);
+        }
 
         // ⑥ 串流：部分寫、部分讀、壓實、滿了部分寫入（總線的 parser 環用這個模式）
         if (s_t_stream != NULL) {
@@ -3839,28 +3853,75 @@ static void on_buf_test(nc4_ctx_t *ctx, const nc4_frame_t *f)
                 (nc_buf_handover(s_t_sram, "t.sram") == ESP_OK);
     }
 
-    const int bad = 11 - (ok_align + ok_fifo + ok_full + ok_res + ok_s2s + ok_s2p +
-                          ok_p2s + ok_p2p + ok_ho + ok_stream + ok_abort);
+    // 有 PSRAM = 11 項；冇 PSRAM = 8 項（s2p／p2p／p2s 跳過）
+    const int total = has_ps ? 11 : 8;
+    const int bad = total - (ok_align + ok_fifo + ok_full + ok_res + ok_s2s + ok_s2p +
+                             ok_p2s + ok_p2p + ok_ho + ok_stream + ok_abort);
 
     size_t off = 0;
     jappend(js, NC4_REPLY_JSON_MAX + 1, &off,
-            "{\"ok\":%d,\"fail\":%d,\"align\":%d,\"fifo\":%d,\"full\":%d,"
+            "{\"ok\":%d,\"fail\":%d,\"total\":%d,\"psram\":%d,\"align\":%d,\"fifo\":%d,\"full\":%d,"
             "\"reserve\":%d,\"s2s\":%d,\"s2p\":%d,\"p2s\":%d,\"p2p\":%d,"
             "\"handover\":%d,\"stream\":%d,\"abort\":%d,\"buf\":",
-            bad == 0, bad, ok_align, ok_fifo, ok_full, ok_res,
+            bad == 0, bad, total, has_ps, ok_align, ok_fifo, ok_full, ok_res,
             ok_s2s, ok_s2p, ok_p2s, ok_p2p, ok_ho, ok_stream, ok_abort);
     jchain(js, NC4_REPLY_JSON_MAX + 1, &off, nc_buf_json);
     jappend(js, NC4_REPLY_JSON_MAX + 1, &off, "}");
 
     if (bad != 0) {
-        ESP_LOGW(TAG, "BUF_TEST %d 項失敗（align=%d fifo=%d full=%d res=%d "
+        ESP_LOGW(TAG, "BUF_TEST %d/%d 項失敗（psram=%d align=%d fifo=%d full=%d res=%d "
                       "s2s=%d s2p=%d p2s=%d p2p=%d ho=%d stream=%d abort=%d）",
-                 bad, ok_align, ok_fifo, ok_full, ok_res, ok_s2s, ok_s2p,
+                 bad, total, has_ps, ok_align, ok_fifo, ok_full, ok_res, ok_s2s, ok_s2p,
                  ok_p2s, ok_p2p, ok_ho, ok_stream, ok_abort);
     }
     reply_send(&r, off);
 }
 
+
+// ── 0xF042 MUTEX_BENCH：無競爭 mutex fast path（測試用）──
+// payload [iters:u32]（預設 1,000,000）→ ns_pair = take+give 一對
+#define NC4_CMD_MUTEX_BENCH 0xF042
+
+static void on_mutex_bench(nc4_ctx_t *ctx, const nc4_frame_t *f)
+{
+    uint32_t iters = 1000000;
+    if (f->len >= 4) {
+        iters = nb_u32(f->data);
+    }
+    if (iters < 1000) {
+        iters = 1000;
+    }
+    if (iters > 5000000) {
+        iters = 5000000;
+    }
+
+    static SemaphoreHandle_t s_mb;
+    if (s_mb == NULL) {
+        s_mb = xSemaphoreCreateMutex();
+    }
+    if (s_mb == NULL) {
+        reply_json(ctx, NC4_CMD_DEV_RSP, "{\"err\":\"no_mutex\"}");
+        return;
+    }
+
+    for (int i = 0; i < 1000; i++) {          // warmup
+        xSemaphoreTake(s_mb, portMAX_DELAY);
+        xSemaphoreGive(s_mb);
+    }
+    const int64_t t0 = esp_timer_get_time();
+    for (uint32_t i = 0; i < iters; i++) {
+        xSemaphoreTake(s_mb, portMAX_DELAY);
+        xSemaphoreGive(s_mb);
+    }
+    const int64_t dt = esp_timer_get_time() - t0;
+    char j[160];
+    snprintf(j, sizeof(j),
+             "{\"iters\":%u,\"us\":%lld,\"ns_pair\":%lld,\"ns_op\":%lld}",
+             (unsigned)iters, (long long)dt,
+             (long long)(dt * 1000 / (int64_t)iters),
+             (long long)(dt * 1000 / (int64_t)(iters * 2)));
+    reply_json(ctx, NC4_CMD_DEV_RSP, j);
+}
 
 // ── 0xF060 MATRIX：8×8 WS2812 矩陣（測試任務，Kconfig NETCORE_RGB_MATRIX）──
 // payload [op:u8][args]
@@ -4728,6 +4789,7 @@ static const nc_action_t k_actions[] = {
     { NC4_CMD_BUF_TEST, on_buf_test, "test" },
     { NC4_CMD_BUF_BENCH, on_buf_bench, "test" },
     { NC4_CMD_PARSER_SELFTEST, on_parser_selftest, "test" },
+    { NC4_CMD_MUTEX_BENCH, on_mutex_bench, "test" },
 #if CONFIG_NETCORE_RGB_MATRIX
     { NC4_CMD_MATRIX, on_matrix, "test" },
 #endif

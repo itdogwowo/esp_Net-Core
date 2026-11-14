@@ -97,6 +97,10 @@ COM13）；JTAG 孔（COM21）只係 console。
 5. 板子重啟、CDC 短暫消失；重新連線
 6. `sys.fw` 應顯示新版本
 
+> 速度參考（2026-11-14）：S3（TinyUSB CDC）661 KB ≈ **6.8 s（~97 KB/s）**；
+> P4（USB-Serial-JTAG）1.06 MB ≈ **175 s（~6 KB/s）**。USJ 本來就慢，見
+> [usb-config §0.1](../03_notes/usb-config.md)；大批量更新建議走 CDC 或留 USB 線。
+
 ---
 
 ## 4. 失敗模式對照

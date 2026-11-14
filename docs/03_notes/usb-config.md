@@ -144,6 +144,7 @@ B11（bus＋producer）只讀 ctx，不再各自去問一次 router ——
 | ESP32-C3-DevKitM（4 MB，全清後第一次開機） | USJ（pull） | 4,128 | 0.94 s | 4,102 | 0 / 0 | 出廠 seed 自動是 `usb_jtag`、`msc=0`；4 KB／3 KB／2 KB／再 4 KB 全部 SHA 對 |
 | ESP32-S3-N16R8（`kind=cdc`，OTG） | TinyUSB CDC（push-slot） | 4,128 | 0.35 s | 4,102 | 0 / 0 | `peak` 1 格、`slot_full` 0 |
 | ESP32-S3-N16R8（`kind=usb_jtag`，USJ） | USB-Serial-JTAG（pull） | 4,128 | 0.98 s | 4,102 | 0 / 0 | 與 C3 同一個 driver；`rt` 冇 TinyUSB／cdc.rx |
+| ESP32-P4-C6（`usb_jtag`，USJ） | USB-Serial-JTAG（pull） | 4,128 | —（1.06 MB OTA 用 175 s，≈6 KB/s） | — | — | 2026-11-14 實測；主機 raw write 4 KB = 640 ms（64 B × 10 ms tick），與 C3／S3 的 USJ 同級；CDC 約 97 KB/s |
 
 兩塊板都係：payload 4,102（6 + 4,096）→ 幀 4,115 → 4,128 的環 **零丟幀**。
 S3 的 `/config/system.json` 是舊版（冇 `usb`、冇 `rx`），reboot 後仍然是 4,128 →

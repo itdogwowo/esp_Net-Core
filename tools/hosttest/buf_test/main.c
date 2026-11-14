@@ -3,6 +3,12 @@
 #include <stdlib.h>
 #include <string.h>
 
+#if defined(__unix__) || defined(__APPLE__)
+#include <pthread.h>
+#include <stdatomic.h>
+#define HAVE_SPSC_THREADS 1
+#endif
+
 #include "nc_buf.h"
 
 static int fails;
@@ -319,6 +325,13 @@ static void test_ring(void)
 
     CHECK(nc_buf_write(b, src, 40) == 40, "歸零後再寫");
     CHECK(nc_buf_skip(b, 40) == ESP_OK, "再清空");
+
+    // SPSC 契約：consumer 清空時唔可以 reset producer 的計數／位置。
+    // 舊版會在 st_out == st_in 時把兩邊歸零 → 上面 40 B 會由 offset 0 再寫。
+    CHECK(nc_buf_write(b, src, 8) == 8, "清空後再寫 8");
+    CHECK(nc_buf_read_segments(b, &p0, &n0, &p1, &n1) == 8, "回 8");
+    CHECK(p0 == nc_buf_raw(b, 0) + 56, "位置接住上次（唔 reset 返 0）");
+    CHECK(nc_buf_skip(b, 8) == ESP_OK, "消費 8");
     CHECK(nc_buf_release(b) == ESP_OK, "release RING");
 
     // 線性 STREAM 的 read_segments 仍然只有一段。
@@ -330,6 +343,68 @@ static void test_ring(void)
     CHECK(n0 == 10 && n1 == 0 && p1 == NULL, "線性永遠一段");
     CHECK(nc_buf_release(l) == ESP_OK, "release 線性");
 }
+
+#ifdef HAVE_SPSC_THREADS
+// 兩 thread 壓力：producer 每次寫 1 B（遞增值），consumer 逐 byte 核對。
+// 舊版 skip() 清空時 reset st_in，producer 下一個 byte 會寫錯位置 → 內容錯位。
+typedef struct {
+    nc_buf_t *b;
+    atomic_int stop;
+    unsigned long bad;
+    unsigned long got;
+} spsc_t;
+
+static void *spsc_producer(void *arg)
+{
+    spsc_t *s = arg;
+    uint8_t v = 0;
+    while (!atomic_load(&s->stop)) {
+        if (nc_buf_write(s->b, &v, 1) == 1) {
+            v++;
+        }
+    }
+    return NULL;
+}
+
+static void *spsc_consumer(void *arg)
+{
+    spsc_t *s = arg;
+    uint8_t want = 0;
+    while (s->got < 1000000UL) {
+        const uint8_t *p = nc_buf_read_ptr(s->b, NULL);
+        if (p == NULL) {
+            continue;
+        }
+        if (*p != want) {
+            s->bad++;
+        }
+        nc_buf_skip(s->b, 1);
+        want++;
+        s->got++;
+    }
+    atomic_store(&s->stop, 1);
+    return NULL;
+}
+
+static void test_ring_spsc(void)
+{
+    printf("\n-- RING SPSC：consumer 清空時唔會 reset producer --\n");
+    nc_buf_t *b = nc_buf_create("r.spsc", NC_BUF_SRAM, 64, 1,
+                                NC_BUF_F_RUNTIME | NC_BUF_F_STREAM | NC_BUF_F_RING);
+    CHECK(b != NULL, "建立 RING 64 B");
+    spsc_t s = {.b = b, .bad = 0, .got = 0};
+    atomic_init(&s.stop, 0);
+    pthread_t tp, tc;
+    CHECK(pthread_create(&tp, NULL, spsc_producer, &s) == 0, "起 producer thread");
+    CHECK(pthread_create(&tc, NULL, spsc_consumer, &s) == 0, "起 consumer thread");
+    pthread_join(tc, NULL);
+    pthread_join(tp, NULL);
+    CHECK(s.got == 1000000UL, "consumer 讀完 1,000,000 B");
+    printf("  INFO  錯位 %lu 次\n", s.bad);
+    CHECK(s.bad == 0, "內容零錯位");
+    CHECK(nc_buf_release(b) == ESP_OK, "release RING");
+}
+#endif
 
 int main(void)
 {
@@ -344,6 +419,9 @@ int main(void)
     test_json_truncation();
     test_stream();
     test_ring();
+#ifdef HAVE_SPSC_THREADS
+    test_ring_spsc();
+#endif
     test_abort();
     test_carve();
 

@@ -10,5 +10,6 @@ cc -std=c11 -Wall -Wextra -Werror \
    -I "$ROOT/firmware/components/sys/mem/include" \
    "$ROOT/firmware/components/sys/mem/nc_buf.c" \
    "$ROOT/tools/hosttest/buf_test/main.c" \
+   -pthread \
    -o "$OUT"
 "$OUT"

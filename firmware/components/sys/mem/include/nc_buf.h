@@ -53,7 +53,9 @@ typedef enum {
 // 預設係「線性＋必要時 memmove 壓實」：read_ptr 永遠係一段連續。
 #define NC_BUF_F_STREAM (1u << 1)
 // RING（要同時帶 STREAM）：真正環形，in/out 單調計數，**唔會壓實／搬資料**。
-// producer 只寫 in 側，consumer 揸住 out 側的指標時資料唔會被移動。
+// SPSC 契約：producer 只寫 in／wr 側，consumer 只寫 out／rd 側；任何一邊
+// **唔會 reset** 對方嘅計數（計數可以自然 wrap，`st_in - st_out` 仍然正確）。
+// consumer 揸住 out 側的指標時 producer 可以繼續寫，資料唔會被移動。
 // read_ptr 只回第一段；跨環請用 nc_buf_read_segments()（兩段）。
 // 量測（2026-11-14，S3）：backlog 一半時，線性版 17.6 MB/s、ring 346 MB/s。
 #define NC_BUF_F_RING   (1u << 3)
