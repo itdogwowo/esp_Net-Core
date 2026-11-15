@@ -61,31 +61,59 @@
         "enable": 1
       },
       {
-        "name": "TCP",
-        "kind": "tcp",
+        "kind": "eth_tcp",
+        "index": 0,
+        "port": 80,
+        "enable": 1
+      },
+      {
+        "kind": "eth_tcp",
+        "index": 1,
+        "port": 6000,
         "enable": 1,
+        "mem": "auto",
         "cfg": {
           "port": 6000,
           "rx": {
-            "mode": "pull",
             "region": 16410,
-            "chunk": 8192,
+            "chunk": 8205,
             "budget": 8,
-            "slots": 8,
+            "slots": 2,
             "slot_size": 8205
           }
         }
       },
       {
-        "name": "UDP",
-        "kind": "udp",
+        "kind": "eth_tcp",
+        "index": 2,
+        "port": 8080,
         "enable": 1,
+        "mem": "auto",
+        "cfg": {
+          "port": 8080,
+          "rx": {
+            "region": 16384,
+            "chunk": 8192,
+            "budget": 4,
+            "slots": 2,
+            "slot_size": 8192
+          }
+        }
+      },
+      {
+        "kind": "eth_udp",
+        "index": 0,
+        "port": 6001,
+        "enable": 1,
+        "mem": "auto",
         "cfg": {
           "port": 6001,
           "rx": {
-            "mode": "datagram",
-            "max_msg": 16384,
-            "budget": 8
+            "region": 8205,
+            "chunk": 8205,
+            "budget": 8,
+            "slots": 1,
+            "slot_size": 8205
           }
         }
       }
@@ -114,16 +142,24 @@
         ]
       },
       {
-        "in": "TCP",
+        "in": "eth_tcp1",
+        "out": [
+          "decode0"
+        ]
+      },
+      {
+        "in": "eth_tcp2",
+        "out": [
+          "decode0"
+        ]
+      },
+      {
+        "in": "eth_udp0",
         "out": [
           "decode0"
         ]
       }
     ]
-  },
-  "usb": {
-    "msc": 0,
-    "cdc_log": 0
   },
   "log_debug_mode": 0
 }

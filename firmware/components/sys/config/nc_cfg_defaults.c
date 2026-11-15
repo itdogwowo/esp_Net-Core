@@ -83,6 +83,7 @@ void nc_cfg_rx_default(nc_link_kind_t kind, nc_link_rx_t *rx)
         break;
     case NC_LINK_WS:
     case NC_LINK_UDP:
+    case NC_LINK_HTTP:
     default:
         *rx = (nc_link_rx_t){ .region = 4096, .chunk = 1024, .slot_size = 1024,
                               .slots = 4, .budget = 8 };

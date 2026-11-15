@@ -381,6 +381,7 @@ const char *nc_cfg_kind_name(nc_link_kind_t kind)
     case NC_LINK_TCP:     return "tcp";
     case NC_LINK_WS:      return "ws";
     case NC_LINK_UDP:     return "udp";
+    case NC_LINK_HTTP:    return "http";
     case NC_LINK_USBJTAG: return "usb_jtag";
     default:              return "?";
     }

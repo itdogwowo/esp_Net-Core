@@ -49,6 +49,63 @@
         "name": "UART",
         "kind": "uart",
         "enable": 1
+      },
+      {
+        "kind": "wifi_tcp",
+        "index": 0,
+        "port": 80,
+        "enable": 1
+      },
+      {
+        "kind": "wifi_tcp",
+        "index": 1,
+        "port": 6000,
+        "enable": 1,
+        "mem": "auto",
+        "cfg": {
+          "port": 6000,
+          "rx": {
+            "region": 16410,
+            "chunk": 8205,
+            "budget": 8,
+            "slots": 2,
+            "slot_size": 8205
+          }
+        }
+      },
+      {
+        "kind": "wifi_tcp",
+        "index": 2,
+        "port": 8080,
+        "enable": 1,
+        "mem": "auto",
+        "cfg": {
+          "port": 8080,
+          "rx": {
+            "region": 16384,
+            "chunk": 8192,
+            "budget": 4,
+            "slots": 2,
+            "slot_size": 8192
+          }
+        }
+      },
+      {
+        "kind": "wifi_udp",
+        "index": 0,
+        "port": 6001,
+        "enable": 1,
+        "mem": "auto",
+        "cfg": {
+          "port": 6001,
+          "rx": {
+            "region": 8205,
+            "chunk": 8205,
+            "budget": 8,
+            "slots": 1,
+            "slot_size": 8205
+          }
+        }
       }
     ],
     "routes": [
@@ -72,6 +129,24 @@
         "in": "UART",
         "out": [
           "decode1"
+        ]
+      },
+      {
+        "in": "wifi_tcp1",
+        "out": [
+          "decode0"
+        ]
+      },
+      {
+        "in": "wifi_tcp2",
+        "out": [
+          "decode0"
+        ]
+      },
+      {
+        "in": "wifi_udp0",
+        "out": [
+          "decode0"
         ]
       }
     ]

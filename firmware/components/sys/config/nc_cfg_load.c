@@ -147,6 +147,7 @@ static bool kind_parse(const char *s, nc_link_kind_t *out)
     static const char *const names[NC_LINK_KIND_MAX] = {
         [NC_LINK_CDC] = "cdc", [NC_LINK_UART] = "uart", [NC_LINK_TCP] = "tcp",
         [NC_LINK_WS] = "ws",   [NC_LINK_UDP] = "udp",
+        [NC_LINK_HTTP] = "http",
         [NC_LINK_USBJTAG] = "usb_jtag",
     };
     if (s == NULL || out == NULL) {
@@ -159,6 +160,30 @@ static bool kind_parse(const char *s, nc_link_kind_t *out)
         }
     }
     return false;
+}
+
+
+// 複合 kind：eth_tcp / wifi_tcp / eth_udp / wifi_udp / eth_ws / wifi_ws
+// 回傳 base kind，並把 iface 寫入 out_iface；composite=false 表示舊式 kind。
+static bool kind_parse_transport(const char *s, nc_link_kind_t *out,
+                                 char *out_iface, size_t iface_cap, bool *composite)
+{
+    if (s == NULL || out == NULL) return false;
+    const char *base = s;
+    const char *iface = "any";
+    bool comp = false;
+    if (strncmp(s, "eth_", 4) == 0) {
+        base = s + 4; iface = "eth"; comp = true;
+    } else if (strncmp(s, "wifi_", 5) == 0) {
+        base = s + 5; iface = "wifi"; comp = true;
+    }
+    if (!kind_parse(base, out)) return false;
+    if (comp) {
+        if (iface_cap == 0) return false;
+        snprintf(out_iface, iface_cap, "%s", iface);
+    }
+    if (composite) *composite = comp;
+    return true;
 }
 
 // 讀一個 rx 數值欄位：只有「config 寫了而且合法」才回 true（給 rx_mask 用）。
@@ -208,32 +233,111 @@ static void parse_links(const cJSON *root, nc_system_cfg_t *out, nc_cfg_stat_t *
         memset(&l, 0, sizeof(l));
 
         const cJSON *nm = item(it, "name");
-        if (!cJSON_IsString(nm) || nm->valuestring == NULL || nm->valuestring[0] == '\0' ||
-            strlen(nm->valuestring) >= NC_CFG_NAME_MAX) {
-            st->invalid++;      // 冇名字的線沒有意義
+        const cJSON *kd = item(it, "kind");
+        const char *kind_s = (kd != NULL && cJSON_IsString(kd) && kd->valuestring != NULL)
+                             ? kd->valuestring : NULL;
+        char iface_from_kind[8] = "any";
+        bool composite = false;
+        if (kind_s != NULL) {
+            if (!kind_parse_transport(kind_s, &l.kind, iface_from_kind,
+                                      sizeof(iface_from_kind), &composite)) {
+                st->invalid++;
+                continue;
+            }
+        } else if (cJSON_IsString(nm) && nm->valuestring != NULL) {
+            // 舊式：冇 kind，由 name 推（CDC / UART）
+            nc_link_kind_t k;
+            if (!kind_parse(nm->valuestring, &k)) {
+                st->invalid++;
+                continue;
+            }
+            l.kind = k;
+            st->defaulted++;
+        } else {
+            st->invalid++;      // 冇 name 又冇 kind
             continue;
         }
-        snprintf(l.name, sizeof(l.name), "%s", nm->valuestring);
 
-        const cJSON *kd = item(it, "kind");
-        if (kd != NULL && cJSON_IsString(kd) && kd->valuestring != NULL) {
-            if (!kind_parse(kd->valuestring, &l.kind)) {
+        const cJSON *idx = item(it, "index");
+        l.index = 0;
+        if (idx != NULL) {
+            if (!cJSON_IsNumber(idx) || idx->valuedouble < 0 || idx->valuedouble > 255) {
                 st->invalid++;
                 continue;
             }
+            l.index = (uint8_t)idx->valueint;
         } else {
-            nc_link_kind_t k;
-            if (kind_parse(l.name, &k)) {
-                l.kind = k;     // 冇寫 kind → 由名字推（CDC → cdc）
-                st->defaulted++;
-            } else {
-                st->invalid++;
-                continue;
-            }
+            st->defaulted++;
         }
 
+        if (cJSON_IsString(nm) && nm->valuestring != NULL && nm->valuestring[0] != '\0' &&
+            strlen(nm->valuestring) < NC_CFG_NAME_MAX) {
+            snprintf(l.name, sizeof(l.name), "%s", nm->valuestring);
+        } else if (kind_s != NULL) {
+            // 冇 name → 由 kind + index 生成（eth_tcp0 / wifi_tcp1 / uart0）
+            const int n = snprintf(l.name, sizeof(l.name), "%s%u", kind_s,
+                                   (unsigned)l.index);
+            if (n <= 0 || (size_t)n >= sizeof(l.name)) {
+                st->invalid++;
+                continue;
+            }
+            st->defaulted++;
+        } else {
+            st->invalid++;
+            continue;
+        }
         l.enable = get_bool(it, "enable", true, st);
-        l.port = (uint16_t)get_int(it, "port", 0, 0, 65535, st);
+        l.port = (uint16_t)get_int(it, "port",
+                (uint16_t)get_int(item(it, "cfg"), "port", 0, 0, 65535, st),
+                0, 65535, st);
+
+        const cJSON *ifc = item(it, "iface");
+        l.managed = composite || (ifc != NULL) || (item(it, "service") != NULL);
+        if (composite) {
+            snprintf(l.iface, sizeof(l.iface), "%s", iface_from_kind);
+            if (ifc != NULL) {
+                // kind 已經帶 interface；再寫 iface 不可以矛盾
+                if (!cJSON_IsString(ifc) || ifc->valuestring == NULL ||
+                    strcasecmp(ifc->valuestring, iface_from_kind) != 0) {
+                    st->invalid++;
+                    continue;
+                }
+            }
+        } else if (ifc == NULL) {
+            snprintf(l.iface, sizeof(l.iface), "any");
+            st->defaulted++;
+        } else if (!cJSON_IsString(ifc) || ifc->valuestring == NULL ||
+                   strlen(ifc->valuestring) >= sizeof(l.iface)) {
+            st->invalid++;
+            continue;
+        } else {
+            snprintf(l.iface, sizeof(l.iface), "%s", ifc->valuestring);
+        }
+
+        const cJSON *mem = item(it, "mem");
+        if (mem == NULL) {
+            snprintf(l.mem, sizeof(l.mem), "auto");
+            st->defaulted++;
+        } else if (!cJSON_IsString(mem) || mem->valuestring == NULL ||
+                   strlen(mem->valuestring) >= sizeof(l.mem)) {
+            st->invalid++;
+            continue;
+        } else {
+            snprintf(l.mem, sizeof(l.mem), "%s", mem->valuestring);
+        }
+
+        const cJSON *svc = item(it, "service");
+        if (svc == NULL) {
+            snprintf(l.service, sizeof(l.service), "%s",
+                     (l.kind == NC_LINK_HTTP) ? "web" : "nc4");
+            st->defaulted++;
+        } else if (!cJSON_IsString(svc) || svc->valuestring == NULL ||
+                   strlen(svc->valuestring) >= sizeof(l.service)) {
+            st->invalid++;
+            continue;
+        } else {
+            snprintf(l.service, sizeof(l.service), "%s", svc->valuestring);
+        }
 
         nc_cfg_rx_default(l.kind, &l.rx);
         const cJSON *rx = item(item(it, "cfg"), "rx");

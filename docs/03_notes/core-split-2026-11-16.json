@@ -1,0 +1,15 @@
+{
+  "schema": 1,
+  "date": "2026-11-16",
+  "board": "ESP32-S3-N16R8",
+  "interface": "wifi",
+  "method": "two TCP ports 6000/6002, simultaneous net_bench --count 500 --burst, 3 runs each",
+  "configs": {
+    "same_core": {"TCP": "decode0", "TCP2": "decode0",
+      "aggregate_rps": [583.2, 585.6, 561.0], "mean": 576.6},
+    "split_core": {"TCP": "decode0", "TCP2": "decode1",
+      "aggregate_rps": [564.1, 564.8, 568.7], "mean": 565.9}
+  },
+  "single_port_reference_rps": "~950-1000",
+  "conclusion": "same interface -> same decode core; split gave no gain (-1.8%)"
+}

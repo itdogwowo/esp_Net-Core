@@ -22,7 +22,7 @@ esp_err_t nc4_line_net_declare(nc4_decoder_t *decoder, int core);
 // 開 socket：TCP 6000、UDP 6001、WS 8080。可重複呼叫（已開就 no-op）。
 esp_err_t nc4_line_net_start(void);
 
-// WS 的 httpd（未開 WS 時 NULL）；給 /config.json、/ota、/ 共用同一個 server。
+// WS 的 httpd（未開 WS 時 NULL）；舊 fallback 用。
 httpd_handle_t nc4_line_net_httpd(void);
 
 // 狀態：{"tcp":{"fd":..,"port":..},"udp":...,"ws":...}

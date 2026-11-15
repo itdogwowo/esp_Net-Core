@@ -27,7 +27,7 @@ extern "C" {
 #define NC_CFG_NAME_MAX         16     // 通道名（CDC / UART / TCP …）
 #define NC_CFG_TASK_NAME_MAX    24
 #define NC_CFG_CID_MAX          8      // "F5F9" + 餘裕
-#define NC_CFG_REGION_MAX       8300   // = NC4_MAX_FRAME（8205）向上取整；不直接 include nc4
+#define NC_CFG_REGION_MAX       65535  // network line 可能要收多幀；slot/region 用 uint16
 // USB（TinyUSB CDC 與 USB-Serial-JTAG 共用）的 parser 緩衝貼身值。
 //   最大 FILE_CHUNK 4,096 ＋ NC4 header 9 ＋ chunk header 6 ＋ CRC 4 = 4,115 B
 //   向上 32 對齊 → 4,128（留 13 B 餘裕）
@@ -45,6 +45,7 @@ typedef enum {
     NC_LINK_TCP,
     NC_LINK_WS,
     NC_LINK_UDP,
+    NC_LINK_HTTP,   // 這條線交給 web service（httpd），不進 NC4 parser
     // USB-Serial-JTAG 的資料通道（C3／C6／H2：沒有 OTG，但同一顆 peripheral
     // 本身就是一個 CDC-ACM，RX/TX 都是硬件 FIFO）。kind 名 = "usb_jtag"。
     NC_LINK_USBJTAG,
@@ -69,9 +70,14 @@ typedef struct {
 
 typedef struct {
     char           name[NC_CFG_NAME_MAX];
+    uint8_t        index;       // 同類線編號；name 省略時用來生成 eth_tcp0
     nc_link_kind_t kind;
     bool           enable;
-    uint16_t       port;        // tcp / ws / udp
+    uint16_t       port;        // tcp / ws / udp / http
+    char           iface[8];    // any / eth / wifi（空的 = any）
+    char           service[8];  // nc4 / web（空的 = kind 預設）
+    char           mem[6];      // auto / psram / sram（空的 = auto）
+    bool           managed;     // config 有寫 iface/service → 交給 nc_net_lines
     uint8_t        rx_mask;     // config 實際寫了哪些 rx 欄位
     nc_link_rx_t   rx;
 } nc_link_cfg_t;

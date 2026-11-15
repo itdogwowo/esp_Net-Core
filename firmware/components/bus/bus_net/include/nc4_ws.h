@@ -23,7 +23,7 @@
 extern "C" {
 #endif
 
-// 底層的 httpd（給 /config.json 之類的端點共用同一個 server）
+// 底層的 httpd（舊 fallback 的 WS server）
 httpd_handle_t nc4_ws_httpd(void);
 
 // 啟動 WS server（uri = /nc4）。decoder 由呼叫端提供，parser 在這裡建。

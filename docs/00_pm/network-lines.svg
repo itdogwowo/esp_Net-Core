@@ -1,0 +1,151 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1800" height="1260" viewBox="0 0 1800 1260">
+<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#5F6B76"/></marker></defs>
+<rect width="1800" height="1260" fill="#F7F5EF"/>
+<text x="50" y="62" font-family="'Noto Sans TC','PingFang TC','Microsoft JhengHei','Segoe UI',sans-serif" font-size="32" fill="#17191C" font-weight="700" text-anchor="start" letter-spacing="0">esp_Net-Core — 網絡線路層</text>
+<text x="50" y="90" font-family="'Noto Sans TC','PingFang TC','Microsoft JhengHei','Segoe UI',sans-serif" font-size="15" fill="#3D4247" font-weight="400" text-anchor="start" letter-spacing="0">Interface → Line（iface + transport + port）→ Service（nc4 / web）</text>
+<text x="1750" y="54" font-family="'Noto Sans TC','PingFang TC','Microsoft JhengHei','Segoe UI',sans-serif" font-size="12" fill="#9AA0A6" font-weight="400" text-anchor="end" letter-spacing="0">2026-11-15 · P4-ETH + S3-WiFi</text>
+<line x1="50" y1="108" x2="1750" y2="108" stroke="#D8D3C8" stroke-width="1.2" stroke-linecap="round"/>
+<rect x="50" y="130" width="1700" height="122" rx="8" fill="#FFFFFF" fill-opacity="0.7" stroke="#D8D3C8" stroke-width="1"/>
+<text x="70" y="156" font-family="'SF Mono','Cascadia Mono','Consolas',monospace" font-size="11" fill="#9AA0A6" font-weight="400" text-anchor="start" letter-spacing="1.6">01  CONFIG</text>
+<text x="70" y="182" font-family="'Noto Sans TC','PingFang TC','Microsoft JhengHei','Segoe UI',sans-serif" font-size="16" fill="#17191C" font-weight="600" text-anchor="start" letter-spacing="0">line 的 iface／kind／port／service／rx 全部由 config 決定</text>
+<rect x="70" y="196" width="510" height="40" rx="5" fill="#FBF7EE" fill-opacity="1" stroke="#E4D8C2" stroke-width="1"/>
+<text x="84" y="221" font-family="'SF Mono','Cascadia Mono','Consolas',monospace" font-size="13" fill="#8A5A20" font-weight="400" text-anchor="start" letter-spacing="0">system.json  nc4.links[] · nc4.routes[]</text>
+<rect x="596" y="196" width="410" height="40" rx="5" fill="#F2F7F3" fill-opacity="1" stroke="#D6E2D8" stroke-width="1"/>
+<text x="610" y="221" font-family="'SF Mono','Cascadia Mono','Consolas',monospace" font-size="13" fill="#2E6B4F" font-weight="400" text-anchor="start" letter-spacing="0">network.json  lan / wifi / IP</text>
+<rect x="1022" y="196" width="708" height="40" rx="5" fill="#F3F6F9" fill-opacity="1" stroke="#D5DFE8" stroke-width="1"/>
+<text x="1036" y="221" font-family="'Noto Sans TC','PingFang TC','Microsoft JhengHei','Segoe UI',sans-serif" font-size="13" fill="#1F5F8B" font-weight="400" text-anchor="start" letter-spacing="0">managed line：iface 或 service 有寫 → 由 nc_net_lines 接管</text>
+<rect x="50" y="276" width="1700" height="132" rx="8" fill="#FFFFFF" fill-opacity="0.7" stroke="#D8D3C8" stroke-width="1"/>
+<text x="70" y="302" font-family="'SF Mono','Cascadia Mono','Consolas',monospace" font-size="11" fill="#9AA0A6" font-weight="400" text-anchor="start" letter-spacing="1.6">02  INTERFACE</text>
+<text x="70" y="328" font-family="'Noto Sans TC','PingFang TC','Microsoft JhengHei','Segoe UI',sans-serif" font-size="16" fill="#17191C" font-weight="600" text-anchor="start" letter-spacing="0">System 提供 netif；line 只認 interface 名</text>
+<rect x="70" y="344" width="800" height="48" rx="5" fill="#F2F7F3" fill-opacity="1" stroke="#D6E2D8" stroke-width="1"/>
+<text x="86" y="364" font-family="'Noto Sans TC','PingFang TC','Microsoft JhengHei','Segoe UI',sans-serif" font-size="15" fill="#2E6B4F" font-weight="700" text-anchor="start" letter-spacing="0">ETH</text>
+<text x="140" y="364" font-family="'Noto Sans TC','PingFang TC','Microsoft JhengHei','Segoe UI',sans-serif" font-size="13" fill="#3D4247" font-weight="400" text-anchor="start" letter-spacing="0">esp_eth + IP101 · P4-ETH</text>
+<text x="86" y="383" font-family="'SF Mono','Cascadia Mono','Consolas',monospace" font-size="12" fill="#6E747B" font-weight="400" text-anchor="start" letter-spacing="0">10.10.1.50 / 16 · 32 MB PSRAM</text>
+<rect x="890" y="344" width="840" height="48" rx="5" fill="#F2F7F3" fill-opacity="1" stroke="#D6E2D8" stroke-width="1"/>
+<text x="906" y="364" font-family="'Noto Sans TC','PingFang TC','Microsoft JhengHei','Segoe UI',sans-serif" font-size="15" fill="#2E6B4F" font-weight="700" text-anchor="start" letter-spacing="0">WIFI</text>
+<text x="976" y="364" font-family="'Noto Sans TC','PingFang TC','Microsoft JhengHei','Segoe UI',sans-serif" font-size="13" fill="#3D4247" font-weight="400" text-anchor="start" letter-spacing="0">esp_wifi · S3-Matrix（AP mode）</text>
+<text x="906" y="383" font-family="'Noto Sans TC','PingFang TC','Microsoft JhengHei','Segoe UI',sans-serif" font-size="12" fill="#6E747B" font-weight="400" text-anchor="start" letter-spacing="0">192.168.4.1 · 4 MB flash · 2 MB embedded PSRAM（停用）</text>
+<text x="50" y="444" font-family="'SF Mono','Cascadia Mono','Consolas',monospace" font-size="11" fill="#9AA0A6" font-weight="400" text-anchor="start" letter-spacing="1.6">03  LINE</text>
+<text x="50" y="470" font-family="'Noto Sans TC','PingFang TC','Microsoft JhengHei','Segoe UI',sans-serif" font-size="16" fill="#17191C" font-weight="600" text-anchor="start" letter-spacing="0">一條 config line = 一個 listener／task／buffer；service 決定誰消費</text>
+<rect x="50" y="486" width="410" height="130" rx="8" fill="#FFFFFF" fill-opacity="1" stroke="#1F5F8B" stroke-width="1.3"/>
+<rect x="50" y="486" width="5" height="130" rx="0" fill="#1F5F8B" fill-opacity="1" stroke="#1F5F8B" stroke-width="1"/>
+<text x="68" y="516" font-family="'Noto Sans TC','PingFang TC','Microsoft JhengHei','Segoe UI',sans-serif" font-size="18" fill="#1F5F8B" font-weight="700" text-anchor="start" letter-spacing="0">TCP</text>
+<text x="442" y="516" font-family="'SF Mono','Cascadia Mono','Consolas',monospace" font-size="14" fill="#6E747B" font-weight="400" text-anchor="end" letter-spacing="0">:6000</text>
+<rect x="68" y="528" width="78" height="22" rx="11.0" fill="#1F5F8B" fill-opacity="0.1" stroke="#1F5F8B" stroke-width="0"/>
+<text x="107.0" y="542.96" font-family="'Noto Sans TC','PingFang TC','Microsoft JhengHei','Segoe UI',sans-serif" font-size="11" fill="#1F5F8B" font-weight="600" text-anchor="middle" letter-spacing="0">nc4</text>
+<text x="156" y="544" font-family="'Noto Sans TC','PingFang TC','Microsoft JhengHei','Segoe UI',sans-serif" font-size="12" fill="#3D4247" font-weight="400" text-anchor="start" letter-spacing="0">socket · stream</text>
+<text x="68" y="572" font-family="'SF Mono','Cascadia Mono','Consolas',monospace" font-size="11.5" fill="#6E747B" font-weight="400" text-anchor="start" letter-spacing="0">line slots → nc4_bus</text>
+<text x="68" y="594" font-family="'Noto Sans TC','PingFang TC','Microsoft JhengHei','Segoe UI',sans-serif" font-size="11" fill="#9AA0A6" font-weight="400" text-anchor="start" letter-spacing="0">core = routes</text>
+<rect x="480" y="486" width="410" height="130" rx="8" fill="#FFFFFF" fill-opacity="1" stroke="#1F5F8B" stroke-width="1.3"/>
+<rect x="480" y="486" width="5" height="130" rx="0" fill="#1F5F8B" fill-opacity="1" stroke="#1F5F8B" stroke-width="1"/>
+<text x="498" y="516" font-family="'Noto Sans TC','PingFang TC','Microsoft JhengHei','Segoe UI',sans-serif" font-size="18" fill="#1F5F8B" font-weight="700" text-anchor="start" letter-spacing="0">UDP</text>
+<text x="872" y="516" font-family="'SF Mono','Cascadia Mono','Consolas',monospace" font-size="14" fill="#6E747B" font-weight="400" text-anchor="end" letter-spacing="0">:6001</text>
+<rect x="498" y="528" width="78" height="22" rx="11.0" fill="#1F5F8B" fill-opacity="0.1" stroke="#1F5F8B" stroke-width="0"/>
+<text x="537.0" y="542.96" font-family="'Noto Sans TC','PingFang TC','Microsoft JhengHei','Segoe UI',sans-serif" font-size="11" fill="#1F5F8B" font-weight="600" text-anchor="middle" letter-spacing="0">nc4</text>
+<text x="586" y="544" font-family="'Noto Sans TC','PingFang TC','Microsoft JhengHei','Segoe UI',sans-serif" font-size="12" fill="#3D4247" font-weight="400" text-anchor="start" letter-spacing="0">socket · datagram</text>
+<text x="498" y="572" font-family="'SF Mono','Cascadia Mono','Consolas',monospace" font-size="11.5" fill="#6E747B" font-weight="400" text-anchor="start" letter-spacing="0">line slots → nc4_bus</text>
+<text x="498" y="594" font-family="'Noto Sans TC','PingFang TC','Microsoft JhengHei','Segoe UI',sans-serif" font-size="11" fill="#9AA0A6" font-weight="400" text-anchor="start" letter-spacing="0">core = routes</text>
+<rect x="910" y="486" width="410" height="130" rx="8" fill="#FFFFFF" fill-opacity="1" stroke="#1F5F8B" stroke-width="1.3"/>
+<rect x="910" y="486" width="5" height="130" rx="0" fill="#1F5F8B" fill-opacity="1" stroke="#1F5F8B" stroke-width="1"/>
+<text x="928" y="516" font-family="'Noto Sans TC','PingFang TC','Microsoft JhengHei','Segoe UI',sans-serif" font-size="18" fill="#1F5F8B" font-weight="700" text-anchor="start" letter-spacing="0">WS</text>
+<text x="1302" y="516" font-family="'SF Mono','Cascadia Mono','Consolas',monospace" font-size="14" fill="#6E747B" font-weight="400" text-anchor="end" letter-spacing="0">:8080</text>
+<rect x="928" y="528" width="78" height="22" rx="11.0" fill="#1F5F8B" fill-opacity="0.1" stroke="#1F5F8B" stroke-width="0"/>
+<text x="967.0" y="542.96" font-family="'Noto Sans TC','PingFang TC','Microsoft JhengHei','Segoe UI',sans-serif" font-size="11" fill="#1F5F8B" font-weight="600" text-anchor="middle" letter-spacing="0">nc4</text>
+<text x="1016" y="544" font-family="'Noto Sans TC','PingFang TC','Microsoft JhengHei','Segoe UI',sans-serif" font-size="12" fill="#3D4247" font-weight="400" text-anchor="start" letter-spacing="0">自寫 handshake／frame</text>
+<text x="928" y="572" font-family="'SF Mono','Cascadia Mono','Consolas',monospace" font-size="11.5" fill="#6E747B" font-weight="400" text-anchor="start" letter-spacing="0">line slots → nc4_bus</text>
+<text x="928" y="594" font-family="'Noto Sans TC','PingFang TC','Microsoft JhengHei','Segoe UI',sans-serif" font-size="11" fill="#9AA0A6" font-weight="400" text-anchor="start" letter-spacing="0">不經 httpd</text>
+<rect x="1198" y="528" width="104" height="22" rx="11.0" fill="#2E7D4F" fill-opacity="0.1" stroke="#2E7D4F" stroke-width="0"/>
+<text x="1250.0" y="542.6" font-family="'Noto Sans TC','PingFang TC','Microsoft JhengHei','Segoe UI',sans-serif" font-size="10" fill="#2E7D4F" font-weight="600" text-anchor="middle" letter-spacing="0">NO HTTPD</text>
+<rect x="1340" y="486" width="410" height="130" rx="8" fill="#FFFFFF" fill-opacity="1" stroke="#A04A3A" stroke-width="1.3"/>
+<rect x="1340" y="486" width="5" height="130" rx="0" fill="#A04A3A" fill-opacity="1" stroke="#A04A3A" stroke-width="1"/>
+<text x="1358" y="516" font-family="'Noto Sans TC','PingFang TC','Microsoft JhengHei','Segoe UI',sans-serif" font-size="18" fill="#A04A3A" font-weight="700" text-anchor="start" letter-spacing="0">HTTP</text>
+<text x="1732" y="516" font-family="'SF Mono','Cascadia Mono','Consolas',monospace" font-size="14" fill="#6E747B" font-weight="400" text-anchor="end" letter-spacing="0">:80</text>
+<rect x="1358" y="528" width="78" height="22" rx="11.0" fill="#A04A3A" fill-opacity="0.1" stroke="#A04A3A" stroke-width="0"/>
+<text x="1397.0" y="542.96" font-family="'Noto Sans TC','PingFang TC','Microsoft JhengHei','Segoe UI',sans-serif" font-size="11" fill="#A04A3A" font-weight="600" text-anchor="middle" letter-spacing="0">web</text>
+<text x="1446" y="544" font-family="'Noto Sans TC','PingFang TC','Microsoft JhengHei','Segoe UI',sans-serif" font-size="12" fill="#3D4247" font-weight="400" text-anchor="start" letter-spacing="0">httpd</text>
+<text x="1358" y="572" font-family="'SF Mono','Cascadia Mono','Consolas',monospace" font-size="11.5" fill="#6E747B" font-weight="400" text-anchor="start" letter-spacing="0">request buffer</text>
+<text x="1358" y="594" font-family="'Noto Sans TC','PingFang TC','Microsoft JhengHei','Segoe UI',sans-serif" font-size="11" fill="#9AA0A6" font-weight="400" text-anchor="start" letter-spacing="0">services: /, /config, /ota</text>
+<rect x="1628" y="528" width="104" height="22" rx="11.0" fill="#A04A3A" fill-opacity="0.1" stroke="#A04A3A" stroke-width="0"/>
+<text x="1680.0" y="542.6" font-family="'Noto Sans TC','PingFang TC','Microsoft JhengHei','Segoe UI',sans-serif" font-size="10" fill="#A04A3A" font-weight="600" text-anchor="middle" letter-spacing="0">WEB ONLY</text>
+<rect x="50" y="658" width="830" height="258" rx="8" fill="#FFFFFF" fill-opacity="0.7" stroke="#D8D3C8" stroke-width="1"/>
+<text x="70" y="684" font-family="'SF Mono','Cascadia Mono','Consolas',monospace" font-size="11" fill="#9AA0A6" font-weight="400" text-anchor="start" letter-spacing="1.6">04A  NC4 PATH</text>
+<text x="70" y="710" font-family="'Noto Sans TC','PingFang TC','Microsoft JhengHei','Segoe UI',sans-serif" font-size="16" fill="#17191C" font-weight="600" text-anchor="start" letter-spacing="0">bytes → parser → decoder → action</text>
+<rect x="70" y="730" width="142" height="76" rx="6" fill="#FFFFFF" fill-opacity="1" stroke="#1F5F8B" stroke-width="1"/>
+<text x="82" y="758" font-family="'Noto Sans TC','PingFang TC','Microsoft JhengHei','Segoe UI',sans-serif" font-size="13" fill="#1F5F8B" font-weight="700" text-anchor="start" letter-spacing="0">socket recv</text>
+<text x="82" y="778" font-family="'Noto Sans TC','PingFang TC','Microsoft JhengHei','Segoe UI',sans-serif" font-size="10.5" fill="#6E747B" font-weight="400" text-anchor="start" letter-spacing="0">line task 直接入 slot</text>
+<line x1="215" y1="768.0" x2="225" y2="768.0" stroke="#5F6B76" stroke-width="1.2" marker-end="url(#arrow)" stroke-linecap="round"/>
+<rect x="230" y="730" width="142" height="76" rx="6" fill="#FFFFFF" fill-opacity="1" stroke="#6B4C8A" stroke-width="1"/>
+<text x="242" y="758" font-family="'Noto Sans TC','PingFang TC','Microsoft JhengHei','Segoe UI',sans-serif" font-size="13" fill="#6B4C8A" font-weight="700" text-anchor="start" letter-spacing="0">line slots</text>
+<text x="242" y="778" font-family="'Noto Sans TC','PingFang TC','Microsoft JhengHei','Segoe UI',sans-serif" font-size="10.5" fill="#6E747B" font-weight="400" text-anchor="start" letter-spacing="0">每 line 自己嘅 region</text>
+<line x1="375" y1="768.0" x2="385" y2="768.0" stroke="#5F6B76" stroke-width="1.2" marker-end="url(#arrow)" stroke-linecap="round"/>
+<rect x="390" y="730" width="142" height="76" rx="6" fill="#FFFFFF" fill-opacity="1" stroke="#6B4C8A" stroke-width="1"/>
+<text x="402" y="758" font-family="'Noto Sans TC','PingFang TC','Microsoft JhengHei','Segoe UI',sans-serif" font-size="13" fill="#6B4C8A" font-weight="700" text-anchor="start" letter-spacing="0">nc4_bus</text>
+<text x="402" y="778" font-family="'Noto Sans TC','PingFang TC','Microsoft JhengHei','Segoe UI',sans-serif" font-size="10.5" fill="#6E747B" font-weight="400" text-anchor="start" letter-spacing="0">PUSH</text>
+<line x1="535" y1="768.0" x2="545" y2="768.0" stroke="#5F6B76" stroke-width="1.2" marker-end="url(#arrow)" stroke-linecap="round"/>
+<rect x="550" y="730" width="142" height="76" rx="6" fill="#FFFFFF" fill-opacity="1" stroke="#1F5F8B" stroke-width="1"/>
+<text x="562" y="758" font-family="'Noto Sans TC','PingFang TC','Microsoft JhengHei','Segoe UI',sans-serif" font-size="13" fill="#1F5F8B" font-weight="700" text-anchor="start" letter-spacing="0">decoder 0/1</text>
+<text x="562" y="778" font-family="'Noto Sans TC','PingFang TC','Microsoft JhengHei','Segoe UI',sans-serif" font-size="10.5" fill="#6E747B" font-weight="400" text-anchor="start" letter-spacing="0">routes 指定；handler</text>
+<line x1="695" y1="768.0" x2="705" y2="768.0" stroke="#5F6B76" stroke-width="1.2" marker-end="url(#arrow)" stroke-linecap="round"/>
+<rect x="710" y="730" width="142" height="76" rx="6" fill="#FFFFFF" fill-opacity="1" stroke="#2E7D4F" stroke-width="1"/>
+<text x="722" y="758" font-family="'Noto Sans TC','PingFang TC','Microsoft JhengHei','Segoe UI',sans-serif" font-size="13" fill="#2E7D4F" font-weight="700" text-anchor="start" letter-spacing="0">reply</text>
+<text x="722" y="778" font-family="'Noto Sans TC','PingFang TC','Microsoft JhengHei','Segoe UI',sans-serif" font-size="10.5" fill="#6E747B" font-weight="400" text-anchor="start" letter-spacing="0">同一條 line send</text>
+<text x="70" y="842" font-family="'Noto Sans TC','PingFang TC','Microsoft JhengHei','Segoe UI',sans-serif" font-size="11.5" fill="#6E747B" font-weight="400" text-anchor="start" letter-spacing="0">TCP／UDP／WS 都是這條路；WS framing 在 line task，NC4 解析在 decoder core。</text>
+<text x="70" y="866" font-family="'Noto Sans TC','PingFang TC','Microsoft JhengHei','Segoe UI',sans-serif" font-size="11.5" fill="#6E747B" font-weight="400" text-anchor="start" letter-spacing="0">action 回覆經同一條 line；不經 web service。</text>
+<rect x="900" y="658" width="850" height="258" rx="8" fill="#FFFFFF" fill-opacity="0.7" stroke="#D8D3C8" stroke-width="1"/>
+<text x="920" y="684" font-family="'SF Mono','Cascadia Mono','Consolas',monospace" font-size="11" fill="#9AA0A6" font-weight="400" text-anchor="start" letter-spacing="1.6">04B  WEB PATH</text>
+<text x="920" y="710" font-family="'Noto Sans TC','PingFang TC','Microsoft JhengHei','Segoe UI',sans-serif" font-size="16" fill="#17191C" font-weight="600" text-anchor="start" letter-spacing="0">HTTP :80 → httpd → handler</text>
+<rect x="920" y="730" width="220" height="76" rx="6" fill="#FBF1EE" fill-opacity="1" stroke="#A04A3A" stroke-width="1"/>
+<text x="932" y="758" font-family="'Noto Sans TC','PingFang TC','Microsoft JhengHei','Segoe UI',sans-serif" font-size="13" fill="#A04A3A" font-weight="700" text-anchor="start" letter-spacing="0">httpd task</text>
+<text x="932" y="778" font-family="'SF Mono','Cascadia Mono','Consolas',monospace" font-size="10.5" fill="#6E747B" font-weight="400" text-anchor="start" letter-spacing="0">stack 6,144 · prio 10</text>
+<text x="932" y="794" font-family="'Noto Sans TC','PingFang TC','Microsoft JhengHei','Segoe UI',sans-serif" font-size="10.5" fill="#6E747B" font-weight="400" text-anchor="start" letter-spacing="0">core = line core</text>
+<rect x="1170" y="730" width="240" height="76" rx="6" fill="#FFFFFF" fill-opacity="1" stroke="#A04A3A" stroke-width="1"/>
+<text x="1182" y="758" font-family="'Noto Sans TC','PingFang TC','Microsoft JhengHei','Segoe UI',sans-serif" font-size="13" fill="#A04A3A" font-weight="700" text-anchor="start" letter-spacing="0">HTTP handlers</text>
+<text x="1182" y="778" font-family="'SF Mono','Cascadia Mono','Consolas',monospace" font-size="10.5" fill="#6E747B" font-weight="400" text-anchor="start" letter-spacing="0">/ · /config.json</text>
+<text x="1182" y="794" font-family="'SF Mono','Cascadia Mono','Consolas',monospace" font-size="10.5" fill="#6E747B" font-weight="400" text-anchor="start" letter-spacing="0">/ota · POST .bin</text>
+<rect x="1440" y="730" width="290" height="76" rx="6" fill="#F7F7F2" fill-opacity="1" stroke="#D8D3C8" stroke-width="1"/>
+<text x="1452" y="758" font-family="'Noto Sans TC','PingFang TC','Microsoft JhengHei','Segoe UI',sans-serif" font-size="13" fill="#2E7D4F" font-weight="700" text-anchor="start" letter-spacing="0">NO NC4</text>
+<text x="1452" y="778" font-family="'Noto Sans TC','PingFang TC','Microsoft JhengHei','Segoe UI',sans-serif" font-size="10.5" fill="#6E747B" font-weight="400" text-anchor="start" letter-spacing="0">不經 decoder</text>
+<text x="1452" y="794" font-family="'Noto Sans TC','PingFang TC','Microsoft JhengHei','Segoe UI',sans-serif" font-size="10.5" fill="#6E747B" font-weight="400" text-anchor="start" letter-spacing="0">不佔 line slots</text>
+<line x1="1143" y1="768" x2="1165" y2="768" stroke="#5F6B76" stroke-width="1.2" marker-end="url(#arrow)" stroke-linecap="round"/>
+<line x1="1413" y1="768" x2="1435" y2="768" stroke="#5F6B76" stroke-width="1.2" marker-end="url(#arrow)" stroke-linecap="round"/>
+<text x="920" y="842" font-family="'Noto Sans TC','PingFang TC','Microsoft JhengHei','Segoe UI',sans-serif" font-size="11.5" fill="#6E747B" font-weight="400" text-anchor="start" letter-spacing="0">HTTP 只係 web service；WS 是 NC4 line，兩者唔綁埋。</text>
+<text x="920" y="866" font-family="'Noto Sans TC','PingFang TC','Microsoft JhengHei','Segoe UI',sans-serif" font-size="11.5" fill="#6E747B" font-weight="400" text-anchor="start" letter-spacing="0">HTTP 用 httpd／lwIP request buffer，不是 NC4 buffer。</text>
+<rect x="50" y="942" width="1700" height="150" rx="8" fill="#FFFFFF" fill-opacity="0.7" stroke="#D8D3C8" stroke-width="1"/>
+<text x="70" y="968" font-family="'SF Mono','Cascadia Mono','Consolas',monospace" font-size="11" fill="#9AA0A6" font-weight="400" text-anchor="start" letter-spacing="1.6">05  BOOT ORDER</text>
+<text x="70" y="994" font-family="'Noto Sans TC','PingFang TC','Microsoft JhengHei','Segoe UI',sans-serif" font-size="16" fill="#17191C" font-weight="600" text-anchor="start" letter-spacing="0">B08 先 carve line buffer，之後才開 Wi-Fi；B11 才開 listener／httpd</text>
+<rect x="70" y="1010" width="250" height="58" rx="6" fill="#FFFFFF" fill-opacity="1" stroke="#8A5A20" stroke-width="1"/>
+<text x="82" y="1032" font-family="'SF Mono','Cascadia Mono','Consolas',monospace" font-size="11" fill="#8A5A20" font-weight="700" text-anchor="start" letter-spacing="0">B07</text>
+<text x="118" y="1032" font-family="'Noto Sans TC','PingFang TC','Microsoft JhengHei','Segoe UI',sans-serif" font-size="13" fill="#17191C" font-weight="700" text-anchor="start" letter-spacing="0">declare</text>
+<text x="82" y="1053" font-family="'Noto Sans TC','PingFang TC','Microsoft JhengHei','Segoe UI',sans-serif" font-size="10.5" fill="#6E747B" font-weight="400" text-anchor="start" letter-spacing="0">decoder／資源</text>
+<rect x="338" y="1010" width="250" height="58" rx="6" fill="#FFFFFF" fill-opacity="1" stroke="#6B4C8A" stroke-width="1"/>
+<text x="350" y="1032" font-family="'SF Mono','Cascadia Mono','Consolas',monospace" font-size="11" fill="#6B4C8A" font-weight="700" text-anchor="start" letter-spacing="0">B08</text>
+<text x="386" y="1032" font-family="'Noto Sans TC','PingFang TC','Microsoft JhengHei','Segoe UI',sans-serif" font-size="13" fill="#17191C" font-weight="700" text-anchor="start" letter-spacing="0">commit</text>
+<text x="350" y="1053" font-family="'Noto Sans TC','PingFang TC','Microsoft JhengHei','Segoe UI',sans-serif" font-size="10.5" fill="#6E747B" font-weight="400" text-anchor="start" letter-spacing="0">line buffers → WiFi</text>
+<rect x="606" y="1010" width="250" height="58" rx="6" fill="#FFFFFF" fill-opacity="1" stroke="#1F5F8B" stroke-width="1"/>
+<text x="618" y="1032" font-family="'SF Mono','Cascadia Mono','Consolas',monospace" font-size="11" fill="#1F5F8B" font-weight="700" text-anchor="start" letter-spacing="0">B09</text>
+<text x="654" y="1032" font-family="'Noto Sans TC','PingFang TC','Microsoft JhengHei','Segoe UI',sans-serif" font-size="13" fill="#17191C" font-weight="700" text-anchor="start" letter-spacing="0">start</text>
+<text x="618" y="1053" font-family="'Noto Sans TC','PingFang TC','Microsoft JhengHei','Segoe UI',sans-serif" font-size="10.5" fill="#6E747B" font-weight="400" text-anchor="start" letter-spacing="0">decode loops</text>
+<rect x="874" y="1010" width="250" height="58" rx="6" fill="#FFFFFF" fill-opacity="1" stroke="#2E6B4F" stroke-width="1"/>
+<text x="886" y="1032" font-family="'SF Mono','Cascadia Mono','Consolas',monospace" font-size="11" fill="#2E6B4F" font-weight="700" text-anchor="start" letter-spacing="0">B10</text>
+<text x="922" y="1032" font-family="'Noto Sans TC','PingFang TC','Microsoft JhengHei','Segoe UI',sans-serif" font-size="13" fill="#17191C" font-weight="700" text-anchor="start" letter-spacing="0">usb</text>
+<text x="886" y="1053" font-family="'Noto Sans TC','PingFang TC','Microsoft JhengHei','Segoe UI',sans-serif" font-size="10.5" fill="#6E747B" font-weight="400" text-anchor="start" letter-spacing="0">USB／CDC</text>
+<rect x="1142" y="1010" width="250" height="58" rx="6" fill="#FFFFFF" fill-opacity="1" stroke="#2E7D4F" stroke-width="1"/>
+<text x="1154" y="1032" font-family="'SF Mono','Cascadia Mono','Consolas',monospace" font-size="11" fill="#2E7D4F" font-weight="700" text-anchor="start" letter-spacing="0">B11</text>
+<text x="1190" y="1032" font-family="'Noto Sans TC','PingFang TC','Microsoft JhengHei','Segoe UI',sans-serif" font-size="13" fill="#17191C" font-weight="700" text-anchor="start" letter-spacing="0">channels</text>
+<text x="1154" y="1053" font-family="'Noto Sans TC','PingFang TC','Microsoft JhengHei','Segoe UI',sans-serif" font-size="10.5" fill="#6E747B" font-weight="400" text-anchor="start" letter-spacing="0">listener／:80 httpd</text>
+<rect x="1410" y="1010" width="250" height="58" rx="6" fill="#FFFFFF" fill-opacity="1" stroke="#8A5A20" stroke-width="1"/>
+<text x="1422" y="1032" font-family="'SF Mono','Cascadia Mono','Consolas',monospace" font-size="11" fill="#8A5A20" font-weight="700" text-anchor="start" letter-spacing="0">B12</text>
+<text x="1458" y="1032" font-family="'Noto Sans TC','PingFang TC','Microsoft JhengHei','Segoe UI',sans-serif" font-size="13" fill="#17191C" font-weight="700" text-anchor="start" letter-spacing="0">account</text>
+<text x="1422" y="1053" font-family="'Noto Sans TC','PingFang TC','Microsoft JhengHei','Segoe UI',sans-serif" font-size="10.5" fill="#6E747B" font-weight="400" text-anchor="start" letter-spacing="0">剩餘記憶體</text>
+<rect x="50" y="1112" width="830" height="116" rx="8" fill="#F2F7F3" fill-opacity="1" stroke="#CFE0D2" stroke-width="1"/>
+<text x="70" y="1140" font-family="'Noto Sans TC','PingFang TC','Microsoft JhengHei','Segoe UI',sans-serif" font-size="14" fill="#2E7D4F" font-weight="700" text-anchor="start" letter-spacing="0">P4-ETH  ·  實機驗證</text>
+<text x="70" y="1164" font-family="'Noto Sans TC','PingFang TC','Microsoft JhengHei','Segoe UI',sans-serif" font-size="11.5" fill="#3D4247" font-weight="400" text-anchor="start" letter-spacing="0">HTTP :80 200 · TCP :6000 STATUS · UDP :6001 STATUS</text>
+<text x="70" y="1186" font-family="'Noto Sans TC','PingFang TC','Microsoft JhengHei','Segoe UI',sans-serif" font-size="11.5" fill="#3D4247" font-weight="400" text-anchor="start" letter-spacing="0">WS :8080 basic PASS（自寫 handshake／frame）</text>
+<text x="70" y="1210" font-family="'SF Mono','Cascadia Mono','Consolas',monospace" font-size="10.5" fill="#9AA0A6" font-weight="400" text-anchor="start" letter-spacing="0">@ 10.10.1.50</text>
+<rect x="900" y="1112" width="850" height="116" rx="8" fill="#FBF7EE" fill-opacity="1" stroke="#E4D8C2" stroke-width="1"/>
+<text x="920" y="1140" font-family="'Noto Sans TC','PingFang TC','Microsoft JhengHei','Segoe UI',sans-serif" font-size="14" fill="#8A5A20" font-weight="700" text-anchor="start" letter-spacing="0">S3-WiFi  ·  AP mode</text>
+<text x="920" y="1164" font-family="'Noto Sans TC','PingFang TC','Microsoft JhengHei','Segoe UI',sans-serif" font-size="11.5" fill="#3D4247" font-weight="400" text-anchor="start" letter-spacing="0">TCP／UDP／WS／HTTP 四條 line 全建立；on-device selftest 四項 PASS</text>
+<text x="920" y="1186" font-family="'Noto Sans TC','PingFang TC','Microsoft JhengHei','Segoe UI',sans-serif" font-size="11.5" fill="#3D4247" font-weight="400" text-anchor="start" letter-spacing="0">@ 192.168.4.1 · 4 MB flash · 2 MB embedded PSRAM（未啟用）</text>
+<text x="920" y="1210" font-family="'Noto Sans TC','PingFang TC','Microsoft JhengHei','Segoe UI',sans-serif" font-size="11" fill="#6E747B" font-weight="400" text-anchor="start" letter-spacing="0">限制：單 session · INADDR_ANY 單 interface · buffer 未全入 plan</text>
+<text x="1750" y="1242" font-family="'Noto Sans TC','PingFang TC','Microsoft JhengHei','Segoe UI',sans-serif" font-size="10.5" fill="#9AA0A6" font-weight="400" text-anchor="end" letter-spacing="0">config → interface → line → service  ·  WS = line；HTTP = web service</text>
+</svg>

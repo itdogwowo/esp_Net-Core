@@ -1,0 +1,470 @@
+{
+  "schema": 1,
+  "date": "2026-11-15",
+  "boards": {
+    "P4": {
+      "ip": "10.10.1.50",
+      "psram_mb": 32,
+      "flash_mb": 16
+    },
+    "S3": {
+      "ip": "10.10.1.31",
+      "psram_mb": 8,
+      "flash_mb": 16,
+      "wifi": "AX3000",
+      "rssi_dbm": -70
+    }
+  },
+  "common_profile": {
+    "tcp": {
+      "slots": 2,
+      "slot_size": 8205
+    },
+    "udp": {
+      "slots": 1,
+      "slot_size": 8205
+    },
+    "ws": {
+      "slots": 2,
+      "slot_size": 8192
+    },
+    "mem": "auto"
+  },
+  "tests": [
+    {
+      "id": "RR-P4-TCP",
+      "type": "request_reply",
+      "board": "P4",
+      "result": {
+        "rtt_p50_ms": 3.5,
+        "replies_per_s": 6961
+      },
+      "valid": true
+    },
+    {
+      "id": "RR-P4-WS",
+      "type": "request_reply",
+      "board": "P4",
+      "result": {
+        "rtt_p50_ms": 3.6,
+        "replies_per_s": 1027,
+        "note": "after TCP_NODELAY/small-send; old 6.5"
+      },
+      "valid": true
+    },
+    {
+      "id": "RR-S3-TCP",
+      "type": "request_reply",
+      "board": "S3",
+      "result": {
+        "rtt_p50_ms": 7.4,
+        "replies_per_s": 950
+      },
+      "valid": true
+    },
+    {
+      "id": "RR-S3-WS",
+      "type": "request_reply",
+      "board": "S3",
+      "result": {
+        "rtt_p50_ms": 7.4,
+        "replies_per_s": 266,
+        "note": "after optimization; old 14-16"
+      },
+      "valid": true
+    },
+    {
+      "id": "NC4-P4-1K-TCP",
+      "type": "oneway_nc4",
+      "board": "P4",
+      "payload": 1024,
+      "batch": 10,
+      "result": {
+        "mbps": 5.42
+      },
+      "valid": true
+    },
+    {
+      "id": "NC4-P4-2K-TCP",
+      "type": "oneway_nc4",
+      "board": "P4",
+      "payload": 2048,
+      "batch": 10,
+      "result": {
+        "mbps": 5.08
+      },
+      "valid": true
+    },
+    {
+      "id": "NC4-P4-4K-TCP",
+      "type": "oneway_nc4",
+      "board": "P4",
+      "payload": 4096,
+      "batch": 10,
+      "result": {
+        "mbps": 5.61
+      },
+      "valid": true
+    },
+    {
+      "id": "NC4-P4-8K-TCP",
+      "type": "oneway_nc4",
+      "board": "P4",
+      "payload": 8000,
+      "batch": 10,
+      "result": {
+        "mbps": 5.55
+      },
+      "valid": true
+    },
+    {
+      "id": "NC4-P4-1K-WS",
+      "type": "oneway_nc4",
+      "board": "P4",
+      "payload": 1024,
+      "batch": 1,
+      "result": {
+        "mbps": 1.87
+      },
+      "valid": true,
+      "notes": "batch=1, slot8192; unfair vs TCP batch=10; superseded by fair batch test"
+    },
+    {
+      "id": "NC4-P4-2K-WS",
+      "type": "oneway_nc4",
+      "board": "P4",
+      "payload": 2048,
+      "batch": 1,
+      "result": {
+        "mbps": 2.91
+      },
+      "valid": true,
+      "notes": "batch=1, slot8192; unfair vs TCP batch=10; superseded by fair batch test"
+    },
+    {
+      "id": "NC4-P4-4K-WS",
+      "type": "oneway_nc4",
+      "board": "P4",
+      "payload": 4096,
+      "batch": 1,
+      "result": {
+        "mbps": 3.9
+      },
+      "valid": true,
+      "notes": "batch=1, slot8192; unfair vs TCP batch=10; superseded by fair batch test"
+    },
+    {
+      "id": "NC4-P4-8K-WS",
+      "type": "oneway_nc4",
+      "board": "P4",
+      "payload": 8000,
+      "batch": 1,
+      "result": {
+        "mbps": 4.6
+      },
+      "valid": true
+    },
+    {
+      "id": "RAW-P4-UP",
+      "type": "raw_tcp",
+      "board": "P4",
+      "direction": "pc_to_device",
+      "result": {
+        "2K": 8.59,
+        "4K": 8.53,
+        "8K": 8.83,
+        "16K": 8.51
+      },
+      "valid": true,
+      "notes": "source SRAM 4K cap, core1 prio12"
+    },
+    {
+      "id": "RAW-P4-DOWN",
+      "type": "raw_tcp",
+      "board": "P4",
+      "direction": "device_to_pc",
+      "result": {
+        "2K": 8.15,
+        "4K": 8.19,
+        "8K": 8.05,
+        "16K": 7.94
+      },
+      "valid": true,
+      "notes": "source SRAM 4K cap, core1 prio12"
+    },
+    {
+      "id": "RAW-S3-UP",
+      "type": "raw_tcp",
+      "board": "S3",
+      "direction": "pc_to_device",
+      "result": {
+        "2K": 0.57,
+        "4K": 0.71,
+        "8K": 0.63,
+        "16K": 0.69
+      },
+      "valid": true
+    },
+    {
+      "id": "RAW-S3-DOWN",
+      "type": "raw_tcp",
+      "board": "S3",
+      "direction": "device_to_pc",
+      "result": null,
+      "valid": false,
+      "notes": "2K+ timeout"
+    },
+    {
+      "id": "HIST-MPY-P4-RAW",
+      "type": "raw_tcp",
+      "board": "P4",
+      "result": {
+        "mbps": 9.35
+      },
+      "valid": true,
+      "notes": "old MicroPython firmware, not same binary"
+    },
+    {
+      "id": "HIST-MPY-P4-NC4",
+      "type": "oneway_nc4",
+      "board": "P4",
+      "result": {
+        "mbps": 7.37
+      },
+      "valid": true,
+      "notes": "old firmware"
+    },
+    {
+      "id": "BUF-P4-MIN-SRAM",
+      "type": "request_reply",
+      "board": "P4",
+      "result": {
+        "tcp_replies_s": 6969,
+        "ws_replies_s": 1317,
+        "buffer_kb": 49
+      },
+      "valid": true
+    },
+    {
+      "id": "BUF-S3-MIN-PSRAM",
+      "type": "request_reply",
+      "board": "S3",
+      "result": {
+        "tcp_replies_s": 1000,
+        "ws_replies_s": 346,
+        "buffer_kb": 49
+      },
+      "valid": true
+    },
+    {
+      "id": "RAW-P4-SINGLE-RAWONLY",
+      "type": "raw_tcp",
+      "board": "P4",
+      "direction": "both",
+      "result": {
+        "4K_upload": 8.52,
+        "4K_download": 7.83
+      },
+      "valid": true,
+      "notes": "raw-only image"
+    },
+    {
+      "id": "RAW-P4-DUAL-UP",
+      "type": "raw_tcp",
+      "board": "P4",
+      "direction": "pc_to_device",
+      "result": {
+        "runs": [
+          9.572,
+          9.162,
+          8.929
+        ],
+        "avg": 9.221,
+        "max": 9.572
+      },
+      "valid": true,
+      "notes": "2 streams, 8MB, 4K, raw-only"
+    },
+    {
+      "id": "RAW-P4-DUAL-DOWN",
+      "type": "raw_tcp",
+      "board": "P4",
+      "direction": "device_to_pc",
+      "result": {
+        "runs": [
+          9.426,
+          9.634,
+          9.574
+        ],
+        "avg": 9.545,
+        "max": 9.634
+      },
+      "valid": true,
+      "notes": "2 streams, 8MB, 4K, raw-only"
+    },
+    {
+      "id": "RAW-S3-SINGLE",
+      "type": "raw_tcp",
+      "board": "S3",
+      "direction": "both",
+      "result": {
+        "upload_4K": 1.334,
+        "upload_8K": 0.539,
+        "download": "timeout"
+      },
+      "valid": true,
+      "notes": "single 4K outlier; download timeout"
+    },
+    {
+      "id": "RAW-S3-DUAL",
+      "type": "raw_tcp",
+      "board": "S3",
+      "direction": "both",
+      "result": {
+        "upload": [
+          0.441,
+          0.456
+        ],
+        "download": 0
+      },
+      "valid": false,
+      "notes": "download timeout"
+    },
+    {
+      "id": "RAW-P4-DUAL-OLD-11.787",
+      "type": "raw_tcp",
+      "board": "P4",
+      "result": {
+        "mbps": 11.787
+      },
+      "valid": false,
+      "notes": "old unstable measurement; superseded by 9.2-9.6"
+    },
+    {
+      "id": "WS-OPT-P4-RTT",
+      "type": "request_reply",
+      "board": "P4",
+      "result": {
+        "before_ms": 6.5,
+        "after_ms": 3.6,
+        "tcp_ms": 3.54
+      },
+      "valid": true,
+      "notes": "TCP_NODELAY + single send + word unmask"
+    },
+    {
+      "id": "WS-OPT-S3-RTT",
+      "type": "request_reply",
+      "board": "S3",
+      "result": {
+        "before_ms": 15.0,
+        "after_ms": 7.4,
+        "tcp_ms": 7.38
+      },
+      "valid": true,
+      "notes": "same"
+    },
+    {
+      "id": "NC4-FAIR-1K-TCP",
+      "type": "oneway_nc4",
+      "board": "P4",
+      "payload": 1024,
+      "batch": 10,
+      "result": {
+        "runs": [
+          5.286,
+          5.505,
+          5.591
+        ],
+        "median": 5.505
+      },
+      "valid": true,
+      "notes": "WS slot16K test"
+    },
+    {
+      "id": "NC4-FAIR-1K-WS",
+      "type": "oneway_nc4",
+      "board": "P4",
+      "payload": 1024,
+      "batch": 10,
+      "result": {
+        "runs": [
+          5.412,
+          5.399,
+          4.769
+        ],
+        "median": 5.399
+      },
+      "valid": true,
+      "notes": "slot16384; matches TCP"
+    },
+    {
+      "id": "NC4-FAIR-2K-TCP",
+      "type": "oneway_nc4",
+      "board": "P4",
+      "payload": 2048,
+      "batch": 7,
+      "result": {
+        "mbps": 5.534
+      },
+      "valid": true
+    },
+    {
+      "id": "NC4-FAIR-2K-WS",
+      "type": "oneway_nc4",
+      "board": "P4",
+      "payload": 2048,
+      "batch": 7,
+      "result": {
+        "mbps": 5.825
+      },
+      "valid": true,
+      "notes": "slot16384"
+    },
+    {
+      "id": "NC4-FAIR-4K-TCP",
+      "type": "oneway_nc4",
+      "board": "P4",
+      "payload": 4096,
+      "batch": 3,
+      "result": {
+        "mbps": 5.683
+      },
+      "valid": true
+    },
+    {
+      "id": "NC4-FAIR-4K-WS",
+      "type": "oneway_nc4",
+      "board": "P4",
+      "payload": 4096,
+      "batch": 3,
+      "result": {
+        "mbps": 5.705
+      },
+      "valid": true,
+      "notes": "slot16384"
+    },
+    {
+      "id": "NC4-FAIR-8K-TCP",
+      "type": "oneway_nc4",
+      "board": "P4",
+      "payload": 8000,
+      "batch": 1,
+      "result": {
+        "mbps": 5.263
+      },
+      "valid": true
+    },
+    {
+      "id": "NC4-FAIR-8K-WS",
+      "type": "oneway_nc4",
+      "board": "P4",
+      "payload": 8000,
+      "batch": 1,
+      "result": {
+        "mbps": 5.152
+      },
+      "valid": true
+    }
+  ]
+}

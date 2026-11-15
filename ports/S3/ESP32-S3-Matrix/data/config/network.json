@@ -4,6 +4,8 @@
   "wifi": {
     "enable": 0,
     "ssid": "",
-    "ssid_pw": ""
+    "ssid_pw": "",
+    "timeout_s": 60,
+    "mode": "sta"
   }
 }

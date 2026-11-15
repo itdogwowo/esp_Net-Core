@@ -1,4 +1,4 @@
-// 最小網頁（v0）：/ 首頁、/ota 上傳、/config.json 連結。
+// 最小靜態網頁：只提供 /；所有操作走 NC4。
 // 完整 UI 是獨立任務；這頁只做「打開得到／可以上傳」。
 #pragma once
 #include "esp_err.h"

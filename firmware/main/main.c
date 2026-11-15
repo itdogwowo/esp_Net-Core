@@ -90,8 +90,9 @@
 #include "nc4_bus.h"
 #include "nc4_link.h"
 #include "nc4_line_net.h"
-#include "nc4_http.h"
-#include "nc4_ota_http.h"
+#include "nc_net_lines.h"
+#include "nc_net_raw.h"
+
 #include "nc4_web.h"
 #include "nc4_router.h"
 #include "nc_task.h"
@@ -119,7 +120,6 @@
 #include "nc4_udp.h"
 #include "nc_cfg.h"
 #include "cJSON.h"
-#include "nc4_http.h"
 #include "nc_store.h"
 #include "boot.h"
 
@@ -4008,7 +4008,9 @@ static esp_err_t ph_hardware(void)
 #ifdef NC_ENABLE_TESTS
         nc_test_tcp_start();   // 吞吐量測端點（5000–5003）
 #endif
-        xTaskCreatePinnedToCore(tcp_nc4_accept_task, "tcp_nc4", 6144, NULL, 9, NULL, 0);
+        if (!nc_net_lines_enabled()) {
+            xTaskCreatePinnedToCore(tcp_nc4_accept_task, "tcp_nc4", 6144, NULL, 9, NULL, 0);
+        }
     } else if (nerr == ESP_ERR_NOT_SUPPORTED) {
         // 「config 冇開」與「硬體/驅動壞了」要分得清：一個是政策，一個是故障。
         ESP_LOGW(TAG, "ETH 未啟用（want=0）→ 不宣告/不啟動 TCP 通道");
@@ -4130,12 +4132,17 @@ static esp_err_t ph_commit(void)
         ESP_LOGI(TAG, "plan(%s): %s", esp_err_to_name(perr), s_boot_txt);
     }
 
+    // ── 網絡線緩衝先 carve，之後才開 Wi-Fi driver ──
+    // 反過來（Wi-Fi 先）會令 S3 冇 PSRAM 時 line buffers 配不到；
+    // 線路是固定成本，Wi-Fi 是可選項，所以線先。
+    if (nc_net_lines_enabled()) {
+        const esp_err_t lerr = nc_net_lines_declare(decoder_for_core);
+        ESP_LOGW(TAG, "net lines declare：%s", esp_err_to_name(lerr));
+    }
     // ── Wi-Fi：兩道閘（編譯期 CONFIG_NETCORE_WIFI ＋ network.json wifi.enable）──
-    // 放在 plan commit 之後：核心通道先要記憶體，Wi-Fi 係可選項。
-    // 未啟用時 nc_wifi_boot() 只回報狀態，一個 byte 都唔配。
     nc_wifi_boot();
 #if CONFIG_NETCORE_WIFI
-    if (nc_wifi_used() && s_decoder[0] != NULL) {
+    if (!nc_net_lines_enabled() && nc_wifi_used() && s_decoder[0] != NULL) {
         const esp_err_t lerr = nc4_line_net_declare(s_decoder[0], 0);
         ESP_LOGW(TAG, "network line declare：%s", esp_err_to_name(lerr));
     }
@@ -4208,7 +4215,7 @@ static esp_err_t ph_usb(void)
         }
 #endif
         // 沒有 OTG → 不要把 FAT 交給 USB，否則裝置自己與網路都讀不到 /data。
-        ESP_LOGW(TAG, "無 USB OTG → /data 留在 APP，改用 http://<ip>:8080/config.json");
+        ESP_LOGW(TAG, "無 USB OTG → /data 留在 APP；設定請經 NC4 指令（WebSocket /nc4）");
         return ESP_OK;
     }
 
@@ -4258,13 +4265,11 @@ static esp_err_t ph_channels(void)
 {
     const nc_boot_ctx_t *b = nc_boot_ctx();     // USB 那條叫什麼／走哪條 transport
 #if CONFIG_NETCORE_WIFI
-    if (nc_wifi_used()) {
+    if (!nc_net_lines_enabled() && nc_wifi_used()) {
         const esp_err_t nerr = nc4_line_net_start();
         ESP_LOGW(TAG, "network line start：%s", esp_err_to_name(nerr));
         httpd_handle_t h = nc4_line_net_httpd();
         if (h != NULL) {
-            (void)nc4_http_register(h);
-            (void)nc4_ota_http_register(h);
             (void)nc4_web_register(h);
         }
     }
@@ -4273,7 +4278,7 @@ static esp_err_t ph_channels(void)
     // 這裡只掛「需要硬體」的通道。
     if (s_decoder[0] != NULL) {
 #if NC_HAS_ETH
-        if (s_eth_ok) {
+        if (!nc_net_lines_enabled() && s_eth_ok) {
             // NC4 over WebSocket（訊息即一幀；直接解析，不經 bus）—— httpd 在 core0
             esp_err_t werr = nc4_ws_start(decoder_for_core(0), 8080);
             ESP_LOGW(TAG, "NC4 over WS: %s", esp_err_to_name(werr));
@@ -4285,9 +4290,8 @@ static esp_err_t ph_channels(void)
                 ESP_LOGW(TAG, "UDP：links[].enable=0 → 唔建立（0 B）");
             }
             ESP_LOGW(TAG, "NC4 over UDP: %s", esp_err_to_name(uerr));
-            nc4_http_register(nc4_ws_httpd());
         } else {
-            ESP_LOGW(TAG, "沒有乙太網 → WS / UDP 通道不啟動");
+            ESP_LOGW(TAG, "舊 ETH 通道不啟動（新 net lines 已接管或沒有乙太網）");
         }
 #endif
     }
@@ -4465,7 +4469,8 @@ static esp_err_t ph_channels(void)
 #if NC_HAS_ETH
         // TCP 傳輸只在 P4（乙太網）且「ETH 真的起來」時建立
         int tcp_core = -1;
-        if (s_eth_ok && s_tcp_rx_region != NULL && link_core("TCP", &tcp_core)) {
+        if (!nc_net_lines_enabled() && s_eth_ok && s_tcp_rx_region != NULL &&
+            link_core("TCP", &tcp_core)) {
             tcp_core = decoder_core(tcp_core);   // 解碼核 = 實際 decoder 嗰核
             link_rx_t rx = { .region = 16410, .chunk = 8192, .budget = 8, .slots = 8, .slot = 8205 };
             link_rx("TCP", &rx);
@@ -4517,6 +4522,12 @@ static esp_err_t ph_channels(void)
             ESP_LOGI(TAG, "UART producer: %s", esp_err_to_name(perr));
         }
     }
+    // 即使只有 HTTP（冇 decoder）都要開 web service。
+    if (nc_net_lines_enabled()) {
+        const esp_err_t nerr = nc_net_lines_start();
+        ESP_LOGW(TAG, "net lines start：%s", esp_err_to_name(nerr));
+    }
+    nc_net_raw_start_if_configured();
     return ESP_OK;
 }
 

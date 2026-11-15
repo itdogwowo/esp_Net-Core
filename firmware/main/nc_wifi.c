@@ -29,6 +29,7 @@ const char *nc_wifi_state_name(nc_wifi_state_t s)
 // ───────────────────────── 未編入：同一個介面，零成本 ─────────────────────────
 #if !CONFIG_NETCORE_WIFI
 
+
 nc_wifi_state_t nc_wifi_boot(void)
 {
     ESP_LOGI(TAG, "Wi-Fi：未編入（CONFIG_NETCORE_WIFI=n）→ 唔初始化、唔佔記憶體");
@@ -419,6 +420,11 @@ static void wifi_mgr_task(void *arg)
         s_scanning = true;
         const int n = scan_aps(s_aps, WIFI_CRED_MAX_SCAN);
         s_scanning = false;
+        for (int a = 0; a < n; a++) {
+            ESP_LOGW(TAG, "scan[%d] \"%s\" rssi=%d ch=%u auth=%d",
+                     a, (const char *)s_aps[a].ssid, s_aps[a].rssi,
+                     (unsigned)s_aps[a].primary, (int)s_aps[a].authmode);
+        }
         bool tried[WIFI_CRED_MAX] = {false};
 
         // ① 掃描得到、又有憑證的，按 RSSI 強弱試。
@@ -529,6 +535,66 @@ static void wifi_release(void)
     s_connected = false;
 }
 
+// 最小 AP 模式：用嚟隔離測試 interface／line／web；同 STA 共用 nc_wifi_json。
+static nc_wifi_state_t wifi_boot_ap(const char *ssid, const char *pw)
+{
+    esp_err_t err = esp_netif_init();
+    if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
+        goto fail;
+    }
+    err = esp_event_loop_create_default();
+    if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
+        goto fail;
+    }
+    s_netif = esp_netif_create_default_wifi_ap();
+    if (s_netif == NULL) {
+        err = ESP_ERR_NO_MEM;
+        goto fail;
+    }
+    wifi_init_config_t ic = WIFI_INIT_CONFIG_DEFAULT();
+    err = esp_wifi_init(&ic);
+    if (err != ESP_OK) {
+        goto fail;
+    }
+    s_inited = true;
+    if ((err = esp_wifi_set_mode(WIFI_MODE_AP)) != ESP_OK) {
+        goto fail;
+    }
+    wifi_config_t wc;
+    memset(&wc, 0, sizeof(wc));
+    snprintf((char *)wc.ap.ssid, sizeof(wc.ap.ssid), "%s",
+             (ssid != NULL && ssid[0] != '\0') ? ssid : "esp-netcore");
+    snprintf((char *)wc.ap.password, sizeof(wc.ap.password), "%s",
+             (pw != NULL) ? pw : "");
+    wc.ap.ssid_len = (uint8_t)strlen((char *)wc.ap.ssid);
+    wc.ap.channel = 6;
+    wc.ap.max_connection = 4;
+    wc.ap.authmode = (wc.ap.password[0] != '\0') ? WIFI_AUTH_WPA2_PSK : WIFI_AUTH_OPEN;
+    if (wc.ap.authmode == WIFI_AUTH_WPA2_PSK && strlen((char *)wc.ap.password) < 8) {
+        wc.ap.authmode = WIFI_AUTH_OPEN;
+        wc.ap.password[0] = '\0';
+    }
+    if ((err = esp_wifi_set_config(WIFI_IF_AP, &wc)) != ESP_OK) {
+        goto fail;
+    }
+    if ((err = esp_wifi_start()) != ESP_OK) {
+        goto fail;
+    }
+    (void)esp_wifi_set_ps(WIFI_PS_NONE);
+    snprintf(s_ssid, sizeof(s_ssid), "%s", (char *)wc.ap.ssid);
+    s_state = NC_WIFI_ON;
+    s_connected = true;
+    s_got_ip = true;
+    s_rssi = 0;
+    ESP_LOGW(TAG, "Wi-Fi AP 啟動：%s（IP 192.168.4.1）", s_ssid);
+    return s_state;
+fail:
+    ESP_LOGE(TAG, "Wi-Fi AP 初始化失敗 %s", esp_err_to_name(err));
+    wifi_release();
+    s_state = NC_WIFI_ERROR;
+    return s_state;
+}
+
 nc_wifi_state_t nc_wifi_boot(void)
 {
     if (s_state == NC_WIFI_ON) {
@@ -551,9 +617,12 @@ nc_wifi_state_t nc_wifi_boot(void)
         ESP_LOGI(TAG, "Wi-Fi：wifi.enable=0 → 唔初始化（0 B 靜態以外、0 B heap）");
         return s_state;
     }
+    if (strcmp(mode, "ap") == 0) {
+        return wifi_boot_ap(ssid, pw);
+    }
     if (strcmp(mode, "sta") != 0) {
         s_state = NC_WIFI_OFF_UNSUPPORTED;
-        ESP_LOGW(TAG, "Wi-Fi：mode=\"%s\" 未實作（目前只支援 sta）→ 唔初始化", mode);
+        ESP_LOGW(TAG, "Wi-Fi：mode=\"%s\" 未實作（目前支援 sta／ap）→ 唔初始化", mode);
         return s_state;
     }
 
