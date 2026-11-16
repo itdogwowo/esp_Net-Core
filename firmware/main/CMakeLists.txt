@@ -4,41 +4,83 @@
 #   MSC 走 wear levelling，WL 會把分區開頭拿去放自己的 metadata，
 #   所以「燒在分區 offset 0 的 FAT 映像」經過 WL 之後對不上 —— 碟會顯示「沒有檔案系統」。
 #   改成：firmware 內嵌 → 第一次開機自動格式化 → 寫入預置 → 交給 host。
-#   使用者不需要手動格式化；換預置只要改 ports/<board>/data/config/*.json 再 build。
+#   使用者不需要手動格式化；換預置只要改 project/.../data/config/*.json 再 build。
 #
-# 一個層一個檔：目前嵌 hardware / system / network / tasks（存在才嵌）；缺的層由 firmware 的預設補。
-# hardware.json 目前只有 **ETH** 與 **SDIO** 兩段真的被讀（nc_cfg_apply_hardware）；
-# 其餘段（PIN/SPI/I2C/I80/UART/I2S/PWM/ENC/XL9555）只會被計入 config 的 unknown 計數，
-# 改它們不會生效 —— 等有 driver 用到再補型別。
-# driver.json **沒有** embed、也還沒有任何地方讀它。
+# 兩層分工：
+#   hardware/wiring.json → 由 tools/ncportgen.py 編成 C 預設（nc_port.c）＋ 產生
+#                          hardware.json 出廠預置；**不是**在 runtime 解析 JSON。
+#   project/data/config/ → 原樣嵌進 firmware，開機 seed 到 /data/config/。
+# 一個層一個檔：system / network / tasks（存在才嵌）；缺的層由 firmware 的預設補。
 
-set(_preset_embed)
-set(_has_wiring 0)
-if(EXISTS "${PORT_DIR}/wiring.json")
-    # 板級 wiring 是 build-time 的硬體事實；不寫進 data/config、不給用戶改。
-    # 開機由 nc_cfg_boot_ex() 當 base，用戶 hardware.json 只覆蓋差異。
-    set(_wiring_out "${CMAKE_CURRENT_BINARY_DIR}/preset_wiring.json")
-    add_custom_command(
-        OUTPUT  "${_wiring_out}"
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                "${PORT_DIR}/wiring.json" "${_wiring_out}"
-        DEPENDS "${PORT_DIR}/wiring.json"
-        COMMENT "wiring.json → build")
-    list(APPEND _preset_embed "${_wiring_out}")
-    set(_has_wiring 1)
+# IDF 的 component_get_requirements 會在另一個 CMake context 重新 include 這份檔，
+# 那時 top-level CMakeLists 的普通變數（PORT_DIR／PROJECT_DIR）不會繼承；
+# -DPORT/-DPROJECT 的 cache 變數也不一定見得到。唯一可靠的是環境變數 NC_PORT／NC_PROJECT。
+if(NOT PORT)
+    set(PORT "$ENV{NC_PORT}")
 endif()
-foreach(_cfg hardware system network tasks)
-    if(EXISTS "${PORT_DIR}/data/config/${_cfg}.json")
+if(NOT PROJECT)
+    set(PROJECT "$ENV{NC_PROJECT}")
+endif()
+if(NOT PORT_DIR)
+    set(PORT_DIR "${CMAKE_CURRENT_LIST_DIR}/../../ports/hardware/${PORT}")
+endif()
+if(NOT PROJECT_DIR AND PROJECT)
+    set(PROJECT_DIR "${CMAKE_CURRENT_LIST_DIR}/../../ports/project/${PROJECT}")
+endif()
+if(NOT EXISTS "${PORT_DIR}/board.json")
+    message(FATAL_ERROR "hardware port not found or incomplete: ${PORT_DIR} (PORT=${PORT})")
+endif()
+
+# ── 硬體層 → firmware 預設（build-time codegen）──
+# 輸出的 nc_port.c 直接是 nc_hardware_cfg_t 的 static const：
+#   · 字典字串（OUT/IN、UP/DOWN、IP101、spi/i2c…）在這裡對標成數值
+#   · 只有數值，沒有 JSON 文字；比同時嵌 wiring.json ＋ hardware.json 少一半以上
+#   · nc_cfg_defaults.c 透過 weak symbol 取用它；host test 沒有生成檔時自動退回內建表
+find_package(Python3 COMPONENTS Interpreter REQUIRED)
+set(_gen_dir "${CMAKE_CURRENT_BINARY_DIR}/ncport_gen")
+set(_gen_c   "${_gen_dir}/nc_port.c")
+set(_gen_h   "${_gen_dir}/nc_port.h")
+set(_gen_hw  "${_gen_dir}/preset_hardware.json")
+set(_gen_dep "${PORT_DIR}/board.json" "${PORT_DIR}/wiring.json"
+             "${CMAKE_CURRENT_LIST_DIR}/../../tools/ncportgen.py")
+if(EXISTS "${PORT_DIR}/driver.json")
+    list(APPEND _gen_dep "${PORT_DIR}/driver.json")
+endif()
+# configure 時先跑一次：確保 EMBED_FILES 在 configure 階段就見得到檔案；
+# build 時再由下面的 custom command 按 JSON mtime 重新產生。
+execute_process(
+    COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_LIST_DIR}/../../tools/ncportgen.py"
+            --hardware "${PORT_DIR}" --out "${_gen_dir}"
+    RESULT_VARIABLE _gen_rc)
+if(NOT _gen_rc EQUAL 0)
+    message(FATAL_ERROR "ncportgen failed for ${PORT_DIR}")
+endif()
+if(NOT CMAKE_SCRIPT_MODE_FILE)
+    add_custom_command(
+        OUTPUT  "${_gen_c}" "${_gen_h}" "${_gen_hw}"
+        COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_LIST_DIR}/../../tools/ncportgen.py"
+                --hardware "${PORT_DIR}" --out "${_gen_dir}"
+        DEPENDS ${_gen_dep}
+        COMMENT "hardware JSON → firmware 預設（nc_port.c）"
+        VERBATIM)
+    add_custom_target(ncport_gen DEPENDS "${_gen_c}" "${_gen_h}" "${_gen_hw}")
+endif()
+
+set(_preset_embed "${_gen_hw}")
+foreach(_cfg system network tasks)
+    if(PROJECT_DIR AND EXISTS "${PROJECT_DIR}/data/config/${_cfg}.json")
         # 用 build-time 的 copy_if_different，而唔係 configure_file：
         # configure_file 只在「CMake 重跑」時複製，只改 JSON 內容唔會觸發
         # ⇒ 嵌進 firmware 的預置會係舊版（實測：改了 routes 但 seed 出嚟仍係舊值）。
         set(_preset_out "${CMAKE_CURRENT_BINARY_DIR}/preset_${_cfg}.json")
-        add_custom_command(
-            OUTPUT  "${_preset_out}"
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                    "${PORT_DIR}/data/config/${_cfg}.json" "${_preset_out}"
-            DEPENDS "${PORT_DIR}/data/config/${_cfg}.json"
-            COMMENT "預置 ${_cfg}.json → build")
+        if(NOT CMAKE_SCRIPT_MODE_FILE)
+            add_custom_command(
+                OUTPUT  "${_preset_out}"
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                        "${PROJECT_DIR}/data/config/${_cfg}.json" "${_preset_out}"
+                DEPENDS "${PROJECT_DIR}/data/config/${_cfg}.json"
+                COMMENT "預置 ${_cfg}.json → build")
+        endif()
         list(APPEND _preset_embed "${_preset_out}")
     endif()
 endforeach()
@@ -46,7 +88,17 @@ if(_preset_embed)
     set(_preset_args EMBED_FILES ${_preset_embed})
 endif()
 
-if(EXISTS "${PORT_DIR}/data/config/tasks.json")
+if(PROJECT_DIR AND EXISTS "${PROJECT_DIR}/data/config/system.json")
+    set(_has_system_preset 1)
+else()
+    set(_has_system_preset 0)
+endif()
+if(PROJECT_DIR AND EXISTS "${PROJECT_DIR}/data/config/network.json")
+    set(_has_network_preset 1)
+else()
+    set(_has_network_preset 0)
+endif()
+if(PROJECT_DIR AND EXISTS "${PROJECT_DIR}/data/config/tasks.json")
     set(_has_tasks_preset 1)
 else()
     set(_has_tasks_preset 0)
@@ -79,8 +131,8 @@ if(NC_ENABLE_TESTS)
 endif()
 
 idf_component_register(
-    SRCS "main.c" "nc_wifi.c" "boot.c"
-    INCLUDE_DIRS "."
+    SRCS "main.c" "nc_wifi.c" "boot.c" ${_gen_c}
+    INCLUDE_DIRS "." "${_gen_dir}"
     PRIV_REQUIRES fatfs esp_timer esp_partition esp_driver_gpio esp_driver_uart esp_driver_sdmmc
               wear_levelling esp_eth esp_netif lwip esp_event esp_psram nvs_flash
               # driver/：匯流排驅動器（對照舊專案 slave/driver/*_drv.py）
@@ -90,39 +142,47 @@ idf_component_register(
                    ${_nc_priv_extra}
     ${_preset_args}
 )
+# IDF 6.1 的 component_get_requirements 會用 `cmake -P`（script mode）include 這份檔，
+# 那時 add_custom_command／add_dependencies／target_* 全部不是 scriptable。
+# 只有 idf_component_register 要在 script mode 跑（它會記錄 requirements）；
+# 其餘 build-system 命令一律跳過。
+if(NOT CMAKE_SCRIPT_MODE_FILE)
+    add_dependencies(${COMPONENT_LIB} ncport_gen)
 
-target_compile_definitions(${COMPONENT_LIB} PRIVATE NETCORE_HAS_PRESET_TASKS=${_has_tasks_preset})
-target_compile_definitions(${COMPONENT_LIB} PRIVATE NETCORE_HAS_WIRING=${_has_wiring})
-if(NC_ENABLE_TESTS)
-    target_compile_definitions(${COMPONENT_LIB} PRIVATE NC_ENABLE_TESTS=1)
-    # main 直接 include 測試任務的標頭（nc_fx.h / nc_bench.h …）。
-    # 不靠 PRIV_REQUIRES：組件掃描階段（component manager）睇唔到本專案的
-    # 變數（NC_ENABLE_TESTS 未定義），嗰次登記就會漏咗 include path。
-    target_include_directories(${COMPONENT_LIB} PRIVATE
-        "${CMAKE_CURRENT_LIST_DIR}/../components/tasks/test_fx_tasks/include"
-        "${CMAKE_CURRENT_LIST_DIR}/../components/tasks/test_hello_tasks/include"
-        "${CMAKE_CURRENT_LIST_DIR}/../components/tasks/test_bench_tasks/include"
-        "${CMAKE_CURRENT_LIST_DIR}/../components/tasks/test_probe_tasks/include"
-        "${CMAKE_CURRENT_LIST_DIR}/../components/tasks/test_rgb_led_matrix_tasks/include"
-        "${CMAKE_CURRENT_LIST_DIR}/../components/tasks/test_tcp_tasks/include"
-        "${CMAKE_CURRENT_LIST_DIR}/../components/action/test_action/include")
-endif()
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE NETCORE_HAS_PRESET_TASKS=${_has_tasks_preset})
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE NETCORE_HAS_PRESET_SYSTEM=${_has_system_preset})
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE NETCORE_HAS_PRESET_NETWORK=${_has_network_preset})
+    if(NC_ENABLE_TESTS)
+        target_compile_definitions(${COMPONENT_LIB} PRIVATE NC_ENABLE_TESTS=1)
+        # main 直接 include 測試任務的標頭（nc_fx.h / nc_bench.h …）。
+        # 不靠 PRIV_REQUIRES：組件掃描階段（component manager）睇唔到本專案的
+        # 變數（NC_ENABLE_TESTS 未定義），嗰次登記就會漏咗 include path。
+        target_include_directories(${COMPONENT_LIB} PRIVATE
+            "${CMAKE_CURRENT_LIST_DIR}/../components/tasks/test_fx_tasks/include"
+            "${CMAKE_CURRENT_LIST_DIR}/../components/tasks/test_hello_tasks/include"
+            "${CMAKE_CURRENT_LIST_DIR}/../components/tasks/test_bench_tasks/include"
+            "${CMAKE_CURRENT_LIST_DIR}/../components/tasks/test_probe_tasks/include"
+            "${CMAKE_CURRENT_LIST_DIR}/../components/tasks/test_rgb_led_matrix_tasks/include"
+            "${CMAKE_CURRENT_LIST_DIR}/../components/tasks/test_tcp_tasks/include"
+            "${CMAKE_CURRENT_LIST_DIR}/../components/action/test_action/include")
+    endif()
 
-# 最小映像（只印心跳，不碰 USB/MSC/ETH）：用來確認新板子的基礎能不能跑
-if(NETCORE_MINIMAL)
-    target_compile_definitions(${COMPONENT_LIB} PRIVATE NETCORE_MINIMAL=1)
-endif()
+    # 最小映像（只印心跳，不碰 USB/MSC/ETH）：用來確認新板子的基礎能不能跑
+    if(NETCORE_MINIMAL)
+        target_compile_definitions(${COMPONENT_LIB} PRIVATE NETCORE_MINIMAL=1)
+    endif()
 
-# SD 速度量測（sd_boot 內）：-DNC_SD_BENCH=1 才編入，正常映像唔會有。
-# FAT 寫入量測：包住 sdmmc_write_sectors 計 sector 數。
-# ★ 只可以在測試映像加 --wrap：__wrap_sdmmc_* 的定義在 main.c 的 NC_ENABLE_TESTS 區塊裡
-#   （0xF012–0xF019 的 SD bench 本身就是測試指令）。無條件加就會令 release 映像
-#   出現 undefined reference to `__wrap_sdmmc_write_sectors` —— 這裡之前就是這樣。
-if(NC_ENABLE_TESTS AND NOT IDF_TARGET STREQUAL "esp32p4")
-    idf_build_set_property(LINK_OPTIONS "-Wl,--wrap=sdmmc_write_sectors" APPEND)
-    idf_build_set_property(LINK_OPTIONS "-Wl,--wrap=sdmmc_read_sectors" APPEND)
-endif()
+    # SD 速度量測（sd_boot 內）：-DNC_SD_BENCH=1 才編入，正常映像唔會有。
+    # FAT 寫入量測：包住 sdmmc_write_sectors 計 sector 數。
+    # ★ 只可以在測試映像加 --wrap：__wrap_sdmmc_* 的定義在 main.c 的 NC_ENABLE_TESTS 區塊裡
+    #   （0xF012–0xF019 的 SD bench 本身就是測試指令）。無條件加就會令 release 映像
+    #   出現 undefined reference to `__wrap_sdmmc_write_sectors` —— 這裡之前就是這樣。
+    if(NC_ENABLE_TESTS AND NOT IDF_TARGET STREQUAL "esp32p4")
+        idf_build_set_property(LINK_OPTIONS "-Wl,--wrap=sdmmc_write_sectors" APPEND)
+        idf_build_set_property(LINK_OPTIONS "-Wl,--wrap=sdmmc_read_sectors" APPEND)
+    endif()
 
-if(NC_SD_BENCH)
-    target_compile_definitions(${COMPONENT_LIB} PRIVATE NC_SD_BENCH=1)
+    if(NC_SD_BENCH)
+        target_compile_definitions(${COMPONENT_LIB} PRIVATE NC_SD_BENCH=1)
+    endif()
 endif()

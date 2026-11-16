@@ -53,6 +53,10 @@ const nc_system_cfg_t *nc_cfg_defaults_system(void);
 const nc_tasks_cfg_t  *nc_cfg_defaults_tasks(void);
 const nc_hardware_cfg_t *nc_cfg_defaults_hardware(void);
 
+// 這塊板有沒有 build-time 產生的硬體預設（nc_port.c）？
+// 有 → /data/config/hardware.json 缺失不算 degraded（generated 表就是出廠預設）。
+bool nc_cfg_hw_has_port_defaults(void);
+
 // 告訴預設「現在是哪顆晶片」：有 USJ 的用 usb_jtag、只有 OTG 的用 CDC、
 // 單核板唔砌 decode1。**要在 nc_cfg_boot() 之前呼叫**（main 在 app_main 最前面做）。
 // chip = NULL 或未知 → 保守用「CDC + 2 核」（跟舊行為一致）。
@@ -107,6 +111,12 @@ nc_cfg_merge_t nc_cfg_merge_cores(int cores);
 
 // link kind 的字串名（"cdc" / "usb_jtag" …）；只給 log／STATUS，不參與解析。
 const char *nc_cfg_kind_name(nc_link_kind_t kind);
+
+// 字典欄位的「數值 → 字串」方向；只給 log／STATUS。
+const char *nc_cfg_iface_name(uint8_t iface);      // nc_iface_t
+const char *nc_cfg_service_name(uint8_t service);  // nc_service_t
+const char *nc_cfg_mem_name(uint8_t mem);          // nc_mem_t
+const char *nc_cfg_phy_name(uint8_t phy);          // nc_phy_type_t
 
 // 查一條 link / 一列 route（找不到回 NULL）
 const nc_link_cfg_t  *nc_cfg_link(const char *name);

@@ -1,0 +1,12 @@
+{
+  "_comment": "Project 層：這塊硬體上「跑什麼」。硬體事實一律在 ports/hardware/，這裡只放項目選擇與執行期預置。",
+  "version": 1,
+  "name": "ESP32-S3-N16R8",
+  "hardware": "S3/ESP32-S3-N16R8",
+  "profiles": [],
+  "seed": [
+    "system",
+    "network",
+    "tasks"
+  ]
+}

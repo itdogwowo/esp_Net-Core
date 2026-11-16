@@ -6,6 +6,7 @@ import os
 import shutil
 import subprocess
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 TOOLS = Path(__file__).resolve().parent.parent      # tools/
@@ -27,6 +28,7 @@ DEFAULT_CONFIG = {
         "archive": True,       # 產物複製到 artifacts/ 並帶時間戳
         "doctor": True,        # build 前跑環境健檢（快檢，不是全套）
         "output_dir": ARTIFACTS_NAME,
+        "build_dir": None,     # None = <output_dir>/build（每塊板一個子目錄）
         "keep": 10,            # 每塊板子保留幾個歷史產物
     },
     "idf": {
@@ -54,7 +56,7 @@ def load_config(explicit: str | None = None) -> dict:
     cfg = json.loads(json.dumps(DEFAULT_CONFIG))  # deep copy
     if path and path.exists():
         try:
-            user = json.loads(path.read_text())
+            user = json.loads(path.read_text(encoding="utf-8"))
         except json.JSONDecodeError as e:
             raise SystemExit(f"{path.name} 不是合法 JSON：{e}")
         for k, v in user.items():
@@ -71,38 +73,89 @@ def artifacts_dir(cfg: dict) -> Path:
     return d if d.is_absolute() else ROOT / d
 
 
+def build_root(cfg: dict) -> Path:
+    """所有 CMake/IDF 中間檔的統一父目錄。
+
+    預設 <artifacts>/build；`build.build_dir` 可以指到專案外（例如
+    `~/.cache/esp_Net-Core/build`），專案樹就不會有 build_p4、build_p4c6。
+    """
+    raw = (cfg.get("build") or {}).get("build_dir")
+    if raw:
+        d = Path(str(raw)).expanduser()
+        return d if d.is_absolute() else ROOT / d
+    return artifacts_dir(cfg) / "build"
+
+
+def build_slug(port: "Port") -> str:
+    """一塊板一個 build dir：<chip>_<board>，避免同名板跨晶片撞名。"""
+    return f"{port.hw.parent.name}_{port.hw.name}"
+
+
+def build_dir(cfg: dict, port: "Port") -> Path:
+    return build_root(cfg) / build_slug(port)
+
+
+def sdkconfig_path(cfg: dict, port: "Port") -> Path:
+    return build_dir(cfg, port) / "sdkconfig"
+
+
 # ───────────────────────── 板子 ─────────────────────────
 
-def resolve_board(query: str | None, *, require: bool = True
-                  ) -> tuple[Path, dict, str, str]:
-    """回傳 (port 目錄, board.json, idf target, 晶片目錄名如 P4)。
+@dataclass(frozen=True)
+class Port:
+    """一次建置的兩層身分：硬體板（必）＋ project（選）。"""
+    hw: Path
+    pj: Path | None
+    board: dict
+    chip: str
 
-    require=True 且沒有指定板子 → 報錯（不要默默挑第一塊，那遲早燒錯板）。
+    @property
+    def hw_rel(self) -> str:
+        return f"{self.hw.parent.name}/{self.hw.name}"
+
+    @property
+    def pj_rel(self) -> str:
+        return "" if self.pj is None else f"{self.pj.parent.name}/{self.pj.name}"
+
+    @property
+    def name(self) -> str:
+        return self.board.get("name", self.hw.name)
+
+
+def resolve_board(query: str | None, *, require: bool = True) -> Port:
+    """回傳硬體板 + 對應 project 的身分。
+
+    查詢可以命中任一層：硬體板名、project 名、<chip>/<board>。
+    require=True 且沒有指定 → 報錯（不要默默挑第一塊，那遲早燒錯板）。
     """
     import board as boardmod   # tools/board.py
 
     try:
-        dirs = boardmod.find_boards(query) if query else boardmod.board_dirs()
+        pairs = boardmod.find_ports(query) if query else boardmod.find_ports(None)
     except SystemExit as e:
         raise SystemExit(str(e))
-    if not dirs:
+    if not pairs:
         raise SystemExit("ports/ 下沒有任何 board.json —— 先 python3 tools/board.py new …")
     if query is None and require:
-        names = "、".join(boardmod.load_board(d).get("name", d.name) for d in dirs)
+        names = "、".join(boardmod.load_board(d).get("name", d.name) for d, _ in pairs)
         raise SystemExit(
             f"沒有指定板子（目前有：{names}）\n"
-            f"  → python3 make.py build <板子>   或   make.py build --all\n"
+            f"  → python3 make.py build <硬體板或 project>\n"
             f"  → 常用的那塊可寫進 make_config.json 的 default_board"
         )
-    d = dirs[0]
+    d, p = pairs[0]
     b = boardmod.load_board(d)
-    chip = b["chip"]
-    return d, b, chip, d.parent.name.upper()
+    return Port(hw=d, pj=p, board=b, chip=b["chip"])
 
 
 def port_name(d: Path) -> str:
-    """傳給 CMake 的 -DPORT（相對於 repo 根的 ports/）。"""
+    """傳給 CMake 的 -DPORT（相對於 ports/hardware/）。"""
     return f"{d.parent.name}/{d.name}"
+
+
+def project_name(d: Path | None) -> str:
+    """傳給 CMake 的 -DPROJECT（相對於 ports/project/）；空字串 = 沒有 project。"""
+    return "" if d is None else f"{d.parent.name}/{d.name}"
 
 
 # ───────────────────────── IDF ─────────────────────────

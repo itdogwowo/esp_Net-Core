@@ -109,6 +109,10 @@ const char *nc_cap_name(uint16_t bit);
 //   L.xxx  通道／線（link 名；NC4 的線名）             L.CDC、L.UART
 //   C.xxxx 協議指令（16-bit）                          C.0x1101
 //   M.xxx  模塊／功能（component 或一組行為）          M.store、M.config
+//   F.xxx  設定檔來源（2026-11-16）                     F.preset、F.live
+//          F.spec（板卡規格）／F.wiring（板卡接線）／F.build（建置開關）／
+//          F.preset（出廠預置）／F.live（現行設定）／F.default（內建預設）
+//          規則：唔講「config」／「ports」，講 F.xxx。見 docs/03_notes/glossary.md §5。
 //
 // 規則
 //   ① ID 係**契約**：一旦寫落文件／log／圖就唔改。要改就係「換一個 ID」，

@@ -196,7 +196,7 @@ USB 的差異不再寫在 `.c` 裡。主程式**冇任何 `CONFIG_IDF_TARGET_*`*
 | 層 | 位置 | 決定什麼 | 換晶片／換板要改？ |
 |---|---|---|---|
 | ① 能力 | `Kconfig.projbuild` `NETCORE_USB_OTG` | 這段程式碼**存不存在**（tinyusb 約 21.7 KB） | 不用，default 已列 S3/S2/P4 |
-| ② 板子 | `NETCORE_USB_OTG_HS`、`NETCORE_USB_CONSOLE_TEE` | 用邊條 PHY、log 要不要 tee console | 換板要（目前放 `ports/<board>/sdkconfig.defaults`） |
+| ② 板子 | `NETCORE_USB_OTG_HS`、`NETCORE_USB_CONSOLE_TEE` | 用邊條 PHY、log 要不要 tee console | 換板要（目前放 `ports/hardware/<board>/sdkconfig.defaults`） |
 | ③ 執行期 | `system.json` 的 `usb.{msc,cdc_log}` | 開唔開、交唔交碟 | 不用，改完重開機即生效 |
 
 **陷阱**：`SOC_USB_OTG_SUPPORTED` 是自動產生的 **C 巨集**，不是 Kconfig 符號。

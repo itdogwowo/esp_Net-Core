@@ -97,7 +97,7 @@ esp_Net-Core/
 `data/` 用 IDF 的 FATFS 映像產生器燒進去，不需要寫任何 C：
 
 ```cmake
-# ports/S3/ESP32-S3-Matrix/CMakeLists.txt
+# ports/hardware/S3/ESP32-S3-Matrix/CMakeLists.txt（現在由 firmware/main/CMakeLists 統一處理）
 fatfs_create_partition_image(data ${CMAKE_CURRENT_LIST_DIR}/data FLASH_IN_PROJECT)
 ```
 
@@ -110,7 +110,9 @@ fatfs_create_partition_image(data ${CMAKE_CURRENT_LIST_DIR}/data FLASH_IN_PROJEC
 
 ### 4.2 邊界
 
-- `ports/<board>/data/` 只放**出廠預設**。燒完之後那份內容屬於使用者。
+- `ports/project/<board>/data/` 只放**出廠預設**。燒完之後那份內容屬於使用者。
+- `ports/hardware/<board>/wiring.json` 是硬體事實；build 時由 `ncportgen` 編成
+  `nc_port.c`（static const）＋ `preset_hardware.json`，不再 runtime 解析。
 - 預置不是保證：使用者可以刪掉任何一個檔。**缺檔必須能開機**（該層用內建預設），不能因此進不了 RUN。
 
 ---
@@ -128,7 +130,7 @@ fatfs_create_partition_image(data ${CMAKE_CURRENT_LIST_DIR}/data FLASH_IN_PROJEC
 | `schema/*.json` | `components/schema/`（build 時轉 C 表） |
 | `pixel/` | **消失**：程式在 `sw/`，資料在 FAT |
 | `cores/` | 併入 `tasks/`（core pin 表） |
-| `ports/<chip>/<board>/config/*.json` | `ports/<chip>/<board>/data/config/*.json` ＋ 可選 `sdkconfig.defaults` |
+| `ports/<chip>/<board>/config/*.json` | `ports/project/<chip>/<board>/data/config/*.json` ＋ `ports/hardware/<chip>/<board>/{board,wiring}.json` |
 | `config/*.json`（base） | firmware 內建預設值（找不到檔案時用） |
 
 ---

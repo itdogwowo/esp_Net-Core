@@ -386,3 +386,42 @@ const char *nc_cfg_kind_name(nc_link_kind_t kind)
     default:              return "?";
     }
 }
+
+const char *nc_cfg_iface_name(uint8_t iface)
+{
+    switch (iface) {
+    case NC_CFG_IFACE_ETH:  return "eth";
+    case NC_CFG_IFACE_WIFI: return "wifi";
+    default:            return "any";
+    }
+}
+
+const char *nc_cfg_service_name(uint8_t service)
+{
+    switch (service) {
+    case NC_CFG_SVC_NC4: return "nc4";
+    case NC_CFG_SVC_WEB: return "web";
+    default:         return "auto";
+    }
+}
+
+const char *nc_cfg_mem_name(uint8_t mem)
+{
+    switch (mem) {
+    case NC_CFG_MEM_SRAM:  return "sram";
+    case NC_CFG_MEM_PSRAM: return "psram";
+    default:           return "auto";
+    }
+}
+
+const char *nc_cfg_phy_name(uint8_t phy)
+{
+    switch (phy) {
+    case NC_CFG_PHY_IP101:   return "IP101";
+    case NC_CFG_PHY_LAN8720: return "LAN8720";
+    case NC_CFG_PHY_DP83848: return "DP83848";
+    case NC_CFG_PHY_RTL8201: return "RTL8201";
+    case NC_CFG_PHY_GENERIC: return "generic";
+    default:             return "unknown";
+    }
+}

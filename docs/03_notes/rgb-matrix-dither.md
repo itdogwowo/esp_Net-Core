@@ -51,7 +51,7 @@ WS2812 每顆只有 **8-bit PWM**，暗階一格一跳。8×8 板每秒送 450 �
 避開：10–13（IMU）、19/20（USB）、26–32（flash）、43/44（UART0）、
 0/3/45/46（strapping），以及 `nc_hw_reserved()` 在 S3 視為 PSRAM 的 33–37。
 
-改腳位：`CONFIG_NETCORE_RGB_MATRIX_I80_PINS`（`ports/S3/ESP32-S3-Matrix/sdkconfig.defaults`）。
+改腳位：`CONFIG_NETCORE_RGB_MATRIX_I80_PINS`（`ports/hardware/S3/ESP32-S3-Matrix/sdkconfig.defaults`）。
 
 ---
 
@@ -321,5 +321,5 @@ export NC_PORT=/dev/cu.usbmodem*        # 換成實際埠
 | `firmware/components/tasks/test_rgb_led_matrix_tasks/nc_rgb_matrix.c` | I80、波形編碼、抖動、效果、任務 |
 | `…/include/nc_rgb_matrix.h` | 對外 API（效果／抖動／每區參數／JSON） |
 | `firmware/components/action/test_action/nc_test_action.c` | `0xF060` handler |
-| `ports/S3/ESP32-S3-Matrix/` | 板子事實、4 MB 分割表、預設 tasks |
+| `ports/hardware/S3/ESP32-S3-Matrix/` | 板子事實、4 MB 分割表、預設 tasks |
 | `firmware/main/Kconfig.projbuild` | `NETCORE_RGB_MATRIX*` |

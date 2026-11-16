@@ -1,0 +1,47 @@
+{
+  "version": 1,
+  "_comment": [
+    "System 層：身份、開機行為、NC4 通道與路由表（S3-SuperMini）。",
+    "這塊板只有一條 USB（USB-Serial-JTAG）＋ Wi-Fi；沒有任何 UART／SPI／I2C 接出來。",
+    "",
+    "── USB ──",
+    "板上冇 USB-UART 橋接，USB-C 直入 S3 原生 USB：出廠用 usb_jtag（kind=usb_jtag）。",
+    "S3 的 OTG 同 USJ 共用同一條 PHY，兩者只能二選一；要試 TinyUSB CDC 就把",
+    "kind 改成 cdc、name 改成 CDC，再重啟（會失去 USJ console）。",
+    "rx 唔使寫：預設 NC_CFG_USB_RX_REGION = 4,128，放得落 4 KB 的檔案幀（4,115 B）。"
+  ],
+  "cID": "",
+  "frame_interval_ms": 20,
+  "num_pixels": 0,
+  "log_debug_mode": 0,
+  "usb": {
+    "msc": 0,
+    "cdc_log": 1
+  },
+  "nc4": {
+    "links": [
+      {
+        "name": "usb_jtag",
+        "kind": "usb_jtag"
+      }
+    ],
+    "routes": [
+      {
+        "in": "nctx",
+        "out": [
+          "decode0"
+        ]
+      },
+      {
+        "in": "outbound",
+        "out": []
+      },
+      {
+        "in": "usb_jtag",
+        "out": [
+          "decode0"
+        ]
+      }
+    ]
+  }
+}

@@ -34,11 +34,15 @@ esp_Net-Core/
 │  └─ build/  managed_components/  sdkconfig  ← 生成物，不進 git
 │
 ├─ ports/                       ──【配置層】每塊板子的差異，不屬於程式 ──
-│  ├─ S3/ESP32-S3-N16R8/data/config/*.json
-│  └─ P4/ESP32-P4-ETH/{sdkconfig.defaults, data/config/*.json}
+│  ├─ hardware/<chip>/<board>/   這塊板「有什麼」：board.json / wiring.json /
+│  │                              driver.json / sdkconfig.defaults / partitions.csv
+│  ├─ project/<chip>/<board>/    這塊板「跑什麼」：project.json / data/config/*.json
+│  ├─ _profiles/                 能力碎片（eth-rmii / nc4-ws / nc4-udp …）
+│  └─ _chips/                    別名 chip profile（driver.json 引用）
 │
 └─ tools/                       ──【工具層】主機端，不會進 firmware image ──
    ├─ ncbuild/                  建置工具實作（make.py 的引擎）
+   ├─ ncportgen.py              hardware JSON → firmware 預設（build-time codegen）
    ├─ board.py  board.sh        板子清單 / 檢查 / 新增（board.sh 是薄殼）
    ├─ flash.sh                  逃生門燒錄
    ├─ nc4.py  ota.py  selftest.py  nc4_test.py   對設備說話
@@ -65,7 +69,7 @@ esp_Net-Core/
 | 有線／無線／藍牙／ESP-NOW 怎麼選 | [docs/02_guides/connectivity.md](docs/02_guides/connectivity.md) |
 | 分層原則（七個程式分區） | [docs/03_notes/component-layout.md](docs/03_notes/component-layout.md) |
 | 實際的 C 程式 | `firmware/main/`、`firmware/components/` |
-| 這塊板子要什麼 | `ports/<chip>/<board>/` |
+| 這塊板子要什麼 | `ports/hardware/<chip>/<board>/`（硬體）＋ `ports/project/<chip>/<board>/`（項目） |
 | 怎麼操作板子 | [tools/README.md](tools/README.md) |
 
 ⚠️ `docs/03_notes/component-layout.md` 描述的是**目標架構**（hw/sys/sw/action/tasks/ui/schema 七區）。
@@ -77,27 +81,34 @@ esp_Net-Core/
 
 | 配置 | 檔案 | 誰改 | 進 git |
 |---|---|---|---|
-| **板子身份證**（硬體事實，機器可讀） | `ports/<chip>/<board>/board.json` | 開發者手寫 | ✅ |
-| 板子建置設定（L1，後者勝過共通） | `ports/<chip>/<board>/sdkconfig.defaults` | 開發者手寫；檔尾碎片由 `sync` 產生 | ✅ |
-| 能力碎片（L2：ETH / WS / UDP） | `ports/_profiles/*.defaults` | 開發者手寫 | ✅ |
+| **硬體板身份證**（硬體事實，機器可讀） | `ports/hardware/<chip>/<board>/board.json` | 開發者手寫 | ✅ |
+| **硬體接線**（腳位／匯流排；firmware 預設的唯一來源） | `ports/hardware/<chip>/<board>/wiring.json` | 開發者手寫 | ✅ |
+| 板子建置設定（L1，後者勝過共通） | `ports/hardware/<chip>/<board>/sdkconfig.defaults` | 開發者手寫；檔尾碎片由 `sync` 產生 | ✅ |
+| 能力碎片（L2：ETH／WS／UDP） | `ports/_profiles/*.defaults` | 開發者手寫 | ✅ |
+| 項目選擇（這塊板跑什麼、要哪些能力） | `ports/project/<chip>/<board>/project.json` | 開發者手寫 | ✅ |
 | 共通建置設定 | `firmware/sdkconfig.defaults` | 開發者手寫（**不准放板子事實**） | ✅ |
-| 分割表 | `firmware/partitions.csv` | 開發者手寫 | ✅ |
-| 出廠執行期內容（L3） | `ports/<chip>/<board>/data/config/*.json` | 出廠預置；上機後屬使用者 | ✅ |
-| 完整展開後的設定 | `firmware/sdkconfig` | **機器** | ❌ 生成物 |
+| 分割表 | `ports/hardware/<chip>/<board>/partitions.csv` 或 `firmware/partitions.csv` | 開發者手寫 | ✅ |
+| 出廠執行期內容（L3） | `ports/project/<chip>/<board>/data/config/*.json` | 出廠預置；上機後屬使用者 | ✅ |
+| 完整展開後的設定 | `artifacts/build/<chip>_<board>/sdkconfig` | **機器** | ❌ 生成物 |
 | 依賴鎖定 | `firmware/dependencies.lock` | 機器 | ❌ 生成物 |
 
 **為什麼要分三層**：`flash 大小 / flash 頻率 / PSRAM / CPU 頻率` 在 bootloader 階段就決定，
 **永遠不可能用 `config.json` 換**；能 runtime 換的只有 gpio、服務開關這類。混在一起寫，
 就會出現「改了沒反應」或「同一份 binary 燒上去開不了機」。
 
+**為什麼再分 hardware / project**：`wiring.json`（腳位）是硬體事實，換項目不變；
+`system.json` 的 `links[]` / `routes[]` / `tasks[]` 是「這個項目要收哪幾條線、跑哪些任務」。
+同一塊硬體可以有多個 project，build 時用 `-DPORT`（硬體）＋ `-DPROJECT`（項目）組合。
+
 ```bash
-python3 tools/board.py list      # 板子 × 能力一覽
+python3 tools/board.py list      # 硬體板 × project 一覽
 python3 tools/board.py check     # 抓出「board.json 說 A、sdkconfig 卻是 B」與放錯層的設定
-python3 tools/board.py new …     # 新增板子（自動產生四個檔，不用改腳本或 CMake）
+python3 tools/board.py new …     # 新增板子（自動產生兩層骨架，不用改腳本或 CMake）
 ```
 
-**建置時唯一真相 = `sdkconfig.defaults` + 板子覆蓋。** `firmware/sdkconfig` 是產物：
-它存在時改 `sdkconfig.defaults` **不會生效**，要先刪掉（`board.py check` 會提醒）。
+**建置時唯一真相 = 共通 `sdkconfig.defaults` → hardware 覆蓋 → project 覆蓋。**
+每塊板的 `artifacts/build/<chip>_<board>/sdkconfig` 是產物：它存在時改 defaults
+**不會生效**，要 `python3 make.py build <board> --fresh`（`board.py check` 會提醒）。
 細節見 [ports/README.md](ports/README.md)。
 
 ---
@@ -107,26 +118,39 @@ python3 tools/board.py new …     # 新增板子（自動產生四個檔，不�
 ```bash
 python3 make.py doctor              # 先看環境（IDF / esptool / 板子設定 / 磁碟）
 python3 make.py list                # 插著哪塊板子 + repo 支援哪些
-python3 make.py build  p4           # 建置（板子名 / 晶片名都可以；會自動處理 target 切換）
-python3 make.py flash  p4           # 建置 + 燒錄（預設 app-flash，不動碟上的資料）
-python3 make.py monitor p4          # 序列埠監看
+python3 make.py build  ESP32-P4-ETH # 建置（硬體板名 / <chip>/<board> / project 名都可以）
+python3 make.py flash  ESP32-P4-ETH # 建置 + 燒錄（預設 app-flash，不動碟上的資料）
+python3 make.py monitor ESP32-P4-ETH # 序列埠監看
 python3 make.py outputs             # 歷史產物（artifacts/）
 
 # 之後的更新不用按鍵
-tools/ota.py --port /dev/cu.usbmodem* artifacts/ESP32-P4-ETH_20261102_022530.bin
+tools/ota.py --port /dev/cu.usbmodem* artifacts/ESP32-P4-ETH.bin
 tools/selftest.py --port /dev/cu.usbmodem*     # 一鍵自測：STATUS / 解碼 / OTA
 ```
 
-`artifacts/<板子>.bin` 永遠是最新那顆；再建一次時，上一顆才退成帶時間戳的歷史檔
-（附 `.json` 側錄：git / IDF / sha256 / 尺寸）。要建全部板子：`python3 make.py build --all`。
-細節見 [tools/README.md](tools/README.md)。
+建置產物全部集中在 `artifacts/`：
 
-直接操作 IDF 時，`idf.py` 要在 `firmware/` 下跑：
+```text
+artifacts/
+├─ <board>.bin              最新 app image（OTA 用這個）
+├─ <board>/                 bootloader.bin / partition-table.bin / app / flash_args
+├─ build/<chip>_<board>/    所有 CMake / ninja 中間檔（每塊板一個）
+└─ logs/
+```
+
+`artifacts/<板子>.bin` 永遠是最新那顆；再建一次時，上一顆才退成帶時間戳的歷史檔
+（附 `.json` 側錄：git / IDF / sha256 / 尺寸）。`firmware/` 不會再出現
+`build/`、`build_p4/`、`build_p4c6/` 或 `sdkconfig`。要建全部板子：
+`python3 make.py build --all`。細節見 [tools/README.md](tools/README.md)。
+
+直接操作 IDF 時，`idf.py` 要在 `firmware/` 下跑；要跟 `make.py` 用同一個 build dir：
 
 ```bash
 source ~/esp/esp-idf/export.sh
-cd firmware && idf.py -DPORT=P4/ESP32-P4-ETH -DIDF_TARGET=esp32p4 build
-# 或留在 repo 根：idf.py -C firmware ...
+cd firmware
+idf.py -B ../artifacts/build/P4_ESP32-P4-ETH \
+       -DSDKCONFIG=../artifacts/build/P4_ESP32-P4-ETH/sdkconfig \
+       -DPORT=P4/ESP32-P4-ETH -DIDF_TARGET=esp32p4 build
 ```
 
 ---
@@ -142,6 +166,8 @@ ESP32-P4 乙太網：純 TCP 7.4 / 7.1 MB/s；NC4 over TCP 在 PUSH 收斂模式
 下一步：真零複製（parser 直接在插槽上解析）、PUSH 長時 soak、OTA rollback、
 第二條 CDC（NC4 與 log 分離）、多通道轉接頭。
 
-環境：ESP-IDF v6.0.3（`~/esp/esp-idf`）。2026-11-02 從乾淨的 `build/` 重建通過 —
-P4 `0x9b830`（≈623 KB，含 WS/UDP/HTTP）、S3 `0x57050`（≈349 KB，無 WS）。
+環境：ESP-IDF **v6.1**（`/home/user/git/s31-verify/esp-idf`；另有 v6.0.3 的
+`~/esp/esp-idf`）。2026-11-16 用兩層 ports 從乾淨的 `build/` 重建通過 —
+P4-ETH `0xff040`（1020 KB，含 WS/UDP/HTTP）、S3-N16R8 `0x118e90`（1.1 MB，無 WS）。
+（2026-11-02 在 IDF 6.0.3 的量測是 P4 623 KB／S3 349 KB；6.1 的元件與設定不同，不要直接比。）
 安裝與踩雷記錄見 [build_and_flash.md](docs/02_guides/build_and_flash.md)。

@@ -6,6 +6,7 @@
     "archive": true,
     "doctor": true,
     "output_dir": "artifacts",
+    "build_dir": null,
     "keep": 10
   },
   "idf": {

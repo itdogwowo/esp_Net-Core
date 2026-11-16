@@ -354,17 +354,17 @@ static const char *kind_name(nl_kind_t k)
     default:      return "http";
     }
 }
-static bool mem_is(const nc_link_cfg_t *l, const char *m)
+static bool mem_is(const nc_link_cfg_t *l, uint8_t m)
 {
-    return l != NULL && strcmp(l->mem, m) == 0;
+    return l != NULL && l->mem == m;
 }
 
 static void *line_alloc(size_t bytes, const nc_link_cfg_t *l)
 {
-    if (mem_is(l, "sram")) {
+    if (mem_is(l, NC_CFG_MEM_SRAM)) {
         return heap_caps_malloc(bytes, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
     }
-    if (mem_is(l, "psram")) {
+    if (mem_is(l, NC_CFG_MEM_PSRAM)) {
         return heap_caps_malloc(bytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     }
     void *p = heap_caps_malloc(bytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
@@ -758,7 +758,8 @@ esp_err_t nc_net_lines_declare(nc_net_decoder_fn get_decoder)
         const nc_link_cfg_t *l = &sys->links[i];
         ESP_LOGW(TAG, "scan %s kind=%d enable=%d managed=%d port=%u iface=%s service=%s",
                  l->name, (int)l->kind, (int)l->enable, (int)l->managed,
-                 (unsigned)l->port, l->iface, l->service);
+                 (unsigned)l->port, nc_cfg_iface_name(l->iface),
+                 nc_cfg_service_name(l->service));
         if (!l->enable || !l->managed || !kind_is_net(l->kind)) {
             continue;
         }
@@ -788,7 +789,7 @@ esp_err_t nc_net_lines_declare(nc_net_decoder_fn get_decoder)
             ln->core = 0;                 // web 不需要 decoder；core 只係 httpd task
             s_nlines++;
             ESP_LOGW(TAG, "line %s：iface=%s http/%u service=http core=%d",
-                     l->name, l->iface, (unsigned)l->port, ln->core);
+                     l->name, nc_cfg_iface_name(l->iface), (unsigned)l->port, ln->core);
             continue;
         }
 
@@ -827,8 +828,8 @@ esp_err_t nc_net_lines_declare(nc_net_decoder_fn get_decoder)
             .rx_ring_size = l->rx.slot_size,
             .rx_slots = l->rx.slots,
             // S3-Matrix 冇 PSRAM；NC_BUF_PSRAM 不會 fallback，會直接 NO_MEM。
-            .slots_psram = !mem_is(l, "sram") &&
-                           (!mem_is(l, "psram") ||
+            .slots_psram = !mem_is(l, NC_CFG_MEM_SRAM) &&
+                           (!mem_is(l, NC_CFG_MEM_PSRAM) ||
                             heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM) >=
                             (size_t)l->rx.slot_size),
         };
@@ -842,10 +843,10 @@ esp_err_t nc_net_lines_declare(nc_net_decoder_fn get_decoder)
         ln->tx_lock = xSemaphoreCreateMutex();
         s_nlines++;
         ESP_LOGW(TAG, "line %s：iface=%s %s/%u service=%s core=%d slots=%u×%u",
-                 l->name, l->iface, kind_name(ln->kind), (unsigned)l->port,
+                 l->name, nc_cfg_iface_name(l->iface), kind_name(ln->kind), (unsigned)l->port,
                  (ln->service == NLS_WS) ? "ws" : "nc4", core,
                  (unsigned)l->rx.slots, (unsigned)l->rx.slot_size);
-        ESP_LOGW(TAG, "  mem=%s region=%u B", l->mem, (unsigned)bytes);
+        ESP_LOGW(TAG, "  mem=%s region=%u B", nc_cfg_mem_name(l->mem), (unsigned)bytes);
     }
     s_declared = true;
     ESP_LOGW(TAG, "declared %u network lines", (unsigned)s_nlines);

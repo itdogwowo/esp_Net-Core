@@ -32,20 +32,31 @@ def _board_check() -> Check:
                  "跑 python3 tools/board.py check 看細節")
 
 
-def _sdkconfig_freshness() -> Check:
-    gen = env.FIRMWARE / "sdkconfig"
-    if not gen.exists():
-        return Check("sdkconfig", OK, "還沒有（第一次 build 會產生）")
+def _sdkconfig_freshness(cfg: dict) -> Check:
+    root = env.build_root(cfg)
+    try:
+        shown = root.relative_to(env.ROOT)
+    except ValueError:
+        shown = root
+    sdkconfigs = sorted(root.glob("*/sdkconfig")) if root.exists() else []
+    legacy = env.FIRMWARE / "sdkconfig"
+    if not sdkconfigs and not legacy.exists():
+        return Check("sdkconfig", OK, f"還沒有（第一次 build 會在 {shown}/ 產生）")
     defaults = [env.FIRMWARE / "sdkconfig.defaults"]
-    defaults += [d / "sdkconfig.defaults" for d in (env.ROOT / "ports").glob("*/*/")]
+    defaults += [d / "sdkconfig.defaults" for d in (env.ROOT / "ports" / "hardware").glob("*/*/")]
+    defaults += [d / "sdkconfig.defaults" for d in (env.ROOT / "ports" / "project").glob("*/*/")]
     defaults = [p for p in defaults if p.exists()]
     if not defaults:
         return Check("sdkconfig", OK, "沒有 defaults 可比較")
-    newest = max(p.stat().st_mtime for p in defaults)
-    if gen.stat().st_mtime < newest:
-        return Check("sdkconfig", WARN, "比 sdkconfig.defaults 舊",
-                     "改了不會生效：rm firmware/sdkconfig 再 build（make.py build --clean 也行）")
-    return Check("sdkconfig", OK, "與 defaults 同步")
+    newest_default = max(p.stat().st_mtime for p in defaults)
+    stale = [p for p in sdkconfigs if p.stat().st_mtime < newest_default]
+    if stale:
+        return Check("sdkconfig", WARN, f"{len(stale)} 個 build 的 sdkconfig 比 defaults 舊",
+                     "改了不會生效：make.py build <board> --fresh（或 make.py clean）")
+    if legacy.exists():
+        return Check("sdkconfig", WARN, "舊 firmware/sdkconfig 仍在",
+                     "新版每個 build dir 有自己的 sdkconfig；make.py clean 會清掉舊檔")
+    return Check("sdkconfig", OK, f"與 defaults 同步（{len(sdkconfigs)} 個 build）")
 
 
 def run_checks(cfg: dict, board_query: str | None = None, quick: bool = False) -> list[Check]:
@@ -59,12 +70,13 @@ def run_checks(cfg: dict, board_query: str | None = None, quick: bool = False) -
 
     # 2) 選一塊板子當代表（決定要檢查哪個 IDF）
     try:
-        d, b, chip, chip_dir = env.resolve_board(board_query, require=False)
-        board_label = f"{b.get('name', d.name)} ({chip})"
+        pt = env.resolve_board(board_query, require=False)
+        chip = pt.chip
+        board_label = f"{pt.name} ({chip})"
     except SystemExit as e:
         checks.append(Check("板子", FAIL, str(e), "python3 tools/board.py new …"))
-        d = b = None
-        chip, chip_dir, board_label = "esp32s3", "S3", "?"
+        pt = None
+        chip, board_label = "esp32s3", "?"
 
     idf = env.idf_path_for(chip, cfg)
 
@@ -100,11 +112,11 @@ def run_checks(cfg: dict, board_query: str | None = None, quick: bool = False) -
                         "" if ports else "只有 flash / monitor 需要；build 不需要"))
 
     # 8) 板子設定
-    if d is not None:
+    if pt is not None:
         checks.append(_board_check())
 
     # 9) sdkconfig 新鮮度
-    checks.append(_sdkconfig_freshness())
+    checks.append(_sdkconfig_freshness(cfg))
 
     # 10) 磁碟
     du = shutil.disk_usage(env.ROOT)

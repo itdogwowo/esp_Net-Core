@@ -1,0 +1,30 @@
+# ESP32-S3-SuperMini — 硬體事實（改這裡要重新 build）
+# 對應 board.json；tools/board.py check 會驗證兩者一致。
+#
+# ESP32-S3FH4R2：4 MB 內嵌 flash（XMC）＋ 2 MB 內嵌 PSRAM（AP_3v3，quad @ 80 MHz）。
+# esptool 讀到的 eFuse：flash quad 4 lines、3.3 V。
+
+# ── flash（4 MB 內嵌）──
+CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
+CONFIG_ESPTOOLPY_FLASHFREQ_80M=y
+CONFIG_ESPTOOLPY_FLASHMODE_DIO=y
+
+# ── PSRAM：內嵌 2 MB，quad（不是 octal；呢個 package 只有 4 條 data line）──
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_QUAD=y
+CONFIG_SPIRAM_SPEED_80M=y
+
+# ── CPU ──
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
+
+# ── console：USB-Serial-JTAG ──
+# 板上冇 USB-UART 橋接，UART0 只出得去排針；要見到 bootloader 的訊息就靠 USJ。
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+
+# ── 分區表：全域那份是 16 MB（N16R8），這塊只有 4 MB，用自己一份 ──
+# 路徑相對 firmware/（專案根）。
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="../ports/hardware/S3/ESP32-S3-SuperMini/partitions.csv"
+
+# ── Wi-Fi（S3 原生 radio；runtime 仍由 network.json 的 wifi.enable 決定）──
+CONFIG_NETCORE_WIFI=y

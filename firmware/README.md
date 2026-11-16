@@ -3,17 +3,19 @@
 這是唯一會被編進裝置的東西。`idf.py` 的專案根就在這一層。
 
 ```bash
-# 建議走 tools/board.sh（它會處理 target 切換與 sdkconfig 重設）
-../tools/board.sh build p4
+# 建議走 tools/board.sh / make.py（它會處理 build dir、target 與 sdkconfig）
+../tools/board.sh build ESP32-P4-ETH
 
-# 直接用 idf.py 也可以，但 target 與 PORT 要自己指定
+# 直接用 idf.py 也可以，但 target、PORT 與 build dir 要自己指定
 source ~/esp/esp-idf/export.sh
-idf.py -DPORT=P4/ESP32-P4-ETH -DIDF_TARGET=esp32p4 build
-idf.py -DPORT=S3/ESP32-S3-N16R8 -DIDF_TARGET=esp32s3 build
+idf.py -B ../artifacts/build/P4_ESP32-P4-ETH \
+       -DSDKCONFIG=../artifacts/build/P4_ESP32-P4-ETH/sdkconfig \
+       -DPORT=P4/ESP32-P4-ETH -DIDF_TARGET=esp32p4 build
 ```
 
-> ⚠️ `sdkconfig` 會記住「上一次的 target」。換板子卻只換 `-DPORT` 會拿 A 板的設定去建 B 板，
-> 所以 `tools/board.sh` 偵測到 target 不符時會自動 `set-target`（等於重設 `sdkconfig` 與 `build/`）。
+> ⚠️ 每塊板有自己的 `artifacts/build/<chip>_<board>/sdkconfig`。直接用 `idf.py` 而
+> 不指定 `-B`／`-DSDKCONFIG` 會退回 `firmware/build` 與 `firmware/sdkconfig`，
+> 那就又開始污染專案樹了。
 
 ---
 
@@ -38,8 +40,11 @@ firmware/
 │  └─ app/fx/              效果載入器（.fxe + manifest + 實例表）
 ├─ sdkconfig.defaults      共通建置配置（晶片層）
 ├─ partitions.csv          分割表（factory / ota_0 / ota_1 / data / nvs）
-└─ build/  managed_components/  sdkconfig  dependencies.lock   ← 生成物，不進 git
+└─ managed_components/  dependencies.lock   ← IDF 依賴生成物，不進 git
 ```
+
+CMake/ninja 的中間檔不在 `firmware/`：`make.py` 用 `-B ../artifacts/build/<chip>_<board>`，
+`-DSDKCONFIG` 也在同一個目錄。`firmware/sdkconfig` 已廢除。
 
 `components/sys` 與 `components/tasks` 由根 `CMakeLists.txt` 的 `EXTRA_COMPONENT_DIRS` 掛進來。
 新增一個分區（`hw/`、`sw/`…）時，要同時加進那個清單。
@@ -53,12 +58,18 @@ firmware/sdkconfig.defaults                  ← 共通（分割表 / FATFS / Fr
         ↓ 後者覆蓋前者
 ../ports/_profiles/<能力>.defaults           ← 能力碎片（ETH / WS / UDP），由 board.py sync 展開
         ↓
-../ports/<chip>/<board>/sdkconfig.defaults   ← 這塊板子的硬體事實（flash / PSRAM / CPU / console）
+../ports/hardware/<chip>/<board>/sdkconfig.defaults   ← 硬體事實（flash / PSRAM / CPU / console）
+        ↓
+../ports/project/<chip>/<board>/sdkconfig.defaults    ← 項目能力（WS / UDP；可選）
         ↓ build 時展開
-firmware/sdkconfig                           ← 生成物，不要手改；它存在時改 defaults 不會生效
+../artifacts/build/<chip>_<board>/sdkconfig   ← 生成物（每塊板一份，-DSDKCONFIG），不要手改
 ```
 
-三個檔案各自的上位真相是 `../ports/<chip>/<board>/board.json`（機器可讀的板子身份證）。
+`firmware/sdkconfig` 已經廢除；`make.py` 用 `-DSDKCONFIG=` 指向 per-board build dir，
+所以多塊板可以並存。舊的 `firmware/sdkconfig` 若還在，`make.py clean` 會清掉。
+
+三個檔案各自的上位真相是 `../ports/hardware/<chip>/<board>/board.json`（機器可讀的板子身份證），
+項目選擇在 `../ports/project/<chip>/<board>/project.json`。
 
 ```bash
 python3 ../tools/board.py check   # board.json ↔ sdkconfig 一致性 + 抓放錯層的設定
@@ -66,16 +77,21 @@ python3 ../tools/board.py check   # board.json ↔ sdkconfig 一致性 + 抓放�
 
 **規則：共通檔不准出現板子事實**（flash 大小 / PSRAM / console / CPU 頻率）——
 `board.py check` 會擋。要調任何值 → 寫回 port 的 `sdkconfig.defaults` 或 `board.json`，
-刪掉 `sdkconfig` 再 build。
+再 `python3 make.py build <board> --fresh`（只清這塊板的 build dir／sdkconfig）。
 
-分割表同理：`partitions.csv` 在 `sdkconfig.defaults` 用
-`CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"` 指定（相對本目錄）。
+分割表同理：`partitions.csv` 放在 hardware 層，在 `sdkconfig.defaults` 用
+`CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="../ports/hardware/<chip>/<board>/partitions.csv"` 指定
+（相對本目錄）。
+
+**hardware 預設是編出來的**：`tools/ncportgen.py` 把 `wiring.json` 變成
+`nc_port.c`（static const `nc_hardware_cfg_t`）＋ `preset_hardware.json`；
+firmware 不再在 runtime 解析 wiring JSON。
 
 ---
 
 ## 出廠預置怎麼進裝置
 
-`main/CMakeLists.txt` 會把 `../ports/<board>/data/config/*.json` 用 `EMBED_FILES` 嵌進 firmware，
+`main/CMakeLists.txt` 會把 `../ports/project/<board>/data/config/*.json` 用 `EMBED_FILES` 嵌進 firmware，
 開機時寫進 `data` 分區。**不走** `fatfs_create_partition_image`——MSC 用 wear levelling，
 預先燒的 FAT 映像會被 WL 的 metadata 擠歪，導致碟顯示「沒有檔案系統」。
 

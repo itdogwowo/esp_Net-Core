@@ -1,18 +1,36 @@
 cmake_minimum_required(VERSION 3.16)
 
-# ── 專案層（<repo>/ports/，在 firmware/ 的上一層）：晶片 = 一個 build，板子 = 一份 JSON ──
+# ── 兩層 port：硬體板（ports/hardware/）＋ project（ports/project/）──
+# 硬體板 = 這塊板「有什麼」；project = 這塊板「跑什麼」。
 # 這個 CMakeLists 是 ESP-IDF 工程的根；idf.py 必須在 firmware/ 下跑（或 idf.py -C firmware）。
-set(PORT "S3/ESP32-S3-N16R8" CACHE STRING "Board port under <repo>/ports/")
-set(PORT_DIR "${CMAKE_CURRENT_LIST_DIR}/../ports/${PORT}")
+set(PORT "S3/ESP32-S3-N16R8" CACHE STRING "Hardware board under <repo>/ports/hardware/")
+set(PROJECT "" CACHE STRING "Project under <repo>/ports/project/ (optional)")
+set(PORT_DIR "${CMAKE_CURRENT_LIST_DIR}/../ports/hardware/${PORT}")
 
 if(NOT EXISTS "${PORT_DIR}")
-    message(FATAL_ERROR "port not found: ${PORT_DIR}")
+    message(FATAL_ERROR "hardware port not found: ${PORT_DIR}")
 endif()
 
-# 共通預設 → 板子覆蓋（後者勝）
+set(PROJECT_DIR "")
+if(PROJECT)
+    set(PROJECT_DIR "${CMAKE_CURRENT_LIST_DIR}/../ports/project/${PROJECT}")
+    if(NOT EXISTS "${PROJECT_DIR}")
+        message(FATAL_ERROR "project not found: ${PROJECT_DIR}")
+    endif()
+endif()
+
+# IDF 6.1 的 component_get_requirements 在另一個 context 重新 include 元件 CMake；
+# 那裡看不到上面的普通變數。把身分放進環境，子 CMake 一定繼承得到。
+set(ENV{NC_PORT} "${PORT}")
+set(ENV{NC_PROJECT} "${PROJECT}")
+
+# 共通預設 → 硬體板覆蓋 → project 覆蓋（後者勝）
 set(SDKCONFIG_DEFAULTS "${CMAKE_CURRENT_LIST_DIR}/sdkconfig.defaults")
 if(EXISTS "${PORT_DIR}/sdkconfig.defaults")
     list(APPEND SDKCONFIG_DEFAULTS "${PORT_DIR}/sdkconfig.defaults")
+endif()
+if(PROJECT_DIR AND EXISTS "${PROJECT_DIR}/sdkconfig.defaults")
+    list(APPEND SDKCONFIG_DEFAULTS "${PROJECT_DIR}/sdkconfig.defaults")
 endif()
 
 # ── 測試專用（約定：action/test_action、app/test_*_tasks）──
@@ -52,4 +70,3 @@ endif()
 
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 project(esp_net_core)
-

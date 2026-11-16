@@ -1,30 +1,37 @@
 # 配置分層：一個層一個檔案
 
-> **狀態（2026-11-08 更新）**：`nc_cfg`（`sys/config`）已上線，已接四個檔：
+> **用語（2026-11-16 起）**：本頁每個檔案都有 `F.` 名，之後所有文件、log、對話都用同一組：
+> `F.spec`（板卡規格，`hardware/board.json`）、`F.wiring`（板卡接線，`hardware/wiring.json`）、
+> `F.device`（板載裝置，`hardware/driver.json`）、`F.build`（建置開關，兩層 `sdkconfig.defaults`／`_profiles`）、
+> `F.project`（項目選擇，`project/project.json`）、`F.preset`（出廠預置，
+> `project/<board>/data/config/*.json`）、`F.live`（現行設定，裝置 `/data/config/*.json`）、
+> `F.default`（內建預設，`nc_cfg_defaults.c`／generated `nc_port.c`／`nc_cfg_chip.c`）。
+> **2026-11-16 起 ports/ 已分成 hardware／project 兩層**；完整設計見
+> [ports-layout.md](ports-layout.md)。定義與五條規則見 [glossary.md §5](glossary.md)。
+
+> **狀態（2026-11-16 更新）**：`nc_cfg`（`sys/config`）已接三個層：
 > `tasks.json`（任務管理器讀 level / affinity，並會補寫）、`system.json`
-> （`cID` / `links[]` / `routes[]` / `log_debug_mode`）、`network.json`（只讀 `bt.pin`）、
-> `hardware.json`（**只有 ETH 與 SDIO 兩段**，2026-11-08 起 ETH 的腳位與 enable 真的生效）。
+> （`cID` / `links[]` / `routes[]` / `log_debug_mode` / `usb`）、
+> `hardware.json`（generated 預設 ＋ 用戶逐欄位覆蓋；已 typed：ETH／SDIO／PIN／PWM／UART）。
+> `network.json` **仍然不是單一 typed 層**：`nc_wifi.c`、`nc_net_lines.c`、
+> `nc_net_raw.c`、`main.c` 各自讀自己那一段（wifi / selftest / rawbench / bt.pin）。
 >
-> ⚠️ **`driver.json` 仍未接 runtime**：2026-11-10 已由 `ports/*/data/config/`
-> 移到 `ports/<board>/driver.json`（build-time，不再出現在 USB），但 firmware 仍然
-> 沒有讀它；改了不會生效。`hardware.json` 其餘段（`PIN`/`SPI`/`I2C`/`I80`/`UART`/
-> `I2S`/`PWM`/`ENC`/`XL9555`）同理，等 driver 有型別才逐個接。
-> 下面 §2–§4 有一部分是**目標設計**，不是現況；以本頁頂部 2026-11-10 更新為準。
+> **`wiring.json` 不再在 runtime 解析**：build 時由 `tools/ncportgen.py` 編成
+> `nc_port.c`（static const `nc_hardware_cfg_t`）＋ `preset_hardware.json`；
+> `nc_cfg_defaults_hardware()` 回傳 generated 表，用戶 `/data/config/hardware.json`
+> 只覆蓋差異。`nc_cfg_boot_ex()` 的 wiring base 參數已不再由 `main` 使用。
 >
-> **2026-11-10 現況更新（board／user 分家）**：
-> **編譯進去的 wiring／driver 是「預設」，不是鎖死**；用戶 `config/hardware.json`
-> 可以覆蓋 wiring 的任何欄位。已 typed：ETH／SDIO／**PIN／PWM／UART**；
-> 其餘段（SPI／I2C／I80／I2S／ENC／XL9555）等 driver 型別化。
-> `ports/<board>/wiring.json` 已成為 build-time 的板級接線，CMake embed；
-> `/data/config/hardware.json` 是**用戶覆蓋層**；seed 會寫入一份完整的
-> wiring 預設（GPIO／SPI／I2C／I80／UART／I2S／PWM／SDIO／ENC／XL9555 都看得見），
-> 用戶可以直接改、也可以只留差異；缺席／沒寫的欄位再由 wiring 補。
-> 開機由 `nc_cfg_boot_ex()` 先讀 wiring、再用戶 JSON 逐欄位覆蓋。
-> `ports/<board>/driver.json` 也移到 board package（build-time；目前 runtime 仍未讀）。
-> `sdkconfig.defaults` 永遠在 build-time，不會出現在 USB。
-> `ports/_chips/` 已建立第一批 chip profile（ST7789／GT1151Q／PCM5102／APA102／PCA9685／HUSB238／UART_MOTOR）；
-> 板子 `driver.json` 只寫 `profile`＋板級差異，`tools/board.py check` 會驗證引用。
-> **runtime 仍未讀 `driver.json`**，所以 profile 合併暫時是 build-time 資料結構，不是已生效的 driver 參數。
+> **`driver.json` 仍未接 runtime**：它是 `ports/hardware/<board>/driver.json`
+> （build-time，不進 USB），firmware 沒有讀它；改了不會生效。
+> `hardware.json` 其餘段（`SPI`／`I2C`／`I80`／`I2S`／`ENC`／`XL9555`）同理，
+> 只留在 generated seed，等 driver 有型別才逐個接。
+> 下面 §2–§4 有一部分是**目標設計**，不是現況；以本頁頂部 2026-11-16 更新為準。
+>
+> **2026-11-16 link schema（canonical）**：`kind` 只寫 transport（`tcp`／`udp`／`ws`…）、
+> `iface` 分開寫（`eth`／`wifi`／`any`）、`port`／`rx` 在 link 頂層。
+> 舊 `kind:"eth_tcp"` 與 `cfg:{port,rx}` 仍然接受；新 seed 已全部正規化。
+> `main.c` 另有第 ① 層最小骨架（`k_min_system`／`k_min_network`／`k_min_tasks`），
+> 所以 `config/` 四個檔一定存在。
 
 > **參考**：mp_Net-Core 的 `config.json`（一個檔 24 個 section：System / Buffer / SPI / I2C / UART / TFT / WS2812 …）
 > **相關**：[decode-routes.md](decode-routes.md)、[writing-a-task.md](writing-a-task.md)、[component-layout.md](component-layout.md)
@@ -35,7 +42,7 @@
 
 | 層 | 內容 | 換它要重 build？ | 放哪 |
 |---|---|---|---|
-| **L1 硬體事實** | flash 大小/頻率、PSRAM、CPU 頻率、有沒有 ETH、console | ✅ 一定要 | `ports/<chip>/<board>/board.json` + `sdkconfig.defaults` |
+| **L1 硬體事實** | flash 大小/頻率、PSRAM、CPU 頻率、有沒有 ETH、console | ✅ 一定要 | `ports/hardware/<chip>/<board>/board.json` + `sdkconfig.defaults` |
 | **L2 能力碎片** | ETH、NC4 over WS、NC4 over UDP | ✅ 要 | `ports/_profiles/*.defaults` |
 | **L3 執行期** | 腳位覆蓋、通道與解碼路線、IP、任務參數、效果開關 | ❌ 同一份 binary | **隨身碟 `config/*.json`** |
 
@@ -54,7 +61,7 @@ config 只能管租戶。** 但「冇 config 都開得機」不等於「config �
 | 層 | 來源 | 誰決定 | 內容 | 什麼時候用 |
 |---|---|---|---|---|
 | ① **內建最小預設** | 編在 firmware 裡的常數字串 | 韌體 | 只有 `version` + 最少必需欄位（骨架） | 該層**完全沒有**任何來源時 |
-| ② **板級出廠預置** | `ports/<chip>/<board>/data/config/<layer>.json`（build 時 `EMBED_FILES`） | 這塊板子 | 實際值：腳位、PHY、IP、任務清單 | 檔案不存在、而且這塊板有出廠檔 |
+| ② **板級出廠預置** | `ports/project/<chip>/<board>/data/config/<layer>.json`（build 時 `EMBED_FILES`） | 這塊板子 | 實際值：腳位、PHY、IP、任務清單 | 檔案不存在、而且這塊板有出廠檔 |
 | ③ **用戶檔** | 隨身碟上的 `/data/config/<layer>.json` | 使用者 | 使用者改過的值 | 永遠最高優先（存在就不動） |
 
 **建立規則**（`seed_file()`，`main.c`）：
@@ -91,14 +98,10 @@ config 只能管租戶。** 但「冇 config 都開得機」不等於「config �
 CDC／MSC／log 三樣都冇人要 → 連 TinyUSB 都唔裝。以前缺名會當成啟用，
 把一條線從 `links[]` 刪掉記憶體照樣佔住 —— 2026-11-13 已改（`main.c` 的 `link_enabled()`）。
 
-> ⚠️ **現況缺口**：目前只有第 ② 層（而且只有 `hardware` / `system` / `network` / `tasks` 四個檔）。
-> 第 ① 層**不存在** —— 如果某塊板冇 `ports/<board>/data/config/tasks.json`，
-> `NETCORE_HAS_PRESET_TASKS=0`，`tasks.json` 就**永遠不會被建立**（`nc_task` 只會補條目，
-> 不會建檔）。`driver.json` 完全沒有 embed；`hardware.json` 有 embed，但 firmware 只讀
-> ETH 與 SDIO 兩段（見開頭說明）。
->
-> 要補的東西：在 `main.c` 加三個內建最小字串（`system` / `network` / `tasks`），
-> 讓 `seed_presets()` 在「冇板級預置」時用它們。內容只要 `{"version":1}` 這種骨架即可。
+> ✅ **2026-11-16 已補第 ① 層**：`main.c` 有 `k_min_system`／`k_min_network`／`k_min_tasks`
+> 三個最小骨架字串；`seed_presets()` 在「冇板級預置」時用它們，所以 `config/` 下四個檔
+> 一定會存在。`hardware` 由 `ncportgen` 的 `preset_hardware.json` 保證；`driver.json`
+> 仍然是 build-time 資料，runtime 未讀。
 
 ---
 
@@ -124,18 +127,21 @@ CDC／MSC／log 三樣都冇人要 → 連 TinyUSB 都唔裝。以前缺名會�
 ```text
 【build-time，開發者；唔會出現在 USB】
 ports/
-  _chips/                    ← 同一顆 IC 的跨板 profile（未做）
-  <board>/
+  hardware/<chip>/<board>/
     board.json               ← 不可變事實（chip/flash/PSRAM/console/features）
-    wiring.json              ← 板級 pins/buses（CMake embed，開機當 base）
+    wiring.json              ← 板級 pins/buses（ncportgen 編成 nc_port.c，零 runtime 解析）
     driver.json              ← PHY/DMA/TFT/USB 參數（build-time，runtime 未讀）
-    sdkconfig.defaults       ← IDF build config
-    data/config/             ← 只放給用戶的 seed
+    sdkconfig.defaults       ← IDF build config（L1 + 硬體能力碎片）
+    partitions.csv           ← 這塊 flash 的分割表（可選）
+  project/<chip>/<board>/
+    project.json             ← 項目選擇（hardware 指回哪塊板 / profiles / seed）
+    sdkconfig.defaults       ← 項目能力碎片（可選）
+    data/config/             ← 只放給用戶的 seed（system/network/tasks）
 
 【runtime，USB 只看見這個】
 /data/
 ├─ config/
-│  ├─ hardware.json          完整預設（可改；沒寫的欄位回 wiring）
+│  ├─ hardware.json          完整硬體預設（generated seed；沒寫的欄位回 nc_port.c）
 │  ├─ system.json            身份、開機、NC4 通道與解碼路線
 │  ├─ network.json           IP / mask / gw / DHCP
 │  └─ tasks.json             任務 core / prio / stack 覆蓋
@@ -144,8 +150,8 @@ ports/
 
 | 檔案 | 擁有者 | 讀的時機 | 缺檔 / 壞檔 |
 |---|---|---|---|
-| `wiring.json`（build-time） | 硬體層 | **硬體 init 之前**（`nc_cfg_boot_ex` base） | 用編譯期預設 |
-| `hardware.json`（user） | 硬體層 | 同上，覆蓋 wiring | 用 wiring |
+| `wiring.json`（build-time） | 硬體層 | **build 時**（`ncportgen` → `nc_port.c`） | 用 `k_hw` 內建預設 |
+| `hardware.json`（user） | 硬體層 | **硬體 init 之前**（覆蓋 generated 預設） | 用 generated 預設 |
 | `driver.json`（build-time） | driver 層 | 未接 | 用 driver 內建預設 |
 | `system.json` | 系統層（main） | **硬體起來之後**（分配要看實際硬體） | 只啟動硬體實際支援的通道 |
 | `network.json` | 網路層 | ETH/WiFi 起來前 | 用內建 IP 或 DHCP |
@@ -190,7 +196,7 @@ nc_cfg_close(cfg);
 
 ```text
 ① NVS init
-② hardware.json → 硬體 init（GPIO/SPI/I2C/UART/ETH PHY；缺檔用 board.json）
+② hardware.json → 硬體 init（GPIO/SPI/I2C/UART/ETH PHY；缺檔用 generated `nc_port.c`）
 ③ driver.json   → driver init（ETH DMA、USB、TFT…）
 ④ 硬體起來了，讀分配：
      system.json  → nc4.links[] / routes[]（引擎由 routes 推導，不寫 engines[]）
@@ -223,20 +229,30 @@ ETH PHY 沒 link、UART 沒接，就不該照 config 硬開一條 link。
 
   "nc4": {
     "links": [                                  // 通道：只講怎麼收
-      { "name": "CDC", "kind": "cdc", "enable": 1, "cfg": { "rx": { "mode": "pull", "region": 8205, "chunk": 1024, "budget": 8 } } },
-      { "name": "UART", "kind": "uart", "enable": 1, "cfg": { "rx": { "mode": "pull", "region": 1024, "chunk": 512, "budget": 8 } } },
-      { "name": "TCP", "kind": "tcp", "enable": 1, "cfg": { "port": 6000, "rx": { "mode": "push_frame", "region": 16410, "chunk": 8192, "budget": 8, "slots": 8, "slot_size": 8205 } } }
+      { "name": "CDC", "kind": "cdc", "rx": { "region": 8205, "chunk": 1024, "budget": 8 } },
+      { "name": "UART", "kind": "uart", "rx": { "region": 1024, "chunk": 512, "budget": 8 } },
+      { "kind": "tcp", "iface": "eth", "index": 0, "port": 6000,
+        "rx": { "region": 16410, "chunk": 8192, "budget": 8, "slots": 8, "slot_size": 8205 } }
     ],
     "routes": [                                 // 誰解、要不要轉出去（router 永遠生效）
       { "in": "nctx",     "out": ["decode0"] },   // 本機 → 自己
       { "in": "outbound", "out": [] },            // 本機 → 外
       { "in": "CDC",      "out": ["decode0"] },
       { "in": "UART",     "out": ["decode1"] },
-      { "in": "TCP",      "out": ["decode0", "UART"] }
+      { "in": "eth_tcp0", "out": ["decode0", "UART"] }
     ]
   }
 }
 ```
+
+**Link schema（canonical，2026-11-16）**：
+
+- `kind` 只寫 transport：`cdc` / `uart` / `tcp` / `ws` / `udp` / `http` / `usb_jtag`。
+- `iface` 另外寫：`eth` / `wifi` / `any`（缺席 = `any`）。
+- `port` 只在 link 頂層寫一次；`rx` 也直接在 link 下面。
+- 冇寫 `name` 時，由 `iface + kind + index` 生成（`eth_tcp0`、`wifi_udp1`…）。
+- **舊格式仍然接受**：`kind:"eth_tcp"` 會拆成 `kind:"tcp", iface:"eth"`；
+  `cfg:{port,rx}` 亦會讀，但新檔請用上面的寫法。
 
 `routes[].out` 同時接受**通道**（轉發）與 **decode 引擎**（本地執行），跟舊專案的
 `out: ["self"]` 同一個語意（新專案的本機來源叫 `nctx`）；`decodeN` 有人指向才開（N = 核心編號），**不需要宣告引擎**。
@@ -468,7 +484,7 @@ DMA 大小（1600）與環數（16/16）**不在 config**——那是 build-time
 |---|---|---|
 | `nc_cfg_open/root/version/close` | `firmware/components/sys/config/` | ❌ 還沒有 |
 | 各層自己的 parser | 各 component（`sys/store`、`sys/transport`、`main`） | ❌ 還沒有 |
-| 出廠預置（每個檔一份） | `ports/<chip>/<board>/data/config/*.json` | ❌ 現在只有一個 `config.json`（321 B，只有 System + Network.lan） |
+| 出廠預置（每個檔一份） | `ports/project/<chip>/<board>/data/config/*.json` | ❌ 現在只有一個 `config.json`（321 B，只有 System + Network.lan） |
 | 效果樹 | `/data/pixel/`（`effects/`、`map/`、`modes/`） | 🟡 載入器掃 `pixel/effects/`（路徑本輪改） |
 | NVS 覆蓋 | `net/rx_core`、`net/rx_split`、`cid` … | ✅ 已有（優先於 config） |
 
@@ -484,7 +500,7 @@ DMA 大小（1600）與環數（16/16）**不在 config**——那是 build-time
 | C1 | `system.json` 的 `nc4.links` 先接（唯讀）；`routes[]` 的 `in → decodeN` 已生效（決定哪一核解、哪一核存在），`out` 的 link 轉發未做 | 改 `slots` 重開機生效；改 `routes[].in` 的 `decodeN` 會換核 |
 | C2 | `hardware.json` / `driver.json` 接掉 `main.c` 的寫死值 | 🟡 ETH 已完成（2026-11-08，含 `enable`）；SDIO 早前已完成；其餘段與 `driver.json` 未做 |
 | C3 | `network.json` / `tasks.json` | IP 與 core 可由檔案覆蓋 |
-| C4 | 出廠預置改成多檔（`ports/<board>/data/config/`） | 新板首次開機長出 `config/` 目錄 |
+| C4 | 出廠預置改成多檔（`ports/project/<board>/data/config/`） | 新板首次開機長出 `config/` 目錄 |
 | C5 | `pixel/` 樹（`effects/`、`map/`、`modes/`） | 拖拉 `.fxe` 進 `pixel/effects/` 就生效 |
 
 ---

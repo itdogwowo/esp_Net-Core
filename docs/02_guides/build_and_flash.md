@@ -1,9 +1,9 @@
-# 建置與燒錄（ESP-IDF v6.0.3 / macOS）
+# 建置與燒錄（ESP-IDF v6.1 / macOS 或 WSL Ubuntu）
 
 > **用途**：從零把這台機器弄成「能 build esp_Net-Core」的狀態，並說明燒錄的三種模式。
 > **對象**：第一次在這台機器 build 的人；或 IDF / Python 被升級後壞掉的人。
-> **最後驗證**：2026-11-02，macOS 26.2 (arm64)，從乾淨的 `build/` 重建通過
-> （P4 `0x9b830` ≈ 623 KB、S3 `0x57050` ≈ 349 KB）。
+> **最後驗證**：2026-11-16，WSL Ubuntu + ESP-IDF v6.1，從乾淨的 `artifacts/build/` 重建通過
+> （P4-ETH `0xff040` ≈ 1020 KB、S3-N16R8 `0x118e90` ≈ 1.1 MB）。
 
 > ⚠️ **指令在哪一層跑**：ESP-IDF 工程根是 **`firmware/`**（`firmware/CMakeLists.txt`）。
 > 下面的 `idf.py ...` 全部要在 `firmware/` 下執行；`tools/*` 則在 repo 根執行（它們會自己找路徑）。
@@ -15,8 +15,8 @@
 ```bash
 # 推薦：一支搞定（自動處理 target 切換、產物備份、環境健檢）
 python3 make.py doctor              # IDF / esptool / 板子設定 / 磁碟
-python3 make.py build p4            # 板子名 / 晶片名都可以
-python3 make.py flash p4
+python3 make.py build ESP32-P4-ETH  # 硬體板名 / <chip>/<board> / project 名都可以
+python3 make.py flash ESP32-P4-ETH
 
 # 手動等價
 . ~/esp/esp-idf/export.sh
@@ -24,8 +24,28 @@ cd firmware
 idf.py -DPORT=P4/ESP32-P4-ETH -DIDF_TARGET=esp32p4 build
 ```
 
-建置成功的 image 會在 `artifacts/<板子>_<時間>.bin`（附 `.json` 側錄），
-`firmware/build/esp_net_core.bin` 是最新的那一份。
+建置產物全部集中在 `artifacts/`：
+
+```text
+artifacts/
+├─ <board>.bin                 最新 app image（OTA 用這個）
+├─ <board>_<時間>.bin          舊的歷史檔
+├─ <board>.json                尺寸 / sha256 / git / IDF 版本
+├─ <board>/                    這顆的完整可燒 .bin 組
+│  ├─ esp_net_core.bin
+│  ├─ bootloader.bin
+│  ├─ partition-table.bin
+│  ├─ ota_data_initial.bin
+│  ├─ flash_args
+│  └─ manifest.json
+├─ build/<chip>_<board>/       所有 CMake / ninja / .o 中間檔（每塊板一個）
+└─ logs/<board>_<時間>.log
+```
+
+**`firmware/` 不再產生 `build/`、`build_p4/`、`build_p4c6/`、`sdkconfig`。**
+每塊板的 `sdkconfig` 在 `artifacts/build/<chip>_<board>/sdkconfig`，所以多塊板可以
+並存、不用每次切 target。`python3 make.py clean` 會清掉整個 `artifacts/build/`
+以及舊的 `firmware/build*`／`sdkconfig*`。
 
 前提是第 2 節裝好了、第 3 節的地雷修過了。
 
@@ -36,7 +56,7 @@ idf.py -DPORT=P4/ESP32-P4-ETH -DIDF_TARGET=esp32p4 build
 | 項目 | 值 |
 |---|---|
 | OS | macOS 26.2（build 25C56），Apple Silicon |
-| ESP-IDF | **v6.0.3**，安裝在 `~/esp/esp-idf` |
+| ESP-IDF | **v6.1**（WSL 的 `/home/user/git/s31-verify/esp-idf`；macOS 的 `~/esp/esp-idf` 仍有 v6.0.3 可退回） |
 | 工具鏈 | `xtensa-esp-elf-gcc` 15.2.0（esp-15.2.0_20251204） |
 | Python | 3.12.14（Homebrew），venv 在 `~/.espressif/python_env/idf6.0_py3.12_env` |
 | esptool | 5.6.0 |
@@ -49,7 +69,7 @@ idf.py -DPORT=P4/ESP32-P4-ETH -DIDF_TARGET=esp32p4 build
 ```bash
 # 1) clone（shallow + shallow submodules，約 350 MB）
 mkdir -p ~/esp && cd ~/esp
-git clone --depth 1 --branch v6.0.3 \
+git clone --depth 1 --branch v6.1 \
     --recurse-submodules --shallow-submodules \
     https://github.com/espressif/esp-idf.git esp-idf
 
@@ -59,7 +79,7 @@ cd ~/esp/esp-idf
 
 # 3) 每次開新 shell 都要 source
 . ~/esp/esp-idf/export.sh
-idf.py --version        # 應印 ESP-IDF v6.0.3
+idf.py --version        # 應印 ESP-IDF v6.1
 ```
 
 > 為什麼裝在 `~/esp/esp-idf`：`tools/flash.sh` 和 `docs/02_guides/testing.md` 都假設這個路徑。
@@ -137,26 +157,28 @@ idf.py -DPORT=S3/ESP32-S3-N16R8 -DIDF_TARGET=esp32s3 build
 
 `PORT` 相對於 repo 根的 `ports/`（CMakeLists 用 `../ports/${PORT}` 找）。
 
-成功的樣子（2026-11-02，乾淨重建）：
+成功的樣子（2026-11-16，WSL + IDF 6.1）：
 
 ```text
-P4  esp_net_core.bin binary size 0x9b830 bytes. Smallest app partition is 0x400000 bytes.
-S3  esp_net_core.bin binary size 0x57050 bytes. Smallest app partition is 0x400000 bytes.
+P4-ETH  esp_net_core.bin binary size 0xff040 bytes. Smallest app partition is 0x400000 bytes.
+S3-N16R8 esp_net_core.bin binary size 0x118e90 bytes. Smallest app partition is 0x400000 bytes.
 ```
 
-`sdkconfig`、`build/`、`managed_components/`、`dependencies.lock` 都在 `.gitignore` 裡，
-**不會污染 repo**——它們全部生成在 `firmware/` 下。要重建乾淨環境就是
-`rm -rf firmware/build firmware/sdkconfig && tools/board.sh build <board>`。
+`artifacts/`（`build/`、`<board>.bin`、`<board>/`、`logs/`）、`managed_components/`、
+`dependencies.lock` 都在 `.gitignore` 裡，**不會污染 repo**。要重建乾淨環境就是
+`python3 make.py clean && python3 make.py build <board>`；`firmware/` 不再生成
+`build/` 或 `sdkconfig`。
 
-> ⚠️ 改 `sdkconfig.defaults` **不會**套用到已存在的 `sdkconfig`。
-> 例如 `CONFIG_TINYUSB_CDC_RX_BUFSIZE` 改了卻沒生效，就是這個原因 —— 必須 `rm sdkconfig` 再 build。
+> ⚠️ 改 `sdkconfig.defaults` **不會**套用到已存在的 per-board `sdkconfig`。
+> 例如 `CONFIG_TINYUSB_CDC_RX_BUFSIZE` 改了卻沒生效，就是這個原因 —— 必須
+> `python3 make.py build <board> --fresh`（只清這塊板的 build dir）再 build。
 
 ### 兩塊板子共用一棵樹：`tools/board.sh`
 
 ```bash
-tools/board.sh build s3        # 板子 + 晶片都是從 ports/<chip>/<board> 決定
-tools/board.sh flash p4
-tools/board.sh list            # 偵測現在插的是哪塊
+tools/board.sh build ESP32-S3-N16R8   # 硬體板 + project 由 ports/ 兩層決定
+tools/board.sh flash ESP32-P4-ETH
+tools/board.sh list                   # 偵測現在插的是哪塊
 ```
 
 **踩過的坑（2026-11-02 已修）**：`-DPORT` 只換板子目錄，**不會換晶片**——
@@ -165,14 +187,14 @@ tools/board.sh list            # 偵測現在插的是哪塊
 （同一時間還發現：`main.c` 的 TCP bus 區塊沒有用 `#if CONFIG_IDF_TARGET_ESP32P4` 包起來，
 所以 **S3 從那個區塊進來之後就一直編不過**，只是沒有人真的用 S3 target 建置過。）
 
-現在的 `board.sh` 會比對 `sdkconfig` 的 target，不同就自動 `set-target` 重建
-（等同 `rm sdkconfig build`）。代價是所有可調值都必須寫在 `sdkconfig.defaults` /
-`ports/<board>/sdkconfig.defaults`，不能只留在 menuconfig 的 sdkconfig 裡。
+每塊板都有自己的 `artifacts/build/<chip>_<board>/` 與 `sdkconfig`，所以切板不再需要
+`set-target` 重建整棵樹；所有可調值都必須寫在 `sdkconfig.defaults` /
+`ports/hardware/<board>/sdkconfig.defaults`，不能只留在 menuconfig 的 sdkconfig 裡。
 
 > 驗證方式（兩邊都要能編）：
 > ```bash
-> tools/board.sh build s3   # 期望 IDF_TARGET=esp32s3、image ≈ 349 KB（0x57050）
-> tools/board.sh build p4   # 期望 IDF_TARGET=esp32p4、image ≈ 623 KB（0x9b830，含 WS/UDP/HTTP）
+> tools/board.sh build ESP32-S3-N16R8   # 期望 IDF_TARGET=esp32s3、image 0x118e90（≈1.1 MB）
+> tools/board.sh build ESP32-P4-ETH     # 期望 IDF_TARGET=esp32p4、image 0xff040（≈1020 KB，含 WS/UDP/HTTP）
 > ```
 
 ---
@@ -214,7 +236,7 @@ tools/flash.sh --erase      # 全清
 之後更新 firmware 不需要 download mode，直接用 OTA：
 
 ```bash
-tools/ota.py --port /dev/cu.usbmodem* firmware/build/esp_net_core.bin
+tools/ota.py --port /dev/cu.usbmodem* artifacts/ESP32-P4-ETH.bin
 ```
 
 ---
@@ -237,4 +259,4 @@ tools/ota.py --port /dev/cu.usbmodem* firmware/build/esp_net_core.bin
 
 - `docs/02_guides/testing.md` §0 環境表（本文件是它的展開）
 - `tools/flash.sh` / `tools/ota.py` / `tools/nc4.py` / `tools/selftest.py`
-- `firmware/sdkconfig.defaults`（晶片層）與 `ports/<chip>/<board>/sdkconfig.defaults`（板子層，後者覆蓋前者）
+- `firmware/sdkconfig.defaults`（晶片層）與 `ports/hardware/<chip>/<board>/sdkconfig.defaults`（板子層，後者覆蓋前者）

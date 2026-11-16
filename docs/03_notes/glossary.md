@@ -84,7 +84,40 @@
 
 ---
 
-## 5. 一句話總結
+## 5. 檔案來源：`F.` 命名空間（2026-11-16）
+
+> 同一個 `system.json` 可以出現喺三個地方，而三個都叫「config」——
+> 所以規矩係：**講來源，唔講「config」**。`F.` 跟 `B.`／`T.`／`R.`／`L.`／`C.`／`M.` 同一套命名空間。
+
+| ID | 中文名 | 位置 | 誰寫 | 幾時生效 |
+|---|---|---|---|---|
+| `F.spec` | **板卡規格** | `ports/hardware/<chip>/<board>/board.json` | 板卡作者 | 建置 |
+| `F.wiring` | **板卡接線** | `ports/hardware/<chip>/<board>/wiring.json` | 板卡作者 | 建置 |
+| `F.device` | **板載裝置** | `ports/hardware/<chip>/<board>/driver.json` | 板卡作者 | 建置（runtime 逐段接） |
+| `F.build` | **建置開關** | hardware／project 兩層的 `sdkconfig.defaults`、`ports/_profiles/*.defaults` | 板卡作者 | 建置 |
+| `F.project` | **項目選擇** | `ports/project/<chip>/<board>/project.json` | 項目作者 | 建置 |
+| `F.preset` | **出廠預置** | `ports/project/<chip>/<board>/data/config/*.json` | 項目作者 | 首次開機（檔案不存在時） |
+| `F.live` | **現行設定** | 裝置 `/data/config/*.json` | 用戶 | 每次開機 |
+| `F.default` | **內建預設** | `nc_cfg_defaults.c`、`nc_cfg_chip.c`、build-time 產生的 `nc_port.c` | 韌體／`ncportgen` | 逐欄位缺值時 |
+
+五條規則：
+
+1. **唔講「改 config」／「改 ports」**。講「改 `F.preset` 的 `system`」或「改 `F.live` 的 `system`」。
+2. **`F.preset` 係種子，唔係 fallback**：`seed_file()` 只喺 `F.live` 唔存在時寫入；
+   存在就一個 byte 都唔郁。
+3. **改 `F.preset` 唔會影響已初始化過的板**。要令它生效，只有兩條路：
+   - `0x1103 STATUS_SET {"System":{"fs_format":1}}` ＋ `0x100F REBOOT`（會抹 `/data` 重建）；
+   - 或者手動刪裝置上嗰個檔。
+4. 開機真正讀的永遠係 `F.live`；缺檔先補 `F.preset`；再缺就逐欄位落 `F.default`。
+5. `F.spec`／`F.wiring`／`F.device`／`F.build`／`F.project` 只影響 build，改完一定要重 build；
+   `F.preset` 同 `F.live` 同一份 schema，分別只係「出廠」同「現行」。
+
+> **換韌體唔會抹 `F.live`**：`nc_boot.c` 只喺 `provisioned=0`（第一次）或 `fs_format=1` 時格式化；
+> `fw_changed` 只係記錄。`main.c:408` 那句「換韌體 = 格式化 → seed」係舊註解，唔成立。
+
+---
+
+## 6. 一句話總結
 
 **開機時，任務向 arena 要 buffer；線程由 buffer 拿格；格裡的資料按 S／P 規則搬；
 所有帳在 `mem.buf`。**

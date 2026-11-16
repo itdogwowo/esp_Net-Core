@@ -1,0 +1,14 @@
+{
+  "cores": 2,
+  "usb": {
+    "otg": false,
+    "otg_hs": false,
+    "serial_jtag": false,
+    "shared_phy": false,
+    "link": null,
+    "kind": null,
+    "rx_region": 4128
+  },
+  "id": "esp32",
+  "_comment": "晶片能力（build-time 事實）：cores / USB。ncportgen 用它產生 nc_cfg_chip_t。"
+}

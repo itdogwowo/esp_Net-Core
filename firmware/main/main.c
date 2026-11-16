@@ -1,11 +1,12 @@
-// esp_Net-Core — Phase A：USB composite（MSC + CDC）
+// esp_Net-Core — 主程式（開機階段表 ＋ USB 應用層）
 //
-// 一條線同時提供：
-//   • MSC  → 一個隨身碟，內容是 data 分區（config.json / pixel assets）
-//   • CDC  → 一個 COM port，當 console（之後接 NC4）
+// USB 一條線可以同時提供：
+//   • MSC  → 一個隨身碟，內容是 data 分區（config / pixel assets）—— 預設唔交（usb.msc=0）
+//   • CDC  → 一個 COM port，當 console 或 NC4 通道（OTG 時）；USJ 時係另一條 driver
 //
 // 開機順序（使用者不需要手動格式化）：
-//   自動格式化（若需要）→ 寫入出廠預置 config.json → 把碟交給 host
+//   第一次／fs_format=1 → 格式化 → 寫入 F.preset（出廠預置）→ 之後只讀 F.live
+//   換韌體唔會格式化：F.live 保留，只補缺檔。
 //
 // 逃生門：Windows 端要重燒時，USB 被 TinyUSB 佔住，esptool 進不了 download mode。
 // 兩個軟體路徑可解，都不需要精確按鍵時機：
@@ -119,6 +120,7 @@
 #include "nc4_ws.h"
 #include "nc4_udp.h"
 #include "nc_cfg.h"
+#include "nc_port.h"          // build-time 由 hardware/board.json + _chips/*.json 產生
 #include "cJSON.h"
 #include "nc_store.h"
 #include "boot.h"
@@ -246,17 +248,19 @@ static volatile uint32_t s_rx_frames;        // 成功收到的幀數
 #define NC4_CMD_ROUTE_GET 0x1105
 #define NC4_CMD_ROUTE_RSP 0x1106
 
-// ports/<board>/data/config/*.json 由 EMBED_FILES 嵌進 firmware（一個層一個檔）
+// project/data/config/*.json 由 EMBED_FILES 嵌進 firmware（一個層一個檔）
+// hardware.json 不是手寫檔案：它由 tools/ncportgen.py 從 hardware/wiring.json 產生，
+// 內容是「這塊板的完整硬體預設」，用戶插上 USB 就看得到可以改的欄位。
 extern const uint8_t preset_hardware_start[] asm("_binary_preset_hardware_json_start");
 extern const uint8_t preset_hardware_end[]   asm("_binary_preset_hardware_json_end");
-#if NETCORE_HAS_WIRING
-extern const uint8_t preset_wiring_start[] asm("_binary_preset_wiring_json_start");
-extern const uint8_t preset_wiring_end[]   asm("_binary_preset_wiring_json_end");
-#endif
+#if NETCORE_HAS_PRESET_SYSTEM
 extern const uint8_t preset_system_start[]  asm("_binary_preset_system_json_start");
 extern const uint8_t preset_system_end[]    asm("_binary_preset_system_json_end");
+#endif
+#if NETCORE_HAS_PRESET_NETWORK
 extern const uint8_t preset_network_start[] asm("_binary_preset_network_json_start");
 extern const uint8_t preset_network_end[]   asm("_binary_preset_network_json_end");
+#endif
 
 #if NETCORE_HAS_PRESET_TASKS
 extern const uint8_t preset_tasks_start[]   asm("_binary_preset_tasks_json_start");
@@ -272,7 +276,7 @@ static const esp_partition_t *find_data_partition(void)
 }
 
 // ── 出廠預置：缺檔才寫，不覆蓋使用者改過的內容 ──
-static void seed_file(const char *path, const uint8_t *start, const uint8_t *end)
+static void seed_bytes(const char *path, const uint8_t *buf, size_t len)
 {
     struct stat st;
     if (stat(path, &st) == 0) {
@@ -285,11 +289,29 @@ static void seed_file(const char *path, const uint8_t *start, const uint8_t *end
         ESP_LOGE(TAG, "寫入預置失敗：開不了 %s", path);
         return;
     }
-    const size_t len = (size_t)(end - start);
-    const size_t written = fwrite(start, 1, len, f);
+    const size_t written = fwrite(buf, 1, len, f);
     fclose(f);
     ESP_LOGI(TAG, "已寫入預置 %s（%u B）", path, (unsigned)written);
 }
+
+static void seed_file(const char *path, const uint8_t *start, const uint8_t *end)
+{
+    seed_bytes(path, start, (size_t)(end - start));
+}
+
+// 內建最小預設：沒有板級 seed 時，仍然令 /data/config 每個檔都存在，
+// 使用者插上 USB 就看得到該改哪一個。內容 = 「全部用程式預設」。
+static void seed_text(const char *path, const char *text)
+{
+    seed_bytes(path, (const uint8_t *)text, strlen(text));
+}
+
+static const char k_min_system[] =
+    "{\n  \"version\": 1,\n  \"cID\": \"\",\n  \"frame_interval_ms\": 20,\n  \"num_pixels\": 0\n}\n";
+static const char k_min_network[] =
+    "{\n  \"version\": 1,\n  \"hostname\": \"\",\n  \"priority\": [\"lan\"]\n}\n";
+static const char k_min_tasks[] =
+    "{\n  \"version\": 1,\n  \"tasks\": []\n}\n";
 
 // 目錄結構也是「出廠內容」的一部分：config/ 與 pixel/effects/ 先建好，
 // 使用者插上隨身碟就看得到該把東西放哪裡。
@@ -311,10 +333,20 @@ static void seed_presets(void)
 {
     seed_dirs();
     seed_file(PRESET_HARDWARE_PATH, preset_hardware_start, preset_hardware_end);
+#if NETCORE_HAS_PRESET_SYSTEM
     seed_file(PRESET_SYSTEM_PATH, preset_system_start, preset_system_end);
+#else
+    seed_text(PRESET_SYSTEM_PATH, k_min_system);
+#endif
+#if NETCORE_HAS_PRESET_NETWORK
     seed_file(PRESET_NETWORK_PATH, preset_network_start, preset_network_end);
+#else
+    seed_text(PRESET_NETWORK_PATH, k_min_network);
+#endif
 #if NETCORE_HAS_PRESET_TASKS
     seed_file(PRESET_TASKS_PATH, preset_tasks_start, preset_tasks_end);
+#else
+    seed_text(PRESET_TASKS_PATH, k_min_tasks);
 #endif
 }
 
@@ -405,8 +437,11 @@ static void ensure_volume_label(void)
 // 它們其實都在答同一條問題：「這塊分區而家喺生命週期的哪一步？」
 // 現在全部由 state manager 的一條 NVS 記錄（nc_boot）回答：
 //   PROVISIONED     初始化過、底座已寫 → 之後唔准自動格式化
-//   FORMAT_PENDING  明確重建（用戶指令，或偵測到換韌體）
-// 換韌體 = 回到起點：格式化 → seed，唔再有「刪 4 個 config 檔」這條另類路徑。
+//   FORMAT_PENDING  明確重建（用戶指令 fs_format=1，或第一次開機）
+//
+// 換韌體**唔會**格式化：nc_boot.c 只記錄 fw_changed，data/config 原封不動；
+// 只有第一次開機（provisioned=0）或用戶明確 fs_format=1 才重建。
+// 所以 F.live（裝置 /data/config）係用戶資產，OTA 之後仍然存在。
 static int s_fmt_err = -99;          // -99 = 未嘗試，0 = 正常／已重建，>0 = esp_err_t
 
 static esp_err_t storage_init(void)
@@ -3515,7 +3550,7 @@ static eth_cfg_t eth_cfg_resolve(void)
             .mdio    = hw->eth.mdio,
             .ref_clk = hw->eth.ref_clk,
             .addr    = hw->eth.phy_addr,
-            .type    = hw->eth.phy_type,
+            .type    = nc_cfg_phy_name(hw->eth.phy_type),
             .from_cfg = true,
         };
     }
@@ -3830,13 +3865,9 @@ static esp_err_t ph_storage(void)
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "storage 初始化失敗: %s", esp_err_to_name(err));
     }
-#if NETCORE_HAS_WIRING
-    // 板級 wiring 當 base；/data/config/hardware.json 只覆蓋差異。
-    (void)nc_cfg_boot_ex((const char *)preset_wiring_start,
-                         (size_t)(preset_wiring_end - preset_wiring_start));
-#else
+    // 硬體預設（nc_port.c）已經是這塊板的 wiring 編譯結果；用戶 hardware.json
+    // 只覆蓋差異。沒有 wiring 檔或舊板的 host test 會自動退回內建預設。
     (void)nc_cfg_boot();    // 永遠成功：最差 = 全部用預設
-#endif
     // system.json 的 "log_debug_mode"：
     //   0 = 正常（INFO、2 KB、USB 起來之後開始記 → 看到服務/bus 啟動）
     //   1 = 除錯（全部等級、8 KB、第一行開始）
@@ -4568,7 +4599,12 @@ void app_main(void)
     // nc_cfg_defaults_system() 被叫到時砌的。所以先把「這顆晶片有冇 USB、
     // 用 CDC 還是 usb_jtag、幾多核」告訴預設，之後 ph_storage 讀到的
     // 就是一份「出廠就用得到原生 USB」的 config。
-    s_chip = nc_cfg_chip_find(CONFIG_IDF_TARGET);
+    // 晶片能力的真相 = ports/hardware/_chips/<chip>.json；ncportgen 把它編成
+    // nc_port_chip()。舊的 nc_cfg_chip.c 只在「這塊板沒有 generated chip」時當 fallback。
+    s_chip = nc_port_chip();
+    if (s_chip == NULL) {
+        s_chip = nc_cfg_chip_find(CONFIG_IDF_TARGET);
+    }
     if (s_chip == NULL) {
         // 未知晶片（表裡未有）：用**編譯期能力**砌一個臨時表，唔盲猜 CDC。
         // 規則同晶片表一致：有 USJ 就用 USJ（所有人的預設）；冇 USJ 才用 OTG；

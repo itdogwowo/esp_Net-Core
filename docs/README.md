@@ -88,7 +88,7 @@
 | [tx-path-design.md](03_notes/tx-path-design.md) | **發送／轉寄路徑（2026-11-08 討論＋同日落地）**：各通道「交出去」的緩衝與阻塞行為（CDC 4 KB FIFO 不用等、UART 1 KB ring 會排空、P4 TCP >5.7 KB 會等）、`nc4_link` 出口表、`routes[].out` 轉寄（同步、先轉寄後本地）、零複製 vs copy-into-ring vs pin 插槽、4 KB／8 KB 的成本表、DMA 的事實（UART 無 TX DMA）、PSRAM 與 flash 停頓、**上板量測結果與仍未做的清單** |
 | [fat-ownership.md](03_notes/fat-ownership.md) | **FAT 擁有者（互斥模型）**：為什麼不能同時掛碟與讀檔、為什麼只切 mount_point 不夠、LUN 拆建＋USB 重新列舉、實測數據 |
 | [config-layers.md](03_notes/config-layers.md) | **配置分層（一個層一個檔案）**：`config/hardware.json`→`driver`→`system`→`network`→`tasks`→`effects`→`ui`；每層自己讀、缺檔用預設、壞檔只退化該層；開機順序（硬體先起來才讀分配）；`system.json` 的 `links[]` / `routes[]` 與 `tasks.json` 怎麼寫 |
-| [hardware-config.md](03_notes/hardware-config.md) | **硬體設定的三層結構**：preset → override → merged，以及為什麼不直接改 board 檔 |
+| [ports-layout.md](03_notes/ports-layout.md) | **ports 兩層（hardware／project）＋ OTA 分割表**：`hardware/<chip>/<board>` 是硬體事實、`project/<chip>/<board>` 是項目選擇；`ncportgen` 把 wiring 編成 firmware 預設（字典→數值）；build 怎麼指定任一層；**OTA 不能改分割表**、為什麼 4 MB slot 不浪費、P4 32 MB 分割表怎麼釘住 app 不後移 |
 | [p4-bringup.md](03_notes/p4-bringup.md) | **ESP32-P4 上板紀錄**：IDF 版本、console/PSRAM 陷阱、乙太網吞吐調校（1.1 → 8 MB/s） |
 | [failure-policy.md](03_notes/failure-policy.md) | **失敗處理**：config 壞掉/超範圍、PHY 協商失敗、拔線、USB MSC 不支援時的替代路徑（HTTP/NC4 file） |
 | [writing-a-task.md](03_notes/writing-a-task.md) | **怎麼寫一個 Task（C）**：`nc_task_register()` 之後全交給管理器（建立**緩衝區** / 開 loop / 狀態）；身份（kind）/接線（mem·claims·**provides**）/執行（loops：core·layer·節奏）/生命（on_start·on_stop·attach·detach）；**§3.1 資源＝緩衝區（契約 C1–C11）**、**§3.2 指令＝action，不是任務的財產** |

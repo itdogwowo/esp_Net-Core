@@ -1,0 +1,67 @@
+{
+  "version": 1,
+  "_comment": [
+    "Hardware 層（S3-SuperMini）：這塊板除了 USB 同板載 1 顆 WS2812（GPIO48）之外，",
+    "所有匯流排都未接出來 —— 全部 enable = 0。",
+    "GPIO48 的 WS2812 未接入 driver（等有需要再開 LED 任務）。",
+    "改這裡 = 重新 build；runtime 可改的在 project 層的 data/config。"
+  ],
+  "_gpio_convention": "兩種『未設定』寫法不能混用：-1 = 未設定／不啟用（driver 以 >= 0 判斷）；null = 沒接這條線（driver 以 is not None 判斷，寫 -1 會變成 Pin(-1) 而爆掉）。標 -1 的欄位可以安全留著；標 null 的欄位要填真實腳位才 enable。",
+  "ETH": {
+    "enable": 0,
+    "mdc": -1,
+    "mdio": -1,
+    "ref_clk": -1,
+    "phy_type": "IP101",
+    "phy_addr": 1,
+    "spi": -1,
+    "cs": -1,
+    "rst": -1,
+    "int": -1
+  },
+  "PIN": {
+    "enable": 0,
+    "list": []
+  },
+  "SPI": {
+    "enable": 0,
+    "list": []
+  },
+  "I2C": {
+    "enable": 0,
+    "list": []
+  },
+  "I80": {
+    "enable": 0,
+    "list": []
+  },
+  "UART": {
+    "enable": 0,
+    "list": []
+  },
+  "I2S": {
+    "enable": 0,
+    "list": []
+  },
+  "PWM": {
+    "enable": 0,
+    "list": []
+  },
+  "SDIO": {
+    "enable": 0,
+    "list": []
+  },
+  "ENC": {
+    "enable": 0,
+    "list": []
+  },
+  "XL9555": {
+    "enable": 0,
+    "bus": {
+      "type": "i2c",
+      "index": -1
+    },
+    "addr": "0x20",
+    "list": []
+  }
+}

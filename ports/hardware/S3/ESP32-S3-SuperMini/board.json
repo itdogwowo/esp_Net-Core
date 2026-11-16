@@ -1,0 +1,25 @@
+{
+  "_comment": "硬體事實（F.spec）。改這裡 = 要重新 build；runtime 可改的放 project 層的 data/config。能力 profiles 只放硬體能力（eth/wifi），項目能力（ws/udp）在 project.json。",
+  "name": "ESP32-S3-SuperMini",
+  "chip": "esp32s3",
+  "flash": {
+    "size_mb": 4,
+    "freq_mhz": 80,
+    "mode": "dio"
+  },
+  "psram": {
+    "size_mb": 2,
+    "mode": "quad",
+    "speed_mhz": 80
+  },
+  "cpu_mhz": 240,
+  "console": "usb-serial-jtag",
+  "profiles": [],
+  "features": {
+    "eth": null,
+    "wifi": true,
+    "usb": true
+  },
+  "verified": "2026-11-16：esptool 讀到 ESP32-S3 (QFN56) rev v0.2、內嵌 4MB flash (XMC) + 2MB PSRAM (AP_3v3)、USB-Serial/JTAG，MAC e4:b3:23:f9:38:68",
+  "notes": "ESP32-S3 SuperMini（ESP32-S3FH4R2：4 MB 內嵌 flash + 2 MB 內嵌 PSRAM，quad @ 80 MHz）。板上只有一個 USB-C，直接接 S3 的原生 USB（GPIO19/20）——冇 USB-UART 橋接晶片，所以 console 一定是 USB-Serial-JTAG。USB-OTG 與 USJ 共用同一條 PHY，只能二選一（同其他 S3 板一樣）。板載 WS2812 在 GPIO48（1 顆），未接入 driver。"
+}

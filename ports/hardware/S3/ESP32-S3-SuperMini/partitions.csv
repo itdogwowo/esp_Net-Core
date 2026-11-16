@@ -1,0 +1,9 @@
+# Name,     Type, SubType,  Offset,    Size,      Flags
+# 4 MB flash（ESP32-S3FH4R2 內嵌）。app 1.5 MB × 2（OTA）＋ FAT 896 KB。
+# 同 ESP32-S3-Matrix 同一個版面（兩塊都係 4 MB），但各自一份，改一邊唔會影響另一邊。
+nvs,        data, nvs,      0x9000,    0x6000,
+otadata,    data, ota,      0xf000,    0x2000,
+phy_init,   data, phy,      0x11000,   0x1000,
+ota_0,      app,  ota_0,    0x20000,   0x180000,
+ota_1,      app,  ota_1,    0x1a0000,  0x180000,
+data,       data, fat,      0x320000,  0x0e0000,

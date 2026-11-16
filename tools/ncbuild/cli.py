@@ -21,7 +21,8 @@ COMMANDS = {"build", "flash", "monitor", "doctor", "clean", "outputs",
 
 
 def _add_common(p: argparse.ArgumentParser) -> None:
-    p.add_argument("board", nargs="?", help="板子（目錄名 / board.json name / 晶片名），預設看設定檔")
+    p.add_argument("board", nargs="?",
+                   help="硬體板（ports/hardware/）或 project（ports/project/）；預設看設定檔")
 
 
 def _board_of(cfg: dict, args: argparse.Namespace) -> str | None:
@@ -74,7 +75,12 @@ def cmd_outputs(cfg: dict, args: argparse.Namespace) -> int:
 
     rows = artifacts.list_outputs(cfg, board)
     if not rows:
-        print(f"{env.artifacts_dir(cfg).relative_to(env.ROOT)}/ 還沒有任何產物（先 build）")
+        out = env.artifacts_dir(cfg)
+        try:
+            shown = out.relative_to(env.ROOT)
+        except ValueError:
+            shown = out
+        print(f"{shown}/ 還沒有任何產物（先 build）")
         return 0
 
     # header 用 ASCII：CJK 字元寬度會讓 f-string 對齊失準
@@ -85,7 +91,12 @@ def cmd_outputs(cfg: dict, args: argparse.Namespace) -> int:
         built = str(i.get("built_at", "")).replace("T", " ")[:19]
         dirty = "*" if i.get("git_dirty") else " "
         print(f"{i.get('board', '?'):<22} {built:<20} {size:>10} {str(i.get('git', '?')) + dirty:<9} {i.get('file')}")
-    print(f"\n{len(rows)} 顆；目錄 {env.artifacts_dir(cfg).relative_to(env.ROOT)}/")
+    out = env.artifacts_dir(cfg)
+    try:
+        shown = out.relative_to(env.ROOT)
+    except ValueError:
+        shown = out
+    print(f"\n{len(rows)} 顆；目錄 {shown}/")
     return 0
 
 
@@ -149,13 +160,13 @@ def cmd_env(cfg: dict, args: argparse.Namespace) -> int:
 def build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(
         prog="make.py",
-        description="esp_Net-Core 建置工具（板子清單來自 ports/<chip>/<board>/board.json）",
+        description="esp_Net-Core 建置工具（硬體板 ports/hardware/ ＋ project ports/project/）",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""常用：
-  python3 make.py p4                 建置（等於 build p4）
-  python3 make.py s3 --minimal       最小映像（bring-up 用）
+  python3 make.py ESP32-P4-ETH       建置（等於 build ESP32-P4-ETH）
+  python3 make.py ESP32-S3-N16R8 --minimal   最小映像（bring-up 用）
   python3 make.py doctor             環境健檢
-  python3 make.py flash p4 --full    連分割表一起燒
+  python3 make.py flash ESP32-P4-ETH --full  連分割表一起燒
   python3 make.py outputs --prune 3  只留每塊板子最近 3 顆
 """)
     ap.add_argument("--version", action="version", version=f"ncbuild {__version__}")
@@ -169,11 +180,11 @@ def build_parser() -> argparse.ArgumentParser:
                    help="測試映像（NC_ENABLE_TESTS=ON：0xF00x 指令與 test_* 任務）；"
                         "預設 OFF＝出貨映像。之前靠 CMake cache 記住上一個值，現在每次都明確傳")
     p.add_argument("--jobs", type=int, help="平行編譯數（預設讓 IDF 決定）")
-    p.add_argument("--clean", action="store_true", help="先清 build/")
-    p.add_argument("--fresh", action="store_true", help="先清 build/ 與 sdkconfig（重新套用 defaults）")
+    p.add_argument("--clean", action="store_true", help="先清這塊板的 artifacts/build/<board>/")
+    p.add_argument("--fresh", action="store_true", help="先清 build dir 與 sdkconfig（重新套用 defaults）")
     p.add_argument("--no-doctor", action="store_true", help="跳過建置前健檢")
     p.add_argument("--no-archive", action="store_true", help="不複製到 artifacts/")
-    p.add_argument("--all", action="store_true", help="建置全部板子（依序，每塊各自切 target）")
+    p.add_argument("--all", action="store_true", help="建置全部板子（每塊一個 build dir，可平行／可重入）")
     p.set_defaults(fn=cmd_build)
 
     p = sub.add_parser("flash", help="燒錄")
@@ -198,7 +209,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--quick", action="store_true", help="跳過慢檢查（idf.py / esptool）")
     p.set_defaults(fn=cmd_doctor)
 
-    p = sub.add_parser("clean", help="清掉 build/ 與 sdkconfig")
+    p = sub.add_parser("clean", help="清掉 artifacts/build/、舊 firmware/build* 與 sdkconfig")
     p.add_argument("--all", action="store_true", help="連 managed_components / dependencies.lock 一起清")
     p.set_defaults(fn=cmd_clean)
 

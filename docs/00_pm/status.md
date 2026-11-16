@@ -1099,7 +1099,7 @@ ETH 的缺段／正常／明確關閉／型別錯／未知鍵，以及兩塊板*
 零 invalid、零 unknown）；`python3 tools/board.py check` 0 錯誤、0 警告。
 
 **未做**：`PIN/SPI/I2C/I80/UART/I2S/PWM/ENC/XL9555` 仍然只有「認得這個鍵」；
-preset/merge 與 arena→PSRAM 見 [hardware-config.md](../03_notes/hardware-config.md) §7。
+preset/merge 與 arena→PSRAM 見 [ports-layout.md](../03_notes/ports-layout.md) §4。
 **P4 只在 build 層驗過**（板子不在手邊），ETH 改由 config 決定的行為要上板確認：
 開機應見 `hardware: eth=開 mdc=31 mdio=52 refclk=50 IP101@1` 與 `ETH started (... 來源=hardware.json)`。
 
@@ -2140,3 +2140,59 @@ S3 WiFi 連上後開 TCP 6000、UDP 6001、WS 8080。
 - P4 USJ 的 `0xF02B`（~2–3 KB 回覆）會 timeout：`usb_jtag_send` 100 ms deadline
   截斷；`0xF02F`／`0xF032` 等小回覆正常。要量 P4 大結果，先處理 TX deadline
   或分塊回覆。
+
+### 7.65 2026-11-16（ports 兩層：hardware／project；firmware 預設 codegen）
+
+- `ports/` 拆成 `hardware/<chip>/<board>/`（硬體事實：board.json／wiring.json／driver.json／
+  sdkconfig／partitions）與 `project/<chip>/<board>/`（項目：project.json／data/config）。
+  同一塊硬體可以配多個 project；build 用 `-DPORT` ＋ `-DPROJECT`。
+- 新 `tools/ncportgen.py`：build 時把 `wiring.json` 編成 `nc_port.c`（static const
+  `nc_hardware_cfg_t`）＋ `preset_hardware.json`。firmware 不再 embed／runtime 解析 wiring JSON；
+  `nc_cfg_defaults_hardware()` 直接回傳 generated 表（weak symbol，host test 退回 `k_hw`）。
+- 字典→數值：`phy_type` → enum；link 的 `iface`／`service`／`mem` 由 char[8]/[6] → 各 1 byte
+  （每個 link 省 22 B），比較不再 `strcmp`。JSON 對外仍然寫字串。
+- 能力碎片分層：`eth-rmii`／`wifi-hosted-c6` 留在 hardware；`nc4-ws`／`nc4-udp` 移到 project。
+  `board.py sync` 分別寫兩層的 `sdkconfig.defaults`。
+- P4-ETH 補 32 MB 分割表（`hardware/P4/ESP32-P4-ETH/partitions.csv`）：app slot offset 不變，
+  `data` 由 7 MB 增到 23 MB。套用要 `--full`；OTA **不能**改分割表。
+- 驗證：`board.py check` 0 error；`ncportgen` 五塊板都產生成功；host 端用 Zig cc
+  編譯 `cfgstruct_test` **133/133 通過**、generated `nc_port.c` 可編譯並跑出正確預設。
+- **完整 IDF 6.1 build 通過**（WSL Ubuntu + `/home/user/git/s31-verify/esp-idf` v6.1）：
+  P4-ETH `0xff040`（1020 KB，app 分區剩 75%）、S3-N16R8 `0x118e90`（1.1 MB，剩 73%）。
+  P4 分割表實際解出 `data 0x820000 23M`，與 `partitions.csv` 一致。
+- build 期間修了三個 IDF 6.1 相容問題：
+  1. `component_get_requirements` 用 `cmake -P` 重新 include `main/CMakeLists.txt`，
+     不能在裡面跑 `add_custom_command`／`add_dependencies`／`target_*`；
+     已用 `CMAKE_SCRIPT_MODE_FILE` 分開 script mode 與正常 configure。
+  2. 那個 context 也看不到 `-DPORT`／`-DPROJECT` cache 變數；`make.py` 改為在命令前
+     加 `NC_PORT`／`NC_PROJECT` 環境變數，top-level CMake 亦 `set(ENV{...})` 傳下去。
+  3. `NC_MEM_PSRAM` 與 `nc_mem.h` 的 heap class 撞名；config 的 enum 全部加 `NC_CFG_`
+     prefix（`NC_CFG_MEM_*`／`NC_CFG_IFACE_*`／`NC_CFG_SVC_*`／`NC_CFG_PHY_*`）。
+- 清理：刪除 `docs/03_notes/hardware-config.md`（preset 表設計已被 generated defaults 取代）、
+  舊 `ports/<chip>/` 空目錄、`main.c.bak`、0-byte 的 `sdkconfig.p4c6`／`_p4_usb.log`。
+
+### 7.66 2026-11-16（建置產物集中：`artifacts/build/<chip>_<board>/`）
+
+- `firmware/build`、`build_c3`、`build_p4`、`build_p4c6`、`build_s3` 全部移除（共 ~1 GB）。
+  新版 `make.py` 用 `-B artifacts/build/<chip>_<board>` 和
+  `-DSDKCONFIG=.../sdkconfig`，每塊板有自己的 build dir 與 sdkconfig，不再互相洗 target。
+- `.bin` 集中：`artifacts/<board>.bin`（最新 app）＋ `artifacts/<board>/`
+  （`esp_net_core.bin`、`bootloader.bin`、`partition-table.bin`、`ota_data_initial.bin`、
+  `flash_args`、`manifest.json` sha256）。中間檔只留在 `artifacts/build/`。
+- `make.py clean` 清 `artifacts/build/`＋舊 `firmware/build*`／`sdkconfig*`；
+  `--all` 連 `managed_components`／`dependencies.lock`。
+- `make_config.json` 新增 `build.build_dir`（預設 `<output_dir>/build`，可指到專案外）。
+- 驗證（WSL IDF 6.1）：P4-ETH `0xff040`、S3-N16R8 `0x118e90`；兩個 build dir 並存，
+  S3 build 沒有再出現「target 由 esp32p4 改成 esp32s3」的清理步驟。
+
+### 7.67 2026-11-16（config 分層：link schema 正規化＋最小預設）
+
+- `system.json` 的 link 改成 canonical：`kind` 只寫 transport、`iface` 分開、
+  `port`／`rx` 在 link 頂層；`cfg.port`／`cfg.rx` 仍然接受但 `board.py check` 會提醒。
+  冇 `name` 時由 `iface+kind+index` 生成（`eth_tcp0` / `wifi_udp1`）。
+- 五塊板的 project seed 已全部正規化；舊 composite kind 與 `cfg` 只留兼容路徑。
+- `main.c` 補第 ① 層最小預設：冇板級 `system`／`network`／`tasks` 時，
+  `seed_presets()` 會寫入 `{"version":1,...}` 骨架，`config/` 四個檔一定存在。
+- 驗證：`cfgstruct_test` **140/140**；P4-ETH `0xff2e0`、S3-N16R8 `0x1190e0` 建置通過。
+- 下一步缺口：`network.json` 仍然是 `nc_wifi.c`／`nc_net_lines.c`／`nc_net_raw.c`／`main.c`
+  各自讀，沒有單一 typed `nc_cfg_network()`；`driver.json` 仍然 build-time。

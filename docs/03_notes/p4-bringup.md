@@ -36,7 +36,7 @@ P4 port 明確 `# CONFIG_SPIRAM is not set`。
 
 ## 4. 乙太網（RMII + IP101）
 
-設定取自 `ports/P4/ESP32-P4-ETH/config.json`：phy_addr=1、mdc=31、mdio=52、ref_clk=50（外部時鐘）。
+設定取自 `ports/hardware/P4/ESP32-P4-ETH/wiring.json`：phy_addr=1、mdc=31、mdio=52、ref_clk=50（外部時鐘）。
 
 IDF 6 移除了 `esp_eth_phy_new_ip101()`，只剩 generic 802.3 PHY；5.5.5 兩者都有。
 本專案用 `esp_eth_phy_new_generic()`，IP101 走 802.3 自動協商可正常 link（100 Mbps full）。

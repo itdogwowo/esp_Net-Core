@@ -35,6 +35,16 @@ static const nc_cfg_chip_t *s_chip;
 static nc_system_cfg_t s_system;
 static bool s_system_ready;
 
+// 硬體板預設由 tools/ncportgen.py 在 build 時產生（nc_port.c）。
+// host test 沒有生成檔時，符號是 NULL，自動退回下面的 k_hw。
+#if defined(__GNUC__)
+extern const nc_hardware_cfg_t *nc_port_hw_defaults(void) __attribute__((weak));
+#  define NC_PORT_HW_DEFAULTS_MAYBE() (nc_port_hw_defaults != NULL)
+#else
+static const nc_hardware_cfg_t *nc_port_hw_defaults(void) { return NULL; }
+#  define NC_PORT_HW_DEFAULTS_MAYBE() (nc_port_hw_defaults() != NULL)
+#endif
+
 void nc_cfg_defaults_set_chip(const nc_cfg_chip_t *chip)
 {
     s_chip = chip;
@@ -191,7 +201,7 @@ static const nc_hardware_cfg_t k_hw = {
     .eth = {
         .present = false, .enable = false,
         .mdc = -1, .mdio = -1, .ref_clk = -1,
-        .phy_addr = 1, .phy_type = "IP101",
+        .phy_addr = 1, .phy_type = NC_CFG_PHY_IP101,
     },
     .n_sdio = 1,
     .sdio = {
@@ -203,8 +213,19 @@ static const nc_hardware_cfg_t k_hw = {
     .n_uart = 0,
 };
 
+bool nc_cfg_hw_has_port_defaults(void)
+{
+    return NC_PORT_HW_DEFAULTS_MAYBE() && nc_port_hw_defaults() != NULL;
+}
+
 const nc_hardware_cfg_t *nc_cfg_defaults_hardware(void)
 {
+    if (NC_PORT_HW_DEFAULTS_MAYBE()) {
+        const nc_hardware_cfg_t *hw = nc_port_hw_defaults();
+        if (hw != NULL) {
+            return hw;
+        }
+    }
     return &k_hw;
 }
 

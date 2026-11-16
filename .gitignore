@@ -1,7 +1,8 @@
 # ── 生成物：由 idf.py / 組件管理器產生，永遠不進 git ──
-# 位置在 firmware/ 下；路徑不寫死深度，所以任何子目錄都適用
+# 新版 make.py 把所有 CMake／ninja 中間檔集中到 artifacts/build/<board>/；
+# 下面的 firmware/build*、sdkconfig* 只是舊版或手動 idf.py 的殘留，保留 ignore
+# 以防有人誤 commit；make.py clean 會一併清掉。
 build/
-# 分析用建置（例如 build_ana：帶 -fcallgraph-info 的棧深分析）
 build_*/
 sdkconfig
 sdkconfig.old

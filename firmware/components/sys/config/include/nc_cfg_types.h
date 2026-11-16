@@ -52,6 +52,37 @@ typedef enum {
     NC_LINK_KIND_MAX,
 } nc_link_kind_t;
 
+// ── 字典 → 數值 ────────────────────────────────────────────────
+// 這些欄位以前是 char[8]／char[6]，每個 link 就多 22 B，而且每次比較都要
+// strcmp。JSON 仍然寫 "eth"／"nc4"／"sram"（人類可讀），進來 struct 就只剩
+// 一個 byte；要印 log 再用 name() 轉回去。
+typedef enum {
+    NC_CFG_IFACE_ANY = 0,   // 空／未指定
+    NC_CFG_IFACE_ETH,
+    NC_CFG_IFACE_WIFI,
+} nc_iface_t;
+
+typedef enum {
+    NC_CFG_SVC_AUTO = 0,    // 由 kind 推導：http→web，其餘→nc4
+    NC_CFG_SVC_NC4,
+    NC_CFG_SVC_WEB,
+} nc_service_t;
+
+typedef enum {
+    NC_CFG_MEM_AUTO = 0,    // 先 PSRAM，配不到再 internal
+    NC_CFG_MEM_SRAM,
+    NC_CFG_MEM_PSRAM,
+} nc_mem_t;
+
+typedef enum {
+    NC_CFG_PHY_UNKNOWN = 0,
+    NC_CFG_PHY_IP101,
+    NC_CFG_PHY_LAN8720,
+    NC_CFG_PHY_DP83848,
+    NC_CFG_PHY_RTL8201,
+    NC_CFG_PHY_GENERIC,
+} nc_phy_type_t;
+
 // 一條 link 的 rx 參數。rx_mask 記錄「config 真的寫了邊幾項」，
 // 這樣 STATUS 的 cfg_src 才是真話（而不是「套完之後看起來都一樣」）。
 #define NC_CFG_RX_REGION     0x01u
@@ -74,9 +105,9 @@ typedef struct {
     nc_link_kind_t kind;
     bool           enable;
     uint16_t       port;        // tcp / ws / udp / http
-    char           iface[8];    // any / eth / wifi（空的 = any）
-    char           service[8];  // nc4 / web（空的 = kind 預設）
-    char           mem[6];      // auto / psram / sram（空的 = auto）
+    uint8_t        iface;       // nc_iface_t（any / eth / wifi）
+    uint8_t        service;     // nc_service_t（auto / nc4 / web）
+    uint8_t        mem;         // nc_mem_t（auto / sram / psram）
     bool           managed;     // config 有寫 iface/service → 交給 nc_net_lines
     uint8_t        rx_mask;     // config 實際寫了哪些 rx 欄位
     nc_link_rx_t   rx;
@@ -115,7 +146,7 @@ typedef struct {
     int8_t  mdio;
     int8_t  ref_clk;
     uint8_t phy_addr;
-    char    phy_type[NC_CFG_PHY_NAME_MAX];   // 目前只影響 log；IDF 6 只有 generic PHY 驅動
+    uint8_t phy_type;          // nc_phy_type_t（IP101 / LAN8720 …）；只影響 log
 } nc_eth_cfg_t;
 
 typedef struct {

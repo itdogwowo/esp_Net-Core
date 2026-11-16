@@ -162,6 +162,53 @@ static bool kind_parse(const char *s, nc_link_kind_t *out)
     return false;
 }
 
+// 字典 → 數值。JSON 保持人類可讀；struct 只存 enum（每個 link 省 22 B）。
+static bool iface_parse(const char *s, uint8_t *out)
+{
+    if (s == NULL || out == NULL) {
+        return false;
+    }
+    if (strcasecmp(s, "any") == 0)  { *out = NC_CFG_IFACE_ANY;  return true; }
+    if (strcasecmp(s, "eth") == 0)  { *out = NC_CFG_IFACE_ETH;  return true; }
+    if (strcasecmp(s, "wifi") == 0) { *out = NC_CFG_IFACE_WIFI; return true; }
+    return false;
+}
+
+static bool service_parse(const char *s, uint8_t *out)
+{
+    if (s == NULL || out == NULL) {
+        return false;
+    }
+    if (strcasecmp(s, "nc4") == 0)  { *out = NC_CFG_SVC_NC4; return true; }
+    if (strcasecmp(s, "web") == 0)  { *out = NC_CFG_SVC_WEB; return true; }
+    if (strcasecmp(s, "auto") == 0) { *out = NC_CFG_SVC_AUTO; return true; }
+    return false;
+}
+
+static bool mem_parse(const char *s, uint8_t *out)
+{
+    if (s == NULL || out == NULL) {
+        return false;
+    }
+    if (strcasecmp(s, "auto") == 0)  { *out = NC_CFG_MEM_AUTO;  return true; }
+    if (strcasecmp(s, "sram") == 0)  { *out = NC_CFG_MEM_SRAM;  return true; }
+    if (strcasecmp(s, "psram") == 0) { *out = NC_CFG_MEM_PSRAM; return true; }
+    return false;
+}
+
+static bool phy_parse(const char *s, uint8_t *out)
+{
+    if (s == NULL || out == NULL) {
+        return false;
+    }
+    if (strcasecmp(s, "IP101") == 0)   { *out = NC_CFG_PHY_IP101;   return true; }
+    if (strcasecmp(s, "LAN8720") == 0) { *out = NC_CFG_PHY_LAN8720; return true; }
+    if (strcasecmp(s, "DP83848") == 0) { *out = NC_CFG_PHY_DP83848; return true; }
+    if (strcasecmp(s, "RTL8201") == 0) { *out = NC_CFG_PHY_RTL8201; return true; }
+    if (strcasecmp(s, "generic") == 0) { *out = NC_CFG_PHY_GENERIC; return true; }
+    return false;
+}
+
 
 // 複合 kind：eth_tcp / wifi_tcp / eth_udp / wifi_udp / eth_ws / wifi_ws
 // 回傳 base kind，並把 iface 寫入 out_iface；composite=false 表示舊式 kind。
@@ -270,12 +317,67 @@ static void parse_links(const cJSON *root, nc_system_cfg_t *out, nc_cfg_stat_t *
             st->defaulted++;
         }
 
-        if (cJSON_IsString(nm) && nm->valuestring != NULL && nm->valuestring[0] != '\0' &&
-            strlen(nm->valuestring) < NC_CFG_NAME_MAX) {
+        l.enable = get_bool(it, "enable", true, st);
+        const cJSON *port_top = item(it, "port");
+        const cJSON *port_cfg = item(item(it, "cfg"), "port");
+        l.port = (uint16_t)get_int(it, "port",
+                (uint16_t)get_int(item(it, "cfg"), "port", 0, 0, 65535, st),
+                0, 65535, st);
+        if (port_top != NULL && port_cfg != NULL &&
+            cJSON_IsNumber(port_top) && cJSON_IsNumber(port_cfg) &&
+            port_top->valueint != port_cfg->valueint) {
+            st->invalid++;      // 兩個寫法同時存在但唔一致：要人決定哪個才對
+        }
+
+        const cJSON *ifc = item(it, "iface");
+        l.managed = composite || (ifc != NULL) || (item(it, "service") != NULL);
+        if (composite) {
+            if (!iface_parse(iface_from_kind, &l.iface)) {
+                st->invalid++;
+                continue;
+            }
+            if (ifc != NULL) {
+                // kind 已經帶 interface；再寫 iface 不可以矛盾
+                uint8_t explicit_iface = NC_CFG_IFACE_ANY;
+                if (!cJSON_IsString(ifc) || ifc->valuestring == NULL ||
+                    !iface_parse(ifc->valuestring, &explicit_iface) ||
+                    explicit_iface != l.iface) {
+                    st->invalid++;
+                    continue;
+                }
+            }
+        } else if (ifc == NULL) {
+            l.iface = NC_CFG_IFACE_ANY;
+            st->defaulted++;
+        } else if (!cJSON_IsString(ifc) || ifc->valuestring == NULL ||
+                   !iface_parse(ifc->valuestring, &l.iface)) {
+            st->invalid++;
+            continue;
+        }
+
+        if (nm != NULL) {
+            // 有寫 name 就一定用它；太長／型別錯 = 這條不合法，不可以靜靜改成
+            // kind+index（那會令用戶以為自己寫的名字生效了）。
+            if (!cJSON_IsString(nm) || nm->valuestring == NULL ||
+                nm->valuestring[0] == '\0' || strlen(nm->valuestring) >= NC_CFG_NAME_MAX) {
+                st->invalid++;
+                continue;
+            }
             snprintf(l.name, sizeof(l.name), "%s", nm->valuestring);
         } else if (kind_s != NULL) {
-            // 冇 name → 由 kind + index 生成（eth_tcp0 / wifi_tcp1 / uart0）
-            const int n = snprintf(l.name, sizeof(l.name), "%s%u", kind_s,
+            // 冇 name → 由 iface + kind + index 生成（eth_tcp0 / wifi_tcp1 / uart0）。
+            // canonical schema 把 kind 與 iface 分開，所以名字也要由兩者夾出來，
+            // 否則 routes 寫 eth_tcp1 會對不上。
+            const char *base = kind_s;
+            char split[NC_CFG_NAME_MAX];
+            if (!composite && l.iface != NC_CFG_IFACE_ANY) {
+                const char *ifname = nc_cfg_iface_name(l.iface);
+                const int m = snprintf(split, sizeof(split), "%s_%s", ifname, base);
+                if (m > 0 && (size_t)m < sizeof(split)) {
+                    base = split;
+                }
+            }
+            const int n = snprintf(l.name, sizeof(l.name), "%s%u", base,
                                    (unsigned)l.index);
             if (n <= 0 || (size_t)n >= sizeof(l.name)) {
                 st->invalid++;
@@ -286,61 +388,33 @@ static void parse_links(const cJSON *root, nc_system_cfg_t *out, nc_cfg_stat_t *
             st->invalid++;
             continue;
         }
-        l.enable = get_bool(it, "enable", true, st);
-        l.port = (uint16_t)get_int(it, "port",
-                (uint16_t)get_int(item(it, "cfg"), "port", 0, 0, 65535, st),
-                0, 65535, st);
-
-        const cJSON *ifc = item(it, "iface");
-        l.managed = composite || (ifc != NULL) || (item(it, "service") != NULL);
-        if (composite) {
-            snprintf(l.iface, sizeof(l.iface), "%s", iface_from_kind);
-            if (ifc != NULL) {
-                // kind 已經帶 interface；再寫 iface 不可以矛盾
-                if (!cJSON_IsString(ifc) || ifc->valuestring == NULL ||
-                    strcasecmp(ifc->valuestring, iface_from_kind) != 0) {
-                    st->invalid++;
-                    continue;
-                }
-            }
-        } else if (ifc == NULL) {
-            snprintf(l.iface, sizeof(l.iface), "any");
-            st->defaulted++;
-        } else if (!cJSON_IsString(ifc) || ifc->valuestring == NULL ||
-                   strlen(ifc->valuestring) >= sizeof(l.iface)) {
-            st->invalid++;
-            continue;
-        } else {
-            snprintf(l.iface, sizeof(l.iface), "%s", ifc->valuestring);
-        }
 
         const cJSON *mem = item(it, "mem");
         if (mem == NULL) {
-            snprintf(l.mem, sizeof(l.mem), "auto");
+            l.mem = NC_CFG_MEM_AUTO;
             st->defaulted++;
         } else if (!cJSON_IsString(mem) || mem->valuestring == NULL ||
-                   strlen(mem->valuestring) >= sizeof(l.mem)) {
+                   !mem_parse(mem->valuestring, &l.mem)) {
             st->invalid++;
             continue;
-        } else {
-            snprintf(l.mem, sizeof(l.mem), "%s", mem->valuestring);
         }
 
         const cJSON *svc = item(it, "service");
         if (svc == NULL) {
-            snprintf(l.service, sizeof(l.service), "%s",
-                     (l.kind == NC_LINK_HTTP) ? "web" : "nc4");
+            l.service = (l.kind == NC_LINK_HTTP) ? NC_CFG_SVC_WEB : NC_CFG_SVC_NC4;
             st->defaulted++;
         } else if (!cJSON_IsString(svc) || svc->valuestring == NULL ||
-                   strlen(svc->valuestring) >= sizeof(l.service)) {
+                   !service_parse(svc->valuestring, &l.service)) {
             st->invalid++;
             continue;
-        } else {
-            snprintf(l.service, sizeof(l.service), "%s", svc->valuestring);
         }
 
         nc_cfg_rx_default(l.kind, &l.rx);
-        const cJSON *rx = item(item(it, "cfg"), "rx");
+        // canonical：rx 直接在 link 下面；舊格式在 cfg.rx。兩者都有時以 link 為準。
+        const cJSON *rx = item(it, "rx");
+        if (rx == NULL) {
+            rx = item(item(it, "cfg"), "rx");
+        }
         if (rx == NULL) {
             st->defaulted++;    // 只寫 name/kind → rx 用該 kind 的量測預設
         } else if (!cJSON_IsObject(rx)) {
@@ -435,8 +509,8 @@ static void parse_routes(const cJSON *root, nc_system_cfg_t *out, nc_cfg_stat_t 
 
 // ───────────────────────── hardware ─────────────────────────
 // 每一段一個函式，apply_hardware 只負責「按段叫」；加一段 = 加一個函式 + 一行。
-// 這個形狀是刻意跟 hardware-config.md 的「preset / merge」對齊的：
-// 之後每一段都會變成「preset 表 + 逐欄位覆蓋」，而不是在這裡逐個 get_int。
+// 起點是 generated 的 nc_port.c（build 時由 wiring.json 編成），所以「缺席 = 用板級預設」；
+// 這裡只做用戶 JSON 的逐欄位覆蓋，不再需要另一張 preset 表。
 
 // ETH（RMII）：{ "ETH": {"enable":1,"mdc":31,"mdio":52,"ref_clk":50,
 //                        "phy_type":"IP101","phy_addr":1} }
@@ -466,7 +540,14 @@ static void apply_eth(const cJSON *root, nc_hardware_cfg_t *out, nc_cfg_stat_t *
     e->mdio     = (int8_t)get_int(o, "mdio", -1, -1, NC_CFG_GPIO_MAX, st);
     e->ref_clk  = (int8_t)get_int(o, "ref_clk", -1, -1, NC_CFG_GPIO_MAX, st);
     e->phy_addr = (uint8_t)get_int(o, "phy_addr", 1, 0, 31, st);
-    get_str(o, "phy_type", e->phy_type, sizeof(e->phy_type), "IP101", st);
+    {
+        char phy[NC_CFG_PHY_NAME_MAX];
+        get_str(o, "phy_type", phy, sizeof(phy), "IP101", st);
+        if (!phy_parse(phy, &e->phy_type)) {
+            st->invalid++;
+            e->phy_type = NC_CFG_PHY_GENERIC;
+        }
+    }
 }
 
 // SDIO：{ "SDIO": { "enable":1, "list":[ {"freq":40000000,"width":4,
@@ -1066,6 +1147,9 @@ esp_err_t nc_cfg_boot_ex(const char *hw_base_json, size_t hw_base_len)
         s_hw_stat.bad_json = 1;
     } else if (base != NULL) {
         s_hw_stat.missing = 0;
+    } else if (nc_cfg_hw_has_port_defaults()) {
+        // 沒有用戶 hardware.json，但這塊板有 generated 預設：不是 degraded。
+        s_hw_stat.missing = 0;
     }
 
     exists = false;
@@ -1094,7 +1178,7 @@ esp_err_t nc_cfg_boot_ex(const char *hw_base_json, size_t hw_base_len)
     const char *eth_state = !s_hw.eth.present ? "未寫(內建)" : (s_hw.eth.enable ? "開" : "關");
     ESP_LOGI(TAG, "hardware: eth=%s mdc=%d mdio=%d refclk=%d %s@%u；sdio=%u%s%s（def=%u inv=%u unk=%u）",
              eth_state, s_hw.eth.mdc, s_hw.eth.mdio, s_hw.eth.ref_clk,
-             s_hw.eth.phy_type, (unsigned)s_hw.eth.phy_addr,
+             nc_cfg_phy_name(s_hw.eth.phy_type), (unsigned)s_hw.eth.phy_addr,
              (unsigned)s_hw.n_sdio,
              s_hw_stat.missing ? " 缺檔" : "",
              s_hw_stat.bad_json ? " 壞檔" : "",

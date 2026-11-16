@@ -68,6 +68,43 @@ def _unique(path: Path) -> Path:
         i += 1
 
 
+def collect_flash_bins(cfg: dict, board: str, build_dir: Path) -> Path | None:
+    """把所有可燒的 .bin 集中到 artifacts/<board>/。
+
+    中間檔（CMake／ninja／.o／.map）全部留在 `artifacts/build/<board>/`，
+    這裡只收「真的要拿去燒」的幾個檔，外加一份 manifest：
+        esp_net_core.bin、bootloader/bootloader.bin、
+        partition_table/partition-table.bin、ota_data_initial.bin、flash_args
+    """
+    rels = [
+        "esp_net_core.bin",
+        "bootloader/bootloader.bin",
+        "partition_table/partition-table.bin",
+        "ota_data_initial.bin",
+        "flash_args",
+    ]
+    out_dir = env.artifacts_dir(cfg) / board
+    copied: list[dict] = []
+    for rel in rels:
+        src = build_dir / rel
+        if not src.is_file():
+            continue
+        out_dir.mkdir(parents=True, exist_ok=True)
+        dst = out_dir / Path(rel).name
+        shutil.copy2(src, dst)
+        copied.append({"file": dst.name, "size": dst.stat().st_size,
+                       "sha256": sha256(dst)})
+    if not copied:
+        return None
+    (out_dir / "manifest.json").write_text(json.dumps({
+        "board": board,
+        "built_at": _dt.datetime.now().isoformat(timespec="seconds"),
+        "git": env.git_rev(),
+        "files": copied,
+    }, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    return out_dir
+
+
 def archive(cfg: dict, board: str, bin_path: Path, meta: dict | None = None) -> Path:
     """把建置產物放到 artifacts/<board>.bin；舊的那顆自動退成帶時間戳的歷史檔。"""
     out_dir = env.artifacts_dir(cfg)

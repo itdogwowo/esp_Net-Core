@@ -8,7 +8,7 @@
 #   tools/board.sh ports                誰佔住了序列埠
 #
 # console 不再用 --console 切換：那是「這塊板子的事」，
-# 寫在 ports/<chip>/<board>/board.json 的 "console" 欄位。
+# 寫在 ports/hardware/<chip>/<board>/board.json 的 "console" 欄位。
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 exec python3 "$ROOT/make.py" "$@"

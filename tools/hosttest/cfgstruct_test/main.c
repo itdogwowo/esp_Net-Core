@@ -89,7 +89,7 @@ static void check_preset_hw(const char *path, int expect_eth)
     if (hw.eth.enable) {
         ok("啟用時腳位齊", hw.eth.mdc >= 0 && hw.eth.mdio >= 0 && hw.eth.ref_clk >= 0);
     }
-    ok("phy_type 非空", hw.eth.phy_type[0] != '\0');
+    ok("phy_type 非空", hw.eth.phy_type != NC_CFG_PHY_UNKNOWN);
     cJSON_Delete(root);
 }
 
@@ -245,6 +245,28 @@ int main(void)
     ok("推定 uart", l != NULL && l->kind == NC_LINK_UART);
     ok("rx 用 uart 預設 1024", l != NULL && l->rx.region == 1024);
 
+    printf("[12b] canonical link：kind + iface 分開、rx 直接在 link 下面\n");
+    st = parse_sys(
+        "{\"version\":1,\"nc4\":{\"links\":["
+        "{\"kind\":\"tcp\",\"iface\":\"eth\",\"index\":1,\"port\":6000,"
+        " \"rx\":{\"region\":4096,\"chunk\":1024}}]}}",
+        &sys);
+    l = link(&sys, "eth_tcp1");
+    ok("冇 name → 由 iface+kind+index 生成 eth_tcp1", l != NULL);
+    ok("iface=eth", l != NULL && l->iface == NC_CFG_IFACE_ETH);
+    ok("managed=1", l != NULL && l->managed);
+    ok("port=6000", l != NULL && l->port == 6000);
+    ok("rx 在 link 下面生效", l != NULL && l->rx.region == 4096 &&
+                             l->rx.chunk == 1024);
+
+    printf("[12c] 舊 composite kind 仍然接受\n");
+    st = parse_sys(
+        "{\"version\":1,\"nc4\":{\"links\":["
+        "{\"kind\":\"eth_tcp\",\"index\":2,\"port\":8080}]}}", &sys);
+    l = link(&sys, "eth_tcp2");
+    ok("eth_tcp 生成 eth_tcp2", l != NULL);
+    ok("iface=eth", l != NULL && l->iface == NC_CFG_IFACE_ETH);
+
     printf("[13] tasks：has_level 要分得出「冇寫」與「寫 0」\n");
     nc_tasks_cfg_t tasks;
     nc_cfg_stat_t ts = parse_tasks(
@@ -275,7 +297,7 @@ int main(void)
     ok("present=0", !hw.eth.present);
     ok("enable=0", !hw.eth.enable);
     ok("mdc=-1", hw.eth.mdc == -1);
-    ok("phy_type 預設 IP101", strcmp(hw.eth.phy_type, "IP101") == 0);
+    ok("phy_type 預設 IP101", hw.eth.phy_type == NC_CFG_PHY_IP101);
 
     printf("[16] hardware：正常 ETH 段（mdio=52 在 P4 的 GPIO 範圍內）\n");
     hs = parse_hw("{\"version\":1,\"ETH\":{\"enable\":1,\"mdc\":31,\"mdio\":52,"
@@ -287,7 +309,7 @@ int main(void)
     ok("mdio=52（唔可以當超範圍）", hw.eth.mdio == 52);
     ok("ref_clk=50", hw.eth.ref_clk == 50);
     ok("phy_addr=1", hw.eth.phy_addr == 1);
-    ok("phy_type=IP101", strcmp(hw.eth.phy_type, "IP101") == 0);
+    ok("phy_type=IP101", hw.eth.phy_type == NC_CFG_PHY_IP101);
     ok("spi/cs/rst/int 認得（unknown=0）", hs.unknown == 0);
     ok("零 invalid", hs.invalid == 0);
 
@@ -302,7 +324,7 @@ int main(void)
     ok("present=1", hw.eth.present);
     ok("enable 回 false", !hw.eth.enable);
     ok("mdc 回 -1", hw.eth.mdc == -1);
-    ok("phy_type 回 IP101", strcmp(hw.eth.phy_type, "IP101") == 0);
+    ok("phy_type 回 IP101", hw.eth.phy_type == NC_CFG_PHY_IP101);
     ok("invalid>=3（三項都係型別／範圍錯）", hs.invalid >= 3);
 
     printf("[19] hardware：未知鍵只計數，仍然解析\n");
@@ -346,8 +368,8 @@ int main(void)
                 nc_cfg_stat_t ps;
                 (void)nc_cfg_apply_system(root, &sys, &ps);
                 ok("預置解析零 invalid", ps.invalid == 0);
-                ok("預置有 2 條 link", sys.n_links == 2);
-                ok("預置有 4 列 route", sys.n_routes == 4);
+                ok("預置有 6 條 link", sys.n_links == 6);
+                ok("預置有 7 列 route", sys.n_routes == 7);
                 ok("預置 CDC 啟用", sys.links[0].enable);
                 cJSON_Delete(root);
             }

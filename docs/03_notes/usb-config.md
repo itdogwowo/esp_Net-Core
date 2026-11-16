@@ -61,7 +61,7 @@ B09 租用（交給 nc4 任務）；USB 真正上線（TinyUSB 列舉／log 管�
 | 層 | 位置 | 現在決定什麼 | 問題 |
 |---|---|---|---|
 | **能力／編譯期** | `main/Kconfig.projbuild` 的 `NETCORE_USB_OTG` | 「呢個 target 有冇 OTG」→ 整組 TinyUSB 編唔編 | 只看 `IDF_TARGET_*`，不看板子；P4 就算 `features.usb=false` 都照 y |
-| **板子／編譯期** | `ports/<board>/sdkconfig.defaults` | OTG 走 FS/HS（`NETCORE_USB_OTG_HS`） | 手寫、沒有 profile、`board.py` 不驗；`board.json` 的 `features.usb` 完全冇人讀 |
+| **板子／編譯期** | `ports/hardware/<board>/sdkconfig.defaults` | OTG 走 FS/HS（`NETCORE_USB_OTG_HS`） | 手寫、沒有 profile、`board.py` 不驗；`board.json` 的 `features.usb` 完全冇人讀 |
 | **執行期** | `system.json` 的 `usb.{msc,cdc_log}` ＋ `nc4.links[]` | 交唔交碟、log 走唔走 CDC、CDC 通唔通 | `cdc_log` 只管 OTG；`msc` 預設 1；CDC 通道藏在 `links[].enable`，不是一個「USB 基線」概念 |
 
 兩條 transport 在 S3／P4 都會編入（USJ 看 `SOC_USB_SERIAL_JTAG_SUPPORTED`），

@@ -84,7 +84,7 @@ enable=1            → STA 試一輪
 | 類別 | 例子 | 放哪 | 為什麼 |
 |---|---|---|---|
 | **通用行為** | `enable`／`active_mode`／`timeout`／`ssid`／`ap_ssid` | `network.json`（runtime） | 每塊板都一樣，改完重開就生效 |
-| **板商差異** | ETH 的 `mdc/mdio/ref_clk`、UART 的 `tx/rx`、SPI 腳位 | `ports/<board>/wiring.json`（build-time）＋ `/data/config/hardware.json` 覆蓋 | 同一顆晶片，不同廠商接法不同 —— 不可能有「通用腳位」 |
+| **板商差異** | ETH 的 `mdc/mdio/ref_clk`、UART 的 `tx/rx`、SPI 腳位 | `ports/hardware/<board>/wiring.json`（build-time）＋ `/data/config/hardware.json` 覆蓋 | 同一顆晶片，不同廠商接法不同 —— 不可能有「通用腳位」 |
 | **能力碎片** | 有冇 ETH／WiFi 走 hosted／WS | `ports/_profiles/*.defaults`（board.json profiles） | 決定要不要編進 image |
 
 

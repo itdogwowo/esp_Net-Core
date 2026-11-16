@@ -1,0 +1,108 @@
+{
+  "_comment": [
+    "System 層：身份、開機行為、NC4 通道與路由表（S3-Matrix）。",
+    "這塊板沒有 ETH、沒有 SD；USB 一台、沒有 UART 擴展（IO14 是燈，不要當 UART）。"
+  ],
+  "version": 1,
+  "cID": "",
+  "frame_interval_ms": 20,
+  "num_pixels": 64,
+  "nc4": {
+    "links": [
+      {
+        "name": "usb_jtag",
+        "kind": "usb_jtag"
+      },
+      {
+        "name": "TCP",
+        "kind": "tcp",
+        "iface": "wifi",
+        "port": 6000,
+        "service": "nc4",
+        "rx": {
+          "region": 8205,
+          "chunk": 4096,
+          "budget": 8,
+          "slots": 1,
+          "slot_size": 8205
+        }
+      },
+      {
+        "name": "UDP",
+        "kind": "udp",
+        "iface": "wifi",
+        "port": 6001,
+        "service": "nc4",
+        "rx": {
+          "region": 4096,
+          "chunk": 4096,
+          "budget": 8,
+          "slots": 1,
+          "slot_size": 4096
+        }
+      },
+      {
+        "name": "WS",
+        "kind": "ws",
+        "iface": "wifi",
+        "port": 8080,
+        "service": "nc4",
+        "rx": {
+          "region": 8192,
+          "chunk": 8192,
+          "budget": 4,
+          "slots": 1,
+          "slot_size": 8192
+        }
+      },
+      {
+        "name": "HTTP",
+        "kind": "http",
+        "iface": "wifi",
+        "port": 80,
+        "service": "web"
+      }
+    ],
+    "routes": [
+      {
+        "in": "nctx",
+        "out": [
+          "decode0"
+        ]
+      },
+      {
+        "in": "outbound",
+        "out": []
+      },
+      {
+        "in": "usb_jtag",
+        "out": [
+          "decode0"
+        ]
+      },
+      {
+        "in": "TCP",
+        "out": [
+          "decode0"
+        ]
+      },
+      {
+        "in": "UDP",
+        "out": [
+          "decode0"
+        ]
+      },
+      {
+        "in": "WS",
+        "out": [
+          "decode0"
+        ]
+      }
+    ]
+  },
+  "usb": {
+    "msc": 0,
+    "cdc_log": 1
+  },
+  "log_debug_mode": 0
+}

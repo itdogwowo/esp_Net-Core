@@ -34,18 +34,18 @@ tools/ncbuild/
 
 | 命令 | 需要板子 | 做什麼 |
 |---|---|---|
-| `make.py p4` = `make.py build p4` | — | 建置；自動處理 target 切換 |
-| `make.py build s3 --minimal` | — | 最小映像（只印心跳），新板 bring-up 用 |
-| `make.py build s3 --tests` | — | **測試映像**（`NC_ENABLE_TESTS=ON`：`0xF00x` 指令與 test_* 任務）。不寫＝出貨映像（OFF）。每次都會明確傳給 CMake，不再靠 cache 記住上一個值 |
-| `make.py build p4 --fresh` | — | 先刪 `sdkconfig` 再建（改了 defaults 才需要） |
-| `make.py build p4 --jobs 4` | — | 限制平行編譯 |
-| `make.py build --all` | — | 依序建置**全部**板子（CI / 回歸用；每塊都會切 target，慢） |
+| `make.py build ESP32-P4-ETH` | — | 建置；板名 / `<chip>/<board>` / project 名都可以 |
+| `make.py build S3/ESP32-S3-Matrix --minimal` | — | 最小映像（只印心跳），新板 bring-up 用 |
+| `make.py build ESP32-S3-N16R8 --tests` | — | **測試映像**（`NC_ENABLE_TESTS=ON`：`0xF00x` 指令與 test_* 任務）。不寫＝出貨映像（OFF）。每次都會明確傳給 CMake，不再靠 cache 記住上一個值 |
+| `make.py build ESP32-P4-ETH --fresh` | — | 先刪這個 build dir 的 `sdkconfig` 再建（改了 defaults 才需要） |
+| `make.py build ESP32-P4-ETH --jobs 4` | — | 限制平行編譯 |
+| `make.py build --all` | — | 依序建置**全部**板子（每塊一個 build dir，可重入） |
 | `make.py doctor` | — | 環境健檢：IDF / idf.py / esptool / pyserial / 板子設定 / 磁碟 / git |
-| `make.py flash p4 [--full\|--erase]` | ✅ | 建置 + 燒錄（預設 `app-flash`，不動碟上的使用者資料） |
-| `make.py monitor p4` | ✅ | 序列埠監看 |
+| `make.py flash ESP32-P4-ETH [--full\|--erase]` | ✅ | 建置 + 燒錄（預設 `app-flash`，不動碟上的使用者資料） |
+| `make.py monitor ESP32-P4-ETH` | ✅ | 序列埠監看 |
 | `make.py outputs [--prune N]` | — | 列出歷史產物 / 每塊板子只留 N 顆 |
-| `make.py config p4` | — | 印出這塊板子的 board.json + 合併後的有效 Kconfig |
-| `make.py clean [--all]` | — | 清 `build/` `sdkconfig`；（`--all` 連 `managed_components`） |
+| `make.py config ESP32-P4-ETH` | — | 印出這塊板子的 board.json + 合併後的有效 Kconfig |
+| `make.py clean [--all]` | — | 清 `artifacts/build/`、舊 `firmware/build*`／`sdkconfig*`；（`--all` 連 `managed_components`） |
 | `make.py boards` / `list` / `ports` / `env` | — | 板子表 / 插著的板子 / 序列埠 / IDF 路徑 |
 
 ### 產物（`artifacts/`）
@@ -53,24 +53,38 @@ tools/ncbuild/
 命名規則跟 `mp_Make-Tools` 一致：**只有撞名才加時間戳**。
 
 ```text
-第一次  build → artifacts/ESP32-P4-ETH.bin
-第二次  build → artifacts/ESP32-P4-ETH.bin                       ← 最新那顆，永遠是這個名字
-                artifacts/ESP32-P4-ETH_2026_11_02_02_25_30.bin   ← 上一顆退成歷史檔
-                artifacts/ESP32-P4-ETH_2026_11_02_02_25_30.json  ← board / chip / git / idf / sha256
-第三次  還是撞 → ..._1.bin
+artifacts/
+├─ ESP32-P4-ETH.bin                   最新 app image（OTA 用這個）
+├─ ESP32-P4-ETH_2026_11_16_15_07_27.bin  上一顆退成歷史檔
+├─ ESP32-P4-ETH.json                  尺寸 / sha256 / git / IDF 版本
+├─ ESP32-P4-ETH/                      這顆的完整可燒 .bin 組
+│  ├─ esp_net_core.bin
+│  ├─ bootloader.bin
+│  ├─ partition-table.bin
+│  ├─ ota_data_initial.bin
+│  ├─ flash_args
+│  └─ manifest.json
+├─ build/<chip>_<board>/              CMake / ninja / .o 全部在這裡（每塊板一個）
+└─ logs/<board>_<時間>.log
 ```
 
 > ⚠️ 與 `mp_Make-Tools` 的差異：它的時間戳貼在**新**產物上（`NAME.bin` 一直是最舊那顆）；
 > 這裡貼在**舊**產物上。理由是 `NAME.bin` 必須永遠是最新的一顆 —— 否則
 > `ota.py artifacts/<board>.bin` 會安靜地燒到第一次建置的舊韌體。
 
-出貨或 OTA 回滾測試直接拿 `artifacts/<board>.bin`，不用回頭挖 `firmware/build/`。
-`--no-archive` 可關掉；`make.py outputs --prune 3` 只留每塊板子最近 3 顆。
+`firmware/` 不再有 `build/`、`build_p4/`、`build_p4c6/`、`sdkconfig`；所有中間檔都在
+`artifacts/build/<chip>_<board>/`，`sdkconfig` 也在裡面（`-DSDKCONFIG`），所以多塊板
+可以並存、不用每次切 target。`make.py clean` 清 `artifacts/build/` 與舊的
+`firmware/build*`／`sdkconfig*`；`--all` 連 `managed_components`／`dependencies.lock`。
+
+`--no-archive` 可關掉 `.bin` 收集；`make.py outputs --prune 3` 只留每塊板子最近 3 顆。
 
 ### 設定檔
 
 `make_config.json`（root）：`default_board`、`build.jobs`、`build.keep`、
-`idf.per_chip`（讓 P4 用不同的 IDF）、`serial.port`。命令列參數優先。
+`build.output_dir`（預設 `artifacts`）、`build.build_dir`（預設 `<output_dir>/build`；
+可指到專案外，例如 `~/.cache/esp_Net-Core/build`）、`idf.per_chip`、`serial.port`。
+命令列參數優先。
 
 ### 跟舊 `board.sh` 的關係
 
@@ -82,17 +96,20 @@ tools/ncbuild/
 
 ### `board.py` — 板子設定的真相
 
-板子清單不是寫在腳本裡，而是 `ports/<chip>/<board>/board.json`：
+板子清單不是寫在腳本裡，而是兩層：
+`ports/hardware/<chip>/<board>/board.json`（硬體）＋
+`ports/project/<chip>/<board>/project.json`（項目）：
 
 ```bash
-python3 tools/board.py list      # 所有板子 × flash/PSRAM/ETH/console
+python3 tools/board.py list      # 硬體板 × project × flash/PSRAM/ETH/console
 python3 tools/board.py check     # 驗 board.json ↔ sdkconfig；擋下「把 build-time 設定寫進 config.json」
-python3 tools/board.py sync      # 改了 ports/_profiles/ 之後，把能力碎片寫進各板
+python3 tools/board.py sync      # 改了 ports/_profiles/ 之後，把能力碎片寫進兩層
 python3 tools/board.py new --chip S3 --board ESP32-S3-Matrix --flash 16 --psram 8 --ws
+python3 tools/board.py new --project demo --hardware P4/ESP32-P4-ETH
 ```
 
 新增板子**不需要改 `board.sh` 或 CMake**。`board.sh` 會自己問 `board.py` 這塊板子的
-目錄、idf target 與 IDF 路徑。細節見 [ports/README.md](../ports/README.md)。
+硬體目錄、project、idf target 與 IDF 路徑。細節見 [ports/README.md](../ports/README.md)。
 
 ## ② 對設備說話
 
@@ -108,7 +125,7 @@ python3 tools/board.py new --chip S3 --board ESP32-S3-Matrix --flash 16 --psram 
 | `fx.py pack / dump` | ❌ | **打包 `.fxe`**（header + manifest + payload + 指令表）與檢視；manifest 欄位＝模組的 kind/core/layer/fps/px/預算。`pack` 會先擋掉裝置端一定會拒的值 |
 | `matrix.py --port … stats\|effect\|dither\|color\|gain\|fps\|zone\|zmask` | ✅ | **8×8 WS2812 矩陣**（`0xF060`）：切效果（第一區／呼吸／波浪／單色／色階）、抖動開關、每區 rate+phase、看實測 fps／late／tx_us。見 [rgb-matrix-dither](../docs/03_notes/rgb-matrix-dither.md) |
 
-firmware image 在 `firmware/build/esp_net_core.bin`（先 build 才有）。
+firmware image 在 `artifacts/<board>.bin`（先 build 才有；完整可燒組在 `artifacts/<board>/`）。
 
 ## ③ `bench/` — 量測（要板子，多數要 P4 乙太網）
 

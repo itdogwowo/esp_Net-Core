@@ -34,7 +34,7 @@ nc_wifi.c ── esp_wifi.h ──► esp_wifi（remote shim）──► esp_hos
 `firmware/` 的程式碼不動。
 
 ```jsonc
-// ports/P4/ESP32-P4-C6/board.json
+// ports/hardware/P4/ESP32-P4-C6/board.json
 "profiles": ["eth-rmii", "wifi-hosted-c6"],
 "features": { "eth": "rmii-ip101", "wifi": "hosted-c6" }
 ```
@@ -61,7 +61,7 @@ nc_wifi.c ── esp_wifi.h ──► esp_wifi（remote shim）──► esp_hos
 | `firmware/main/CMakeLists.txt` | P4 + hosted 時 `PRIV_REQUIRES` 加 `esp_wifi esp_wifi_remote` |
 | `firmware/components/action/test_action/CMakeLists.txt` | `esp_event`／`esp_netif` 由「只在 S3 加」改成「有 `CONFIG_NETCORE_WIFI` 就加」——**這是原本就存在的隱性 transitive 依賴**，P4 一開 Wi-Fi 就爆 |
 | `ports/_profiles/wifi-hosted-c6.defaults`／`-c5.defaults` | 能力碎片（來源：MicroPython `sdkconfig.p4_wifi_common`，去掉 BLE） |
-| `ports/P4/ESP32-P4-C6/` | 新板：16 MB flash、32 MB HEX PSRAM、P4 rev1.0、C6 作 Wi-Fi |
+| `ports/hardware/P4/ESP32-P4-C6/` | 新板：16 MB flash、32 MB HEX PSRAM、P4 rev1.0、C6 作 Wi-Fi |
 
 ### 為什麼要 `CONFIG_SLAVE_*`
 
