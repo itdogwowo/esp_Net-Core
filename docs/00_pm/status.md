@@ -3066,3 +3066,49 @@ host import（列印／讀 GPIO／反轉 GPIO）全條鏈都通。`ok:1` 同 `ba
 `CONFIG_ESP_CONSOLE_NONE=y` 換成 `CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y`，
 由 ROM download mode watchdog-reset 冷開機，就可以用 USJ console 拿 backtrace；
 修好後還原。
+
+### 7.83 2026-11-17 深夜（收納定案：L0 外掛 → L1 AOT → L2 原生 → L3 硬件；首次 wasm vs C 實測 14.8×）
+
+**① 定案（模組收納流程）**
+
+- 新功能／測試**先做外掛模組**（通用 `.nct`，L0 wasm 直譯），喺 tests 固件驗證。
+- 測試冊驗收通過後，按「量到嘅性能需要」**分層收納**：
+  **L0** 外掛 wasm（通用、≈15× C）→ **L1** 外掛 AOT（同容器 `fmt=aot`、per-arch、預期 2–4× C）
+  → **L2** 原生 C 固件組件（熱路徑／驅動／timing）→ **L3** 硬件加速（DMA／PPA／RMT／IRAM）。
+- 每升一層要引用量測；保留上一層作 golden reference／回退；AOT 仍然受 import 白名單
+  （唔算「加能力」）；原生能力只可以經 **OTA 固件**加，唔可以由 FAT 載入 native code。
+- 文件：[module-adoption.md](../03_notes/module-adoption.md)、
+  [test-register.md](test-register.md)（測試冊；收納入固件前一定要有一行）。
+
+**② 首次同 workload 對照（S3 Mini-Nano、240 MHz、tests 固件）**
+
+workload：50,000 次 LCG（`v = v*1664525 + 1013904223`，同一個 checksum）：
+
+| 形態 | 實測（5 次） | 備註 |
+|---|---|---|
+| **L2 原生 C**：新測試指令 `0xF050 CPU_BURN` | **1,677–1,687 µs**（均值 1,683） | `__asm__` barrier 防優化；~8 cycles/iter |
+| **L0 wasm 直譯**：`tools/ncm_samples/bench_task.wat` | **24,868–24,910 µs**（均值 24,887） | tick 內用新 import `nc_now_us()` 自量 |
+| **倍數** | **≈14.8×** | 同一塊板、同一時段；兩個 checksum 都係 `1919499729` |
+
+- 有一個 335 ms outlier（USB 擷取期間；不計入均值）。純 ALU workload，locals 喺
+  internal exec stack，所以呢個倍數主要係**直譯器 overhead**，唔關 PSRAM 事。
+- 順帶新增：`nc_now_us()` import（白名單第 7 個，= MPY `time.ticks_us()`）、
+  `0xF050 CPU_BURN`（native 對照工具）、`bench_task` 樣本。
+
+**③ 解讀**
+
+- L0 適合「每 tick 唔爆 budget 的邏輯」；如果 tick 用咗 >30% budget → 升 L1 AOT；
+  AOT 仍然 >30% → 升 L2 原生 C。實際門檻留待 AOT 數字出爐再校準。
+- **AOT 未接**（`CONFIG_WAMR_ENABLE_AOT=n`；engine 明確拒 AOT）。P3 要：`wamrc`
+  編 Xtensa、S3 PSRAM dual-bus 執行路徑、量 L1 倍數。AOT 唔等於原生 C
+  （仍有 wasm 記憶體模型＋bounds check），「真·原生」只有 L2。
+- 純 ALU 之外（大 framebuffer／streaming）要另外量 PSRAM 成本——緩衝管理器只
+  解決 host 側搬資料，唔解決 guest linear memory 喺 PSRAM。
+
+**④ 下一步**
+
+1. capability provider 重構（`nc_cap_gpio`／`nc_cap_time` 先；之後 `nc_cap_led`）；
+2. `nc_cap_led`＋`nc_led_show/info`，LED pattern 任務 L0 → driver 留 L2；
+3. AOT spike（P3）；
+4. per-module loop／prio／core（manifest 已有欄位，loader 只 attach 未調度）；
+5. 測試冊逐項更新（T-NCM-008 fuzz、T-NCM-009 AOT、T-NCM-010 LED…）。

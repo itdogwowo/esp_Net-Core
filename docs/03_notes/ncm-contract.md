@@ -112,7 +112,7 @@ export，節奏由 manifest 的 `fps` 決定：
 |---|---|
 | export（必需） | `task_tick() -> i32`（0 = ok） |
 | export（可選） | `task_init() -> i32`（載入時一次） |
-| import（白名單，module `"env"`） | `nc_print(ptr,len)`、`nc_print_i32(v)`、`nc_print2(p1,l1,v1,p2,l2,v2)`、`nc_gpio_read(pin)`、`nc_gpio_write(pin,val)`、`nc_gpio_toggle(pin)` |
+| import（白名單，module `"env"`） | `nc_print(ptr,len)`、`nc_print_i32(v)`、`nc_print2(p1,l1,v1,p2,l2,v2)`、`nc_gpio_read(pin)`、`nc_gpio_write(pin,val)`、`nc_gpio_toggle(pin)`、`nc_now_us()→i64`（= `time.ticks_us()`） |
 | GPIO 安全 | 0／3／45／46（strap）、7／8（本板 UART）、19／20（USB）、26–37（SPI flash／octal PSRAM）、43／44（UART0）一律拒絕；其餘 0–48 開放 |
 | 實作 | `test_mod_tasks/nc_mod_engine.c`（WAMR interp backend）；樣本 `tools/ncm_samples/` |
 
@@ -124,6 +124,9 @@ export，節奏由 manifest 的 `fps` 決定：
   嘅 tick 週期提供）；要加能力就擴白名單＋升 ABI version。
 - 驗證：`status ncm` 見 `backend:"wamr"`、模組 `ok:1`；`status tasks` 見模組以
   `kind:normal` 租戶登記；CDC log 每 tick 一行。詳見 status §7.82。
+- 收納流程（測試 → 外掛驗證 → L0/L1/L2/L3 分層升級）見
+  [module-adoption.md](module-adoption.md)；測試紀錄見
+  [test-register](../00_pm/test-register.md)。
 
 ---
 
