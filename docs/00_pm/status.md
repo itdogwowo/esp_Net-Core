@@ -2658,7 +2658,8 @@ MAC `80:f1:b2:d7:ba:f8`、協處理器 **ESP32-C5** silicon `0x17`）。build �
 - 32 MB 分割表另寫一份（`ota_0 @0x20000`、`ota_1 @0x420000`、`data @0x820000 size 0x1700000`），
   開機 log 見 `data 分區 size 23552 KB`。
 - aliases：`P4-WIFI6-DB`／`ESP32-P4-C5`／`P4-C5`（`ESP32-P4-C6` 仍然屬 FireBeetle2）。
-- 實測：B01–B10 全 `ok`、`hwcheck claims: []`、`TinyUSB Driver installed on port 1`（HS）、
+- 實測：B01–B12 全 `ok`（階段表本身冇 B06）、`hwcheck claims: []`、
+  `TinyUSB Driver installed on port 1`（HS）、
   `links[].msc=0 → /data 留在 APP`。
 
 **新能力碎片 `p4-rev3` / `p4-pre-rev3`（晶片版本也是硬體事實）**
@@ -2762,3 +2763,56 @@ IDF `esp_system/port/soc/esp32p4/Kconfig.cpu` 的 `ESP_DEFAULT_CPU_FREQ_MHZ_360`
    `SET_PERI_REG_MASK(RTC_CNTL_OPTION1_REG, RTC_CNTL_FORCE_DOWNLOAD_BOOT)` ＋ `esp_restart()`
    （RTC domain 保留，正好同 watchdog-reset 同一條路）。未做之前，S3 跑 OTG 版要重燒
    只能實體 BOOT＋RESET。
+
+### 7.79 2026-11-17 傍晚（第三輪：功能面深入驗證 —— S3 存儲／NC4／日誌、P4 復位與 flash 回讀）
+
+兩塊板照舊直接插主機（S3＝COM31 `303A:4003`，P4＝COM34 CH343）。今輪唔再燒錄，只驗行為。
+
+**S3：MSC／FAT 與主機的「一個主人」模型**
+
+| 驗證 | 結果 |
+|---|---|
+| 磁碟區 | `NC-2F2C`（FAT）7,237,632 B，total／free 同裝置 `status storage` 完全一致 |
+| 內容 | `config/{system,hardware,network,tasks}.json` ＋ `system.json.bak`、`pixel/effects`；`system.json` 內 `cID:"2F2C"` → 磁碟標籤 `NC-2F2C` 由 `cID` 衍生（實測見下） |
+| 裝置讀主機寫的檔 | `FILE_QUERY /config/system.json` → `exists=1 size=1351 sha256=91ebd45a…`，同主機 `Get-FileHash` **逐字節相同**（唯讀視圖真係讀 FAT，唔係快取假象）|
+| claim 守衛 | `claim` → `file_mode=1 mode=app`；此時主機寫 D: **0.03 s 內失敗**（"裝置未就緒"），確認主機唔會偷偷寫爛 FAT |
+| release | `release` → `file_mode=0 mode=usb`，約 4 s 後碟返嚟，`free` 由 4,046,848 回到 7,192,576（claim 期間的失效已復原）|
+| 寫入吞吐 | 1 MB 花 **14.2 s（≈72 KB/s）**、3 MB 花 42.8 s（同速率）；資料 round-trip hash 一致。讀取數字（0.01 s）係 host cache，不可信 |
+| 併發 | 3 MB 寫入期間同時串流 CDC 日誌：心跳最大 `dt=1.0529 s`（比 1 s 多 53 ms，冇出現 ~900 ms 停頓），heap 全程 169,995 不變 |
+| `fmt` | `-99` ＝ 未嘗試（`main.c:469` 的 sentinel，唔係 bug —— 這塊板沿用既有 FAT）|
+
+**S3：配置回環（真·由 FAT 設定驅動開機）**
+
+改 `D:\config\system.json` 的 `cID` `"2F2C"`→`"2F2D"`（sha 由 `91ebd45a…` 變 `1087d1a0…`，
+`Write-VolumeCache` 後裝置唯讀視圖即見到新 sha）→ NC4 `REBOOT (0x100F)` →
+開機後 `status sys` 回 **`cid=12077`**（＝0x2F2D），磁碟標籤同時變 **`NC-2F2D`** →
+還原原檔再重啟 → `cid=12076`、標籤 `NC-2F2C`、sha 回到 `91ebd45a…`。即：主機經 MSC 寫的
+config 真係主導下一次開機，而且可逆。
+
+**S3：NC4 與日誌（console=none 之下的唯一診斷管道）**
+
+- `status` 全部 keys 正常：`sys`／`storage`／`log`／`mem`／`provides`／`tasks`／`fx`／`cfg`；
+  `log` 見 `cap=1 run=1`、`produced=[34,4]`、`sent=38`、`dropped=578`（冇人讀時正常丟棄）。
+- `nc4_log.py` 串流 8 s：1 Hz 心跳、`dt` 抖動 ±100 µs、`heap=169995` 穩定。
+- `REBOOT`：`up_s` 619→12、`rst` 1→3、USB 重新枚舉回 `303A:4003`、`app` hash 不變
+  （即軟重啟後 OTG 棧照樣起返，PHY mux 由 driver 重新寫同一個值 —— 同 §7.78 的說明一致）。
+
+**P4：三次復位 + flash 回讀**
+
+- 用 pyserial 拉 RTS（EN）連續復位 3 次，每次都完整開到 **B01–B05、B07–B12 全 `ok`**
+  （**冇 B06 —— 階段表本身冇**，見 `main.c` 的階段表）、`eh_sdio: Card init success`、
+  `slave chip id 0x17 (esp32c5)`、SDIO `CLK=18 CMD=19 D0=14 D1=15 D2=16 D3=17 RESET=54`、
+  `cpu freq 400000000 Hz` → 開機確定性 OK。
+- `read-flash 0x20000 1038640` 回讀 app → sha256 `5472ed85…` 同
+  `artifacts/build/P4_ESP32-P4-WIFI6-DB/esp_net_core.bin` **完全相同**（裝置內容＝建置產物）。
+- 回讀分割表：`nvs 0x9000/0x6000`、`otadata 0xf000/0x2000`、`phy_init 0x11000/0x1000`、
+  `ota_0 0x20000/0x400000`、`ota_1 0x420000/0x400000`、`data 0x820000/0x1700000`（23 MB），
+  合計 31.1 MB ≤ 32 MB。
+
+**P4 這輪做唔到的（缺硬件接線／憑證，唔係程式問題）**
+
+- P4 的 `system.json` 只有 `usb0` link（OTG HS），**冇 uart0 link** → CH343 那個 COM34 只係
+  console（單向 log），送唔到 NC4 指令；而 4-pin OTG HS 排針未接主機 → 主機見唔到 CDC／MSC。
+- 所以 P4 的 NC4／MSC／網絡連線測試全部做唔到。要繼續驗，需要其中一樣：
+  ① 4-pin OTG 線插主機（之後可以照 S3 同一套流程驗 CDC／MSC／配置回環）；
+  ② 一個真實 AP 的 SSID／密碼（現時種子 SSID `NETCORE-TEST` 不存在，只驗到掃描）。
