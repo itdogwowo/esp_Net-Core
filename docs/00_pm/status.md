@@ -2720,6 +2720,29 @@ IDF `esp_system/port/soc/esp32p4/Kconfig.cpu` 的 `ESP_DEFAULT_CPU_FREQ_MHZ_360`
   所以 USJ 分支每次都明確寫一次（我們走 LL、冇 `usb_serial_jtag_driver_install()`）。
   完整表見 `docs/03_notes/usb-config.md`。
 
+**S3 再燒一次（同日下午，實測流程）**
+
+- 機上跑 `app=3450d85a`（舊映像），source 的新 build 係 `3d3e59af` → 需要重燒。
+- 流程：按 BOOT＋RESET 入 ROM download（`303A:1001`，COM30）→ 由 **build dir** 跑
+  `esptool … --before no-reset write-flash "@flash_args"`（1135648 B、`Hash of data verified`）。
+- ⚠ **燒完不會自己離開 ROM download**：`--after hard-reset`、以及直接拉 RTS／EN、
+  esptool 自己的 hard reset 都試過 → 依然停在 `303A:1001`（ROM 回 `read-mac` 有回應，
+  NC4 冇回應 ＝ 確認係 ROM 唔係 app）。download 選擇係 strapping latch（RTC domain），
+  軟／EN 重啟都不會重新採樣。**正解＝`--after watchdog-reset`**（`tools/flash.sh` 已經
+  这样做，今次只是再次確認），RTC WDT 一 reset 就跳返 app。
+- 驗證：`303A:4003` 重新出現 → CDC `COM31` 上 NC4 `status sys` 回
+  `app=3d3e59af`、`up_s=13`、`chip=esp32s3`、`idf=v6.0.3`；MSC 磁碟區 `NC-2F2C`
+  （7,237,632 B）照樣出現 → 新映像確認上機。
+
+**兩個文件／工具不一致（今輪發現，未修）**
+
+1. `main.c` 檔頭、`docs/02_guides/build_and_flash.md`、`tools/flash.sh` 都寫「CDC 收字串
+   `DFU` → 重啟入 download mode」的逃生門，但 firmware **冇實作**（全 repo 的 `DFU`
+   只出現在註解／文件）。現時唯一入 download mode 的方法係實體 BOOT＋RESET。
+2. WSL 的 git 會把整個工作區看成 modified（351 檔、+67736/−67736 ＝純 CRLF/LF 差異），
+   所以 **WSL 建置出來的 app 版本字串永遠帶 `-dirty`**（例如 `bfd1ded-dirty`）。
+   commit 在 Windows 側做，內容無影響；但版本字串不能當「工作區乾淨」的證據。
+
 **仍未做（今輪新增）**
 
 1. `board.py check` 未擋「兩個互斥 rev 碎片同時掛」（`p4-rev3` ＋ `p4-pre-rev3` 寫相反值，
@@ -2734,3 +2757,8 @@ IDF `esp_system/port/soc/esp32p4/Kconfig.cpu` 的 `ESP_DEFAULT_CPU_FREQ_MHZ_360`
    esp_hosted 2.6+ 有 host-performed slave OTA，未接入。
 6. FireBeetle2 rev1.0 專屬的 `PM_SLEEP_CLK_ICG_ENABLE=n` 補丁未確認 rev3 是否需要 ——
    Waveshare rev3 板冇加，開機正常。
+7. 逃生門「對 CDC 送 `DFU` 字串 → 重啟入 download mode」**未實作**（`main.c` 檔頭、
+   `build_and_flash.md`、`tools/flash.sh` 都咁寫）。做法應該係 CDC RX 見到 `DFU` →
+   `SET_PERI_REG_MASK(RTC_CNTL_OPTION1_REG, RTC_CNTL_FORCE_DOWNLOAD_BOOT)` ＋ `esp_restart()`
+   （RTC domain 保留，正好同 watchdog-reset 同一條路）。未做之前，S3 跑 OTG 版要重燒
+   只能實體 BOOT＋RESET。
