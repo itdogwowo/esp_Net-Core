@@ -3360,3 +3360,28 @@ modules/
   證實 override 生效；移除 `prio` 後回復預設 `prio:2 running:0`。
 - 已還原板上 config（只留 `test_hello_tasks` level 4；缺的條目由管理器補 [0,0]），
   `status ncm`：`live test_hello_tasks`、`ok:1`。
+
+### 7.90 2026-11-18（prio 收緊到 1–6；任務資源指南）
+
+**① `tasks.json` 的 prio 上界＝6（唔可以搶核心保留區）**
+
+- 原因：NC 核心（收／解／回）獨佔 **7–15**（[nc_prio.h](../../firmware/components/sys/task/include/nc_prio.h)）；
+  租戶 config 如果可以寫 8，就會出現「偶爾慢」呢類極難查的搶佔。
+- 實作（縱深防禦三層）：
+  1. `nc_cfg_types.h` 定義 `NC_CFG_TASK_PRIO_MAX = 6`；
+  2. `nc_cfg_load.c` 只接受 **1–6**，其餘（0、7、24…）當無效 → 用 loop 宣告值；
+  3. `nc_task.c` 加 `_Static_assert(NC_CFG_TASK_PRIO_MAX == NC_PRIO_OTHERS_MAX)`；
+     runtime `nc_task_rt_start()` 仍然會夾租戶 prio 到 ≤6（SYSTEM 例外）。
+- 8 個 project 的 `tasks.json` `_comment` 改做「prio：可選，1–6…」。
+- 上板驗（S3 tests，app `1b275806`）：`bench_a`：
+  - `prio:3` → loop `prio:3 core1 running:1`；
+  - `prio:10`（無效）→ 回落 loop 宣告值 `prio:2`；
+  - `prio:5` → loop `prio:5`。
+  已還原板上 config（bench 任務關閉、`test_hello_tasks` live ok:1）。
+
+**② 新增任務資源指南**
+
+[docs/03_notes/task-resources.md](../03_notes/task-resources.md)：四類資源
+（記憶體 declare／硬體 claims／provides／外掛 requires＋resources.json）的
+「怎樣宣告 → 怎樣配對 → 怎樣提交」、B06/B08 配對順序、GPIO owner 契約同
+現況缺口（T-NCM-019）。hw-ownership §9 已有缺口說明。

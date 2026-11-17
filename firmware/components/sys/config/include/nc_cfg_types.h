@@ -239,7 +239,7 @@ typedef struct {
     int8_t level;        // -1 = 停用
     bool   aff[2];       // [core0, core1]
     bool   has_prio;     // false = config 冇寫 prio → 用 loop 宣告值
-    uint8_t prio;        // FreeRTOS 優先級（1..24；租戶 runtime 會再夾）
+    uint8_t prio;        // FreeRTOS 優先級（1..NC_CFG_TASK_PRIO_MAX = 1..6）
 } nc_task_cfg_t;
 
 typedef struct {
@@ -251,6 +251,11 @@ typedef struct {
 // ── 外部任務資源表格（resources.json）──
 // 誰提供什麼、誰需要什麼。模組自己宣告的 provides/requires 會在開機時合併進來；
 // 這個檔是「用戶可調」的那一層（缺檔 → 用預設；有檔 → 逐條覆蓋）。
+// tasks.json 的 prio 上界 = 租戶可用上限（NC_PRIO_OTHERS_MAX）。
+// 核心保留區 7–15 只准 SYSTEM 任務；config 寫 7 以上一律當無效（另一個
+// _Static_assert 在 task_manager 對住 NC_PRIO_OTHERS_MAX，防止兩邊漂移）。
+#define NC_CFG_TASK_PRIO_MAX 6
+
 #define NC_CFG_MAX_RES       16
 #define NC_CFG_RES_NAME_MAX  24
 

@@ -22,6 +22,11 @@
 #include "cJSON.h"
 #include "nc_buf.h"
 #include "nc_core.h"
+#include "nc_prio.h"
+
+// config 的 prio 上界要同任務層的租戶上限一致；任何一邊改咗呢度會 build fail。
+_Static_assert(NC_CFG_TASK_PRIO_MAX == NC_PRIO_OTHERS_MAX,
+               "tasks.json prio 上限要等於 NC_PRIO_OTHERS_MAX");
 
 static const char *TAG = "tm";
 
