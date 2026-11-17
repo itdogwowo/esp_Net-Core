@@ -1,7 +1,7 @@
 # NCM 格式標準（`.nct` / `.nce`）
 
 > **用途**：這是 `.nct` / `.nce` 的**格式標準**——位元組佈局、magic、驗證規則、錯誤碼。
-> 實作在 `firmware/components/tasks/test_mod_tasks/`（`nc_mod.c` + `nc_ncd.c`），
+> 實作在 `firmware/components/host/ncm/`（`nc_mod.c` + `nc_ncd.c`），
 > 打包／檢視在 `tools/ncm.py`。
 > **狀態**：v1（2026-11-17）。容器、manifest、指令表、wasm/aot 兩種 payload 都已實作。
 > **相關**：[ncm-loader.md](ncm-loader.md)（載入流程）、[ncm-engine.md](ncm-engine.md)（引擎）、

@@ -242,20 +242,25 @@ tools/ota.py --port /dev/cu.usbmodem* --abort      # 清掉中斷／超時留下
 
 ### 外部任務（ncm / WAMR）
 
-S3 的測試建置會拉入 `espressif/wasm-micro-runtime`（`main/idf_component.yml` 的
-rule: `target == esp32s3`）。上游 2.4.0 對 **IDF 6 + picolibc** 有四個位編唔過／
-跑唔起，所以倉庫唔 vendor 上游，而係用 `tools/patch_wamr.py`：`firmware/CMakeLists.txt`
-喺 `project()` 之後自動套（`managed_components/` 每次重新抓都補得返，腳本 idempotent）。
-詳情見 [ncm-loader.md §10.8](../03_notes/ncm-loader.md)。
+只有開 `NC_ENABLE_NCM`（測試映像自動開）的建置才會拉入 `espressif/wasm-micro-runtime`；
+依賴寫在 `firmware/components/host/ncm/idf_component.yml`（`target == esp32s3`），
+release 建置完全唔會 fetch／build WAMR。上游 2.4.0 對 **IDF 6 + picolibc** 有四個位
+編唔過／跑唔起，所以倉庫唔 vendor 上游，而係用 `tools/patch_wamr.py`：
+`firmware/CMakeLists.txt` 喺 `project()` 之後自動套（`managed_components/` 每次重新
+抓都補得返，腳本 idempotent）。詳情見 [ncm-loader.md §10.8](../03_notes/ncm-loader.md)。
 
 樣本模組（列印＋讀／反轉 GPIO）：
 
 ```bash
-tools/ncm_samples/build.sh                  # 需要 wat2wasm（brew install wabt）
-cp tools/ncm_samples/out/hello_task.nct /Volumes/NC-<cid>/tasks/
+python3 tools/ncm_build.py                  # 編譯全部樣本（需要 wat2wasm：brew install wabt）
+python3 tools/ncm_build.py hello_task       # 只編一個
+python3 tools/ncm_build.py hello_task --device   # 直接裝到 /Volumes/NC-*/tasks
 python3 tools/nc4.py --port /dev/cu.usbmodem* reboot
 python3 tools/nc4_log.py --port /dev/cu.usbmodem*
 ```
+
+`ncm_build.py` 是獨立任務編譯工具：讀 `<name>.build.json`（fps／budget／mem…）
+＋`<name>.meta.json`，輸出 `tools/ncm_samples/out/<name>.nct`。
 
 > 如果 WAMR／模組喺 **USB 之前（B01–B08）** 就 crash，`console=none` 之下收唔到
 > backtrace；暫時把 board sdkconfig 的 `CONFIG_ESP_CONSOLE_NONE=y` 換成

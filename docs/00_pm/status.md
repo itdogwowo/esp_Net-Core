@@ -3155,3 +3155,58 @@ T-NCM-015（P4 CAM→ISP→PPA→JPEG）、T-NCM-016（LCD/顯示）。
 2. capability provider 重構（`nc_cap_gpio/time`）＋`nc_cap_led`；
 3. **M4 第一條 L3：S3 RMT LED matrix**（fps／CPU before-after）；
 4. L1.5 native ELF 只作可選 PoC（簽名＋ABI 白名單齊備先做）。
+
+### 7.85 2026-11-17 深夜（項目／工具重組：功能測試外掛化、效能測試留 dev、任務獨立編譯工具）
+
+**① 固件目錄重組（目標：測試唔再混在固件）**
+
+| 前 | 後 | 說明 |
+|---|---|---|
+| `components/tasks/test_mod_tasks` | **`components/host/ncm`** | 外掛宿主（loader＋WAMR）升為獨立 component；新 `NC_ENABLE_NCM` 開關（tests 自動開，release 預設 OFF） |
+| `components/action/test_action` | **`components/dev/test_action`** | 開發／量測指令（0xF0xx） |
+| `components/tasks/test_bench_tasks` | **`components/dev/test_bench_tasks`** | 效能測試 → 留 dev |
+| `components/tasks/test_rgb_led_matrix_tasks` | **`components/dev/test_rgb_led_matrix_tasks`** | 效能／視覺測試 → 留 dev |
+| `components/tasks/test_tcp_tasks` | **`components/dev/test_tcp_tasks`** | 吞吐效能 → 留 dev |
+| `components/tasks/test_hello_tasks` | **刪除** | 功能測試改用外掛 `hello_task.nct` |
+| `components/tasks/test_probe_tasks` | **刪除** | 測 host hub 內部 → hosttest `hub_test`＋`0xF003 HUB_BENCH` 覆蓋 |
+| `main/idf_component.yml` 的 WAMR 依賴 | **`components/host/ncm/idf_component.yml`** | release 建置唔再 fetch／build WAMR（clean checkout 驗證：release lock 冇 WAMR；tests 才會 resolve） |
+
+- `firmware/CMakeLists.txt`：`NC_ENABLE_TESTS` → `components/dev`；`NC_ENABLE_NCM` →
+  `components/host/ncm`；WAMR patch hook 加 `EXISTS` 檢查。
+- 注意（踩過）：ncm 一度放 `components/ncm`（第一層）→ IDF 自動當 component，
+  C3/P4 因 WAMR rule 只限 S3 而 resolve 失敗；**任何 optional 組件要放第二層**
+  （`components/<bucket>/name`）。
+- `main.c`：移除 hello／probe include 同註冊；保留 bench／rgb／tcp 效能任務。
+
+**② 任務獨立編譯工具**
+
+- 新增 [tools/ncm_build.py](../../tools/ncm_build.py)：WAT／WASM（C 預留）→ `.nct`，
+  讀 `<name>.build.json`（fps／budget／mem…）＋`<name>.meta.json`；`--list`／`--out`／
+  `--clean`／`--device`；取代 `tools/ncm_samples/build.sh`。
+- 樣本加 `api_cost.wat`（API 成本量測）；`hello_task`／`bench_task`／`api_cost`
+  全部由工具建出（887／872／519 B）。
+- README／tools/README／build_and_flash／testing／samples README 已同步；
+  ncm 相關文件路徑全部改到 `components/host/ncm`。
+
+**③ API 呼叫成本實測（回答「API 會唔會影響性能」）**
+
+同一個 wasm task、N=2000，量四樣（空迴圈做底，扣掉迴圈本身）：
+
+| 項目 | 實測（多次中位數） | per-call |
+|---|---|---|
+| 空迴圈（increment only） | 725 µs / 2000 | 0.36 µs / iter |
+| `nc_now_us()` | 4,805 µs | **≈2.04 µs / call** |
+| `nc_gpio_read(21)` | 5,440 µs | **≈2.36 µs / call** |
+| LCG 算術（對照 bench） | 993 µs | 0.50 µs / iter（對得上 50k=24.9 ms） |
+
+結論：**API 成本是「每次呼叫」固定開銷（≈2 µs），唔會拖慢模組自身運算**。
+每 tick／每 frame 叫幾次（例如 10 次 = 20 µs/20 ms = 0.1% budget）完全可忽略；
+**每 pixel／每 element 叫就係災難**（2000 次 ≈ 4–5 ms）→ 要 batching：一次交
+buffer pointer＋length，host 一次過處理。
+
+**④ 驗證**
+
+- `make.py build --all`：**8 塊板全過**（C3 538 KB、P4 全部、S3 全部）。
+- S3 tests 映像 1.31 MB（WAMR 只在 NCM）、release 1.14 MB（clean resolve 冇 WAMR）。
+- 板子：`hello_task` live、`backend:"wamr"`、`ok:1`；api_cost 量測完已還原。
+- 下一步：M2 AOT spike（P3）→ capability provider → M4 S3 RMT LED pipeline。

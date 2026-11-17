@@ -28,7 +28,9 @@ esp_Net-Core/
 │  ├─ main/                     裝配 + 目前還住在 main.c 的業務邏輯
 │  ├─ components/               可重用元件
 │  │  ├─ sys/                   nc4（framing/解碼）、mem、task（型別+loop）、task_manager、transport
-│  │  └─ tasks/                test_mod_tasks（載入器）、test_<name>_tasks（每個任務一個）
+│  │  ├─ host/ncm/              外部任務宿主（loader＋WAMR 引擎；NC_ENABLE_NCM）
+│  │  ├─ tasks/                生產任務（一個任務一個 component；現有 hw_gpio）
+│  │  └─ dev/                  開發／效能測試（test_action、bench、rgb matrix、tcp；NC_ENABLE_TESTS）
 │  ├─ sdkconfig.defaults        共通建置配置（晶片層）
 │  ├─ partitions.csv            分割表
 │  └─ build/  managed_components/  sdkconfig  ← 生成物，不進 git
@@ -46,6 +48,8 @@ esp_Net-Core/
    ├─ board.py  board.sh        板子清單 / 檢查 / 新增（board.sh 是薄殼）
    ├─ flash.sh                  逃生門燒錄
    ├─ nc4.py  ota.py  selftest.py  nc4_test.py   對設備說話
+   ├─ ncm.py                     打包／檢視 .nct（容器格式）
+   ├─ ncm_build.py               任務模組獨立編譯（WAT/WASM → .nct；讀 build.json）
    ├─ bench/                    量測（要板子）
    ├─ hosttest/                 主機端 C 測試（不需要板子）
    └─ poc/                      原型驗證（mod_poc：效果模組 ABI）

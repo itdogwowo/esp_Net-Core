@@ -135,7 +135,7 @@
 | `decode0` | 0 | 任務管理器 | `ulTaskNotifyTake(10 ms)` | 逾時喺 core0 本地處理 → I1 冇事；**同 core1 共用 decoder mutex**（I2） | 🔄 per-core decoder |
 | `decode1` | 1 | 任務管理器 | 同上 | 逾時由 **core0 的 tick** 處理 → **I1 違反，100 次/秒** | 🔄 改 poll；或者索性唔開 |
 | ~~`slow_worker`~~ | — | — | — | **已刪（2026-11-04）**：指令一問一答，慢工作佇列唔需要 | 🗑️ |
-| `ncm`（**POC／原始形態**） | 1 | 任務管理器 | `vTaskDelay(幀期)` [nc_mod.c:778](../../firmware/components/tasks/test_mod_tasks/nc_mod.c#L778) | **I1 違反**（每幀一次）；運作方式未定義 | 🔄 重新規劃（核心、幀來源、buffer 接口） |
+| `ncm`（**POC／原始形態**） | 1 | 任務管理器 | `vTaskDelay(幀期)` [nc_mod.c:778](../../firmware/components/host/ncm/nc_mod.c#L778) | **I1 違反**（每幀一次）；運作方式未定義 | 🔄 重新規劃（核心、幀來源、buffer 接口） |
 | ~~`monitor`~~ | — | — | — | **已刪（2026-11-04）**：只係一行 log，`epoch`／`STATUS_GET` 已可即時查 | 🗑️ |
 | `hello` | 0（S3 `tasks.json`） | 任務管理器 | `vTaskDelay(1000)` | 本地 | ✅ |
 | `bench_a/b/c` | 1（預設**關**） | 任務管理器 | `vTaskDelay(5)` | 開啟時 **I1 違反，200 次/秒** | ✅ 要量先開 |
@@ -205,7 +205,7 @@
 1. **通訊層與解碼一樣要獨立分離**，而且「核心」係配置，唔係 code。呢一步**暫時收起**（唔改功能），
    但 `main.c` 之後唔可以再有 `.core = 0/1` 寫死喺通訊任務上。
 2. **`slow_worker` 不存在** —— 已刪（見 §7.1；理由：指令一問一答，慢指令擋唔到下一條）。
-3. **測試全部搬去 `test_*`**：`firmware/components/tasks/test_*_tasks/` ＋ `components/action/test_action/`，
+3. **測試全部搬去 `test_*`**：2026-11-17 重組後是 `firmware/components/dev/`（效能測試）＋外掛 `.nct`（功能測試），
    由**一個**編譯開關 `NC_ENABLE_TESTS`（預設 OFF）控制；閂咗 = 唔編譯、唔註冊、唔佔 stack。
 4. **log 兩核都唔准直接印**：`ESP_LOG*` 一律入中間緩衝；由**一條** log task 印，
    「有先印、冇就唔印」；log task 自己嘅核心可以調配。

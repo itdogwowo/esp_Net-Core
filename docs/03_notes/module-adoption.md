@@ -148,8 +148,15 @@ symbol table 同 `esp_elf_register_symbol()`；配套 examples：
 
 ## 8. 現況與下一步
 
-- 已達 **L0**：`hello_task`（列印＋GPIO 讀／反轉）＋`bench_task`（性能對照）；
-  能力白名單 7 個 import（print／print_i32／print2／gpio_read/write/toggle／now_us）。
+- 已達 **L0**：`hello_task`（列印＋GPIO 讀／反轉）＋`bench_task`（性能對照）＋
+  `api_cost`（API 成本量測）；能力白名單 7 個 import
+  （print／print_i32／print2／gpio_read/write/toggle／now_us）。
+- **2026-11-17 重組**：功能測試（hello／probe）已由固件移出（刪 component，改外掛
+  `.nct` 驗證）；效能測試留 `components/dev/`；宿主 ncm 搬到 `components/host/ncm`
+  並有 `NC_ENABLE_NCM` 開關（release 預設唔開、唔 fetch WAMR）。
+- **API 成本實測**：`nc_now_us` ≈2.0 µs/call、`nc_gpio_read` ≈2.4 µs/call
+  （S3、N=2000，空迴圈底 0.36 µs/iter）→ 每 tick／每 frame 叫幾次可忽略；
+  每 pixel／每 element 叫就係災難（要 batching）。見測試冊 T-NCM-017。
 - 已量：interp ≈15× C（上面）；**AOT 未接，未有板上數字**。
 - 終極目標：**L3 硬件加速**（DMA／RMT／LCD_CAM／I2S／PPA／JPEG／ISP），
   里程碑 M1–M5 見 [goal-hardware-acceleration.md](../00_pm/goal-hardware-acceleration.md)。

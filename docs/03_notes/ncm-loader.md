@@ -90,7 +90,7 @@ _Static_assert(sizeof(nc_ncm_hdr_t) == 48, "ncm header must stay 48 B");
 類型、跑哪一核、哪一層、優先權、要多少線性記憶體、幾 px、每幀預算、擁有哪幾條指令。
 
 ```c
-// firmware/components/tasks/test_mod_tasks/include/nc_ncd.h（純 C，可 host 測試）
+// firmware/components/host/ncm/include/nc_ncd.h（純 C，可 host 測試）
 #define NC_NCD_MAGIC   0x3144434Eu   // 'N','C','D','1'
 #define NC_NCD_VERSION 1
 
@@ -419,7 +419,7 @@ nc_task_register(&(nc_task_loop_t){
 
 ### 10.7 實作現況（2026-11-02 驗證）
 
-骨架已落地：`firmware/components/tasks/test_mod_tasks/`（`nc_mod.c` + `include/nc_mod.h`）。
+骨架已落地：`firmware/components/host/ncm/`（`nc_mod.c` + `include/nc_mod.h`）。
 
 | 項目 | 狀態 |
 |---|---|

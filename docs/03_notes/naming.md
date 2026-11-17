@@ -86,7 +86,7 @@ components/action/pixel_action/
 
 | 講法 | 指什麼 | 在哪 | 屬於 |
 |---|---|---|---|
-| **NCM 引擎** | 延後綁定：從檔案載入模組、給記憶體、登記成任務、每 tick 回呼、超預算就停用 | `components/tasks/test_mod_tasks/`（`nc_mod.c`） | **房東**（`NC_TASK_SYSTEM`，插件機制本身） |
+| **NCM 引擎** | 延後綁定：從檔案載入模組、給記憶體、登記成任務、每 tick 回呼、超預算就停用 | `components/host/ncm/`（`nc_mod.c`） | **房東**（`NC_TASK_SYSTEM`，插件機制本身） |
 | **NCM 模組** | 一個 `.nct` / `.nce` 載入後的實例（name / payload / decl / 自己的記憶體） | arena 裡 | **租戶**（attach 時 `kind` 由 manifest 決定） |
 | **NCM 容器** | `.nct` / `.nce` 檔格式：48 B 檔頭 + manifest + payload | `tools/`、`nc_ncd.c` | wire format，**唔改名** |
 | **NCM arena** | 引擎向 plan 宣告的那塊記憶體（**大小是宣告值，不是上限**） | `nc_mod_init()` | 房東 |

@@ -218,30 +218,30 @@ round 永遠完成唔到 → `rounds` / `duty` 永遠 0。一個永遠 0 的指�
 
 ---
 
-## 6. 測試歸類（唔准污染功能結構）
+## 6. 測試歸類（2026-11-17 重組：功能測試走外掛，效能測試留 dev）
 
 ```
-firmware/components/action/
-├── file_action/      真功能
-├── ota_action/       真功能
-└── test_action/      測試指令（0xF00x / 0x181x）—— **已搬，2026-11-04**
-firmware/components/tasks/
-├── test_bench_tasks/      bench_a/b/c（量測驗證）
-├── test_hello_tasks/      hello（框架自測）
-├── test_mod_tasks/         ncm（POC 燈效引擎；運作方式未定）
-├── test_probe_tasks/      probe（開機 hub 自測）
-└── test_tcp_tasks/        tcp_sink0/3、tcp_src0/1（P4 吞吐量測，5000–5003）
-
-（monitor 已刪：2026-11-04，只有一行 log，價值唔夠 3 KB + 跨核讀取）
+firmware/components/
+├── action/{file_action,ota_action}/   真功能
+├── bus/ driver/ sys/                  真功能／宿主
+├── host/ncm/                          外部任務宿主（loader＋WAMR；NC_ENABLE_NCM）
+├── tasks/hw_gpio/                     生產任務
+└── dev/                               開發／效能測試（NC_ENABLE_TESTS）
+    ├── test_action/                   0xF0xx 開發／量測指令
+    ├── test_bench_tasks/              bench_a/b/c（效能）
+    ├── test_rgb_led_matrix_tasks/     LED 矩陣（效能／視覺）
+    └── test_tcp_tasks/                TCP 吞吐（效能）
 ```
 
-**現況（2026-11-04）**：
+**規則**
 
-- `components/tasks` 整個目錄由 `NC_ENABLE_TESTS` gate；OFF = 唔加入 `EXTRA_COMPONENT_DIRS` = 唔編譯、唔 link。
-- `ncm`／`monitor` 係 POC／實驗，所以同測試放埋一齊（release 唔會出）。
-- 全部已搬完（2026-11-04）：`test_action`（8 條測試指令）、`test_probe_tasks`、`test_tcp_tasks`
-  （`tcp_sink/src`）；`hub_w/r`、`tx_pack` 隨 `HUB_BENCH`／`TX_BENCH` 一齊入 `test_action`。
-- `main.c` 只剩 5 條真指令（`REBOOT`／`STATUS_GET`／`ROUTE_GET`／`SET_MASTER`／`SYS_TASK_QUERY`）。
+- **功能測試**（hello 之類）→ 做成外掛 `.nct`，喺 tests 固件動態加載；驗證完才按
+  [module-adoption](../03_notes/module-adoption.md) 分層收納。
+  `test_hello_tasks`、`test_probe_tasks` 已刪（2026-11-17）。
+- **效能測試**（bench／rgb matrix／tcp 吞吐）留 dev 固件，因為要量 native 基準。
+- `components/dev` 整個目錄由 `NC_ENABLE_TESTS` gate；OFF = 唔加入 `EXTRA_COMPONENT_DIRS`。
+- `components/host/ncm` 由 `NC_ENABLE_NCM` gate（tests 自動開）；release 預設唔加入，
+  WAMR 依賴只喺呢個 component 的 `idf_component.yml`（唔使靠 linker 唔拉）。
 
 **指令分類（15 條 → 7 真 + 8 測試）**
 

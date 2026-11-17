@@ -7,7 +7,7 @@
 > **相關**：[ncm-loader.md](ncm-loader.md) §10（三層）、[effect-language.md](effect-language.md) §6（ABI v0）、
 > [memory.md](memory.md)（heap class）、[buffer-manager.md](buffer-manager.md)（declare→commit）、
 > [architecture-flow.md](architecture-flow.md)（frame pipeline）
-> **程式**：`firmware/components/tasks/test_mod_tasks/`（`nc_mod.c`、`include/nc_mod_abi.h`）
+> **程式**：`firmware/components/host/ncm/`（`nc_mod.c`、`include/nc_mod_abi.h`）；2026-11-17 由 `components/tasks/test_mod_tasks` 搬入
 
 ---
 
@@ -114,7 +114,7 @@ export，節奏由 manifest 的 `fps` 決定：
 | export（可選） | `task_init() -> i32`（載入時一次） |
 | import（白名單，module `"env"`） | `nc_print(ptr,len)`、`nc_print_i32(v)`、`nc_print2(p1,l1,v1,p2,l2,v2)`、`nc_gpio_read(pin)`、`nc_gpio_write(pin,val)`、`nc_gpio_toggle(pin)`、`nc_now_us()→i64`（= `time.ticks_us()`） |
 | GPIO 安全 | 0／3／45／46（strap）、7／8（本板 UART）、19／20（USB）、26–37（SPI flash／octal PSRAM）、43／44（UART0）一律拒絕；其餘 0–48 開放 |
-| 實作 | `test_mod_tasks/nc_mod_engine.c`（WAMR interp backend）；樣本 `tools/ncm_samples/` |
+| 實作 | `host/ncm/nc_mod_engine.c`（WAMR interp backend）；樣本 `tools/ncm_samples/`（用 `tools/ncm_build.py` 編譯） |
 
 - `nc_print*` 把 guest 線性記憶體的一段 UTF-8 寫去裝置 log；`nc_print2` 係一行過
   `<文字1><v1> <文字2><v2>`，用嚟做「讀值＋動作」的一行報告。

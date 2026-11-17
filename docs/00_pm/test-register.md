@@ -27,6 +27,8 @@
 | T-NCM-014 | L3：S3 RMT LED matrix（DMA→RMT） | 硬件加速 | L3 | 未做（現有 `test_rgb_led_matrix` 為 CPU 波形） | **未做** | 目標 60 fps＋、CPU <10%、零 bit-bang | ⬜ M4 第一條 pipeline |
 | T-NCM-015 | L3：P4 CAM→ISP→PPA→JPEG pipeline | 硬件加速 | L3 | 未做（`esp_driver_cam/isp/ppa/jpeg`） | **未做** | 目標 640×480@30 fps、CPU 只做控制 | ⬜ M4（要接線） |
 | T-NCM-016 | L3：LCD/顯示（PPA/DMA2D→LCD_CAM） | 硬件加速 | L3 | 未做 | **未做** | 全屏刷新 CPU ~0、無 tearing | ⬜ M4/M5 |
+| T-NCM-017 | API 呼叫成本（`nc_now_us`／`nc_gpio_read`） | 性能 | L0 | [api_cost.wat](../../tools/ncm_samples/api_cost.wat) | 空迴圈 725 µs／2000；now 4805 µs；gpio 5440 µs；LCG 993 µs（N=2000，多次中位數） | **約 2.0–2.4 µs／call**（其餘係迴圈本身 0.36 µs/iter） | ✅ 2026-11-17 量測 |
+| T-NCM-018 | 任務模組獨立編譯工具 | 工具 | — | [tools/ncm_build.py](../../tools/ncm_build.py)＋`<name>.build.json` | `hello_task`／`bench_task`／`api_cost` 三個模組由工具建出；輸出 887／872／519 B | — | ✅ 2026-11-17 驗證 |
 
 ## 2. Host 測試（完全唔入固件，L2 工具）
 
@@ -34,18 +36,30 @@
 `cfg`、`cfgstruct`（含 resources 層）、`ncd`、`task`、`router`、`link`、`mod`、
 `hub`、`plan`、`buf`、`portgen`、`ncm`。
 
-## 3. 固件內測試／工具任務處置（2026-11-17 定案）
+## 3. 固件內測試／工具任務處置（2026-11-17 重組後）
 
-| 組件 | 處置 |
-|---|---|
-| `hw_gpio` | 正式（留固件） |
-| `test_mod_tasks`（ncm loader／WAMR engine） | 外掛宿主；tests 建置先用，將來升 production（config 可關） |
-| `test_hello` | 可外掛（已被 `hello_task` 取代）；留 dev 固件作對照 |
-| `test_bench_a/b/c` | 留 dev 固件（測排程；L0 等價版已用 `bench_task` 驗證性能） |
-| `test_probe` | 留 dev 固件／hosttest（測 host hub 內部，唔外掛） |
-| `test_rgb_led_matrix` | driver 留 host（L2/L3）；pattern 可外掛（T-NCM-010） |
-| `test_tcp` | 留 dev 固件（L2）；外掛能力未開放 |
-| `test_action`（0xF0xx 55 條） | 留 dev 固件（開發工具，唔係任務） |
+規則：**功能測試用外掛模組（動態加載）；效能測試留 dev 固件**（要 native 基準）；
+測試 host 內部的東西留 hosttest／dev 固件。
+
+| 組件 | 新位置 | 處置 |
+|---|---|---|
+| `hw_gpio` | `components/tasks/hw_gpio` | 正式（留固件） |
+| ncm（前 `test_mod_tasks`：loader／WAMR engine） | `components/host/ncm` | 外掛宿主；`NC_ENABLE_NCM` 開關（tests 自動開；release 預設冇、亦唔 fetch WAMR） |
+| `test_action`（0xF0xx 55 條＋0xF050） | `components/dev/test_action` | 留 dev 固件（開發／量測工具，唔係任務） |
+| `test_bench_a/b/c` | `components/dev/test_bench_tasks` | 效能測試 → 留 dev 固件（native 基準） |
+| `test_rgb_led_matrix` | `components/dev/test_rgb_led_matrix_tasks` | 效能／視覺測試 → 留 dev；pattern 可外掛（T-NCM-010） |
+| `test_tcp` | `components/dev/test_tcp_tasks` | 效能（吞吐）→ 留 dev 固件 |
+| `test_hello` | **已刪（2026-11-17）** | 功能測試改用外掛 `hello_task.nct` |
+| `test_probe` | **已刪（2026-11-17）** | 測 host hub 內部；由 hosttest `hub_test` ＋ `0xF003 HUB_BENCH` 覆蓋 |
+
+## 3.1 任務模組編譯工具
+
+`tools/ncm_build.py`（2026-11-17）：
+- `python3 tools/ncm_build.py` → 編譯 `tools/ncm_samples/` 全部；
+- `python3 tools/ncm_build.py hello_task --device` → 編譯＋複製到 MSC `tasks/`；
+- 每個任務用 `<name>.build.json` 描述 fps／budget／mem／stack…，`<name>.meta.json` 描述名稱；
+- WAT 用 `wat2wasm`；C 路徑預留（clang wasm32＋wasm-ld）；
+- 取代舊 `tools/ncm_samples/build.sh`。
 
 ## 4. 更新方式
 

@@ -20,6 +20,21 @@
 
 ---
 
+## 0.5 外掛任務模組（ncm）
+
+功能測試而家優先做成外掛 `.nct`（唔入固件），用 `tools/ncm_build.py` 編譯：
+
+```bash
+python3 tools/ncm_build.py                 # 全部樣本 → tools/ncm_samples/out/
+python3 tools/ncm_build.py hello_task --device   # 編譯＋裝到 /Volumes/NC-*/tasks
+python3 tools/nc4.py --port /dev/cu.usbmodem* reboot
+python3 tools/nc4_log.py --port /dev/cu.usbmodem*
+```
+
+驗收睇 `status ncm`（`backend:"wamr"`、`live`、`ok:1`、`frames` 增長）＋ CDC log。
+效能測試（bench／rgb matrix／tcp）仍然留 dev 固件（`--tests` 建置）；測試 host 內部
+（hub／buffer／flash）留 `tools/hosttest/`。
+
 ## 1. 解碼器一致性
 
 ### 方法

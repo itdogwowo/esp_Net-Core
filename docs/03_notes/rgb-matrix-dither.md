@@ -318,7 +318,7 @@ export NC_PORT=/dev/cu.usbmodem*        # 換成實際埠
 
 | 檔案 | 內容 |
 |---|---|
-| `firmware/components/tasks/test_rgb_led_matrix_tasks/nc_rgb_matrix.c` | I80、波形編碼、抖動、效果、任務 |
+| `firmware/components/dev/test_rgb_led_matrix_tasks/nc_rgb_matrix.c` | I80、波形編碼、抖動、效果、任務 |
 | `…/include/nc_rgb_matrix.h` | 對外 API（效果／抖動／每區參數／JSON） |
 | `firmware/components/action/test_action/nc_test_action.c` | `0xF060` handler |
 | `ports/hardware/S3/ESP32-S3-Matrix/` | 板子事實、4 MB 分割表、預設 tasks |
