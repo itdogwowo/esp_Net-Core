@@ -204,6 +204,7 @@ static volatile uint32_t s_rx_frames;        // 成功收到的幀數
 #define PRESET_SYSTEM_PATH  PRESET_DIR "/system.json"
 #define PRESET_NETWORK_PATH PRESET_DIR "/network.json"
 #define PRESET_TASKS_PATH   PRESET_DIR "/tasks.json"
+#define PRESET_RESOURCES_PATH PRESET_DIR "/resources.json"
 // 卷標 = 品牌縮寫 + "-" + 16-bit CID（FAT 卷標上限 11 字元）：
 //   "NC-" + "A57C" → "NC-A57C"
 // 不能寫成 Net-Core_A57C（14 字元，f_setlabel 會回 FR_INVALID_NAME）。
@@ -318,12 +319,11 @@ static void seed_file(const char *path, const uint8_t *start, const uint8_t *end
 // 有 project preset 的層就唔需要呢個骨架（main/CMakeLists 會 define
 // NETCORE_HAS_PRESET_*），所以逐個用 #if 包住：否則 -Werror=unused-const-variable
 // 會在「三個 preset 齊全」的 build（例如 P4-ETH 的 default project）直接失敗。
-#if !NETCORE_HAS_PRESET_SYSTEM || !NETCORE_HAS_PRESET_NETWORK || !NETCORE_HAS_PRESET_TASKS
+// seed_text 本身無條件編：resources.json 的骨架一定會用到它。
 static void seed_text(const char *path, const char *text)
 {
     seed_bytes(path, (const uint8_t *)text, strlen(text));
 }
-#endif
 
 #if !NETCORE_HAS_PRESET_SYSTEM
 static const char k_min_system[] =
@@ -337,6 +337,8 @@ static const char k_min_network[] =
 static const char k_min_tasks[] =
     "{\n  \"version\": 1,\n  \"tasks\": []\n}\n";
 #endif
+static const char k_min_resources[] =
+    "{\n  \"version\": 1,\n  \"resources\": []\n}\n";
 
 // 目錄結構也是「出廠內容」的一部分：config/ 與 pixel/effects/ 先建好，
 // 使用者插上隨身碟就看得到該把東西放哪裡。
@@ -373,6 +375,7 @@ static void seed_presets(void)
 #else
     seed_text(PRESET_TASKS_PATH, k_min_tasks);
 #endif
+    seed_text(PRESET_RESOURCES_PATH, k_min_resources);
 }
 
 // ── 卷標：預設叫 NETCORE，不是 NO NAME ──
