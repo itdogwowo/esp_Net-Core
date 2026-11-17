@@ -1,0 +1,10 @@
+# ncm 組件自己的依賴：只有呢個 component 加入建置（NC_ENABLE_NCM=ON）時，
+# component manager 才會去 fetch WAMR。release 建置（預設唔開 ncm）完全唔會
+# 見到呢個檔 → 唔會 fetch、唔會 build WAMR。
+#
+# WAMR 只在 S3 上接（Xtensa 解譯器）；P4 要等 AOT 路徑一起驗再加。
+dependencies:
+  espressif/wasm-micro-runtime:
+    version: ^2.4.0
+    rules:
+      - if: "target == esp32s3"

@@ -12,11 +12,16 @@
 ## 跑
 
 ```bash
-tools/ncm_samples/build.sh          # 需要 wat2wasm
-cp tools/ncm_samples/out/hello_task.nct /Volumes/NC-xxxx/tasks/
+python3 tools/ncm_build.py                  # 編譯全部樣本（需要 wat2wasm）
+python3 tools/ncm_build.py hello_task       # 只編一個
+python3 tools/ncm_build.py hello_task --device   # 直接裝到 /Volumes/NC-*/tasks
 python3 tools/nc4.py --port /dev/cu.usbmodem* reboot
 python3 tools/nc4_log.py --port /dev/cu.usbmodem*
 ```
+
+`tools/ncm_build.py` 是獨立的任務編譯工具：讀 `<name>.wat`＋`<name>.build.json`
+（fps／budget／mem…）＋`<name>.meta.json`，輸出 `out/<name>.nct`。C 模組預留
+（要 clang wasm32＋wasm-ld），而家 WAT 用 wat2wasm 就夠。
 
 預期 CDC log（1 Hz）：
 
@@ -25,6 +30,12 @@ ncm.wamr: [hello_task.nct] tick pin21 read=1 toggle=0
 ncm.wamr: [hello_task.nct] tick pin21 read=0 toggle=1
 ...
 ```
+
+## api_cost：API 呼叫成本
+
+`api_cost.wat` 量同一個任務入面四樣嘢（N=2000）：純迴圈、`nc_now_us()` 呼叫、
+`nc_gpio_read()` 呼叫、LCG 算術。per-call 成本 = (呼叫時間 − 純迴圈) / N，
+用嚟判斷 API 呼叫喺每 tick 預算入面佔幾多。
 
 ## bench_task：性能對照
 
@@ -36,7 +47,7 @@ ncm.wamr: [hello_task.nct] tick pin21 read=0 toggle=1
 
 ## 模組 ABI
 
-見 `firmware/components/tasks/test_mod_tasks/include/nc_mod_abi.h`：任務模組
+見 `firmware/components/host/ncm/include/nc_mod_abi.h`：任務模組
 export `task_tick`（必需）／`task_init`（可選），import 白名單七個
 `env.nc_*`（列印、print2、讀／寫／反轉 GPIO、`nc_now_us`）。GPIO 只准安全腳位
 （USB／flash／UART／strap 一律拒絕）。收納層級見

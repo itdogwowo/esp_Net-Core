@@ -1,0 +1,10 @@
+{
+  "kind": "task",
+  "fps": 1,
+  "core": -1,
+  "layer": 4,
+  "prio": 3,
+  "mem": 65536,
+  "stack": 4096,
+  "budget_us": 20000
+}

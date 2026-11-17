@@ -40,10 +40,22 @@ if(PROJECT AND EXISTS "${NC_PROJECT_DIR}/sdkconfig.defaults")
                     "project 層只放 runtime 設定，build 設定請搬到 hardware 層。")
 endif()
 
-# ── 測試專用（約定：action/test_action、app/test_*_tasks）──
-# OFF 時整個 components/app 唔加入編譯：測試任務「唔存在」，而唔係靠命名或 runtime 開關。
-option(NC_ENABLE_TESTS "測試指令與測試任務（test_action / test_*_tasks）" OFF)
+# ── 測試／開發專用（components/dev）──
+# OFF 時整個 components/dev 唔加入編譯：測試指令與效能測試任務「唔存在」，
+# 而唔係靠命名或 runtime 開關。
+# 約定（2026-11-17 重組）：
+#   · 測試「功能」→ 用外掛模組（.nct，動態加載）驗證，唔入固件；
+#   · 效能測試（bench／rgb matrix／tcp 吞吐）→ 留 dev 固件（components/dev）；
+#   · 宿主能力（ncm loader／WAMR）→ components/ncm（暫時跟 tests 開）。
+option(NC_ENABLE_TESTS "測試指令與效能測試任務（components/dev）" OFF)
 option(NC_STACK_ANALYSIS "產生 .su/.ci（給 tools/stack_depth.py 算最壞棧深）" OFF)
+
+# 外部任務宿主（ncm：loader＋WAMR engine）。現階段測試映像先開；
+# 將來 production 要支援外掛就單獨開 NC_ENABLE_NCM（唔使連測試任務一齊）。
+option(NC_ENABLE_NCM "外部任務宿主（ncm：loader＋WAMR 引擎）" OFF)
+if(NC_ENABLE_TESTS)
+    set(NC_ENABLE_NCM ON)   # 測試映像一定要有動態加載能力（測試用外掛做）
+endif()
 
 # 正式組件（永遠編譯）
 set(_nc_extra_dirs
@@ -58,11 +70,17 @@ set(_nc_extra_dirs
     "${CMAKE_CURRENT_LIST_DIR}/components/bus"
     # ── 硬體 owner（生產任務，不是測試）──
     "${CMAKE_CURRENT_LIST_DIR}/components/tasks/hw_gpio")
-# 測試組件（NC_ENABLE_TESTS=OFF 時唔加入 → 唔編譯、唔 link、唔存在）
+# 外部任務宿主（ncm）。NC_ENABLE_NCM=OFF 時連 component 都唔加入 →
+# 唔編譯、唔 link、唔 fetch WAMR 依賴（components/host/ncm/idf_component.yml）。
+# 注意：一定要放喺 components 之下第二層（components/*/ncm）—— IDF 會自動把
+# components/ 第一層有 CMakeLists.txt 的目錄當 component，放第一層會連 release
+# 都拉入嚟（C3/P4 冇 WAMR rule → resolve 失敗）。
+if(NC_ENABLE_NCM)
+    list(APPEND _nc_extra_dirs "${CMAKE_CURRENT_LIST_DIR}/components/host/ncm")
+endif()
+# 開發／效能測試組件（NC_ENABLE_TESTS=OFF 時唔加入 → 唔編譯、唔 link、唔存在）
 if(NC_ENABLE_TESTS)
-    list(APPEND _nc_extra_dirs
-        "${CMAKE_CURRENT_LIST_DIR}/components/action/test_action"
-        "${CMAKE_CURRENT_LIST_DIR}/components/tasks")
+    list(APPEND _nc_extra_dirs "${CMAKE_CURRENT_LIST_DIR}/components/dev")
 endif()
 set(EXTRA_COMPONENT_DIRS ${_nc_extra_dirs})
 
@@ -83,13 +101,14 @@ project(esp_net_core)
 # 乾淨的上游落嚟。呢度喺 project() 之後、真正編譯之前套補丁；腳本 idempotent，
 # 已補過唔會再改（唔會令 WAMR 每次 configure 都重新編譯）。
 # 詳情同四個補丁位見 tools/patch_wamr.py 頂部註解。
-if(NOT CMAKE_SCRIPT_MODE_FILE)
+set(_nc_wamr_dir "${CMAKE_CURRENT_LIST_DIR}/managed_components/espressif__wasm-micro-runtime")
+if(NOT CMAKE_SCRIPT_MODE_FILE AND EXISTS "${_nc_wamr_dir}")
     find_package(Python3 COMPONENTS Interpreter QUIET)
     if(Python3_Interpreter_FOUND)
         execute_process(
             COMMAND ${Python3_EXECUTABLE}
                     "${CMAKE_CURRENT_LIST_DIR}/../tools/patch_wamr.py"
-                    --component "${CMAKE_CURRENT_LIST_DIR}/managed_components/espressif__wasm-micro-runtime"
+                    --component "${_nc_wamr_dir}"
             RESULT_VARIABLE _wamr_patch_rc
             OUTPUT_VARIABLE _wamr_patch_out)
         if(NOT _wamr_patch_rc EQUAL 0)

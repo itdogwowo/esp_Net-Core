@@ -108,9 +108,7 @@
 #include "nc_task.h"
 #include "nc_prio.h"
 #ifdef NC_ENABLE_TESTS
-#include "nc_hello.h"
 #include "nc_bench.h"
-#include "nc_probe.h"
 #include "nc_test_tcp.h"
 #include "nc_rgb_matrix.h"     // 8×8 WS2812 矩陣（I80 + 分區抖動），Kconfig 預設 n
 #endif
@@ -4293,10 +4291,10 @@ static esp_err_t ph_declare(void)
     nc_task_register(&s_task_net);     // L1：UART / TCP 緩衝（照 ETH 是否起來）
     nc_task_register(nc_hw_gpio_task()); // L2：GPIO owner（nc_hw resource "gpio"）
 #ifdef NC_ENABLE_TESTS
-    nc_task_register(nc_test_probe_task());   // L3：開機自測（hub 交換）
+    // 測試「功能」改用外掛模組（/data/tasks/*.nct，動態加載）——
+    // hello／probe 等唔再入固件；呢度只留效能測試任務（bench/rgb/tcp）。
     nc_task_register(&s_task_ncm);      // L4：模組 arena + render task
     nc_task_register(nc_rgb_matrix_task());   // L4：8×8 WS2812（Kconfig 開咗才有 loop）
-    nc_task_register(nc_hello_task());  // L6：最小框架自測（每秒 Hello World）
     nc_task_register(nc_bench_task_a()); // L4：量測驗證用（預設 (0,0) = 唔跑）
     nc_task_register(nc_bench_task_b());
     nc_task_register(nc_bench_task_c());
