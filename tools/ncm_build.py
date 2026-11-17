@@ -12,6 +12,8 @@
     ├── actions/       指令模組     → out/<name>.nct   （leaf 名以 _actions 結尾，
     │                     kind=normal，build.json 的 cmds 必須非空）
     ├── effects/       效果模組     → out/<name>.nce   （leaf 名以 _effects 結尾）
+    ├── lab/           實驗／量測    → out/<name>.nct   （leaf 名以 _lab 結尾；
+    │                     一次性驗證用，唔係任務、唔會收納）
     ├── build/         中間產物（.wasm；gitignore，唔會同成品混在一起）
     └── out/           最終成品（只有 .nct／.nce；gitignore）
 
@@ -43,7 +45,8 @@ MODULES = ROOT / "modules"
 NCM_PY = ROOT / "tools" / "ncm.py"
 
 # role 目錄 → 預設 kind（ncm.py 的 kind；build.json 可覆寫）
-ROLE_KIND = {"tasks": "task", "actions": "normal", "effects": "effect"}
+ROLE_KIND = {"tasks": "task", "actions": "normal", "effects": "effect",
+             "lab": "task"}
 # kind → 副檔名
 EXT_BY_KIND = {"task": ".nct", "normal": ".nct", "effect": ".nce"}
 

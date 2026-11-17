@@ -20,6 +20,9 @@ modules/
 │   └── <name>_actions/         build.json 必須有 "cmds": [0x3xxx]）
 ├── effects/                   效果模組       → out/<name>.nce（kind=effect）
 │   └── <name>_effects/
+├── lab/                       實驗／量測模組 → out/<name>.nct（leaf 以 _lab 結尾；
+│   ├── bench_compare_lab/       一次性驗證，唔係任務、唔會收納）
+│   └── api_cost_lab/
 ├── build/                     中間產物（.wasm；gitignore，唔會混入成品）
 └── out/                       最終成品（只有 .nct／.nce；一入去就見到要收集嘅嘢）
 ```
@@ -45,8 +48,12 @@ python3 tools/ncm_build.py --clean                  # 清空 build/ 同 out/
 | 路徑 | 名稱 | 類型 | 用途 | 量測 |
 |---|---|---|---|---|
 | `tasks/test_hello_tasks/` | `test_hello_tasks` | 測試（smoke） | 1 Hz 印字＋讀／反轉 GPIO21 | — |
-| `tasks/test_bench_tasks/` | `test_bench_tasks` | 測試（效能） | wasm 直譯 vs 原生 C（50k LCG） | 24.9 ms vs 1.68 ms（14.8×） |
-| `tasks/test_api_cost_tasks/` | `test_api_cost_tasks` | 測試（量測） | API 呼叫成本 | ≈2.0–2.4 µs/call |
+| `lab/bench_compare_lab/` | `bench_compare_lab` | 實驗（效能） | wasm 直譯 vs 原生 C（50k LCG） | 24.9 ms vs 1.68 ms（14.8×） |
+| `lab/api_cost_lab/` | `api_cost_lab` | 實驗（量測） | API 呼叫成本 | ≈2.0–2.4 µs/call |
+
+> **量測唔係任務**：host 內部量測用 dev 固件 native 指令（`0xF050` 等）；
+> 量測「外掛路徑」本身（interp/AOT、API 成本）只係一次性實驗，放 `lab/`，
+> 量完就可以移除，唔會收納入固件。
 
 ## 對外 ABI
 

@@ -252,11 +252,13 @@ modules/
 │   └── <name>_actions/        cmds 必須非空，vendor 區 0x3000–0x3FFF）
 ├── effects/                  → out/<name>.nce（kind=effect）
 │   └── <name>_effects/
+├── lab/                      實驗／量測模組 → out/<name>.nct（leaf 以 _lab 結尾；
+│   └── <name>_lab/            一次性驗證，唔係任務、唔會收納）
 ├── build/                    中間產物（.wasm；gitignore）
 └── out/                      最終成品（只有 .nct／.nce；一入去就係要收集嘅嘢）
 ```
 
-- **leaf 名 = `<name>_<role>`**：`_tasks`／`_actions`／`_effects`，同 role 目錄一致；
+- **leaf 名 = `<name>_<role>`**：`_tasks`／`_actions`／`_effects`／`_lab`，同 role 目錄一致；
   工具會驗證，唔啱就報錯（flat 模式都靠後綴反推 role）。
 - **成熟度前綴**：`test_`（測試）／`demo_`（示範）／無前綴（真任務）；`test_` 唔會收納。
 - 資料夾、`<name>.wat`（或 `.c`／`.wasm`）、模組名三處一致；容器副檔名由 role 決定。

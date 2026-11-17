@@ -50,6 +50,7 @@ typedef struct {
     bool cfg_seen;             // config 有這個名字
     int  cfg_level;            // -1 = 不啟動
     int  cfg_aff[2];           // [core0, core1]；-1 = 沒寫
+    int  cfg_prio;             // prio 覆寫；-1 = 沒寫（用 loop 宣告）
 } tm_slot_t;
 
 // ── 對外提供 ──
@@ -441,6 +442,7 @@ static void load_cfg(void)
         s->cfg_level = s->def->level;
         // 租戶：用戶未設定 = (0,0) = 唔跑。核心：-1 = 唔受 config 管（照 C 宣告）。
         s->cfg_aff[0] = s->cfg_aff[1] = (s->def->kind == NC_TASK_SYSTEM) ? -1 : 0;
+        s->cfg_prio = -1;
 
         // 核心（房東）不受租約約束：SYSTEM 任務永遠照 C 宣告跑，config 管不到它。
         if (s->def->kind == NC_TASK_SYSTEM) {
@@ -461,16 +463,23 @@ static void load_cfg(void)
             // 未寫的核一律當 0：未設定 = 唔准跑嗰核（同舊行為）。
             s->cfg_aff[0] = t->aff[0] ? 1 : 0;
             s->cfg_aff[1] = t->aff[1] ? 1 : 0;
+            s->cfg_prio = t->has_prio ? (int)t->prio : -1;
             break;
         }
     }
 
     for (int i = 0; i < s_count; i++) {
         tm_slot_t *s = &s_slots[i];
-        ESP_LOGI(TAG, "cfg %-10s %s level=%2d affinity=(%d,%d)%s",
+        char prio_txt[12];
+        if (s->cfg_prio < 0) {
+            snprintf(prio_txt, sizeof(prio_txt), "def");
+        } else {
+            snprintf(prio_txt, sizeof(prio_txt), "%d", s->cfg_prio);
+        }
+        ESP_LOGI(TAG, "cfg %-10s %s level=%2d affinity=(%d,%d) prio=%s%s",
                  s->name, s->def->kind == NC_TASK_SYSTEM ? "core  " : "task  ",
                  s->cfg_level, s->cfg_aff[0], s->cfg_aff[1],
-                 s->cfg_seen ? " config" : "");
+                 prio_txt, s->cfg_seen ? " config" : "");
     }
 }
 
@@ -578,6 +587,7 @@ static void prepare_loops(tm_slot_t *s)
         rt->def = d;
         rt->kind = (uint8_t)s->def->kind;   // 優先級治理用
         rt->enabled = true;
+        rt->prio_override = (s->cfg_prio >= 0) ? s->cfg_prio : -1;
         // 完全照宣告，但核數才是硬體事實：藍圖／config 都只是「要求」。
         // 收斂在這裡（而不是在每個 xTaskCreatePinnedToCore），單核板上寫 core1
         // 只會得到一行警告，唔會在 FreeRTOS 裡 assert → reboot loop。
@@ -907,7 +917,8 @@ size_t nc_task_json(char *buf, size_t cap)
                           "%s{\"name\":\"%s\",\"core\":%d,\"layer\":%d,\"prio\":%d,"
                           "\"period_ms\":%u,\"running\":%d,\"enabled\":%d,\"b\":%u}",
                           k ? "," : "", d->name ? d->name : "?", rt->core, d->layer,
-                          (int)d->prio, (unsigned)d->period_ms,
+                          (rt->prio_override >= 0) ? rt->prio_override : (int)d->prio,
+                          (unsigned)d->period_ms,
                           rt->started ? 1 : 0, rt->enabled ? 1 : 0,
                           (unsigned)rt->beats);
         }

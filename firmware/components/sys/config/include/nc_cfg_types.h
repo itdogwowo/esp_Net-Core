@@ -238,6 +238,8 @@ typedef struct {
     bool   has_level;    // false = config 冇寫 level（不是 0！）→ 用固件宣告
     int8_t level;        // -1 = 停用
     bool   aff[2];       // [core0, core1]
+    bool   has_prio;     // false = config 冇寫 prio → 用 loop 宣告值
+    uint8_t prio;        // FreeRTOS 優先級（1..24；租戶 runtime 會再夾）
 } nc_task_cfg_t;
 
 typedef struct {

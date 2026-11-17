@@ -178,3 +178,26 @@ NC4 action
 **不要**把 `nc_hw` 當成新的 `hw_manager`：
 它沒有 `HW.get()` 的即時硬體讀取，也沒有一堆 driver 的直接指標；
 它只是一張目錄、每資源一條 queue、一份 snapshot。
+
+---
+
+## 9. 外掛模組的 GPIO（2026-11-18 現況／缺口）
+
+**現況**：模組經 ABI `nc_gpio_read/write/toggle` 操作 GPIO；`nc_mod_engine.c` 直接
+`gpio_config()／gpio_set_level()`，**繞過** `hw_gpio` owner。結果：
+
+- 唔會入 `nc_hw_gpio_snap_t` snapshot → `STATUS`／其他人睇唔到模組改過嘅狀態；
+- 冇 claim 記錄 → 另一個任務／NC4 同時操作同一腳位時，冇衝突偵測；
+- pin allowlist 只係「唔准碰 USB／flash／UART／strap」，唔係歸屬協議；
+- read/write 會**隱式改 mode**（read→input+pull-up；write→INPUT_OUTPUT）——
+  「某啲狀態」（pull／方向／默認電平）冇得由模組明確指定。
+
+**建議（未實作）**：
+
+1. 模組 GPIO 一律經 `nc_hw_send("gpio", {CFG/SET})`，由 `hw_gpio` owner 做唯一 writer；
+2. 模組用 capability 宣告要邊啲腳位（manifest `requires: [{type:"hw", name:"pin:21",
+   exclusive:true}]`），loader 交 `nc_hw_claim()` 檢查；冇 claim 嘅腳位拒絕；
+3. 狀態（direction／pull／level）由 owner 保存＋snapshot 公開；模組只讀 snapshot
+   或者用 get／set 命令；
+4. ABI 加 `nc_gpio_cfg(pin, mode, pull, level)`（受 capability 限制），read/write
+   保留做 level 層操作。

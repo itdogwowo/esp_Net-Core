@@ -39,6 +39,7 @@ esp_Net-Core/
 │  ├─ tasks/                   任務模組，leaf 以 _tasks 結尾 → out/<name>.nct
 │  ├─ actions/                 指令模組，leaf 以 _actions 結尾（build.json cmds）
 │  ├─ effects/                 效果模組，leaf 以 _effects 結尾 → out/<name>.nce
+│  ├─ lab/                     實驗／量測，leaf 以 _lab 結尾（唔係任務、唔會收納）
 │  ├─ build/                   中間產物（.wasm；gitignore）
 │  └─ out/                     最終成品（只有 .nct／.nce；gitignore）
 ├─ ports/                       ──【配置層】每塊板子的差異，不屬於程式 ──

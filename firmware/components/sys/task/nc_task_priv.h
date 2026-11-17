@@ -9,6 +9,7 @@ typedef struct {
     uint8_t kind;             // nc_task_kind_t：優先級治理要用（SYSTEM 可以用保留區）
     TaskHandle_t handle;
     int core;                 // 執行期核心（CORE_ANY 在 start 時定案；沒有 set_core）
+    int prio_override;        // >=0 = tasks.json 的 prio；-1 = 用 def->prio
     bool started;
     bool exited;
     bool enabled;

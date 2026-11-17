@@ -3308,3 +3308,55 @@ modules/
   （舊 `test_hello.nct` 已移除）。
 - 文件同步：README／tools README／modules README／build_and_flash／testing／
   test-register（模組名同連結）／module-adoption／ncm-engine／handoff／naming §7。
+
+### 7.89 2026-11-18（量測唔做任務模組；`tasks.json` 加 prio；資源／GPIO 現況）
+
+**① 量測模組出 tasks → 入 `lab/`**
+
+- 原則：**量測唔係任務**。host 內部量測用 dev 固件 native 指令（`0xF050` 等）；
+  量測「外掛路徑」本身（interp／AOT、API 成本）係一次性實驗，放 `modules/lab/`。
+- 改名：`test_bench_tasks` → `lab/bench_compare_lab`、`test_api_cost_tasks` →
+  `lab/api_cost_lab`（leaf 尾綴 `_lab`；工具新增 lab role）；`tasks/` 只剩
+  `test_hello_tasks`（smoke）。
+- 量測數字已入測試冊（T-003／T-017），lab 模組量完可以移除、唔會收納。
+
+**② `tasks.json` 新增 `prio`（可選）**
+
+- schema：`{ "name", "level", "affinity": [c0,c1], "prio": 1..24 }`；
+  `level` 管啟動次序／-1 停用、`affinity` 管跑邊核、`prio` 覆寫 loop 的 FreeRTOS
+  優先級（冇寫 = 用 loop 宣告值）。
+- 實作：`nc_cfg_types.h` 加 `has_prio/prio`；`nc_cfg_load.c` 解析；
+  `nc_task.c` 記 `cfg_prio`、`prepare_loops()` 寫入 `rt->prio_override`、
+  `nc_task_rt_start()` 用 override；status loop JSON 印**生效** prio。
+- 治理不變：租戶（NORMAL／EFFECT）就算寫 7–15 都會被夾到 `NC_PRIO_OTHERS_MAX`（6）；
+  SYSTEM 任務照 C 宣告、不受 tasks.json 影響。
+- 各 project 的 `tasks.json` `_comment` 已補 prio 說明。
+
+**③ 資源模型（回答「請投資源／提交什麼資源」）**
+
+| 類型 | 宣告 | 處理 |
+|---|---|---|
+| 記憶體 | `nc_task_t.mem[]`／`declare()` | 開機 `nc_plan` 一次 carve（class／align／bytes）；`on_start` 收 `ptr/len/buf` |
+| 硬體接線 claim | `nc_task_t.claims[]`（`pin:16`、`bus:spi1`、exclusive） | `audit()` 檢查獨占衝突；失敗的 claim 標記不算，衝突要人解決 |
+| 對外 provide | `nc_task_t.provides[]`（buf／json／u32） | 登記到 provides 表；`STATUS_GET` 的 `provides` 可讀 |
+| 外掛資源 | manifest `requires`／`provides` ＋`resources.json` | 掃描時合併；載入前 `nc_res_check()` 擋缺資源的模組 |
+
+**④ GPIO 現況與缺口（重要）**
+
+- 合約係「`hw_gpio` owner 唯一 writer」：其他人用 `nc_hw_send("gpio", CFG/SET)`、
+  讀 `nc_hw_snapshot()`。
+- **但外掛模組的 `nc_gpio_read/write/toggle` 直接 `gpio_config／gpio_set_level`**，
+  繞過 owner：唔入 snapshot、冇 claim、狀態（pull／方向／默認電平）冇得明確指定，
+  只靠 pin allowlist 擋危險腳位。→ 測試冊 T-NCM-019；
+  建議方案（capability＋claim＋owner 統一寫入）寫入
+  [hw-ownership §9](../03_notes/hw-ownership.md)。
+
+**⑤ 驗證**
+
+- hosttest 12/12；`make.py build --all` 8 板全過（prio 欄位不影響 release）。
+- 上板：S3 Mini-Nano tests 映像（app `6b7ca0a4`）；`/data/config/tasks.json` 寫
+  `{"name":"bench_a","level":4,"affinity":[0,1],"prio":3}` → 開機後
+  `status tasks`：`bench_a` loop `core:1 layer:4 prio:3 running:1 b≈1891`（5 ms 週期），
+  證實 override 生效；移除 `prio` 後回復預設 `prio:2 running:0`。
+- 已還原板上 config（只留 `test_hello_tasks` level 4；缺的條目由管理器補 [0,0]），
+  `status ncm`：`live test_hello_tasks`、`ok:1`。

@@ -1025,6 +1025,19 @@ esp_err_t nc_cfg_apply_tasks(const cJSON *root, nc_tasks_cfg_t *out, nc_cfg_stat
             st->invalid++;      // 型別錯／超範圍 → 當冇寫
         }
 
+        // prio（可選）：冇寫 → 用 loop 宣告值；寫錯型別／超範圍 → 當冇寫。
+        // 範圍 1..24 是 FreeRTOS configMAX_PRIORITIES-1；租戶最終會被
+        // nc_task_rt_start() 夾到 NC_PRIO_OTHERS_MAX（保留區唔准租戶用）。
+        const cJSON *pr = item(it, "prio");
+        if (pr == NULL) {
+            st->defaulted++;
+        } else if (cJSON_IsNumber(pr) && pr->valueint >= 1 && pr->valueint <= 24) {
+            t.prio = (uint8_t)pr->valueint;
+            t.has_prio = true;
+        } else {
+            st->invalid++;      // 型別錯／超範圍 → 當冇寫
+        }
+
         const cJSON *af = item(it, "affinity");
         if (af == NULL) {
             st->defaulted++;        // 未設定 = (0,0) = 唔跑

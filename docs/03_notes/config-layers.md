@@ -10,7 +10,7 @@
 > [ports-layout.md](ports-layout.md)。定義與五條規則見 [glossary.md §5](glossary.md)。
 
 > **狀態（2026-11-16 更新）**：`nc_cfg`（`sys/config`）已接三個層：
-> `tasks.json`（任務管理器讀 level / affinity，並會補寫）、`system.json`
+> `tasks.json`（任務管理器讀 level / affinity / prio，並會補寫）、`system.json`
 > （`cID` / `links[]` / `routes[]` / `log_debug_mode` / `usb`）、
 > `hardware.json`（generated 預設 ＋ 用戶逐欄位覆蓋；已 typed：ETH／SDIO／PIN／PWM／UART）。
 `ports/project/<chip>/<board>/data/config/hardware.json` 現在有一份 **generated snapshot**
@@ -119,7 +119,7 @@ CDC／MSC／log 三樣都冇人要 → 連 TinyUSB 都唔裝。以前缺名會�
 | `system.json` 的 `nc4.links` | **Channels**（或保留 links） | 邏輯通道：NC4 over USB／UART／TCP／WS… | ✅ |
 | `system.json` 的 `nc4.routes` | **Routes** | 幀去 decodeN／轉發 | ✅ |
 | `network.json` | **Connectivity**（不是 Interface） | WiFi STA/AP、hostname、credentials | ✅ |
-| `tasks.json` | Tasks | 任務 level／affinity | ✅ |
+| `tasks.json` | Tasks | 任務 level／affinity／prio（可選） | ✅ |
 | `wiring.json` | **F.wiring**（build） | 板級腳位／匯流排預設 | ❌ 要重 build |
 | `board.json`＋`sdkconfig.defaults` | **F.spec／F.build**（build） | flash／PSRAM／CPU／console／OTG／HS／分割表 | ❌ 要重 build |
 
@@ -235,7 +235,7 @@ ports/
 | `driver.json`（build-time） | driver 層 | 未接 | 用 driver 內建預設 |
 | `system.json` | 系統層（main） | **硬體起來之後**（分配要看實際硬體） | 只啟動硬體實際支援的通道 |
 | `network.json` | 網路層 | ETH/WiFi 起來前 | 用內建 IP 或 DHCP |
-| `tasks.json` | 任務管理器 | 任務登記前 | 用程式裡宣告的 core/prio |
+| `tasks.json` | 任務管理器 | 任務登記前 | level／affinity；`prio`（可選）覆寫 loop 宣告值；`-1`=停用 |
 | `resources.json` | ncm / 資源表 | 掃描之後、載入之前 | 用固件預設（空表） |
 | `pixel/`（目錄） | ncm | 掃描 `pixel/effects/` | 不啟用效果 |
 
