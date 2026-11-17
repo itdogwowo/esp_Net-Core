@@ -36,6 +36,12 @@ class Reader:
             self.buf+=d
         return None,None
 
+# 韌體的 OTA_BEGIN 會先把目標分區**整段抹掉**才回 ACK（esp_ota_begin 同步 erase）。
+# S3 上實測 ≈237 KB/s：1.2 MB 要 ~5.2 s，剛好越過舊版硬編的 5 s 等待 →
+# 「BEGIN no reply」假故障（2026-11-17）。這裡照 image 大小估，兩種通道同一條規則。
+def begin_timeout(nbytes):
+    return 10.0 + nbytes / 100_000.0
+
 def main():
     ap=argparse.ArgumentParser()
     ap.add_argument("--host",default="10.10.1.50")
@@ -54,10 +60,17 @@ def main():
     if f:
         max_chunk,=struct.unpack_from("<H",f,9); print("caps max_chunk",max_chunk)
         if a.chunk>max_chunk: a.chunk=max_chunk
+    tmo=begin_timeout(len(data))
+    print(f"BEGIN（先抹 {len(data)/1024:.0f} KB，估 ≤ {tmo:.0f} s）")
     s.sendall(pack(CMD_BEGIN,struct.pack("<IH",len(data),a.chunk)+digest+struct.pack("<H",len(ver))+ver))
-    cmd,f=rd.frame({CMD_ACK,CMD_ERROR},5)
+    cmd,f=rd.frame({CMD_ACK,CMD_ERROR},tmo)
     if cmd!=CMD_ACK:
-        print("BEGIN failed", f.hex() if f else "no reply"); return 1
+        # 回覆可能只是遲到：問 STATE 確認係咪已經入咗 writing。
+        s.sendall(pack(CMD_STATE)); scmd,sf=rd.frame({CMD_STATE},3)
+        if scmd==CMD_STATE and len(sf)>=14 and sf[9+1]:
+            print("BEGIN: 冇收到 ACK，但 STATE=writing → 當作已開始，繼續")
+        else:
+            print("BEGIN failed", f.hex() if f else "no reply"); return 1
     print("BEGIN ok")
     off=0; t0=time.time()
     while off<len(data):

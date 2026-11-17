@@ -208,7 +208,9 @@ def main():
             digest = hashlib.sha256(data).digest()
             payload = struct.pack("<IH", len(data), 4096) + digest + ota.str_u16("selftest")
             ser.write(pack(0x2201, payload))
-            f = rd.wait_for({0x2204, 0x221C}, timeout=6)
+            # BEGIN 會先同步 erase 整個分區（≈237 KB/s，1.2 MB ≈5.2 s）
+            # → 用 ota.py 同一條按大小估的等待，唔好硬編 6 s。
+            f = rd.wait_for({0x2204, 0x221C}, timeout=ota.begin_timeout_for(len(data)))
             if f and f[0] == 0x2204:
                 offset = 0
                 t0 = time.time()
