@@ -3281,3 +3281,30 @@ modules/
 - 全部重編 887／872／519 B；hosttest 12/12；`make.py check` 0 錯 5 舊警告。
 - firmware 無改動（板子仍係 app 8007da05、`test_hello` 上板只係舊檔名；
   下次換模組時用新名 `test_hello.nct` 即可）。
+
+### 7.88 2026-11-18（外掛模組命名收緊：leaf 尾綴＝角色；out/ 只放成品）
+
+**定案**
+
+- `modules/` 三個角色目錄：`tasks/`（`.nct`）、`actions/`（`.nct`，kind=normal，
+  `cmds` 必須非空）、`effects/`（`.nce`）。
+- **leaf 名一定要以角色結尾**：`<name>_tasks`／`<name>_actions`／`<name>_effects`；
+  工具會驗證（flat 目錄則由後綴反推 role），唔啱直接報錯。
+- **成品／中間產物分開**：`modules/out/` 只放最終 `.nct`／`.nce`（一入去就見到
+  要收集嘅嘢）；`.wasm` 中間產物放 `modules/build/`。兩者都 gitignore。
+- 現有模組改名：`test_hello_tasks`、`test_bench_tasks`、`test_api_cost_tasks`
+  （資料夾／payload／容器同名）；重編 887／872／519 B。
+- `modules/actions/README.md`、`modules/effects/README.md` 建立，寫明角色規則
+  （actions 未實作路由前係保留位）。
+- 工具：`--build-dir`（預設 `<root>/build`）、`--out`（預設 `<root>/out`）、
+  `--clean` 清兩者、`--list` 顯示 role／kind；`--dir` 外部專案照樣可用；
+  `build.json` 的 `cmds` 會傳 `--cmd`（非 0x3000–0x3FFF 警告）。
+
+**驗證**
+
+- `--list`：3 個任務 role=tasks／kind=task；`modules/out/` 只有 3 個 `.nct`，
+  `modules/build/` 只有 `.wasm`。
+- 黑板安裝 `test_hello_tasks.nct` → `status ncm`：`live test_hello_tasks`、`ok 1`
+  （舊 `test_hello.nct` 已移除）。
+- 文件同步：README／tools README／modules README／build_and_flash／testing／
+  test-register（模組名同連結）／module-adoption／ncm-engine／handoff／naming §7。

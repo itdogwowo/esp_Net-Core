@@ -37,5 +37,7 @@ tools/hosttest/ncm_test/_tmp*
 # ── macOS ──
 .DS_Store
 
-# ── 外掛任務（modules/）的 build 產物（由 tools/ncm_build.py 生成）──
+# ── 外掛模組（modules/）的產物（由 tools/ncm_build.py 生成）──
+# out/ = 最終成品（.nct／.nce）；build/ = 中間產物（.wasm）
 modules/out/
+modules/build/

@@ -115,7 +115,7 @@ symbol table 同 `esp_elf_register_symbol()`；配套 examples：
 | 形態 | 實測 | 備註 |
 |---|---|---|
 | **L2 原生 C**（新測試指令 `0xF050 CPU_BURN`） | **1,683 µs**（5 次：1,677–1,687） | 6–8 cycles/iteration @240 MHz |
-| **L0 wasm 直譯**（`modules/tasks/test_bench/test_bench.wat`） | **24,887 µs**（5 次：24,868–24,910） | 每次 tick 用 `nc_now_us()` 自量 |
+| **L0 wasm 直譯**（`modules/tasks/test_bench_tasks/test_bench_tasks.wat`） | **24,887 µs**（5 次：24,868–24,910） | 每次 tick 用 `nc_now_us()` 自量 |
 | **倍數** | **≈14.8×** | 同一塊板、同一時段；有一個 335 ms outlier（USB 擷取期間，不計） |
 
 建議門檻（暫定，之後按實測校準）：
@@ -148,8 +148,8 @@ symbol table 同 `esp_elf_register_symbol()`；配套 examples：
 
 ## 8. 現況與下一步
 
-- 已達 **L0**：`test_hello`（列印＋GPIO 讀／反轉）＋`test_bench`（性能對照）＋
-  `test_api_cost`（API 成本量測）；能力白名單 7 個 import
+- 已達 **L0**：`test_hello_tasks`（列印＋GPIO 讀／反轉）＋`test_bench_tasks`（性能對照）＋
+  `test_api_cost_tasks`（API 成本量測）；能力白名單 7 個 import
   （print／print_i32／print2／gpio_read/write/toggle／now_us）。
 - **2026-11-17 重組**：功能測試（hello／probe）已由固件移出（刪 component，改外掛
   `.nct` 驗證）；效能測試留 `components/dev/`；宿主 ncm 搬到 `components/host/ncm`

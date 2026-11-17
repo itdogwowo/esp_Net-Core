@@ -253,8 +253,8 @@ release 建置完全唔會 fetch／build WAMR。上游 2.4.0 對 **IDF 6 + picol
 
 ```bash
 python3 tools/ncm_build.py                  # 編譯全部樣本（需要 wat2wasm：brew install wabt）
-python3 tools/ncm_build.py test_hello       # 只編一個
-python3 tools/ncm_build.py test_hello --device   # 直接裝到 /Volumes/NC-*/tasks
+python3 tools/ncm_build.py test_hello_tasks       # 只編一個
+python3 tools/ncm_build.py test_hello_tasks --device   # 直接裝到 /Volumes/NC-*/tasks
 python3 tools/nc4.py --port /dev/cu.usbmodem* reboot
 python3 tools/nc4_log.py --port /dev/cu.usbmodem*
 ```

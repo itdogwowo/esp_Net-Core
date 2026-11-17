@@ -26,7 +26,7 @@
 
 ```bash
 python3 tools/ncm_build.py                 # 全部樣本 → modules/out/
-python3 tools/ncm_build.py test_hello --device   # 編譯＋裝到 /Volumes/NC-*/tasks
+python3 tools/ncm_build.py test_hello_tasks --device   # 編譯＋裝到 /Volumes/NC-*/tasks
 python3 tools/nc4.py --port /dev/cu.usbmodem* reboot
 python3 tools/nc4_log.py --port /dev/cu.usbmodem*
 ```

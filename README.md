@@ -35,10 +35,12 @@ esp_Net-Core/
 │  ├─ partitions.csv            分割表
 │  └─ build/  managed_components/  sdkconfig  ← 生成物，不進 git
 │
-├─ modules/                    ──【外掛任務層】獨立編譯（唔屬於 firmware）──
-│  ├─ tasks/                   test_<name>（測試）／demo_<name>（示範）／<name>（真任務）→ .nct
-│  ├─ effects/                 效果任務 → .nce（預留）
-│  └─ out/                     編譯產物（.wasm／.nct／.nce；gitignore）
+├─ modules/                    ──【外掛模組層】獨立編譯（唔屬於 firmware）──
+│  ├─ tasks/                   任務模組，leaf 以 _tasks 結尾 → out/<name>.nct
+│  ├─ actions/                 指令模組，leaf 以 _actions 結尾（build.json cmds）
+│  ├─ effects/                 效果模組，leaf 以 _effects 結尾 → out/<name>.nce
+│  ├─ build/                   中間產物（.wasm；gitignore）
+│  └─ out/                     最終成品（只有 .nct／.nce；gitignore）
 ├─ ports/                       ──【配置層】每塊板子的差異，不屬於程式 ──
 │  ├─ hardware/<chip>/<board>/   這塊板「有什麼」：board.json / wiring.json /
 │  │                              driver.json / sdkconfig.defaults / partitions.csv
