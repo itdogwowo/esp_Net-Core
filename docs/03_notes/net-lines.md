@@ -36,7 +36,8 @@ Core
 - 舊寫法仍然讀：`kind:"tcp", iface:"wifi"`、`kind:"eth_tcp"`、`cfg:{port,rx}`；
   `python3 tools/board.py check` 會提醒。
 - `name` 可以覆寫（非空才生效）；出廠 config 現在會寫上生成名做預設
-  （`uart0`／`usb_jtag0`／`cdc0`），用戶可以改，或寫 `""` fallback 生成名。
+  （`usb0`／`uart0`／`wifi_tcp0`／`eth_tcp0`），用戶可以改，或寫 `""` fallback 生成名。
+  舊的 `usb_jtag0`／`cdc0` 只在「冇 project seed」時由晶片能力表生成。
 
 **Name 與 Route 是兩個獨立的軸**：
 

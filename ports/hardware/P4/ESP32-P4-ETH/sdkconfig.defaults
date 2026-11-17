@@ -8,9 +8,10 @@ CONFIG_ESPTOOLPY_FLASHSIZE_32MB=y
 CONFIG_ESPTOOLPY_FLASHFREQ_40M=y
 CONFIG_ESPTOOLPY_FLASHMODE_DIO=y
 
-# ── 晶片版本：pre-rev3 配方（mp_Make-Tools/README，MicroPython PR #19564）──
-CONFIG_ESP32P4_SELECTS_REV_LESS_V3=y
-CONFIG_ESP32P4_REV_MIN_0=y
+# ── 晶片版本：rev<3.0 配方 ──
+# 由能力碎片 p4-pre-rev3 提供（見檔尾 sync 區塊）。以前這兩行直接寫在這裡，
+# 現在收進碎片：rev<3 與 rev>=3 互斥，寫在板檔外面才看得到「這塊板是哪一邊」。
+# flash 只能 40 MHz 就係 pre-rev3 的連帶限制（IDF 喺 rev<3 直接關掉 80/120M）。
 
 # ── CPU：這顆樣品上限 360 MHz（400 → 開機迴圈）──
 CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_360=y
@@ -74,3 +75,20 @@ CONFIG_HTTPD_WS_SUPPORT=y
 # 讓整個 UDP 收發崩掉，見 docs/02_guides/testing.md §2.16）。datagram 請留在 MTU 以內。
 CONFIG_LWIP_UDP_RECVMBOX_SIZE=32
 # <<< profile: nc4-udp
+# >>> profile: p4-pre-rev3
+# 能力碎片：ESP32-P4 rev < v3.0（v0.x／v1.x，例如 FireBeetle 2 的 v1.0 樣品）
+#
+# 同 p4-rev3 互斥（IDF：ESP32P4_SELECTS_REV_LESS_V3 一開，REV_MIN_300/301 就
+# 直接唔存在）。開了這個碎片，映像嘅 rev 上限就會由 v3.99 變 v1.99。
+#
+# 下限用最鬆的 REV_MIN_0：pre-rev3 樣品實際 rev 每塊都唔同（v0.x／v1.0），
+# 收緊到 v1.0 只會令 v0.x 樣品開唔到機，換唔到任何好處。
+# 真係要寫死下限 → 唔好改這個檔（其他板會跟住中招），另開一個碎片。
+#
+# ★ 連帶影響（唔係呢個檔寫得晒）：IDF 喺 pre-rev3 之下會關掉 80／120 MHz flash
+#   時脈選項（bootloader Kconfig 的 depends on !ESP32P4_REV_MIN_0 系列），所以
+#   走這個碎片的板子 sdkconfig 只能 40 MHz —— check 見到 40M 唔係寫錯。
+
+CONFIG_ESP32P4_SELECTS_REV_LESS_V3=y
+CONFIG_ESP32P4_REV_MIN_0=y
+# <<< profile: p4-pre-rev3

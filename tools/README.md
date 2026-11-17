@@ -7,10 +7,13 @@
 ```text
 tools/
 ├─ ncbuild/                     ① 建置工具（make.py 的實作）
+├─ ncportgen.py                 ① 建置期程式碼產生（ports/ → nc_port.c/h）
+├─ sync_hardware_presets.py     ① 兩層 preset 同步 / 漂移檢查
+├─ *_diagram.py                 ① 文件用圖（boot / buffer / core …；改了要重畫 SVG）
 ├─ board.py                     ① 板子清單 / 設定檢查 / 新增板子
 ├─ board.sh                     ① 薄殼 → make.py（相容用）
 ├─ flash.sh                     ① 逃生門燒錄
-├─ nc4.py  ota.py selftest.py nc4_test.py fx.py   ② 對設備說話 / 打包 .fxe
+├─ nc4.py  ota.py selftest.py nc4_test.py nc4_file.py buf_test.py matrix.py fx.py   ② 對設備說話 / 打包 .fxe
 ├─ bench/                       ③ 量測（要板子）
 ├─ hosttest/                    ④ 主機端 C 測試（不需要板子）
 └─ poc/                         ⑤ 原型驗證
@@ -39,7 +42,9 @@ tools/ncbuild/
 | `make.py build ESP32-S3-N16R8 --tests` | — | **測試映像**（`NC_ENABLE_TESTS=ON`：`0xF00x` 指令與 test_* 任務）。不寫＝出貨映像（OFF）。每次都會明確傳給 CMake，不再靠 cache 記住上一個值 |
 | `make.py build ESP32-P4-ETH --fresh` | — | 先刪這個 build dir 的 `sdkconfig` 再建（改了 defaults 才需要） |
 | `make.py build ESP32-P4-ETH --jobs 4` | — | 限制平行編譯 |
-| `make.py build --all` | — | 依序建置**全部**板子（每塊一個 build dir，可重入） |
+| `make.py build --all` | — | 依序建置**全部**板子（每塊一個 build dir，可重入；`--project`／`--no-project` 會被拒絕，因為每塊板子用哪個 project 由 hardware 層決定） |
+| `make.py projects` | — | 列出每塊板子的 project（`default` 會標出來） |
+| `make.py check [板子]` | — | 驗 `board.json` ↔ `sdkconfig.defaults` 一致（同 `tools/board.py check`） |
 | `make.py doctor` | — | 環境健檢：IDF / idf.py / esptool / pyserial / 板子設定 / 磁碟 / git |
 | `make.py flash ESP32-P4-ETH [--full\|--erase]` | ✅ | 建置 + 燒錄（預設 `app-flash`，不動碟上的使用者資料） |
 | `make.py monitor ESP32-P4-ETH` | ✅ | 序列埠監看 |
@@ -102,10 +107,23 @@ artifacts/
 
 ```bash
 python3 tools/board.py list      # 硬體板 × project × flash/PSRAM/ETH/console
+python3 tools/board.py projects  # 每塊硬體板下面有哪些 project（default 會標）
 python3 tools/board.py check     # 驗 board.json ↔ sdkconfig；擋下「把 build-time 設定寫進 config.json」
-python3 tools/board.py sync      # 改了 ports/_profiles/ 之後，把能力碎片寫進兩層
-python3 tools/board.py new --chip S3 --board ESP32-S3-Matrix --flash 16 --psram 8 --ws
-python3 tools/board.py new --project demo --hardware P4/ESP32-P4-ETH
+python3 tools/board.py sync      # 改了 ports/_profiles/ 之後，把能力碎片寫進 hardware 層的 sdkconfig.defaults
+python3 tools/board.py resolve ESP32-P4-ETH        # 查「找不到板子」：解析到哪個 hardware／project／target（跟 make.py 同一套）
+python3 tools/board.py new --chip S3 --board ESP32-S3-Matrix --flash 16 --psram 8 --wifi
+python3 tools/board.py new --project demo --hardware P4/ESP32-P4-ETH --default
+```
+
+`--wifi` / `--eth` / `--usb` 這些是**能力碎片**（`ports/_profiles/`），寫進 hardware 層；
+`--console`、`--flash`、`--psram` 是 L1 硬體事實。`--project` 建的 project 只放 runtime 設定
+（`data/config/*.json`），**不會**帶 `sdkconfig.defaults` 或 profiles。
+
+硬體 preset 與 project 的 `hardware.json` 快照要保持同步——改完跑：
+
+```bash
+python3 tools/sync_hardware_presets.py --check   # 只檢查（CI 用；有漂移就非 0）
+python3 tools/sync_hardware_presets.py           # 重寫 project/data/config/hardware.json
 ```
 
 新增板子**不需要改 `board.sh` 或 CMake**。`board.sh` 會自己問 `board.py` 這塊板子的
@@ -141,27 +159,32 @@ firmware image 在 `artifacts/<board>.bin`（先 build 才有；完整可燒組�
 | `hub_bench.py` | 0xF003 雙核 hub 交換量測 |
 | `buf_probe.py` | **緩衝貼身化**：`snap` / `sizing` / `session` / `compare` / `rtt` / `uart` / `txbench` / `storm` / `idle`。`session` 跑標準量測並輸出 JSON、`compare` 並排兩次並標 >3% 退步；`sizing` 把峰值換算成建議尺寸（已知但沒打出來的需求用 `--declare CDC=4096` 補）。流程見 [measurement-method.md](../docs/02_guides/measurement-method.md)，本次紀錄見 [buffer-tightening.md](../docs/03_notes/buffer-tightening.md) |
 
-P4 預設靜態 IP `10.10.1.50/16`，量測前先確認連得到。
+P4 預設 **DHCP**（舊版寫死的 `10.10.1.50/16` 已移除）；量測前先用 `nc4.py --port … status`
+或序列埠看它拿到哪個 IP（`network.json` 的 `lan.ip.mode=static` 目前**未實作**）。
 
 ## ④ `hosttest/` — 主機端 C 測試（不需要板子）
 
 用 `cc` 直接把同一個 `.c` 編進來跑，驗證純邏輯，不用燒板子：
 
 ```bash
+bash tools/hosttest/run_all.sh     # 一次跑全部（11 套；每套印 OK / FAIL）
 tools/hosttest/hub_test/run.sh     # nc_hub.c：格子交換 / 自動歸還
 tools/hosttest/plan_test/run.sh    # nc_plan.c：宣告 / commit / 重名
 tools/hosttest/fx_test/run.sh      # nc_fx.c：載入 / 選 / 兩幀釋放 / trap / 超支
 tools/hosttest/fxm_test/run.sh     # .fxe manifest：解碼 / 範圍 / 指令表
 tools/hosttest/task_test/run.sh    # 任務管理器：level 排序 / 帳本 / attach / detach / provides / config
 tools/hosttest/cfg_test/run.sh     # nc_cfg_patch：token patch（巢狀 / 陣列 / 轉義）
+tools/hosttest/cfgstruct_test/run.sh  # nc_cfg_load／defaults：三層 config 疊加、線的 kind/index、USB personality
 tools/hosttest/router_test/run.sh  # nc4_router.c：線 → 核、out 轉寄清單（decodeN／自我／重複）
 tools/hosttest/link_test/run.sh    # nc4_link.c：出口表、整幀送出、短送／錯誤 → drops、JSON
 tools/hosttest/buf_test/run.sh     # nc_buf.c：格狀態機 / FIFO / reserve / 32-bit / S·P 記帳 / 換手 / JSON 截斷
+tools/hosttest/portgen_test/run.sh # ncportgen.py：從 ports/ 產生 nc_port.c/h（含 USB kind 表）
 ```
 
-Windows（MSVC）用同目錄的 `run.bat`。注意：目前只有 `cfg_test` / `fxm_test` / `task_test`
-有 `run.bat`；`fx_test` 用到 `dirent.h` / `clock_gettime` 是 POSIX-only，
-`hub_test` / `plan_test` 只是還沒補腳本（純 C，補了就能跑）。
+Windows（MSVC）用同目錄的 `run.bat`。注意：目前只有 `cfg_test` / `fxm_test` / `router_test` /
+`task_test` 有 `run.bat`；`fx_test` 用到 `dirent.h` / `clock_gettime` 是 POSIX-only，
+其餘只是還沒補腳本（純 C，補了就能跑）。`cfgstruct_test`／`portgen_test` 直接吃 `firmware/`
+的標頭與 `ports/`，在 WSL／macOS 跑最省事。
 
 全部都會印 `ALL PASS`。改了 `sys/mem/`、`sys/task/`、`sys/task_manager/`、`sys/config/`、`app/fx/` 之後先跑對應那支。
 

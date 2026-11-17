@@ -275,9 +275,12 @@ def gen_hardware(wiring: dict) -> tuple[str, dict]:
 def gen_preset(wiring: dict, hw_rel: str) -> dict:
     out = {
         "_comment": [
-            "這份是 build 時由 ports/hardware/" + hw_rel + "/wiring.json 產生的出廠預置。",
-            "它同時是 firmware 的內建預設（nc_port.c）：這裡的值就是「冇檔案的板子」會跑的形狀。",
-            "用戶改這一份只覆蓋差異；硬度事實（flash/psram）在 board.json，不在這裡。",
+            "這份是 build 時由 ports/hardware/" + hw_rel + "/wiring.json 產生的出廠預置（鏡子）。",
+            "它會被 build 嵌入、並在 /data/config/hardware.json 缺失時 seed 到裝置；"
+            "**唔係** firmware 內建預設本身：真正的內建預設是 nc_port.c（同樣由 wiring.json 生成）。",
+            "所以改這份只會改「用戶看到的值」；要改行為就改 wiring.json 再 rebuild"
+            "（目前 typed 解析：ETH／SDIO／PIN／PWM／UART；SPI／I2C／I80／I2S／ENC／XL9555 未 parse）。",
+            "硬度事實（flash/psram/CPU）在 board.json，不在這裡。",
         ],
         "version": 1,
     }
@@ -289,7 +292,13 @@ def gen_preset(wiring: dict, hw_rel: str) -> dict:
 
 
 def gen_usb_kinds(wiring: dict) -> str:
-    """USB.list index → internal link kind（NC_LINK_CDC / NC_LINK_USBJTAG）。"""
+    """USB.list index → internal link kind（NC_LINK_CDC / NC_LINK_USBJTAG）。
+
+    屬性只用 `used`：**唔可以用 `retain`**。xtensa GCC 15（IDF 6.0.3）冇實作
+    `retain`，會報 `'retain' attribute ignored [-Werror=attributes]`，
+    整個 build 直接失敗（2026-11-17 實測）。留住整個 object 係 main.c 的
+    強引用負責（見 main.c 的 s_usb_kind_lookup）；呢度只保證函數一定被編出。
+    """
     kind = {"otg-fs": "NC_LINK_CDC", "otg-hs": "NC_LINK_CDC",
             "usj-fs": "NC_LINK_USBJTAG"}
     vals = []
@@ -297,11 +306,11 @@ def gen_usb_kinds(wiring: dict) -> str:
         phy = str(it.get("phy") or "").lower()
         vals.append(kind.get(phy, "0xFF"))
     if not vals:
-        return ("__attribute__((used, retain)) uint8_t nc_port_usb_kind(uint8_t idx) { (void)idx; return 0xFF; }\n")
+        return ("__attribute__((used)) uint8_t nc_port_usb_kind(uint8_t idx) { (void)idx; return 0xFF; }\n")
     body = ", ".join(vals)
     return (
         f"static const uint8_t s_usb_kinds[{len(vals)}] = {{ {body} }};\n"
-        f"__attribute__((used, retain)) uint8_t nc_port_usb_kind(uint8_t idx) {{\n"
+        f"__attribute__((used)) uint8_t nc_port_usb_kind(uint8_t idx) {{\n"
         f"    if (idx >= {len(vals)}u) return 0xFF;\n"
         f"    return s_usb_kinds[idx];\n"
         f"}}\n"

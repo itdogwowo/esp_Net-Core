@@ -8,7 +8,7 @@
 |---|---|---|---|
 | **PHY／port** | 實體 USB 控制器／D+/D- | S3 一個共用 PHY；P4 FS_PHY1、FS_PHY2、HS_PHY | 板子 hardware／board.json |
 | **personality／driver** | 這條 PHY 用哪個 device stack | `usb_jtag`（USJ）／`cdc`（TinyUSB OTG） | config `links[].kind`＋編譯能力 |
-| **function** | USB device 提供的功能 | NC4 CDC 資料、log、MSC 隨身碟 | `usb.msc`／`usb.cdc_log`＋link |
+| **function** | USB device 提供的功能 | NC4 CDC 資料、log、MSC 隨身碟 | `links[].msc`／`usb.cdc_log`＋link |
 | **NC4 line** | 把 USB 資料當成 NC4 通道 | `usb_jtag0`／`cdc0` | `links[]`＋`routes[]` |
 
 ## 2. 目前實作對應
@@ -27,7 +27,7 @@
 
 ### Function
 
-- `usb.msc`：只有 OTG 有意義；USJ 沒有 MSC。
+- `links[].msc`：只有 OTG 有意義；USJ 沒有 MSC。預設 0（唔交碟），global `usb.msc` 已停用。
 - `usb.cdc_log`：只有 OTG 有意義；USJ 的 log 永遠開，和 NC4 共用 TX。
 - MSC driver 目前無條件安裝（因為 TinyUSB descriptor 是編譯期決定）；`msc=0` 只代表不交碟。
 - log 不是 NC4 line；它是 USB transport 上的一條文字管道。
@@ -43,13 +43,13 @@
 | 問題 | 現象 |
 |---|---|
 | 「USB 線」和「NC4 link」同名 | `usb_jtag` 有時指 driver，有時指 config link |
-| `usb.msc`／`usb.cdc_log` 是全域 | 多 USB port 時無法分開 |
+| `usb.cdc_log`／`usb.rx` 是全域 | 多 USB port 時無法分開（`links[].msc` 已經 per-link） |
 | `usb.rx` 是全域 | 多 USB link 時共用同一塊 |
 | `usb_nc4_link()` 只取第一條 | P4 多 PHY 不能並存 |
 | `board.json features.usb` 沒被讀 | 板子事實和 build 能力可能不一致 |
 | P4 features.usb=false | 但 build 有 OTG；要靠 config 避免 |
 | `cdc` 與 `usb_jtag` 的 log 規則不同 | USJ log 強制開；OTG 受 cdc_log |
-| MSC 是 function，不是 line | 不應該出現在 `links[]` 或 routes |
+| MSC 是 function，不是 line | 開關掛在 USB link（`links[].msc`），但唔會出現在 routes |
 | `usb_core` 是 core affinity | 不是 USB 裝置編號 |
 
 ## 4. 目標模型
@@ -67,7 +67,7 @@ usb_port0（PHY；板子事實，只註冊能力）
 - **不要**在 config 寫 `functions` 或把 port 配給 service；這是 2026-11-17 撤回的方向。
 - consumer 自己 claim：`nc4` 要一條資料通道、`log` 要出口、`msc` 要碟；registry 找
   同時滿足所有 claim 的 port，並推導 personality（有 MSC → OTG；否則有 USJ 用 USJ）。
-- `usb.rx`／`usb.msc`／`usb.cdc_log` 將來是 **per-port 狀態**，由 claim 產生，不是 config 欄位。
+- `usb.rx`／`usb.cdc_log` 將來是 **per-port 狀態**，由 claim 產生，不是 config 欄位（`links[].msc` 已經 per-link）。
 - `usb_nc4_link()` 應該變成「registry 分配」，不是 first-only。
 - `board.json features.usb` 應該 gate port 是否存在；編譯能力只 gate driver 是否存在。
 - P4 多 PHY：build／板子註冊三個 port，claim 自動分配；不需要 `usb.ports[]` 配對表。

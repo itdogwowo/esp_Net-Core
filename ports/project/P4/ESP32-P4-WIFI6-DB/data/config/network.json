@@ -1,0 +1,52 @@
+{
+  "version": 1,
+  "_comment": [
+    "ESP32-P4-WIFI6-DB：Wi-Fi 6 由板載 ESP32-C5 提供（ESP-Hosted / SDIO），不是 P4 自己的 radio。",
+    "這裡是**測試預設**：P4 以 STA 加入 S3 開的 AP（NETCORE-TEST），用同一組 API 證明無線路徑通了。",
+    "正式部署時改成真實 AP 即可（wifi.enable／ssid 都可以用 /data/config 覆蓋）。",
+    "這塊板冇乙太網 PHY（wiring 的 ETH.enable=0）→ lan 永遠關閉；不要在這裡指有線 IP。",
+    "esp_hosted 的 SDIO 腳位由 build 時的 CONFIG_ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD 決定，不在這份檔。"
+  ],
+  "hostname": "",
+  "priority": [
+    "wifi"
+  ],
+  "lan": {
+    "enable": 0,
+    "ip": {
+      "mode": "dhcp",
+      "addr": "",
+      "mask": "",
+      "gw": ""
+    }
+  },
+  "wifi": {
+    "enable": 1,
+    "mode": "sta",
+    "ssid": "NETCORE-TEST",
+    "ssid_pw": "netcore123",
+    "timeout_s": 120,
+    "ip": {
+      "mode": "dhcp",
+      "addr": "",
+      "mask": "",
+      "gw": ""
+    },
+    "credentials": []
+  },
+  "bt": {
+    "enable": 0,
+    "profile": "none",
+    "fast": 0,
+    "name": "",
+    "pin": "",
+    "bonding": 1
+  },
+  "espnow": {
+    "enable": 0,
+    "channel": 0,
+    "encrypt": 0,
+    "pmk": "",
+    "peers": []
+  }
+}

@@ -279,6 +279,9 @@ static void parse_links(const cJSON *root, nc_system_cfg_t *out, nc_cfg_stat_t *
         nc_link_cfg_t l;
         memset(&l, 0, sizeof(l));
         l.usb_port = NC_CFG_USB_PORT_NONE;
+        // msc：per-link，預設 0（唔交碟）。global usb.msc 已經唔再 fallback
+        // （2026-11-17 定案），所以兩條路徑（呢度同 nc_cfg_defaults 的 add_link）
+        // 一定要同一個值，否則「有冇 system.json」會得出唔同的 MSC 行為。
         l.msc = 0;
 
         const cJSON *nm = item(it, "name");
@@ -289,8 +292,9 @@ static void parse_links(const cJSON *root, nc_system_cfg_t *out, nc_cfg_stat_t *
         bool composite = false;
         bool usb_family = false;
         if (kind_s != NULL && strcasecmp(kind_s, "usb") == 0) {
-            // kind:"usb" = 硬件類別；personality/index 由 USB.list index 決定。
-            l.kind = NC_LINK_CDC;       // 臨時；下面 index 解析後再定
+            // kind:"usb" = 硬件類別（同 uart／spi 一樣），不是 personality。
+            // 真正的 kind（cdc／usb_jtag）要等 index／usb 欄位解析完，再去查
+            // hardware 的 USB.list（見下面 usb_family 那一段）。
             usb_family = true;
         } else if (kind_s != NULL) {
             if (!kind_parse_transport(kind_s, &l.kind, iface_from_kind,
@@ -337,7 +341,7 @@ static void parse_links(const cJSON *root, nc_system_cfg_t *out, nc_cfg_stat_t *
             l.usb_port = (uint8_t)usb->valueint;
         }
 
-        // msc：per-link；未寫 = -1（USB link 會 fallback 去 global usb.msc）
+        // msc：per-link；未寫 = 0（唔交碟，同 global usb.msc 脫鈎）
         const cJSON *msc = item(it, "msc");
         if (msc != NULL) {
             if (!cJSON_IsBool(msc) && !cJSON_IsNumber(msc)) {
@@ -346,6 +350,24 @@ static void parse_links(const cJSON *root, nc_system_cfg_t *out, nc_cfg_stat_t *
             }
             l.msc = cJSON_IsBool(msc) ? (cJSON_IsTrue(msc) ? 1 : 0)
                                       : (msc->valueint ? 1 : 0);
+        }
+
+        // kind:"usb" → 真正的 personality。資料源是 hardware 的 USB.list：
+        // wiring.json 的 USB.list[].phy 在 build 時生成 nc_port_usb_kind()，
+        // 這裡經 nc_cfg_usb_default_kind() 查（0xFF = 這塊板冇這條 port）。
+        // **呢一步唔可以留空**：留空就等於全部 USB 都當成 OTG CDC，S3／C3 的
+        // USJ 會靜靜消失（2026-11-17 P4 實測：wiring 寫 usj-fs，link 仍然 kind=cdc）。
+        if (usb_family) {
+            // index 就是 USB.list index；舊檔另外寫 "usb":N 的仍然接受（以它為準）。
+            const uint8_t port = (l.usb_port != NC_CFG_USB_PORT_NONE)
+                                 ? l.usb_port : l.index;
+            const uint8_t hw_kind = nc_cfg_usb_default_kind(port);
+            if (hw_kind >= (uint8_t)NC_LINK_KIND_MAX) {
+                st->invalid++;      // 這塊板冇這條 USB port → 這條 link 不建立
+                continue;
+            }
+            l.kind = (nc_link_kind_t)hw_kind;
+            l.usb_port = port;
         }
         const cJSON *port_top = item(it, "port");
         const cJSON *port_cfg = item(item(it, "cfg"), "port");

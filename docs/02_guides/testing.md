@@ -838,9 +838,12 @@ FreeRTOS HZ=1000、PC = macOS、每筆 ≈ 16 MB、TCP RTT ≈ 8–10 ms。
 
 ### 方法
 
+`<board>` 換成板名（例如 `ESP32-P4-ETH`）；檔案是 `python3 make.py build <board>` 收出來的
+`artifacts/<board>.bin`（舊文件寫的 `firmware/build/esp_net_core.bin` 已經冇咗）。
+
 ```bash
-tools/ota.py --port /dev/cu.usbmodem* firmware/build/esp_net_core.bin --no-apply   # 只驗證
-tools/ota.py --port /dev/cu.usbmodem* firmware/build/esp_net_core.bin               # 驗證 + 切換
+tools/ota.py --port /dev/cu.usbmodem* artifacts/<board>.bin --no-apply   # 只驗證
+tools/ota.py --port /dev/cu.usbmodem* artifacts/<board>.bin               # 驗證 + 切換
 ```
 
 流程照 `slave/schema/ota.json`：`0x2201 BEGIN` → 逐塊 `0x2202 WRITE`（等 `0x2204 ACK`）→
@@ -877,7 +880,7 @@ idf.py build
 tools/flash.sh
 
 # 之後都用 OTA
-tools/ota.py --port /dev/cu.usbmodem* firmware/build/esp_net_core.bin
+tools/ota.py --port /dev/cu.usbmodem* artifacts/<board>.bin
 
 # 解碼器一致性
 tools/nc4_test.py --port /dev/cu.usbmodem*

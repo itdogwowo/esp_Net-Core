@@ -1,0 +1,37 @@
+{
+  "_comment": "硬體事實（F.spec）。改這裡 = 要重新 build；runtime 可改的放 project 層的 data/config。能力 profiles 只放硬體能力（eth/wifi／晶片 rev）；項目能力（ws/udp）在 project.json。",
+  "name": "ESP32-P4-WIFI6-DB",
+  "chip": "esp32p4",
+  "flash": {
+    "size_mb": 32,
+    "freq_mhz": 40,
+    "mode": "dio"
+  },
+  "psram": {
+    "size_mb": 32,
+    "mode": "hex",
+    "speed_mhz": 200
+  },
+  "cpu_mhz": 400,
+  "console": "uart0",
+  "profiles": [
+    "eth-rmii",
+    "wifi-hosted-c5",
+    "p4-rev3"
+  ],
+  "features": {
+    "eth": "emac-only",
+    "wifi": "hosted-c5",
+    "usb": "otg-hs"
+  },
+  "verified": null,
+  "notes": "Waveshare ESP32-P4-WIFI6-DB：P4（本機樣品 **chip rev v3.2 / ECO7**）＋ 板載 **ESP32-C5** 做 Wi-Fi 6。32 MB flash、32 MB HEX PSRAM @200 MHz、CPU 360 MHz（保守值，rev3 可試 400）。console 走板載 CH343 USB-UART（Type-C 那個孔，Windows 見 USB-Enhanced-SERIAL CH343）；P4 自己的 USB 裝置埠係 OTG 2.0 HS 的 **4-pin 排針**（D-／D+ = GPIO49／50，UTMI HS PHY），板子冇引出 USJ（GPIO24／25）。Wi-Fi 由 C5 經 esp_hosted／SDIO 提供 → 一定要 wifi-hosted-c5 碎片（用 c6 碎片會握手失敗：expect=0x0d got=0x17）。晶片係 rev3 → 一定要 p4-rev3 碎片（pre-rev3 配方會用 rev 檢查擋住開機）。**板子冇乙太網 PHY**：eth-rmii 碎片只為讓 P4 EMAC 程式碼保持可編，runtime 由 wiring 的 ETH.enable=0 關閉。另有 MIPI-DSI／CSI、microSD、40-pin 排針（腳位未核對，見 wiring）。",
+  "brand": "Waveshare",
+  "model": "ESP32-P4-WIFI6-DB",
+  "rev": "chip rev v3.2（ECO7）",
+  "aliases": [
+    "P4-WIFI6-DB",
+    "ESP32-P4-C5",
+    "P4-C5"
+  ]
+}

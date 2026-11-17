@@ -93,7 +93,7 @@ config 只能管租戶。** 但「冇 config 都開得機」不等於「config �
 **2026-11-13 更新：出廠形狀由晶片能力決定。**
 `nc_cfg_defaults_system()` 不再是一份固定常數，而是由 `nc_cfg_chip.c`（IDF `soc_caps.h` 的事實表）
 砌出來：有 USB-Serial-JTAG 的板子（S3／P4／C3…）預設 `usb_jtag`、只有 OTG 的 S2 才預設 `CDC`、
-`usb.msc` 預設 0（CDC 先）、USB parser 4,128 B。`app_main` 第一行就把
+`usb.msc` 預設 0（CDC 先；**2026-11-17 起交碟開關搬到 per-link** `links[].msc`，global 已停用）、USB parser 4,128 B。`app_main` 第一行就把
 `CONFIG_IDF_TARGET` 交給預設，所以「第一次開機」與「config 壞掉」跑出來的形狀都對得上晶片。
 詳見 [usb-config.md](usb-config.md) §0.5。
 
@@ -149,7 +149,7 @@ CDC／MSC／log 三樣都冇人要 → 連 TinyUSB 都唔裝。以前缺名會�
   `msc`／`log` 這些 consumer 開關；**不是** `functions` 配對表。
 - port 能力（有幾條 PHY、USJ／OTG、FS／HS）由 build／板子註冊，不由用戶填。
 - 真正 personality 由 claim 推導：有 MSC claim → OTG；否則有 USJ 用 USJ。
-- 現在 interim 仍然係 `system.json` 的 `links[].kind`＋global `usb.msc`／`cdc_log`。
+- 現在 interim 仍然係 `system.json` 的 `links[].kind`（＋per-link `msc`）／global `usb.cdc_log`。
 
 ### 0.7 Network 只 claim 硬件（2026-11-17 修正）
 
@@ -315,7 +315,7 @@ ETH PHY 沒 link、UART 沒接，就不該照 config 硬開一條 link。
     "routes": [                                 // 誰解、要不要轉出去（router 永遠生效）
       { "in": "nctx",     "out": ["decode0"] },   // 本機 → 自己
       { "in": "outbound", "out": [] },            // 本機 → 外
-      { "in": "cdc0",     "out": ["decode0"] },
+      { "in": "usb0",     "out": ["decode0"] },
       { "in": "uart0",    "out": ["decode1"] },
       { "in": "eth_tcp0", "out": ["decode0", "uart0"] }
     ]
@@ -326,7 +326,8 @@ ETH PHY 沒 link、UART 沒接，就不該照 config 硬開一條 link。
 **Link schema（canonical，2026-11-16 晚間定案）**：
 
 - `kind` 是 composite：`eth_tcp` / `wifi_tcp` / `eth_udp` / `wifi_udp` / `eth_ws` / `wifi_ws`，
-  實體線是 `uart` / `cdc` / `usb_jtag`；**interface 已包含在 kind，不再寫 `iface`**。
+  實體線是 `uart` / `usb`（硬件類別，載入時解析成 `cdc`／`usb_jtag`；舊檔可直接寫 `cdc`／`usb_jtag`）；
+  **interface 已包含在 kind，不再寫 `iface`**。
 - `index` 是同一 kind 的編號；line identity = `kind + index`。
 - `port` 只在 link 頂層寫一次；`rx` 也直接在 link 下面（有量測偏離時才寫，見 net-lines §5）。
 - 冇寫 `name` 時，由 `kind + index` 生成（`eth_tcp0`、`wifi_udp1`…）；`name` 可以覆寫。
@@ -395,7 +396,8 @@ DMA 大小（1600）與環數（16/16）**不在 config**——那是 build-time
 {
   "version": 1,
 
-  "USB":    { "enable": 0, "msc": 0, "cdc": 0 },
+  "USB":    { "enable": 1,
+              "list": [ { "phy": "usj-fs", "GPIO": { "dm": 19, "dp": 20 }, "enable": 1 } ] },
   "TFT":    { "enable": 0, "bus": { "type": "spi", "index": -1 }, "driver": "ST7789",
               "width": 240, "height": 320, "rotation": 0, "color_order": "RGB",
               "invert": 0, "pixel_format": "RGB565_BE",

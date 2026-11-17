@@ -122,7 +122,9 @@ static nc_link_cfg_t *add_link(nc_system_cfg_t *s, const char *name, nc_link_kin
     snprintf(l->name, sizeof(l->name), "%s", name);
     l->kind = kind;
     l->usb_port = NC_CFG_USB_PORT_NONE;
-    l->msc = -1;
+    // msc：per-link，預設 0（唔交碟）。同 nc_cfg_load.c 的 parse_links 必須一致，
+    // 否則「有冇 system.json」會決定開機交唔交碟。
+    l->msc = 0;
     l->enable = true;
     nc_cfg_rx_default(kind, &l->rx);
     return l;

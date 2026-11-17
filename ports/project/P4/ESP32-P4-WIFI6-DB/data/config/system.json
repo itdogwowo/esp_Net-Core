@@ -1,0 +1,45 @@
+{
+  "version": 1,
+  "_comment": [
+    "ESP32-P4-WIFI6-DB（Waveshare：P4 rev v3.2 / ECO7 ＋ 板載 ESP32-C5）：出廠 USB = OTG 2.0 HS。",
+    "console 係 UART0（板載 CH343 USB-UART，Type-C 那個孔）；P4 的 USJ 同 OTG 係獨立 PHY，",
+    "可以同時存在，但這塊板冇引出 USJ → hardware USB.list 只有一條 otg-hs → link index:0 解析成 cdc。",
+    "msc 預設 0（per-link，link 冇寫就係 0；global usb.msc 已停用）：開機唔把 FAT 交出去。",
+    "要插 OTG 排針見到隨身碟：usb0 加 \"msc\":1（/data 交俾 host，APP 自己暫時讀唔到）。",
+    "想要第二條通道（TCP／UDP），自己在 links[] 加一條、routes[] 指去 decodeN。",
+    "links[].name：可省略或用 \"name\":\"\" → 自動生成；有非空 name 就用。links[].msc：USB link 的 MSC 開關（只 OTG）。"
+  ],
+  "frame_interval_ms": 20,
+  "num_pixels": 0,
+  "usb": {
+    "cdc_log": 1
+  },
+  "nc4": {
+    "links": [
+      {
+        "name": "usb0",
+        "kind": "usb",
+        "index": 0
+      }
+    ],
+    "routes": [
+      {
+        "in": "nctx",
+        "out": [
+          "decode0"
+        ]
+      },
+      {
+        "in": "outbound",
+        "out": []
+      },
+      {
+        "in": "usb0",
+        "out": [
+          "decode0"
+        ]
+      }
+    ]
+  },
+  "log_debug_mode": 0
+}

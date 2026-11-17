@@ -867,7 +867,17 @@ def cmd_new(args) -> int:
 
     profiles = []
     if args.eth and args.eth != "none":
-        profiles.append("eth-rmii" if args.eth == "rmii" else f"eth-{args.eth}")
+        prof = "eth-rmii" if args.eth == "rmii" else f"eth-{args.eth}"
+        # 能力碎片一定要存在，而且要在**寫任何檔案之前**檢查：以前這裡直接
+        # profiles.append()，sync_board() 才 raise → 留下「check 2 errors」的半塊板
+        # （2026-11-17 實測 --eth spi：ports/_profiles/eth-spi.defaults 不存在）。
+        if not (PROFILES / f"{prof}.defaults").exists():
+            have = "、".join(sorted(p.stem for p in PROFILES.glob("*.defaults")))
+            raise SystemExit(
+                f"沒有能力碎片 ports/_profiles/{prof}.defaults（現有：{have}）\n"
+                f"  --eth {args.eth} 沒有對應的 build 設定；W5500（SPI）driver 亦未實作。\n"
+                f"  先用 --eth rmii，或先加 {prof}.defaults 再建板。")
+        profiles.append(prof)
     # Wi-Fi 有兩種完全不同的 build 路徑：
     #   · 晶片有原生 radio（S3／C3／C6…）→ 一個 CONFIG_NETCORE_WIFI=y，不用碎片
     #   · P4 沒有 radio → 一定要 wifi-hosted-* 碎片（外掛 C5／C6）
@@ -981,7 +991,7 @@ def main() -> int:
     p.add_argument("board", nargs="?", help="只查這塊（預設全部）")
     p.set_defaults(fn=cmd_check)
 
-    p = sub.add_parser("sync", help="把能力碎片寫進兩層的 sdkconfig.defaults")
+    p = sub.add_parser("sync", help="把能力碎片寫進 hardware 層的 sdkconfig.defaults")
     p.add_argument("board", nargs="?")
     p.set_defaults(fn=cmd_sync)
 
@@ -1025,4 +1035,8 @@ def main() -> int:
 
 
 if __name__ == "__main__":
+    # Windows 的 console 預設 cp950：print("✔") 會 UnicodeEncodeError。
+    # 只放寬 errors（中文仍用 cp950 輸出色），不把整個輸出改成 UTF-8。
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(errors="replace")
     sys.exit(main())

@@ -64,7 +64,7 @@
   },
   "_gpio_convention": "兩種『未設定』寫法不能混用：-1 = 未設定／不啟用（driver 以 >= 0 判斷）；null = 沒接這條線（driver 以 is not None 判斷，寫 -1 會變成 Pin(-1) 而爆掉）。標 -1 的欄位可以安全留著；標 null 的欄位要填真實腳位才 enable。",
   "USB": {
-    "_comment": "S3：USB D-／D+ = GPIO19／20；S3 只有一條 FS PHY，硬件要在 phy:\"usj-fs\" 或 phy:\"otg-fs\" 二選一（同一對腳，只能一個）。現時這塊板用 otg-fs；轉另一個就改 phy，並在 system.json 對應改 link。",
+    "_comment": "S3：USB D-／D+ = GPIO19／20；S3 只有一條 FS PHY，硬件要在 phy:\"usj-fs\" 或 phy:\"otg-fs\" 二選一（同一對腳，只能一個）。現時這塊板用 otg-fs。轉另一個人格就改這裡的 phy 再 rebuild；system.json 的 link 寫 {kind:\"usb\",index:0} 會自動跟（hardware.json 的 USB 段 firmware 未 parse，改它無效）。",
     "enable": 1,
     "list": [
       {

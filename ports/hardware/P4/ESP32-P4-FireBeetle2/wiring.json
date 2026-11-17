@@ -201,7 +201,7 @@
     ]
   },
   "USB": {
-    "_comment": "P4-FireBeetle2：USB-C OTG = HS PHY，D-／D+ = GPIO49／50；另一邊 USB CDC = USJ FS，GPIO24／25。兩者是獨立 PHY，可同時存在；現時 firmware 只開一條 USB link，用 system.json links[].kind 揀。",
+    "_comment": "P4-FireBeetle2：USB-C OTG = HS PHY，D-／D+ = GPIO49／50；另一邊 USB CDC = USJ FS，GPIO24／25。兩者是獨立 PHY，可同時存在。firmware 目前只開一條 USB link；personality 由 build-time 這裡的 USB.list[index].phy 決定（system.json 的 link 只寫 {kind:\"usb\",index:N}）。hardware.json 的 USB 段未 parse，改它無效。",
     "enable": 1,
     "list": [
       {

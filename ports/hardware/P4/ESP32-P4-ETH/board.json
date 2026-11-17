@@ -17,7 +17,8 @@
   "profiles": [
     "eth-rmii",
     "nc4-ws",
-    "nc4-udp"
+    "nc4-udp",
+    "p4-pre-rev3"
   ],
   "features": {
     "eth": "rmii-ip101",

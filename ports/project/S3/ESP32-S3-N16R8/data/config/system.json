@@ -14,7 +14,7 @@
     "name：通道名；routes[].in / out 填的就是它",
     "enable：0 = 呢條線開機唔建立（唔宣告緩衝、唔建 bus、路由跳過）；要開就改 1 再重啟",
     "每條 link：kind / index / port；name 可選（唔寫就生成）；rx 直接放 link 下面（舊檔的 cfg.rx 仍然接受）",
-    "kind：composite（wifi_tcp／wifi_udp）或 usb_jtag／cdc／uart（USB 二選一：USJ 或 OTG）",
+    "kind：composite（wifi_tcp／wifi_udp）或 usb（硬件類別，personality 由 hardware 的 USB.list 決定）／uart；舊式 usb_jtag／cdc 仍然接受",
     "port：tcp / ws / udp 的埠號",
     "rx.mode：只對 tcp / ws / udp 有效（pull = 非阻塞 recv；push_frame = producer 阻塞 recv）",
     "          cdc / uart 由 kind 推導（cdc→pull、uart→push），唔可以設；寫咗都唔會讀",
@@ -34,7 +34,7 @@
     "例：out=[decode0] 只執行｜out=[TCP] 只轉發｜兩者一齊寫 = 兩樣都做｜out=[] 丟棄",
     "decodeN 有人指向才開；冇人指向就唔存在",
     "log_debug_mode：0 = 正常（INFO、2 KB，由 USB 起來開始記，看到服務啟動）｜1 = 除錯（全部等級、8 KB，連最早期開機）",
-    "USB：hardware phy=usj-fs（GPIO19/20）；目標 link {kind:\"usb\",index:0}（USJ 冇 MSC）。現時 interim kind:\"usb_jtag\",usb:0。",
+    "USB：hardware phy=usj-fs（GPIO19/20）；link 寫 {kind:\"usb\",index:0}（USJ 冇 MSC）：personality 由 USB.list[0].phy 決定（usj-fs → usb_jtag）。",
     "links[].name：可省略或用 \"name\":\"\" → 自動生成；有非空 name 就用。links[].msc：USB link 的 MSC 開關（只 OTG）。"
   ],
   "cID": "",

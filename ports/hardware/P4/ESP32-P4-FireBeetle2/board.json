@@ -16,7 +16,8 @@
   "console": "uart0",
   "profiles": [
     "eth-rmii",
-    "wifi-hosted-c6"
+    "wifi-hosted-c6",
+    "p4-pre-rev3"
   ],
   "features": {
     "eth": "emac-only",

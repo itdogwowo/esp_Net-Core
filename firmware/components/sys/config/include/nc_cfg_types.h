@@ -105,7 +105,7 @@ typedef struct {
     char           name[NC_CFG_NAME_MAX];
     uint8_t        index;       // 同類線編號；name 省略時用來生成 eth_tcp0
     uint8_t        usb_port;    // USB 線 → hardware.json USB.list index；0xFF = 未指定
-    int8_t         msc;         // USB link 的 MSC 開關：-1 = 未寫（用 global）、0/1
+    int8_t         msc;         // USB link 的 MSC 開關：0 = 唔交碟（預設）／1 = 交；global usb.msc 已停用
     nc_link_kind_t kind;
     bool           enable;
     uint16_t       port;        // tcp / ws / udp / http

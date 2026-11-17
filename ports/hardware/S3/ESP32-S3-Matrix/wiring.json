@@ -199,7 +199,7 @@
     ]
   },
   "USB": {
-    "_comment": "S3：USB D-／D+ = GPIO19／20；S3 只有一條 FS PHY，硬件要在 phy:\"usj-fs\" 或 phy:\"otg-fs\" 二選一（同一對腳，只能一個）。現時這塊板用 otg-fs；轉另一個就改 phy，並在 system.json 對應改 link。",
+    "_comment": "S3：USB D-／D+ = GPIO19／20；S3 只有一條 FS PHY，硬件要在 phy:\"usj-fs\" 或 phy:\"otg-fs\" 二選一（同一對腳，只能一個）。現時這塊板用 otg-fs。轉另一個人格就改這裡的 phy 再 rebuild；system.json 的 link 寫 {kind:\"usb\",index:0} 會自動跟（hardware.json 的 USB 段 firmware 未 parse，改它無效）。",
     "enable": 1,
     "list": [
       {

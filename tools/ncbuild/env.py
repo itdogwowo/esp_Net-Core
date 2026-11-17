@@ -187,8 +187,8 @@ def resolve_board(query: str | None, *, project: str | None = None,
         chosen = hit
     elif no_project:
         chosen = None
-    elif p is not None and default_pj is not None and p != default_pj:
-        chosen = p          # 查詢本身就係非 default project
+    elif p is not None and p != default_pj:
+        chosen = p          # 查詢本身就係非 default project（塊板冇 default 時亦然）
     else:
         chosen = default_pj
     return Port(hw=d, pj=chosen, board=b, chip=b["chip"], default_pj=default_pj)

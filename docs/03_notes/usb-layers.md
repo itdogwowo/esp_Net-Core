@@ -33,7 +33,8 @@
 | ESP32-C3／C5／C6／C61／H2 | 1 × USJ | 1 | `usb_jtag0` | 冇 OTG，冇 MSC |
 | **ESP32-P4** | **3 條 PHY**：USJ FS、OTG FS、OTG HS | 硬件可 2+；**firmware 目前只開 1 條 USB link** | `usb_jtag0` | 多線並存未實作 |
 
-「一條 USB link」= `system.json` 的 `links[]` 裡面一條 `kind:"cdc"` 或 `kind:"usb_jtag"`。
+「一條 USB link」= `system.json` 的 `links[]` 裡面一條 `kind:"usb"`（載入時解析成
+`cdc` 或 `usb_jtag`），或者直接寫舊式 `kind:"cdc"`／`kind:"usb_jtag"`。
 `usb_nc4_link()` 只取**第一條 enable 的 USB link**；多過一條會 warning，第二條不會建立。
 
 ---
@@ -62,10 +63,16 @@
 | `GPIO` | **read-only**：這條 PHY 的 D-／D+（`dm`／`dp`）實際 GPIO；只作定位，不可改、不可 remap |
 | `enable` | 這條 PHY 有冇接出來／用不用 |
 
-**S3 怎樣二選一**：S3 只有一條 FS PHY，硬件 `USB.list` 直接寫
-`phy:"usj-fs"` **或** `phy:"otg-fs"`；同一對 GPIO19/20，只能揀一個。
-轉另一個人格就改 `hardware.json` 的 `phy`，`system.json` 的 link 再指向同一條
-`USB.list[0]`。**不需要在 link 再寫一次 `mode`**；`phy` 已經係硬件選擇。
+**S3 怎樣二選一**：S3 只有一條 FS PHY，`wiring.json`（build 時的硬件事實）
+的 `USB.list` 直接寫 `phy:"usj-fs"` **或** `phy:"otg-fs"`；同一對 GPIO19/20，
+只能揀一個。轉另一個人格就是改 `wiring.json` 的 `phy` 再 **rebuild**
+（`nc_port_usb_kind()` 由 build-time 生成），`system.json` 的 link 唔使改 ——
+它寫的 `{kind:"usb",index:0}` 會跟住解析到新 personality。
+**不需要在 link 再寫一次 `mode`**；`phy` 已經係硬件選擇。
+
+> ⚠️ 裝置上的 `/data/config/hardware.json`（同 project 內那份 generated snapshot）
+> 目前**只是鏡子**：它記錄 `USB.list`，但 firmware **未 parse** USB 段，
+> 所以直接改它**不會**換 personality（ETH 段就有 parse）。要換就改 `wiring.json` 再 build。
 `shared`／`fs` 都不是 PHY 值，唔再用。
 
 | 板 | `USB.list` | USB GPIO（提醒用） |
@@ -79,9 +86,11 @@
 > 注意：`seed_file()` **只會建立、不覆蓋**。已經用過的裝置，`/data/config/hardware.json`
 > 是舊版（冇 `USB` 段）；要見到新段就刪掉該檔重開機（會重新 seed），或手動加。
 >
-> **2026-11-17 起**：`system.json` 的 `kind:"usb"` 已經由 generated
-> `nc_port_usb_kind(index)` 解析（由 `wiring.json` 的 `USB.list[].phy` 生成）；
-> 所以 link 不需要再寫 `mode`。`USB.list` 的 `GPIO` 仍然只是 metadata（未 parse）；
+> **2026-11-17 起**：`system.json` 的 `kind:"usb"` 由 `nc_cfg_load.c` 解析 —— 用
+> `index`（或舊式 `"usb":N`）查 build-time generated `nc_port_usb_kind()`
+> （來源 `wiring.json` 的 `USB.list[].phy`），得出真 kind（`cdc`／`usb_jtag`）。
+> 這塊板冇那條 port（生成表回 `0xFF`）→ 該 link **不建立**並計 `invalid`，
+> 唔會靜靜當成 CDC。`USB.list` 的 `GPIO` 仍然只是 metadata（未 parse）；
 > 完整 `sys/usb` claim 未實作，但 USB link 的 kind／name／msc 已經可以直接用。
 
 ### 2.6 USB 有幾多個可調 GPIO？
@@ -111,11 +120,11 @@ I2S、I80 等可以經 GPIO matrix 選腳；ETH RMII 的 mdc／mdio／ref_clk �
 | `index` | `USB.list` 的 index；也是線編號 |
 | `msc` | 這條 USB 是否交碟（只對 `phy:"otg-*"` 有意義） |
 
-- **不需要 `mode`**：personality 已經在 `hardware.json` 的 `phy` 揀了
-  （S3：`usj-fs`／`otg-fs`；P4：`usj-fs`／`otg-fs`／`otg-hs`）。
+- **不需要 `mode`**：personality 已經在 `wiring.json` 的 `phy` 揀了
+  （S3：`usj-fs`／`otg-fs`；P4：`usj-fs`／`otg-fs`／`otg-hs`），build 時生成查表。
 - **不需要 `usb` 欄位**：`index` 已經就是 `USB.list` index。
-- 名用統一格式 **`<kind><index>`**：`usb0`（`kind:"usb"` ＋ index）。
-  personality 由 `phy` 決定，唔入名；routes 用**解析後**的名字。
+- 名用統一格式 **`usb<index>`**：`usb0`（`kind:"usb"` ＋ index）。
+  personality 由 `phy` 決定，唔入名；routes 用**你寫的名字**（有寫 `name` 就用它）。
 - name 優先序：非空 `name` 優先；冇寫或空字串 `""` → 用生成名。
 - `name` 放在 object 最前面，同其他 link 統一。
 - 舊的 `kind:"cdc"`／`"usb_jtag"`＋`"usb":0` 仍然接受作兼容，但新 seed 已全部遷移。
@@ -125,7 +134,9 @@ I2S、I80 等可以經 GPIO matrix 選腳；ETH RMII 的 mdc／mdio／ref_clk �
 寫在 USB link 上（`"msc":1`），因為它是「這條 USB port 要不要交碟」；
 `hardware.json` 不記 MSC。
 
-- **預設 0**：唔寫 `msc` = 唔交碟。
+- **預設 0**：唔寫就是唔交碟（`nc_cfg_load.c` 寫死 `l.msc = 0`，冇「未指定」狀態）。
+  global `system.json` 的 `usb.msc` **已經停用**、唔會 fallback；舊檔寫了它，開機只會出一行
+  warning 提醒改寫成 `links[].msc`。
 - `msc=1`：B10 把 FAT 交給 host（只在 **OTG** 有意義；USJ 沒有這個 capability → 跳過／warning）。
 - `msc=0`：`/data` 留在 APP；主機不會見到碟。
 - MSC descriptor 是編譯期（`CONFIG_TINYUSB_MSC_ENABLED=y`）；`msc=0` 只代表不交碟，
@@ -139,11 +150,11 @@ I2S、I80 等可以經 GPIO matrix 選腳；ETH RMII 的 mdc／mdio／ref_clk �
 ### ④ `routes[]`：USB link 去哪裡
 
 ```json
-{ "in": "cdc0",      "out": ["decode0"] }
-{ "in": "usb_jtag0", "out": ["decode0"] }
+{ "in": "usb0", "out": ["decode0"] }
 ```
 
-目標 USB link 名由 `kind + index` 生成（`usb0`）；現時 interim 仍是 `cdc0`／`usb_jtag0`。
+現時 seed 用 `kind:"usb"` ＋ 顯式 `name:"usb0"`；舊檔寫 `cdc0`／`usb_jtag0` 的是
+晶片表預設（**冇** project seed 時才會出現）。無 `name` 時生成名是 `usb<index>`。
 
 ---
 
@@ -196,13 +207,15 @@ python3 make.py flash <board> --full   # 分割表沒改；--full 只是確保�
 - `msc=1` 時 B10 已把 FAT 交 host；device 只剩唯讀 `/ro`，
   HTTP static `/data/www` 可能讀不到，測試時要預期。
 
-### 4.5 本專案現況（2026-11-16）
+### 4.5 本專案現況（2026-11-17 重驗）
 
-- **ESP32-S3-Matrix 與 ESP32-S3-Mini-Nano 已配置成 OTG MSC**：`kind:"cdc"`、
-  `usb.msc=1`、`cdc_log=1`、`CONFIG_ESP_CONSOLE_NONE=y`；build 已通過。
+- **ESP32-S3-Matrix 與 ESP32-S3-Mini-Nano 已配置成 OTG MSC**：link 寫
+  `{kind:"usb",index:0,msc:1}`（wiring `otg-fs` → 載入時解析成 `cdc`）、
+  `cdc_log=1`、`CONFIG_ESP_CONSOLE_NONE=y`；**build 已通過**（2026-11-17）。
   上板後**預期**主機見到 composite MSC＋CDC；app log 由 CDC 出 —— 未上板實測。
-- **其他 S3（N16R8／SuperMini）仍然是 USJ console、msc=0**。
-  要開就跟上面步驟，先決定 UART0 還是 none。
+- **其他 S3（N16R8／SuperMini）**：wiring `usj-fs` → 解析成 `usb_jtag`、
+  link 冇寫 `msc`（跟 global 預設 0），console 仍然是 USJ。
+  要開 MSC 就跟上面步驟，先決定 UART0 還是 none。
 
 ---
 
@@ -210,8 +223,8 @@ python3 make.py flash <board> --full   # 分割表沒改；--full 只是確保�
 
 | 欄位 | 意思 | 不是 |
 |---|---|---|
-| `kind` | **personality／driver**：`usb_jtag`（USJ）或 `cdc`（TinyUSB OTG） | 不是 PHY 編號 |
-| `index` | 同一個 kind 的 **line 編號**（`cdc0`／`cdc1`） | 不是 PHY 編號 |
+| `kind` | `usb` = 硬件類別（載入時由 `USB.list[index].phy` 解析成 `cdc`／`usb_jtag`）；舊式可直接寫 `cdc`／`usb_jtag` | 不是 PHY 編號 |
+| `index` | USB link 指向的 `USB.list` index，同時是線編號 | 不是 PHY 編號 |
 | `CONFIG_NETCORE_USB_OTG_HS` | P4 的 OTG 用 HS PHY（build-time） | 不是每條 link 的 runtime 選擇 |
 
 - **今天**：每塊板只建立**第一條 enable 的 USB link**。寫兩條 `links[]` 只會 warning，
@@ -253,7 +266,8 @@ config 只需要「啟不啟用 consumer」（tasks／service 的 level／affini
 - 誰要用 USB 就自己 claim；衝突由 registry 判，claim 失敗只影響該 consumer；
 - P4 多 PHY 時，registry 自動分配，不需要用戶手動配對。
 
-> 未實作：現在仍是 `links[].kind` ＋ global `usb.msc`／`cdc_log`。
+> 未實作：現在仍是 `links[].kind`（`usb` 載入時解析成 `cdc`／`usb_jtag`）＋
+> per-link `msc`（預設 0；global `usb.msc` 已停用）／global `usb.cdc_log`。
 > 要做的是 `nc_usb_port_register()`／`nc_usb_claim()` 與 per-port 狀態。
 > 在接 FXE 之前不動這一層。
 
@@ -298,8 +312,9 @@ USB line），B05 建 router，B07 任務拿 handle，B10 才 init driver。
 ## 6. 未做好（下一步）
 
 1. **多 USB 通道**：P4 有三條 PHY，但 `usb_nc4_link()` 只取第一條；
-   `usb.rx`／`usb.msc`／`usb.cdc_log` 仍是全域，未 per-port。
-2. **`driver.json` USB 段**：firmware 未讀；`board.json features.usb` 也未讀。
-   真正開關只有 `CONFIG_NETCORE_USB_OTG` ＋ `system.json`。
+   `usb.rx` 仍然是全域，`usb.cdc_log` 也是全域（`msc` 已有 per-link）。全部 per-port 未做。
+2. **`hardware.json` 的 `USB` 段**：firmware **未 parse**（只是 generated snapshot／鏡子）；
+   personality 只認 build-time 的 `wiring.json` → `nc_port_usb_kind()`。
+   `driver.json` USB 段與 `board.json features.usb` 亦未讀。
 3. **MSC descriptor** 是編譯期；`msc=0` 仍安裝 driver，未做到「唔要就完全唔編」。
-4. **USJ 沒有 MSC**：不要用 `usb.msc=1` 配 `usb_jtag`，那只會 warning。
+4. **USJ 沒有 MSC**：不要用 `msc=1` 配 USJ 解析出的 link，那只會 warning。

@@ -36,10 +36,16 @@ def _board_of(cfg: dict, args: argparse.Namespace) -> str | None:
 
 def cmd_build(cfg: dict, args: argparse.Namespace) -> int:
     if args.all:
+        # --all 是「每塊板子用佢嘅 default project」；專案選擇對它無意義。
+        # 靜靜忽略會令人以為生效過，所以明確報錯（2026-11-17）。
+        if args.project or args.no_project:
+            print("✘ --all 會逐塊板子用各自的 default project；"
+                  "唔可以同時加 --project／--no-project")
+            return 2
         return builder.build_all(cfg, minimal=args.minimal, jobs=args.jobs,
                                  clean=args.clean, fresh=args.fresh,
                                  do_archive=False if args.no_archive else None,
-                                 tests=args.tests)
+                                 tests=args.tests, do_doctor=not args.no_doctor)
     return builder.build(
         cfg, _board_of(cfg, args),
         minimal=args.minimal, jobs=args.jobs,

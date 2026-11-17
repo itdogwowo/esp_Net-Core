@@ -159,7 +159,8 @@ def build(cfg: dict, board_query: str | None, *, minimal: bool = False,
 
 def build_all(cfg: dict, *, minimal: bool = False, jobs: int | None = None,
               clean: bool = False, fresh: bool = False,
-              do_archive: bool | None = None, tests: bool = False) -> int:
+              do_archive: bool | None = None, tests: bool = False,
+              do_doctor: bool = True) -> int:
     """依序建置 ports/ 下每一塊板子（CI / 回歸用）。每塊有自己的 build dir。"""
     import board as boardmod
 
@@ -175,7 +176,7 @@ def build_all(cfg: dict, *, minimal: bool = False, jobs: int | None = None,
         name = b.get("name", d.name)
         print(f"── [{i}/{len(dirs)}] {name} ─────────────────────────────")
         rc = build(cfg, boardmod.hw_name(d), minimal=minimal, jobs=jobs,
-                   clean=clean, fresh=fresh, do_doctor=(i == 1),
+                   clean=clean, fresh=fresh, do_doctor=(do_doctor and i == 1),
                    do_archive=do_archive, tests=tests)
         results.append((name, rc))
         if rc != 0:
@@ -200,7 +201,9 @@ def flash(cfg: dict, board_query: str | None, *, port: str | None = None,
     b = pt.board
     board = pt.output_name
     idf = env.idf_path_for(pt.chip, cfg)
-    build = env.build_dir(cfg, pt)
+    # 唔可以叫 build：會遮蔽上面的 build() 函式，下面「先建置再燒錄」就變成
+    # TypeError: 'WindowsPath' object is not callable（2026-11-17 實測）。
+    bdir = env.build_dir(cfg, pt)
 
     if not no_build:
         rc = build(cfg, board_query, minimal=minimal, do_doctor=False, tests=tests,
@@ -214,16 +217,16 @@ def flash(cfg: dict, board_query: str | None, *, port: str | None = None,
         return 1
 
     # 防止「拿 A 板的 image 燒 B 板」
-    now = _current_target(build / "sdkconfig")
+    now = _current_target(bdir / "sdkconfig")
     if now and now != b["chip"]:
-        print(f"✘ {build}/sdkconfig 的 target 是 {now}，不是 {b['chip']}；先 build 這塊板子")
+        print(f"✘ {bdir}/sdkconfig 的 target 是 {now}，不是 {b['chip']}；先 build 這塊板子")
         return 1
 
     # ⚠️ `--tests` 一定要一路帶到**燒錄這一步**：idf.py 每次收到不同嘅
     # -DNC_ENABLE_TESTS 都會重新 configure＋重編。以前呢裡漏咗 tests，
     # 所以 `make.py flash s3 --tests` 先建測試映像、再喺 app-flash 時
     # 悄悄重編成 release 才寫入（燒上去嘅同建好嘅唔係同一顆）。
-    args = _idf_args(pt, build, minimal, tests)
+    args = _idf_args(pt, bdir, minimal, tests)
     cmd_map = {
         "app": "app-flash",
         "full": "flash",
@@ -234,7 +237,7 @@ def flash(cfg: dict, board_query: str | None, *, port: str | None = None,
         return 1
 
     cmd = (f'{env.export_prefix(idf)} && cd "{env.FIRMWARE}" && '
-           f'{_env_prefix(pt)}idf.py -B "{build}" {" ".join(args)} -p "{p}" {cmd_map[mode]}')
+           f'{_env_prefix(pt)}idf.py -B "{bdir}" {" ".join(args)} -p "{p}" {cmd_map[mode]}')
     if dry_run:
         print(f"→ 會執行（dry-run，{board} → {p}）：\n  {cmd}")
         return 0

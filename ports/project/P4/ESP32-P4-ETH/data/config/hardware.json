@@ -1,8 +1,9 @@
 {
   "_comment": [
-    "這份是 build 時由 ports/hardware/P4/ESP32-P4-ETH/wiring.json 產生的出廠預置。",
-    "它同時是 firmware 的內建預設（nc_port.c）：這裡的值就是「冇檔案的板子」會跑的形狀。",
-    "用戶改這一份只覆蓋差異；硬度事實（flash/psram）在 board.json，不在這裡。"
+    "這份是 build 時由 ports/hardware/P4/ESP32-P4-ETH/wiring.json 產生的出廠預置（鏡子）。",
+    "它會被 build 嵌入、並在 /data/config/hardware.json 缺失時 seed 到裝置；**唔係** firmware 內建預設本身：真正的內建預設是 nc_port.c（同樣由 wiring.json 生成）。",
+    "所以改這份只會改「用戶看到的值」；要改行為就改 wiring.json 再 rebuild（目前 typed 解析：ETH／SDIO／PIN／PWM／UART；SPI／I2C／I80／I2S／ENC／XL9555 未 parse）。",
+    "硬度事實（flash/psram/CPU）在 board.json，不在這裡。"
   ],
   "version": 1,
   "_gpio_convention": "兩種『未設定』寫法不能混用：-1 = 未設定／不啟用（driver 以 >= 0 判斷）；null = 沒接這條線（driver 以 is not None 判斷，寫 -1 會變成 Pin(-1) 而爆掉）。標 -1 的欄位可以安全留著；標 null 的欄位要填真實腳位才 enable。",

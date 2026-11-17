@@ -1,0 +1,18 @@
+# 能力碎片：ESP32-P4 rev >= v3.0（ECO7 之後的晶片）
+#
+# 為什麼要有這個碎片：ESP32-P4 的 **rev < 3.0 與 rev >= 3.0 互斥**，同一份映像
+# 只支援其中一邊（IDF 自己喺 components/esp_hw_support/port/esp32p4/Kconfig.hw_support
+# 第一行就寫 "Support of ESP32-P4 rev. <3.0 and >=3.0 is mutually exclusive"）。
+# 所以「這塊板的晶片是 rev3 還是 pre-rev3」係**硬體事實**，同 eth／wifi 一樣
+# 用能力碎片表達，唔好每塊板各自抄一次那兩行（以前 ETH／FireBeetle2 就是各抄一份）。
+#
+# 用這個碎片 = 映像只會開喺 rev3.x；pre-rev3 板請用 p4-pre-rev3。
+# **兩者不可以同時掛**：兩個碎片會寫相反的值，Kconfig 見到檔尾那個贏，結果
+# 隨 profiles 陣列次序漂移 —— 呢種「兩個互斥碎片同時宣告」目前 board.py check
+# 未擋（status.md 的「仍然未做」有記）。
+#
+# 下限揀 REV_MIN_300（最鬆的 rev3）而唔係 IDF 預設的 301：碎片係俾「所有 rev3 板」
+# 用，v3.0 樣品唔應該因為預設值而開唔到機。要收緊到自己那塊板就另開一個碎片。
+
+# CONFIG_ESP32P4_SELECTS_REV_LESS_V3 is not set
+CONFIG_ESP32P4_REV_MIN_300=y

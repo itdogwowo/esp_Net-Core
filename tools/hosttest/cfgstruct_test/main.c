@@ -121,9 +121,9 @@ int main(void)
     printf("[1] 缺檔（root=NULL）→ 全部用最基礎的形狀\n");
     st = parse_sys(NULL, &sys);
     ok("missing=1", st.missing == 1);
-    ok("2 條預設 link（CDC/UART）", sys.n_links == 2);
-    ok("CDC 是 cdc kind", sys.links[0].kind == NC_LINK_CDC);
-    ok("5 列預設 route（nctx/outbound/CDC/UART/ESPNOW）", sys.n_routes == 5);
+    ok("2 條預設 link（cdc0／uart0）", sys.n_links == 2);
+    ok("cdc0 是 cdc kind", sys.links[0].kind == NC_LINK_CDC);
+    ok("5 列預設 route（nctx/outbound/cdc0/uart0/ESPNOW）", sys.n_routes == 5);
     ok("cID 空", sys.cid[0] == '\0');
     ok("frame_interval_ms=20", sys.frame_interval_ms == 20);
 
@@ -390,57 +390,57 @@ int main(void)
     ok("新晶片查唔到 → NULL", nc_cfg_chip_find("esp32x9") == NULL);
     ok("NULL id → NULL", nc_cfg_chip_find(NULL) == NULL);
 
-    // S3：出廠用 USJ（usb_jtag）＋ UART；雙核 → UART 去 decode1；出廠唔交 FAT。
+    // S3：出廠用 USJ（usb_jtag0）＋ uart0；雙核 → uart0 去 decode1；出廠唔交 FAT。
     nc_cfg_defaults_set_chip(nc_cfg_chip_find("esp32s3"));
     (void)parse_sys(NULL, &sys);
-    const nc_link_cfg_t *usb = link(&sys, "usb_jtag");
-    ok("S3 預設 USB = usb_jtag（USJ 先，可改 config 換 cdc）",
+    const nc_link_cfg_t *usb = link(&sys, "usb_jtag0");
+    ok("S3 預設 USB = usb_jtag0（USJ 先，可改 config 換 cdc0）",
        usb != NULL && usb->kind == NC_LINK_USBJTAG && usb->enable);
-    ok("S3 usb_jtag region 4,128（貼身，4 KB chunk 幀 4,115）",
+    ok("S3 usb_jtag0 region 4,128（貼身，4 KB chunk 幀 4,115）",
        usb != NULL && usb->rx.region == NC_CFG_USB_RX_REGION);
-    ok("S3 預設冇 CDC link（要 OTG 才自己加）", link(&sys, "CDC") == NULL);
+    ok("S3 預設冇 cdc0 link（要 OTG 才自己加）", link(&sys, "cdc0") == NULL);
     ok("S3 usb.msc=0 / cdc_log=1", sys.usb_msc == 0 && sys.usb_cdc_log == 1);
-    const nc_route_cfg_t *r = route(&sys, "usb_jtag");
-    ok("S3 usb_jtag 路由去 decode0", r != NULL && r->n_out == 1 &&
+    const nc_route_cfg_t *r = route(&sys, "usb_jtag0");
+    ok("S3 usb_jtag0 路由去 decode0", r != NULL && r->n_out == 1 &&
                                       strcmp(r->out[0], "decode0") == 0);
-    r = route(&sys, "UART");
-    ok("S3 UART 路由去 decode1", r != NULL && r->n_out == 1 &&
+    r = route(&sys, "uart0");
+    ok("S3 uart0 路由去 decode1", r != NULL && r->n_out == 1 &&
                                   strcmp(r->out[0], "decode1") == 0);
 
-    // C3：只有 USJ → usb_jtag；單核 → 所有路由去 decode0。
+    // C3：只有 USJ → usb_jtag0；單核 → 所有路由去 decode0。
     nc_cfg_defaults_set_chip(nc_cfg_chip_find("esp32c3"));
     (void)parse_sys(NULL, &sys);
-    usb = link(&sys, "usb_jtag");
-    ok("C3 預設 USB = usb_jtag", usb != NULL && usb->kind == NC_LINK_USBJTAG && usb->enable);
-    ok("C3 usb_jtag region 4,128", usb != NULL && usb->rx.region == NC_CFG_USB_RX_REGION);
-    ok("C3 冇 CDC link", link(&sys, "CDC") == NULL);
-    r = route(&sys, "UART");
-    ok("C3 單核：UART 路由去 decode0", r != NULL && r->n_out == 1 &&
+    usb = link(&sys, "usb_jtag0");
+    ok("C3 預設 USB = usb_jtag0", usb != NULL && usb->kind == NC_LINK_USBJTAG && usb->enable);
+    ok("C3 usb_jtag0 region 4,128", usb != NULL && usb->rx.region == NC_CFG_USB_RX_REGION);
+    ok("C3 冇 cdc0 link", link(&sys, "cdc0") == NULL);
+    r = route(&sys, "uart0");
+    ok("C3 單核：uart0 路由去 decode0", r != NULL && r->n_out == 1 &&
                                         strcmp(r->out[0], "decode0") == 0);
     ok("C3 冇任何 decode1 路由", route(&sys, "decode1") == NULL);
 
-    // P4：出廠也是 USJ（usb_jtag）；OTG 由用戶改 config。
+    // P4：出廠也是 USJ（usb_jtag0）；OTG 由用戶改 config。
     nc_cfg_defaults_set_chip(nc_cfg_chip_find("esp32p4"));
     (void)parse_sys(NULL, &sys);
-    usb = link(&sys, "usb_jtag");
-    ok("P4 預設 USB = usb_jtag", usb != NULL && usb->kind == NC_LINK_USBJTAG);
-    r = route(&sys, "UART");
-    ok("P4 UART 路由去 decode1", r != NULL && r->n_out == 1 &&
+    usb = link(&sys, "usb_jtag0");
+    ok("P4 預設 USB = usb_jtag0", usb != NULL && usb->kind == NC_LINK_USBJTAG);
+    r = route(&sys, "uart0");
+    ok("P4 uart0 路由去 decode1", r != NULL && r->n_out == 1 &&
                                   strcmp(r->out[0], "decode1") == 0);
 
-    // 冇 USB 的晶片：只剩 UART，兩個 USB 開關都關。
+    // 冇 USB 的晶片：只剩 uart0，兩個 USB 開關都關。
     nc_cfg_defaults_set_chip(nc_cfg_chip_find("esp32"));
     (void)parse_sys(NULL, &sys);
-    ok("ESP32 只有 1 條 link（UART）", sys.n_links == 1 &&
-                                       strcmp(sys.links[0].name, "UART") == 0);
+    ok("ESP32 只有 1 條 link（uart0）", sys.n_links == 1 &&
+                                       strcmp(sys.links[0].name, "uart0") == 0);
     ok("ESP32 usb.cdc_log=0", sys.usb_cdc_log == 0);
 
     // 未知晶片：保守當 S3（CDC + 2 核），唔會砌出一條起唔到的線。
     nc_cfg_defaults_set_chip(NULL);
     (void)parse_sys(NULL, &sys);
-    ok("未知晶片 → 保守 CDC + 2 核", link(&sys, "CDC") != NULL &&
-                                      (route(&sys, "UART") != NULL &&
-                                       strcmp(route(&sys, "UART")->out[0], "decode1") == 0));
+    ok("未知晶片 → 保守 cdc0 + 2 核", link(&sys, "cdc0") != NULL &&
+                                      (route(&sys, "uart0") != NULL &&
+                                       strcmp(route(&sys, "uart0")->out[0], "decode1") == 0));
 
     // kind 的字串名要同 config 檔寫的一模一樣（log／STATUS 靠它指路）。
     ok("kind name cdc", strcmp(nc_cfg_kind_name(NC_LINK_CDC), "cdc") == 0);
@@ -449,8 +449,42 @@ int main(void)
     // 用戶明確寫 links[] 就唔受晶片預設影響（預設只在缺項時出現）。
     nc_cfg_defaults_set_chip(nc_cfg_chip_find("esp32c3"));
     (void)parse_sys("{\"version\":1,\"nc4\":{\"links\":["
-                    "{\"name\":\"UART\",\"kind\":\"uart\"}]}}", &sys);
-    ok("用戶只寫 UART → 冇 usb_jtag", link(&sys, "usb_jtag") == NULL);
+                    "{\"name\":\"uart0\",\"kind\":\"uart\"}]}}", &sys);
+    ok("用戶只寫 uart0 → 冇 usb_jtag0", link(&sys, "usb_jtag0") == NULL);
+
+    printf("[23b] kind:\"usb\"：personality 由 hardware USB.list 決定"
+           "（host stub：USB.list[0]=usj-fs）\n");
+    {
+        nc_system_cfg_t us;
+        nc_cfg_stat_t ust;
+        // index 就是 USB.list index；name 可省略 → 自動生成 usb0
+        ust = parse_sys("{\"version\":1,\"nc4\":{\"links\":["
+                        "{\"kind\":\"usb\",\"index\":0,\"msc\":1}]}}", &us);
+        const nc_link_cfg_t *ul = link(&us, "usb0");
+        ok("冇寫 name → 生成 usb0", ul != NULL);
+        ok("kind:usb + index:0 → USJ（由 USB.list[0].phy 決定）",
+           ul != NULL && ul->kind == NC_LINK_USBJTAG);
+        ok("usb_port 記住 index=0", ul != NULL && ul->usb_port == 0);
+        ok("per-link msc=1", ul != NULL && ul->msc == 1);
+        ok("解析零 invalid", ust.invalid == 0);
+
+        // hardware 冇這條 port（stub 只認 port 0）→ 這條 link 不建立，而且要計 invalid。
+        ust = parse_sys("{\"version\":1,\"nc4\":{\"links\":["
+                        "{\"kind\":\"usb\",\"index\":1}]}}", &us);
+        ok("USB.list 冇 index 1 → 不建立 + invalid", us.n_links == 0 && ust.invalid > 0);
+
+        // 舊檔兼容：直接寫 kind:\"usb_jtag\" 仍然接受。
+        ust = parse_sys("{\"version\":1,\"nc4\":{\"links\":["
+                        "{\"name\":\"usb_jtag0\",\"kind\":\"usb_jtag\",\"index\":0}]}}", &us);
+        ul = link(&us, "usb_jtag0");
+        ok("舊式 kind:usb_jtag 仍然接受", ul != NULL && ul->kind == NC_LINK_USBJTAG);
+
+        // msc 是 per-link、預設 0（唔交碟）；global usb.msc 已停用，唔會 fallback。
+        ust = parse_sys("{\"version\":1,\"nc4\":{\"links\":["
+                        "{\"kind\":\"uart\",\"index\":0}]}}", &us);
+        ul = link(&us, "uart0");
+        ok("link 冇寫 msc → 0（per-link 預設，唔再 fallback global）", ul != NULL && ul->msc == 0);
+    }
 
     printf("[24] 核數收斂（B03 capability）：單核把「兩核」的 config 併成一核\n");
     {

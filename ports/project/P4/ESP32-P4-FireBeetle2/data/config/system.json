@@ -1,15 +1,15 @@
 {
   "version": 1,
   "_comment": [
-    "ESP32-P4-FireBeetle2（DFRobot FireBeetle 2 + 外掛 C6）：出廠＝CDC 先。",
+    "ESP32-P4-FireBeetle2（DFRobot FireBeetle 2 + 外掛 C6）：出廠 USB = USJ（usb_jtag）。",
     "P4 有獨立三條 USB PHY：OTG（FS/HS）同 USB-Serial-JTAG 可以同時存在，",
-    "所以 NC4 的 USB 通道就叫 CDC（OTG），同 S3 一樣；console 仍然喺 UART0。",
-    "usb.msc = 0：開機唔把 FAT 交出去，檔案一律走 CDC（要插線見到碟才改 1）。",
-    "想要第二條 CDC（JTAG）或 UART／TCP 通道，自己在 links[] 加一條、routes[] 指去 decodeN。",
-    "USB：hardware list[0]=usj-fs（GPIO24/25）、list[1]=otg-hs（GPIO49/50）；目標 link {kind:\"usb\",index:0}（USJ）或 index:1（OTG HS）＋msc:1。現時 interim kind:\"usb_jtag\",usb:0。",
+    "出廠 link 指 USB.list[0]＝usj-fs → 解析成 usb_jtag；console 仍然喺 UART0。",
+    "msc 預設 0（per-link，link 冇寫就係 0；global usb.msc 已停用）：開機唔把 FAT 交出去；",
+    "要插線見到碟就把 link 改成 index:1（otg-hs）＋msc:1，並確認 console 唔再食 USJ。",
+    "想要第二條通道（UART／TCP），自己在 links[] 加一條、routes[] 指去 decodeN。",
+    "USB：hardware list[0]=usj-fs（GPIO24/25）、list[1]=otg-hs（GPIO49/50）；link 寫 {kind:\"usb\",index:0}（USJ）或 index:1（OTG HS）＋msc:1。",
     "links[].name：可省略或用 \"name\":\"\" → 自動生成；有非空 name 就用。links[].msc：USB link 的 MSC 開關（只 OTG）。"
   ],
-  "hostname": "",
   "frame_interval_ms": 20,
   "num_pixels": 0,
   "usb": {

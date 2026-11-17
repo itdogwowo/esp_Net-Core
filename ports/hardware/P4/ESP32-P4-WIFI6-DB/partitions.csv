@@ -1,0 +1,19 @@
+# ESP32-P4-WIFI6-DB — 32 MB flash（本機樣品 esptool 讀到 32 MB，同 Waveshare 標稱一致）
+#
+# 設計原則照 ESP32-P4-ETH：**app 的 offset 永遠不動**，資料分區放最後、只增長不搬。
+#   · ota_0 @ 0x20000、ota_1 @ 0x420000 與 16 MB 版完全相同
+#   · data 起點 0x820000 不變，只是由 7 MB 增到 23 MB（用完 32 MB）
+#
+# 注意：改這張表要 `python3 make.py flash <board> --full`；只燒 app 不會改分割表。
+#
+#   ota_0 / ota_1 : firmware（含 schema 表），runtime 唯讀
+#   data (fat)    : config.json / pixel assets —— 就是那個隨身碟
+#   nvs           : cID / master_cid / next_mode / boots 計數
+
+# Name,     Type, SubType,  Offset,    Size,      Flags
+nvs,        data, nvs,      0x9000,    0x6000,
+otadata,    data, ota,      0xf000,    0x2000,
+phy_init,   data, phy,      0x11000,   0x1000,
+ota_0,      app,  ota_0,    0x20000,   0x400000,
+ota_1,      app,  ota_1,    0x420000,  0x400000,
+data,       data, fat,      0x820000,  0x1700000,

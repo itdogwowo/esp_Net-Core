@@ -26,17 +26,20 @@ AliExpress 上常見的「ESP32-S3-MINI Nano / S3-N16R8」Nano 尺寸開發板�
    要接 WS2812、SD、SPI 屏之前，先量清楚再填，不要照其他 S3 板抄。
    （S3 的 USB-OTG 與 USJ 共用同一對 D+/D-，只能二選一。）
 
-## USB：OTG MSC（2026-11-16 起）
+## USB：OTG MSC（2026-11-16 起；2026-11-17 schema 更新）
 
 S3 的 OTG 與 USJ 共用同一條 PHY，只能二選一。這塊板現在用 **TinyUSB OTG**：
 
-- `system.json`：`links[].kind="cdc"`、`usb.msc=1`、`usb.cdc_log=1`；route `cdc0→decode0`
+- `wiring.json`：`USB.list[0].phy="otg-fs"`（build 時生成 `nc_port_usb_kind(0)=CDC`）
+- `system.json`：`links[]` 寫 `{ "name":"usb0", "kind":"usb", "index":0, "msc":1 }`、
+  `usb.cdc_log=1`；route `usb0→decode0`。`kind:"usb"` 由 hardware 的 `phy` 解析成 `cdc`。
 - `sdkconfig.defaults`：`CONFIG_ESP_CONSOLE_NONE=y`、`CONFIG_ESP_CONSOLE_SECONDARY_NONE=y`
 - 16 MB flash 用預設 `firmware/partitions.csv` → `data` 7 MB，主機見到約 7 MB 的 `NC-xxxx` 碟
 - 上板後預期：MSC 碟 ＋ CDC serial（app log）；**bootloader 早期 log 冇**
-- `msc=1` 時 B10 把 FAT 交 host；device 只剩唯讀 `/ro`
+- link 的 `msc=1` → B10 把 FAT 交 host；device 只剩唯讀 `/ro`
 
-要回到 USJ console（MSC 會失效）：link 改回 `usb_jtag`、`usb.msc=0`、
+要回到 USJ console（MSC 會失效）：改 `wiring.json` 的 `USB.list[0].phy="usj-fs"`
+（link 唔使改，`index` 會跟住解析成 `usb_jtag`）、把 link 的 `msc` 改 0、
 `CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y`，再 `make.py build ESP32-S3-Mini-Nano --fresh`。
 完整 USB 配置地圖見 [docs/03_notes/usb-layers.md](../../../../docs/03_notes/usb-layers.md)。
 

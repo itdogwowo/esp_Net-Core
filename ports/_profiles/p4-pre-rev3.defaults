@@ -1,0 +1,15 @@
+# 能力碎片：ESP32-P4 rev < v3.0（v0.x／v1.x，例如 FireBeetle 2 的 v1.0 樣品）
+#
+# 同 p4-rev3 互斥（IDF：ESP32P4_SELECTS_REV_LESS_V3 一開，REV_MIN_300/301 就
+# 直接唔存在）。開了這個碎片，映像嘅 rev 上限就會由 v3.99 變 v1.99。
+#
+# 下限用最鬆的 REV_MIN_0：pre-rev3 樣品實際 rev 每塊都唔同（v0.x／v1.0），
+# 收緊到 v1.0 只會令 v0.x 樣品開唔到機，換唔到任何好處。
+# 真係要寫死下限 → 唔好改這個檔（其他板會跟住中招），另開一個碎片。
+#
+# ★ 連帶影響（唔係呢個檔寫得晒）：IDF 喺 pre-rev3 之下會關掉 80／120 MHz flash
+#   時脈選項（bootloader Kconfig 的 depends on !ESP32P4_REV_MIN_0 系列），所以
+#   走這個碎片的板子 sdkconfig 只能 40 MHz —— check 見到 40M 唔係寫錯。
+
+CONFIG_ESP32P4_SELECTS_REV_LESS_V3=y
+CONFIG_ESP32P4_REV_MIN_0=y

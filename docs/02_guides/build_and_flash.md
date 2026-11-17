@@ -248,7 +248,7 @@ tools/ota.py --port /dev/cu.usbmodem* artifacts/ESP32-P4-ETH.bin
 | `install.sh` 在 ensurepip / venv 失敗 | 3.1 的 libexpat | 套用 3.1 的修法 |
 | `pip` 報 truststore ValueError | 同上 | 同上 |
 | `idf.py` 找不到 | 沒 source export.sh | `. ~/esp/esp-idf/export.sh` |
-| 改了 `sdkconfig.defaults` 沒生效 | 已存在的 `firmware/sdkconfig` 不會被覆蓋 | `rm firmware/sdkconfig && tools/board.sh build <board>` |
+| 改了 `sdkconfig.defaults` 沒生效 | sdkconfig 在 build dir 裡（`artifacts/build/<chip>_<board>/sdkconfig`），已存在的不會被覆蓋 | `python3 make.py build <board> --fresh`（刪掉那份 sdkconfig 再建） |
 | `idf.py flash` 找不到埠 | app 佔著 TinyUSB | 用 `tools/flash.sh`（會等 ROM 埠） |
 | 燒完板子沒反應 | hard-reset 對 USB-JTAG 無效 | `tools/flash.sh` 已用 watchdog-reset 處理 |
 | `esp_tinyusb` 抓不到 | component manager 沒網路 | 檢查 `dependencies.lock` 與網路 |

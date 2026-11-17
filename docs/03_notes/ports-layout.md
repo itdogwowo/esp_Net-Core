@@ -77,8 +77,15 @@ ports/
 | 碎片 | 層 | 理由 |
 |---|---|---|
 | `eth-rmii` | hardware | 板上有沒有 EMAC／PHY 是硬體事實 |
-| `wifi-hosted-c6` | hardware | 外掛 C6 是板載硬體 |
+| `wifi-hosted-c6` / `wifi-hosted-c5` | hardware | 外掛協處理器是板載硬體；**只給 slave target／緩衝**，SDIO 腳位是各板 sdkconfig.defaults 的事（見下方註） |
+| `p4-rev3` / `p4-pre-rev3` | hardware | **晶片版本也是硬體事實**：IDF 對 P4 rev<3.0 與 rev>=3.0 互斥，同一份映像只支援一邊。兩者不可同時掛 |
 | `nc4-ws` / `nc4-udp` | hardware | 2026-11-16 修正：**project 唔再有 build 設定**；同一塊板要 WS／UDP 就開在硬體板的 profiles（重 build 一次，所有 project 共用同一個 binary） |
+
+> **能力碎片只管「這類硬體有什麼能力」，不管「腳位接在哪」。** 反例（2026-11-17 實測）：
+> `wifi-hosted-*` 以前把 `CONFIG_ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD` 寫在碎片裡 ——
+> 那符號一開就決定 CLK/CMD/D0..D3 ＋ reset 整組腳位，於是同一份「能力」在不同板子
+> 上配錯線（Waveshare P4-WIFI6-DB 的 C5 → SDIO CMD5 timeout 0x107）。現在碎片只留
+> slave target，板子符號（`ESP_HOSTED_*_BOARD`）寫在各板 `sdkconfig.defaults`。
 
 > **project 只放 runtime 設定**（`project.json` ＋ `data/config/*.json`）。換部署 = 換
 > project 的 data/config，不需要重 build；要改 build 能力 = 改 hardware 的 profiles 並重 build。

@@ -1,0 +1,130 @@
+# ESP32-P4-WIFI6-DB — 硬體事實（改這裡要重新 build）
+# 由 tools/board.py new 產生；tools/board.py check 會驗證與 board.json 一致
+
+# ── flash ──
+CONFIG_ESPTOOLPY_FLASHSIZE_32MB=y
+CONFIG_ESPTOOLPY_FLASHFREQ_40M=y
+CONFIG_ESPTOOLPY_FLASHMODE_DIO=y
+
+# ── PSRAM ──
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_HEX=y
+CONFIG_SPIRAM_SPEED_200M=y
+
+# ── CPU ──
+# 一定要 400：IDF 的 ESP32P4 只有 360／400 兩個選擇，而 **360 是 pre-rev3 專屬**
+# （components/esp_system/port/soc/esp32p4/Kconfig.cpu：360 這個 config 有
+#  depends on ESP32P4_SELECTS_REV_LESS_V3）。rev3 板寫 360 會被 Kconfig 忽略、
+# 靜靜變回 400 —— 寫錯只會令 board.json 同實際不符，所以直接寫 400。
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_400=y
+
+# ── console ──
+# 板載 CH343 USB-UART 接 P4 的 UART0（Type-C 那個孔）。P4 上 USJ console 會令
+# bootloader 卡死（同 ETH 板同一個坑），所以唔可以揀 USB-Serial/JTAG。
+CONFIG_ESP_CONSOLE_UART_DEFAULT=y
+
+# ── USB OTG HS（4-pin 排針；UTMI PHY pin 49/50）──
+# board.json features.usb = "otg-hs"；TinyUSB 預設唔會揀 HS，要這個符號。
+CONFIG_NETCORE_USB_OTG_HS=y
+
+# ── Wi-Fi 協處理器（板載 ESP32-C5，走 ESP-Hosted / SDIO）──
+# SDIO 腳位係板子事實，唔跟能力碎片走（碎片只提供 slave target／緩衝）。
+# 這個符號一次決定 CLK/CMD/D0..D3 + reset 整組腳位，實測對應官方
+# ESP32-P4X-Function-EV-Board 的 C5 腳位組：
+#   CLK=GPIO18  CMD=GPIO19  D0=14  D1=15  D2=16  D3=17  RESET=GPIO54
+# 同 Waveshare 公佈的接法逐隻吻合（docs.waveshare.com/ESP32-P4-WIFI6-DB 的
+# "ESP32-C5 ESP-Hosted 通信 SDIO" 一行）。
+# ⚠ 唔好用 CONFIG_ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD（官方 P4-Function-EV-Board
+#   的 C5 子板），那組係 33/4/20/23/21/22 + reset 53，落這塊板會 SDIO CMD5
+#   超時（esp_hosted log: sdmmc_init_ocr send_op_cond 0x107）。
+CONFIG_ESP_HOSTED_P4X_C5_DEV_BOARD_FUNC_BOARD=y
+
+# ── 分割表：32 MB flash，用滿它（firmware/partitions.csv 係 16 MB 表）──
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="../ports/hardware/P4/ESP32-P4-WIFI6-DB/partitions.csv"
+
+# ─── 能力碎片（由 tools/board.py sync 產生，不要手改這段）───
+# 來源：ports/_profiles/*.defaults；hardware/board.json 的 profiles 決定要哪些
+# >>> profile: eth-rmii
+# 能力碎片：RMII 乙太網（ESP32 內建 EMAC + 外部 PHY）
+#
+# 這是「有 Ethernet」的板子共用的建置設定。board.json 的 profiles 寫上 eth-rmii
+# 之後由 tools/board.py sync 寫進 ports/<board>/sdkconfig.defaults。
+#
+# 需要調整的代表性數字（見 docs/03_notes/p4-bringup.md）：
+#   ETH_DMA_BUFFER_SIZE=1600   512 B 對 MTU 1500 太小（實測掉到 1.9 MB/s）
+#   LWIP_TCP_WND_DEFAULT=65535 預設 5744 B 會被 RTT 鎖死在 1 MB/s
+
+CONFIG_ETH_ENABLED=y
+CONFIG_ETH_USE_ESP32_EMAC=y
+CONFIG_ETH_ESP32_EMAC_DEFAULT_CONFIG=y
+
+CONFIG_ETH_DMA_BUFFER_SIZE=1600
+CONFIG_ETH_DMA_RX_BUFFER_NUM=16
+CONFIG_ETH_DMA_TX_BUFFER_NUM=16
+
+CONFIG_LWIP_TCP_MSS=1440
+CONFIG_LWIP_TCP_WND_DEFAULT=65535
+CONFIG_LWIP_TCP_SND_BUF_DEFAULT=65535
+CONFIG_LWIP_TCP_RECVMBOX_SIZE=64
+CONFIG_LWIP_TCPIP_RECVMBOX_SIZE=64
+CONFIG_LWIP_MEMP_NUM_TCP_SEG=64
+CONFIG_LWIP_TCP_SACK_OUT=y
+# <<< profile: eth-rmii
+# >>> profile: wifi-hosted-c5
+# 能力碎片：ESP32-P4 + 外掛 ESP32-C5（Wi-Fi 6 dual-band via ESP-Hosted）
+#
+# 與 wifi-hosted-c6 只差在 slave target；其他（SDIO 腳位、緩衝、lwIP）相同。
+# 由 board.json 的 profiles 引用，tools/board.py sync 寫進板子的 sdkconfig.defaults。
+#
+# ★ 協處理器型號不只 C6／C5：遇到其他型號（官方支援清單見 esp_hosted 的
+#   CONFIG_SLAVE_IDF_TARGET_*），照這個檔複製一份、只改 slave target 那一行即可。
+
+CONFIG_NETCORE_WIFI=y
+CONFIG_NETCORE_WIFI_HOSTED=y
+
+CONFIG_ESP_HOSTED_ENABLED=y
+CONFIG_ESP_WIFI_REMOTE_ENABLED=y
+CONFIG_ESP_WIFI_REMOTE_LIBRARY_HOSTED=y
+CONFIG_SLAVE_IDF_TARGET_ESP32C5=y
+
+# ⚠ SDIO 腳位係**板子**的事，唔關能力事：esp_hosted 用「板子符號」
+#   （CONFIG_ESP_HOSTED_*_BOARD）去揀一整組腳位，所以那行要寫在
+#   ports/hardware/<chip>/<board>/sdkconfig.defaults，唔可以寫在這裡。
+#   2026-11 實測：舊版把 CONFIG_ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD 寫在
+#   這個碎片裡，Waveshare P4-WIFI6-DB 的 C5 就因為腳位錯（拿咗官方
+#   P4-Function-EV-Board 的 33/4/20/23/21/22+53，實板係
+#   18/19/14/15/16/17+54）而 SDIO CMD5 超時（send_op_cond 0x107）。
+#   板子接法全自訂 → 揀 ESP_HOSTED_P4_DEV_BOARD_NONE 再明寫
+#   CONFIG_ESP_HOSTED_HOST_SDIO_PIN_CLK/CMD/D0..D3 同 HOST_RESET_GPIO。
+
+CONFIG_WIFI_RMT_STATIC_RX_BUFFER_NUM=16
+CONFIG_WIFI_RMT_DYNAMIC_RX_BUFFER_NUM=64
+CONFIG_WIFI_RMT_DYNAMIC_TX_BUFFER_NUM=64
+
+CONFIG_LWIP_TCP_SND_BUF_DEFAULT=65534
+CONFIG_LWIP_TCP_WND_DEFAULT=65534
+CONFIG_LWIP_TCP_RECVMBOX_SIZE=64
+CONFIG_LWIP_UDP_RECVMBOX_SIZE=64
+CONFIG_LWIP_TCPIP_RECVMBOX_SIZE=64
+# <<< profile: wifi-hosted-c5
+# >>> profile: p4-rev3
+# 能力碎片：ESP32-P4 rev >= v3.0（ECO7 之後的晶片）
+#
+# 為什麼要有這個碎片：ESP32-P4 的 **rev < 3.0 與 rev >= 3.0 互斥**，同一份映像
+# 只支援其中一邊（IDF 自己喺 components/esp_hw_support/port/esp32p4/Kconfig.hw_support
+# 第一行就寫 "Support of ESP32-P4 rev. <3.0 and >=3.0 is mutually exclusive"）。
+# 所以「這塊板的晶片是 rev3 還是 pre-rev3」係**硬體事實**，同 eth／wifi 一樣
+# 用能力碎片表達，唔好每塊板各自抄一次那兩行（以前 ETH／FireBeetle2 就是各抄一份）。
+#
+# 用這個碎片 = 映像只會開喺 rev3.x；pre-rev3 板請用 p4-pre-rev3。
+# **兩者不可以同時掛**：兩個碎片會寫相反的值，Kconfig 見到檔尾那個贏，結果
+# 隨 profiles 陣列次序漂移 —— 呢種「兩個互斥碎片同時宣告」目前 board.py check
+# 未擋（status.md 的「仍然未做」有記）。
+#
+# 下限揀 REV_MIN_300（最鬆的 rev3）而唔係 IDF 預設的 301：碎片係俾「所有 rev3 板」
+# 用，v3.0 樣品唔應該因為預設值而開唔到機。要收緊到自己那塊板就另開一個碎片。
+
+# CONFIG_ESP32P4_SELECTS_REV_LESS_V3 is not set
+CONFIG_ESP32P4_REV_MIN_300=y
+# <<< profile: p4-rev3

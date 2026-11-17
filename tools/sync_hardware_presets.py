@@ -24,16 +24,26 @@ HW = ROOT / "ports" / "hardware"
 PJ = ROOT / "ports" / "project"
 GEN = ROOT / "tools" / "ncportgen.py"
 
+# Windows console 預設 cp950；子行程 stderr 可能含 cp950 編不出的字元
+# （例如 errors="replace" 產生的 U+FFFD），直接 print 會再炸一次。
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(errors="replace")
+
 
 def boards(chip_filter: str | None):
+    """每塊硬體板 → 它的 **default project**（唔可以用同名目錄猜：
+    default project 可以是別名目錄，例如 `default:true` 指去 <板>-Demo；
+    同名慣例只是其中一種。用同名目錄會靜靜跳過有別名 default 的板）。"""
+    import board as boardmod   # tools/board.py
+
     for hw in sorted(HW.glob("*/*/wiring.json")):
         chip, board = hw.parts[-3], hw.parts[-2]
         if chip.startswith("_"):
             continue
         if chip_filter and chip.lower() != chip_filter.lower():
             continue
-        proj = PJ / chip / board
-        if proj.is_dir():
+        proj = boardmod.default_project_for_hardware(hw.parent)
+        if proj is not None and proj.is_dir():
             yield chip, board, hw.parent, proj
 
 
@@ -48,23 +58,26 @@ def main() -> int:
         with tempfile.TemporaryDirectory() as td:
             r = subprocess.run(
                 [sys.executable, str(GEN), "--hardware", str(hwdir), "--out", td],
-                capture_output=True, text=True)
+                capture_output=True, text=True, encoding="utf-8", errors="replace")
             if r.returncode != 0:
-                print(f"✘ {chip}/{board}: ncportgen failed\n{r.stderr}")
+                print(f"FAIL {chip}/{board}: ncportgen failed\n{r.stderr}")
                 return 1
             src = Path(td) / "preset_hardware.json"
             dst = proj / "data" / "config" / "hardware.json"
-            new = src.read_text()
-            old = dst.read_text() if dst.exists() else None
+            # 一定要指明編碼：Windows 的預設是 cp950，讀 UTF-8 的 JSON 會 UnicodeDecodeError。
+            # read_text 的 universal newline 會把 CRLF 收成 \n，所以下面的比較不怕行尾；
+            # 寫回時 newline="" 才不會把 LF 變成 CRLF（版控內的檔案是 LF）。
+            new = src.read_text(encoding="utf-8")
+            old = dst.read_text(encoding="utf-8") if dst.exists() else None
             if old == new:
-                print(f"✔ {chip}/{board}: 已同步")
+                print(f"OK    {chip}/{board}: 已同步")
                 continue
             changed += 1
             if args.check:
-                print(f"△ {chip}/{board}: 不同步（跑 tools/sync_hardware_presets.py）")
+                print(f"DRIFT {chip}/{board}: 不同步（跑 tools/sync_hardware_presets.py）")
             else:
-                dst.write_text(new)
-                print(f"↻ {chip}/{board}: 已寫 {dst.relative_to(ROOT)}")
+                dst.write_text(new, encoding="utf-8", newline="")
+                print(f"WROTE {chip}/{board}: 已寫 {dst.relative_to(ROOT)}")
 
     if args.check and changed:
         return 2

@@ -22,9 +22,10 @@ CONFIG_ESP_WIFI_REMOTE_ENABLED=y
 CONFIG_ESP_WIFI_REMOTE_LIBRARY_HOSTED=y
 CONFIG_SLAVE_IDF_TARGET_ESP32C6=y
 
-# 官方 P4 開發板的 SDIO 腳位組。板子接法不同時要覆蓋這幾個 GPIO，
-# 見 esp_hosted 的 CONFIG_ESP_HOSTED_SDIO_*（不要直接改 profile，另開一個）。
-CONFIG_ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD=y
+# SDIO 腳位係板子的事，不是能力的事：esp_hosted 的「板子符號」
+# （CONFIG_ESP_HOSTED_*_BOARD）一次決定 CLK/CMD/D0..D3 + reset 整組腳位，
+# 所以那行寫在各板 sdkconfig.defaults，不要寫在這個碎片裡。
+# （寫在這裡的後果見 wifi-hosted-c5.defaults 的註解。）
 
 # 遠端 Wi-Fi 的緩衝是 WIFI_RMT_*；ESP_WIFI_* 那組是衍生值，寫了沒用。
 CONFIG_WIFI_RMT_STATIC_RX_BUFFER_NUM=16

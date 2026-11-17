@@ -82,8 +82,8 @@ DECISIONS = [
      "1 核 → config decode1→decode0、tasks core1→core0；decoder 只建 1 個；全部 clamp core0\n"
      "2 核 → 可按 routes 派 decode0／decode1",
      "B03；影響 B07 decoder 數、B08 line core、B11 任務核", C_CAP),
-    ("D4", "links[] 有 enable 的 cdc／usb_jtag？× build 有冇該 transport",
-     "JTAG／OTG／NONE；JTAG log 永遠開、OTG 跟 usb.cdc_log；MSC 只 OTG＋usb.msc=1",
+    ("D4", "links[] 有 enable 的 kind:\"usb\"（→cdc／usb_jtag）？× build 有冇該 transport",
+     "JTAG／OTG／NONE；JTAG log 永遠開、OTG 跟 usb.cdc_log；MSC 只 OTG＋link.msc=1",
      "B03 寫 ctx；B10 照做（冇 runtime 切換）", C_CAP),
     ("D5", "NC_HAS_ETH（晶片 EMAC）＋ hardware ETH.present／enable＋mdc/mdio/ref_clk 完整",
      "全部成立 → 起 netif／PHY（s_eth_ok=1）；否則 s_eth_ok=0",
@@ -151,9 +151,9 @@ SKIP = [
                     "routes 冇 decodeN；decoder 唔存在；buffer 配唔到", C_LINK),
     ("legacy 網絡", "有 managed line → 新路徑接管，legacy 唔用；"
                     "或者根本冇 ETH／WiFi 可用", C_LINK),
-    ("USB 線／stack", "links[] 冇 enable 的 cdc／usb_jtag；build 冇該 transport；"
+    ("USB 線／stack", "links[] 冇 enable 的 USB line；build 冇該 transport；"
                       "OTG 但 cdc 未登記＋msc=0 → 連 TinyUSB 都唔裝", C_CAP),
-    ("MSC（交碟）", "USB=NONE／JTAG；或 usb.msc=0（預設 0，/data 留 APP）", C_CAP),
+    ("MSC（交碟）", "USB=NONE／JTAG；或 link.msc=0（預設 0，/data 留 APP）", C_CAP),
     ("WiFi", "CONFIG_NETCORE_WIFI=n；network.json 缺；enable=0；mode 唔支援；"
              "冇 credentials；hosted 握手失敗", C_TASK),
     ("任務 loop", "tenant level=-1；affinity=(0,0)；enabled() false；layer 超界；"

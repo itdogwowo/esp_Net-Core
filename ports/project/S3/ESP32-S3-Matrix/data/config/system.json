@@ -4,7 +4,7 @@
     "這塊板沒有 ETH、沒有 SD；USB 一台、沒有 UART 擴展（IO14 是燈，不要當 UART）。",
     "links 用 composite kind + index（wifi_tcp／wifi_udp）；冇 name 時自動生成 wifi_tcp0／wifi_udp0，routes 用生成名。",
     "HTTP :80 由 web service claim，冇 route；其他線的核心由 routes[].out 的 decodeN 決定。",
-    "USB：hardware phy=otg-fs（GPIO19/20）；目標 link {kind:\"usb\",index:0,msc:1}。現時 interim kind:\"cdc\",usb:0。",
+    "USB：hardware phy=otg-fs（GPIO19/20）；link 寫 {kind:\"usb\",index:0,msc:1}：personality 由 USB.list[0].phy 決定（otg-fs → cdc，MSC 可行）。",
     "links[].name：可省略或用 \"name\":\"\" → 自動生成；有非空 name 就用。links[].msc：USB link 的 MSC 開關（只 OTG）。"
   ],
   "version": 1,

@@ -21,11 +21,9 @@ CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_360=y
 CONFIG_ESP_CONSOLE_UART_DEFAULT=y
 
 # ── 晶片版本：這顆是 P4 rev v1.0（pre-rev3）────────────────────────────
-# 官方預設是 REV_MIN_300（只支援 rev3+），會直接拒絕開機：
-#   "requires chip revision in range [v3.1 - v3.99]（this chip is revision v1.0）"
-# 這組就是官方 boards/sdkconfig.p4_pre_rev3 的內容。
-CONFIG_ESP32P4_SELECTS_REV_LESS_V3=y
-CONFIG_ESP32P4_REV_MIN_0=y
+# 由能力碎片 p4-pre-rev3 提供（見檔尾 sync 區塊）：官方預設只支援 rev3+，
+# 這顆 pre-rev3 會被直接拒絕開機（"requires chip revision in range [v3.1 - v3.99]
+# （this chip is revision v1.0）"）。這組就是官方 boards/sdkconfig.p4_pre_rev3。
 
 # ── IDF 6.1 的 P4 sleep-clock ICG（rev1.0 + esp_hosted + PSRAM 的開機 abort）──
 # 症狀：sleep_clock_icg_init() 要向 retention 記憶體要 32 個 REGDMA link，
@@ -36,6 +34,13 @@ CONFIG_PM_SLEEP_CLK_ICG_ENABLE=n
 # ── USB OTG HS（UTMI pin 49/50）──
 # board.json features.usb = "otg-hs"；TinyUSB 預設唔會揀 HS，要這個符號。
 CONFIG_NETCORE_USB_OTG_HS=y
+
+# ── Wi-Fi 協處理器（外掛 ESP32-C6）──
+# SDIO 腳位係板子事實，唔跟能力碎片走（碎片只提供 slave target／緩衝）。
+# ⚠ 未在實機驗證（這塊板要另外接 C6）：暫時沿用官方 P4-Function-EV-Board
+#   的 C6 腳位組 18/19/14/15/16/17 + reset 54。接法唔同就改成
+#   ESP_HOSTED_P4_DEV_BOARD_NONE + 明寫 HOST_SDIO_PIN_*／HOST_RESET_GPIO。
+CONFIG_ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD=y
 
 # ─── 能力碎片（由 tools/board.py sync 產生，不要手改這段）───
 # 來源：ports/_profiles/*.defaults；hardware/board.json 的 profiles 決定要哪些
@@ -90,9 +95,10 @@ CONFIG_ESP_WIFI_REMOTE_ENABLED=y
 CONFIG_ESP_WIFI_REMOTE_LIBRARY_HOSTED=y
 CONFIG_SLAVE_IDF_TARGET_ESP32C6=y
 
-# 官方 P4 開發板的 SDIO 腳位組。板子接法不同時要覆蓋這幾個 GPIO，
-# 見 esp_hosted 的 CONFIG_ESP_HOSTED_SDIO_*（不要直接改 profile，另開一個）。
-CONFIG_ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD=y
+# SDIO 腳位係板子的事，不是能力的事：esp_hosted 的「板子符號」
+# （CONFIG_ESP_HOSTED_*_BOARD）一次決定 CLK/CMD/D0..D3 + reset 整組腳位，
+# 所以那行寫在各板 sdkconfig.defaults，不要寫在這個碎片裡。
+# （寫在這裡的後果見 wifi-hosted-c5.defaults 的註解。）
 
 # 遠端 Wi-Fi 的緩衝是 WIFI_RMT_*；ESP_WIFI_* 那組是衍生值，寫了沒用。
 CONFIG_WIFI_RMT_STATIC_RX_BUFFER_NUM=16
@@ -106,3 +112,20 @@ CONFIG_LWIP_TCP_RECVMBOX_SIZE=64
 CONFIG_LWIP_UDP_RECVMBOX_SIZE=64
 CONFIG_LWIP_TCPIP_RECVMBOX_SIZE=64
 # <<< profile: wifi-hosted-c6
+# >>> profile: p4-pre-rev3
+# 能力碎片：ESP32-P4 rev < v3.0（v0.x／v1.x，例如 FireBeetle 2 的 v1.0 樣品）
+#
+# 同 p4-rev3 互斥（IDF：ESP32P4_SELECTS_REV_LESS_V3 一開，REV_MIN_300/301 就
+# 直接唔存在）。開了這個碎片，映像嘅 rev 上限就會由 v3.99 變 v1.99。
+#
+# 下限用最鬆的 REV_MIN_0：pre-rev3 樣品實際 rev 每塊都唔同（v0.x／v1.0），
+# 收緊到 v1.0 只會令 v0.x 樣品開唔到機，換唔到任何好處。
+# 真係要寫死下限 → 唔好改這個檔（其他板會跟住中招），另開一個碎片。
+#
+# ★ 連帶影響（唔係呢個檔寫得晒）：IDF 喺 pre-rev3 之下會關掉 80／120 MHz flash
+#   時脈選項（bootloader Kconfig 的 depends on !ESP32P4_REV_MIN_0 系列），所以
+#   走這個碎片的板子 sdkconfig 只能 40 MHz —— check 見到 40M 唔係寫錯。
+
+CONFIG_ESP32P4_SELECTS_REV_LESS_V3=y
+CONFIG_ESP32P4_REV_MIN_0=y
+# <<< profile: p4-pre-rev3

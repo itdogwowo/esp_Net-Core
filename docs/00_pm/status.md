@@ -1,7 +1,7 @@
 # 專案現況總結（單頁）
 
 > **用途**：所有「已經驗證的事實、已定案的設計、還沒做的事」集中在這一頁；
-> 細節都連到對應文件。**最後更新**：2026-11-08。
+> 細節都連到對應文件。**最後更新**：2026-11-17。
 
 ---
 
@@ -13,8 +13,8 @@ ESP32-P4（另有 S3 port）上的 **NC4 通訊核心**：多條傳輸通道 →
 | 面向 | 狀態 |
 |---|---|
 | 晶片 | ESP32-P4 rev1.3（ECO2）、360 MHz、32 MB PSRAM、IDF 6.0.3 |
-| 網路 | 100 Mbps full duplex（RMII + IP101），靜態 IP `10.10.1.50/16` |
-| 通道 | TCP :6000、UDP :6001、WS :8080/nc4、HTTP :8080（設定） |
+| 網路 | 100 Mbps full duplex（RMII + IP101），**DHCP**（2026-11-17 起唔再寫死靜態 IP；`network.json` 的 `lan.ip.mode=static` 未實作） |
+| 通道 | TCP :6000、UDP :6001、WS :8080/nc4、HTTP **:80**（static GET/HEAD；冇設定端點） |
 | 解碼 | 分核、零複製（一格一整幀）、task notification |
 | 架構 | 系統任務（硬體→driver→通道）＋ 一般任務（生命週期）已分層，兩者同一套任務管理器 |
 | 任務模型 | **核心（房東）／任務（租戶）**：`tasks.json` 只管租戶；`level` / `affinity` 由 config 定，**未設定 = `[0,0]` = 唔跑**；缺的條目開機自動補寫（寫 `[0,0]`，預設關閉）（[task-model.md](../03_notes/task-model.md)） |
@@ -2330,7 +2330,7 @@ S3 WiFi 連上後開 TCP 6000、UDP 6001、WS 8080。
 
 ### 7.71 2026-11-16（回顧啟動程序；更新 boot／core-timeline／architecture 三張圖）
 
-- **`boot.svg`**（[tools/boot_diagram.py](tools/boot_diagram.py)）按現行程式重寫，並補回
+- **`boot.svg`**（[tools/boot_diagram.py](../../tools/boot_diagram.py)）按現行程式重寫，並補回
   最近兩個改動的影響：
   - **B02 storage+cfg**：掛 FAT／WL → boot record（首次／`fs_format` 才格式化）→
     **seed 出廠 preset（build 揀的 default／--project，嵌進 firmware）** →
@@ -2347,15 +2347,15 @@ S3 WiFi 連上後開 TCP 6000、UDP 6001、WS 8080。
   - Panel B 更正位元帳：只到 B02 = **0x0007**、過 B03 = **0x001f**
     （舊圖寫 0x0017，錯）。
   - 表頭「① 階段」縮短，避免同「② 做什麼」重疊。
-- **`core-timeline.svg`**（[tools/core_timeline.py](tools/core_timeline.py)）：
+- **`core-timeline.svg`**（[tools/core_timeline.py](../../tools/core_timeline.py)）：
   B02 描述改為「掛 FAT／WL、boot record、seed 出廠 preset、config（system／hardware／tasks）」；
   ctx 註腳改「cores／usb_*／usb_core＋ready 帳」。
-- **`architecture.svg`**（[tools/arch_diagram.py](tools/arch_diagram.py)）：
+- **`architecture.svg`**（[tools/arch_diagram.py](../../tools/arch_diagram.py)）：
   Panel 05 的 storage+cfg 卡改「掛 FAT；seed→nc_port 預設」；
   footer 配置鏈改「`F.wiring`（build 時編成 `nc_port.c`）→ `F.preset`（build 揀的 project）
   → `F.live`（`/data/config`）→ NVS」。
-- 連帶修正：[boot.h](firmware/main/boot.h) 的 ctx 欄位數與 `NC_CAP_CONFIG`
-  註解（唔再寫「network 已載入」）；[naming.md](docs/03_notes/naming.md) 的 B02／B05 對照。
+- 連帶修正：[boot.h](../../firmware/main/boot.h) 的 ctx 欄位數與 `NC_CAP_CONFIG`
+  註解（唔再寫「network 已載入」）；[naming.md](../03_notes/naming.md) 的 B02／B05 對照。
 - **驗證**：三個 generator 重跑（boot 1680×1404、core-timeline 1720×1658、
   architecture 1720×1510）；用 headless Chrome 逐張 render 檢查文字冇重疊／爆格。
 - **未改**：core-timeline 的 ms 數字仍是 2026-11-08 舊 build 的量測值。
@@ -2378,7 +2378,7 @@ S3 WiFi 連上後開 TCP 6000、UDP 6001、WS 8080。
   - `iface` 仍只係 metadata（bind `INADDR_ANY`）；legacy 路徑仍在；
     `rawbench` 係測試 endpoint；上限 `NC_CFG_MAX_LINKS`／`NET_MAX_LINES`／
     `NC4_MAX_BUSES` = 8。
-- **`network-lines.svg` 重寫**（[tools/net_arch_diagram.py](tools/net_arch_diagram.py)，1800×1340）：
+- **`network-lines.svg` 重寫**（[tools/net_arch_diagram.py](../../tools/net_arch_diagram.py)，1800×1340）：
   - 01 canonical config（`kind:"tcp", iface:"wifi", index:1, port:6000, rx…` →
     `wifi_tcp1`）＋ managed line 規則。
   - 02 line 卡：TCP／UDP（NC4）、WS（自寫 handshake，NO HTTPD）、HTTP（STATIC ONLY）。
@@ -2396,8 +2396,8 @@ S3 WiFi 連上後開 TCP 6000、UDP 6001、WS 8080。
   - `boot.svg` B11 改「net lines start：NC4／WS service 各自 listener；HTTP 獨立 static」。
   - `core-timeline.svg` B11 改「`nc_net_lines_start()`：listener／httpd（service claim）」，
     移除舊 `nc4_udp` 描述。
-  - [net-lines.md](docs/03_notes/net-lines.md) 重寫：canonical schema、service claim、
-    HTTP 邊界、限制／legacy。 [line-identity.md](docs/03_notes/line-identity.md)
+  - [net-lines.md](../03_notes/net-lines.md) 重寫：canonical schema、service claim、
+    HTTP 邊界、限制／legacy。 [line-identity.md](../03_notes/line-identity.md)
     加 banner：該頁「複合 kind、無 iface／service」係中間設計，已被取代。
 - **驗證**：四個 generator 重跑；XML parse；headless Chrome 逐張 render 檢查，
   修正 03 service claim note 壓住最後一列、architecture 動態句子與 PUSH 卡文字。
@@ -2409,11 +2409,11 @@ S3 WiFi 連上後開 TCP 6000、UDP 6001、WS 8080。
 
 - **問題**：boot.svg 只有 11 行抽象摘要，冇講每階段實際做什麼、決定什麼、什麼條件下
   某個通道／任務才會啟動、又喺邊個核跑。使用者要求更仔細。
-- **boot.svg 重畫**（[tools/boot_diagram.py](tools/boot_diagram.py)，1960×1702）：
+- **boot.svg 重畫**（[tools/boot_diagram.py](../../tools/boot_diagram.py)，1960×1702）：
   每階段五欄：① 階段（B01…）② **做什麼（實際順序）** ③ **決定／分支（◇D1–D12）**
   ④ **產出／去哪裡** ⑤ **失敗／跳過**；底部再列階段語義（needs→SKIP、fn→FAIL、
   optional→WARN）、10 個能力位、ctx 欄位、四條硬性次序。
-- **新增 boot-cores.svg**（[tools/boot_cores_diagram.py](tools/boot_cores_diagram.py)，1960×1858）：
+- **新增 boot-cores.svg**（[tools/boot_cores_diagram.py](../../tools/boot_cores_diagram.py)，1960×1858）：
   - **D. 決策表（12 項）**：D1 boot record（格式化？）／D2 config 缺壞／D3 核數／
     D4 USB 人格／D5 ETH／D6 routes→核／D7 managed vs legacy／D8 每條 line 建唔建／
     D9 任務 level／affinity／D10 WiFi／D11 .fxe／D12 rawbench；
@@ -2548,3 +2548,181 @@ S3 WiFi 連上後開 TCP 6000、UDP 6001、WS 8080。
 - **Build**：P4-ETH `0xfd160`（75% free）；Matrix `0x1130e0`（28% free）。
 - **未做**：`lan.enable` 的 claim 仍未檢查 hardware（`hardware.json` 冇 ETH 段時仍 fallback
   內建腳位）；SPI PHY driver 未實作；`network.lan.ip` static 未接；USB `sys/usb` registry 未實作。
+
+---
+
+### 7.77 2026-11-17（同日）— b68795f 的收尾：build 修復、kind:"usb" 真正解析
+
+b68795f 本身 **build 唔過**、`kind:"usb"` 亦只做了一半。同日補完：
+
+**建置（阻斷級）**
+
+- `ncportgen` 生成的 `nc_port_usb_kind()` 用了 `__attribute__((used, retain))`；xtensa
+  GCC 15（IDF 6.0.3）未實作 `retain` → `'retain' attribute ignored [-Werror=attributes]`，
+  **所有板子都 build 失敗**。改成只有 `used`；把 `nc_port.o` 拉入改用 `main.c` 的
+  **強引用函數指標**（唔再靠 attribute）。
+- `cfgstruct_test` 因 `usb_family` set-but-unused 在 `-Werror` 下編譯失敗；同時斷言仍是
+  舊出廠名（`CDC`／`UART`／`usb_jtag`）。已更新斷言、加 USB stub 同 `[23b] kind:"usb"` 測試。
+  現時 `tools/hosttest/run_all.sh` **11 支全過**。
+
+**USB schema（commit 賣點，之前未接）**
+
+- `nc_cfg_load.c` 的 `kind:"usb"` 以前**寫死** `NC_LINK_CDC`（S3／C3 的 USJ 會靜靜變 OTG、
+  C3 直接冇 USB 通道）。現在依 `index`（或舊式 `"usb":N`）查
+  `nc_cfg_usb_default_kind()` → 真 kind；查不到（`0xFF`）＝這塊板冇該 port → 該 link
+  不建立並計 `invalid`。
+- `msc` 兩條路徑（缺檔預設 vs `parse_links`）以前一個 `-1`、一個 `0`，`-1` 在
+  `msc != 0` 之下等於 truthy → **冇 `system.json` 的板子會自動交 FAT**。兩邊統一 `0`；
+  global `usb.msc` 已停用（per-link 才有效）。`main.c` 殘留的「`-1` 才 fallback global」
+  分支亦一併刪（default 0 之下永遠唔會行），改成**開機一行 warning**提醒舊寫法；
+  `nc_cfg_types.h`／`Kconfig.projbuild`／`usb-concepts.md`／`config-layers.md` 的註解同步。
+- `hardware.json` 的 `USB` 段**仍然未 parse**（只是 generated 鏡子）；personality 只認
+  build-time 的 `wiring.json`。文件已改成這樣寫，唔再叫人去改裝置上的 `hardware.json`。
+- ETH `driver:"spi"`：hwcheck 以前一律 claim mdc/mdio/ref_clk（SPI 下全是 -1，靜靜漏了
+  cs/rst/int）；ph_hardware 又把「未實作」印成「未啟用（want=0）」。兩處已修。
+
+**工具鏈**
+
+- `make.py flash`：區域變數 `build` 遮蔽 `build()` → `TypeError: 'WindowsPath' object is
+  not callable`（**任何板子、任何平台**）。已改名 `bdir`。
+- `make.py`／`board.py`：Windows cp950 console 遇到 `✔／✘／↔` 直接 `UnicodeEncodeError`
+  （`--help`、`check`、`doctor`、`flash` 錯誤路徑全中）。入口加 `stdout.reconfigure(errors="replace")`。
+- `sync_hardware_presets.py`：Windows 下 `read_text()` 用 cp950 讀 UTF-8 → 全滅；
+  而且用同名目錄猜 default project。已加 encoding（read/write 都 UTF-8、比對不看行尾）、
+  改用 `default_project_for_hardware()`。
+- `resolve_board()`：塊板「有 project 但冇 default」時，指名 project 會被靜默降級成純硬體。
+- `make.py build --all`：以前靜默忽略 `--project`／`--no-project`／`--no-doctor`；
+  現在前兩者明確報錯，`--no-doctor` 生效。
+- `board.py new --eth spi`：能力碎片不存在，以前會先寫一半檔案再炸，留下 `check 2 errors`
+  的半塊板；現在**寫之前**就報錯。
+- `board.py sync` 的 help 由「兩層」改成「hardware 層」。
+
+**文件**
+
+- `usb-layers.md`：personality 來源（build-time `wiring.json`，唔係裝置 `hardware.json`）、
+  `msc` 口徑、`kind:"usb"` 名稱／路由、§4.5 現況、§5、§6 未做清單全部對齊程式。
+- 6 份 project `system.json` 的「現時 interim kind:…,usb:0」註解（與檔案本身矛盾）已清；
+  `hardware.json` 根／USB `_comment` 由 `ncportgen` 產生器改正（並重跑 sync）。
+- `status.md`：日期、網路（DHCP）、HTTP :80、10 條 broken link；`config-layers.md` route
+  `usb0`／USB schema／kind 清單；`line-identity.md`／`net-lines.md` 的名稱口徑；
+  `buffers.svg` 的 `usb.rx` 4,192→4,128、`boot*.svg` 的 `usb.msc` → `link.msc`（改腳本重生成）。
+- `tools/README.md`：hosttest 由 9 支補到 11 支（加 `run_all.sh`）、`board.py new --ws` → `--wifi`、
+  補 `make.py projects`／`check`、`board.py resolve`／`projects`、`ncportgen`／
+  `sync_hardware_presets.py`／圖表腳本，P4 靜態 IP 改 DHCP。`build_and_flash.md`
+  疑難排解的 `rm firmware/sdkconfig` 改成 `make.py build … --fresh`；`testing.md` 的 OTA
+  路徑 `firmware/build/esp_net_core.bin` 改成 `artifacts/<board>.bin`。
+
+**仍然未做（下一輪）**
+
+1. `hardware.json` 的 `USB` 段 typed 解析（要做 `nc_usb_port_cfg_t` ＋ `apply_usb()`，並把
+   personality 由 build-time 移到 runtime decision）；`sys/usb` register／claim。
+2. 多 USB 通道（P4 三條 PHY 只開一條）；`usb.rx`／`cdc_log` 仍全局。
+3. `board.py`：`projects` 分不出 `default:true` 同同名慣例、`hw:`／`pj:` 前綴係 no-op、
+   alias 撞名只查「硬體＋default project」、doctor 對新 build slug 的新鮮度判斷、
+   `tools/esp_webmaster/recover.py` 的 board→image MAP 未跟新板（S3 16MB 有兩塊板）。
+4. 舊筆記仍在用已消失的路徑（今次未動，屬舊債）：`03_notes/core-isolation.md`／`cross-core.md`
+   的 `firmware/components/sys/transport/`、`p4-usb.md:219`、`usb-config.md:539` 的
+   `ports/_profiles/usb-*.defaults`、`memory-budget.md`／`memory-vs-micropython.md` 的
+   `firmware/build/*.map`。
+
+**實機驗證（2026-11-17 10:30–11:05，兩塊板直接插喺 Windows 主機）**
+
+WSL 見唔到 COM（WSL2 冇 usbipd → `/dev/ttyACM*` 全空），所以燒錄／讀 log 改用 Windows 的
+`python -m esptool`（5.3.1）＋ pyserial；build 仍然喺 WSL。全程冇用 `make.py flash`
+（它走 WSL，見唔到埠）。
+
+| 板 | 燒咗 | 結果 |
+|---|---|---|
+| ESP32-S3 16 MB flash / 8 MB PSRAM（COM30，303A:1001 USJ） | `ESP32-S3-N16R8`（console=USJ） | ✅ 完整開機；`USB：mode=jtag｜link=usb0（kind=usb_jtag）｜log=1｜msc=0` → `{kind:"usb",index:0}` 依 `wiring.json` 的 `usj-fs` 解析成 **usb_jtag**（未修之前會變 `cdc`）|
+| 同上 | `ESP32-S3-Mini-Nano`（`phy=otg-fs`、console=none） | ⚠️ 燒完**完全冇 USB 枚舉**（主機連 303A 都沒有）。呢塊板靠 RTS 復位唔生效，`--after hard-reset` 會留住 ROM download mode；要 `--after watchdog-reset` 才真開機。OTG 版冇 log 可睇 → 待查（要用 BOOT 鍵入 download mode 再燒 USJ console 版） |
+| ESP32-P4（COM34 = CH343 UART0；ECO7 / **rev v3.2**；32 MB flash；周邊係 **ESP32-C5**） | `P4-ETH` / `P4-FireBeetle2` 原版 | ❌ `requires chip revision in range [v0.0 - v1.99]`；`--force` 燒得入但 **boot loop**（ROM `esp32p4-eco7` 反覆重啟）→ repo 兩個 P4 板都寫死 pre-rev3 配方 |
+| 同上 | `P4-FireBeetle2` 暫時改成 `SELECTS_REV_LESS_V3=n` + `REV_MIN_301=y` | ✅ 開機到 B11（UART0 有完整 log）；`USB：mode=jtag｜link=usb0（kind=usb_jtag）｜msc=0` 一樣正確。但這塊板只引出 OTG／CH343，USJ 冇接線 → 主機見唔到 USJ。`esp_hosted` 期望 C6（0x0d）、實板係 C5（0x17）→ Wi-Fi 失敗 |
+
+順手修：`P4-FireBeetle2` 的 `system.json` 有個**放錯層**的 `"hostname": ""`（`hostname` 屬於
+`network.json`）→ 開機 log 一直 `unk=1`；已移除。`console` 與 `wiring.json` 的暫時改動已
+`git checkout` 還原。
+
+### 7.78 2026-11-17 下午（實機第二輪：S3 OTG 打通；新板 Waveshare P4-WIFI6-DB＋rev3 碎片；ESP32-C5 hosted Wi-Fi 打通）
+
+兩塊板都直接插在 Windows 主機（WSL2 冇 usbipd，COM 只有 Windows 見得到）：**COM30＝S3
+16 MB flash／8 MB octal PSRAM**（MAC `d8:85:ac:d4:2f:2c`）、**COM34＝CH343 UART0＝Waveshare
+ESP32-P4-WIFI6-DB**（P4 rev **v3.2**／ECO7、32 MB flash `gd`、32 MB hex PSRAM@200 MHz、
+MAC `80:f1:b2:d7:ba:f8`、協處理器 **ESP32-C5** silicon `0x17`）。build 在 WSL，燒錄／讀 log
+在 Windows（`python -m esptool` 5.x ＋ pyserial；`make.py flash` 走 WSL 見唔到埠）。
+
+**新板 `ports/hardware/P4/ESP32-P4-WIFI6-DB/` ＋ `ports/project/P4/ESP32-P4-WIFI6-DB/`**
+
+- 硬體事實：32 MB flash（40 MHz／DIO）、hex PSRAM 200 MHz、**CPU 400 MHz**、console 走
+  UART0（CH343）、USB OTG **HS**（4-pin 排針，UTMI pin 49/50）、板載 C5 走 ESP-Hosted／
+  SDIO、冇 Ethernet PHY（`wiring.json` 留 ETH 但 `enable=0`，同 FireBeetle2 同一手法）。
+- 32 MB 分割表另寫一份（`ota_0 @0x20000`、`ota_1 @0x420000`、`data @0x820000 size 0x1700000`），
+  開機 log 見 `data 分區 size 23552 KB`。
+- aliases：`P4-WIFI6-DB`／`ESP32-P4-C5`／`P4-C5`（`ESP32-P4-C6` 仍然屬 FireBeetle2）。
+- 實測：B01–B10 全 `ok`、`hwcheck claims: []`、`TinyUSB Driver installed on port 1`（HS）、
+  `links[].msc=0 → /data 留在 APP`。
+
+**新能力碎片 `p4-rev3` / `p4-pre-rev3`（晶片版本也是硬體事實）**
+
+- IDF：P4 `rev<3.0` 與 `rev>=3.0` **互斥**（`esp_hw_support/port/esp32p4/Kconfig.hw_support`
+  第一行就寫死「mutually exclusive」），同一份映像只支援一邊。所以「這塊板是 rev3 還是
+  pre-rev3」跟 eth／wifi 一樣用碎片表達，不再每塊板各抄兩行。
+- `p4-rev3` ＝ `SELECTS_REV_LESS_V3=n` ＋ `REV_MIN_300`（揀 300 而非 IDF 預設 301：碎片要
+  涵蓋所有 rev3 樣品，v3.0 不應被預設值擋）。`p4-pre-rev3` ＝ `SELECTS_REV_LESS_V3=y` ＋
+  `REV_MIN_0`（pre-rev3 樣品 rev 五花八門，收緊冇好處）。
+- `ESP32-P4-ETH`／`ESP32-P4-FireBeetle2` 改掛 `p4-pre-rev3`，原本手抄那兩行換成指向碎片的
+  註解；Waveshare 板掛 `p4-rev3`。實測 log：`efuse_init: Min chip rev v3.0 / Max v3.99 /
+  Chip rev v3.2`。
+
+**修正①：rev3 上 `cpu_mhz:360` 根本不可達**
+
+IDF `esp_system/port/soc/esp32p4/Kconfig.cpu` 的 `ESP_DEFAULT_CPU_FREQ_MHZ_360`
+**depends on `ESP32P4_SELECTS_REV_LESS_V3`**；掛了 `p4-rev3` 之後只剩 400 可選，board.json
+寫 360 會被 Kconfig 靜靜改回 400（實測 `cpu freq: 400000000 Hz`，同 board.json 唔符）。
+新板改成 400、sdkconfig 亦改 `MHZ_400`。ETH／FireBeetle2 是 pre-rev3，360 保留。
+
+**修正②：ESP-Hosted 的 SDIO 腳位放錯層 → C5 握手失敗**
+
+- 症狀：`sdmmc_init_ocr: send_op_cond (1) returned 0x107` → `eh_sdio: card init failed` →
+  `bring-up timed out (5000ms)` → `Wi-Fi 初始化失敗 ESP_FAIL`。**唔係**「C5 冇 slave
+  firmware」，係 CMD5 冇人應。
+- 根因：`wifi-hosted-*` 碎片裡寫了 `CONFIG_ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD=y`。這符號是
+  esp_hosted 的**板子符號**，一開就決定 CLK/CMD/D0..D3 ＋ reset 整組腳位；配 C5 時它給
+  官方 P4-Function-EV-Board 子板的 **33/4/20/23/21/22＋53**，而 Waveshare 實板是
+  **18/19/14/15/16/17＋54**（該公司文件「ESP32-C5 ESP-Hosted 通信 SDIO」一行）。
+- 修正：**碎片只留 slave target／緩衝，板子符號搬到各板 `sdkconfig.defaults`**。新板用
+  `CONFIG_ESP_HOSTED_P4X_C5_DEV_BOARD_FUNC_BOARD=y`（esp_hosted 對 P4+C5 的預設值，腳位
+  剛好逐隻吻合實板）。FireBeetle2 保留原本的 func-board 符號（外掛 C6 未上板驗，註解已標）。
+- 修好之後：`eh_sdio: SDIO 4-bit 40000 kHz CLK=18 CMD=19 D0=14 D1=15 D2=16 D3=17 RESET=54`
+  → `Card init success` → `slave chip id: 0x17 (esp32c5)` →
+  `esp-hosted fw versions: host=3.1.0 coprocessor=2.12.9`。
+- **Wi-Fi 真的通了**：STA 掃描經 SDIO 回報 8 個真實 AP（`MB9_IT`／`TVBWiFi`／`VIPWiFi`…，
+  2.4 G 與 5 G 都有，ch=1／161）→ RPC 數據路徑 OK。連線失敗只是因為種子 config 的 SSID
+  `NETCORE-TEST` 不存在（`reason=201 NO_AP_FOUND`），唔係鏈路問題。
+
+**S3 OTG 實測（`ESP32-S3-Mini-Nano`：console=none、PHY 走 OTG-FS）**
+
+- 之前「燒完完全冇 USB」的真因**唔係** OTG 有問題，而是板上的舊 `/data` 設定：
+  `kind=usb_jtag` ＋ 這份映像 `CONFIG_ESP_CONSOLE_NONE=y` → 開機早段就 abort／reboot loop，
+  主機連 `303A` 都見唔到。清掉 `data` 分割區（`0x820000` 起 `0x700000`）＋ NVS 之後即刻正常。
+- 正常之後：主機枚舉 **`VID_303A&PID_4003`** → CDC `COM31`（TinyUSB 出 log）＋ MSC 磁碟區
+  **`NC-2F2C`**，log `碟交給 host: ESP_OK`。即 S3 的 OTG（FSLS PHY）在 console=none 建置下
+  **完全可用**。
+- 三個坑（已寫入 `usb-config.md`）：① 燒錄要喺 **build dir** 跑 `write-flash "@flash_args"`
+  （`artifacts/<board>/` 那層的 `flash_args` 少了 `bootloader/` 前綴）；② 用 USJ 讀 log 一開埠
+  DTR/RTS 就拉重置線 → 想乾淨抓 boot log 要用 `--after watchdog-reset`／唔碰 DTR/RTS；
+  ③ 燒 OTG 版會令 USJ 掉埠（CDC 重新枚舉），要重開埠搶 ROM 下載窗口。
+
+**仍未做（今輪新增）**
+
+1. `board.py check` 未擋「兩個互斥 rev 碎片同時掛」（`p4-rev3` ＋ `p4-pre-rev3` 寫相反值，
+   Kconfig 檔尾者贏 → 隨 profiles 次序漂移）。
+2. `board.py check` 未驗 `board.json` 的 `cpu_mhz` 是否**真的可達**（今次 360→400 的靜默不符
+   就是因為 Kconfig 只管得到自己）。
+3. ESP-Hosted 的板子符號目前只能手寫在各板 `sdkconfig.defaults`，`board.json` 冇對應欄位 →
+   `check` 驗唔到「這塊板的 SDIO 腳位同 esp_hosted 選的一致」。
+4. 映像與裝置上舊 `/data` 設定的一致性冇稽核（`kind=usb_jtag` ＋ `CONSOLE_NONE` 可以靜靜令
+   USB 全滅，S3 就是這樣「假死」的）。
+5. 板上 C5 的 slave firmware 落後（`coprocessor=2.12.9` vs host `3.1.0`，可用但建議升級）；
+   esp_hosted 2.6+ 有 host-performed slave OTA，未接入。
+6. FireBeetle2 rev1.0 專屬的 `PM_SLEEP_CLK_ICG_ENABLE=n` 補丁未確認 rev3 是否需要 ——
+   Waveshare rev3 板冇加，開機正常。

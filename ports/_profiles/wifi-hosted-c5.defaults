@@ -14,7 +14,15 @@ CONFIG_ESP_WIFI_REMOTE_ENABLED=y
 CONFIG_ESP_WIFI_REMOTE_LIBRARY_HOSTED=y
 CONFIG_SLAVE_IDF_TARGET_ESP32C5=y
 
-CONFIG_ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD=y
+# ⚠ SDIO 腳位係**板子**的事，唔關能力事：esp_hosted 用「板子符號」
+#   （CONFIG_ESP_HOSTED_*_BOARD）去揀一整組腳位，所以那行要寫在
+#   ports/hardware/<chip>/<board>/sdkconfig.defaults，唔可以寫在這裡。
+#   2026-11 實測：舊版把 CONFIG_ESP_HOSTED_P4_DEV_BOARD_FUNC_BOARD 寫在
+#   這個碎片裡，Waveshare P4-WIFI6-DB 的 C5 就因為腳位錯（拿咗官方
+#   P4-Function-EV-Board 的 33/4/20/23/21/22+53，實板係
+#   18/19/14/15/16/17+54）而 SDIO CMD5 超時（send_op_cond 0x107）。
+#   板子接法全自訂 → 揀 ESP_HOSTED_P4_DEV_BOARD_NONE 再明寫
+#   CONFIG_ESP_HOSTED_HOST_SDIO_PIN_CLK/CMD/D0..D3 同 HOST_RESET_GPIO。
 
 CONFIG_WIFI_RMT_STATIC_RX_BUFFER_NUM=16
 CONFIG_WIFI_RMT_DYNAMIC_RX_BUFFER_NUM=64

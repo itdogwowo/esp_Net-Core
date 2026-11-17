@@ -1,5 +1,11 @@
 # USB 配置：能力、傳輸與 CDC 基線
 
+> ⚠️ **2026-11-17 之後，本文的「兩個全局開關」只對了一半**：`msc` 已改成
+> **per-link**（`links[].msc`，預設 0，唔再 fallback global `usb.msc`）；
+> `usb.cdc_log` 仍然是全局。另外 USB link 的 `kind:"usb"` 會由 `wiring.json` 的
+> `USB.list[index].phy` 解析成 `cdc`／`usb_jtag`。最新 schema 見
+> [usb-layers.md](usb-layers.md)；本文保留 2026-11-12 的現況與量測。
+>
 > 2026-11-16：**先看 [usb-layers.md](usb-layers.md)** —— 那篇是「晶片 → 板子 → 用戶」
 > 的配置地圖、每顆晶片的通道數、S3 開 MSC 的完整步驟。本文保留 2026-11-12 的現況與量測。
 >
@@ -23,7 +29,7 @@
 
 | 層 | 叫法 | 出現在哪 | 由誰決定 |
 |---|---|---|---|
-| **線**（板子上的一條 USB PHY／接口） | USB 線 `usb` | `usb.rx`、`usb_core`、`usb.msc`、`usb.cdc_log` | 板子（有幾條線）＋ config（用哪條） |
+| **線**（板子上的一條 USB PHY／接口） | USB 線 `usb` | `usb.rx`、`usb_core`、`links[].msc`、`usb.cdc_log` | 板子（有幾條線）＋ config（用哪條） |
 | **driver／transport** | USB-OTG（TinyUSB）或 USB-Serial-JTAG（USJ LL） | `links[].kind`；`nc_usb_mode_t` | config；**預設一律 USJ** |
 | **NC4 通道** | 這條線上的一條 link（`CDC`／`usb_jtag`） | `links[]` 的 `name`／`enable` | config |
 
@@ -41,7 +47,7 @@
    - **現況**：固件仍只揀一條 USB link（`usb_nc4_link()` 取第一條 `enable`，
      多過一條警告）；P4 的多線並存屬 Phase 2（`usb.interfaces[]`，見 §2.2–2.4）。
 4. **`usb.*` 前綴指「這條線」**，不是 driver：`usb.rx`（收幀環）、`usb_core`
-   （所屬核心組）、`usb.msc`／`usb.cdc_log`（兩個開關）。
+   （所屬核心組）、`usb.cdc_log`（log 開關）；交碟開關例外，寫在 `links[].msc`。
 5. **資源名不按 driver 分**：收幀環叫 `usb.rx`，不叫 `cdc.rx`／`usb_jtag.rx`。
    ⚠️ 今日只有一條 USB 線，所以一個 `usb.rx` 就夠；P4 多線並存時**每條線要自己
    一份**，命名到時按線分（不能共用同一個 `usb.rx`）。
@@ -176,6 +182,18 @@ S3 的 `/config/system.json` 是舊版（冇 `usb`、冇 `rx`），reboot 後仍
 > USJ 完全不會枚舉（主機見不到裝置）。修正：每次選 USJ 都呼叫
 > `usb_serial_jtag_ll_phy_enable_external(false)` 把 mux 指返 USJ（`main.c` 的 `ph_usb`）。
 > 修好之後同一個切換（cdc ↔ usb_jtag）雙向都通過，軟重啟亦保持可見。
+>
+> **2026-11-17 補充：OTG 方向不用、也不該碰 mux。** `ph_usb` 的 OTG 分支沒有呼叫任何
+> mux API —— `usb_new_phy()` → `usb_wrap_hal_phy_set_external(hal, false)` 會把同一條
+> FSLS PHY 指去 OTG。換句話說：**B03 決定的是「這次開機用哪條 transport」（config／
+> ctx），PHY 的歸屬是實體層、由「最後 enable 它的那家 driver」決定**；兩件事不要混。
+> 只有選 USJ 時才要主動搶回 mux（power-on 預設是 USJ，但軟重啟後不一定）。
+> 實測：S3 燒 OTG 版 → 主機見到 `303A:4003`（CDC＋MSC 兩個介面），USJ 完全不見；
+> 這是預期，不是「USJ 壞了」。
+>
+> **留意**：PHY 歸屬**不會**在斷電後保留（RTC domain 掉電即回預設）。所以「上一個
+> 映像跑過 OTG」這種狀態不會跨拔電；但用 USJ 讀 log 時，開埠的 DTR/RTS 會拉重置線，
+> 一開就 reboot —— 想乾淨抓 log 要改用 `--after watchdog-reset` 或不碰 DTR/RTS。
 
 > 未測：P4（OTG FS/HS 與 USJ 三條 PHY）。P4 走的是與 S3 相同的 TinyUSB 分支，
 > 但 PHY／接線不同，仍要實板驗。USJ 那條在 P4 已編入（`SOC_USB_SERIAL_JTAG_SUPPORTED`），

@@ -19,8 +19,8 @@ menu "esp_Net-Core"
             關掉時整組定義都不編，連 tinyusb 都不會 link（省約 21.7 KB：
             _cdcd_itf 12,532 + _mscd_epbuf 8,192 + _cdcd_epbuf 1,024）。
 
-            開著也**不代表會用**：開機仍然由 system.json 的 usb.msc / usb.cdc_log 決定，
-            兩個都可以 runtime 改成 0，不用重燒。
+            開著也**不代表會用**：開機仍然由 system.json 決定（`links[].msc` 交唔交碟、
+            `usb.cdc_log` 決定 log），兩個都可以 runtime 改，不用重燒。
 
     config NETCORE_USB_OTG_HS
         bool "USB OTG 走 High-Speed PHY（P4：pin 50/49）"

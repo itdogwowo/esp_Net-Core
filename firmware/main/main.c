@@ -1,7 +1,7 @@
 // esp_Net-Core — 主程式（開機階段表 ＋ USB 應用層）
 //
 // USB 一條線可以同時提供：
-//   • MSC  → 一個隨身碟，內容是 data 分區（config / pixel assets）—— 預設唔交（usb.msc=0）
+//   • MSC  → 一個隨身碟，內容是 data 分區（config / pixel assets）—— 預設唔交（links[].msc=0）
 //   • CDC  → 一個 COM port，當 console 或 NC4 通道（OTG 時）；USJ 時係另一條 driver
 //
 // 開機順序（使用者不需要手動格式化）：
@@ -123,12 +123,16 @@
 #include "nc_cfg.h"
 #include "nc_port.h"          // build-time 由 hardware/board.json + _chips/*.json 產生
 
-// nc_cfg_defaults.c 以 weak 方式引用 generated nc_port_usb_kind()；
-// 若冇任何強引用，linker 唔會拉入 nc_port.o，會 fallback 成 CDC
-// （2026-11-17 P4 實測：USB link kind=cdc，即使 wiring 寫 usj-fs）。
-// 呢個強引用負責把 nc_port.o 拉入；同時 nc_port_hw_defaults 亦一齊入。
+// nc_cfg_defaults.c 以 weak 方式引用 generated nc_port_usb_kind()：weak undefined
+// symbol **唔會**令 linker 由 libmain.a 抽出 nc_port.o，於是 nc_cfg_usb_default_kind()
+// 永遠行 fallback（CDC），即使 wiring 寫 usj-fs（2026-11-17 P4 實測）。
+// 呢個指標係**強引用**（真函數位址），負責把 nc_port.o 拉入；usb_resolve() 會真讀
+// 一次做 config／hardware 交叉核對，順便證明佢唔係死碼。
+//
+// 唔用 __attribute__((retain))：xtensa GCC 15（IDF 6.0.3）冇實作佢，會報
+// 'retain' attribute ignored [-Werror=attributes]，整個 build 失敗。
 extern uint8_t nc_port_usb_kind(uint8_t idx);
-__attribute__((used, retain)) uint8_t (*const nc_port_usb_kind_ref)(uint8_t) = nc_port_usb_kind;
+static uint8_t (*const s_usb_kind_lookup)(uint8_t) = nc_port_usb_kind;
 #include "cJSON.h"
 #include "nc_store.h"
 #include "boot.h"
@@ -569,8 +573,24 @@ static void usb_resolve(void)
     //    預設本身一定有一條（晶片表決定 name／kind），所以「揀唔到」只有一個意思：
     //    用戶明確寫了一份沒有 USB link 的 links[] —— 那就是「唔要」。
     const nc_link_cfg_t *usb = usb_nc4_link();
-    // want_msc：per-link；預設 0（唔交碟），冇 capability（USJ）就跳過。
+    // want_msc：只睇這條 USB link 的 msc（預設 0 = 唔交碟）。
+    // global system.json 的 usb.msc 已經停用 —— 舊寫法冇作用，所以明講一次，
+    // 免得「我明明寫咗 msc=1」查半日。
     const bool want_msc = (usb != NULL) && (usb->msc != 0);
+    if (usb != NULL && !want_msc && scfg != NULL && scfg->usb_msc != 0) {
+        ESP_LOGW(TAG, "system.json 的 usb.msc=%u 已停用 → 要交碟請寫 links[].msc:1",
+                 (unsigned)scfg->usb_msc);
+    }
+    // config 的 kind 應由 hardware 的 USB.list 決定；唔一致就講清楚（以 config 為準）。
+    // 呢個讀取同時係 s_usb_kind_lookup 的真用途 —— 唔可以刪，否則 nc_port.o 冇人拉。
+    if (usb != NULL && usb->usb_port != NC_CFG_USB_PORT_NONE) {
+        const uint8_t hw_kind = s_usb_kind_lookup(usb->usb_port);
+        if (hw_kind < (uint8_t)NC_LINK_KIND_MAX && hw_kind != (uint8_t)usb->kind) {
+            ESP_LOGW(TAG, "USB：link %s kind=%s ≠ hardware USB.list[%u]=%s（跟 config）",
+                     usb->name, nc_cfg_kind_name(usb->kind), (unsigned)usb->usb_port,
+                     nc_cfg_kind_name((nc_link_kind_t)hw_kind));
+        }
+    }
     if (usb == NULL) {
         b->usb_mode = NC_USB_NONE;
         b->usb_link = NULL;
@@ -2204,7 +2224,7 @@ static int link_rx(const char *name, link_rx_t *rx)
 // ── 兩種 USB transport 是**不同驅動**，刻意分開（2026-11-13 定案）──
 //
 //   kind=cdc      TinyUSB／OTG：一個 device stack 可以同時有 CDC-ACM 與 MSC；
-//                 usb.msc／usb.cdc_log 只對它有意義。
+//                 links[].msc／usb.cdc_log 只對它有意義。
 //   kind=usb_jtag USB-Serial-JTAG：原生 CDC-ACM，冇 MSC、冇第二條 endpoint；
 //                 log 與 NC4 共用同一條 TX（RS 前綴由 nc_log 的 arbiter 分流）。
 //
@@ -2258,7 +2278,7 @@ static const nc_link_cfg_t *usb_nc4_link(void)
 }
 
 // 開機稽核：config 寫的 USB kind 這個 build 冇 → 明講可以用哪一條；
-// 另加「usb.msc 只對 OTG 有意義」的提醒。
+// 另加「link 的 msc 只對 OTG 有意義」的提醒。
 static void usb_links_audit(void)
 {
     const nc_system_cfg_t *sys = nc_cfg_system();
@@ -2288,10 +2308,10 @@ static void usb_links_audit(void)
             ESP_LOGE(TAG, "  這個 build 冇 USJ transport；請確認 target");
         }
     }
-    // msc 只在「選了 OTG」時有意義：USJ 沒有 MSC。per-link msc 優先，未寫才看 global。
+    // msc 只在「選了 OTG」時有意義：USJ 沒有 MSC。per-link 制（預設 0）。
     const nc_link_cfg_t *usb = usb_nc4_link();
     const bool want_msc = (usb != NULL) && (usb->msc != 0);
-    if (want_msc && (usb == NULL || usb->kind != NC_LINK_CDC)) {
+    if (want_msc && usb->kind != NC_LINK_CDC) {
         ESP_LOGW(TAG, "USB link msc=1 但 personality 不是 OTG（USJ 冇 MSC）→ 跳過");
     }
 }
@@ -3957,10 +3977,10 @@ static esp_err_t ph_storage(void)
                 }
             }
         }
-        ESP_LOGW(TAG, "cfg 生效：usb=%s(%s) msc=%u log=%u links=%u routes=%u",
+        ESP_LOGW(TAG, "cfg 生效：usb=%s(%s) msc=%d log=%u links=%u routes=%u",
                  (usb != NULL) ? usb->name : "冇",
                  (usb != NULL) ? (usb->enable ? "on" : "off") : "-",
-                 (unsigned)((sys != NULL) ? sys->usb_msc : 0),
+                 (usb != NULL) ? (int)usb->msc : -1,
                  (unsigned)((sys != NULL) ? sys->usb_cdc_log : 0),
                  (unsigned)((sys != NULL) ? sys->n_links : 0),
                  (unsigned)((sys != NULL) ? sys->n_routes : 0));
@@ -4064,9 +4084,19 @@ static esp_err_t ph_hwcheck(void)
             }
         }
         if (hw->eth.enable) {
-            (void)nc_hw_claim(hw->eth.mdc, "eth", "mdc", NC_HW_CLAIM_WRITE);
-            (void)nc_hw_claim(hw->eth.mdio, "eth", "mdio", NC_HW_CLAIM_WRITE);
-            (void)nc_hw_claim(hw->eth.ref_clk, "eth", "ref_clk", NC_HW_CLAIM_WRITE);
+            // claim 要跟 driver 走：RMII 用 mdc/mdio/ref_clk；SPI（W5500 類）用
+            // cs/rst/int（spi_idx 是 bus index，不是腳位，唔入 GPIO 帳本）。
+            // 以前一律 claim RMII 三條，SPI 模式下三條都係 -1 → nc_hw_claim 靜靜
+            // 回 INVALID_ARG，等於 CS/RST/INT 冇入帳本，將來衝突偵測唔到。
+            if (hw->eth.driver == NC_ETH_DRIVER_SPI) {
+                (void)nc_hw_claim(hw->eth.cs, "eth", "cs", NC_HW_CLAIM_WRITE);
+                (void)nc_hw_claim(hw->eth.rst, "eth", "rst", NC_HW_CLAIM_WRITE);
+                (void)nc_hw_claim(hw->eth.int_pin, "eth", "int", NC_HW_CLAIM_READ);
+            } else {
+                (void)nc_hw_claim(hw->eth.mdc, "eth", "mdc", NC_HW_CLAIM_WRITE);
+                (void)nc_hw_claim(hw->eth.mdio, "eth", "mdio", NC_HW_CLAIM_WRITE);
+                (void)nc_hw_claim(hw->eth.ref_clk, "eth", "ref_clk", NC_HW_CLAIM_WRITE);
+            }
         }
         for (uint8_t i = 0; i < hw->n_pin; i++) {
             (void)nc_hw_claim(hw->pin[i].pin, "gpio", hw->pin[i].label,
@@ -4129,8 +4159,15 @@ static esp_err_t ph_hardware(void)
             xTaskCreatePinnedToCore(tcp_nc4_accept_task, "tcp_nc4", 6144, NULL, 9, NULL, 0);
         }
     } else if (nerr == ESP_ERR_NOT_SUPPORTED) {
-        // 「config 冇開」與「硬體/驅動壞了」要分得清：一個是政策，一個是故障。
-        ESP_LOGW(TAG, "ETH 未啟用（want=0）→ 不宣告/不啟動 TCP 通道");
+        // 「config 冇開」、「driver 未實作」與「硬體/驅動壞了」要分得清：
+        // 一個是政策，一個是缺口，一個是故障。SPI PHY（W5500）driver 未實作，
+        // 唔可以再印「未啟用（want=0）」—— 那會令人以為係自己寫錯 config。
+        const nc_hardware_cfg_t *hwx = nc_cfg_hardware();
+        if (hwx != NULL && hwx->eth.driver == NC_ETH_DRIVER_SPI) {
+            ESP_LOGW(TAG, "ETH driver=SPI（SPI PHY driver 未實作）→ 不宣告/不啟動 TCP 通道");
+        } else {
+            ESP_LOGW(TAG, "ETH 未啟用（want=0）→ 不宣告/不啟動 TCP 通道");
+        }
     } else {
         ESP_LOGE(TAG, "乙太網啟動失敗: %s → 不宣告/不啟動 TCP 通道", esp_err_to_name(nerr));
     }
@@ -4345,6 +4382,11 @@ static esp_err_t ph_usb(void)
             ESP_LOGW(TAG, "config 冇 USB 服務（CDC 未登記、msc=0）→ 唔裝 TinyUSB");
             return ESP_OK;
         }
+        // S3 的 PHY mux 在這裡**故意不碰**：OTG 那邊 usb_new_phy() →
+        // usb_wrap_hal_phy_set_external(hal, false) 會把同一條 FSLS PHY 指去 OTG。
+        // B03 揀的是「用哪條 transport」（ctx 的 usb_mode／usb_kind），PHY 只有
+        // 一條、屬於實體層，誰家 driver 最後 enable 就歸誰 —— 兩件事唔好混。
+        // 反方向（USJ）才要自己搶返 mux，見上面 JTAG 分支的註解。
         err = usb_init();
         MAIN_HWM("post-usb");
         if (err != ESP_OK) {
@@ -4365,7 +4407,7 @@ static esp_err_t ph_usb(void)
             const esp_err_t herr = storage_hand_over_to_usb();
             ESP_LOGI(TAG, "碟交給 host: %s", esp_err_to_name(herr));
         } else {
-            ESP_LOGI(TAG, "usb.msc=0 → /data 留在 APP（唔交 FAT）");
+            ESP_LOGI(TAG, "links[].msc=0 → /data 留在 APP（唔交 FAT）");
         }
 #else
         ESP_LOGE(TAG, "USB：判定為 OTG，但這份映像冇編入 OTG（不應該發生）");

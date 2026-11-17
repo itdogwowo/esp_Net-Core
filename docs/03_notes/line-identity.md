@@ -145,8 +145,9 @@ UART／USB／多 TCP port 要更多線，必須提高這三個上限，並重新
   - 舊 `kind=http/ws` 仍兼容
 - HTTP line 不再需要 `kind=http`；`eth_tcp0:80` 由 HTTP service claim。
 - 2026-11-16 晚間：七塊 project 的 `system.json` 已轉 composite kind + index；
-  `uart`／`usb_jtag`／`cdc` 都加 `index` 並移除 `name`，全部由 `kind + index` 生成。
-  firmware 的 UART lookup 已改成 by-kind（USB 本來就係）。
+  `uart`／`usb`／`wifi_*` 都加 `index`（USB 另外有 `kind:"usb"` 的硬件類別），
+  並且**保留**生成名做預設（`usb0`／`uart0`／`wifi_tcp0`），唔再靠「冇 name」隱式生成；
+  用戶寫 `""` 或省略時才 fallback 生成。firmware 的 UART lookup 已改成 by-kind（USB 本來就係）。
 - S3 已實測：
   - `wifi_tcp0:80` → HTTP 200
   - `wifi_tcp1:6000` → NC4 TCP
