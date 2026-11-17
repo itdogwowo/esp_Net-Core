@@ -43,6 +43,20 @@ python3 run.py --serial /dev/cu.usbmodemF0F5BD7554EC1 --port 8011 --open
 | 💾 隨身碟 | 可選（有 USB 的板）：交還 FAT → 揀電腦上嘅碟 → 直接拖拉／編輯 → 接管 FAT |
 | 🔥 固件 | NC4 OTA；**ESPTOOL（ROM／USB-Serial-JTAG）**、晶片探測、offset／baud／erase |
 | ⌨ 指令 | 任意 NC4 cmd + hex payload + expect；底部 `>>>` 快速指令 |
+| 📦 容器 | 在 IDE 檔案樹打開 `.nct`／`.nce`／`.nca` 會顯示**容器檢視器**（唔開二進位編輯器）：檔頭／manifest（kind、target、core、layer、prio、fps、px、mem、stack、budget）／meta（name、desc、usage、requires、provides）／宣告指令／payload CRC／原始位元組。 |
+
+## 容器檢視（`.nct` / `.nce` / `.nca`）
+
+IDE 左邊檔案樹揀 `.nct`／`.nce`（或任何帶 NCM magic 的 `.nca`）→ 右邊會出容器摘要：
+
+- **檔頭**：magic／ABI／flags（AOT／MANIFEST）／payload offset+size+CRC／target／manifest offset；
+- **manifest**：kind（task／effect）、core／layer／prio、fps／px、mem／stack／budget、宣告指令（外掛私有 cmd）；
+- **meta**：name／desc／usage、`requires`（type／name／bytes／exclusive）、`provides`；
+- **驗證**：magic／版本／payload CRC／區塊界線；有問題會逐條列出（仍然會顯示已讀到的部分）；
+- `.nca` 等未知副檔名會照樣解析，但會提示「裝置只掃 `.nct`／`.nce`，唔會載入」。
+
+API：`GET /api/container?path=/tasks/xxx.nct`（server-side 讀 FAT，唔會把整份檔落瀏覽器）。
+解析器在 `container.py`（純 Python，同 `tools/ncm.py`／`nc_ncd.h` 對齊）。
 
 ## 共享 log／AI API（重點）
 

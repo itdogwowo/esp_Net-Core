@@ -3430,3 +3430,22 @@ modules/
 - `.gitignore` 加 `.venv/`、`.pytest_cache/`（launch.py／pytest 產物）。
 - 驗證：`webmaster/run.py --sim` 真係起得到（curl 200）；webmaster pytest 全過；
   `bash -n web.sh WebMaster.command` 通過。
+
+### 7.93 2026-11-18（WebMaster 可讀 `.nct`／`.nce`／`.nca` 容器：header／manifest／meta）
+
+- 新增 `webmaster/container.py`：純 Python NCM 容器解析（48 B header＋40 B manifest＋
+  cmd table＋540 B meta），驗 magic／ABI／版本／區塊界線／payload CRC；未知副檔名
+  （例如 `.nca`）照樣解析但提示「裝置只掃 `.nct`／`.nce`」。
+- 新 API：`GET /api/container?path=…`（server 讀 FAT，回 JSON；壞檔仍然 200 +
+  `valid:false` + 錯誤原因，UI 可顯示）。
+- IDE 檔案樹：`.nct`／`.nce`／`.nca` 唔再當二進位檔下載，改開**容器檢視器**：
+  - 檔頭（magic／flags／payload CRC／target）；manifest（kind／core／layer／prio／
+    fps／px／mem／stack／budget／宣告指令）；meta（name／desc／usage／requires／
+    provides）；驗證列表＋原始位元組前 96 B；
+  - 容器 tab 停用儲存／格式化／驗證（唔會改壞 binary）；下載／刪除照常。
+- `--sim` 模擬裝置：如果 `modules/out/` 有樣本，會 seed 一份 `/tasks/test_hello_tasks.nct`，
+  免硬件都可以試容器檢視。
+- 測試：`webmaster/tests/_ncm_sample.py` 造合法／壞容器；`test_container.py`（parser）
+  ＋`test_server.py::test_container_view`（API）；**pytest 50 passed**。
+- 驗證：重啟 server 後 `/api/container?path=/tasks/test_hello_tasks.nct` 回傳
+  `valid:true`、kind=task、meta name／requires／provides（見下方板上實測）。

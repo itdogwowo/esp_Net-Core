@@ -25,6 +25,7 @@ from fastapi import Body, FastAPI, Header, HTTPException, Query, WebSocket, WebS
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
+import container
 import events
 import files
 import flash
@@ -336,6 +337,20 @@ def create_app(sim_root: str | Path | None = None,
             raise HTTPException(status_code=504, detail=str(e))
         return Response(content=data, media_type="application/octet-stream",
                         headers={"Content-Disposition": f'attachment; filename="{name}"'})
+
+    @app.get("/api/container")
+    def api_container(path: str = Query(...)):
+        """讀 .nct／.nce（或任何 NCM 容器）→ 檔頭／manifest／meta／CRC。"""
+        link = state.require()
+        try:
+            with state.lock:
+                data = files.download(link, path)
+        except files.FileError as e:
+            raise HTTPException(status_code=404 if e.kind == "not_found" else 400,
+                                detail={"kind": e.kind, "msg": str(e)})
+        except LinkError as e:
+            raise HTTPException(status_code=504, detail=str(e))
+        return {"ok": True, "data": container.parse_container(data, path)}
 
     @app.put("/api/file")
     def api_file_put(path: str = Query(...), body: bytes = Body(b""),

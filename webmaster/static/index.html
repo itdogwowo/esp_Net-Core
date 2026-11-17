@@ -444,6 +444,34 @@ code { font-family: var(--font-mono); color: var(--bench-100); font-size: 11.5px
 .ide-tab .x:hover { opacity: 1; color: var(--danger); }
 .ide-path { color: var(--bench-100); font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 42%; }
 .ide-editor-wrap { flex: 1; min-height: 0; position: relative; }
+.ide-editor-wrap.view-container > textarea,
+.ide-editor-wrap.view-container > .CodeMirror,
+.ide-editor-wrap.view-container > #ideEmpty { display: none; }
+.ide-container { position: absolute; inset: 0; overflow: auto; padding: 14px 18px 24px;
+  background: #0b0e12; color: var(--bench-100); font: 400 12.5px/1.55 var(--font-mono); }
+.ncm-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+.ncm-head .grow { flex: 1; }
+.ncm-badge { display: inline-flex; align-items: center; padding: 2px 8px; border-radius: 999px;
+  border: 1px solid var(--bench-700); color: var(--bench-300); font-size: 10.5px; }
+.ncm-badge.ok { color: var(--led); border-color: rgb(47 224 168 / .45); background: rgb(47 224 168 / .08); }
+.ncm-badge.bad { color: #ff6b6b; border-color: rgb(255 107 107 / .45); background: rgb(255 107 107 / .08); }
+.ncm-title { margin: 2px 0 2px; font-size: 17px; font-weight: 600; color: var(--bench-50); }
+.ncm-desc { margin: 0 0 8px; color: var(--bench-200); }
+.ncm-label { margin-top: 8px; color: var(--bench-400); font-size: 11px; text-transform: uppercase; letter-spacing: .06em; }
+.ncm-h3 { margin: 16px 0 6px; font-size: 12px; color: var(--bench-300); text-transform: uppercase; letter-spacing: .06em; }
+.ncm-kv { width: 100%; border-collapse: collapse; margin: 2px 0 4px; }
+.ncm-kv th, .ncm-kv td { text-align: left; padding: 3px 10px 3px 0; vertical-align: top; border-bottom: 1px solid rgb(255 255 255 / .05); }
+.ncm-kv th { width: 190px; color: var(--bench-400); font-weight: 500; white-space: nowrap; }
+.ncm-kv td { color: var(--bench-100); }
+.ncm-issues { margin: 8px 0 0; padding-left: 18px; }
+.ncm-issues li.bad { color: #ff6b6b; }
+.ncm-issues li.warn { color: #f0a53c; }
+.ncm-cmds { color: var(--bench-100); letter-spacing: .04em; }
+.ncm-usage, .ncm-hex { margin: 2px 0 0; padding: 8px 10px; background: #090c10;
+  border: 1px solid var(--bench-800); border-radius: 6px; color: var(--bench-200);
+  white-space: pre-wrap; word-break: break-all; font-size: 11.5px; }
+.ide-container .muted { color: var(--bench-400); }
+.ide-container .mono { font-family: var(--font-mono); }
 .ide-empty { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; color: var(--bench-400); font-size: 13px; text-align: center; pointer-events: none; }
 .ide-statusbar { display: flex; align-items: center; gap: 12px; padding: 3px 10px; border-top: 1px solid var(--bench-700); color: var(--bench-400); font-size: 10.5px; flex: 0 0 auto; }
 .ide-statusbar .grow { flex: 1; }
@@ -657,6 +685,7 @@ code { font-family: var(--font-mono); color: var(--bench-100); font-size: 11.5px
               </div>
               <div class="ide-editor-wrap" id="ideEditorWrap">
                 <textarea id="ideEditor" spellcheck="false"></textarea>
+                <div id="ideContainer" class="ide-container hidden"></div>
                 <div id="ideEmpty" class="ide-empty">
                   <div>從左邊揀檔案，或按 <b>＋</b> 新檔。<br>
                   <span class="mono">Ctrl/Cmd+S 儲存</span></div>

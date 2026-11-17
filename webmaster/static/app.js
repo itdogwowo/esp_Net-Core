@@ -1630,7 +1630,7 @@ function ideExtInfo(path) {
     md: { cls: "md", label: "MD" }, markdown: { cls: "md", label: "MD" },
     sh: { cls: "sh", label: "SH" }, bash: { cls: "sh", label: "SH" },
     bin: { cls: "bin", label: "BIN" }, nct: { cls: "bin", label: "NCT" },
-    nce: { cls: "bin", label: "NCE" },
+    nce: { cls: "bin", label: "NCE" }, nca: { cls: "bin", label: "NCA" },
     txt: { cls: "txt", label: "TXT" },
   };
   return map[ext] || { cls: "txt", label: (ext.slice(0, 3) || "•").toUpperCase() };
@@ -1690,22 +1690,29 @@ function ideSyncBar() {
   const cm = state.ideCM;
   $("#idePath").textContent = tab ? tab.path : "未開啟檔案";
   $("#ideDirty").classList.toggle("hidden", !(tab && tab.dirty));
-  $("#btnIdeSave").disabled = !tab;
+  const binary = !!(tab && tab.binary);
+  $("#btnIdeSave").disabled = !tab || binary;
   $("#btnIdeConfirm").disabled = !tab;
   $("#btnIdeUndo").disabled = !tab;
   $("#btnIdeDownload").disabled = !tab;
   $("#btnIdeDelete").disabled = !tab;
-  $("#btnIdeFormat").disabled = !tab;
-  $("#btnIdeValidate").disabled = !tab;
+  $("#btnIdeFormat").disabled = !tab || binary;
+  $("#btnIdeValidate").disabled = !tab || binary;
   if (!tab) $("#ideLint").classList.add("hidden");
-  $("#ideMode").textContent = tab ? (tab.mode || "text/plain") : "—";
-  if (cm && tab) {
-    const c = cm.getCursor();
-    $("#ideCursor").textContent = `Ln ${c.line + 1}, Col ${c.ch + 1}`;
-    $("#ideSize").textContent = `${cm.getValue().length} B`;
-  } else {
+  if (binary) {
+    $("#ideMode").textContent = "NCM 容器";
     $("#ideCursor").textContent = "—";
-    $("#ideSize").textContent = "—";
+    $("#ideSize").textContent = fmtBytes(tab.container?.file?.size || 0);
+  } else {
+    $("#ideMode").textContent = tab ? (tab.mode || "text/plain") : "—";
+    if (cm && tab) {
+      const c = cm.getCursor();
+      $("#ideCursor").textContent = `Ln ${c.line + 1}, Col ${c.ch + 1}`;
+      $("#ideSize").textContent = `${cm.getValue().length} B`;
+    } else {
+      $("#ideCursor").textContent = "—";
+      $("#ideSize").textContent = "—";
+    }
   }
 }
 
@@ -1746,18 +1753,167 @@ function ideTreeActive() {
     n.classList.toggle("active", n.dataset.path === state.ideActive));
 }
 
+// ── NCM 容器（.nct / .nce / .nca）檢視 ─────────────────────
+function isContainerPath(path) {
+  return /\.(nct|nce|nca)$/i.test(String(path || ""));
+}
+
+async function fetchContainer(path) {
+  const r = await fetch(`/api/container?path=${encodeURIComponent(path)}`);
+  if (!r.ok) {
+    let msg = `${r.status}`;
+    try { const j = await r.json(); msg = JSON.stringify(j.detail ?? j); } catch (_) { /* */ }
+    throw new Error(msg);
+  }
+  const j = await r.json();
+  if (!j.ok) throw new Error(JSON.stringify(j));
+  return j.data;
+}
+
+function _el(tag, cls, text) {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (text !== undefined && text !== null) e.textContent = String(text);
+  return e;
+}
+
+function _kvTable(rows) {
+  const t = _el("table", "ncm-kv");
+  for (const [k, v] of rows) {
+    if (v === undefined || v === null || v === "") continue;
+    const tr = _el("tr");
+    tr.appendChild(_el("th", "", k));
+    tr.appendChild(_el("td", "", v));
+    t.appendChild(tr);
+  }
+  return t;
+}
+
+function ideRenderContainer(c) {
+  const box = $("#ideContainer");
+  if (!box) return;
+  box.innerHTML = "";
+  if (!c) { box.appendChild(_el("p", "muted", "冇資料")); return; }
+
+  const head = _el("div", "ncm-head");
+  head.appendChild(_el("span", "ncm-badge " + (c.valid ? "ok" : "bad"),
+                       c.valid ? "✓ 容器可以載入" : "✗ 有問題"));
+  const kind = c.manifest ? (c.manifest.kind_name || "?") : "?";
+  head.appendChild(_el("span", "ncm-badge", "kind: " + kind));
+  if (c.header) head.appendChild(_el("span", "ncm-badge", "target: " + c.header.target_name));
+  head.appendChild(_el("span", "grow"));
+  box.appendChild(head);
+
+  const title = c.meta && c.meta.name ? c.meta.name : c.file.name;
+  box.appendChild(_el("h2", "ncm-title", title));
+  if (c.meta && c.meta.desc) box.appendChild(_el("p", "ncm-desc", c.meta.desc));
+  if (c.meta && c.meta.usage) {
+    box.appendChild(_el("div", "ncm-label", "用法"));
+    box.appendChild(_el("pre", "ncm-usage", c.meta.usage));
+  }
+
+  const errs = [...(c.errors || []), ...(c.warnings || [])];
+  if (errs.length) {
+    const ul = _el("ul", "ncm-issues");
+    for (const x of c.errors || []) ul.appendChild(_el("li", "bad", "✗ " + x));
+    for (const x of c.warnings || []) ul.appendChild(_el("li", "warn", "⚠ " + x));
+    box.appendChild(ul);
+  }
+
+  // 檔案／檔頭
+  const h = c.header || {};
+  const m = c.manifest || {};
+  const p = c.payload || {};
+  box.appendChild(_el("h3", "ncm-h3", "檔案／檔頭"));
+  box.appendChild(_kvTable([
+    ["檔名", `${c.file.name}（${fmtBytes(c.file.size)}）`],
+    ["副檔名", c.file.ext + (c.file.ext_known ? "" : "（非 .nct／.nce）")],
+    ["magic", h.magic],
+    ["ABI", h.abi],
+    ["flags", `${h.flags}${h.flags_list && h.flags_list.length ? "（" + h.flags_list.join(" / ") + "）" : ""}`],
+    ["payload", `off ${p.offset}／size ${fmtBytes(p.size)}／${p.format}${p.aot ? "（AOT）" : ""}`],
+    ["payload CRC", `${p.crc_expected} → ${p.crc_actual}（${p.crc_ok ? "OK" : "不符"}）`],
+    ["manifest", c.manifest ? `off ${h.manifest_off}／${h.manifest_size} B（ver ${m.version}）` : "冇"],
+    ["meta", c.meta ? "有（name／desc／usage／requires／provides）" : "冇"],
+  ]));
+
+  // 載入參數
+  if (c.manifest) {
+    box.appendChild(_el("h3", "ncm-h3", "載入參數（manifest）"));
+    box.appendChild(_kvTable([
+      ["kind", `${m.kind_name}（${m.kind}）`],
+      ["target", h.target_name],
+      ["core", m.core < 0 ? "不限（-1）" : m.core],
+      ["layer", m.layer],
+      ["prio", m.prio],
+      ["fps", m.fps],
+      ["px", m.px],
+      ["mem（線性記憶體）", fmtBytes(m.mem)],
+      ["stack", fmtBytes(m.stack)],
+      ["budget_us", `${m.budget_us} µs／tick`],
+      ["指令數", m.ncmds],
+      ["manifest flags / reserved", `${m.flags} / ${m.reserved}`],
+    ]));
+    if (m.cmds && m.cmds.length) {
+      box.appendChild(_el("div", "ncm-label", "宣告指令（外掛私有 cmd）"));
+      box.appendChild(_el("div", "ncm-cmds",
+        m.cmds.map((x) => "0x" + x.toString(16).toUpperCase().padStart(4, "0")).join("  ")));
+    }
+  }
+
+  // meta：requires / provides
+  if (c.meta) {
+    const reqs = c.meta.requires || [];
+    const provs = c.meta.provides || [];
+    for (const [label, list] of [["需要資源（requires）", reqs], ["提供資源（provides）", provs]]) {
+      box.appendChild(_el("h3", "ncm-h3", label));
+      if (!list.length) {
+        box.appendChild(_el("p", "muted", "冇宣告"));
+        continue;
+      }
+      const t = _el("table", "ncm-kv");
+      const trh = _el("tr");
+      for (const x of ["type", "name", "bytes", "exclusive"]) trh.appendChild(_el("th", "", x));
+      t.appendChild(trh);
+      for (const e of list) {
+        const tr = _el("tr");
+        tr.appendChild(_el("td", "", e.type_name || e.type));
+        tr.appendChild(_el("td", "mono", e.name || ""));
+        tr.appendChild(_el("td", "", e.bytes || ""));
+        tr.appendChild(_el("td", "", e.exclusive ? "是" : ""));
+        t.appendChild(tr);
+      }
+      box.appendChild(t);
+    }
+  }
+
+  // 原始檔頭
+  if (c.hex) {
+    box.appendChild(_el("h3", "ncm-h3", "原始位元組（前 96 B）"));
+    box.appendChild(_el("pre", "ncm-hex", c.hex));
+  }
+}
+
 function ideActivate(path) {
   const tab = state.ideTabs.find((t) => t.path === path);
   if (!tab) return;
   state.ideActive = path;
-  const cm = ideEnsureCM();
-  if (cm) {
-    state.ideSilent = true;
-    cm.setValue(tab.text);
-    cm.setOption("mode", tab.mode || "text/plain");
-    state.ideSilent = false;
+  const isC = !!tab.container;
+  $("#ideContainer").classList.toggle("hidden", !isC);
+  $("#ideEditorWrap").classList.toggle("view-container", isC);
+  if (isC) {
+    ideRenderContainer(tab.container);
     $("#ideEmpty").classList.add("hidden");
-    cm.focus();
+  } else {
+    const cm = ideEnsureCM();
+    if (cm) {
+      state.ideSilent = true;
+      cm.setValue(tab.text);
+      cm.setOption("mode", tab.mode || "text/plain");
+      state.ideSilent = false;
+      $("#ideEmpty").classList.add("hidden");
+      cm.focus();
+    }
   }
   ideRenderTabs();
   ideSyncBar();
@@ -1768,6 +1924,14 @@ async function ideOpen(path) {
   const existing = state.ideTabs.find((t) => t.path === path);
   if (existing) { ideActivate(path); return; }
   try {
+    // .nct／.nce／.nca：唔開文字編輯器，開容器檢視器（header／manifest／meta）
+    if (isContainerPath(path)) {
+      const data = await fetchContainer(path);
+      state.ideTabs.push({ path, text: "", dirty: false, mode: "text/plain",
+                           binary: true, container: data });
+      ideActivate(path);
+      return;
+    }
     const r = await fetch(`/api/file?path=${encodeURIComponent(path)}`);
     if (!r.ok) {
       let msg = `${r.status}`;
@@ -1801,6 +1965,8 @@ function ideClose(path) {
       ideActivate(next.path);
     } else {
       if (cm) { state.ideSilent = true; cm.setValue(""); state.ideSilent = false; }
+      $("#ideContainer").classList.add("hidden");
+      $("#ideEditorWrap").classList.remove("view-container");
       $("#ideEmpty").classList.remove("hidden");
       ideRenderTabs();
     }
@@ -1964,7 +2130,7 @@ function ideFormat() {
 async function ideSave() {
   const tab = ideActiveTab();
   const cm = state.ideCM;
-  if (!tab || !cm) return;
+  if (!tab || !cm || tab.binary) return;
   const data = new TextEncoder().encode(cm.getValue());
   try {
     $("#ideSize").textContent = "儲存中…";

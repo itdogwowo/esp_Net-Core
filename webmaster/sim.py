@@ -84,6 +84,10 @@ SEED = {
 }
 
 
+_REPO = Path(__file__).resolve().parent.parent
+_SAMPLE_NCT = _REPO / "modules" / "out" / "test_hello_tasks.nct"
+
+
 class SimDevice:
     def __init__(self, root: str | Path):
         self.root = Path(root)
@@ -104,6 +108,12 @@ class SimDevice:
             if not p.exists():
                 p.parent.mkdir(parents=True, exist_ok=True)
                 p.write_text(text, encoding="utf-8")
+        # 有 build 過的樣本 .nct → 放一份去 /tasks，--sim 都試得到容器檢視
+        if _SAMPLE_NCT.exists():
+            dst = self.root / "tasks" / _SAMPLE_NCT.name
+            if not dst.exists():
+                dst.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(_SAMPLE_NCT, dst)
 
     def _path(self, req: str) -> Path | None:
         if req is None:

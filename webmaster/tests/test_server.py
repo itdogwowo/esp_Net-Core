@@ -1,7 +1,12 @@
 import hashlib
+import sys
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _ncm_sample import make_container  # noqa: E402
 
 import nc4
 from server import create_app
@@ -228,3 +233,21 @@ def test_empty_file_and_file_changed_ws(client):
                 break
         else:
             assert False, "冇收到 file_changed"
+
+
+def test_container_view(client):
+    blob = make_container(cmds=(0x3101,), meta=True)
+    put = client.put("/api/file?path=/tasks/demo.nct", content=blob)
+    assert put.status_code == 200, put.text
+    r = client.get("/api/container?path=/tasks/demo.nct")
+    assert r.status_code == 200, r.text
+    data = r.json()["data"]
+    assert data["valid"] is True, data["errors"]
+    assert data["manifest"]["kind_name"] == "task"
+    assert data["manifest"]["cmds"] == [0x3101]
+    assert data["meta"]["requires"][0]["name"] == "gpio"
+
+    # 壞檔：仍然 200，但 valid=false 同有錯誤（UI 可以顯示原因）
+    client.put("/api/file?path=/tasks/bad.nct", content=b"not a container")
+    bad = client.get("/api/container?path=/tasks/bad.nct").json()["data"]
+    assert bad["valid"] is False and bad["errors"]
