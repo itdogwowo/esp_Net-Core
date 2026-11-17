@@ -77,3 +77,23 @@ endif()
 
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 project(esp_net_core)
+
+# ── 第三方 component 的 IDF 6 補丁（WAMR）────────────────────────
+# managed_components/ 唔入 git：依賴 resolver 喺 configure（project() 裡面）抓一份
+# 乾淨的上游落嚟。呢度喺 project() 之後、真正編譯之前套補丁；腳本 idempotent，
+# 已補過唔會再改（唔會令 WAMR 每次 configure 都重新編譯）。
+# 詳情同四個補丁位見 tools/patch_wamr.py 頂部註解。
+if(NOT CMAKE_SCRIPT_MODE_FILE)
+    find_package(Python3 COMPONENTS Interpreter QUIET)
+    if(Python3_Interpreter_FOUND)
+        execute_process(
+            COMMAND ${Python3_EXECUTABLE}
+                    "${CMAKE_CURRENT_LIST_DIR}/../tools/patch_wamr.py"
+                    --component "${CMAKE_CURRENT_LIST_DIR}/managed_components/espressif__wasm-micro-runtime"
+            RESULT_VARIABLE _wamr_patch_rc
+            OUTPUT_VARIABLE _wamr_patch_out)
+        if(NOT _wamr_patch_rc EQUAL 0)
+            message(WARNING "WAMR 補丁套用失敗：${_wamr_patch_out}")
+        endif()
+    endif()
+endif()

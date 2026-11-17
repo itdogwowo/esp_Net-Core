@@ -157,6 +157,7 @@ static uint8_t (*const s_usb_kind_lookup)(uint8_t) = nc_port_usb_kind;
 #include "nc_file_action.h"
 #ifdef NC_ENABLE_TESTS
 #include "nc_mod.h"
+#include "nc_mod_engine.h"
 #include "nc_res.h"
 #endif
 #include "nc_wifi.h"
@@ -366,6 +367,8 @@ static void seed_dirs(void)
         PRESET_DIR,
         MSC_MOUNT_POINT "/pixel",
         MSC_MOUNT_POINT "/pixel/effects",
+        // 外部任務（.nct）放這裡；ncm 開機掃描 /data/pixel/effects + /data/tasks。
+        MSC_MOUNT_POINT "/tasks",
     };
     for (size_t i = 0; i < sizeof(dirs) / sizeof(dirs[0]); i++) {
         if (mkdir(dirs[i], 0777) != 0 && errno != EEXIST) {
@@ -3576,7 +3579,10 @@ static esp_err_t task_ncm_start(const nc_task_res_view_t *res, int n)
 
 static const nc_task_loop_t s_ncm_loops[] = {
     { .name = "ncm", .fn = nc_mod_task, .arg = NULL,
-      .stack = 4096, .prio = NC_MOD_TASK_PRIO, .core = NC_MOD_TASK_CORE,
+      // 8 KB：tick 會經 wasm_runtime_call_wasm 入 WAMR 直譯器（C 棧），
+      // 4 KB 對 task_tick + native（print/gpio）太貼。exec env 自己的 operand
+      // stack 另計（WAMR_CALL_STACK）。
+      .stack = 8192, .prio = NC_MOD_TASK_PRIO, .core = NC_MOD_TASK_CORE,
       // period_ms = 0：幀週期由 manifest 的 fps 決定，nc_mod_task 自己延遲。
       // 兩邊都延遲會變成兩倍週期。
       .layer = 3, .period_ms = 0 },
@@ -4351,6 +4357,38 @@ static esp_err_t ph_commit(void)
 }
 
 // 開機階段：start
+#ifdef NC_ENABLE_TESTS
+// ncm 的開機載入：引擎 init + 模組實例化。
+// （整個區塊包喺 NC_ENABLE_TESTS：release 建置冇 ncm 模組／冇 WAMR 依賴。）
+//
+// **為什麼要另開 task**：main task 的棧只有 3,072 B（實測峰值 2.1 KB）。
+// WAMR 的 full_init／wasm_runtime_load／instantiate 會用幾 KB C 棧，
+// 喺 main task 度做會 stack overflow → panic → reboot loop，而且因為
+// console=none（S3 走 OTG），開機前段冇 log，症狀只係「USB 唔見咗」。
+// 用一個一次性的 8 KB task 做，做完即走，棧由 heap 來。
+// 仍然喺 B09（USB）之前 synchronous 完成：FAT 之後要交畀 host，模組要在
+// 交出去之前讀完。
+static SemaphoreHandle_t s_ncm_boot_done;
+
+static void ncm_boot_task(void *arg)
+{
+    (void)arg;
+    const esp_err_t berr = nc_mod_set_backend(nc_mod_wamr_backend());
+    if (berr == ESP_OK) {
+        const int n = nc_mod_load_all(&s_mod_scan);
+        ESP_LOGI(TAG, "ncm 模組載入：%d 個（%d 個被拒）", n, s_mod_scan.bad);
+    } else {
+        ESP_LOGW(TAG, "WAMR backend 起唔到（%s）→ 模組只登記、唔跑",
+                 esp_err_to_name(berr));
+        (void)nc_mod_load_all(&s_mod_scan);
+    }
+    if (s_ncm_boot_done != NULL) {
+        xSemaphoreGive(s_ncm_boot_done);
+    }
+    vTaskDelete(NULL);
+}
+#endif  // NC_ENABLE_TESTS（ncm 引擎／模組載入）
+
 static esp_err_t ph_start(void)
 {
     // ── ③ 任務啟動：資源 → on_start → 指令 → 準備 loop（還不開）──
@@ -4360,9 +4398,19 @@ static esp_err_t ph_start(void)
     //    （放在 start_all 之後：attach 會插入 registry，不能跟 start_all 同時走）
 #ifdef NC_ENABLE_TESTS
     if (nc_task_started("ncm")) {
-        nc_mod_load_all(&s_mod_scan);        // ③ 載入 payload（arena 已 commit）
-        // 模組的 tasks.json 條目已在 B06 的 nc_mod_merge_cfg 補寫；
-        // 不再呼叫 nc_task_sync_cfg()，否則 runtime 任務的 cfg_seen=false 會再補一次。
+        // ③ 載入 payload（arena 已 commit）。引擎 init 同實例化都喺 8 KB task 做，
+        //    原因見 ncm_boot_task 上面的註解。模組的 tasks.json 條目已在 B06 補寫；
+        //    不再呼叫 nc_task_sync_cfg()，否則 runtime 任務的 cfg_seen=false 會再補一次。
+        s_ncm_boot_done = xSemaphoreCreateBinary();
+        if (s_ncm_boot_done != NULL &&
+            xTaskCreate(ncm_boot_task, "ncm.boot", 8192, NULL, 3, NULL) == pdPASS) {
+            xSemaphoreTake(s_ncm_boot_done, portMAX_DELAY);
+        } else {
+            ESP_LOGW(TAG, "ncm.boot task 開唔到 → 喺 main task 直接載入（棧風險）");
+            ncm_boot_task(NULL);
+        }
+        vSemaphoreDelete(s_ncm_boot_done);
+        s_ncm_boot_done = NULL;
     }
 #endif
 

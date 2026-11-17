@@ -34,13 +34,22 @@ extern "C" {
 #define NC_MOD_PATH_MAX    80
 #define NC_MOD_MAX_CMDS    8      // manifest 最多宣告幾條指令（模組層另有上限）
 
-// 執行引擎插槽。現在只有 stub；WAMR 接進來時換掉 fn 表即可（不改上層）。
+// 執行引擎插槽。上層（loader／task／狀態）唔識 WAMR，只識這張表；
+// 引擎換掉（WAMR／stub／host 測試）唔需要改上層。
 typedef struct nc_mod nc_mod_t;
 
 typedef struct {
     const char *name;
+    // 一次初始化（boot 內單例）。arena 係 plan 給的 payload 儲存區，
+    // 引擎可以自己再要 heap（WAMR 用 custom allocator）。
     esp_err_t (*init)(void *arena, size_t bytes);
+    // 可選：模組 payload 已就緒（驗證／CRC 都過了）→ 載入並實例化。
+    // 回非 0 ＝ 這個模組不能跑（loader 會標 bad，但仍然留在表裡給人查）。
+    esp_err_t (*load)(nc_mod_t *ncm);
+    // 每次 tick 呼叫（效果＝一幀；任務＝一次 task_tick）。回非 0 → 標 bad。
     esp_err_t (*render)(nc_mod_t *ncm, uint32_t frame_id);
+    // 可選：卸載前回收（destroy env／deinstantiate／unload）。
+    void      (*unload)(nc_mod_t *ncm);
     void      (*deinit)(void);
 } nc_mod_backend_t;
 
@@ -64,6 +73,9 @@ esp_err_t nc_mod_unload(const char *name);
 nc_mod_t  *nc_mod_live(void);
 // 這個模組是 wasm 還是 aot（NC_MOD_FMT_*）；WAMR backend 用它決定 import 路徑
 uint8_t   nc_mod_module_format(const nc_mod_t *ncm);
+// 給 backend 用：模組名字（log 用）＋ payload 指標（loader 已由 arena 複製好）
+const char    *nc_mod_name(const nc_mod_t *ncm);
+const uint8_t *nc_mod_payload(const nc_mod_t *ncm, size_t *size);
 // 這顆晶片吃的 AOT target（NC_MOD_TARGET_*）；0 = 未知（只收 wasm）
 int       nc_mod_arch_target(void);
 

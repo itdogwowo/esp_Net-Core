@@ -22,6 +22,13 @@ CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
 # 早期訊息不會有。要拿回 USJ console 就把這行改回 USB_SERIAL_JTAG，並把
 # system.json 的 USB link kind 改回 usb_jtag（MSC 會失效）。
 CONFIG_ESP_CONSOLE_NONE=y
+# 診斷提示（外部任務／WAMR bring-up）：console=none 之下，USB 之前（B01–B08）
+# 的 log 同 panic backtrace 一律收唔到，症狀只係「USB 唔見咗」。懷疑有開機
+# crash 時，暫時把上面一行換成：
+#   # CONFIG_ESP_CONSOLE_NONE=y
+#   CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+# 用 USJ console 拿 B01–B08／panic 訊息，修好之後記得還原（OTG/CDC 行為不變，
+# 但 USJ 會在 USB 列舉前多一段 console 視窗）。
 # 不要 USJ secondary：OTG 與 USJ 共用 PHY
 CONFIG_ESP_CONSOLE_SECONDARY_NONE=y
 

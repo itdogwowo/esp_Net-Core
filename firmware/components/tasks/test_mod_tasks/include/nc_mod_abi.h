@@ -66,9 +66,41 @@ typedef struct {
 #define NC_MOD_EXPORT_PARAM   "fx_param"
 
 // ── host 提供給 guest 的 import ──
-// v0 刻意是**零個**：模組不能印字、不能讀時間、不能碰檔案。
-// 時間與幀號由 fx_render 的參數給；要更多能力必須升 abi，舊模組不受影響。
-#define NC_MOD_IMPORT_COUNT   0
+// 效果（v0）：零個 —— 時間與幀號由 fx_render 的參數給。
+//
+// **任務模組（v1，2026-11-17）：白名單 import**。任務要有「落手做嘢」的能力，
+// 所以開五個 host function；仍然係白名單制（不是全部開放），而且全部只經
+// host 做，guest 冇 pointer、冇 syscall、碰不到暫存器。
+//
+//   wasm import module = "env"
+//
+//   nc_print(ptr:i32, len:i32) -> i32   線性記憶體的一段文字寫去裝置 log
+//   nc_print_i32(v:i32)        -> i32   一個整數寫去 log（十進位，獨立一行）
+//   nc_print2(p1:i32,l1:i32,v1:i32,p2:i32,l2:i32,v2:i32) -> i32
+//                                       一行過印 "<文字1><v1> <文字2><v2>"
+//                                       （給「讀 GPIO 再 print」這類一行報告用）
+//   nc_gpio_read(pin:i32)      -> i32   讀 GPIO（第一次會設成輸入＋pull-up）
+//   nc_gpio_write(pin:i32,v)   -> i32   設成輸出再寫（回 0／-1）
+//   nc_gpio_toggle(pin:i32)    -> i32   反轉並回新電平（-1 = 失敗）
+//
+// 只准「安全腳位」：以下一律拒絕（回 -1）——
+//   0／3／45／46（boot strap）、7／8（本板 UART）、19／20（USB OTG）、
+//   26–37（SPI flash／octal PSRAM）、43／44（UART0 預設）。
+//
+#define NC_MOD_IMPORT_COUNT   6
+
+// 任務模組（.nct）的 export：task_tick 必需，task_init 可選。
+// 節奏 = manifest 的 fps（0 → 預設 10 ms）；budget_us 由 manifest 宣告。
+#define NC_MOD_ABI_TASK_VERSION 1
+#define NC_MOD_EXPORT_TASK_INIT  "task_init"
+#define NC_MOD_EXPORT_TASK_TICK  "task_tick"
+
+#define NC_MOD_IMPORT_PRINT      "nc_print"
+#define NC_MOD_IMPORT_PRINT_I32  "nc_print_i32"
+#define NC_MOD_IMPORT_PRINT2     "nc_print2"
+#define NC_MOD_IMPORT_GPIO_READ  "nc_gpio_read"
+#define NC_MOD_IMPORT_GPIO_WRITE "nc_gpio_write"
+#define NC_MOD_IMPORT_GPIO_TOGGLE "nc_gpio_toggle"
 
 // ── 每幀預算（host 量測；連續超支就降級）──
 #define NC_MOD_FRAME_BUDGET_US   16000   // 33 ms 幀的一半

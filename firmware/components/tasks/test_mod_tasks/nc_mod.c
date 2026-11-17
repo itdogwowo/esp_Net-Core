@@ -214,6 +214,10 @@ static void refresh_ok(void)
 // 拆不掉就不要清 —— 模組宣告還活在這個 slot 裡，清了會是 use-after-free。
 static esp_err_t release_slot(nc_mod_t *m)
 {
+    // 先收引擎那邊的資源（instance／module／exec env），之後才清 loader 的資料。
+    if (s_backend != NULL && s_backend->unload != NULL) {
+        s_backend->unload(m);
+    }
 #ifndef NC_MOD_HOST_TEST
     if (m->attached) {
         const esp_err_t e = nc_task_detach(m->name);
@@ -610,6 +614,18 @@ esp_err_t nc_mod_load_ex(const char *path, int level)
     slot->used = true;
     slot->ok = (s_backend != NULL);        // 沒有執行引擎時「載入成功但不能跑」
 
+    // 有引擎就即刻實例化（payload／CRC 已驗）。失敗唔踢走：留在表裡標 bad，
+    // 主機可以由 status 看到「呢個模組存在但載入引擎時失敗」，唔會靜靜消失。
+    if (slot->ok && s_backend->load != NULL) {
+        const esp_err_t lerr = s_backend->load(slot);
+        if (lerr != ESP_OK) {
+            ESP_LOGE(TAG, "%s：執行引擎載入失敗（%s）→ 標記 bad（唔會跑）",
+                     name, esp_err_to_name(lerr));
+            slot->bad = true;
+            slot->ok = false;
+        }
+    }
+
     const esp_err_t aerr = attach_module(slot);
     if (aerr != ESP_OK) {
         s_arena_used = arena_mark;
@@ -624,8 +640,8 @@ esp_err_t nc_mod_load_ex(const char *path, int level)
              mod_kind_name(slot->decl.kind),
              slot->decl.core, slot->ok ? 1 : 0);
 
-    if (s_live == NULL) {
-        nc_mod_select(name);                // 第一個自動上線
+    if (s_live == NULL && slot->ok && !slot->bad) {
+        nc_mod_select(name);                // 第一個「跑得動」的自動上線
     }
     return ESP_OK;
 }
@@ -913,6 +929,26 @@ esp_err_t nc_mod_unload(const char *name)
 uint8_t nc_mod_module_format(const nc_mod_t *ncm)
 {
     return ncm ? ncm->fmt : NC_MOD_FMT_WASM;
+}
+
+const char *nc_mod_name(const nc_mod_t *ncm)
+{
+    return ncm ? ncm->name : "?";
+}
+
+// payload 由 loader 從 arena 複製好，lifetime = 模組 lifetime（unload 才回收）。
+const uint8_t *nc_mod_payload(const nc_mod_t *ncm, size_t *size)
+{
+    if (ncm == NULL) {
+        if (size != NULL) {
+            *size = 0;
+        }
+        return NULL;
+    }
+    if (size != NULL) {
+        *size = ncm->payload_size;
+    }
+    return ncm->payload;
 }
 
 nc_mod_t *nc_mod_live(void)

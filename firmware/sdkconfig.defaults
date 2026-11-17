@@ -19,6 +19,25 @@ CONFIG_FATFS_LFN_HEAP=y
 CONFIG_FATFS_MAX_LFN=255
 CONFIG_FATFS_USE_LABEL=y
 
+# ── WASM 執行引擎（WAMR；ncm 外部任務用）────────────────────────
+# 只要解譯器：AOT／WASI libc／pthread／app-framework 全部關掉。
+#   · WASI libc 係 `espidf_file.c` 嘅來源；佢喺 IDF 6 編唔過（sys/stat.h 收緊、
+#     picolibc 冇 S_ISBLK）。模組唔會自己開檔（檔案由 host 經 NC4 寫），
+#     所以直接唔要 WASI。
+#   · AOT 要 wamrc 同 per-arch 映像，之後 P3 才做。
+CONFIG_WAMR_BUILD_RELEASE=y
+CONFIG_WAMR_ENABLE_INTERP=y
+CONFIG_WAMR_INTERP_FAST=y
+CONFIG_WAMR_INTERP_LOADER_NORMAL=y
+CONFIG_WAMR_ENABLE_AOT=n
+CONFIG_WAMR_ENABLE_LIBC_WASI=n
+CONFIG_WAMR_ENABLE_LIBC_BUILTIN=n
+CONFIG_WAMR_ENABLE_LIB_PTHREAD=n
+CONFIG_WAMR_ENABLE_APP_FRAMEWORK=n
+CONFIG_WAMR_ENABLE_MULTI_MODULE=n
+CONFIG_WAMR_ENABLE_REF_TYPES=n
+CONFIG_WAMR_ENABLE_SHARED_MEMORY=n
+
 # ── 系統 ──
 CONFIG_FREERTOS_HZ=1000
 # main 只負責開機（FAT/config/seed）＋之後心跳；實測峰值 ~2.1 KB

@@ -9,6 +9,16 @@ dependencies:
       - if: "target in [esp32s3, esp32s2, esp32p4]"
   espressif/cjson: '*'
 
+  # ── WASM 執行引擎（ncm 外部任務）────────────────────────────────
+  # WAMR 只在 S3 上接（Xtensa 解譯器）；P4 要等 AOT 路徑一起驗再加。
+  # 只有 NC_ENABLE_TESTS 的建置會引用它（nc_mod_engine.c），release 唔會 link
+  # 任何 WAMR 符號 —— 但 component 本身仍然會 build（component manager 唔識
+  # NC_ENABLE_TESTS 這個 CMake 變數）。
+  espressif/wasm-micro-runtime:
+    version: ^2.4.0
+    rules:
+      - if: "target == esp32s3"
+
   # ── P4：Wi-Fi 由外掛協處理器提供（ESP-Hosted）────────────────────────
   # P4 冇 radio，板上另有一顆 ESP32-C6／C5（或其他型號）做 Wi-Fi/BLE。
   # esp_wifi_remote 提供與 esp_wifi 相同的 API（nc_wifi.c 一行都不用改），

@@ -56,6 +56,7 @@ enum {
 
 typedef struct {
     bool busy;              // 有 session（writing）
+    volatile bool pausing;  // BEGIN 一入嚟就 true（erase 期間都算），END／ABORT 清
     bool verified;
     esp_ota_handle_t handle;
     const esp_partition_t *target;
@@ -168,11 +169,17 @@ static void reply_ack(nc4_ctx_t *ctx, uint32_t offset)
 
 static void on_begin_impl(nc4_ctx_t *ctx, const nc4_frame_t *f)
 {
+    // 由呢一刻開始，外部任務的 tick 要停：下面 esp_ota_begin() 會即場 erase
+    // 整個分區（1.3 MB ≈5 s），期間 flash cache 暫停、另一核會被 park；
+    // 如果 WAMR 仲喺度由 flash 執行程式碼，task watchdog 會炸（實測 rst=6）。
+    s_ota.pausing = true;
     if (s_ota.busy) {
+        s_ota.pausing = false;
         reply_error(ctx, E_BEGIN_PARTITION_CONFLICT, 0);
         return;
     }
     if (f->len < 38) {
+        s_ota.pausing = false;
         reply_error(ctx, E_BEGIN_SIZE_TOO_BIG, 0);
         return;
     }
@@ -187,10 +194,12 @@ static void on_begin_impl(nc4_ctx_t *ctx, const nc4_frame_t *f)
 
     const esp_partition_t *part = esp_ota_get_next_update_partition(NULL);
     if (part == NULL) {
+        s_ota.pausing = false;
         reply_error(ctx, E_BEGIN_NO_PARTITION, 0);
         return;
     }
     if (image_size > part->size || chunk_size > OTA_MAX_CHUNK) {
+        s_ota.pausing = false;
         reply_error(ctx, E_BEGIN_SIZE_TOO_BIG, 0);
         return;
     }
@@ -198,6 +207,7 @@ static void on_begin_impl(nc4_ctx_t *ctx, const nc4_frame_t *f)
     esp_err_t err = esp_ota_begin(part, image_size, &s_ota.handle);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "esp_ota_begin: %s", esp_err_to_name(err));
+        s_ota.pausing = false;
         reply_error(ctx, E_BEGIN_NO_PARTITION, 0);
         return;
     }
@@ -273,6 +283,7 @@ static void on_end_impl(nc4_ctx_t *ctx, const nc4_frame_t *f)
         ESP_LOGE(TAG, "sha256 不符（收到 %u bytes）", (unsigned)s_ota.written);
         esp_ota_abort(s_ota.handle);
         s_ota.busy = false;
+        s_ota.pausing = false;
         reply_error(ctx, E_END_VALIDATE_FAIL, (uint32_t)s_ota.written);
         return;
     }
@@ -281,12 +292,14 @@ static void on_end_impl(nc4_ctx_t *ctx, const nc4_frame_t *f)
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "esp_ota_end: %s", esp_err_to_name(err));
         s_ota.busy = false;
+        s_ota.pausing = false;
         reply_error(ctx, E_END_VALIDATE_FAIL, (uint32_t)s_ota.written);
         return;
     }
 
     s_ota.busy = false;
     s_ota.verified = true;
+    s_ota.pausing = false;      // 唔再掂 flash；等 APPLY（或 host 決定唔 apply）
     ESP_LOGW(TAG, "OTA_END 驗證通過（%u bytes，目標 %s）",
              (unsigned)s_ota.written, s_ota.target->label);
     reply_state(ctx);
@@ -305,6 +318,7 @@ static void on_abort_impl(nc4_ctx_t *ctx, const nc4_frame_t *f)
     }
     s_ota.verified = false;
     s_ota.written = 0;
+    s_ota.pausing = false;
     ESP_LOGW(TAG, "OTA_ABORT");
     reply_state(ctx);
 }
@@ -431,6 +445,11 @@ static const nc_action_t s_ota_actions[] = {
 };
 
 NC_ACTION_TABLE_DEF(nc_ota_action_table, "ota", s_ota_actions);
+
+bool nc_ota_action_paused(void)
+{
+    return s_ota.pausing;
+}
 
 void nc_ota_action_init(void)
 {
