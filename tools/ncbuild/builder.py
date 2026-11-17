@@ -65,10 +65,11 @@ def _prepare_target(port: env.Port, cfg: dict, idf: Path, log: Path | None,
 def build(cfg: dict, board_query: str | None, *, minimal: bool = False,
           jobs: int | None = None, clean: bool = False, fresh: bool = False,
           do_doctor: bool = True, do_archive: bool | None = None,
-          tests: bool = False) -> int:
-    port = env.resolve_board(board_query)
+          tests: bool = False, project: str | None = None,
+          no_project: bool = False) -> int:
+    port = env.resolve_board(board_query, project=project, no_project=no_project)
     d, b, chip = port.hw, port.board, port.chip
-    board = port.name
+    board = port.output_name
     idf = env.idf_path_for(chip, cfg)
     build = env.build_dir(cfg, port)
 
@@ -193,15 +194,17 @@ def build_all(cfg: dict, *, minimal: bool = False, jobs: int | None = None,
 
 def flash(cfg: dict, board_query: str | None, *, port: str | None = None,
           mode: str = "app", minimal: bool = False, no_build: bool = False,
-          dry_run: bool = False, tests: bool = False) -> int:
-    pt = env.resolve_board(board_query)
+          dry_run: bool = False, tests: bool = False,
+          project: str | None = None, no_project: bool = False) -> int:
+    pt = env.resolve_board(board_query, project=project, no_project=no_project)
     b = pt.board
-    board = pt.name
+    board = pt.output_name
     idf = env.idf_path_for(pt.chip, cfg)
     build = env.build_dir(cfg, pt)
 
     if not no_build:
-        rc = build(cfg, board_query, minimal=minimal, do_doctor=False, tests=tests)
+        rc = build(cfg, board_query, minimal=minimal, do_doctor=False, tests=tests,
+                   project=project, no_project=no_project)
         if rc != 0:
             return rc
 
@@ -240,8 +243,9 @@ def flash(cfg: dict, board_query: str | None, *, port: str | None = None,
 
 
 def monitor(cfg: dict, board_query: str | None, port: str | None = None,
-            dry_run: bool = False) -> int:
-    pt = env.resolve_board(board_query)
+            dry_run: bool = False, project: str | None = None,
+            no_project: bool = False) -> int:
+    pt = env.resolve_board(board_query, project=project, no_project=no_project)
     idf = env.idf_path_for(pt.chip, cfg)
     build = env.build_dir(cfg, pt)
     p = env.pick_port(cfg, port)
@@ -283,20 +287,27 @@ def clean(cfg: dict, full: bool = False) -> int:
     return 0
 
 
-def show_config(cfg: dict, board_query: str | None) -> int:
+def show_config(cfg: dict, board_query: str | None, *,
+                project: str | None = None, no_project: bool = False) -> int:
     import board as boardmod   # tools/board.py
 
-    pt = env.resolve_board(board_query)
+    pt = env.resolve_board(board_query, project=project, no_project=no_project)
     d, b, chip = pt.hw, pt.board, pt.chip
     merged = boardmod.effective_config(d)
     hw_profiles = b.get("profiles") or []
-    pj_profiles = (boardmod.load_project(pt.pj).get("profiles") or []) if pt.pj else []
+    default = boardmod.default_project_for_hardware(d)
+    if pt.pj is None:
+        proj = "—（純硬體，冇 project 預置）"
+    else:
+        tag = "default" if pt.pj == default else "非 default"
+        proj = f"{pt.pj_rel}（{tag}）"
     print(f"硬體板    {b.get('name')}  ({chip})   {pt.hw_rel}")
-    print(f"project   {pt.pj_rel or '—'}")
+    print(f"project   {proj}")
+    print(f"輸出名    {pt.output_name}")
     print(f"IDF       {env.idf_path_for(chip, cfg)}")
     print(f"build     {env.build_dir(cfg, pt)}")
     print(f"設定檔    {cfg.get('_path', '（預設值）')}")
-    print(f"profiles  hardware={', '.join(hw_profiles) or '—'}  project={', '.join(pj_profiles) or '—'}")
+    print(f"profiles  hardware={', '.join(hw_profiles) or '—'}（project 冇 build 設定）")
     print(f"驗證日    {b.get('verified') or '（未驗證）'}")
     print("\nboard.json：")
     for k in ("flash", "psram", "cpu_mhz", "console", "features"):

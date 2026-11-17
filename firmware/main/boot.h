@@ -24,7 +24,8 @@
 // 階段之間**不要**再用 main.c 的 static 互相傳 —— 那些是實作細節，
 // 它們的壽命、誰先寫誰先讀，全靠閱讀順序去猜。
 //
-// 現在 ctx 只收得落「核數 + USB（人格＋組）」六個欄位（2026-11-13）。其餘階段**刻意未搬**：
+// 現在 ctx 只收得落「核數 + USB（人格＋組）」六個決定欄位＋一個 ready 能力位帳
+// （2026-11-13；ready 由 boot.c 執行器維護）。其餘階段**刻意未搬**：
 // 每搬一個欄位 = 一個階段從「static 互傳」變成「契約的一部份」。
 // 搬的時候只改三處：ctx 加欄位、階段寫它、讀者改讀它 —— 一次一個。
 //
@@ -62,7 +63,7 @@ typedef struct {
 
     // ② USB（NC_CAP_USB）：模式 + NC4 那條 link 的名字 + 兩個執行期閘
     nc_usb_mode_t usb_mode;
-    const char *usb_link;   // "CDC" / "usb_jtag" / NULL
+    const char *usb_link;   // 實際 link 名（cdc0／usb_jtag0…）/ NULL
     bool usb_log;           // 要不要開 log 管道
     bool usb_msc;           // 要不要把 FAT 交給 host（只有 OTG 有）
 
@@ -84,7 +85,7 @@ nc_boot_ctx_t *nc_boot_ctx(void);
 // 名字刻意用 CAP 而唔係 STAGE：位元唔係階段，只係階段留下的痕跡。
 #define NC_CAP_NVS       0x0001u   // 日誌／NVS 可用
 #define NC_CAP_STORAGE   0x0002u   // /data 可用（APP 模式）
-#define NC_CAP_CONFIG    0x0004u   // config 三層已載入（system／hardware／network）
+#define NC_CAP_CONFIG    0x0004u   // config 已載入（system／hardware／tasks；network 仍由各模塊自己讀）
 #define NC_CAP_CORES     0x0008u   // 核數已探測（nc_core_count() 有答案）
 #define NC_CAP_USB       0x0010u   // USB 模式／link 名已定
 #define NC_CAP_ROUTER    0x0020u   // 線 → 核 的路由表已定

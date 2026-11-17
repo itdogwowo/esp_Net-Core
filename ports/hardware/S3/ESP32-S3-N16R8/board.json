@@ -12,7 +12,7 @@
     "mode": "octal",
     "speed_mhz": 80
   },
-  "cpu_mhz": 160,
+  "cpu_mhz": 240,
   "console": "usb-serial-jtag",
   "profiles": [],
   "features": {

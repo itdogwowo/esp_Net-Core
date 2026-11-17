@@ -10,7 +10,7 @@
 //
 // 出廠預設：**有 USJ 就用 USJ**（ROM 自帶 CDC-ACM，開機就有、唔靠 TinyUSB，
 // 而且 esptool／console 都喺同一條線 → 最適合第一次 bring-up）。
-// 只有 OTG、冇 USJ 的晶片（S2）才預設 "CDC"。
+// 只有 OTG、冇 USJ 的晶片（S2）才預設 "cdc0"。
 // 兩者的 link 名同 kind 不同；用戶改 config 的 kind 就是「換 personality」。
 //
 // 呢張表要同 tools/board.py 的 CHIP_DIR 保持同一批 target；新增晶片時兩邊一齊加。
@@ -21,28 +21,28 @@
 
 static const nc_cfg_chip_t k_chips[] = {
     { .id = "esp32s3", .cores = 2, .usb_otg = true, .usb_serial_jtag = true,
-      .usb_shared_phy = true, .usb_link = "usb_jtag", .usb_kind = NC_LINK_USBJTAG,
+      .usb_shared_phy = true, .usb_link = "usb_jtag0", .usb_kind = NC_LINK_USBJTAG,
       .usb_rx_region = NC_CFG_USB_RX_REGION },
     { .id = "esp32s2", .cores = 1, .usb_otg = true,
-      .usb_link = "CDC", .usb_kind = NC_LINK_CDC,
+      .usb_link = "cdc0", .usb_kind = NC_LINK_CDC,
       .usb_rx_region = NC_CFG_USB_RX_REGION },
     { .id = "esp32p4", .cores = 2, .usb_otg = true, .usb_otg_hs = true,
-      .usb_serial_jtag = true, .usb_link = "usb_jtag", .usb_kind = NC_LINK_USBJTAG,
+      .usb_serial_jtag = true, .usb_link = "usb_jtag0", .usb_kind = NC_LINK_USBJTAG,
       .usb_rx_region = NC_CFG_USB_RX_REGION },
     { .id = "esp32c3", .cores = 1, .usb_serial_jtag = true,
-      .usb_link = "usb_jtag", .usb_kind = NC_LINK_USBJTAG,
+      .usb_link = "usb_jtag0", .usb_kind = NC_LINK_USBJTAG,
       .usb_rx_region = NC_CFG_USB_RX_REGION },
     { .id = "esp32c5", .cores = 1, .usb_serial_jtag = true,
-      .usb_link = "usb_jtag", .usb_kind = NC_LINK_USBJTAG,
+      .usb_link = "usb_jtag0", .usb_kind = NC_LINK_USBJTAG,
       .usb_rx_region = NC_CFG_USB_RX_REGION },
     { .id = "esp32c6", .cores = 1, .usb_serial_jtag = true,
-      .usb_link = "usb_jtag", .usb_kind = NC_LINK_USBJTAG,
+      .usb_link = "usb_jtag0", .usb_kind = NC_LINK_USBJTAG,
       .usb_rx_region = NC_CFG_USB_RX_REGION },
     { .id = "esp32c61", .cores = 1, .usb_serial_jtag = true,
-      .usb_link = "usb_jtag", .usb_kind = NC_LINK_USBJTAG,
+      .usb_link = "usb_jtag0", .usb_kind = NC_LINK_USBJTAG,
       .usb_rx_region = NC_CFG_USB_RX_REGION },
     { .id = "esp32h2", .cores = 1, .usb_serial_jtag = true,
-      .usb_link = "usb_jtag", .usb_kind = NC_LINK_USBJTAG,
+      .usb_link = "usb_jtag0", .usb_kind = NC_LINK_USBJTAG,
       .usb_rx_region = NC_CFG_USB_RX_REGION },
     // 冇 USB 的晶片也要有一行：預設會因此只剩 UART，而不是硬砌一條永遠起不來的 CDC。
     { .id = "esp32", .cores = 2 },

@@ -278,6 +278,8 @@ static void parse_links(const cJSON *root, nc_system_cfg_t *out, nc_cfg_stat_t *
         }
         nc_link_cfg_t l;
         memset(&l, 0, sizeof(l));
+        l.usb_port = NC_CFG_USB_PORT_NONE;
+        l.msc = 0;
 
         const cJSON *nm = item(it, "name");
         const cJSON *kd = item(it, "kind");
@@ -285,7 +287,12 @@ static void parse_links(const cJSON *root, nc_system_cfg_t *out, nc_cfg_stat_t *
                              ? kd->valuestring : NULL;
         char iface_from_kind[8] = "any";
         bool composite = false;
-        if (kind_s != NULL) {
+        bool usb_family = false;
+        if (kind_s != NULL && strcasecmp(kind_s, "usb") == 0) {
+            // kind:"usb" = 硬件類別；personality/index 由 USB.list index 決定。
+            l.kind = NC_LINK_CDC;       // 臨時；下面 index 解析後再定
+            usb_family = true;
+        } else if (kind_s != NULL) {
             if (!kind_parse_transport(kind_s, &l.kind, iface_from_kind,
                                       sizeof(iface_from_kind), &composite)) {
                 st->invalid++;
@@ -318,6 +325,28 @@ static void parse_links(const cJSON *root, nc_system_cfg_t *out, nc_cfg_stat_t *
         }
 
         l.enable = get_bool(it, "enable", true, st);
+
+        // usb = hardware.json USB.list 的 index；讓 link 由「虛無的 kind」
+        // 变成「指向具體 USB port」。未寫 = NONE。
+        const cJSON *usb = item(it, "usb");
+        if (usb != NULL) {
+            if (!cJSON_IsNumber(usb) || usb->valuedouble < 0 || usb->valuedouble > 15) {
+                st->invalid++;
+                continue;
+            }
+            l.usb_port = (uint8_t)usb->valueint;
+        }
+
+        // msc：per-link；未寫 = -1（USB link 會 fallback 去 global usb.msc）
+        const cJSON *msc = item(it, "msc");
+        if (msc != NULL) {
+            if (!cJSON_IsBool(msc) && !cJSON_IsNumber(msc)) {
+                st->invalid++;
+                continue;
+            }
+            l.msc = cJSON_IsBool(msc) ? (cJSON_IsTrue(msc) ? 1 : 0)
+                                      : (msc->valueint ? 1 : 0);
+        }
         const cJSON *port_top = item(it, "port");
         const cJSON *port_cfg = item(item(it, "cfg"), "port");
         l.port = (uint16_t)get_int(it, "port",
@@ -355,11 +384,18 @@ static void parse_links(const cJSON *root, nc_system_cfg_t *out, nc_cfg_stat_t *
             continue;
         }
 
-        if (nm != NULL) {
-            // 有寫 name 就一定用它；太長／型別錯 = 這條不合法，不可以靜靜改成
-            // kind+index（那會令用戶以為自己寫的名字生效了）。
-            if (!cJSON_IsString(nm) || nm->valuestring == NULL ||
-                nm->valuestring[0] == '\0' || strlen(nm->valuestring) >= NC_CFG_NAME_MAX) {
+        // name 優先序：
+        //   1. 有寫非空 name → 用它（太長／型別錯 = invalid）；
+        //   2. 冇寫，或寫了空字串 "" → 用自動生成名（格式統一）；
+        //   3. 冇 name 又冇 kind → invalid。
+        const bool name_given = (nm != NULL && cJSON_IsString(nm) &&
+                                 nm->valuestring != NULL && nm->valuestring[0] != '\0');
+        if (nm != NULL && !cJSON_IsString(nm)) {
+            st->invalid++;
+            continue;
+        }
+        if (name_given) {
+            if (strlen(nm->valuestring) >= NC_CFG_NAME_MAX) {
                 st->invalid++;
                 continue;
             }
@@ -512,10 +548,20 @@ static void parse_routes(const cJSON *root, nc_system_cfg_t *out, nc_cfg_stat_t 
 // 起點是 generated 的 nc_port.c（build 時由 wiring.json 編成），所以「缺席 = 用板級預設」；
 // 這裡只做用戶 JSON 的逐欄位覆蓋，不再需要另一張 preset 表。
 
+// ETH：{ "ETH": {"enable":1,"driver":"rmii|spi","phy_type":"IP101","phy_addr":1,
+//                 "GPIO":{"mdc":31,"mdio":52,"ref_clk":50,
+//                         "spi":0,"cs":13,"rst":14,"int":15}} }
+// GPIO 可以 nested（舊 Network.lan.GPIO 寫法）或 flat（舊 hardware.json）；
+// nested 優先。SPI 的 GPIO.spi 是 spi_list 的 index，不是 pin。
+static int eth_gpio_int(const cJSON *o, const cJSON *gpio, const char *key,
+                        int def, nc_cfg_stat_t *st)
+{
+    return get_int(cJSON_IsObject(gpio) ? gpio : o, key, def, -1, NC_CFG_GPIO_MAX, st);
+}
+
 // ETH（RMII）：{ "ETH": {"enable":1,"mdc":31,"mdio":52,"ref_clk":50,
 //                        "phy_type":"IP101","phy_addr":1} }
-// spi / cs / rst / int 是 SPI 接線的 PHY 用的欄位：認得（不計 unknown）但唔解析 ——
-// IDF 6 的 RMII 驅動不需要它們，要用再補型別（現在解析了也只是假裝有作用）。
+// spi / cs / rst / int 是 SPI 接線的 PHY 用的欄位；spi 是 spi_list index。
 static void apply_eth(const cJSON *root, nc_hardware_cfg_t *out, nc_cfg_stat_t *st)
 {
     nc_eth_cfg_t *e = &out->eth;
@@ -530,16 +576,48 @@ static void apply_eth(const cJSON *root, nc_hardware_cfg_t *out, nc_cfg_stat_t *
     }
     e->present = true;          // 有寫就算數 —— 即使 enable=0（明確關閉）
     static const char *const keys[] = {
-        "enable", "mdc", "mdio", "ref_clk", "phy_type", "phy_addr",
-        "spi", "cs", "rst", "int", "_comment",
+        "enable", "driver", "GPIO", "mdc", "mdio", "ref_clk", "phy_type", "phy_addr",
+        "bus", "spi", "cs", "rst", "int", "_comment",
     };
     note_unknown(o, keys, sizeof(keys) / sizeof(keys[0]), st);
 
     e->enable   = get_bool(o, "enable", false, st);
-    e->mdc      = (int8_t)get_int(o, "mdc", -1, -1, NC_CFG_GPIO_MAX, st);
-    e->mdio     = (int8_t)get_int(o, "mdio", -1, -1, NC_CFG_GPIO_MAX, st);
-    e->ref_clk  = (int8_t)get_int(o, "ref_clk", -1, -1, NC_CFG_GPIO_MAX, st);
-    e->phy_addr = (uint8_t)get_int(o, "phy_addr", 1, 0, 31, st);
+
+    // driver：RMII（預設，內建 EMAC）或 SPI（W5500 類；driver 未實作）。
+    // 寫錯值 → 回 RMII + invalid，不會靜靜當成 SPI。
+    {
+        char drv[8];
+        get_str(o, "driver", drv, sizeof(drv), "rmii", st);
+        if (strcasecmp(drv, "rmii") == 0) {
+            e->driver = NC_ETH_DRIVER_RMII;
+        } else if (strcasecmp(drv, "spi") == 0 || strcasecmp(drv, "w5500") == 0) {
+            e->driver = NC_ETH_DRIVER_SPI;
+        } else {
+            st->invalid++;
+            e->driver = NC_ETH_DRIVER_RMII;
+        }
+    }
+
+    const cJSON *gpio = item(o, "GPIO");
+    e->mdc      = (int8_t)eth_gpio_int(o, gpio, "mdc", -1, st);
+    e->mdio     = (int8_t)eth_gpio_int(o, gpio, "mdio", -1, st);
+    e->ref_clk  = (int8_t)eth_gpio_int(o, gpio, "ref_clk", -1, st);
+    // GPIO.spi = spi_list index；亦接受舊 flat "spi"／"bus" 作兼容。
+    if (cJSON_IsObject(gpio)) {
+        e->spi_idx = (int8_t)get_int(gpio, "spi", -1, -1, 8, st);
+    } else {
+        int idx = get_int(o, "spi", -1, -1, 8, st);
+        if (idx < 0) {
+            idx = get_int(o, "bus", -1, -1, 8, st);
+        }
+        e->spi_idx = (int8_t)idx;
+    }
+    e->cs       = (int8_t)eth_gpio_int(o, gpio, "cs", -1, st);
+    e->rst      = (int8_t)eth_gpio_int(o, gpio, "rst", -1, st);
+    e->int_pin  = (int8_t)eth_gpio_int(o, gpio, "int", -1, st);
+    // SPI 未用 phy_addr → -1；RMII 預設 1。
+    e->phy_addr = (int8_t)get_int(o, "phy_addr",
+                                 e->driver == NC_ETH_DRIVER_SPI ? -1 : 1, -1, 31, st);
     {
         char phy[NC_CFG_PHY_NAME_MAX];
         get_str(o, "phy_type", phy, sizeof(phy), "IP101", st);
@@ -763,7 +841,7 @@ esp_err_t nc_cfg_apply_hardware(const cJSON *root, nc_hardware_cfg_t *out, nc_cf
     }
     static const char *const root_keys[] = {
         "version", "_comment", "_gpio_convention",
-        "ETH", "PIN", "SPI", "I2C", "I80", "UART", "I2S", "PWM", "SDIO", "ENC", "XL9555",
+        "ETH", "USB", "PIN", "SPI", "I2C", "I80", "UART", "I2S", "PWM", "SDIO", "ENC", "XL9555",
     };
     note_unknown(root, root_keys, sizeof(root_keys) / sizeof(root_keys[0]), st);
 
@@ -1176,9 +1254,11 @@ esp_err_t nc_cfg_boot_ex(const char *hw_base_json, size_t hw_base_len)
              (unsigned)s_sys_stat.unknown);
     // ETH 的「未寫」與「關閉」要分得出來：前者用內建腳位，後者真的不啟動。
     const char *eth_state = !s_hw.eth.present ? "未寫(內建)" : (s_hw.eth.enable ? "開" : "關");
-    ESP_LOGI(TAG, "hardware: eth=%s mdc=%d mdio=%d refclk=%d %s@%u；sdio=%u%s%s（def=%u inv=%u unk=%u）",
-             eth_state, s_hw.eth.mdc, s_hw.eth.mdio, s_hw.eth.ref_clk,
-             nc_cfg_phy_name(s_hw.eth.phy_type), (unsigned)s_hw.eth.phy_addr,
+    ESP_LOGI(TAG, "hardware: eth=%s driver=%s mdc=%d mdio=%d refclk=%d %s@%u；sdio=%u%s%s（def=%u inv=%u unk=%u）",
+             eth_state,
+             s_hw.eth.driver == NC_ETH_DRIVER_SPI ? "SPI" : "RMII",
+             s_hw.eth.mdc, s_hw.eth.mdio, s_hw.eth.ref_clk,
+             nc_cfg_phy_name(s_hw.eth.phy_type), (int)s_hw.eth.phy_addr,
              (unsigned)s_hw.n_sdio,
              s_hw_stat.missing ? " 缺檔" : "",
              s_hw_stat.bad_json ? " 壞檔" : "",

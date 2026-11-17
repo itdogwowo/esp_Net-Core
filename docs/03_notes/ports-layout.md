@@ -25,7 +25,8 @@ ports/P4/ESP32-P4-ETH/
 - `network.json` 的 IP 是「這個現場」——項目／部署決定。
 - `wiring.json` 的腳位是「這塊板焊成怎樣」——硬體決定，換項目不變。
 
-分成兩層之後，同一塊硬體可以掛多個 project，build 時自由組合。
+分成兩層之後，同一塊硬體可以掛多個 project，各自帶自己的 runtime 預置；
+build 能力只由硬體板決定（project 唔會改 Kconfig）。
 
 ---
 
@@ -40,9 +41,8 @@ ports/
 │  ├─ sdkconfig.defaults      F.build   硬體事實 + 硬體能力碎片
 │  ├─ partitions.csv          這塊 flash 的分割表（可選）
 │  └─ README.md
-├─ project/<chip>/<board>/
-│  ├─ project.json            F.project name / hardware / profiles / seed
-│  ├─ sdkconfig.defaults      F.build   項目能力碎片（可選）
+├─ project/<chip>/<board>/     **只有 runtime 設定，冇 build 設定**
+│  ├─ project.json            F.project name / hardware / seed
 │  └─ data/config/*.json      F.preset  system / network / tasks
 ├─ _profiles/                 能力碎片（eth-rmii / nc4-ws / nc4-udp / wifi-hosted-*）
 ├─ _chips/                    別名 chip profile（ST7789 / GT1151Q …，driver.json 引用）
@@ -56,10 +56,21 @@ ports/
   "version": 1,
   "name": "ESP32-P4-ETH",
   "hardware": "P4/ESP32-P4-ETH",   // 必要：指回硬體層
-  "profiles": ["nc4-ws", "nc4-udp"],
-  "seed": ["system", "network", "tasks"]
+  "seed": ["system", "network", "tasks"],
+  "default": true                  // 可選：`build <硬體板>` 冇 --project 時用這個
 }
 ```
+
+### 2.1 命名（2026-11-16 定案）
+
+目錄名／`name`／project 名 = **`<CHIP>-<Identity>`**；品牌、型號、板本寫
+`board.json` 的 `brand`／`model`／`rev`，不進目錄名。改名要留 `aliases`。
+完整規則、現有板子清單與檢查方式見 [ports/README.md §10](../../ports/README.md)。
+
+**2026-11-16 改名**：`ESP32-P4-C6` → **`ESP32-P4-FireBeetle2`**
+（DFRobot FireBeetle 2 ESP32-P4／DFR1172；舊名與 `P4-C6` 都寫進 `aliases`，
+`make.py build ESP32-P4-C6` 仍然解析得到）。同日新增 `ESP32-S3-Mini-Nano`
+（通用 S3-N16R8 白牌板）。
 
 ### 能力碎片放哪一層
 
@@ -67,26 +78,31 @@ ports/
 |---|---|---|
 | `eth-rmii` | hardware | 板上有沒有 EMAC／PHY 是硬體事實 |
 | `wifi-hosted-c6` | hardware | 外掛 C6 是板載硬體 |
-| `nc4-ws` / `nc4-udp` | project | 同一個硬體可以只跑 TCP，也可以加 WS／UDP |
+| `nc4-ws` / `nc4-udp` | hardware | 2026-11-16 修正：**project 唔再有 build 設定**；同一塊板要 WS／UDP 就開在硬體板的 profiles（重 build 一次，所有 project 共用同一個 binary） |
+
+> **project 只放 runtime 設定**（`project.json` ＋ `data/config/*.json`）。換部署 = 換
+> project 的 data/config，不需要重 build；要改 build 能力 = 改 hardware 的 profiles 並重 build。
 
 build 的 `SDKCONFIG_DEFAULTS` 次序：
 
 ```text
-firmware/sdkconfig.defaults → hardware/sdkconfig.defaults → project/sdkconfig.defaults
+firmware/sdkconfig.defaults → hardware/sdkconfig.defaults
 ```
 
-後者勝。`tools/board.py sync` 會把兩層的 `profiles` 分別寫進各自的
-`sdkconfig.defaults` 檔尾 marker 區塊。
+後者勝。`tools/board.py sync` 只會把 hardware 的 `profiles` 寫進
+`hardware/sdkconfig.defaults` 檔尾 marker 區塊；project 層冇 build 設定可以同步。
 
 ---
 
 ## 3. build 時怎麼指定
 
 ```bash
-python3 make.py build ESP32-P4-ETH        # 硬體板名 → 自動配同名 project
+python3 make.py build ESP32-P4-ETH                  # 硬體 + default project
+python3 make.py build ESP32-P4-ETH --project Demo    # 指定 project（短名可）
+python3 make.py build ESP32-P4-ETH --no-project      # 純硬體
 python3 make.py build P4/ESP32-P4-ETH     # <chip>/<board>
 python3 make.py build <project 名>        # project 名 → 由 project.json 找硬體
-python3 make.py build --all               # 每塊硬體板各建一次
+python3 make.py build --all               # 每塊硬體板各建一次（各自 default project）
 ```
 
 解析規則（`tools/ncbuild/env.py::resolve_board`）：
@@ -251,9 +267,17 @@ data      0x820000   0x1700000    ← 由 7 MB 增到 23 MB
 
 ## 7. 驗收清單
 
-- [x] `python3 tools/board.py list` 看到 5 塊硬體板 × 5 個 project
-- [x] `python3 tools/board.py check` 0 error
+- [x] `python3 tools/board.py list` 看到 **7 塊硬體板 × 7 個 project**
+      （2026-11-16 新增 S3-Mini-Nano、P4-C6 改名 FireBeetle2）
+- [x] `python3 tools/board.py check` 0 error（4 個「冇 driver.json」warning，都係 USB-only 板）
 - [x] `tools/ncportgen.py` 對每塊板產生 `nc_port.c` / `preset_hardware.json`
+- [x] `python3 tools/board.py resolve ESP32-P4-C6`／`P4-C6`／`S3-Mini-Nano` 都由 alias 命中
+- [x] project 層冇 `sdkconfig.defaults`／`profiles`（`board.py check` 會擋）
 - [x] `idf.py build` 兩個 target（IDF 6.1：P4-ETH `0xff040`、S3-N16R8 `0x118e90`）
+- [x] 2026-11-16 本機 IDF 6.0.3：`ESP32-S3-Mini-Nano` `0x114f90`（1.1 MB）、
+      `ESP32-P4-FireBeetle2` `0xfd5f0`（1013.5 KB，75% free）
+- [x] project 選擇：default／`--project Demo`／`--no-project` 三種都 build 過；
+      preset 真係嵌入 firmware（`nm` 見到 `_binary_preset_*`；default `0xfcff0`、
+      Demo `0xfad60`、bare `0xfacd0`）
 - [ ] 上板：`hardware.json` 缺失時仍用 generated 預設開機
 - [ ] 上板：P4-ETH `--full` 後 `/data` 仍掛得起來

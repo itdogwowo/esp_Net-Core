@@ -1,0 +1,30 @@
+{
+  "_comment": "硬體事實（F.spec）。改這裡 = 要重新 build；runtime 可改的放 project 層的 data/config。能力碎片只放硬體能力（eth/wifi）；項目能力（ws/udp）在 project.json。",
+  "name": "ESP32-S3-Mini-Nano",
+  "chip": "esp32s3",
+  "flash": {
+    "size_mb": 16,
+    "freq_mhz": 80,
+    "mode": "dio"
+  },
+  "psram": {
+    "size_mb": 8,
+    "mode": "octal",
+    "speed_mhz": 80
+  },
+  "cpu_mhz": 240,
+  "console": "none",
+  "profiles": [],
+  "features": {
+    "eth": null,
+    "wifi": true,
+    "usb": true
+  },
+  "verified": null,
+  "notes": "通用白牌「ESP32-S3-MINI Nano」板（模組 S3-N16R8：16 MB flash + 8 MB octal PSRAM）。Nano 尺寸、Type-C。**腳位／USB 接法未實測**：目前 wiring 全部 enable=0，console 假定走 USB-Serial-JTAG（原生 USB，GPIO19/20）。如果插上電腦只見到 CH340 之類的 USB-UART 橋（新裝置不是 303A:xxxx），就要把 console 改成 uart0：改 board.json 的 console 與 sdkconfig 的 CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG。S3 的 OTG 與 USJ 共用同一條 PHY，只能二選一。",
+  "model": "ESP32-S3 Mini Nano (N16R8)",
+  "aliases": [
+    "S3-Mini-Nano"
+  ],
+  "brand": null
+}

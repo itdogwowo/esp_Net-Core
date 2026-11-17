@@ -27,6 +27,17 @@
 | [status.md](status.md) | **快照**：現在的數字與狀態 | 每次量測 / 每個 Phase 結束 |
 | [roadmap.md](roadmap.md) | **計劃**：Phase 0–5 現況（0／1 已完成）、非目標、開放決策 | 改變優先順序時 |
 
+### 圖（由 `tools/*_diagram.py` 產生，唔好手改）
+
+| 圖 | 內容 |
+|---|---|
+| [boot.svg](boot.svg) | 開機 11 階段：每階段做什麼／決定什麼／產出／失敗（詳細版） |
+| [boot-cores.svg](boot-cores.svg) | 決策表（D1–D12）＋核落點（core0／core1）＋唔啟動矩陣＋B02 總閘 |
+| [core-timeline.svg](core-timeline.svg) | 每階段時間、核在做什麼、緩衝佔用 |
+| [architecture.svg](architecture.svg) | 抽象架構：七層、一幀旅程、排程、契約、初始化次序 |
+| [network-lines.svg](network-lines.svg) | 網絡線路層：line → service claim → decoder／HTTP static |
+| [buffers.svg](buffers.svg) | 緩衝拓撲與記憶體帳 |
+
 ### 維護規則
 
 `status.md` 是**快照，不是日誌**。更新時直接覆蓋舊數字，並改最上面的「最後更新」日期。

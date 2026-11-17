@@ -17,12 +17,17 @@ import sys
 from . import __version__, artifacts, builder, doctor, env
 
 COMMANDS = {"build", "flash", "monitor", "doctor", "clean", "outputs",
-            "config", "boards", "list", "check", "ports", "env"}
+            "config", "boards", "projects", "list", "check", "ports", "env"}
 
 
 def _add_common(p: argparse.ArgumentParser) -> None:
     p.add_argument("board", nargs="?",
                    help="硬體板（ports/hardware/）或 project（ports/project/）；預設看設定檔")
+    p.add_argument("--project", metavar="NAME",
+                   help="用這塊硬體板的哪個 project（可寫短名，例如 demo → <硬體板>-Demo）；"
+                        "唔寫 = default project（同名或 default:true），冇 default = 純硬體")
+    p.add_argument("--no-project", action="store_true",
+                   help="明確唔要 project（就算塊板有 default 都用純硬體 build）")
 
 
 def _board_of(cfg: dict, args: argparse.Namespace) -> str | None:
@@ -42,6 +47,7 @@ def cmd_build(cfg: dict, args: argparse.Namespace) -> int:
         do_doctor=not args.no_doctor,
         do_archive=False if args.no_archive else None,
         tests=args.tests,
+        project=args.project, no_project=args.no_project,
     )
 
 
@@ -49,12 +55,14 @@ def cmd_flash(cfg: dict, args: argparse.Namespace) -> int:
     mode = "erase" if args.erase else ("full" if args.full else "app")
     return builder.flash(cfg, _board_of(cfg, args), port=args.port, mode=mode,
                          minimal=args.minimal, no_build=args.no_build,
-                         dry_run=args.dry_run, tests=args.tests)
+                         dry_run=args.dry_run, tests=args.tests,
+                         project=args.project, no_project=args.no_project)
 
 
 def cmd_monitor(cfg: dict, args: argparse.Namespace) -> int:
     return builder.monitor(cfg, _board_of(cfg, args), port=args.port,
-                           dry_run=getattr(args, "dry_run", False))
+                           dry_run=getattr(args, "dry_run", False),
+                           project=args.project, no_project=args.no_project)
 
 
 def cmd_doctor(cfg: dict, args: argparse.Namespace) -> int:
@@ -101,12 +109,21 @@ def cmd_outputs(cfg: dict, args: argparse.Namespace) -> int:
 
 
 def cmd_config(cfg: dict, args: argparse.Namespace) -> int:
-    return builder.show_config(cfg, _board_of(cfg, args))
+    return builder.show_config(cfg, _board_of(cfg, args),
+                               project=args.project, no_project=args.no_project)
 
 
 def cmd_boards(cfg: dict, args: argparse.Namespace) -> int:
     import board as boardmod
     return boardmod.cmd_list(None)
+
+
+def cmd_projects(cfg: dict, args: argparse.Namespace) -> int:
+    import board as boardmod
+
+    class _A:
+        board = args.board
+    return boardmod.cmd_projects(_A())
 
 
 def cmd_list(cfg: dict, args: argparse.Namespace) -> int:
@@ -163,11 +180,14 @@ def build_parser() -> argparse.ArgumentParser:
         description="esp_Net-Core 建置工具（硬體板 ports/hardware/ ＋ project ports/project/）",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""常用：
-  python3 make.py ESP32-P4-ETH       建置（等於 build ESP32-P4-ETH）
-  python3 make.py ESP32-S3-N16R8 --minimal   最小映像（bring-up 用）
-  python3 make.py doctor             環境健檢
-  python3 make.py flash ESP32-P4-ETH --full  連分割表一起燒
-  python3 make.py outputs --prune 3  只留每塊板子最近 3 顆
+  python3 make.py ESP32-P4-ETH              建置（硬體 + default project）
+  python3 make.py ESP32-P4-ETH --project Demo  換 project（只換 runtime 預置）
+  python3 make.py ESP32-P4-ETH --no-project    純硬體（冇 project 預置）
+  python3 make.py projects                  每塊硬體板有咩 project（default 會標）
+  python3 make.py ESP32-S3-N16R8 --minimal  最小映像（bring-up 用）
+  python3 make.py doctor                    環境健檢
+  python3 make.py flash ESP32-P4-ETH --full 連分割表一起燒
+  python3 make.py outputs --prune 3         只留每塊板子最近 3 顆
 """)
     ap.add_argument("--version", action="version", version=f"ncbuild {__version__}")
     ap.add_argument("--config", help="指定設定檔（預設 make_config.json）")
@@ -228,6 +248,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("boards", help="所有板子與能力")
     p.set_defaults(fn=cmd_boards)
+
+    p = sub.add_parser("projects", help="每塊硬體板的 project（含 default）")
+    p.add_argument("board", nargs="?")
+    p.set_defaults(fn=cmd_projects)
 
     p = sub.add_parser("list", help="插著的板子 + 支援的板子")
     p.set_defaults(fn=cmd_list)

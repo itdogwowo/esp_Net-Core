@@ -9,15 +9,15 @@
 // 預設只在使用者沒寫、或檔案壞掉時才出現，而且**不會**順手寫回用戶的檔。
 //
 // 2026-11-13：出廠預設改成「CDC 先」——
-//   · 有 OTG 的晶片（S2/S3/P4）  → link "CDC"（kind=cdc，TinyUSB）
-//   · 只有 USJ 的（C3/C5/C6/C61/H2）→ link "usb_jtag"（kind=usb_jtag）
+//   · 有 OTG 的晶片（S2/S3/P4）  → link "cdc0"（kind=cdc，TinyUSB）
+//   · 只有 USJ 的（C3/C5/C6/C61/H2）→ link "usb_jtag0"（kind=usb_jtag）
 //   · 連 USB 都沒有的（ESP32）    → 只剩 UART
 //   · usb.msc 預設 0：開機唔把 FAT 交出去，檔案一律走 CDC；
 //     「插線見到 D:」變成用戶的明確選擇，而不是所有板子的副作用。
 //   · USB 的 rx.region = 4,128（4,096 的 FILE_CHUNK → 幀 4,115，向上 32 對齊），
 //     這是必要且貼身的值，用戶唔應該需要調；要塞更大的 chunk 才改 config。
 //
-// 為什麼預設要看得懂晶片：C3 沒有 OTG，寫 "CDC" 也不會建立任何東西；
+// 為什麼預設要看得懂晶片：C3 沒有 OTG，寫 "cdc0" 也不會建立任何東西；
 // 而「第一次開機就要用原生 USB 收得到指令」是 bring-up 的第一步。
 // 這張表在 nc_cfg_chip.c，數據來自 IDF 的 soc_caps.h。
 //
@@ -88,13 +88,24 @@ void nc_cfg_rx_default(nc_link_kind_t kind, nc_link_rx_t *rx)
                               .slots = 4, .budget = 8 };
         break;
     case NC_LINK_TCP:
-        *rx = (nc_link_rx_t){ .region = 16410, .chunk = 8192, .slot_size = 8205,
-                              .slots = 8, .budget = 8 };
+        // 2026-11-15 量測後的公約數（net-test-matrix §4.6）：
+        // TCP 2 × 8,205、UDP 1 × 8,205、WS 2 × 8,192。
+        // request/reply 用 1 slot 已夠，但 8K 單向 burst 最少要 2 個 TCP slot
+        // （1 slot 實測 493/500 掉幀）；所以預設是 2，不是 8。
+        *rx = (nc_link_rx_t){ .region = 16410, .chunk = 8205, .slot_size = 8205,
+                              .slots = 2, .budget = 8 };
         break;
     case NC_LINK_WS:
+        *rx = (nc_link_rx_t){ .region = 16384, .chunk = 8192, .slot_size = 8192,
+                              .slots = 2, .budget = 8 };
+        break;
     case NC_LINK_UDP:
+        *rx = (nc_link_rx_t){ .region = 8205, .chunk = 8205, .slot_size = 8205,
+                              .slots = 1, .budget = 8 };
+        break;
     case NC_LINK_HTTP:
     default:
+        // HTTP 由 httpd 自己收，line 層不建 bus；這個值不會被 allocate。
         *rx = (nc_link_rx_t){ .region = 4096, .chunk = 1024, .slot_size = 1024,
                               .slots = 4, .budget = 8 };
         break;
@@ -110,6 +121,8 @@ static nc_link_cfg_t *add_link(nc_system_cfg_t *s, const char *name, nc_link_kin
     memset(l, 0, sizeof(*l));
     snprintf(l->name, sizeof(l->name), "%s", name);
     l->kind = kind;
+    l->usb_port = NC_CFG_USB_PORT_NONE;
+    l->msc = -1;
     l->enable = true;
     nc_cfg_rx_default(kind, &l->rx);
     return l;
@@ -149,7 +162,7 @@ static void system_build(void)
     nc_link_kind_t usb_kind = NC_LINK_CDC;
     uint8_t cores = 2;
     if (s_chip == NULL) {
-        usb_name = "CDC";
+        usb_name = "cdc0";
     } else {
         cores = s_chip->cores;
         if (s_chip->usb_link != NULL) {
@@ -165,7 +178,7 @@ static void system_build(void)
     if (usb_name != NULL) {
         (void)add_link(s, usb_name, usb_kind);
     }
-    (void)add_link(s, "UART", NC_LINK_UART);
+    (void)add_link(s, "uart0", NC_LINK_UART);
 
     // nctx / outbound 兩列永遠排最前（契約：見 system.json 的 _comment）。
     add_route(s, "nctx", "decode0");
@@ -174,7 +187,7 @@ static void system_build(void)
         add_route(s, usb_name, "decode0");
     }
     // 單核板只可以 decode0：寫 decode1 會在單核上建立 core1 任務（實測 assert）。
-    add_route(s, "UART", (cores > 1) ? "decode1" : "decode0");
+    add_route(s, "uart0", (cores > 1) ? "decode1" : "decode0");
     // 預設就把 USB 的幀同時轉去 ESPNOW：沒有 SD 設定的板子也可以做兩板互轉。
     add_route(s, "ESPNOW", "decode0");
 
@@ -199,9 +212,10 @@ static const nc_hardware_cfg_t k_hw = {
     // ETH：預設「config 冇寫」（present=0）→ 呼叫端用編譯期內建腳位；
     // 這裡填的是「連內建值都沒有」時的形狀（全 -1、不啟用）。
     .eth = {
-        .present = false, .enable = false,
+        .present = false, .enable = false, .driver = NC_ETH_DRIVER_RMII,
         .mdc = -1, .mdio = -1, .ref_clk = -1,
-        .phy_addr = 1, .phy_type = NC_CFG_PHY_IP101,
+        .spi_idx = -1, .cs = -1, .rst = -1, .int_pin = -1,
+        .phy_addr = -1, .phy_type = NC_CFG_PHY_IP101,
     },
     .n_sdio = 1,
     .sdio = {
@@ -227,6 +241,21 @@ const nc_hardware_cfg_t *nc_cfg_defaults_hardware(void)
         }
     }
     return &k_hw;
+}
+
+#if defined(__GNUC__)
+extern uint8_t nc_port_usb_kind(uint8_t idx) __attribute__((weak));
+#endif
+
+uint8_t nc_cfg_usb_default_kind(uint8_t idx)
+{
+#if defined(__GNUC__)
+    if (nc_port_usb_kind != NULL) {
+        return nc_port_usb_kind(idx);
+    }
+#endif
+    // host test／冇 generated 檔：當 CDC（跟舊行為）。
+    return NC_LINK_CDC;
 }
 
 const nc_tasks_cfg_t *nc_cfg_defaults_tasks(void)

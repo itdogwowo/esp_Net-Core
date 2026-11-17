@@ -143,7 +143,7 @@ COM13）；JTAG 孔（COM21）只係 console。
 
    | 偵測 | recovery 目錄 | bootloader offset |
    |---|---|---|
-   | ESP32-P4 / 16MB | `ESP32-P4-C6` | `0x2000` |
+   | ESP32-P4 / 16MB | `ESP32-P4-FireBeetle2`（舊名 `ESP32-P4-C6`） | `0x2000` |
    | ESP32-P4 / 32MB | `ESP32-P4-ETH` | `0x2000` |
    | ESP32-S3 / 16MB | `ESP32-S3-N16R8` | `0x0` |
    | ESP32-S3 / 4MB | `ESP32-S3-Matrix` | `0x0` |

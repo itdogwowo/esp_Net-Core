@@ -241,7 +241,7 @@ LAYERS = [
      "開機要齊、永不 free、只管 carve —— 冇 free 就冇碎片"),
     ("L2", "線路", C_LINK, "bus/bus_core ＋ adapters",
      "`nc_bus_read`／`write`／`ioctl` ＋ `nc_bus_native()` 逃生門",
-     "bus_uart ｜ bus_net：TCP／UDP／WS、httpd、網絡 OTA"),
+     "bus_uart ｜ bus_net：TCP／UDP／WS；HTTP 係獨立 static service"),
     ("L1", "驅動", C_LINK, "driver/drv_*",
      "`drv_uart`（install／read／write／send）、`drv_pwm`（LEDC）",
      "USB／SD／ETH 仍然在 main.c，未抽（CDC 熱路徑最後做）"),
@@ -284,7 +284,7 @@ out.append(f'<text x="{PX2+22}" y="{PY2+82}" font-family="{SANS}" font-size="11"
 STATIONS = [
     ("1", "線路 adapter", C_LINK, ["`read()`／`recv()`", "driver 或 socket", "只答「怎麼讀」"]),
     ("2", "producer", C_ASM, ["prio 7 · 每線一條", "`push_begin()` 拿格", "recv 直接入 slot"]),
-    ("3", "PUSH slots", C_BUF, ["4 格 × 2 KB（net）", "256 B（CDC／UART）", "滿 → `vTaskDelay(1)`"]),
+    ("3", "PUSH slots", C_BUF, ["格數／大小由", "`links[].rx` 決定", "滿 → `vTaskDelay(1)`"]),
     ("4", "decode loop", C_NC4, ["prio 8 · 每核一個", "`kick` 同核叫醒", "parser 逐幀黏包"]),
     ("5", "decoder", C_NC4, ["48 格 handler 表", "STATUS／action", "route 決策"]),
 ]
@@ -335,8 +335,8 @@ out.append(para(PX2 + 446, ly + 41,
 ny = ly + 104
 out.append(rect(PX2 + 22, ny, PW2 - 44, 1, fill=RULE, stroke="none", sw=0))
 notes = [
-    ("一條線就是一條線　", "TCP／UDP／WS 同 UART／CDC 走同一個 parser、同一組動詞，"
-                     "冇「網絡專用」的分支。"),
+    ("NC4 的線　", "TCP／UDP／WS／UART／CDC 走同一個 parser；"
+                 "HTTP 係獨立 static service，唔經 decoder。"),
     ("零複製　", "recv 直接入格；`copied` 18 B／幀（以前 36）。"
              "PUSH = 有資料才拿格，不會揸住格等 blocking read。"),
 ]
@@ -433,7 +433,7 @@ out.append(panel(PX5, PY5, PW5, PH5, "05 / 初始化次序",
 
 STEPS = [
     ("banner+nvs", C_ASM, "NVS 先；log hook 最早"),
-    ("storage+cfg", C_ASM, "掛 FAT；wiring 做 base"),
+    ("storage+cfg", C_ASM, "掛 FAT；seed→nc_port 預設"),
     ("hwcheck", C_HW, "腳位 claim＋驗，不 init"),
     ("hardware", C_HW, "PWM／ETH；router 定核"),
     ("declare", C_BUF, "每核 decoder；任務登記"),
@@ -494,8 +494,8 @@ out.append(f'<text x="{PX5+PW5-22}" y="{ny5+20}" font-family="{MONO}" font-size=
 
 # ── footer ──────────────────────────────────────────────────────────────
 out.append(line(44, 1462, 1676, 1462, RULE, 1))
-foot_l = ("配置三層：`ports/<board>/wiring.json`（build-time 預設）→ "
-          "`/data/config/hardware.json`（用戶覆蓋）→ NVS（執行期最高）")
+foot_l = ("配置來源：F.wiring（build 時編成 nc_port.c）→ F.preset（build 揀的 project）→ "
+          "F.live（/data/config，用戶）→ NVS（執行期最高）")
 out.append(para(44, 1482, foot_l, 11.2, 980, MUTED)[0])
 out.append(f'<text x="1676" y="1482" font-family="{MONO}" font-size="10" fill="{FAINT}" '
            f'text-anchor="end">docs/03_notes · status §7.55–7.60</text>')

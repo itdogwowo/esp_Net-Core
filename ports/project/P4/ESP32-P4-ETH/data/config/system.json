@@ -13,8 +13,8 @@
     "── nc4.links：收幀通道，只講怎麼收、不決定誰解碼 ──",
     "name：通道名；routes[].in / out 填的就是它",
     "enable：0 = 呢條線開機唔建立（唔宣告緩衝、唔建 bus、路由跳過）；要開就改 1 再重啟",
-    "每條 link：name / kind / iface / port / rx；rx 直接放 link 下面（舊檔的 cfg.rx 仍然接受）",
-    "kind：cdc | uart | tcp | ws | udp（transport）｜iface：eth | wifi | any（舊的 eth_tcp 寫法仍然接受）",
+    "每條 link：kind / index / port；name 可選（唔寫就生成）；rx 直接放 link 下面（舊檔的 cfg.rx 仍然接受）",
+    "kind：composite（eth_tcp／wifi_tcp／eth_udp／wifi_udp）或 uart／cdc／usb_jtag；interface 已經包含在 kind",
     "port：tcp / ws / udp 的埠號",
     "rx.mode：只對 tcp / ws / udp 有效（pull = 非阻塞 recv；push_frame = producer 阻塞 recv）",
     "          cdc / uart 由 kind 推導（cdc→pull、uart→push），唔可以設；寫咗都唔會讀",
@@ -39,70 +39,46 @@
     "msc：1 = 開機把 FAT 交給 host（主機見到磁碟）｜0 = 留在 APP（HTTP／CDC 檔案工作臺照用）",
     "本板 board.json 寫 features.usb=false、USB-C 沒有接 OTG：msc 必須 0。",
     "寫 1 的話開機會把 /data 交俾一個永遠唔會來的主機 → 裝置自己失去寫入權，檔案指令回 err_busy。",
-    "cdc_log：本板 console 是 UART0，USB 沒有 host → 0。"
+    "cdc_log：本板 console 是 UART0，USB 沒有 host → 0。",
+    "USB：板上 USB-C 冇接 PHY，USB.list 空；不要加 USB link。",
+    "links[].name：可省略或用 \"name\":\"\" → 自動生成；有非空 name 就用。links[].msc：USB link 的 MSC 開關（只 OTG）。"
   ],
   "cID": "",
   "frame_interval_ms": 33,
   "num_pixels": 676,
   "usb": {
-    "msc": 0,
     "cdc_log": 0
   },
   "nc4": {
     "links": [
       {
-        "name": "CDC",
-        "kind": "cdc",
-        "enable": 0
+        "name": "uart0",
+        "kind": "uart",
+        "index": 0
       },
       {
-        "name": "UART",
-        "kind": "uart"
-      },
-      {
-        "kind": "tcp",
-        "iface": "eth",
+        "name": "eth_tcp0",
+        "kind": "eth_tcp",
         "index": 0,
         "port": 80
       },
       {
-        "kind": "tcp",
-        "iface": "eth",
+        "name": "eth_tcp1",
+        "kind": "eth_tcp",
         "index": 1,
-        "port": 6000,
-        "rx": {
-          "region": 16410,
-          "chunk": 8205,
-          "budget": 8,
-          "slots": 2,
-          "slot_size": 8205
-        }
+        "port": 6000
       },
       {
-        "kind": "tcp",
-        "iface": "eth",
+        "name": "eth_tcp2",
+        "kind": "eth_tcp",
         "index": 2,
-        "port": 8080,
-        "rx": {
-          "region": 16384,
-          "chunk": 8192,
-          "budget": 4,
-          "slots": 2,
-          "slot_size": 8192
-        }
+        "port": 8080
       },
       {
-        "kind": "udp",
-        "iface": "eth",
+        "name": "eth_udp0",
+        "kind": "eth_udp",
         "index": 0,
-        "port": 6001,
-        "rx": {
-          "region": 8205,
-          "chunk": 8205,
-          "budget": 8,
-          "slots": 1,
-          "slot_size": 8205
-        }
+        "port": 6001
       }
     ],
     "routes": [
@@ -117,13 +93,7 @@
         "out": []
       },
       {
-        "in": "CDC",
-        "out": [
-          "decode0"
-        ]
-      },
-      {
-        "in": "UART",
+        "in": "uart0",
         "out": [
           "decode1"
         ]

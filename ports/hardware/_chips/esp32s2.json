@@ -5,7 +5,7 @@
     "otg_hs": false,
     "serial_jtag": false,
     "shared_phy": true,
-    "link": "CDC",
+    "link": "cdc0",
     "kind": "cdc",
     "rx_region": 4128
   },

@@ -1,5 +1,8 @@
 # USB 配置：能力、傳輸與 CDC 基線
 
+> 2026-11-16：**先看 [usb-layers.md](usb-layers.md)** —— 那篇是「晶片 → 板子 → 用戶」
+> 的配置地圖、每顆晶片的通道數、S3 開 MSC 的完整步驟。本文保留 2026-11-12 的現況與量測。
+>
 > 2026-11-12。檢查 CDC FAT 更新（`2084ef0`）之後，USB 這層的現況與目標模型。
 > 2026-11-13：出廠預設、啟動次序、貼身緩衝已落地 —— 先看 **§0.5**（它取代下面 P0 的止血描述）。
 >
@@ -8,6 +11,11 @@
 >
 > 基線：**任何型號第一次 bring-up，第一步都是一條可用的 CDC（NC4）**。
 > MSC（隨身碟）只是「這塊板有 OTG ＋ 有 FAT ＋ 想交碟」時的可選項。
+>
+> **2026-11-16 板名更新**：文中的 `P4-C6` 現在叫 **`ESP32-P4-FireBeetle2`**
+> （DFRobot FireBeetle 2 ESP32-P4 / DFR1172）；舊名已入 `aliases`。
+> 同時把 `board.json` 的 `features.usb` 由 `"otg-fs"` 改成 `"otg-hs"`（見 §1 的
+> 「板子事實自相矛盾」表已標示修正）。歷史量測表保留舊名。
 
 ### 0.1 術語：線（line）、driver、預設 USJ
 
@@ -250,7 +258,7 @@ P4 的 JTAG 第二條 link。今次只落地「出廠預設 ＋ 註冊語義 ＋
 
 | 板子 | `board.json` | `sdkconfig.defaults` | 實際 |
 |---|---|---|---|
-| ESP32-P4-C6 | `features.usb = "otg-fs"` | `CONFIG_NETCORE_USB_OTG_HS=y` | 兩者相反；`p4-usb.md` 的實測是 HS |
+| ESP32-P4-FireBeetle2（舊名 P4-C6） | `features.usb = "otg-hs"` | `CONFIG_NETCORE_USB_OTG_HS=y` | ✅ 2026-11-16 已改正（rename 時一併修）：兩者一致，實測走 HS pin 49/50；`board.json` 另有 `brand`／`model` 記 DFRobot DFR1172 |
 | ESP32-P4-ETH | `features.usb = false` | 沒有關 OTG | build 仍然有 TinyUSB |
 | ESP32-C3 | `features.usb = false` | 冇 OTG（正確） | 但 USB-Serial-JTAG 其實是 CDC；`false` 的語義係「冇 OTG」還是「冇 USB」？ |
 | ESP32-S3-* | `features.usb = true` | 冇講 FS/HS（S3 只有 FS） | 有 OTG ＋ JTAG，兩者共用 PHY，無法用一個 bool 表達 |
@@ -527,13 +535,13 @@ P4-ETH 這一類冇 host 的板子也不會再失去 `/data`。
 
 ### Phase 1：板子事實與 build profile
 
-- `board.json` 的 `features.usb` 換成 `usb.interfaces[]`（5 塊板）。
+- `board.json` 的 `features.usb` 換成 `usb.interfaces[]`（現時 7 塊板）。
 - 新增 `ports/_profiles/usb-otg-fs.defaults`、`usb-otg-hs.defaults`、`usb-none.defaults`。
 - `board.py` 的 `check` / `sync` 接上 USB：interface 的 controller/speed/pins 合法、
   最多一個 `primary`、conflict 不可同時開、舊 bool 給 warning。
 - P4-C6 究竟是 HS（pins 49/50）還是 FS（26/27）由實板確認；P4-ETH 明確關 OTG。
 
-驗收：`board.py check` 對 5 塊板零 USB 錯誤；P4-ETH 的 build 冇 TinyUSB；
+驗收：`board.py check` 對 7 塊板零 USB 錯誤；P4-ETH 的 build 冇 TinyUSB；
 S3 的 `conflicts` 有擋住兩個 interface 同時開。
 
 ### Phase 2：執行期 schema 與 interface registry

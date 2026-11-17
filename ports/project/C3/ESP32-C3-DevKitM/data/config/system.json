@@ -18,25 +18,28 @@
     "",
     "── USB ──",
     "C3 冇 OTG：usb.msc 不存在（編譯期整組唔編），保留欄位只是同一份 schema 通用。",
-    "usb.cdc_log 只對 OTG CDC 生效；usb_jtag 的 log 有自己一條（同 NC4 幀共用 TX，經 arbiter 分流）。"
+    "usb.cdc_log 只對 OTG CDC 生效；usb_jtag 的 log 有自己一條（同 NC4 幀共用 TX，經 arbiter 分流）。",
+    "USB：hardware phy=usj-fs（GPIO18/19）；只有 USJ，目標 link {kind:\"usb\",index:0}；現時 interim kind:\"usb_jtag\",usb:0。",
+    "links[].name：可省略或用 \"name\":\"\" → 自動生成；有非空 name 就用。links[].msc：USB link 的 MSC 開關（只 OTG）。"
   ],
   "cID": "",
   "frame_interval_ms": 20,
   "num_pixels": 0,
   "log_debug_mode": 0,
   "usb": {
-    "msc": 0,
     "cdc_log": 1
   },
   "nc4": {
     "links": [
       {
-        "name": "UART",
-        "kind": "uart"
+        "name": "uart0",
+        "kind": "uart",
+        "index": 0
       },
       {
-        "name": "usb_jtag",
-        "kind": "usb_jtag"
+        "name": "usb0",
+        "kind": "usb",
+        "index": 0
       }
     ],
     "routes": [
@@ -51,13 +54,13 @@
         "out": []
       },
       {
-        "in": "UART",
+        "in": "uart0",
         "out": [
           "decode0"
         ]
       },
       {
-        "in": "usb_jtag",
+        "in": "usb0",
         "out": [
           "decode0"
         ]

@@ -45,6 +45,12 @@ LINK_KIND = {
     "usb_jtag": "NC_LINK_USBJTAG",
 }
 
+ETH_DRIVER = {
+    "rmii": "NC_ETH_DRIVER_RMII",
+    "spi": "NC_ETH_DRIVER_SPI",
+    "w5500": "NC_ETH_DRIVER_SPI",
+}
+
 PHY = {
     "IP101": "NC_CFG_PHY_IP101", "LAN8720": "NC_CFG_PHY_LAN8720",
     "DP83848": "NC_CFG_PHY_DP83848", "RTL8201": "NC_CFG_PHY_RTL8201",
@@ -150,21 +156,31 @@ def gen_hardware(wiring: dict) -> tuple[str, dict]:
         summary["present"]["ETH"] = True
         phy = str(eth.get("phy_type") or "IP101").upper()
         phy_sym = PHY.get(phy, "NC_CFG_PHY_UNKNOWN")
+        drv = str(eth.get("driver") or "rmii").lower()
+        drv_sym = ETH_DRIVER.get(drv, "NC_ETH_DRIVER_RMII")
+        gpio = eth.get("GPIO") if isinstance(eth.get("GPIO"), dict) else eth
         lines += [
             "    .eth = {",
             "        .present = true,",
             f"        .enable = {'true' if num(eth.get('enable')) else 'false'},",
-            f"        .mdc = {pin(eth.get('mdc'))},",
-            f"        .mdio = {pin(eth.get('mdio'))},",
-            f"        .ref_clk = {pin(eth.get('ref_clk'))},",
-            f"        .phy_addr = {num(eth.get('phy_addr'), 1)},",
+            f"        .driver = {drv_sym},",
+            f"        .mdc = {pin(gpio.get('mdc'))},",
+            f"        .mdio = {pin(gpio.get('mdio'))},",
+            f"        .ref_clk = {pin(gpio.get('ref_clk'))},",
+            f"        .spi_idx = {num(gpio.get('spi', eth.get('spi', eth.get('bus'))), -1)},",
+            f"        .cs = {pin(gpio.get('cs'))},",
+            f"        .rst = {pin(gpio.get('rst'))},",
+            f"        .int_pin = {pin(gpio.get('int'))},",
+            f"        .phy_addr = {num(eth.get('phy_addr'), -1 if drv == 'spi' else 1)},",
             f"        .phy_type = {phy_sym},",
             "    },",
         ]
     else:
         summary["present"]["ETH"] = False
-        lines += ["    .eth = { .present = false, .enable = false, .mdc = -1, .mdio = -1,",
-                  "             .ref_clk = -1, .phy_addr = 1, .phy_type = NC_CFG_PHY_UNKNOWN },"]
+        lines += ["    .eth = { .present = false, .enable = false, .driver = NC_ETH_DRIVER_RMII,",
+                  "             .mdc = -1, .mdio = -1, .ref_clk = -1,",
+                  "             .spi_idx = -1, .cs = -1, .rst = -1, .int_pin = -1,",
+                  "             .phy_addr = 1, .phy_type = NC_CFG_PHY_UNKNOWN },"]
 
     def section(name: str, key: str) -> tuple[bool, list]:
         sec = wiring.get(name)
@@ -272,6 +288,26 @@ def gen_preset(wiring: dict, hw_rel: str) -> dict:
     return out
 
 
+def gen_usb_kinds(wiring: dict) -> str:
+    """USB.list index → internal link kind（NC_LINK_CDC / NC_LINK_USBJTAG）。"""
+    kind = {"otg-fs": "NC_LINK_CDC", "otg-hs": "NC_LINK_CDC",
+            "usj-fs": "NC_LINK_USBJTAG"}
+    vals = []
+    for it in (wiring.get("USB") or {}).get("list", []):
+        phy = str(it.get("phy") or "").lower()
+        vals.append(kind.get(phy, "0xFF"))
+    if not vals:
+        return ("__attribute__((used, retain)) uint8_t nc_port_usb_kind(uint8_t idx) { (void)idx; return 0xFF; }\n")
+    body = ", ".join(vals)
+    return (
+        f"static const uint8_t s_usb_kinds[{len(vals)}] = {{ {body} }};\n"
+        f"__attribute__((used, retain)) uint8_t nc_port_usb_kind(uint8_t idx) {{\n"
+        f"    if (idx >= {len(vals)}u) return 0xFF;\n"
+        f"    return s_usb_kinds[idx];\n"
+        f"}}\n"
+    )
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -303,7 +339,8 @@ def main() -> int:
         "#include \"nc_cfg.h\"\n\n"
         "#ifdef __cplusplus\nextern \"C\" {\n#endif\n\n"
         "const nc_cfg_chip_t *nc_port_chip(void);\n"
-        "const nc_hardware_cfg_t *nc_port_hw_defaults(void);\n\n"
+        "const nc_hardware_cfg_t *nc_port_hw_defaults(void);\n"
+        "uint8_t nc_port_usb_kind(uint8_t idx);\n\n"
         "#ifdef __cplusplus\n}\n#endif\n",
         encoding="utf-8")
     (out / "nc_port.c").write_text(
@@ -312,7 +349,8 @@ def main() -> int:
         "#include \"nc_cfg.h\"\n#include \"nc_port.h\"\n\n"
         + chip_c + "\n\n" + hw_c + "\n\n"
         "const nc_cfg_chip_t *nc_port_chip(void) { return &s_chip; }\n"
-        "const nc_hardware_cfg_t *nc_port_hw_defaults(void) { return &s_hw; }\n",
+        "const nc_hardware_cfg_t *nc_port_hw_defaults(void) { return &s_hw; }\n\n"
+        + gen_usb_kinds(wiring) + "\n",
         encoding="utf-8")
     (out / "preset_hardware.json").write_text(
         json.dumps(preset, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")

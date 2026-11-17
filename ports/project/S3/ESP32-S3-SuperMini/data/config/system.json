@@ -8,21 +8,23 @@
     "板上冇 USB-UART 橋接，USB-C 直入 S3 原生 USB：出廠用 usb_jtag（kind=usb_jtag）。",
     "S3 的 OTG 同 USJ 共用同一條 PHY，兩者只能二選一；要試 TinyUSB CDC 就把",
     "kind 改成 cdc、name 改成 CDC，再重啟（會失去 USJ console）。",
-    "rx 唔使寫：預設 NC_CFG_USB_RX_REGION = 4,128，放得落 4 KB 的檔案幀（4,115 B）。"
+    "rx 唔使寫：預設 NC_CFG_USB_RX_REGION = 4,128，放得落 4 KB 的檔案幀（4,115 B）。",
+    "USB：hardware phy=usj-fs（GPIO19/20）；目標 link {kind:\"usb\",index:0}（USJ 冇 MSC）。現時 interim kind:\"usb_jtag\",usb:0。",
+    "links[].name：可省略或用 \"name\":\"\" → 自動生成；有非空 name 就用。links[].msc：USB link 的 MSC 開關（只 OTG）。"
   ],
   "cID": "",
   "frame_interval_ms": 20,
   "num_pixels": 0,
   "log_debug_mode": 0,
   "usb": {
-    "msc": 0,
     "cdc_log": 1
   },
   "nc4": {
     "links": [
       {
-        "name": "usb_jtag",
-        "kind": "usb_jtag"
+        "name": "usb0",
+        "kind": "usb",
+        "index": 0
       }
     ],
     "routes": [
@@ -37,7 +39,7 @@
         "out": []
       },
       {
-        "in": "usb_jtag",
+        "in": "usb0",
         "out": [
           "decode0"
         ]

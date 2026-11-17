@@ -53,6 +53,10 @@ const nc_system_cfg_t *nc_cfg_defaults_system(void);
 const nc_tasks_cfg_t  *nc_cfg_defaults_tasks(void);
 const nc_hardware_cfg_t *nc_cfg_defaults_hardware(void);
 
+// USB hardware.json 的 USB.list[index] → internal link kind（NC_LINK_CDC／USBJTAG）；
+// 0xFF = 這塊板冇這條 USB port。
+uint8_t nc_cfg_usb_default_kind(uint8_t idx);
+
 // 這塊板有沒有 build-time 產生的硬體預設（nc_port.c）？
 // 有 → /data/config/hardware.json 缺失不算 degraded（generated 表就是出廠預設）。
 bool nc_cfg_hw_has_port_defaults(void);

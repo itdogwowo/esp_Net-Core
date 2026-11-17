@@ -1,4 +1,7 @@
-# ESP32-P4-C6 — 硬體事實（改這裡要重新 build）
+# ESP32-P4-FireBeetle2 — 硬體事實（改這裡要重新 build）
+# 舊名 ESP32-P4-C6／P4-C6（aliases）；DFRobot FireBeetle 2 ESP32-P4（DFR1172）。
+# 板子冇乙太網 PHY：eth-rmii 能力碎片留在 profiles 只是為了讓 P4 的 EMAC 程式碼保持可編，
+# runtime 由 wiring 的 ETH.enable=0 關閉（見 docs/03_notes/ports-layout.md）。
 # 由 tools/board.py new 產生；tools/board.py check 會驗證與 board.json 一致
 
 # ── flash ──
@@ -29,6 +32,10 @@ CONFIG_ESP32P4_REV_MIN_0=y
 #       早期內部 DRAM 不足 → ESP_ERR_NO_MEM(0x101) → abort。
 # 設 n 讓那個 .c 完全不編；代價只是 light sleep 時數位周邊不做 clock gating。
 CONFIG_PM_SLEEP_CLK_ICG_ENABLE=n
+
+# ── USB OTG HS（UTMI pin 49/50）──
+# board.json features.usb = "otg-hs"；TinyUSB 預設唔會揀 HS，要這個符號。
+CONFIG_NETCORE_USB_OTG_HS=y
 
 # ─── 能力碎片（由 tools/board.py sync 產生，不要手改這段）───
 # 來源：ports/_profiles/*.defaults；hardware/board.json 的 profiles 決定要哪些

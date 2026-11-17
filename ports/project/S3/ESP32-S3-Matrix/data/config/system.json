@@ -1,7 +1,11 @@
 {
   "_comment": [
     "System 層：身份、開機行為、NC4 通道與路由表（S3-Matrix）。",
-    "這塊板沒有 ETH、沒有 SD；USB 一台、沒有 UART 擴展（IO14 是燈，不要當 UART）。"
+    "這塊板沒有 ETH、沒有 SD；USB 一台、沒有 UART 擴展（IO14 是燈，不要當 UART）。",
+    "links 用 composite kind + index（wifi_tcp／wifi_udp）；冇 name 時自動生成 wifi_tcp0／wifi_udp0，routes 用生成名。",
+    "HTTP :80 由 web service claim，冇 route；其他線的核心由 routes[].out 的 decodeN 決定。",
+    "USB：hardware phy=otg-fs（GPIO19/20）；目標 link {kind:\"usb\",index:0,msc:1}。現時 interim kind:\"cdc\",usb:0。",
+    "links[].name：可省略或用 \"name\":\"\" → 自動生成；有非空 name 就用。links[].msc：USB link 的 MSC 開關（只 OTG）。"
   ],
   "version": 1,
   "cID": "",
@@ -10,15 +14,22 @@
   "nc4": {
     "links": [
       {
-        "name": "usb_jtag",
-        "kind": "usb_jtag"
+        "name": "usb0",
+        "kind": "usb",
+        "index": 0,
+        "msc": 1
       },
       {
-        "name": "TCP",
-        "kind": "tcp",
-        "iface": "wifi",
+        "name": "wifi_tcp0",
+        "kind": "wifi_tcp",
+        "index": 0,
+        "port": 80
+      },
+      {
+        "name": "wifi_tcp1",
+        "kind": "wifi_tcp",
+        "index": 1,
         "port": 6000,
-        "service": "nc4",
         "rx": {
           "region": 8205,
           "chunk": 4096,
@@ -28,25 +39,10 @@
         }
       },
       {
-        "name": "UDP",
-        "kind": "udp",
-        "iface": "wifi",
-        "port": 6001,
-        "service": "nc4",
-        "rx": {
-          "region": 4096,
-          "chunk": 4096,
-          "budget": 8,
-          "slots": 1,
-          "slot_size": 4096
-        }
-      },
-      {
-        "name": "WS",
-        "kind": "ws",
-        "iface": "wifi",
+        "name": "wifi_tcp2",
+        "kind": "wifi_tcp",
+        "index": 2,
         "port": 8080,
-        "service": "nc4",
         "rx": {
           "region": 8192,
           "chunk": 8192,
@@ -56,11 +52,17 @@
         }
       },
       {
-        "name": "HTTP",
-        "kind": "http",
-        "iface": "wifi",
-        "port": 80,
-        "service": "web"
+        "name": "wifi_udp0",
+        "kind": "wifi_udp",
+        "index": 0,
+        "port": 6001,
+        "rx": {
+          "region": 4096,
+          "chunk": 4096,
+          "budget": 8,
+          "slots": 1,
+          "slot_size": 4096
+        }
       }
     ],
     "routes": [
@@ -75,25 +77,25 @@
         "out": []
       },
       {
-        "in": "usb_jtag",
+        "in": "usb0",
         "out": [
           "decode0"
         ]
       },
       {
-        "in": "TCP",
+        "in": "wifi_tcp1",
         "out": [
           "decode0"
         ]
       },
       {
-        "in": "UDP",
+        "in": "wifi_tcp2",
         "out": [
           "decode0"
         ]
       },
       {
-        "in": "WS",
+        "in": "wifi_udp0",
         "out": [
           "decode0"
         ]
@@ -101,7 +103,6 @@
     ]
   },
   "usb": {
-    "msc": 0,
     "cdc_log": 1
   },
   "log_debug_mode": 0

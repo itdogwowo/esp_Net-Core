@@ -20,6 +20,8 @@ extern "C" {
 
 #define NC_CFG_SCHEMA_VERSION   1
 
+#define NC_CFG_USB_PORT_NONE 0xFF
+
 #define NC_CFG_MAX_LINKS        8
 #define NC_CFG_MAX_ROUTES       8
 #define NC_CFG_MAX_OUT          4
@@ -102,6 +104,8 @@ typedef struct {
 typedef struct {
     char           name[NC_CFG_NAME_MAX];
     uint8_t        index;       // 同類線編號；name 省略時用來生成 eth_tcp0
+    uint8_t        usb_port;    // USB 線 → hardware.json USB.list index；0xFF = 未指定
+    int8_t         msc;         // USB link 的 MSC 開關：-1 = 未寫（用 global）、0/1
     nc_link_kind_t kind;
     bool           enable;
     uint16_t       port;        // tcp / ws / udp / http
@@ -139,13 +143,23 @@ typedef struct {
 //   present=0（config 冇寫 ETH 段）→ 呼叫端用**編譯期內建腳位**
 //       —— hardware.json 缺檔／壞掉時板子仍然上得了網（failure-policy）；
 //   present=1, enable=0            → 用戶明確關閉，唔起 netif。
+typedef enum {
+    NC_ETH_DRIVER_RMII = 0,    // 內建 EMAC + 外部 PHY（P4/S3）
+    NC_ETH_DRIVER_SPI  = 1,    // SPI 接 PHY（W5500 類）；driver 未實作
+} nc_eth_driver_t;
+
 typedef struct {
     bool    present;
     bool    enable;
+    uint8_t driver;            // nc_eth_driver_t
     int8_t  mdc;
     int8_t  mdio;
     int8_t  ref_clk;
-    uint8_t phy_addr;
+    int8_t  spi_idx;           // SPI PHY：claim spi_list 的哪一條（index）
+    int8_t  cs;
+    int8_t  rst;
+    int8_t  int_pin;
+    int8_t  phy_addr;          // RMII：0–31；SPI 未用 = -1
     uint8_t phy_type;          // nc_phy_type_t（IP101 / LAN8720 …）；只影響 log
 } nc_eth_cfg_t;
 

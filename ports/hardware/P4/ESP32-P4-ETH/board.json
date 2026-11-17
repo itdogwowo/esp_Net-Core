@@ -15,7 +15,9 @@
   "cpu_mhz": 360,
   "console": "uart0",
   "profiles": [
-    "eth-rmii"
+    "eth-rmii",
+    "nc4-ws",
+    "nc4-udp"
   ],
   "features": {
     "eth": "rmii-ip101",

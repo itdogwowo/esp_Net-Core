@@ -10,13 +10,8 @@
     "priority：多條連線都活著時，資料走哪條的偏好順序（不影響開機順序）",
     "",
     "── lan：有線（RMII + 外部 PHY），本板的資料主力 ──",
-    "lan.enable：0/1",
-    "lan.driver：目前只支援 RMII",
-    "lan.phy_type：PHY 型號（本板 IP101）",
-    "lan.phy_addr：PHY 在 MDIO 上的位址 0–31；link 不起來先查這個",
-    "lan.gpio.mdc / mdio：管理匯流排的兩根腳",
-    "lan.gpio.ref_clk：RMII 的 50 MHz 參考時鐘；-1 = 由 PHY 提供",
-    "lan.ip.mode：dhcp | static；static 時 addr / mask / gw 必填",
+    "lan.enable：0/1，claim／用這條有線接口；硬件 enable 在 hardware.json 的 ETH.enable",
+    "lan.ip.mode：dhcp（預設）| static（未實作）；static 時 addr / mask / gw 必填",
     "",
     "── wifi：本板沒有 Wi-Fi radio，整段不會啟用 ──",
     "wifi.enable：0/1",
@@ -45,7 +40,8 @@
     "espnow.channel：0 = 跟隨 Wi-Fi；兩端必須同頻道",
     "espnow.encrypt：0 = 明文；1 = 用 peers[].lmk 加密",
     "espnow.pmk：主金鑰",
-    "espnow.peers：允許通訊的對象清單，最多 20 個"
+    "espnow.peers：允許通訊的對象清單，最多 20 個",
+    "ETH 的 GPIO／PHY（driver／phy_type／phy_addr）在 hardware.json（由 wiring.json 生成）；network 只 claim／用，不重複硬件。"
   ],
   "hostname": "",
   "priority": [
@@ -53,19 +49,11 @@
   ],
   "lan": {
     "enable": 1,
-    "driver": "RMII",
-    "phy_type": "IP101",
-    "phy_addr": 1,
-    "gpio": {
-      "mdc": 31,
-      "mdio": 52,
-      "ref_clk": 50
-    },
     "ip": {
-      "mode": "static",
-      "addr": "10.10.1.50",
-      "mask": "255.255.0.0",
-      "gw": "10.10.1.1"
+      "mode": "dhcp",
+      "addr": "",
+      "mask": "",
+      "gw": ""
     }
   },
   "wifi": {

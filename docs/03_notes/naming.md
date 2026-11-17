@@ -186,10 +186,10 @@ USB 的三層詞（線／transport／driver）見 [usb-config.md §0.1](usb-conf
 | ID | name | 實測 | 一句話 |
 |---|---|---|---|
 | `B01` | banner+nvs | 9.66 ms | 橫幅、`nvs_flash_init`、讀開機計數 |
-| `B02` | storage+cfg | 126.92 ms | 掛 FAT／WL、寫 seed、config 三層解析 |
+| `B02` | storage+cfg | 126.92 ms | 掛 FAT／WL、boot record、seed 出廠 preset、config 解析（system／hardware／tasks） |
 | `B03` | capability | n/a | 探核數；單核時 core1 的核心組（解碼器＋其上任務）落到 core0（config 只改 RAM）；再定 USB 人格（模式／link／log／msc） |
 | `B04` | hwcheck | n/a | `hardware.json` 的 claim 對帳 |
-| `B05` | hardware | 0.33 ms | ETH／SD 起來；建「線 → 組」表；USB 那條線的組寫入 ctx（usb_core） |
+| `B05` | hardware | 0.33 ms | PWM 安裝；ETH enable=1 才起；`system.routes` 建「線 → 組」表；USB 那條線的組寫入 ctx（usb_core） |
 | `B07` | declare | 10.45 ms | 向 plan 宣告要幾多（未 malloc） |
 | `B08` | commit | 0.76 ms | plan carve（緩衝真正落地）；`nc_wifi_boot()` |
 | `B09` | start | 5.39 ms | 建 decode0／1 任務（entry 停在閘前） |
@@ -231,7 +231,7 @@ USB 的三層詞（線／transport／driver）見 [usb-config.md §0.1](usb-conf
 | `firmware/main/boot.h` | `nc_boot_stage_t.id`、`nc_boot_result_t.id`；命名空間寫在 header |
 | `firmware/main/boot.c` | `boot[B02] storage+cfg 126.92 ms ok`；摘要 `B01 9.66 \| B02 126.92 \| …` |
 | `firmware/main/main.c` | 12 行表加 `"B01"…"B12"`；`NC_STAGE_*` → `NC_CAP_*` |
-| `docs/00_pm/boot.svg`、`core-timeline.svg` | 兩張圖都用 B-id，同 log 對得上 |
+| `docs/00_pm/boot.svg`、`boot-cores.svg`、`core-timeline.svg` | 三張圖都用 B-id／D-id，同 log 對得上 |
 | `tools/id_check.py` | 掃 docs／SVG 的 ID token，對 code 是否存在（唔存在就 fail） |
 
 ### 7.7 未做

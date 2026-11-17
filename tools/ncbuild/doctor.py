@@ -42,16 +42,25 @@ def _sdkconfig_freshness(cfg: dict) -> Check:
     legacy = env.FIRMWARE / "sdkconfig"
     if not sdkconfigs and not legacy.exists():
         return Check("sdkconfig", OK, f"還沒有（第一次 build 會在 {shown}/ 產生）")
-    defaults = [env.FIRMWARE / "sdkconfig.defaults"]
-    defaults += [d / "sdkconfig.defaults" for d in (env.ROOT / "ports" / "hardware").glob("*/*/")]
-    defaults += [d / "sdkconfig.defaults" for d in (env.ROOT / "ports" / "project").glob("*/*/")]
-    defaults = [p for p in defaults if p.exists()]
-    if not defaults:
-        return Check("sdkconfig", OK, "沒有 defaults 可比較")
-    newest_default = max(p.stat().st_mtime for p in defaults)
-    stale = [p for p in sdkconfigs if p.stat().st_mtime < newest_default]
+    # 只有 hardware 層有 build 設定；project 層唔參與 build。
+    # 每塊板的 build dir 只同**自己的** defaults 比（<chip>_<board>）：
+    # 用全 repo 最新的一份去比，會令「改 A 板 → B 板也被判舊」的假警告。
+    common = env.FIRMWARE / "sdkconfig.defaults"
+    hw_root = env.ROOT / "ports" / "hardware"
+    hw_dirs = [d for d in hw_root.glob("*/*") if d.is_dir()]
+    stale: list[Path] = []
+    for sdk in sdkconfigs:
+        slug = sdk.parent.name
+        mine = [d for d in hw_dirs if f"{d.parent.name}_{d.name}" == slug]
+        cands = [common] + [d / "sdkconfig.defaults" for d in mine]
+        cands = [p for p in cands if p.exists()]
+        if not cands:
+            continue
+        if sdk.stat().st_mtime < max(p.stat().st_mtime for p in cands):
+            stale.append(sdk)
     if stale:
-        return Check("sdkconfig", WARN, f"{len(stale)} 個 build 的 sdkconfig 比 defaults 舊",
+        return Check("sdkconfig", WARN,
+                     f"{len(stale)} 個 build 的 sdkconfig 比**自己的** defaults 舊",
                      "改了不會生效：make.py build <board> --fresh（或 make.py clean）")
     if legacy.exists():
         return Check("sdkconfig", WARN, "舊 firmware/sdkconfig 仍在",

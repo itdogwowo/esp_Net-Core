@@ -80,14 +80,94 @@
 
 | 欄位 | 意思 | 預設 | 幾時要改 |
 |---|---|---|---|
-| `enable` | 0/1，開不開 | `0`（P4 是 `1`） | 要用有線才開 |
-| `driver` | 驅動類型，目前只有 `RMII` | `"RMII"` | 不用改 |
-| `phy_type` | PHY 晶片型號（`IP101` / `LAN8720` / `RTL8201`…） | 看板子 | **換板子一定要改**，PHY 認錯就不會 link |
-| `phy_addr` | PHY 在 MDIO 匯流排上的位址（0–31） | `1` | link 不起來時第一個懷疑它 |
-| `gpio.mdc` / `gpio.mdio` | 管理匯流排的兩根腳 | 看板子 | 換板子 |
-| `gpio.ref_clk` | RMII 的 50 MHz 參考時鐘腳；`-1` = 由 PHY 提供 | 看板子 | clock 來源不同時 |
-| `ip.mode` | `static` 或 `dhcp` | `"static"`（P4） | 想要路由器發 IP 就改 `dhcp` |
+| `enable` | 0/1，**claim／用**這塊板的有線接口 | `0`（P4 是 `1`） | 要用有線才開 |
+| `ip.mode` | `dhcp`（**預設**）或 `static`（未實作） | `"dhcp"` | 要固定 IP 才改；static 目前 code 未接 |
 | `ip.addr` / `mask` / `gw` | 靜態 IP 三件套 | 實驗室網段 | `mode: static` 時必填 |
+
+**PHY／GPIO 不在 `network.json`**：`driver`、`phy_type`、`phy_addr`、`GPIO` 全部是硬件，
+寫在 `hardware.json` 的 `ETH` 段（由 `wiring.json` 生成）。Network 只 claim／用。
+
+### 2.1.1 ETH 的兩種模式
+
+兩個模式共用同一個 `ETH` 段：
+
+| 欄位 | 意思 |
+|---|---|
+| `enable` | 0/1 |
+| `driver` | `"rmii"`（預設）或 `"spi"`（別名 `"w5500"`） |
+| `phy_type` | RMII：PHY 型號（IP101／LAN8720…）；SPI：通常 `"W5500"` |
+| `phy_addr` | RMII：PHY 在 MDIO 的位址（0–31）；SPI 未用 = `-1` |
+| `GPIO` | 實際腳位／index，見下面兩個模式 |
+
+#### 模式 A：RMII（內建 EMAC + 外部 PHY）
+
+```jsonc
+"ETH": {
+  "enable": 1,
+  "driver": "rmii",
+  "phy_type": "IP101",
+  "phy_addr": 1,
+  "GPIO": {
+    "mdc": 31, "mdio": 52, "ref_clk": 50,
+    "spi": -1, "cs": -1, "rst": -1, "int": -1
+  }
+}
+```
+
+- 必要：`GPIO.mdc`、`GPIO.mdio`、`GPIO.ref_clk` 都 ≥ 0；缺一個就唔啟動。
+- `GPIO.spi`／`cs`／`rst`／`int` 留 `-1`。
+- 用晶片內建 EMAC；build 要 `eth-rmii` 能力碎片（P4-ETH 現行）。
+- **現時可用**。
+
+#### 模式 B：SPI（W5500 類 SPI PHY）
+
+```jsonc
+// 1) SPI 匯流排：由 SPI driver 註冊成 spi_list
+"SPI": {
+  "enable": 1,
+  "list": [
+    { "id": 1, "baudrate": 40000000, "polarity": 0, "phase": 0,
+      "GPIO": { "sck": 10, "mosi": 11, "miso": 12 } }
+  ]
+},
+
+// 2) ETH 只 claim spi_list 的 index，再指定這顆 device 的 cs/rst/int
+"ETH": {
+  "enable": 1,
+  "driver": "spi",
+  "phy_type": "W5500",
+  "phy_addr": -1,
+  "GPIO": {
+    "spi": 0,                       // ← spi_list index（線名 + index）
+    "cs": 13, "rst": 14, "int": 15,
+    "mdc": -1, "mdio": -1, "ref_clk": -1
+  }
+}
+```
+
+- `GPIO.spi` 是 `spi_list` 的**索引**，不是 pin；SCK／MOSI／MISO 在 `SPI.list`。
+- `GPIO.cs`／`rst` 必要（W5500 需要）；`GPIO.int` 可選，`-1` = 唔用中斷。
+- `mdc`／`mdio`／`ref_clk` 留 `-1`。
+- 註冊次序：`SPI.list` → `spi_list` → ETH claim `spi_list[GPIO.spi]`。
+  同 mp_Net-Core 一樣（`spi_drv.py` 註冊 `spi_list`；`network_manager._init_lan()`
+  用 `spi_list[gpio_cfg['spi']]`）。
+- **現時狀態**：config schema 已接受、會 parse；但 C 的 `SPI` 段未 typed、
+  `spi_list` 未實作，所以 `driver:"spi"` 開機會明確 log「SPI PHY 未實作 → 唔啟動」。
+
+#### 對照表
+
+| 項目 | RMII | SPI |
+|---|---|---|
+| `driver` | `"rmii"` | `"spi"`／`"w5500"` |
+| 匯流排 | 晶片內建 EMAC | `SPI.list` → `spi_list` |
+| 必要腳位 | `GPIO.mdc`／`mdio`／`ref_clk` | `GPIO.spi`（index）＋`GPIO.cs`／`rst` |
+| 選用腳位 | — | `GPIO.int`（可 -1） |
+| 不用腳位 | `GPIO.spi/cs/rst/int` = -1 | `GPIO.mdc/mdio/ref_clk` = -1 |
+| 現時 | ✅ 可用 | 🟡 schema 可用，driver 未實作 |
+| 參考 | P4-ETH | mp_Net-Core W5500 |
+
+Network 只 claim／用。`ETH.enable=0` 時唔會起 netif；`hardware.json` 完全冇 ETH 段時，
+現時仍會用編譯期內建腳位（failure policy），將來 claim 模型會改成 claim 失敗就停。
 
 ### 2.2 `wifi`
 

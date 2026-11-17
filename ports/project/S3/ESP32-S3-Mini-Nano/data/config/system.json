@@ -1,0 +1,56 @@
+{
+  "version": 1,
+  "_comment": [
+    "System 層：身份、NC4 通道與解碼路線。",
+    "這塊白牌 S3 板有 USB OTG（TinyUSB MSC+CDC）＋ UART；USB OTG 與 USJ 共用 PHY，所以 console=none。",
+    "完整說明：docs/03_notes/config-layers.md、docs/03_notes/routing.md",
+    "USB：hardware phy=otg-fs（GPIO19/20）；目標 link {kind:\"usb\",index:0,msc:1}。現時 interim kind:\"cdc\",usb:0。",
+    "links[].name：可省略或用 \"name\":\"\" → 自動生成；有非空 name 就用。links[].msc：USB link 的 MSC 開關（只 OTG）。"
+  ],
+  "cID": "",
+  "frame_interval_ms": 20,
+  "num_pixels": 0,
+  "usb": {
+    "cdc_log": 1
+  },
+  "log_debug_mode": 0,
+  "nc4": {
+    "links": [
+      {
+        "name": "usb0",
+        "kind": "usb",
+        "index": 0,
+        "msc": 1
+      },
+      {
+        "name": "uart0",
+        "kind": "uart",
+        "index": 0
+      }
+    ],
+    "routes": [
+      {
+        "in": "nctx",
+        "out": [
+          "decode0"
+        ]
+      },
+      {
+        "in": "outbound",
+        "out": []
+      },
+      {
+        "in": "usb0",
+        "out": [
+          "decode0"
+        ]
+      },
+      {
+        "in": "uart0",
+        "out": [
+          "decode1"
+        ]
+      }
+    ]
+  }
+}

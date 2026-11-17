@@ -1,4 +1,8 @@
 # 線路身份：kind + index
+> **2026-11-16 晚間定案：回到 composite kind（本頁的方案）。**
+> `kind` 已含 interface（`eth_tcp`／`wifi_tcp`…），config 不再寫 `iface`／`service`；
+> `name` 由 `kind + index` 生成，亦可以用 `name` 覆寫。落地細節見 [net-lines.md](net-lines.md)。
+
 
 > 目標：網絡線、UART、USB 全部用同一套身份模型，不再分「實體線」和「網絡線」兩套世界。
 
@@ -92,16 +96,16 @@ routes 的 `in` 用生成後的名字：
 - `eth_*` 與 `wifi_*` 可以不同 core，但唔係必須。
 - `index` 不代表 core；index 只是 line 編號。
 
-## 7. 現在系統的差距
+## 7. 落地狀態（2026-11-16 晚間）
 
 | 欄位 | 現在 | 目標 |
 |---|---|---|
-| `name` | 手寫，routes key | 由 kind + index 生成 |
-| `kind` | tcp/udp/ws/http/uart/cdc | eth_tcp/wifi_tcp/… |
-| `index` | 不存在 | 每條線必要 |
-| `iface` | 存在，但只 log、不 bind | 移除；由 kind 決定 |
-| `service` | 存在，只用來分 web/nc4 | 移除；由 kind 決定 |
-| `port` | 網絡 endpoint | 保留，但唔係身份 |
+| `name` | 冇寫或空字串 → 由 kind+index 生成；非空 `name` 優先 | 已落地 |
+| `kind` | composite（eth_tcp／wifi_tcp…） | 已落地 |
+| `index` | 每條線都有 | 已落地 |
+| `iface` | config 已移除；parser 由 kind 推導（bind 仍未分離） | 大致落地 |
+| `service` | config 已移除；claim 仍由 port 政策決定 | 未完成（registry） |
+| `port` | 網絡 endpoint，不是身份 | 不變 |
 
 ## 8. 上限
 
@@ -140,6 +144,9 @@ UART／USB／多 TCP port 要更多線，必須提高這三個上限，並重新
   - 其他 TCP/UDP → NC4
   - 舊 `kind=http/ws` 仍兼容
 - HTTP line 不再需要 `kind=http`；`eth_tcp0:80` 由 HTTP service claim。
+- 2026-11-16 晚間：七塊 project 的 `system.json` 已轉 composite kind + index；
+  `uart`／`usb_jtag`／`cdc` 都加 `index` 並移除 `name`，全部由 `kind + index` 生成。
+  firmware 的 UART lookup 已改成 by-kind（USB 本來就係）。
 - S3 已實測：
   - `wifi_tcp0:80` → HTTP 200
   - `wifi_tcp1:6000` → NC4 TCP
@@ -150,6 +157,6 @@ UART／USB／多 TCP port 要更多線，必須提高這三個上限，並重新
 
 1. 真正 service registry／claim state API（目前是線性掃描 + port 政策）。
 2. iface-specific bind：`eth_*`／`wifi_*` 目前仍未綁 local IP，只是 kind 帶 iface。
-3. UART／CDC/USB 的 index 全面遷移。
-4. P4 device config 遷移（source config 已改，device FAT 仍是舊格式）。
+3. UART／CDC／USB：config 已冇 `name`；firmware 已改成 by-kind，冇 by-name 依賴。
+4. P4 device FAT 仍是舊格式（source config 已改）。
 5. 提高 8 條 line／bus 上限。

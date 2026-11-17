@@ -13,8 +13,8 @@
     "── nc4.links：收幀通道，只講怎麼收、不決定誰解碼 ──",
     "name：通道名；routes[].in / out 填的就是它",
     "enable：0 = 呢條線開機唔建立（唔宣告緩衝、唔建 bus、路由跳過）；要開就改 1 再重啟",
-    "每條 link：name / kind / iface / port / rx；rx 直接放 link 下面（舊檔的 cfg.rx 仍然接受）",
-    "kind：usb_jtag | cdc | uart | tcp | ws | udp（USB 二選一：USJ 或 OTG）",
+    "每條 link：kind / index / port；name 可選（唔寫就生成）；rx 直接放 link 下面（舊檔的 cfg.rx 仍然接受）",
+    "kind：composite（wifi_tcp／wifi_udp）或 usb_jtag／cdc／uart（USB 二選一：USJ 或 OTG）",
     "port：tcp / ws / udp 的埠號",
     "rx.mode：只對 tcp / ws / udp 有效（pull = 非阻塞 recv；push_frame = producer 阻塞 recv）",
     "          cdc / uart 由 kind 推導（cdc→pull、uart→push），唔可以設；寫咗都唔會讀",
@@ -33,7 +33,9 @@
     "out：目的地；decodeN = 本地執行（N = 核心編號），link = 轉發；空 = 丟棄",
     "例：out=[decode0] 只執行｜out=[TCP] 只轉發｜兩者一齊寫 = 兩樣都做｜out=[] 丟棄",
     "decodeN 有人指向才開；冇人指向就唔存在",
-    "log_debug_mode：0 = 正常（INFO、2 KB，由 USB 起來開始記，看到服務啟動）｜1 = 除錯（全部等級、8 KB，連最早期開機）"
+    "log_debug_mode：0 = 正常（INFO、2 KB，由 USB 起來開始記，看到服務啟動）｜1 = 除錯（全部等級、8 KB，連最早期開機）",
+    "USB：hardware phy=usj-fs（GPIO19/20）；目標 link {kind:\"usb\",index:0}（USJ 冇 MSC）。現時 interim kind:\"usb_jtag\",usb:0。",
+    "links[].name：可省略或用 \"name\":\"\" → 自動生成；有非空 name 就用。links[].msc：USB link 的 MSC 開關（只 OTG）。"
   ],
   "cID": "",
   "frame_interval_ms": 20,
@@ -41,57 +43,38 @@
   "nc4": {
     "links": [
       {
-        "name": "usb_jtag",
-        "kind": "usb_jtag"
+        "name": "usb0",
+        "kind": "usb",
+        "index": 0
       },
       {
-        "name": "UART",
-        "kind": "uart"
+        "name": "uart0",
+        "kind": "uart",
+        "index": 0
       },
       {
-        "kind": "tcp",
-        "iface": "wifi",
+        "name": "wifi_tcp0",
+        "kind": "wifi_tcp",
         "index": 0,
         "port": 80
       },
       {
-        "kind": "tcp",
-        "iface": "wifi",
+        "name": "wifi_tcp1",
+        "kind": "wifi_tcp",
         "index": 1,
-        "port": 6000,
-        "rx": {
-          "region": 16410,
-          "chunk": 8205,
-          "budget": 8,
-          "slots": 2,
-          "slot_size": 8205
-        }
+        "port": 6000
       },
       {
-        "kind": "tcp",
-        "iface": "wifi",
+        "name": "wifi_tcp2",
+        "kind": "wifi_tcp",
         "index": 2,
-        "port": 8080,
-        "rx": {
-          "region": 16384,
-          "chunk": 8192,
-          "budget": 4,
-          "slots": 2,
-          "slot_size": 8192
-        }
+        "port": 8080
       },
       {
-        "kind": "udp",
-        "iface": "wifi",
+        "name": "wifi_udp0",
+        "kind": "wifi_udp",
         "index": 0,
-        "port": 6001,
-        "rx": {
-          "region": 8205,
-          "chunk": 8205,
-          "budget": 8,
-          "slots": 1,
-          "slot_size": 8205
-        }
+        "port": 6001
       }
     ],
     "routes": [
@@ -106,13 +89,13 @@
         "out": []
       },
       {
-        "in": "usb_jtag",
+        "in": "usb0",
         "out": [
           "decode0"
         ]
       },
       {
-        "in": "UART",
+        "in": "uart0",
         "out": [
           "decode1"
         ]
@@ -138,7 +121,6 @@
     ]
   },
   "usb": {
-    "msc": 0,
     "cdc_log": 1
   },
   "log_debug_mode": 0

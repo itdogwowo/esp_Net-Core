@@ -120,21 +120,17 @@ addr.sin_addr.s_addr = htonl(INADDR_ANY);
 - 第二條 bind 可能失敗，或者兩邊都收到，取決於 lwIP／SO_REUSEADDR。
 - `name` 是 routes 的唯一 key；`TCP6000` 不能區分 iface，除非名字本身有 iface（`eth:T6000`／`wifi:T6000`）。
 
-### 建議 schema
+### 建議 schema（2026-11-16 晚間定案）
 
 ```json
-{
-  "name": "eth:tcp:6000",
-  "kind": "tcp",
-  "iface": "eth",
-  "port": 6000,
-  "service": "nc4"
-}
+{ "kind": "eth_tcp", "index": 3, "port": 6000 }
 ```
 
-- `name` 仍係 routes key，但由 `iface:kind:port` 生成，保證唯一。
-- `iface` 必須由 line 層真正用嚟 bind（iface-specific IP／netif），唔可以只係 metadata。
-- 如果想用 numeric index，內部用 enum（0=eth、1=wifi），config 仍建議寫 `"eth"`／`"wifi"`，避免板子之間 index 漂移。
+- `kind` 是 composite（`eth_tcp`／`wifi_tcp`…），interface 已包含在 kind；**不再寫 `iface`／`service`**。
+- `name` 由 `kind + index` 生成（`eth_tcp3`）；亦可以用 `name` 覆寫。routes 用生成／覆寫後的名字。
+- `index` 是同 kind 的編號；`(kind, index)` 必須唯一。
+- `iface` 的實際 bind（iface-specific IP／netif）仍然未做；kind 只係把 interface 帶落 line 層，
+  唔可以當成已分離 ETH／WiFi。
 
 ### 目前上限
 

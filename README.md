@@ -84,8 +84,8 @@ esp_Net-Core/
 | **硬體板身份證**（硬體事實，機器可讀） | `ports/hardware/<chip>/<board>/board.json` | 開發者手寫 | ✅ |
 | **硬體接線**（腳位／匯流排；firmware 預設的唯一來源） | `ports/hardware/<chip>/<board>/wiring.json` | 開發者手寫 | ✅ |
 | 板子建置設定（L1，後者勝過共通） | `ports/hardware/<chip>/<board>/sdkconfig.defaults` | 開發者手寫；檔尾碎片由 `sync` 產生 | ✅ |
-| 能力碎片（L2：ETH／WS／UDP） | `ports/_profiles/*.defaults` | 開發者手寫 | ✅ |
-| 項目選擇（這塊板跑什麼、要哪些能力） | `ports/project/<chip>/<board>/project.json` | 開發者手寫 | ✅ |
+| 能力碎片（L2：ETH／WS／UDP，由 hardware `profiles` 引用） | `ports/_profiles/*.defaults` | 開發者手寫 | ✅ |
+| 項目選擇（這塊板跑什麼：seed 清單） | `ports/project/<chip>/<board>/project.json` | 開發者手寫 | ✅ |
 | 共通建置設定 | `firmware/sdkconfig.defaults` | 開發者手寫（**不准放板子事實**） | ✅ |
 | 分割表 | `ports/hardware/<chip>/<board>/partitions.csv` 或 `firmware/partitions.csv` | 開發者手寫 | ✅ |
 | 出廠執行期內容（L3） | `ports/project/<chip>/<board>/data/config/*.json` | 出廠預置；上機後屬使用者 | ✅ |
@@ -98,7 +98,7 @@ esp_Net-Core/
 
 **為什麼再分 hardware / project**：`wiring.json`（腳位）是硬體事實，換項目不變；
 `system.json` 的 `links[]` / `routes[]` / `tasks[]` 是「這個項目要收哪幾條線、跑哪些任務」。
-同一塊硬體可以有多個 project，build 時用 `-DPORT`（硬體）＋ `-DPROJECT`（項目）組合。
+同一塊硬體可以有多個 project；`-DPORT`（硬體）決定 build 設定，`-DPROJECT` 只決定**嵌入哪一份 runtime 預置**（`data/config`），唔會改 Kconfig／能力。
 
 ```bash
 python3 tools/board.py list      # 硬體板 × project 一覽
@@ -106,7 +106,9 @@ python3 tools/board.py check     # 抓出「board.json 說 A、sdkconfig 卻是 
 python3 tools/board.py new …     # 新增板子（自動產生兩層骨架，不用改腳本或 CMake）
 ```
 
-**建置時唯一真相 = 共通 `sdkconfig.defaults` → hardware 覆蓋 → project 覆蓋。**
+**建置時唯一真相 = 共通 `sdkconfig.defaults` → hardware 覆蓋。**
+project 層只放 runtime 設定（`project.json`＋`data/config`），**冇 build 設定**；
+能力碎片（eth-rmii／wifi-hosted-*／nc4-ws／nc4-udp）全部寫在 `hardware/board.json` 的 `profiles`。
 每塊板的 `artifacts/build/<chip>_<board>/sdkconfig` 是產物：它存在時改 defaults
 **不會生效**，要 `python3 make.py build <board> --fresh`（`board.py check` 會提醒）。
 細節見 [ports/README.md](ports/README.md)。
@@ -118,7 +120,8 @@ python3 tools/board.py new …     # 新增板子（自動產生兩層骨架，�
 ```bash
 python3 make.py doctor              # 先看環境（IDF / esptool / 板子設定 / 磁碟）
 python3 make.py list                # 插著哪塊板子 + repo 支援哪些
-python3 make.py build  ESP32-P4-ETH # 建置（硬體板名 / <chip>/<board> / project 名都可以）
+python3 make.py build  ESP32-P4-ETH # 硬體 + default project（冇 default = 純硬體）
+python3 make.py build  ESP32-P4-ETH --project Demo   # 換 project（只換 runtime 預置）
 python3 make.py flash  ESP32-P4-ETH # 建置 + 燒錄（預設 app-flash，不動碟上的資料）
 python3 make.py monitor ESP32-P4-ETH # 序列埠監看
 python3 make.py outputs             # 歷史產物（artifacts/）

@@ -1,0 +1,37 @@
+{
+  "_comment": "硬體事實（F.spec）。改這裡 = 要重新 build；runtime 可改的放 project 層的 data/config。能力 profiles 只放硬體能力（eth/wifi），項目能力（ws/udp）在 project.json。",
+  "name": "ESP32-P4-FireBeetle2",
+  "chip": "esp32p4",
+  "flash": {
+    "size_mb": 16,
+    "freq_mhz": 40,
+    "mode": "dio"
+  },
+  "psram": {
+    "size_mb": 32,
+    "mode": "hex",
+    "speed_mhz": 200
+  },
+  "cpu_mhz": 360,
+  "console": "uart0",
+  "profiles": [
+    "eth-rmii",
+    "wifi-hosted-c6"
+  ],
+  "features": {
+    "eth": "emac-only",
+    "wifi": "hosted-c6",
+    "usb": "otg-hs"
+  },
+  "verified": "2026-11-16",
+  "notes": "DFRobot FireBeetle 2 ESP32-P4（SKU DFR1172，ESP32-P4R32；P4 rev1.0 pre-rev3 + 外掛 ESP32-C6）。16 MB flash、32 MB HEX PSRAM @200 MHz、CPU 360 MHz（官方板本）。兩個 USB-C：USB CDC（RST 按鈕旁；FS_PHY1 GPIO24/25，做 console／燒錄／log，開機枚舉 303A:1001）＋ USB OTG 2.0（另一邊；UTMI HS pin 50/49，開機枚舉 303A:4003）。Wi-Fi 經外掛 ESP32-C6（esp_hosted／SDIO）。**板子冇乙太網 PHY**：eth-rmii profile 只保留 P4 EMAC 的編譯能力，runtime 由 wiring 的 ETH.enable=0 關閉。另有 MIPI-DSI／CSI、PDM 麥克風、TF slot、24 支 GPIO。",
+  "brand": "DFRobot",
+  "model": "FireBeetle 2 ESP32-P4",
+  "rev": "v1.0",
+  "aliases": [
+    "ESP32-P4-C6",
+    "P4-C6",
+    "ESP32-P4-FireBeetle",
+    "FireBeetle2"
+  ]
+}

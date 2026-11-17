@@ -1,256 +1,226 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1680" height="1252" viewBox="0 0 1680 1252" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif">
-<rect x="0.0" y="0.0" width="1680.0" height="1252.0" rx="0" fill="#FBFAF6" stroke="#FBFAF6" stroke-width="0" opacity="1.0"/>
-<text x="44.0" y="52.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="25" font-weight="600" fill="#17191C" text-anchor="start">開機：11 個階段、10 個依賴位元、1 個 ctx</text>
-<text x="44.0" y="78.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="12.5" font-weight="400" fill="#6E747B" text-anchor="start">boot.h 是契約（needs／gives）、boot.c 是執行器、main.c 是實作。下面每一行 = main.c 的 stages[] 一行。</text>
-<text x="1636.0" y="78.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11" font-weight="400" fill="#9AA0A6" text-anchor="end">來源：firmware/main/boot.h · boot.c · main.c</text>
-<text x="52.0" y="128.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11.5" font-weight="600" fill="#6E747B" text-anchor="start">① 階段（B01…，順序即執行序）</text>
-<text x="220.0" y="128.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11.5" font-weight="600" fill="#6E747B" text-anchor="start">② 做什麼</text>
-<text x="684.0" y="128.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11.5" font-weight="600" fill="#6E747B" text-anchor="start">③ 用什麼模塊</text>
-<text x="994.0" y="128.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11.5" font-weight="600" fill="#6E747B" text-anchor="start">④ 契約   needs → gives</text>
-<text x="1332.0" y="128.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11.5" font-weight="600" fill="#6E747B" text-anchor="start">⑤ 之後誰用它</text>
-<line x1="44.0" y1="138.0" x2="1636.0" y2="138.0" stroke="#DCD8CE" stroke-width="1"/>
-<rect x="44" y="146" width="4" height="60" rx="2" fill="#8A6A2F"/>
-<text x="52.0" y="164.0" font-family="'Cascadia Mono','Consolas','SF Mono',monospace" font-size="11" font-weight="500" fill="#9AA0A6" text-anchor="start">B01</text>
-<text x="88.0" y="164.0" font-family="'Cascadia Mono','Consolas','SF Mono',monospace" font-size="13" font-weight="600" fill="#17191C" text-anchor="start">banner+nvs</text>
-<text x="220.0" y="162.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="12" font-weight="400" fill="#3D4247" text-anchor="start">NVS 開機、log 擷取、版本橫幅</text>
-<rect x="684.0" y="152.0" width="73.4" height="20.0" rx="10.0" fill="#F1EFE8" stroke="#DCD8CE" stroke-width="1"/>
-<text x="720.7" y="165.8" font-family="'Cascadia Mono','Consolas','SF Mono',monospace" font-size="11" font-weight="500" fill="#3D4247" text-anchor="middle">nvs_flash</text>
-<rect x="763.4" y="152.0" width="47.0" height="20.0" rx="10.0" fill="#F1EFE8" stroke="#DCD8CE" stroke-width="1"/>
-<text x="786.9" y="165.8" font-family="'Cascadia Mono','Consolas','SF Mono',monospace" font-size="11" font-weight="500" fill="#3D4247" text-anchor="middle">nclog</text>
-<rect x="816.4" y="152.0" width="47.0" height="20.0" rx="10.0" fill="#F1EFE8" stroke="#DCD8CE" stroke-width="1"/>
-<text x="839.9" y="165.8" font-family="'Cascadia Mono','Consolas','SF Mono',monospace" font-size="11" font-weight="500" fill="#3D4247" text-anchor="middle">state</text>
-<text x="994.0" y="164.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="12" text-anchor="start">
-<tspan font-family="'Cascadia Mono','Consolas','SF Mono',monospace" fill="#6E747B" font-weight="400">∅</tspan>
-<tspan font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" fill="#9AA0A6" font-weight="400">  →  </tspan>
-<tspan font-family="'Cascadia Mono','Consolas','SF Mono',monospace" fill="#17191C" font-weight="600">nvs</tspan>
+<svg xmlns="http://www.w3.org/2000/svg" width="1960" height="1702" viewBox="0 0 1960 1702" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif">
+<rect x="0.0" y="0.0" width="1960.0" height="1702.0" rx="0" fill="#FBFAF6" stroke="#FBFAF6" stroke-width="0" opacity="1.0"/>
+<text x="40.0" y="52.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="25" font-weight="600" fill="#17191C" text-anchor="start">開機：11 個階段，每一階段做什麼、決定什麼、失敗會怎樣</text>
+<text x="40.0" y="78.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="12.5" font-weight="400" fill="#6E747B" text-anchor="start">每一行 = main.c stages[] 一行（順序即執行序）。永遠嘗試全部階段；FAIL 只記錄、缺 needs 就 SKIP，唔會中途 reboot。</text>
+<text x="1920.0" y="78.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11" font-weight="400" fill="#9AA0A6" text-anchor="end">決策點 ◇D#：完整條件／核落點見 boot-cores.svg</text>
+<rect x="40.0" y="124.0" width="1880.0" height="1372.0" rx="6" fill="#FFFFFF" stroke="#DCD8CE" stroke-width="1" opacity="0.72"/>
+<text x="56.0" y="138.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11.5" font-weight="600" fill="#6E747B" text-anchor="start">① 階段（B01…；順序）</text>
+<text x="290.0" y="138.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11.5" font-weight="600" fill="#6E747B" text-anchor="start">② 做什麼（實際順序）</text>
+<text x="920.0" y="138.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11.5" font-weight="600" fill="#6E747B" text-anchor="start">③ 決定／分支</text>
+<text x="1380.0" y="138.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11.5" font-weight="600" fill="#6E747B" text-anchor="start">④ 產出／去哪裡</text>
+<text x="1660.0" y="138.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11.5" font-weight="600" fill="#6E747B" text-anchor="start">⑤ 失敗・跳過</text>
+<line x1="48.0" y1="148.0" x2="1912.0" y2="148.0" stroke="#DCD8CE" stroke-width="1"/>
+<rect x="48" y="156" width="4" height="104" rx="2" fill="#8A6A2F"/>
+<text x="56.0" y="172.0" font-family="'Cascadia Mono','Consolas','SF Mono',monospace" font-size="10.5" font-weight="500" fill="#9AA0A6" text-anchor="start">B01</text>
+<text x="90.0" y="172.0" font-family="'Cascadia Mono','Consolas','SF Mono',monospace" font-size="12.5" font-weight="600" fill="#17191C" text-anchor="start">banner+nvs</text>
+<text x="290.0" y="170.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11.6" font-weight="400" fill="#3D4247" text-anchor="start">清 BOOT hold（rtc／gpio hold_dis）→ NVS init → 裝 log hook（最早）</text>
+<text x="290.0" y="187.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11.6" font-weight="400" fill="#3D4247" text-anchor="start">印 IDF／chip／cores／PSRAM／頻率 banner</text>
+<text x="920.0" y="170.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11.2" font-weight="400" fill="#1F5F8B" text-anchor="start">◇D1 開機生命週期在 B02 才讀；本階段無分支</text>
+<text x="1380.0" y="170.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11.2" font-weight="400" fill="#3D4247" text-anchor="start">ctx：nvs 可用</text>
+<text x="1380.0" y="185.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11.2" font-weight="400" fill="#3D4247" text-anchor="start">log ring（RAM，consumer 等 B10）</text>
+<text x="1380.0" y="200.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11.2" font-weight="400" fill="#3D4247" text-anchor="start">NC_CAP_NVS</text>
+<text x="1660.0" y="170.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="10.6" font-weight="400" fill="#6E747B" text-anchor="start">NVS 失敗 → warning，log 退 console；唔阻開機</text>
+<line x1="60.0" y1="260.0" x2="1900.0" y2="260.0" stroke="#DCD8CE" stroke-width="1"/>
+<path d="M 64 254 L 64 264" stroke="#9AA0A6" stroke-width="1.1"/>
+<path d="M 61 260 L 64 264 L 67 260" fill="none" stroke="#9AA0A6" stroke-width="1.1"/>
+<rect x="48" y="274" width="4" height="104" rx="2" fill="#8A6A2F"/>
+<text x="56.0" y="290.0" font-family="'Cascadia Mono','Consolas','SF Mono',monospace" font-size="10.5" font-weight="500" fill="#9AA0A6" text-anchor="start">B02</text>
+<text x="90.0" y="290.0" font-family="'Cascadia Mono','Consolas','SF Mono',monospace" font-size="12.5" font-weight="600" fill="#17191C" text-anchor="start">storage+cfg</text>
+<text x="290.0" y="288.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11.6" font-weight="400" fill="#3D4247" text-anchor="start">nc_boot_init：讀 boot record（provisioned／format_pending／fw_hash）</text>
+<text x="290.0" y="305.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11.6" font-weight="400" fill="#3D4247" text-anchor="start">◇D1 需要格式化？→ 抹 data 分區重建 FAT；否則掛載（first 掛唔上→格式化）</text>
+<text x="290.0" y="322.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11.6" font-weight="400" fill="#3D4247" text-anchor="start">seed：缺檔才寫 F.preset（generated hardware ＋ build 揀的 project；冇→k_min）</text>
+<text x="290.0" y="339.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11.6" font-weight="400" fill="#3D4247" text-anchor="start">nc_cfg_boot：system／hardware／tasks → struct；network 由各模塊自己讀</text>
+<text x="290.0" y="356.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11.6" font-weight="400" fill="#3D4247" text-anchor="start">cID（config 有就用；冇→MAC 推導並寫回）／SD／卷標／NVS frame_align</text>
+<text x="920.0" y="288.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11.2" font-weight="400" fill="#1F5F8B" text-anchor="start">◇D1 格式化？</text>
+<text x="920.0" y="305.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11.2" font-weight="400" fill="#1F5F8B" text-anchor="start">◇D2 config 缺／壞 → 預設</text>
+<text x="920.0" y="322.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11.2" font-weight="400" fill="#1F5F8B" text-anchor="start">◇D3 單核 merge 在 B03</text>
+<text x="1380.0" y="288.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11.2" font-weight="400" fill="#3D4247" text-anchor="start">F.live：/data/config 檔案</text>
+<text x="1380.0" y="303.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11.2" font-weight="400" fill="#3D4247" text-anchor="start">cID／SD 狀態</text>
+<text x="1380.0" y="318.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11.2" font-weight="400" fill="#3D4247" text-anchor="start">NC_CAP_STORAGE｜CONFIG</text>
+<text x="1660.0" y="288.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="10.6" font-weight="400" fill="#6E747B" text-anchor="start">storage 失敗：ERROR 但仍繼續（config 用預設）</text>
+<text x="1660.0" y="303.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="10.6" font-weight="400" fill="#6E747B" text-anchor="start">壞檔：整層用預設、degraded 標記，不改用戶檔</text>
+<line x1="60.0" y1="378.0" x2="1900.0" y2="378.0" stroke="#DCD8CE" stroke-width="1"/>
+<path d="M 64 372 L 64 382" stroke="#9AA0A6" stroke-width="1.1"/>
+<path d="M 61 378 L 64 382 L 67 378" fill="none" stroke="#9AA0A6" stroke-width="1.1"/>
+<rect x="48" y="392" width="4" height="104" rx="2" fill="#1F5F8B"/>
+<text x="56.0" y="408.0" font-family="'Cascadia Mono','Consolas','SF Mono',monospace" font-size="10.5" font-weight="500" fill="#9AA0A6" text-anchor="start">B03</text>
+<text x="90.0" y="408.0" font-family="'Cascadia Mono','Consolas','SF Mono',monospace" font-size="12.5" font-weight="600" fill="#17191C" text-anchor="start">capability</text>
+<text x="290.0" y="406.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11.6" font-weight="400" fill="#3D4247" text-anchor="start">nc_core_probe() → ctx.cores（1／2）</text>
+<text x="290.0" y="423.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11.6" font-weight="400" fill="#3D4247" text-anchor="start">◇D3 單核：Routes decode1→decode0、tasks core1→core0（只改 RAM，唔寫檔）</text>
+<text x="290.0" y="440.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11.6" font-weight="400" fill="#3D4247" text-anchor="start">usb_resolve()：links[] 找 enable 的 cdc／usb_jtag；◇D4 決定 JTAG／OTG／NONE</text>
+<text x="290.0" y="457.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11.6" font-weight="400" fill="#3D4247" text-anchor="start">log：JTAG 永遠開；MSC 只有 OTG＋usb.msc=1；S3 兩者共用 PHY，OTG 時 console 要改 none／UART0</text>
+<text x="920.0" y="406.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11.2" font-weight="400" fill="#1F5F8B" text-anchor="start">◇D3 核數</text>
+<text x="920.0" y="423.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11.2" font-weight="400" fill="#1F5F8B" text-anchor="start">◇D4 USB 人格</text>
+<text x="920.0" y="440.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11.2" font-weight="400" fill="#1F5F8B" text-anchor="start">◇D5（ETH 在 B05）</text>
+<text x="1380.0" y="406.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11.2" font-weight="400" fill="#3D4247" text-anchor="start">ctx：cores／usb_mode／usb_link</text>
+<text x="1380.0" y="421.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11.2" font-weight="400" fill="#3D4247" text-anchor="start">usb_log／usb_msc／usb_core</text>
+<text x="1380.0" y="436.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11.2" font-weight="400" fill="#3D4247" text-anchor="start">NC_CAP_CORES｜USB</text>
+<text x="1660.0" y="406.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="10.6" font-weight="400" fill="#6E747B" text-anchor="start">links[] 冇 USB link → USB=NONE（0 B）</text>
+<text x="1660.0" y="421.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="10.6" font-weight="400" fill="#6E747B" text-anchor="start">kind 在這個 build 冇實作 → NONE＋ERROR</text>
+<line x1="60.0" y1="496.0" x2="1900.0" y2="496.0" stroke="#DCD8CE" stroke-width="1"/>
+<path d="M 64 490 L 64 500" stroke="#9AA0A6" stroke-width="1.1"/>
+<path d="M 61 496 L 64 500 L 67 496" fill="none" stroke="#9AA0A6" stroke-width="1.1"/>
+<rect x="48" y="510" width="4" height="104" rx="2" fill="#5A6169"/>
+<text x="56.0" y="526.0" font-family="'Cascadia Mono','Consolas','SF Mono',monospace" font-size="10.5" font-weight="500" fill="#9AA0A6" text-anchor="start">B04</text>
+<text x="90.0" y="526.0" font-family="'Cascadia Mono','Consolas','SF Mono',monospace" font-size="12.5" font-weight="600" fill="#17191C" text-anchor="start">hwcheck</text>
+<text x="290.0" y="524.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11.6" font-weight="400" fill="#3D4247" text-anchor="start">nc_hw_init()；由 typed hardware 收集 claim：</text>
+<text x="290.0" y="541.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11.6" font-weight="400" fill="#3D4247" text-anchor="start">SDIO（clk／cmd／data）、ETH（mdc／mdio／ref_clk）、PIN、PWM、UART（tx／rx／en）</text>
+<text x="920.0" y="524.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11.2" font-weight="400" fill="#1F5F8B" text-anchor="start">無分支：只稽核</text>
+<text x="1380.0" y="524.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11.2" font-weight="400" fill="#3D4247" text-anchor="start">hw claim 帳本</text>
+<text x="1380.0" y="539.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11.2" font-weight="400" fill="#3D4247" text-anchor="start">腳位衝突 → 開機即 log</text>
+<text x="1660.0" y="524.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="10.6" font-weight="400" fill="#6E747B" text-anchor="start">衝突只 log ERROR；仍然開機（相關 driver 會 fail）</text>
+<line x1="60.0" y1="614.0" x2="1900.0" y2="614.0" stroke="#DCD8CE" stroke-width="1"/>
+<path d="M 64 608 L 64 618" stroke="#9AA0A6" stroke-width="1.1"/>
+<path d="M 61 614 L 64 618 L 67 614" fill="none" stroke="#9AA0A6" stroke-width="1.1"/>
+<rect x="48" y="628" width="4" height="104" rx="2" fill="#5A6169"/>
+<text x="56.0" y="644.0" font-family="'Cascadia Mono','Consolas','SF Mono',monospace" font-size="10.5" font-weight="500" fill="#9AA0A6" text-anchor="start">B05</text>
+<text x="90.0" y="644.0" font-family="'Cascadia Mono','Consolas','SF Mono',monospace" font-size="12.5" font-weight="600" fill="#17191C" text-anchor="start">hardware</text>
+<text x="290.0" y="642.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11.6" font-weight="400" fill="#3D4247" text-anchor="start">pwm_boot()：hardware PWM.list enable → LEDC install</text>
+<text x="290.0" y="659.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11.6" font-weight="400" fill="#3D4247" text-anchor="start">◇D5 NC_HAS_ETH（晶片）＋ hardware ETH.enable＋腳位完整 → 起 netif／PHY；否則 s_eth_ok=0</text>
+<text x="290.0" y="676.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11.6" font-weight="400" fill="#3D4247" text-anchor="start">router_from_cfg()：system.routes；◇D6 每行第一個 decodeN 定核（單核 clamp）</text>
+<text x="290.0" y="693.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11.6" font-weight="400" fill="#3D4247" text-anchor="start">冇有效 routes → router_defaults()：USB→core0；ETH ok→TCP core0／UART core1；否則 UART core0</text>
+<text x="290.0" y="710.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11.6" font-weight="400" fill="#3D4247" text-anchor="start">USB 線的組：ctx.usb_core = router_core(usb link)（可能 NONE）</text>
+<text x="920.0" y="642.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11.2" font-weight="400" fill="#1F5F8B" text-anchor="start">◇D5 ETH 起唔起</text>
+<text x="920.0" y="659.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11.2" font-weight="400" fill="#1F5F8B" text-anchor="start">◇D6 routes → 線→核</text>
+<text x="1380.0" y="642.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11.2" font-weight="400" fill="#3D4247" text-anchor="start">ctx.usb_core</text>
+<text x="1380.0" y="657.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11.2" font-weight="400" fill="#3D4247" text-anchor="start">router 表</text>
+<text x="1380.0" y="672.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11.2" font-weight="400" fill="#3D4247" text-anchor="start">eth_ok／pwm</text>
+<text x="1380.0" y="687.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11.2" font-weight="400" fill="#3D4247" text-anchor="start">NC_CAP_ROUTER</text>
+<text x="1660.0" y="642.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="10.6" font-weight="400" fill="#6E747B" text-anchor="start">ETH 未編／enable=0／腳位缺 → 唔起 netif（唔阻其</text>
+<text x="1660.0" y="657.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="10.6" font-weight="400" fill="#6E747B" text-anchor="start">他通道）</text>
+<text x="1660.0" y="672.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="10.6" font-weight="400" fill="#6E747B" text-anchor="start">router 無效 → 用預設表＋warning</text>
+<line x1="60.0" y1="732.0" x2="1900.0" y2="732.0" stroke="#DCD8CE" stroke-width="1"/>
+<path d="M 64 726 L 64 736" stroke="#9AA0A6" stroke-width="1.1"/>
+<path d="M 61 732 L 64 736 L 67 732" fill="none" stroke="#9AA0A6" stroke-width="1.1"/>
+<rect x="48" y="746" width="4" height="104" rx="2" fill="#7A4E8C"/>
+<text x="56.0" y="762.0" font-family="'Cascadia Mono','Consolas','SF Mono',monospace" font-size="10.5" font-weight="500" fill="#9AA0A6" text-anchor="start">B07</text>
+<text x="90.0" y="762.0" font-family="'Cascadia Mono','Consolas','SF Mono',monospace" font-size="12.5" font-weight="600" fill="#17191C" text-anchor="start">declare</text>
+<text x="290.0" y="760.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11.6" font-weight="400" fill="#3D4247" text-anchor="start">s_ndec = (cores&gt;1 且 router 有 core1 線) ? 2 : 1；每核建一個 decoder</text>
+<text x="290.0" y="777.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11.6" font-weight="400" fill="#3D4247" text-anchor="start">套 cid／master_cid；actions_init（統計→一次配置→封存）</text>
+<text x="290.0" y="794.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11.6" font-weight="400" fill="#3D4247" text-anchor="start">登記任務：nc4 L0、net L1、gpio L2；測試 build 另加 probe／fx／rgb／hello／bench</text>
+<text x="290.0" y="811.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11.6" font-weight="400" fill="#3D4247" text-anchor="start">nc_task_declare_all()：讀 tasks.json level／affinity（◇D9），只計記憶體，未 malloc</text>
+<text x="920.0" y="760.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11.2" font-weight="400" fill="#1F5F8B" text-anchor="start">◇D9 任務 level／affinity</text>
+<text x="920.0" y="777.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11.2" font-weight="400" fill="#1F5F8B" text-anchor="start">decoder 個數＝核數＋router</text>
+<text x="1380.0" y="760.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11.2" font-weight="400" fill="#3D4247" text-anchor="start">decoder[] 物件</text>
+<text x="1380.0" y="775.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11.2" font-weight="400" fill="#3D4247" text-anchor="start">plan 帳面（未 carve）</text>
+<text x="1380.0" y="790.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11.2" font-weight="400" fill="#3D4247" text-anchor="start">NC_CAP_DECLARED</text>
+<text x="1660.0" y="760.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="10.6" font-weight="400" fill="#6E747B" text-anchor="start">decoder0 建失敗 → 收不到任何指令</text>
+<line x1="60.0" y1="850.0" x2="1900.0" y2="850.0" stroke="#DCD8CE" stroke-width="1"/>
+<path d="M 64 844 L 64 854" stroke="#9AA0A6" stroke-width="1.1"/>
+<path d="M 61 850 L 64 854 L 67 850" fill="none" stroke="#9AA0A6" stroke-width="1.1"/>
+<rect x="48" y="864" width="4" height="104" rx="2" fill="#7A4E8C"/>
+<text x="56.0" y="880.0" font-family="'Cascadia Mono','Consolas','SF Mono',monospace" font-size="10.5" font-weight="500" fill="#9AA0A6" text-anchor="start">B08</text>
+<text x="90.0" y="880.0" font-family="'Cascadia Mono','Consolas','SF Mono',monospace" font-size="12.5" font-weight="600" fill="#17191C" text-anchor="start">commit</text>
+<text x="290.0" y="878.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11.6" font-weight="400" fill="#3D4247" text-anchor="start">探測每 class 最大連續 → plan commit／carve（一次）</text>
+<text x="290.0" y="895.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11.6" font-weight="400" fill="#3D4247" text-anchor="start">◇D7 managed net lines？有 → nc_net_lines_declare()：逐線 service claim、buffer、bus（◇D8）</text>
+<text x="290.0" y="912.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11.6" font-weight="400" fill="#3D4247" text-anchor="start">之後才 nc_wifi_boot()：◇D10 編譯閘＋network.json wifi.enable；sta／ap；credentials</text>
+<text x="290.0" y="929.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11.6" font-weight="400" fill="#3D4247" text-anchor="start">冇 managed line → legacy 路徑（nc4_line_net declare）</text>
+<text x="920.0" y="878.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11.2" font-weight="400" fill="#1F5F8B" text-anchor="start">◇D7 managed vs legacy</text>
+<text x="920.0" y="895.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11.2" font-weight="400" fill="#1F5F8B" text-anchor="start">◇D8 每條 line 建唔建</text>
+<text x="920.0" y="912.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11.2" font-weight="400" fill="#1F5F8B" text-anchor="start">◇D10 WiFi 起唔起</text>
+<text x="1380.0" y="878.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11.2" font-weight="400" fill="#3D4247" text-anchor="start">plan：已 carve</text>
+<text x="1380.0" y="893.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11.2" font-weight="400" fill="#3D4247" text-anchor="start">net lines 清單（核心已綁）</text>
+<text x="1380.0" y="908.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11.2" font-weight="400" fill="#3D4247" text-anchor="start">WiFi 狀態</text>
+<text x="1380.0" y="923.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11.2" font-weight="400" fill="#3D4247" text-anchor="start">NC_CAP_PLAN</text>
+<text x="1660.0" y="878.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="10.6" font-weight="400" fill="#6E747B" text-anchor="start">單條 line 失敗 → 跳過該線，其他照起</text>
+<text x="1660.0" y="893.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="10.6" font-weight="400" fill="#6E747B" text-anchor="start">WiFi 唔起 → 仍可 ETH／USB</text>
+<line x1="60.0" y1="968.0" x2="1900.0" y2="968.0" stroke="#DCD8CE" stroke-width="1"/>
+<path d="M 64 962 L 64 972" stroke="#9AA0A6" stroke-width="1.1"/>
+<path d="M 61 968 L 64 972 L 67 968" fill="none" stroke="#9AA0A6" stroke-width="1.1"/>
+<rect x="48" y="982" width="4" height="104" rx="2" fill="#A8661B"/>
+<text x="56.0" y="998.0" font-family="'Cascadia Mono','Consolas','SF Mono',monospace" font-size="10.5" font-weight="500" fill="#9AA0A6" text-anchor="start">B09</text>
+<text x="90.0" y="998.0" font-family="'Cascadia Mono','Consolas','SF Mono',monospace" font-size="12.5" font-weight="600" fill="#17191C" text-anchor="start">start</text>
+<text x="290.0" y="996.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11.6" font-weight="400" fill="#3D4247" text-anchor="start">nc_task_start_all()：gather 資源 → on_start → prepare loops（◇D9 決定開唔開）</text>
+<text x="290.0" y="1013.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11.6" font-weight="400" fill="#3D4247" text-anchor="start">loop 未開；只建立 task 物件／資源／指令表</text>
+<text x="290.0" y="1030.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11.6" font-weight="400" fill="#3D4247" text-anchor="start">測試 build：fx 任務起咗 → 掃 /data/pixel/effects、/data/tasks 的 .fxe attach（◇D11）</text>
+<text x="290.0" y="1047.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11.6" font-weight="400" fill="#3D4247" text-anchor="start">WAMR 未接：.fxe 只登記／驗證，未真正執行（FXE 下一步）</text>
+<text x="290.0" y="1064.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11.6" font-weight="400" fill="#3D4247" text-anchor="start">印任務帳本</text>
+<text x="920.0" y="996.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11.2" font-weight="400" fill="#1F5F8B" text-anchor="start">◇D9 loop enabled</text>
+<text x="920.0" y="1013.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11.2" font-weight="400" fill="#1F5F8B" text-anchor="start">◇D11 .fxe 只在測試 build 掃</text>
+<text x="1380.0" y="996.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11.2" font-weight="400" fill="#3D4247" text-anchor="start">on_start 已跑、資源已派</text>
+<text x="1380.0" y="1011.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11.2" font-weight="400" fill="#3D4247" text-anchor="start">tasks.json 補寫</text>
+<text x="1380.0" y="1026.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11.2" font-weight="400" fill="#3D4247" text-anchor="start">NC_CAP_TASKS</text>
+<text x="1660.0" y="996.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="10.6" font-weight="400" fill="#6E747B" text-anchor="start">on_start 失敗 → 任務唔 started，loop 唔開</text>
+<line x1="60.0" y1="1086.0" x2="1900.0" y2="1086.0" stroke="#DCD8CE" stroke-width="1"/>
+<path d="M 64 1080 L 64 1090" stroke="#9AA0A6" stroke-width="1.1"/>
+<path d="M 61 1086 L 64 1090 L 67 1086" fill="none" stroke="#9AA0A6" stroke-width="1.1"/>
+<rect x="48" y="1100" width="4" height="104" rx="2" fill="#2E6B4F"/>
+<text x="56.0" y="1116.0" font-family="'Cascadia Mono','Consolas','SF Mono',monospace" font-size="10.5" font-weight="500" fill="#9AA0A6" text-anchor="start">B10</text>
+<text x="90.0" y="1116.0" font-family="'Cascadia Mono','Consolas','SF Mono',monospace" font-size="12.5" font-weight="600" fill="#17191C" text-anchor="start">usb</text>
+<text x="290.0" y="1114.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11.6" font-weight="400" fill="#3D4247" text-anchor="start">JTAG：nc_log_start() 走 USJ（NC4＋log 共用 TX）；/data 留 APP</text>
+<text x="290.0" y="1131.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11.6" font-weight="400" fill="#3D4247" text-anchor="start">OTG：cdc_wanted＝link enable＋usb_core≠NONE；冇 CDC 又冇 MSC → 唔裝 TinyUSB</text>
+<text x="290.0" y="1148.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11.6" font-weight="400" fill="#3D4247" text-anchor="start">usb_init() → CDC log（usb.cdc_log）／MSC（usb.msc=1 → 交 FAT 給 host）</text>
+<text x="290.0" y="1165.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11.6" font-weight="400" fill="#3D4247" text-anchor="start">NONE：冇 USB → 只 console；/data 留 APP</text>
+<text x="920.0" y="1114.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11.2" font-weight="400" fill="#1F5F8B" text-anchor="start">◇D4 的結果照做（冇 runtime 切換）</text>
+<text x="920.0" y="1131.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11.2" font-weight="400" fill="#1F5F8B" text-anchor="start">◇D12 MSC 交唔交碟</text>
+<text x="1380.0" y="1114.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11.2" font-weight="400" fill="#3D4247" text-anchor="start">USB stack／log 出口</text>
+<text x="1380.0" y="1129.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11.2" font-weight="400" fill="#3D4247" text-anchor="start">/data 歸屬（APP 或 host）</text>
+<text x="1660.0" y="1114.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="10.6" font-weight="400" fill="#6E747B" text-anchor="start">init 失敗 → /data 留 APP、ERROR；不重試</text>
+<line x1="60.0" y1="1204.0" x2="1900.0" y2="1204.0" stroke="#DCD8CE" stroke-width="1"/>
+<path d="M 64 1198 L 64 1208" stroke="#9AA0A6" stroke-width="1.1"/>
+<path d="M 61 1204 L 64 1208 L 67 1204" fill="none" stroke="#9AA0A6" stroke-width="1.1"/>
+<rect x="48" y="1218" width="4" height="104" rx="2" fill="#2E6B4F"/>
+<text x="56.0" y="1234.0" font-family="'Cascadia Mono','Consolas','SF Mono',monospace" font-size="10.5" font-weight="500" fill="#9AA0A6" text-anchor="start">B11</text>
+<text x="90.0" y="1234.0" font-family="'Cascadia Mono','Consolas','SF Mono',monospace" font-size="12.5" font-weight="600" fill="#17191C" text-anchor="start">channels</text>
+<text x="290.0" y="1232.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11.6" font-weight="400" fill="#3D4247" text-anchor="start">managed：nc_net_lines_start()——HTTP→httpd（core0）、WS／TCP→listen＋task（core=ln）</text>
+<text x="290.0" y="1249.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11.6" font-weight="400" fill="#3D4247" text-anchor="start">UDP→bind；legacy：WiFi line／ETH WS＋UDP／main tcp accept fallback</text>
+<text x="290.0" y="1266.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11.6" font-weight="400" fill="#3D4247" text-anchor="start">建 USB bus（OTG PUSH＋cdc.rx；JTAG PULL；UART PUSH）／legacy TCP bus</text>
+<text x="290.0" y="1283.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11.6" font-weight="400" fill="#3D4247" text-anchor="start">最後 nc_task_boot()：按 layer 開所有 enabled loop → decode 開始收幀</text>
+<text x="290.0" y="1300.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11.6" font-weight="400" fill="#3D4247" text-anchor="start">uart.rx producer 最後才起（等 decode 的 owner_init 裝好 driver）</text>
+<text x="920.0" y="1232.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11.2" font-weight="400" fill="#1F5F8B" text-anchor="start">◇D7／D8 的結果照做</text>
+<text x="920.0" y="1249.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11.2" font-weight="400" fill="#1F5F8B" text-anchor="start">◇D9 loop enabled 才開</text>
+<text x="1380.0" y="1232.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11.2" font-weight="400" fill="#3D4247" text-anchor="start">listener／bus／producer</text>
+<text x="1380.0" y="1247.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11.2" font-weight="400" fill="#3D4247" text-anchor="start">tasks loop 開跑</text>
+<text x="1380.0" y="1262.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11.2" font-weight="400" fill="#3D4247" text-anchor="start">NC_CAP_CHANNELS</text>
+<text x="1660.0" y="1232.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="10.6" font-weight="400" fill="#6E747B" text-anchor="start">單線 bind／task 失敗 → log＋跳過；decode 照跑</text>
+<line x1="60.0" y1="1322.0" x2="1900.0" y2="1322.0" stroke="#DCD8CE" stroke-width="1"/>
+<path d="M 64 1316 L 64 1326" stroke="#9AA0A6" stroke-width="1.1"/>
+<path d="M 61 1322 L 64 1326 L 67 1322" fill="none" stroke="#9AA0A6" stroke-width="1.1"/>
+<rect x="48" y="1336" width="4" height="104" rx="2" fill="#2E6B4F"/>
+<text x="56.0" y="1352.0" font-family="'Cascadia Mono','Consolas','SF Mono',monospace" font-size="10.5" font-weight="500" fill="#9AA0A6" text-anchor="start">B12</text>
+<text x="90.0" y="1352.0" font-family="'Cascadia Mono','Consolas','SF Mono',monospace" font-size="12.5" font-weight="600" fill="#17191C" text-anchor="start">account</text>
+<text x="290.0" y="1350.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11.6" font-weight="400" fill="#3D4247" text-anchor="start">印內部／PSRAM：free ＋ 最大連續（兩個數字分開睇）</text>
+<text x="290.0" y="1367.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11.6" font-weight="400" fill="#3D4247" text-anchor="start">之後 app_main 只剩 1 秒心跳（heap 快照）</text>
+<text x="920.0" y="1350.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11.2" font-weight="400" fill="#1F5F8B" text-anchor="start">無分支</text>
+<text x="1380.0" y="1350.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11.2" font-weight="400" fill="#3D4247" text-anchor="start">開機帳</text>
+<text x="1380.0" y="1365.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11.2" font-weight="400" fill="#3D4247" text-anchor="start">—</text>
+<text x="1660.0" y="1350.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="10.6" font-weight="400" fill="#6E747B" text-anchor="start">—</text>
+<rect x="40.0" y="1512.0" width="1880.0" height="150.0" rx="6" fill="#FFFFFF" stroke="#DCD8CE" stroke-width="1" opacity="0.72"/>
+<text x="58.0" y="1538.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="12.5" font-weight="600" fill="#17191C" text-anchor="start">階段語義（boot.c 執行器）</text>
+<text x="58.0" y="1564.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11.5">
+<tspan font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" fill="#6E747B" font-weight="400">needs 缺失 → </tspan>
+<tspan font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" fill="#A04A3A" font-weight="600">SKIP</tspan>
+<tspan font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" fill="#6E747B" font-weight="400">（寫明缺什麼）；</tspan>
+<tspan font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" fill="#6E747B" font-weight="400">fn 失敗 → </tspan>
+<tspan font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" fill="#A04A3A" font-weight="600">FAIL</tspan>
+<tspan font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" fill="#6E747B" font-weight="400">（記錄，不中斷）；optional 失敗 → </tspan>
+<tspan font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" fill="#A8661B" font-weight="600">WARN</tspan>
+<tspan font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" fill="#6E747B" font-weight="400">。</tspan>
 </text>
-<text x="1332.0" y="164.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11" font-weight="400" fill="#6E747B" text-anchor="start">下一個階段等它</text>
-<line x1="56.0" y1="208.0" x2="1624.0" y2="208.0" stroke="#DCD8CE" stroke-width="1"/>
-<rect x="44" y="220" width="4" height="60" rx="2" fill="#8A6A2F"/>
-<text x="52.0" y="238.0" font-family="'Cascadia Mono','Consolas','SF Mono',monospace" font-size="11" font-weight="500" fill="#9AA0A6" text-anchor="start">B02</text>
-<text x="88.0" y="238.0" font-family="'Cascadia Mono','Consolas','SF Mono',monospace" font-size="13" font-weight="600" fill="#17191C" text-anchor="start">storage+cfg</text>
-<text x="220.0" y="236.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="12" font-weight="400" fill="#3D4247" text-anchor="start">掛 FAT／WL、寫 seed、讀 config 三層、cID、SD</text>
-<rect x="684.0" y="226.0" width="47.0" height="20.0" rx="10.0" fill="#F1EFE8" stroke="#DCD8CE" stroke-width="1"/>
-<text x="707.5" y="239.8" font-family="'Cascadia Mono','Consolas','SF Mono',monospace" font-size="11" font-weight="500" fill="#3D4247" text-anchor="middle">store</text>
-<rect x="737.0" y="226.0" width="53.6" height="20.0" rx="10.0" fill="#F1EFE8" stroke="#DCD8CE" stroke-width="1"/>
-<text x="763.8" y="239.8" font-family="'Cascadia Mono','Consolas','SF Mono',monospace" font-size="11" font-weight="500" fill="#3D4247" text-anchor="middle">config</text>
-<rect x="796.6" y="226.0" width="47.0" height="20.0" rx="10.0" fill="#F1EFE8" stroke="#DCD8CE" stroke-width="1"/>
-<text x="820.1" y="239.8" font-family="'Cascadia Mono','Consolas','SF Mono',monospace" font-size="11" font-weight="500" fill="#3D4247" text-anchor="middle">sdmmc</text>
-<text x="994.0" y="238.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="12" text-anchor="start">
-<tspan font-family="'Cascadia Mono','Consolas','SF Mono',monospace" fill="#6E747B" font-weight="400">nvs</tspan>
-<tspan font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" fill="#9AA0A6" font-weight="400">  →  </tspan>
-<tspan font-family="'Cascadia Mono','Consolas','SF Mono',monospace" fill="#17191C" font-weight="600">storage, config</tspan>
+<text x="58.0" y="1586.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11">
+<tspan font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" fill="#6E747B" font-weight="400">能力位 0x03ff = </tspan>
+<tspan font-family="'Cascadia Mono','Consolas','SF Mono',monospace" fill="#3D4247" font-weight="400">NVS(1)｜STORAGE(2)｜CONFIG(4)｜CORES(8)｜USB(0x10)｜ROUTER(0x20)｜DECLARED(0x40)｜PLAN(0x80)｜TASKS(0x100)｜CHANNELS(0x200)</tspan>
 </text>
-<text x="1332.0" y="238.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11" font-weight="400" fill="#6E747B" text-anchor="start">三層 config 之後人人都讀</text>
-<line x1="56.0" y1="282.0" x2="1624.0" y2="282.0" stroke="#DCD8CE" stroke-width="1"/>
-<rect x="44" y="294" width="4" height="60" rx="2" fill="#1F5F8B"/>
-<text x="52.0" y="312.0" font-family="'Cascadia Mono','Consolas','SF Mono',monospace" font-size="11" font-weight="500" fill="#9AA0A6" text-anchor="start">B03</text>
-<text x="88.0" y="312.0" font-family="'Cascadia Mono','Consolas','SF Mono',monospace" font-size="13" font-weight="600" fill="#17191C" text-anchor="start">capability</text>
-<text x="220.0" y="310.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="12" font-weight="400" fill="#3D4247" text-anchor="start">探測核數 → 單核：core1 組（解碼器＋任務）落 core0</text>
-<text x="220.0" y="327.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="12" font-weight="400" fill="#3D4247" text-anchor="start">USB：預設 USJ；手動改 links[].kind 才用 OTG</text>
-<rect x="684.0" y="300.0" width="40.4" height="20.0" rx="10.0" fill="#F1EFE8" stroke="#DCD8CE" stroke-width="1"/>
-<text x="704.2" y="313.9" font-family="'Cascadia Mono','Consolas','SF Mono',monospace" font-size="11" font-weight="500" fill="#3D4247" text-anchor="middle">core</text>
-<rect x="730.4" y="300.0" width="53.6" height="20.0" rx="10.0" fill="#F1EFE8" stroke="#DCD8CE" stroke-width="1"/>
-<text x="757.2" y="313.9" font-family="'Cascadia Mono','Consolas','SF Mono',monospace" font-size="11" font-weight="500" fill="#3D4247" text-anchor="middle">config</text>
-<text x="994.0" y="312.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="12" text-anchor="start">
-<tspan font-family="'Cascadia Mono','Consolas','SF Mono',monospace" fill="#6E747B" font-weight="400">config</tspan>
-<tspan font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" fill="#9AA0A6" font-weight="400">  →  </tspan>
-<tspan font-family="'Cascadia Mono','Consolas','SF Mono',monospace" fill="#17191C" font-weight="600">cores, usb</tspan>
+<text x="58.0" y="1608.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11">
+<tspan font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" fill="#6E747B" font-weight="400">ctx（nc_boot_ctx）＝ </tspan>
+<tspan font-family="'Cascadia Mono','Consolas','SF Mono',monospace" fill="#3D4247" font-weight="400">cores｜usb_mode｜usb_link｜usb_log｜usb_msc｜usb_core｜ready</tspan>
+<tspan font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" fill="#6E747B" font-weight="400">；跨階段只准經 ctx。</tspan>
 </text>
-<text x="1332.0" y="312.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11" font-weight="400" fill="#6E747B" text-anchor="start">router／decoder／任務都用同一份落點</text>
-<line x1="56.0" y1="356.0" x2="1624.0" y2="356.0" stroke="#DCD8CE" stroke-width="1"/>
-<rect x="44" y="368" width="4" height="60" rx="2" fill="#5A6169"/>
-<text x="52.0" y="386.0" font-family="'Cascadia Mono','Consolas','SF Mono',monospace" font-size="11" font-weight="500" fill="#9AA0A6" text-anchor="start">B04</text>
-<text x="88.0" y="386.0" font-family="'Cascadia Mono','Consolas','SF Mono',monospace" font-size="13" font-weight="600" fill="#17191C" text-anchor="start">hwcheck</text>
-<text x="220.0" y="384.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="12" font-weight="400" fill="#3D4247" text-anchor="start">按 hardware.json claim 腳位（衝突開機即見）</text>
-<rect x="684.0" y="374.0" width="27.2" height="20.0" rx="10.0" fill="#F1EFE8" stroke="#DCD8CE" stroke-width="1"/>
-<text x="697.6" y="387.9" font-family="'Cascadia Mono','Consolas','SF Mono',monospace" font-size="11" font-weight="500" fill="#3D4247" text-anchor="middle">hw</text>
-<text x="994.0" y="386.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="12" text-anchor="start">
-<tspan font-family="'Cascadia Mono','Consolas','SF Mono',monospace" fill="#6E747B" font-weight="400">config</tspan>
-<tspan font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" fill="#9AA0A6" font-weight="400">  →  </tspan>
-<tspan font-family="'Cascadia Mono','Consolas','SF Mono',monospace" fill="#17191C" font-weight="600">∅</tspan>
+<text x="58.0" y="1630.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11">
+<tspan font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" fill="#6E747B" font-weight="400">硬性次序：</tspan>
+<tspan font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" fill="#3D4247" font-weight="400">NVS→log hook；掛 FAT→讀 config；decode 起咗→才建 producer；line buffer carve→才開 Wi-Fi／listener。</tspan>
 </text>
-<text x="1332.0" y="386.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11" font-weight="400" fill="#6E747B" text-anchor="start">只稽核：即報，唔阻開機</text>
-<line x1="56.0" y1="430.0" x2="1624.0" y2="430.0" stroke="#DCD8CE" stroke-width="1"/>
-<rect x="44" y="442" width="4" height="60" rx="2" fill="#5A6169"/>
-<text x="52.0" y="460.0" font-family="'Cascadia Mono','Consolas','SF Mono',monospace" font-size="11" font-weight="500" fill="#9AA0A6" text-anchor="start">B05</text>
-<text x="88.0" y="460.0" font-family="'Cascadia Mono','Consolas','SF Mono',monospace" font-size="13" font-weight="600" fill="#17191C" text-anchor="start">hardware</text>
-<text x="220.0" y="458.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="12" font-weight="400" fill="#3D4247" text-anchor="start">ETH 起來；建「線 → 組」表；USB 的組寫入 ctx（usb_core）</text>
-<rect x="684.0" y="448.0" width="60.2" height="20.0" rx="10.0" fill="#F1EFE8" stroke="#DCD8CE" stroke-width="1"/>
-<text x="714.1" y="461.9" font-family="'Cascadia Mono','Consolas','SF Mono',monospace" font-size="11" font-weight="500" fill="#3D4247" text-anchor="middle">drv_pwm</text>
-<rect x="750.2" y="448.0" width="60.2" height="20.0" rx="10.0" fill="#F1EFE8" stroke="#DCD8CE" stroke-width="1"/>
-<text x="780.3" y="461.9" font-family="'Cascadia Mono','Consolas','SF Mono',monospace" font-size="11" font-weight="500" fill="#3D4247" text-anchor="middle">esp_eth</text>
-<rect x="816.4" y="448.0" width="80.0" height="20.0" rx="10.0" fill="#F1EFE8" stroke="#DCD8CE" stroke-width="1"/>
-<text x="856.4" y="461.9" font-family="'Cascadia Mono','Consolas','SF Mono',monospace" font-size="11" font-weight="500" fill="#3D4247" text-anchor="middle">nc4_router</text>
-<text x="994.0" y="460.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="12" text-anchor="start">
-<tspan font-family="'Cascadia Mono','Consolas','SF Mono',monospace" fill="#6E747B" font-weight="400">config</tspan>
-<tspan font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" fill="#9AA0A6" font-weight="400">  →  </tspan>
-<tspan font-family="'Cascadia Mono','Consolas','SF Mono',monospace" fill="#17191C" font-weight="600">router</tspan>
-</text>
-<text x="1332.0" y="460.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11" font-weight="400" fill="#6E747B" text-anchor="start">USB 線的組由此定，之後只讀 ctx</text>
-<line x1="56.0" y1="504.0" x2="1624.0" y2="504.0" stroke="#DCD8CE" stroke-width="1"/>
-<rect x="44" y="516" width="4" height="60" rx="2" fill="#7A4E8C"/>
-<text x="52.0" y="534.0" font-family="'Cascadia Mono','Consolas','SF Mono',monospace" font-size="11" font-weight="500" fill="#9AA0A6" text-anchor="start">B07</text>
-<text x="88.0" y="534.0" font-family="'Cascadia Mono','Consolas','SF Mono',monospace" font-size="13" font-weight="600" fill="#17191C" text-anchor="start">declare</text>
-<text x="220.0" y="532.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="12" font-weight="400" fill="#3D4247" text-anchor="start">建 decoder（只有有線的核）＋套 cid／master</text>
-<text x="220.0" y="549.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="12" font-weight="400" fill="#3D4247" text-anchor="start">登記任務；向 plan 宣告記憶體</text>
-<rect x="684.0" y="522.0" width="33.8" height="20.0" rx="10.0" fill="#F1EFE8" stroke="#DCD8CE" stroke-width="1"/>
-<text x="700.9" y="535.9" font-family="'Cascadia Mono','Consolas','SF Mono',monospace" font-size="11" font-weight="500" fill="#3D4247" text-anchor="middle">nc4</text>
-<rect x="723.8" y="522.0" width="93.2" height="20.0" rx="10.0" fill="#F1EFE8" stroke="#DCD8CE" stroke-width="1"/>
-<text x="770.4" y="535.9" font-family="'Cascadia Mono','Consolas','SF Mono',monospace" font-size="11" font-weight="500" fill="#3D4247" text-anchor="middle">task_manager</text>
-<rect x="823.0" y="522.0" width="40.4" height="20.0" rx="10.0" fill="#F1EFE8" stroke="#DCD8CE" stroke-width="1"/>
-<text x="843.2" y="535.9" font-family="'Cascadia Mono','Consolas','SF Mono',monospace" font-size="11" font-weight="500" fill="#3D4247" text-anchor="middle">plan</text>
-<text x="994.0" y="534.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="12" text-anchor="start">
-<tspan font-family="'Cascadia Mono','Consolas','SF Mono',monospace" fill="#6E747B" font-weight="400">config, cores, usb, router</tspan>
-<tspan font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" fill="#9AA0A6" font-weight="400">  →  </tspan>
-<tspan font-family="'Cascadia Mono','Consolas','SF Mono',monospace" fill="#17191C" font-weight="600">declared</tspan>
-</text>
-<text x="1332.0" y="534.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11" font-weight="400" fill="#6E747B" text-anchor="start">commit 才有東西可 carve</text>
-<line x1="56.0" y1="578.0" x2="1624.0" y2="578.0" stroke="#DCD8CE" stroke-width="1"/>
-<rect x="44" y="590" width="4" height="60" rx="2" fill="#7A4E8C"/>
-<text x="52.0" y="608.0" font-family="'Cascadia Mono','Consolas','SF Mono',monospace" font-size="11" font-weight="500" fill="#9AA0A6" text-anchor="start">B08</text>
-<text x="88.0" y="608.0" font-family="'Cascadia Mono','Consolas','SF Mono',monospace" font-size="13" font-weight="600" fill="#17191C" text-anchor="start">commit</text>
-<text x="220.0" y="606.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="12" font-weight="400" fill="#3D4247" text-anchor="start">plan 一次 carve；Wi-Fi 兩道閘</text>
-<rect x="684.0" y="596.0" width="40.4" height="20.0" rx="10.0" fill="#F1EFE8" stroke="#DCD8CE" stroke-width="1"/>
-<text x="704.2" y="609.9" font-family="'Cascadia Mono','Consolas','SF Mono',monospace" font-size="11" font-weight="500" fill="#3D4247" text-anchor="middle">plan</text>
-<rect x="730.4" y="596.0" width="40.4" height="20.0" rx="10.0" fill="#F1EFE8" stroke="#DCD8CE" stroke-width="1"/>
-<text x="750.6" y="609.9" font-family="'Cascadia Mono','Consolas','SF Mono',monospace" font-size="11" font-weight="500" fill="#3D4247" text-anchor="middle">wifi</text>
-<text x="994.0" y="608.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="12" text-anchor="start">
-<tspan font-family="'Cascadia Mono','Consolas','SF Mono',monospace" fill="#6E747B" font-weight="400">declared</tspan>
-<tspan font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" fill="#9AA0A6" font-weight="400">  →  </tspan>
-<tspan font-family="'Cascadia Mono','Consolas','SF Mono',monospace" fill="#17191C" font-weight="600">plan</tspan>
-</text>
-<text x="1332.0" y="608.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11" font-weight="400" fill="#6E747B" text-anchor="start">start 派資源靠它</text>
-<line x1="56.0" y1="652.0" x2="1624.0" y2="652.0" stroke="#DCD8CE" stroke-width="1"/>
-<rect x="44" y="664" width="4" height="60" rx="2" fill="#A8661B"/>
-<text x="52.0" y="682.0" font-family="'Cascadia Mono','Consolas','SF Mono',monospace" font-size="11" font-weight="500" fill="#9AA0A6" text-anchor="start">B09</text>
-<text x="88.0" y="682.0" font-family="'Cascadia Mono','Consolas','SF Mono',monospace" font-size="13" font-weight="600" fill="#17191C" text-anchor="start">start</text>
-<text x="220.0" y="680.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="12" font-weight="400" fill="#3D4247" text-anchor="start">派資源（nc_buf）、跑 on_start、註冊指令</text>
-<rect x="684.0" y="670.0" width="93.2" height="20.0" rx="10.0" fill="#F1EFE8" stroke="#DCD8CE" stroke-width="1"/>
-<text x="730.6" y="683.9" font-family="'Cascadia Mono','Consolas','SF Mono',monospace" font-size="11" font-weight="500" fill="#3D4247" text-anchor="middle">task_manager</text>
-<rect x="783.2" y="670.0" width="33.8" height="20.0" rx="10.0" fill="#F1EFE8" stroke="#DCD8CE" stroke-width="1"/>
-<text x="800.1" y="683.9" font-family="'Cascadia Mono','Consolas','SF Mono',monospace" font-size="11" font-weight="500" fill="#3D4247" text-anchor="middle">mem</text>
-<rect x="823.0" y="670.0" width="53.6" height="20.0" rx="10.0" fill="#F1EFE8" stroke="#DCD8CE" stroke-width="1"/>
-<text x="849.8" y="683.9" font-family="'Cascadia Mono','Consolas','SF Mono',monospace" font-size="11" font-weight="500" fill="#3D4247" text-anchor="middle">action</text>
-<text x="994.0" y="682.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="12" text-anchor="start">
-<tspan font-family="'Cascadia Mono','Consolas','SF Mono',monospace" fill="#6E747B" font-weight="400">plan, config</tspan>
-<tspan font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" fill="#9AA0A6" font-weight="400">  →  </tspan>
-<tspan font-family="'Cascadia Mono','Consolas','SF Mono',monospace" fill="#17191C" font-weight="600">tasks</tspan>
-</text>
-<text x="1332.0" y="682.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11" font-weight="400" fill="#6E747B" text-anchor="start">usb／channels 等它</text>
-<line x1="56.0" y1="726.0" x2="1624.0" y2="726.0" stroke="#DCD8CE" stroke-width="1"/>
-<rect x="44" y="738" width="4" height="60" rx="2" fill="#2E6B4F"/>
-<text x="52.0" y="756.0" font-family="'Cascadia Mono','Consolas','SF Mono',monospace" font-size="11" font-weight="500" fill="#9AA0A6" text-anchor="start">B10</text>
-<text x="88.0" y="756.0" font-family="'Cascadia Mono','Consolas','SF Mono',monospace" font-size="13" font-weight="600" fill="#17191C" text-anchor="start">usb</text>
-<text x="220.0" y="754.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="12" font-weight="400" fill="#3D4247" text-anchor="start">USB 只 init 一次：OTG 裝 TinyUSB／CDC，或 USJ 開 log</text>
-<text x="220.0" y="771.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="12" font-weight="400" fill="#3D4247" text-anchor="start">換線 = 改 config 重啟（沒有 runtime 切換）</text>
-<rect x="684.0" y="744.0" width="60.2" height="20.0" rx="10.0" fill="#F1EFE8" stroke="#DCD8CE" stroke-width="1"/>
-<text x="714.1" y="757.9" font-family="'Cascadia Mono','Consolas','SF Mono',monospace" font-size="11" font-weight="500" fill="#3D4247" text-anchor="middle">tinyusb</text>
-<rect x="750.2" y="744.0" width="47.0" height="20.0" rx="10.0" fill="#F1EFE8" stroke="#DCD8CE" stroke-width="1"/>
-<text x="773.7" y="757.9" font-family="'Cascadia Mono','Consolas','SF Mono',monospace" font-size="11" font-weight="500" fill="#3D4247" text-anchor="middle">store</text>
-<rect x="803.2" y="744.0" width="47.0" height="20.0" rx="10.0" fill="#F1EFE8" stroke="#DCD8CE" stroke-width="1"/>
-<text x="826.7" y="757.9" font-family="'Cascadia Mono','Consolas','SF Mono',monospace" font-size="11" font-weight="500" fill="#3D4247" text-anchor="middle">nclog</text>
-<rect x="856.2" y="744.0" width="40.4" height="20.0" rx="10.0" fill="#F1EFE8" stroke="#DCD8CE" stroke-width="1"/>
-<text x="876.4" y="757.9" font-family="'Cascadia Mono','Consolas','SF Mono',monospace" font-size="11" font-weight="500" fill="#3D4247" text-anchor="middle">core</text>
-<text x="994.0" y="756.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="12" text-anchor="start">
-<tspan font-family="'Cascadia Mono','Consolas','SF Mono',monospace" fill="#6E747B" font-weight="400">usb, router</tspan>
-<tspan font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" fill="#9AA0A6" font-weight="400">  →  </tspan>
-<tspan font-family="'Cascadia Mono','Consolas','SF Mono',monospace" fill="#17191C" font-weight="600">∅</tspan>
-</text>
-<text x="1332.0" y="756.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11" font-weight="400" fill="#6E747B" text-anchor="start">log 管道與 /data 歸屬從此定案</text>
-<line x1="56.0" y1="800.0" x2="1624.0" y2="800.0" stroke="#DCD8CE" stroke-width="1"/>
-<rect x="44" y="812" width="4" height="60" rx="2" fill="#2E6B4F"/>
-<text x="52.0" y="830.0" font-family="'Cascadia Mono','Consolas','SF Mono',monospace" font-size="11" font-weight="500" fill="#9AA0A6" text-anchor="start">B11</text>
-<text x="88.0" y="830.0" font-family="'Cascadia Mono','Consolas','SF Mono',monospace" font-size="13" font-weight="600" fill="#17191C" text-anchor="start">channels</text>
-<text x="220.0" y="828.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="12" font-weight="400" fill="#3D4247" text-anchor="start">建 CDC／jtag／UART／TCP bus；decode loop 開跑</text>
-<rect x="684.0" y="818.0" width="60.2" height="20.0" rx="10.0" fill="#F1EFE8" stroke="#DCD8CE" stroke-width="1"/>
-<text x="714.1" y="831.9" font-family="'Cascadia Mono','Consolas','SF Mono',monospace" font-size="11" font-weight="500" fill="#3D4247" text-anchor="middle">nc4_bus</text>
-<rect x="750.2" y="818.0" width="66.8" height="20.0" rx="10.0" fill="#F1EFE8" stroke="#DCD8CE" stroke-width="1"/>
-<text x="783.6" y="831.9" font-family="'Cascadia Mono','Consolas','SF Mono',monospace" font-size="11" font-weight="500" fill="#3D4247" text-anchor="middle">drv_uart</text>
-<rect x="823.0" y="818.0" width="60.2" height="20.0" rx="10.0" fill="#F1EFE8" stroke="#DCD8CE" stroke-width="1"/>
-<text x="853.1" y="831.9" font-family="'Cascadia Mono','Consolas','SF Mono',monospace" font-size="11" font-weight="500" fill="#3D4247" text-anchor="middle">bus_net</text>
-<text x="994.0" y="830.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="12" text-anchor="start">
-<tspan font-family="'Cascadia Mono','Consolas','SF Mono',monospace" fill="#6E747B" font-weight="400">tasks, usb, router</tspan>
-<tspan font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" fill="#9AA0A6" font-weight="400">  →  </tspan>
-<tspan font-family="'Cascadia Mono','Consolas','SF Mono',monospace" fill="#17191C" font-weight="600">channels</tspan>
-</text>
-<text x="1332.0" y="830.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11" font-weight="400" fill="#6E747B" text-anchor="start">decode loop 開始收幀</text>
-<line x1="56.0" y1="874.0" x2="1624.0" y2="874.0" stroke="#DCD8CE" stroke-width="1"/>
-<rect x="44" y="886" width="4" height="60" rx="2" fill="#2E6B4F"/>
-<text x="52.0" y="904.0" font-family="'Cascadia Mono','Consolas','SF Mono',monospace" font-size="11" font-weight="500" fill="#9AA0A6" text-anchor="start">B12</text>
-<text x="88.0" y="904.0" font-family="'Cascadia Mono','Consolas','SF Mono',monospace" font-size="13" font-weight="600" fill="#17191C" text-anchor="start">account</text>
-<text x="220.0" y="902.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="12" font-weight="400" fill="#3D4247" text-anchor="start">印剩餘 heap（內部／PSRAM）</text>
-<rect x="684.0" y="892.0" width="66.8" height="20.0" rx="10.0" fill="#F1EFE8" stroke="#DCD8CE" stroke-width="1"/>
-<text x="717.4" y="905.9" font-family="'Cascadia Mono','Consolas','SF Mono',monospace" font-size="11" font-weight="500" fill="#3D4247" text-anchor="middle">esp_heap</text>
-<text x="994.0" y="904.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="12" text-anchor="start">
-<tspan font-family="'Cascadia Mono','Consolas','SF Mono',monospace" fill="#6E747B" font-weight="400">∅</tspan>
-<tspan font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" fill="#9AA0A6" font-weight="400">  →  </tspan>
-<tspan font-family="'Cascadia Mono','Consolas','SF Mono',monospace" fill="#17191C" font-weight="600">∅</tspan>
-</text>
-<text x="1332.0" y="904.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11" font-weight="400" fill="#6E747B" text-anchor="start">—</text>
-<path d="M 78 204 L 78 212" stroke="#9AA0A6" stroke-width="1.2"/>
-<path d="M 75 209 L 78 213 L 81 209" fill="none" stroke="#9AA0A6" stroke-width="1.2"/>
-<path d="M 78 278 L 78 286" stroke="#9AA0A6" stroke-width="1.2"/>
-<path d="M 75 283 L 78 287 L 81 283" fill="none" stroke="#9AA0A6" stroke-width="1.2"/>
-<path d="M 78 352 L 78 360" stroke="#9AA0A6" stroke-width="1.2"/>
-<path d="M 75 357 L 78 361 L 81 357" fill="none" stroke="#9AA0A6" stroke-width="1.2"/>
-<path d="M 78 426 L 78 434" stroke="#9AA0A6" stroke-width="1.2"/>
-<path d="M 75 431 L 78 435 L 81 431" fill="none" stroke="#9AA0A6" stroke-width="1.2"/>
-<path d="M 78 500 L 78 508" stroke="#9AA0A6" stroke-width="1.2"/>
-<path d="M 75 505 L 78 509 L 81 505" fill="none" stroke="#9AA0A6" stroke-width="1.2"/>
-<path d="M 78 574 L 78 582" stroke="#9AA0A6" stroke-width="1.2"/>
-<path d="M 75 579 L 78 583 L 81 579" fill="none" stroke="#9AA0A6" stroke-width="1.2"/>
-<path d="M 78 648 L 78 656" stroke="#9AA0A6" stroke-width="1.2"/>
-<path d="M 75 653 L 78 657 L 81 653" fill="none" stroke="#9AA0A6" stroke-width="1.2"/>
-<path d="M 78 722 L 78 730" stroke="#9AA0A6" stroke-width="1.2"/>
-<path d="M 75 727 L 78 731 L 81 727" fill="none" stroke="#9AA0A6" stroke-width="1.2"/>
-<path d="M 78 796 L 78 804" stroke="#9AA0A6" stroke-width="1.2"/>
-<path d="M 75 801 L 78 805 L 81 801" fill="none" stroke="#9AA0A6" stroke-width="1.2"/>
-<path d="M 78 870 L 78 878" stroke="#9AA0A6" stroke-width="1.2"/>
-<path d="M 75 875 L 78 879 L 81 875" fill="none" stroke="#9AA0A6" stroke-width="1.2"/>
-<rect x="44.0" y="980.0" width="1592.0" height="108.0" rx="5" fill="#FFFFFF" stroke="#DCD8CE" stroke-width="1" opacity="1.0"/>
-<text x="60.0" y="1004.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="12.5" font-weight="600" fill="#17191C" text-anchor="start">ctx（nc_boot_ctx）—— 跨階段的資料只有這六個欄位</text>
-<text x="60.0" y="1024.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11.5" font-weight="400" fill="#6E747B" text-anchor="start">寫入者：capability（核數／USB 人格）＋ B05 hardware（USB 線的組）；讀者經 nc_boot_ctx()。</text>
-<text x="60.0" y="1052.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11.5" text-anchor="start">
-<tspan font-family="'Cascadia Mono','Consolas','SF Mono',monospace" fill="#17191C" font-weight="600">cores</tspan>
-<tspan font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" fill="#6E747B" font-weight="400">  (1／2)   </tspan>
-<tspan font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" fill="#9AA0A6" font-weight="400">讀：</tspan>
-<tspan font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" fill="#3D4247" font-weight="400">B07 的 s_ndec／router（讀落點化嘅 config）／nc_task 的 loop core 落點</tspan>
-</text>
-<text x="60.0" y="1072.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11.5" text-anchor="start">
-<tspan font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" fill="#6E747B" font-weight="400">usb_mode／usb_link／usb_log／usb_msc／usb_core   </tspan>
-<tspan font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" fill="#9AA0A6" font-weight="400">讀：</tspan>
-<tspan font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" fill="#3D4247" font-weight="400">declare、ph_usb、ph_channels、router_defaults、usb_init</tspan>
-</text>
-<rect x="44.0" y="1102.0" width="1592.0" height="116.0" rx="5" fill="#FFFFFF" stroke="#DCD8CE" stroke-width="1" opacity="1.0"/>
-<text x="60.0" y="1126.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="12.5" font-weight="600" fill="#17191C" text-anchor="start">失敗會點：一條鏈講清楚，唔會靜靜帶錯狀態往下跑</text>
-<rect x="60.0" y="1140.0" width="382.5" height="44.0" rx="5" fill="#FCFBF7" stroke="#DCD8CE" stroke-width="1" opacity="1.0"/>
-<rect x="60.0" y="1140" width="4" height="44" rx="2" fill="#7A4E8C"/>
-<text x="74.0" y="1159.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="12" font-weight="600" fill="#17191C" text-anchor="start">階段 FAIL</text>
-<text x="74.0" y="1174.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="10.5" font-weight="400" fill="#6E747B" text-anchor="start">回非 ESP_OK</text>
-<rect x="452.5" y="1140.0" width="382.5" height="44.0" rx="5" fill="#FCFBF7" stroke="#DCD8CE" stroke-width="1" opacity="1.0"/>
-<rect x="452.5" y="1140" width="4" height="44" rx="2" fill="#1F5F8B"/>
-<text x="466.5" y="1159.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="12" font-weight="600" fill="#17191C" text-anchor="start">唔會 give</text>
-<text x="466.5" y="1174.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="10.5" font-weight="400" fill="#6E747B" text-anchor="start">後面的階段驗 needs</text>
-<rect x="845.0" y="1140.0" width="382.5" height="44.0" rx="5" fill="#FCFBF7" stroke="#DCD8CE" stroke-width="1" opacity="1.0"/>
-<rect x="845.0" y="1140" width="4" height="44" rx="2" fill="#A8661B"/>
-<text x="859.0" y="1159.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="12" font-weight="600" fill="#17191C" text-anchor="start">下游 SKIP</text>
-<text x="859.0" y="1174.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="10.5" font-weight="400" fill="#6E747B" text-anchor="start">log 寫明「缺 config|router」</text>
-<rect x="1237.5" y="1140.0" width="382.5" height="44.0" rx="5" fill="#FCFBF7" stroke="#DCD8CE" stroke-width="1" opacity="1.0"/>
-<rect x="1237.5" y="1140" width="4" height="44" rx="2" fill="#2E6B4F"/>
-<text x="1251.5" y="1159.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="12" font-weight="600" fill="#17191C" text-anchor="start">開機照完</text>
-<text x="1251.5" y="1174.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="10.5" font-weight="400" fill="#6E747B" text-anchor="start">最後印「已具備 0x03ff」</text>
-<text x="60.0" y="1206.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="10.5" font-weight="400" fill="#9AA0A6" text-anchor="start">0x03ff = 10 個位元全開（NVS|storage|config|cores|usb|router|declared|plan|tasks|channels）；只跑到 config 會係 0x0017。</text>
-<rect x="44" y="1230" width="4" height="11" rx="2" fill="#8A6A2F"/>
-<text x="53.0" y="1238.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="10.5" font-weight="400" fill="#6E747B" text-anchor="start">準備</text>
-<rect x="92.0" y="1230" width="4" height="11" rx="2" fill="#1F5F8B"/>
-<text x="101.0" y="1238.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="10.5" font-weight="400" fill="#6E747B" text-anchor="start">能力</text>
-<rect x="140.0" y="1230" width="4" height="11" rx="2" fill="#5A6169"/>
-<text x="149.0" y="1238.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="10.5" font-weight="400" fill="#6E747B" text-anchor="start">硬體</text>
-<rect x="188.0" y="1230" width="4" height="11" rx="2" fill="#7A4E8C"/>
-<text x="197.0" y="1238.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="10.5" font-weight="400" fill="#6E747B" text-anchor="start">記憶體</text>
-<rect x="246.5" y="1230" width="4" height="11" rx="2" fill="#A8661B"/>
-<text x="255.5" y="1238.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="10.5" font-weight="400" fill="#6E747B" text-anchor="start">任務</text>
-<rect x="294.5" y="1230" width="4" height="11" rx="2" fill="#2E6B4F"/>
-<text x="303.5" y="1238.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="10.5" font-weight="400" fill="#6E747B" text-anchor="start">通道</text>
+<text x="1902.0" y="1538.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="10.5" font-weight="400" fill="#9AA0A6" text-anchor="end">來源：firmware/main/boot.c · main.c stages[] · boot.h</text>
+<rect x="48" y="1682" width="4" height="11" rx="2" fill="#8A6A2F"/>
+<text x="57.0" y="1690.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="10.5" font-weight="400" fill="#6E747B" text-anchor="start">準備</text>
+<rect x="96.0" y="1682" width="4" height="11" rx="2" fill="#1F5F8B"/>
+<text x="105.0" y="1690.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="10.5" font-weight="400" fill="#6E747B" text-anchor="start">能力</text>
+<rect x="144.0" y="1682" width="4" height="11" rx="2" fill="#5A6169"/>
+<text x="153.0" y="1690.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="10.5" font-weight="400" fill="#6E747B" text-anchor="start">硬體</text>
+<rect x="192.0" y="1682" width="4" height="11" rx="2" fill="#7A4E8C"/>
+<text x="201.0" y="1690.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="10.5" font-weight="400" fill="#6E747B" text-anchor="start">記憶體</text>
+<rect x="250.5" y="1682" width="4" height="11" rx="2" fill="#A8661B"/>
+<text x="259.5" y="1690.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="10.5" font-weight="400" fill="#6E747B" text-anchor="start">任務</text>
+<rect x="298.5" y="1682" width="4" height="11" rx="2" fill="#2E6B4F"/>
+<text x="307.5" y="1690.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="10.5" font-weight="400" fill="#6E747B" text-anchor="start">通道</text>
 </svg>

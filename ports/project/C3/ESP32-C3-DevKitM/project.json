@@ -3,9 +3,11 @@
   "version": 1,
   "name": "ESP32-C3-DevKitM",
   "hardware": "C3/ESP32-C3-DevKitM",
-  "profiles": [],
   "seed": [
+    "hardware",
     "system",
-    "network"
-  ]
+    "network",
+    "tasks"
+  ],
+  "default": true
 }

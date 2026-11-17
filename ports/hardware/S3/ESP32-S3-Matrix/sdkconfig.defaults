@@ -12,8 +12,14 @@ CONFIG_SPIRAM=n
 # ── CPU ──
 CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
 
-# ── console：USB-Serial-JTAG（同 N16R8；USB-OTG 與它共用 PHY）──
-CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+# ── console：none ──
+# 這塊板改用 TinyUSB OTG（MSC 隨身碟 + CDC log）；S3 的 OTG 與 USJ 共用同一條
+# PHY，所以不能同時用 USJ console。App log 由 CDC（B10 之後）出；bootloader 的
+# 早期訊息不會有。要拿回 USJ console 就把這行改回 USB_SERIAL_JTAG，並把
+# system.json 的 USB link kind 改回 usb_jtag（MSC 會失效）。
+CONFIG_ESP_CONSOLE_NONE=y
+# 不要 USJ secondary：OTG 與 USJ 共用 PHY
+CONFIG_ESP_CONSOLE_SECONDARY_NONE=y
 
 # ── 分區表：全域那份是 16 MB（N16R8），這塊只有 4 MB，用自己一份 ──
 # 路徑相對 firmware/（專案根）。

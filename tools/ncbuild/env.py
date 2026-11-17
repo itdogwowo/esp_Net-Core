@@ -87,8 +87,12 @@ def build_root(cfg: dict) -> Path:
 
 
 def build_slug(port: "Port") -> str:
-    """一塊板一個 build dir：<chip>_<board>，避免同名板跨晶片撞名。"""
-    return f"{port.hw.parent.name}_{port.hw.name}"
+    """一個「板 × project」一個 build dir：<chip>_<output_name>。
+
+    default project 用番 <chip>_<board>（同以前一樣）；非 default project 加
+    __<project 目錄名>，避免同一個 build dir 互相洗掉 cache／sdkconfig。
+    """
+    return f"{port.hw.parent.name}_{port.output_name}"
 
 
 def build_dir(cfg: dict, port: "Port") -> Path:
@@ -108,6 +112,7 @@ class Port:
     pj: Path | None
     board: dict
     chip: str
+    default_pj: Path | None = None   # 這塊板的 default project（用來判斷 output 名）
 
     @property
     def hw_rel(self) -> str:
@@ -121,12 +126,32 @@ class Port:
     def name(self) -> str:
         return self.board.get("name", self.hw.name)
 
+    @property
+    def output_name(self) -> str:
+        """artifacts／build dir／log 用的名字。
 
-def resolve_board(query: str | None, *, require: bool = True) -> Port:
-    """回傳硬體板 + 對應 project 的身分。
+        - default project（或冇 project）：<硬體板>（同以前一樣）
+        - `--no-project` 但這塊板有 default：<硬體板>__bare（唔會蓋走 default 的 image）
+        - 指定非 default project：<硬體板>__<project 目錄名>
+        """
+        base = self.name
+        if self.pj is None:
+            return base if self.default_pj is None else f"{base}__bare"
+        if self.default_pj is not None and self.pj == self.default_pj:
+            return base
+        return f"{base}__{self.pj.name}"
+
+
+def resolve_board(query: str | None, *, project: str | None = None,
+                  no_project: bool = False, require: bool = True) -> Port:
+    """回傳硬體板 + project 的身分。
 
     查詢可以命中任一層：硬體板名、project 名、<chip>/<board>。
-    require=True 且沒有指定 → 報錯（不要默默挑第一塊，那遲早燒錯板）。
+    沒有 project 參數 → 用這塊板的 default project（同名的或 default:true 的）；
+    連 default 都沒有 → 純硬體（冇 project 預置）。
+
+    project  = 指定 project（短名可：`--project demo` 會中 <硬體板>-Demo）
+    no_project = 明確唔要 project（就算有 default 都用純硬體）
     """
     import board as boardmod   # tools/board.py
 
@@ -140,12 +165,33 @@ def resolve_board(query: str | None, *, require: bool = True) -> Port:
         names = "、".join(boardmod.load_board(d).get("name", d.name) for d, _ in pairs)
         raise SystemExit(
             f"沒有指定板子（目前有：{names}）\n"
-            f"  → python3 make.py build <硬體板或 project>\n"
+            f"  → python3 make.py build <硬體板> [--project <project>]\n"
             f"  → 常用的那塊可寫進 make_config.json 的 default_board"
         )
     d, p = pairs[0]
     b = boardmod.load_board(d)
-    return Port(hw=d, pj=p, board=b, chip=b["chip"])
+    default_pj = boardmod.default_project_for_hardware(d)
+    chosen: Path | None = default_pj
+
+    if project is not None:
+        if p is not None and default_pj is not None and p != default_pj:
+            raise SystemExit(f"查詢 {query!r} 已經係 project {p.name!r}，"
+                             f"唔可以同時再加 --project {project!r}")
+        hit = boardmod.find_project_for_hardware(d, project)
+        if hit is None:
+            avail = boardmod.projects_for_hardware(d)
+            hint = ("；有：" + "、".join(
+                x.name + ("（default）" if x == default_pj else "") for x in avail)
+                if avail else "（一個 project 都冇）")
+            raise SystemExit(f"{b.get('name', d.name)} 冇 project {project!r}{hint}")
+        chosen = hit
+    elif no_project:
+        chosen = None
+    elif p is not None and default_pj is not None and p != default_pj:
+        chosen = p          # 查詢本身就係非 default project
+    else:
+        chosen = default_pj
+    return Port(hw=d, pj=chosen, board=b, chip=b["chip"], default_pj=default_pj)
 
 
 def port_name(d: Path) -> str:

@@ -9,15 +9,18 @@
   "_gpio_convention": "兩種『未設定』寫法不能混用：-1 = 未設定／不啟用（driver 以 >= 0 判斷）；null = 沒接這條線（driver 以 is not None 判斷，寫 -1 會變成 Pin(-1) 而爆掉）。標 -1 的欄位可以安全留著；標 null 的欄位要填真實腳位才 enable。",
   "ETH": {
     "enable": 0,
-    "mdc": -1,
-    "mdio": -1,
-    "ref_clk": -1,
+    "driver": "rmii",
     "phy_type": "IP101",
     "phy_addr": 1,
-    "spi": -1,
-    "cs": -1,
-    "rst": -1,
-    "int": -1
+    "GPIO": {
+      "mdc": -1,
+      "mdio": -1,
+      "ref_clk": -1,
+      "spi": -1,
+      "cs": -1,
+      "rst": -1,
+      "int": -1
+    }
   },
   "PIN": {
     "enable": 0,
@@ -63,5 +66,19 @@
     },
     "addr": "0x20",
     "list": []
+  },
+  "USB": {
+    "_comment": "S3：USB D-／D+ = GPIO19／20；S3 只有一條 FS PHY，硬件要在 phy:\"usj-fs\" 或 phy:\"otg-fs\" 二選一（同一對腳，只能一個）。現時這塊板用 usj-fs；轉另一個就改 phy，並在 system.json 對應改 link。",
+    "enable": 1,
+    "list": [
+      {
+        "phy": "usj-fs",
+        "enable": 1,
+        "GPIO": {
+          "dm": 19,
+          "dp": 20
+        }
+      }
+    ]
   }
 }

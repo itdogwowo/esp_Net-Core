@@ -2196,3 +2196,355 @@ S3 WiFi 連上後開 TCP 6000、UDP 6001、WS 8080。
 - 驗證：`cfgstruct_test` **140/140**；P4-ETH `0xff2e0`、S3-N16R8 `0x1190e0` 建置通過。
 - 下一步缺口：`network.json` 仍然是 `nc_wifi.c`／`nc_net_lines.c`／`nc_net_raw.c`／`main.c`
   各自讀，沒有單一 typed `nc_cfg_network()`；`driver.json` 仍然 build-time。
+
+### 7.68 2026-11-16（ports 命名公約；P4-C6 正名 FireBeetle2；新增 S3-Mini-Nano）
+
+- **命名公約（新）**：`ports/README.md` §10。硬體板目錄名／`name`／project 名一律
+  **`<CHIP>-<Identity>`**（晶片在最前、ASCII 英數與 `-`、每個詞大寫開頭）；
+  品牌／型號／板本不放名字，寫 `board.json` 的 `brand`／`model`／`rev`；
+  project 名 = 目錄名（多 project → `<硬體板>-<用途>`）。
+  **改名必須留 `aliases`**：舊名照樣 `make.py build` 得到，alias 只影響解析，
+  不改 `-DPORT`／`-DPROJECT`、不影響 `artifacts/<board>.bin`。
+- `tools/board.py`：`check` 新增代號格式、晶片前綴、`name`↔目錄一致、`aliases` 格式與
+  **alias 撞名** 檢查；`new` 支援 `--brand/--model/--rev/--alias`，並修正 `--wifi`
+  對「晶片原生 radio」（S3／C3…）誤寫 `wifi-hosted-c6` 碎片的問題。
+- **改名**：`ESP32-P4-C6` → **`ESP32-P4-FireBeetle2`**（DFRobot FireBeetle 2
+  ESP32-P4／SKU **DFR1172**，ESP32-P4R32）。hardware 與 project 目錄、`name`、
+  `project.json.hardware` 全部同步；`aliases` 保留
+  `ESP32-P4-C6`／`P4-C6`／`ESP32-P4-FireBeetle`／`FireBeetle2`。
+  實測 `board.py resolve ESP32-P4-C6`、`resolve P4-C6`、`resolve FireBeetle2`
+  都命中同一塊板。
+- **同一塊板的事實修正**（rename 時一併做）：
+  1. `features.usb` `"otg-fs"` → **`"otg-hs"`**。2026-11-11 實測另一邊 USB-C
+     枚舉 `303A:4003`，走 UTMI HS（pin 49/50）；RST 旁那個孔是 USB-Serial-JTAG
+     （FS_PHY1 GPIO24/25，`303A:1001`）。兩個孔互換不了。
+  2. **板子冇乙太網**（DFR1172 官方介面冇 ETH）：`features.eth` `"rmii-ip101"` →
+     `"emac-only"`；`wiring.json` 的 `ETH.enable` 1→0、腳位 -1。
+     `eth-rmii` profile 保留只為令 P4 的 EMAC 程式碼保持可編（`CONFIG_SOC_EMAC_SUPPORTED`），
+     runtime 唔會再嘗試起 ETH。
+  3. `README.md` 由 `board.py new` 模板改成真實板卡說明（兩個 USB-C 分工、hosted C6、
+     TF／SDIO 腳位未從 schematic 核對）。
+- **新增** `ESP32-S3-Mini-Nano`（通用白牌「S3-MINI Nano」／模組 S3-N16R8）：
+  16 MB flash @80 MHz DIO、8 MB octal PSRAM @80 MHz、CPU 240 MHz、Wi-Fi。
+  `console` 暫定 `usb-serial-jtag`；`wiring.json` 全部 `enable=0`（腳位未實測）。
+  project seed：`system.json`（`usb_jtag` ＋ `UART` 兩條 link，decode0／decode1）、
+  `network.json`（`wifi.enable=0`）。`aliases`：`S3-Mini-Nano`。
+  README 寫明上板要先確認兩件事：USB 係原生（USJ）定 CH340 橋（要改 `console=uart0`）、
+  GPIO 排針腳位。
+- **驗證**（本機 macOS／IDF **6.0.3**，非平時的 WSL 6.1）：
+  - `board.py list`：**7 塊硬體板 × 7 個 project**；
+    `board.py check` **0 error**（4 個「冇 driver.json」warning，全部 USB-only 板）。
+  - `ncportgen` 7 塊板全部產生成功：FireBeetle2 `ETH present=true enable=false`、
+    S3-Mini-Nano 冇任何已啟用匯流排。
+  - build 通過：`ESP32-S3-Mini-Nano` **`0x114f90`（1.1 MB，app 73% free）**、
+    `ESP32-P4-FireBeetle2` **`0xfd5f0`（1013.5 KB，75% free，16 MB 分割表）**。
+  - host tests：10/11 OK；`cfgstruct_test` 在 macOS/clang 因 weak symbol
+    `nc_port_hw_defaults` 連結失敗 —— **pre-existing**（本次冇改 `sys/config`；
+    `portgen_test` 反而 OK）。Linux/WSL 上應照舊全綠。
+- **未做**：S3-Mini-Nano 上板（USB 型態／腳位／console 要實測才定案）；
+  FireBeetle2 只改名＋修正事實，冇重燒（今日未確認接住的是哪塊板）。
+
+### 7.69 2026-11-16（修正：project 層只放 runtime 設定；能力碎片回 hardware；清舊殘渣）
+
+- **設計修正**：`project`（`ports/project/<chip>/<board>/`）**只放 runtime 設定**
+  （`project.json` ＋ `data/config/*.json`），**冇 `sdkconfig.defaults`、冇 `profiles`**。
+  理由：同一塊硬體的 build 只有一個（binary 是 per chip/board）；project 是部署／用戶設定，
+  換部署不應改變 build 能力。之前把 `nc4-ws`／`nc4-udp` 放 project，等於同一塊板
+  每個 project 一個 binary，與「硬體板 = 一份描述」矛盾。
+- 改動：
+  - 刪 `ports/project/P4/ESP32-P4-ETH/sdkconfig.defaults`。
+  - `nc4-ws`／`nc4-udp` 由 `project.json.profiles` → **`hardware/P4/ESP32-P4-ETH/board.json`
+    的 `profiles`**（連同原有 `eth-rmii`，共 3 個）；`board.py sync` 後 hardware
+    `sdkconfig.defaults` 出現 `eth-rmii`／`nc4-ws`／`nc4-udp` 三個 marker 區塊。
+  - 7 個 `project.json` 全部移除 `profiles`；`board.py check` 見到 project 有 `profiles`
+    或 `sdkconfig.defaults` → **error**，`cmd_new --project` 亦唔再寫 `profiles`。
+  - `firmware/CMakeLists.txt` 唔再 append project 的 sdkconfig（若見到只出 WARNING）；
+    `tools/ncbuild/doctor.py` 的 defaults mtime 唔再計 project；
+    `make.py config` 只顯示 hardware profiles。
+  - 精確語意：project 不影響 Kconfig／能力；但其 `data/config` 會作為 `F.preset`
+    **嵌進 image**，所以換 project 預置內容仍然要重 build。
+- **舊殘渣清理**：
+  - `firmware/build/`（**318 MB**；舊版 build，`project_description.json` 仍指向已刪的
+    `ports/P4/ESP32-P4-C6`）、`firmware/sdkconfig`（112 KB）、`firmware/sdkconfig.old`（92 KB）
+    → 全部刪除（新版 make.py 只用 `artifacts/build/<chip>_<board>/sdkconfig`）。
+  - 舊 `ports/P4/`、`ports/S3/` 空目錄（只剩 `.DS_Store`）→ 刪除。
+  - 全 repo `.DS_Store` → 刪除。
+  - `artifacts/` 舊板名 `ESP32-P4-C6*`（14 個 bin/json）→ 搬到
+    `artifacts/legacy/ESP32-P4-C6/`（保留可回滾，不再混在 `artifacts/` 頂層）。
+- **驗證**：
+  - `board.py sync` 7 塊板；`board.py check` **0 error**（4 個 USB-only 板冇 driver.json 的 warning）。
+  - project 層 scan：`find ports/project -name 'sdkconfig*' -o -name '*.defaults'` → 空。
+  - `python3 make.py build ESP32-P4-ETH` ✅ `0xfacd0`（1003.2 KB，app 分區 76% free）；
+    IDF 6.0.3／macOS。build 後 hardware sdkconfig 三個 profile 區塊齊全。
+  - `make.py config ESP32-P4-ETH` 只列 hardware profiles
+    `eth-rmii, nc4-ws, nc4-udp`（project 一行唔再顯示 profiles）。
+- 未做：FireBeetle2／S3-Mini-Nano 上板；`network.json` typed 層仍是缺口。
+
+### 7.70 2026-11-16（建置可選 project：`--project`／`--no-project`／default；修 CMake preset 從未嵌入）
+
+- **建置選擇（快捷版）**：
+  - `python3 make.py build ESP32-P4-ETH` → 硬體 ＋ **default project**
+  - `python3 make.py build ESP32-P4-ETH --project Demo` → 指定 project
+    （短名可、不分大小寫；`demo` 會 suffix-match `ESP32-P4-ETH-Demo`）
+  - `python3 make.py build ESP32-P4-ETH --no-project` → **純硬體**
+  - **default 判定**：`project.json` 的 `"default": true`；否則同名 project
+    （`ports/project/<chip>/<board>/`）就係慣例 default；每塊板最多一個；
+    兩者都冇 → 純硬體（冇 project 預置）。
+  - 7 個現有 project 已全部明寫 `"default": true`。
+  - 非 default 的 build 用獨立 build dir／artifacts 名：
+    `<硬體板>__<project 目錄>`；`--no-project` 而塊板有 default 時叫 `<硬體板>__bare`，
+    唔會蓋走 default 的 image。
+  - 建 project：`board.py new --project Demo --hardware ESP32-P4-ETH`
+    → 自動命名 `ESP32-P4-ETH-Demo`；加 `--default` 就設為該板 default
+    （已有 default 會拒絕並指出係邊個）。
+  - 檢視：`board.py projects`／`make.py projects`（default 會標）、`board.py list`
+    （default ＋ `(+N)`）、`make.py config <板> --project …` 會印輸出名。
+- **修到一個大 bug：project 的 `data/config` 由 ports 兩層重構後從未嵌入 firmware。**
+  - 原因：top-level `firmware/CMakeLists.txt` 用普通變數 `PROJECT_DIR` 指向
+    `ports/project/...`，但 CMake 的 `project()` 會把 `PROJECT_DIR` 設成
+    「本 project 的 source dir」= `firmware/`。component CMakeLists（`main/CMakeLists.txt`）
+    見到嘅 `PROJECT_DIR` 已經係 `firmware`，所以
+    `EXISTS "${PROJECT_DIR}/data/config/system.json"` 永遠 false →
+    `NETCORE_HAS_PRESET_*=0`，seed 永遠只用 `main.c` 的內建最小骨架。
+    症狀：無論揀邊個 project，燒上去的 `/data/config` 都係同一份 —— project 形同虛設。
+  - 修法：改名 **`NC_PROJECT_DIR`**（top-level ＋ `main/CMakeLists.txt`），避開 CMake
+    內建變數；加註解提醒。
+- 連帶修 `-Werror=unused-const-variable`：preset 齊全時 `k_min_system`／`k_min_network`／
+  `k_min_tasks` 同 `seed_text()` 變成 unused → 用 `#if !NETCORE_HAS_PRESET_*` 包住
+  （純硬體 build 仍然用得著骨架）。
+- **驗證**（IDF 6.0.3／macOS，P4-ETH）：
+
+  | build | image | 實際嵌入的 preset（`nm` 對 ELF） |
+  |---|---:|---|
+  | default | `0xfcff0`（1012.0 KB，**+8,992 B**） | hardware＋system＋network＋tasks |
+  | `--project Demo` | `0xfad60`（1003.3 KB） | hardware＋system＋network |
+  | `--no-project` | `0xfacd0`（1003.2 KB） | hardware only |
+
+  - 三個 build dir／artifacts 名並存，互不覆蓋；
+    `ESP32-P4-ETH.bin`、`ESP32-P4-ETH__ESP32-P4-ETH-Demo.bin`、`ESP32-P4-ETH__bare.bin`。
+  - `board.py check` 0 error（4 個 USB-only 板冇 driver.json 的 warning）。
+  - 測試用 Demo project 與其 build／artifacts 已刪除（`board.py new --project Demo ...`
+    一條指令即可重建）。
+- 文件：`ports/README.md` §3／§3.1、`docs/03_notes/ports-layout.md` §3、`README.md`
+  快速開始、`make.py --help`。
+
+### 7.71 2026-11-16（回顧啟動程序；更新 boot／core-timeline／architecture 三張圖）
+
+- **`boot.svg`**（[tools/boot_diagram.py](tools/boot_diagram.py)）按現行程式重寫，並補回
+  最近兩個改動的影響：
+  - **B02 storage+cfg**：掛 FAT／WL → boot record（首次／`fs_format` 才格式化）→
+    **seed 出廠 preset（build 揀的 default／--project，嵌進 firmware）** →
+    讀 config（system／hardware／tasks；network 仍由各模塊自己開檔）→ cID／SD。
+  - B03：核數收斂 ＋ USB 人格由「晶片能力＋links[]」定；B04 claim 範圍寫明
+    SDIO／ETH／PIN／PWM／UART；B05 改「PWM 安裝、ETH `enable=1` 才起、
+    `system.routes` 定線→組」（FireBeetle 的 ETH.enable=0 是實例）；
+    B07 寫明「有線到 core1 才建第二個 decoder」；B08 net lines 宣告＋Wi-Fi 兩道閘；
+    B09 測試映像掃 `.fxe`＋帳本；B11 改為 net lines start＋USB／UART bus。
+  - **新增 Panel C「B02 的 seed：三個來源、一個方向」**：
+    `F.default`（`nc_port.c`）→ `F.preset`（build 揀的 project）→ `F.live`
+    （`/data/config`；只缺檔才寫，存在就一個 byte 都唔改）。
+  - Panel A 更正：ctx = **6 個決定欄位 ＋ ready 能力位帳**（之前寫「六個欄位」）。
+  - Panel B 更正位元帳：只到 B02 = **0x0007**、過 B03 = **0x001f**
+    （舊圖寫 0x0017，錯）。
+  - 表頭「① 階段」縮短，避免同「② 做什麼」重疊。
+- **`core-timeline.svg`**（[tools/core_timeline.py](tools/core_timeline.py)）：
+  B02 描述改為「掛 FAT／WL、boot record、seed 出廠 preset、config（system／hardware／tasks）」；
+  ctx 註腳改「cores／usb_*／usb_core＋ready 帳」。
+- **`architecture.svg`**（[tools/arch_diagram.py](tools/arch_diagram.py)）：
+  Panel 05 的 storage+cfg 卡改「掛 FAT；seed→nc_port 預設」；
+  footer 配置鏈改「`F.wiring`（build 時編成 `nc_port.c`）→ `F.preset`（build 揀的 project）
+  → `F.live`（`/data/config`）→ NVS」。
+- 連帶修正：[boot.h](firmware/main/boot.h) 的 ctx 欄位數與 `NC_CAP_CONFIG`
+  註解（唔再寫「network 已載入」）；[naming.md](docs/03_notes/naming.md) 的 B02／B05 對照。
+- **驗證**：三個 generator 重跑（boot 1680×1404、core-timeline 1720×1658、
+  architecture 1720×1510）；用 headless Chrome 逐張 render 檢查文字冇重疊／爆格。
+- **未改**：core-timeline 的 ms 數字仍是 2026-11-08 舊 build 的量測值。
+  project preset 真正嵌入之後，B02 要多寫幾 KB seed（成本可能微升），要重新量才更新。
+
+### 7.72 2026-11-16（網絡線路圖重畫：service claim＋HTTP static 邊界；修正舊模型）
+
+- **問題**：`network-lines.svg` 同 7.71 更新過的圖仍然用舊網絡模型 ——
+  HTTP 寫 `/config.json`、`/ota`、`POST .bin`；architecture 仲寫「網絡 OTA」；
+  boot／core-timeline 的 B11 仲寫「net／WS／UDP」舊路徑。另外 `net-lines.md`
+  寫「冇 iface、冇 service」，同最新 canonical（kind＋iface＋index）相反。
+  使用者指出「圖片唔係最新設定」——正確。
+- **先對照現行 code**（2026-11-16 HEAD）：
+  - `nc_net_lines.c` 的 `service_claim()`：`kind=http` 或 `tcp:80` → HTTP；
+    `kind=ws` 或 `tcp:8080` → WS；其他 net kind → NC4。
+  - `nc4_web.c` 只剩 static GET/HEAD；`nc4_ota_http.c`／`nc4_http.c` 已刪；
+    HTTP 冇任何寫入 endpoint。唯一 OTA＝NC4 `0x22xx`。
+  - WS 係 line task 自己 handshake／binary frame → `nc4_bus` push slot → decoder。
+  - `nc4.routes[].out` → line core；HTTP 固定 core 0。
+  - `iface` 仍只係 metadata（bind `INADDR_ANY`）；legacy 路徑仍在；
+    `rawbench` 係測試 endpoint；上限 `NC_CFG_MAX_LINKS`／`NET_MAX_LINES`／
+    `NC4_MAX_BUSES` = 8。
+- **`network-lines.svg` 重寫**（[tools/net_arch_diagram.py](tools/net_arch_diagram.py)，1800×1340）：
+  - 01 canonical config（`kind:"tcp", iface:"wifi", index:1, port:6000, rx…` →
+    `wifi_tcp1`）＋ managed line 規則。
+  - 02 line 卡：TCP／UDP（NC4）、WS（自寫 handshake，NO HTTPD）、HTTP（STATIC ONLY）。
+  - 03 service claim 表：`tcp:80`→HTTP、`tcp:8080`／`kind=ws`→WS、其他→NC4；
+    config 的 `service` 只係 legacy／提示。
+  - 04A NC4 path（socket／frame → line slots → nc4_bus → decoder → action）；
+    04B web path（httpd → static handlers；NO NC4、冇 `/config.json`、冇 `/ota`）。
+  - 05 boot order（B08 line buffer 先、B11 `nc_net_lines_start`）。
+  - 06 限制／legacy（iface 未 bind、上限、舊路徑、rawbench）；
+    07 驗證數字（P4-ETH／S3 WiFi／P4-C6，2026-11-16）。
+- **其他圖／文件同步**：
+  - `architecture.svg`：L2 改「bus_net：TCP／UDP／WS；HTTP 係獨立 static service」；
+    動態路徑句改「NC4 的線…同一個 parser；HTTP 係獨立 static service，唔經 decoder」；
+    PUSH slots 改「格數／大小由 `links[].rx` 決定」。
+  - `boot.svg` B11 改「net lines start：NC4／WS service 各自 listener；HTTP 獨立 static」。
+  - `core-timeline.svg` B11 改「`nc_net_lines_start()`：listener／httpd（service claim）」，
+    移除舊 `nc4_udp` 描述。
+  - [net-lines.md](docs/03_notes/net-lines.md) 重寫：canonical schema、service claim、
+    HTTP 邊界、限制／legacy。 [line-identity.md](docs/03_notes/line-identity.md)
+    加 banner：該頁「複合 kind、無 iface／service」係中間設計，已被取代。
+- **驗證**：四個 generator 重跑；XML parse；headless Chrome 逐張 render 檢查，
+  修正 03 service claim note 壓住最後一列、architecture 動態句子與 PUSH 卡文字。
+  預覽存 `artifacts/previews/`。
+- **未改**：legacy 路徑仍在 code（network-architecture-audit §2）；要 compile out 係另一步。
+  `iface` 真正 bind／同 port ETH＋WiFi 分離仍未做。
+
+### 7.73 2026-11-16（啟動階段圖詳細化：boot.svg 重畫＋新增 boot-cores.svg）
+
+- **問題**：boot.svg 只有 11 行抽象摘要，冇講每階段實際做什麼、決定什麼、什麼條件下
+  某個通道／任務才會啟動、又喺邊個核跑。使用者要求更仔細。
+- **boot.svg 重畫**（[tools/boot_diagram.py](tools/boot_diagram.py)，1960×1702）：
+  每階段五欄：① 階段（B01…）② **做什麼（實際順序）** ③ **決定／分支（◇D1–D12）**
+  ④ **產出／去哪裡** ⑤ **失敗／跳過**；底部再列階段語義（needs→SKIP、fn→FAIL、
+  optional→WARN）、10 個能力位、ctx 欄位、四條硬性次序。
+- **新增 boot-cores.svg**（[tools/boot_cores_diagram.py](tools/boot_cores_diagram.py)，1960×1858）：
+  - **D. 決策表（12 項）**：D1 boot record（格式化？）／D2 config 缺壞／D3 核數／
+    D4 USB 人格／D5 ETH／D6 routes→核／D7 managed vs legacy／D8 每條 line 建唔建／
+    D9 任務 level／affinity／D10 WiFi／D11 .fxe／D12 rawbench；
+    每項寫「條件（輸入）→ 決定（結果）→ 影響／落點」。
+  - **C. 核落點**：6 條規則（app_main 固定 core0；line core＝routes 第一個 decodeN；
+    producer 必須同 bus 同核；SYSTEM／tenant 任務核；WiFi＝core1 clamp；測試／fx）
+    ＋ core0／core1 兩條 lane，逐個 object 寫明「什麼條件下才會出現在這個核」。
+  - **S. 唔啟動矩陣（9 項）**：ETH／TCP、新 net line、legacy 網絡、USB stack、MSC、
+    WiFi、任務 loop、.fxe、rawbench 各自的「唔啟動條件」。
+  - **F. 總閘**：B02 `storage+cfg` 失敗 → CONFIG 唔 give → B03 之後全部 SKIP
+    （B12 account 仍跑，之後只剩心跳）；壞 config ≠ storage 失敗，degraded 仍會開機。
+- **對照來源**：`main.c` ph_boot…ph_account、`boot.c` needs/gives、`nc_task.c`
+  （level／affinity／enabled／ layer）、`nc_net_lines.c`（service claim／line core／
+  buffer）、`nc_wifi.c`（兩道閘／mode／credentials）、`nc4_router.c`（routes→核）、
+  `nc_net_raw.c`、`nc4_web.c`。
+- **驗證**：兩個 generator 重跑；XML parse；headless Chrome render 檢查
+  （修 fail 欄越界、加自動斷行、決策表兩行條目間距）。
+- **其他**：`docs/00_pm/README.md` 加「圖」清單；`naming.md` 圖表清單加 boot-cores.svg；
+  預覽存 `artifacts/previews/`。今次只改圖／文件，冇改 firmware code。
+
+### 7.74 2026-11-16 晚（line schema 回到 composite kind；buffer 預設改成量測值）
+
+- **決策**：line 的身份回到 **`kind + index`**，`kind` 是 composite（`eth_tcp`／`wifi_tcp`／
+  `eth_udp`／`wifi_udp`…），**config 不再寫 `iface`／`service`**；`name` 由 `kind + index`
+  生成，仍然可以用 `name` 覆寫。這是 2026-11-16 凌晨 `1862675` 的方向，之後短暫改成分開
+  `kind`＋`iface`，現回到 composite（`line-identity.md` 的模型）。
+- **Config**：七個 project 的 `system.json` 全部轉 composite kind＋index；
+  `uart`／`usb_jtag`／`cdc` 都補 `index` 並移除 `name`，全部由 `kind + index` 生成；
+  firmware 的 UART lookup 已改成 by-kind（USB 本來就係）。P4-ETH／N16R8 的 `rx` 移除，
+  改用預設；Matrix（4MB／無 PSRAM）保留 1-slot 覆寫。
+- **硬體設定整理**：`ports/hardware/_chips/*.json` 的 `usb.link` 對齊
+  `nc_cfg_chip.c` 的 `usb_jtag0`／`cdc0`；CMake 補 `_chips/*.json` dependency，
+  改晶片表會真正觸發 `ncportgen`（之前改了不會 regen，生成檔與來源不一致）；
+  C3 `console` 正規化為 `uart0`；S3 四塊板 CPU 預設一律 240 MHz（N16R8 由 160 改 240；
+  要降頻改該板 `sdkconfig.defaults`＋`board.json`，`--fresh` 才生效）；
+  Mini-Nano `system.json` 補 `usb`／`log_debug_mode`；四個未 seed `tasks` 的 project
+  全部補 `tasks.json`＋seed（否則 `nc_cfg_append_obj()` 缺檔會靜默失敗）；
+  清掉 `.DS_Store`；[ports/README.md](../../ports/README.md) 新增 §10.5 現有硬體設定表。
+- **Buffer 預設**：`nc_cfg_rx_default()` 由舊的 TCP 8 slots／WS 4×1,024／UDP 4×1,024，
+  改成 2026-11-15 量測公約數：`TCP 2×8,205`、`UDP 1×8,205`、`WS 2×8,192`
+  （`net-test-matrix.md` §4.6）。4MB／無 PSRAM 的板仍然要自己覆寫 1 slot，
+  否則會把內部 RAM 食光（S3 2 slots SRAM 會餓死 WiFi）。
+- **Route 容錯**：`routes[].out` 指向不存在／未啟用的 link → 只忽略該格（同行
+  `decode0` 照常生效）；`in` 不存在／未啟用 → 跳過該行。`link_audit()` 由 `ESP_LOGE`
+  降為 warning。打錯名不再令整張路由表被拒收或令開機停。
+- **`tools/board.py check`**：改為檢查目標 schema —— 網絡 kind 必須 composite、
+  不可有 `iface`／`service`、必須有 `index`、`(kind,index)` 不可重複；
+  舊 `cfg.port`／`cfg.rx` 仍然提醒。
+- **驗證**：`python3 tools/board.py check` 0 error；S3-Matrix build 成功
+  （`0x1138e0`，app 分區剩 28%）＋ P4-ETH（`0xFCFA0`，75%）
+  ＋ N16R8（`0x1178c0`，73%）。文件同步：`net-lines.md`、`line-identity.md`、
+  `config-layers.md`。
+- **未完成**：service registry／claim API；`iface` 真正 bind（ETH／WiFi 同 port 分離）。
+
+### 7.75 2026-11-16 晚（USB 配置地圖、S3-Matrix OTG MSC、CPU 240、FXE 前 gap）
+
+- **文件**：
+  - 新增 [usb-layers.md](../03_notes/usb-layers.md)：晶片能力 → 板子 → build → 用戶
+    config 的五層、每顆晶片幾條 USB 通道、S3 開 MSC 的完整步驟與 console 取捨。
+  - 新增 [cpu-frequency.md](../03_notes/cpu-frequency.md)：build-time 預設 vs 執行期
+    調頻（未來測試）；現階段 S3 全部 240 MHz。
+- **S3-Matrix 與 S3-Mini-Nano 改為 USB OTG MSC**：
+  - `system.json`：`links[].kind="cdc"`、`usb.msc=1`、`usb.cdc_log=1`；route `cdc0→decode0`。
+  - `sdkconfig.defaults`：`CONFIG_ESP_CONSOLE_NONE=y`、`CONFIG_ESP_CONSOLE_SECONDARY_NONE=y`
+    （OTG 與 USJ 共用 PHY，不能同時用 USJ console）。
+  - 上板後預期主機見到 `NC-xxxx` MSC ＋ CDC serial；bootloader 早期 log 冇，app log 由 CDC 出。
+  - build：Matrix `0x112b10`（28% free）、Mini-Nano `0x114ab0`（73% free）。
+  - **現時連接的是 Mini-Nano**（`/dev/cu.usbmodemD885ACD42F2C1`，原生 USB）；
+    未 flash／未上板實測 MSC。
+  - 其餘 S3（N16R8／SuperMini）仍是 USJ console、`msc=0`。
+  - P4-FireBeetle2 補 `CONFIG_NETCORE_USB_OTG_HS=y`：`features.usb="otg-hs"` 之前
+    只在 board.json 寫，build 沒開 HS；現在一致，build `0xfe2c0`（75% free，未上板實測）。
+- **S3 CPU**：四塊全部 240 MHz（N16R8 由 160 改）；要降頻改
+  `board.json`＋`sdkconfig.defaults`，`--fresh` 才生效。執行期調頻未實作。
+- **圖**：`network-lines.svg`、`boot.svg`、`boot-cores.svg` 已按 composite kind、
+  route 容錯、USB console／OTG、D11（WAMR 未接）重畫；`architecture.svg` 沿用。
+- **FXE 前仍未做好**：
+  1. FXE 執行後端（WAMR）未接；`.fxe` 現在「登記得到、跑不到」。
+  2. D9 外部任務掃描要拆「probe→declare」與「B09 load」兩步；manifest v2
+     （name／level／require／provide／param／doc TLV）未做。
+  3. 效果掃描（`/data/pixel/effects`）與 service registry／claim API 未做。
+  4. USB 多通道（P4 三條 PHY）未做；目標改成**資源註冊＋claim**
+     （`nc_usb_port_register()`／`nc_usb_claim()`），唔係 `usb.ports[]`／`functions`
+     配對（2026-11-17 修正）；`usb.rx`／`msc`／`cdc_log` 仍是 global；
+     `driver.json` USB 段與 `board.json features.usb` 仍未讀。
+  5. iface-specific bind（同 port ETH／WiFi 分離）未做。
+  6. CPU 執行期調頻（PM/DFS）未做；先維持 240。
+
+### 7.76 2026-11-17（Network 只 claim Hardware；USB 資源模型）
+
+- **Network 不再重複硬件**：`network.json` 的 `lan` 段移除 `driver`／`phy_type`／
+  `phy_addr`／`gpio`（C3／P4-ETH／P4-FireBeetle2／N16R8 四份）。ETH 的 GPIO／PHY
+  只在 `hardware.json` 的 `ETH`（由 `wiring.json` 生成），Network 只 claim／用。
+  以前那幾個 key runtime 根本冇人讀，改了也沒有作用。
+- **命名方向**：`hardware.json`＝Interface／Hardware；`system.json` 的 `links`＝Channels；
+  `network.json`＝Connectivity（不是 Interface）。見 [config-layers.md §0.6／§0.7](../03_notes/config-layers.md)。
+- **USB 資源模型**：目標是 `sys/usb` 註冊 port 能力 → consumer claim；
+  **不是** `usb.ports[]`＋`functions` 配對。Router 只做 data plane，不擁有 USB port。
+  見 [usb-layers.md §5.2](../03_notes/usb-layers.md)。
+- **P4-FireBeetle2**：`CONFIG_NETCORE_USB_OTG_HS=y` 放在 profile 區塊外，`board.py sync`
+  後 `board.py check` 0 error；build `0xfe2c0`（75% free）。
+- **ETH 兩種模式**：`hardware.json` 的 `ETH.driver` 接受 `"rmii"`（現在）／`"spi"`；
+  SPI 模式只寫 `GPIO.spi`（`spi_list` 的 index）＋ `GPIO.cs`／`rst`／`int`，
+  **不自己填 SPI 腳位**；SPI 匯流排由 Hardware 的 `SPI.list` 註冊成 `spi_list`。
+  這跟 mp_Net-Core 的「線名 + index」一致（`spi_list[GPIO.spi]`），沒有另創 `bus` 名；
+  `driver:"spi"` 開機明確報「未實作」。
+- **ETH 預設 DHCP**：移除 `net_eth_start()` 寫死的 10.10.1.50 static IP，回到 esp_netif
+  預設 DHCP；P4-ETH 的 `network.json` `lan.ip.mode` 改 `dhcp`。static 未接。
+- **硬體 JSON 進入用戶空間**：`ports/project/<chip>/<board>/data/config/hardware.json`
+  由 `tools/sync_hardware_presets.py` 從 `wiring.json` 產生（generated snapshot）；
+  build 時優先嵌入它，開機 seed 到 `/data/config/hardware.json`，用戶插 USB 就看得見、改得到。
+- **SPI 的 `phy_addr`**：未用時寫 `-1`（不是 0）；RMII 才係 0–31。`nc_eth_cfg_t.phy_addr`
+  改 `int8_t`，parser 按 driver 預設（SPI=-1、RMII=1）。
+- **USB 進入 hardware.json**：七塊板的 `wiring.json` 加 `USB.list`；`phy` 只有實際值
+  `usj-fs`／`otg-fs`／`otg-hs`。S3 在 `usj-fs`／`otg-fs` 二選一（Matrix／Mini=otg-fs、
+  N16R8／SuperMini=usj-fs），同一對 GPIO19/20；C3 `usj-fs`、P4-ETH 空、
+  P4-FireBeetle2 `usj-fs`＋`otg-hs`。`personalities`／`speed`／`fs`／`shared` 已刪除。
+- **USB GPIO**：`USB.list[].GPIO` 記錄固定 `dm`／`dp`（S3 19/20、C3 18/19、
+  FireBeetle2 24/25＋49/50），**唯讀、不可 remap**。`USB.list` **冇 `id`**，
+  list index 就是 identity（線名 + index）。
+- **name 預設 key**：**所有** link 的 config 都已經寫上生成名做預設，而且 `name`
+  放 object 最前（`usb0`／`wifi_tcp0`／`eth_tcp0`／`uart0`）；用戶可以改，或寫 `""`
+  fallback 生成名。`links[].msc` 是 per-link，預設 0；唔再 fallback global `usb.msc`。
+- **USB link 已 migrate**：`system.json` 的 USB link 現在是
+  `{ "name":"usb0", "kind":"usb", "index":0, "msc":1 }`（`name` 放最前）；
+  `kind:"usb"` 由 generated `nc_port_usb_kind(index)` 解析成 CDC／USJ；
+  `msc` 預設 0、per-link，USJ 冇 capability 就跳過。
+  routes 用 `usb0`；舊 `cdc0`／`usb_jtag0` 已遷移。
+- **其他 link 也統一 name 在前**：所有 `links[]` 的第一個 key 都是 `name`。
+- **runtime**：`kind:"usb"` 已 parse（generated kind table）；`USB.list` 的 GPIO
+  仍然只是 metadata，未 parse。`sys/usb` claim／多 port 未實作。
+- **Build**：P4-ETH `0xfd160`（75% free）；Matrix `0x1130e0`（28% free）。
+- **未做**：`lan.enable` 的 claim 仍未檢查 hardware（`hardware.json` 冇 ETH 段時仍 fallback
+  內建腳位）；SPI PHY driver 未實作；`network.lan.ip` static 未接；USB `sys/usb` registry 未實作。

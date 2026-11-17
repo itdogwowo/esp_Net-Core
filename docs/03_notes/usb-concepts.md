@@ -55,17 +55,22 @@
 ## 4. 目標模型
 
 ```text
-usb_port0（PHY；板子事實）
-  ├─ personality = usb_jtag | cdc
-  ├─ functions = nc4 / log / msc
-  └─ nc4_line = usb_jtag0 | cdc0
+usb_port0（PHY；板子事實，只註冊能力）
+  ├─ personality 能力 = usj | otg
+  ├─ speed = fs | hs
+  └─ supports = nc4 / log / msc（msc 只限 otg）
+        ▲
+        │  claim（誰要用誰 claim，不是 config 配對）
+   nc4／log／msc consumers
 ```
 
-- `usb.msc`／`usb.cdc_log` 應該是 **per-port function policy**，不是 global。
-- `usb.rx` 應該是 **per-NC4-line buffer**。
-- `usb_nc4_link()` 應該變成「每條 USB port 一條 link」，不是 first-only。
+- **不要**在 config 寫 `functions` 或把 port 配給 service；這是 2026-11-17 撤回的方向。
+- consumer 自己 claim：`nc4` 要一條資料通道、`log` 要出口、`msc` 要碟；registry 找
+  同時滿足所有 claim 的 port，並推導 personality（有 MSC → OTG；否則有 USJ 用 USJ）。
+- `usb.rx`／`usb.msc`／`usb.cdc_log` 將來是 **per-port 狀態**，由 claim 產生，不是 config 欄位。
+- `usb_nc4_link()` 應該變成「registry 分配」，不是 first-only。
 - `board.json features.usb` 應該 gate port 是否存在；編譯能力只 gate driver 是否存在。
-- P4 多 PHY 要 `usb.ports[]`（PHY、personality、functions、core），不是一個 `usb` 段。
+- P4 多 PHY：build／板子註冊三個 port，claim 自動分配；不需要 `usb.ports[]` 配對表。
 
 ## 5. 現況建議
 
@@ -73,9 +78,9 @@ usb_port0（PHY；板子事實）
 |---|---|
 | S3 | `usb_jtag0`、msc0、cdc_log1；單一 PHY，保持現在 |
 | P4 | 保持 `uart0` + `features.usb=false`；若要 OTG，另立 `cdc0` + HS/FS PHY profile，不要和 USJ 混 |
-| 多 USB port | 先補 `usb.ports[]`／per-port `usb.rx`，再談並存 |
+| 多 USB port | 先做資源註冊＋claim（`nc_usb_port_register`／`nc_usb_claim`）＋per-port `usb.rx`，再談並存 |
 
 ## 6. 一句話
 
 > 現在不是「USB 有很多功能」，而是 **PHY、driver、function、NC4 line 四層被同一個 `usb` 字包住**。
-> 先把四層拆開，USB 配置才會清晰。
+> 先把四層拆開，USB 配置才會清晰。目標是**註冊資源、consumer claim**，不是 `functions` 配對。

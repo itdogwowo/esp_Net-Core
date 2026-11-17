@@ -13,6 +13,9 @@
 > `tasks.json`（任務管理器讀 level / affinity，並會補寫）、`system.json`
 > （`cID` / `links[]` / `routes[]` / `log_debug_mode` / `usb`）、
 > `hardware.json`（generated 預設 ＋ 用戶逐欄位覆蓋；已 typed：ETH／SDIO／PIN／PWM／UART）。
+`ports/project/<chip>/<board>/data/config/hardware.json` 現在有一份 **generated snapshot**
+（`tools/sync_hardware_presets.py` 由 `wiring.json` 產生），讓用戶在 repo 就看得見具體 JSON；
+build 時優先嵌入它。改 `wiring.json` 後要跑一次 sync，否則 snapshot 會舊。
 > `network.json` **仍然不是單一 typed 層**：`nc_wifi.c`、`nc_net_lines.c`、
 > `nc_net_raw.c`、`main.c` 各自讀自己那一段（wifi / selftest / rawbench / bt.pin）。
 >
@@ -27,9 +30,9 @@
 > 只留在 generated seed，等 driver 有型別才逐個接。
 > 下面 §2–§4 有一部分是**目標設計**，不是現況；以本頁頂部 2026-11-16 更新為準。
 >
-> **2026-11-16 link schema（canonical）**：`kind` 只寫 transport（`tcp`／`udp`／`ws`…）、
-> `iface` 分開寫（`eth`／`wifi`／`any`）、`port`／`rx` 在 link 頂層。
-> 舊 `kind:"eth_tcp"` 與 `cfg:{port,rx}` 仍然接受；新 seed 已全部正規化。
+> **2026-11-16 晚 link schema（canonical）**：`kind` 是 composite（`eth_tcp`／`wifi_tcp`…）
+> ＋ `index`；config **不寫 `iface`／`service`**；`name` 由 `kind + index` 生成，可 `name` 覆寫。
+> 舊 `kind:"tcp", iface:"eth"` 與 `cfg:{port,rx}` 仍然接受；新 seed 已全部正規化。
 > `main.c` 另有第 ① 層最小骨架（`k_min_system`／`k_min_network`／`k_min_tasks`），
 > 所以 `config/` 四個檔一定存在。
 
@@ -105,6 +108,82 @@ CDC／MSC／log 三樣都冇人要 → 連 TinyUSB 都唔裝。以前缺名會�
 
 ---
 
+## 0.6 名稱對齊：Interface／Hardware（2026-11-17 提案）
+
+你講的「Network 改叫 Interface、所有硬件線路註冊進去」方向是對的，但要先分清楚
+**哪個 Network**、以及**哪些東西根本不能在 runtime 改**。
+
+| 現在 | 建議名字 | 內容 | 能不能 runtime 改 |
+|---|---|---|---|
+| `hardware.json` | **Interface／Hardware** | 實體接口：GPIO／PWM／UART／SPI／I2C／ETH／SDIO／USB | 部分（見下表） |
+| `system.json` 的 `nc4.links` | **Channels**（或保留 links） | 邏輯通道：NC4 over USB／UART／TCP／WS… | ✅ |
+| `system.json` 的 `nc4.routes` | **Routes** | 幀去 decodeN／轉發 | ✅ |
+| `network.json` | **Connectivity**（不是 Interface） | WiFi STA/AP、hostname、credentials | ✅ |
+| `tasks.json` | Tasks | 任務 level／affinity | ✅ |
+| `wiring.json` | **F.wiring**（build） | 板級腳位／匯流排預設 | ❌ 要重 build |
+| `board.json`＋`sdkconfig.defaults` | **F.spec／F.build**（build） | flash／PSRAM／CPU／console／OTG／HS／分割表 | ❌ 要重 build |
+
+**不要把 `network.json` 改名做 Interface**：它是 WiFi 連線憑證與 policy，不是硬件接口。
+「Interface」留給 `hardware.json`（實體接口）比較準。
+
+### 不是所有「硬件線路」現在都可 runtime 改
+
+| 接口 | 現在狀態 | 寫哪裡 |
+|---|---|---|
+| PIN（GPIO） | ✅ typed | `hardware.json` 的 `PIN` |
+| PWM | ✅ typed | `PWM` |
+| UART | ✅ typed pins | `UART`（NC4 使用另外在 `system.json` links） |
+| ETH | ✅ typed enable／pins | `ETH` |
+| SDIO | ✅ typed | `SDIO` |
+| SPI／I2C／I80／I2S／ENC／XL9555 | 🟡 只係 generated seed，未 typed | 改了**不會生效**，等 driver |
+| USB | 🟡 link 在 `system.json`；`msc`／`cdc_log` 在 `usb` 段；port 能力在 build | 見 [usb-layers.md](usb-layers.md) |
+| flash／PSRAM／CPU／console／分割表 | ❌ build-time | `board.json`／`sdkconfig.defaults` |
+
+所以「把所有硬件線路註冊進 Interface」不是改個名就完成：**每個 driver 要先有 typed struct**
+（PIN／PWM／UART／ETH／SDIO 已有；SPI／I2C／I80／I2S 未有），USB 也要先有 port registry。
+改名本身只係文件／schema 的整理，唔會令未 typed 的段生效。
+
+### USB 在 Interface 裡應該長什麼樣（目標，未實作）
+
+- `hardware.json` 的 `USB` 段只放**用戶選擇**：`enable`、personality 偏好（`usj`／`otg`）、
+  `msc`／`log` 這些 consumer 開關；**不是** `functions` 配對表。
+- port 能力（有幾條 PHY、USJ／OTG、FS／HS）由 build／板子註冊，不由用戶填。
+- 真正 personality 由 claim 推導：有 MSC claim → OTG；否則有 USJ 用 USJ。
+- 現在 interim 仍然係 `system.json` 的 `links[].kind`＋global `usb.msc`／`cdc_log`。
+
+### 0.7 Network 只 claim 硬件（2026-11-17 修正）
+
+以前 `network.json` 的 `lan` 段重複寫了一次硬件：
+
+```jsonc
+"lan": { "driver": "RMII", "phy_type": "IP101", "phy_addr": 1,
+         "gpio": { "mdc": 31, "mdio": 52, "ref_clk": 50 } }   // 已移除
+```
+
+這四個其實是**硬件事實**，而且 `wiring.json` → generated `hardware.json` 已經有；
+runtime code 讀的是 `hardware.json` 的 `ETH`，`network.json` 的 `lan.gpio` 從來冇人讀。
+重複寫一份只會出現「改了 network 但冇效果」的假象。
+
+現在改成：
+
+```jsonc
+// hardware.json（硬件註冊；由 wiring 生成，用戶可覆蓋）
+"ETH": { "enable": 1, "mdc": 31, "mdio": 52, "ref_clk": 50,
+         "phy_type": "IP101", "phy_addr": 1 }
+
+// network.json（只 claim／用，不再寫 GPIO／PHY）
+"lan": { "enable": 1, "ip": { "mode": "static", ... } }
+```
+
+- **Hardware** 註冊：這塊板有哪個接口、腳位在哪、PHY 型號／位址。
+- **Network** claim：要不要用這條有線、IP 怎樣拿；硬件不存在／`ETH.enable=0` 就唔用。
+- 同 Router 一樣：Network 應該由 hardware capability **自動識別**，不是自己再抄一份腳位。
+- **SPI 接 PHY**（W5500 之類）亦一樣：Hardware 的 `ETH` 段將來的 `driver:"SPI"`＋
+  `spi/cs/rst/int` 負責註冊；Network 只 claim。現在 parser 認得這些 key 但未 typed，
+  所以 SPI PHY 未可用。
+- 未做：`lan.enable` 的 claim 未真正檢查 hardware（現時 `hardware.json` 冇 ETH 段仍會
+  用編譯期內建腳位）；目標是 claim 失敗就唔起，不再 fallback。
+
 ## 1. 為什麼分檔，而不是一個大 config.json
 
 舊專案是一個 5.8 KB 的 `config.json`，24 個 section。那在 MicroPython 行得通，因為
@@ -134,9 +213,9 @@ ports/
     sdkconfig.defaults       ← IDF build config（L1 + 硬體能力碎片）
     partitions.csv           ← 這塊 flash 的分割表（可選）
   project/<chip>/<board>/
-    project.json             ← 項目選擇（hardware 指回哪塊板 / profiles / seed）
-    sdkconfig.defaults       ← 項目能力碎片（可選）
-    data/config/             ← 只放給用戶的 seed（system/network/tasks）
+    project.json             ← 項目選擇（hardware 指回哪塊板 / seed）
+    data/config/             ← 只放給用戶的 seed（hardware/system/network/tasks）
+    （**冇 sdkconfig.defaults**：project 只放 runtime 設定，唔參與 build）
 
 【runtime，USB 只看見這個】
 /data/
@@ -229,30 +308,31 @@ ETH PHY 沒 link、UART 沒接，就不該照 config 硬開一條 link。
 
   "nc4": {
     "links": [                                  // 通道：只講怎麼收
-      { "name": "CDC", "kind": "cdc", "rx": { "region": 8205, "chunk": 1024, "budget": 8 } },
-      { "name": "UART", "kind": "uart", "rx": { "region": 1024, "chunk": 512, "budget": 8 } },
-      { "kind": "tcp", "iface": "eth", "index": 0, "port": 6000,
-        "rx": { "region": 16410, "chunk": 8192, "budget": 8, "slots": 8, "slot_size": 8205 } }
+      { "name": "usb0", "kind": "usb", "index": 0, "msc": 1 },
+      { "kind": "uart", "index": 0 },
+      { "kind": "eth_tcp", "index": 0, "port": 6000 }
     ],
     "routes": [                                 // 誰解、要不要轉出去（router 永遠生效）
       { "in": "nctx",     "out": ["decode0"] },   // 本機 → 自己
       { "in": "outbound", "out": [] },            // 本機 → 外
-      { "in": "CDC",      "out": ["decode0"] },
-      { "in": "UART",     "out": ["decode1"] },
-      { "in": "eth_tcp0", "out": ["decode0", "UART"] }
+      { "in": "cdc0",     "out": ["decode0"] },
+      { "in": "uart0",    "out": ["decode1"] },
+      { "in": "eth_tcp0", "out": ["decode0", "uart0"] }
     ]
   }
 }
 ```
 
-**Link schema（canonical，2026-11-16）**：
+**Link schema（canonical，2026-11-16 晚間定案）**：
 
-- `kind` 只寫 transport：`cdc` / `uart` / `tcp` / `ws` / `udp` / `http` / `usb_jtag`。
-- `iface` 另外寫：`eth` / `wifi` / `any`（缺席 = `any`）。
-- `port` 只在 link 頂層寫一次；`rx` 也直接在 link 下面。
-- 冇寫 `name` 時，由 `iface + kind + index` 生成（`eth_tcp0`、`wifi_udp1`…）。
-- **舊格式仍然接受**：`kind:"eth_tcp"` 會拆成 `kind:"tcp", iface:"eth"`；
-  `cfg:{port,rx}` 亦會讀，但新檔請用上面的寫法。
+- `kind` 是 composite：`eth_tcp` / `wifi_tcp` / `eth_udp` / `wifi_udp` / `eth_ws` / `wifi_ws`，
+  實體線是 `uart` / `cdc` / `usb_jtag`；**interface 已包含在 kind，不再寫 `iface`**。
+- `index` 是同一 kind 的編號；line identity = `kind + index`。
+- `port` 只在 link 頂層寫一次；`rx` 也直接在 link 下面（有量測偏離時才寫，見 net-lines §5）。
+- 冇寫 `name` 時，由 `kind + index` 生成（`eth_tcp0`、`wifi_udp1`…）；`name` 可以覆寫。
+- `service` 不是 link 欄位；claim 由 kind／port 決定。
+- **舊格式仍然接受**：`kind:"tcp", iface:"eth"` 會合成 `eth_tcp`；`cfg:{port,rx}` 亦會讀，
+  但 `python3 tools/board.py check` 會提醒。
 
 `routes[].out` 同時接受**通道**（轉發）與 **decode 引擎**（本地執行），跟舊專案的
 `out: ["self"]` 同一個語意（新專案的本機來源叫 `nctx`）；`decodeN` 有人指向才開（N = 核心編號），**不需要宣告引擎**。
@@ -285,9 +365,13 @@ ETH PHY 沒 link、UART 沒接，就不該照 config 硬開一條 link。
   "version": 1,
   "_gpio_convention": "（見下）",
 
-  "ETH":  { "enable": 1, "mdc": 31, "mdio": 52, "ref_clk": 50,
+  "ETH":  { "enable": 1, "driver": "rmii",   // rmii（現在）| spi（W5500 類，未實作）
             "phy_type": "IP101", "phy_addr": 1,
-            "spi": -1, "cs": -1, "rst": -1, "int": -1 },
+            "GPIO": { "mdc": 31, "mdio": 52, "ref_clk": 50,
+                      "spi": -1, "cs": -1, "rst": -1, "int": -1 } },
+  "USB":  { "enable": 1, "_comment": "S3 USB D-/D+ = GPIO19/20；phy 在 usj-fs / otg-fs 二選一",
+              "list": [ { "phy": "otg-fs", "enable": 1,
+                          "GPIO": { "dm": 19, "dp": 20 } } ] },
   "PIN":  { "enable": 0, "list": [ { "GPIO": null, "label": "tft_dc", "mode": "OUT", "initial": 0 } ] },
   "SPI":  { "enable": 0, "list": [ { "baudrate": 80000000, "phase": 0, "polarity": 0,
                                      "GPIO": { "sck": null, "mosi": null, "miso": null }, "data_pins": [] } ] },
@@ -364,9 +448,10 @@ DMA 大小（1600）與環數（16/16）**不在 config**——那是 build-time
   "hostname": "",                        // DHCP 主機名 / mDNS；空 = 用 cID 推導（待實作）
   "priority": ["lan", "wifi"],           // 同時啟用時的偏好順序
 
+  // GPIO／PHY（driver／phy_type／phy_addr）在 hardware.json 的 ETH 段；
+  // Network 只 claim／用，不重複硬件。
   "lan": {
-    "enable": 1, "driver": "RMII", "phy_type": "IP101", "phy_addr": 1,
-    "gpio": { "mdc": 31, "mdio": 52, "ref_clk": 50 },
+    "enable": 1,
     "ip": { "mode": "static", "addr": "10.10.1.50", "mask": "255.255.0.0", "gw": "10.10.1.1" }
   },
 

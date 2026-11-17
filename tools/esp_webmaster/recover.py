@@ -8,7 +8,7 @@
     python recover.py --port COM25 --dry-run     # 只印命令
 
 支援：
-    ESP32-P4 + 16MB → ESP32-P4-C6
+    ESP32-P4 + 16MB → ESP32-P4-FireBeetle2（舊名 ESP32-P4-C6，仍可讀舊 recovery 目錄）
     ESP32-P4 + 32MB → ESP32-P4-ETH
     ESP32-S3 + 16MB → ESP32-S3-N16R8
     ESP32-S3 +  4MB → ESP32-S3-Matrix
@@ -34,11 +34,14 @@ REC = ROOT / "artifacts" / "recovery"
 
 # (chip prefix, flash MB) -> (recovery dir, bootloader offset, flash freq)
 MAP = {
-    ("ESP32-P4", 16): ("ESP32-P4-C6", 0x2000, "40m"),
+    ("ESP32-P4", 16): ("ESP32-P4-FireBeetle2", 0x2000, "40m"),
     ("ESP32-P4", 32): ("ESP32-P4-ETH", 0x2000, "40m"),
     ("ESP32-S3", 16): ("ESP32-S3-N16R8", 0x0000, "80m"),
     ("ESP32-S3", 4): ("ESP32-S3-Matrix", 0x0000, "80m"),
 }
+
+# 改名後的舊 recovery 目錄（2026-11-16 P4-C6 → FireBeetle2）；有就用，冇就報缺檔。
+ALIAS_DIR = {"ESP32-P4-FireBeetle2": "ESP32-P4-C6"}
 
 
 def _ports() -> list[str]:
@@ -91,6 +94,11 @@ def main() -> int:
         return 1
     board, offset, freq = MAP[key]
     d = REC / board
+    if not d.is_dir() and board in ALIAS_DIR:
+        alt = REC / ALIAS_DIR[board]
+        if alt.is_dir():
+            print(f"（用舊名 recovery 目錄：{alt.name}）")
+            d = alt
     files = ["bootloader.bin", "partition-table.bin", "ota_data_initial.bin", "esp_net_core.bin"]
     missing = [f for f in files if not (d / f).is_file()]
     if missing:

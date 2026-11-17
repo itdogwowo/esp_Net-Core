@@ -9,7 +9,7 @@
   },
   "psram": null,
   "cpu_mhz": 240,
-  "console": "usb-serial-jtag",
+  "console": "none",
   "profiles": [],
   "features": {
     "eth": null,

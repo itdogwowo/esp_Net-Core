@@ -157,7 +157,7 @@ ROWS = [
      ["NVS 頁快取（IDF 的，唔計）"]),
 
     ("storage+cfg", 126.92,
-     ["掛 FAT／WL 的 /data；寫 seed；config 三層解析（system／network／hardware）",
+     ["掛 FAT／WL 的 /data；boot record；seed 出廠 preset；讀 config（system／hardware／tasks）",
       "→ 全開機最貴嘅一步，佔掉 61%"],
      None, C_PREP, 0, 0,
      ["FAT／WL 的內部表（IDF 的，唔計）"]),
@@ -166,7 +166,7 @@ ROWS = [
      ["nc_core_probe() → ctx.cores（1／2）",
       "usb_resolve() → ctx.usb_mode／usb_link／usb_log／usb_msc"],
      None, C_CAP, 0, 0,
-     ["0 B：只寫 nc_boot_ctx 六個欄位，一個 heap_caps_malloc 都冇"]),
+     ["0 B：只寫 nc_boot_ctx 的決定欄位，一個 heap_caps_malloc 都冇"]),
 
     ("hwcheck", None,
      ["hardware.json 的 claim 對帳（腳位衝突開機即見）"],
@@ -206,10 +206,10 @@ ROWS = [
      ["nc_log 2,560 B 棧 ＋ log 環 2,048／512（debug 8,192／1,024）"]),
 
     ("channels", 1.81,
-     ["net／WS／UDP；CDC bus ＋ cdc.rx；UART bus；TCP bus",
-      "nc_task_boot() 放行 → decode0 開 loop；最後才起 uart.rx producer"],
-     ["decode1 放行（3,072）；uart.rx producer 1,536（只有 ETH 板）",
-      "nc4_udp 6,144（如有 UDP）"],
+     ["nc_net_lines_start()：listener／httpd（service claim）",
+      "CDC／UART bus；nc_task_boot() 放行 decode loop；最後起 uart.rx producer"],
+     ["decode1 放行（3,072）",
+      "uart.rx producer 1,536（只有 ETH 板）"],
      C_LINK, 4864, 0,
      ["cdc.rx 1,280 ＋ uart.rx producer 1,536 ＋ 槽環 256×4×2 ＝ 2,048"]),
 
@@ -531,7 +531,7 @@ def build():
     rich(40, H - 36, [
         ("簡寫", MUTED, 600, False),
         ("：B01–B12 ＝ 開機階段（數字只代表先後）｜"
-         "ctx ＝ nc_boot_ctx（跨階段唯一一份，只六個欄位；usb_core 由 B05 寫）｜"
+         "ctx ＝ nc_boot_ctx（跨階段唯一一份：cores／usb_*／usb_core＋ready 帳；usb_core 由 B05 寫）｜"
          "usb_mode／link／log／msc ＝ USB 模式／線名／log 閘／MSC 閘｜"
          "MSC ＝ Mass Storage Class（把 FAT 當隨身碟）｜"
          "capability 係階段名，唔係 NC_CAP_* 能力位", FAINT, 400, False),

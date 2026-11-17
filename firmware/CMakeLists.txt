@@ -11,11 +11,14 @@ if(NOT EXISTS "${PORT_DIR}")
     message(FATAL_ERROR "hardware port not found: ${PORT_DIR}")
 endif()
 
-set(PROJECT_DIR "")
+# ⚠️ 唔可以叫 PROJECT_DIR：CMake 的 project() 會把 PROJECT_DIR 設成「本 project
+# 的 source dir」（= firmware/），子目錄的 CMakeLists 見到的是被蓋掉的值。
+# 所以我們的 project 路徑一定要用 NC_ 前綴。
+set(NC_PROJECT_DIR "")
 if(PROJECT)
-    set(PROJECT_DIR "${CMAKE_CURRENT_LIST_DIR}/../ports/project/${PROJECT}")
-    if(NOT EXISTS "${PROJECT_DIR}")
-        message(FATAL_ERROR "project not found: ${PROJECT_DIR}")
+    set(NC_PROJECT_DIR "${CMAKE_CURRENT_LIST_DIR}/../ports/project/${PROJECT}")
+    if(NOT EXISTS "${NC_PROJECT_DIR}")
+        message(FATAL_ERROR "project not found: ${NC_PROJECT_DIR}")
     endif()
 endif()
 
@@ -24,13 +27,17 @@ endif()
 set(ENV{NC_PORT} "${PORT}")
 set(ENV{NC_PROJECT} "${PROJECT}")
 
-# 共通預設 → 硬體板覆蓋 → project 覆蓋（後者勝）
+# 建置設定（SDKCONFIG_DEFAULTS）＝ 共通預設 → 硬體板覆蓋（後者勝）。
+# project 層**唔參與 build**：它只有 runtime 設定（project.json ＋ data/config），
+# 冇 sdkconfig.defaults。能力碎片（eth-rmii／wifi-hosted-*／nc4-ws／nc4-udp）
+# 全部寫在 board.json 的 profiles，由 tools/ncbuild 用 -DSDKCONFIG_DEFAULTS 傳入。
 set(SDKCONFIG_DEFAULTS "${CMAKE_CURRENT_LIST_DIR}/sdkconfig.defaults")
 if(EXISTS "${PORT_DIR}/sdkconfig.defaults")
     list(APPEND SDKCONFIG_DEFAULTS "${PORT_DIR}/sdkconfig.defaults")
 endif()
-if(PROJECT_DIR AND EXISTS "${PROJECT_DIR}/sdkconfig.defaults")
-    list(APPEND SDKCONFIG_DEFAULTS "${PROJECT_DIR}/sdkconfig.defaults")
+if(PROJECT AND EXISTS "${NC_PROJECT_DIR}/sdkconfig.defaults")
+    message(WARNING "${NC_PROJECT_DIR}/sdkconfig.defaults 存在但**唔會被使用**："
+                    "project 層只放 runtime 設定，build 設定請搬到 hardware 層。")
 endif()
 
 # ── 測試專用（約定：action/test_action、app/test_*_tasks）──

@@ -59,8 +59,6 @@ firmware/sdkconfig.defaults                  ← 共通（分割表 / FATFS / Fr
 ../ports/_profiles/<能力>.defaults           ← 能力碎片（ETH / WS / UDP），由 board.py sync 展開
         ↓
 ../ports/hardware/<chip>/<board>/sdkconfig.defaults   ← 硬體事實（flash / PSRAM / CPU / console）
-        ↓
-../ports/project/<chip>/<board>/sdkconfig.defaults    ← 項目能力（WS / UDP；可選）
         ↓ build 時展開
 ../artifacts/build/<chip>_<board>/sdkconfig   ← 生成物（每塊板一份，-DSDKCONFIG），不要手改
 ```
@@ -68,8 +66,9 @@ firmware/sdkconfig.defaults                  ← 共通（分割表 / FATFS / Fr
 `firmware/sdkconfig` 已經廢除；`make.py` 用 `-DSDKCONFIG=` 指向 per-board build dir，
 所以多塊板可以並存。舊的 `firmware/sdkconfig` 若還在，`make.py clean` 會清掉。
 
-三個檔案各自的上位真相是 `../ports/hardware/<chip>/<board>/board.json`（機器可讀的板子身份證），
-項目選擇在 `../ports/project/<chip>/<board>/project.json`。
+三個檔案各自的上位真相是 `../ports/hardware/<chip>/<board>/board.json`（機器可讀的板子身份證）。
+project 層（`../ports/project/<chip>/<board>/`）**只有 runtime 設定**（`project.json` ＋
+`data/config/*.json`），冇 `sdkconfig.defaults`，唔參與 build。
 
 ```bash
 python3 ../tools/board.py check   # board.json ↔ sdkconfig 一致性 + 抓放錯層的設定

@@ -115,12 +115,20 @@
 #include "nc_pwm_drv.h"
 #include "nc_hw.h"
 #include "nc_hw_gpio.h"
+
 #include "nc_buf.h"
 #include "nc_ota_action.h"
 #include "nc4_ws.h"
 #include "nc4_udp.h"
 #include "nc_cfg.h"
 #include "nc_port.h"          // build-time 由 hardware/board.json + _chips/*.json 產生
+
+// nc_cfg_defaults.c 以 weak 方式引用 generated nc_port_usb_kind()；
+// 若冇任何強引用，linker 唔會拉入 nc_port.o，會 fallback 成 CDC
+// （2026-11-17 P4 實測：USB link kind=cdc，即使 wiring 寫 usj-fs）。
+// 呢個強引用負責把 nc_port.o 拉入；同時 nc_port_hw_defaults 亦一齊入。
+extern uint8_t nc_port_usb_kind(uint8_t idx);
+__attribute__((used, retain)) uint8_t (*const nc_port_usb_kind_ref)(uint8_t) = nc_port_usb_kind;
 #include "cJSON.h"
 #include "nc_store.h"
 #include "boot.h"
@@ -301,17 +309,29 @@ static void seed_file(const char *path, const uint8_t *start, const uint8_t *end
 
 // 內建最小預設：沒有板級 seed 時，仍然令 /data/config 每個檔都存在，
 // 使用者插上 USB 就看得到該改哪一個。內容 = 「全部用程式預設」。
+//
+// 有 project preset 的層就唔需要呢個骨架（main/CMakeLists 會 define
+// NETCORE_HAS_PRESET_*），所以逐個用 #if 包住：否則 -Werror=unused-const-variable
+// 會在「三個 preset 齊全」的 build（例如 P4-ETH 的 default project）直接失敗。
+#if !NETCORE_HAS_PRESET_SYSTEM || !NETCORE_HAS_PRESET_NETWORK || !NETCORE_HAS_PRESET_TASKS
 static void seed_text(const char *path, const char *text)
 {
     seed_bytes(path, (const uint8_t *)text, strlen(text));
 }
+#endif
 
+#if !NETCORE_HAS_PRESET_SYSTEM
 static const char k_min_system[] =
     "{\n  \"version\": 1,\n  \"cID\": \"\",\n  \"frame_interval_ms\": 20,\n  \"num_pixels\": 0\n}\n";
+#endif
+#if !NETCORE_HAS_PRESET_NETWORK
 static const char k_min_network[] =
     "{\n  \"version\": 1,\n  \"hostname\": \"\",\n  \"priority\": [\"lan\"]\n}\n";
+#endif
+#if !NETCORE_HAS_PRESET_TASKS
 static const char k_min_tasks[] =
     "{\n  \"version\": 1,\n  \"tasks\": []\n}\n";
+#endif
 
 // 目錄結構也是「出廠內容」的一部分：config/ 與 pixel/effects/ 先建好，
 // 使用者插上隨身碟就看得到該把東西放哪裡。
@@ -544,12 +564,13 @@ static void usb_resolve(void)
     nc_boot_ctx_t *b = nc_boot_ctx();
     const nc_system_cfg_t *scfg = nc_cfg_system();
     const bool want_log = (scfg == NULL) || (scfg->usb_cdc_log != 0);
-    const bool want_msc = (scfg == NULL) || (scfg->usb_msc != 0);
 
     // ① 用戶在 links[] 揀了哪條 USB？（kind=cdc／usb_jtag；enable 才算）
     //    預設本身一定有一條（晶片表決定 name／kind），所以「揀唔到」只有一個意思：
     //    用戶明確寫了一份沒有 USB link 的 links[] —— 那就是「唔要」。
     const nc_link_cfg_t *usb = usb_nc4_link();
+    // want_msc：per-link；預設 0（唔交碟），冇 capability（USJ）就跳過。
+    const bool want_msc = (usb != NULL) && (usb->msc != 0);
     if (usb == NULL) {
         b->usb_mode = NC_USB_NONE;
         b->usb_link = NULL;
@@ -2074,6 +2095,13 @@ static size_t s_nc4_rx_bytes;
 static nc_buf_t *s_usb_rx_buf;      // usb.rx（STREAM，管理器建立；唔分 CDC／USJ）
 static nc_buf_t *s_uart_rx_buf;     // uart.rx
 static void *s_uart_rx_region;
+// UART 的 line 名：B03 由 config 的 kind=uart 查出。name 可以由 kind+index 生成，
+// 所以 code 唔可以再寫死 "UART"；用戶改 name 之後，router／bus／forward 全部跟同一個名。
+static const char *s_uart_name;
+#if NC_HAS_ETH
+// TCP line 名同理：router_defaults() 唔可以再寫死 "TCP"。
+static const char *s_tcp_name;
+#endif
 // UART 的 producer 要延後到 decode 任務起咗之後才建立（見 app_main 的說明）。
 static nc4_bus_handle_t s_uart_bus;
 #if NC_HAS_ETH
@@ -2260,10 +2288,11 @@ static void usb_links_audit(void)
             ESP_LOGE(TAG, "  這個 build 冇 USJ transport；請確認 target");
         }
     }
-    // usb.msc 只在「選了 OTG」時有意義：USJ 沒有 MSC。
+    // msc 只在「選了 OTG」時有意義：USJ 沒有 MSC。per-link msc 優先，未寫才看 global。
     const nc_link_cfg_t *usb = usb_nc4_link();
-    if (sys->usb_msc != 0 && (usb == NULL || usb->kind != NC_LINK_CDC)) {
-        ESP_LOGW(TAG, "usb.msc=1 但 USB link 不是 kind=cdc（OTG）→ 冇碟可交");
+    const bool want_msc = (usb != NULL) && (usb->msc != 0);
+    if (want_msc && (usb == NULL || usb->kind != NC_LINK_CDC)) {
+        ESP_LOGW(TAG, "USB link msc=1 但 personality 不是 OTG（USJ 冇 MSC）→ 跳過");
     }
 }
 
@@ -2395,9 +2424,10 @@ static int task_net_declare(nc_task_res_t *out, int max)
 {
     int n = 0;
     // 同 CDC 一樣：enable ＋ 有路由，兩樣都有才宣告（否則 bus 唔會建立）。
-    if (n < max && link_enabled("UART") && nc4_router_core("UART") != NC4_ROUTE_NONE) {
+    if (n < max && s_uart_name != NULL && link_enabled(s_uart_name) &&
+        nc4_router_core(s_uart_name) != NC4_ROUTE_NONE) {
         link_rx_t rx = { .region = 1024 };
-        link_rx("UART", &rx);
+        link_rx(s_uart_name, &rx);
         out[n++] = (nc_task_res_t){
             .name = "uart.rx", .bytes = rx.region, .cls = NC_PLAN_INTERNAL, .align = 32,
             .slot_bytes = (uint32_t)rx.region, .n = 1, .flags = NC_BUF_F_STREAM,
@@ -2405,10 +2435,10 @@ static int task_net_declare(nc_task_res_t *out, int max)
     }
 #if NC_HAS_ETH
     // 兩個條件都要：硬體真的起來（ETH）＋ config 有啟用（TCP）
-    if (n < max && s_eth_ok && link_enabled("TCP") &&
-        nc4_router_core("TCP") != NC4_ROUTE_NONE) {
+    if (n < max && s_eth_ok && s_tcp_name != NULL && link_enabled(s_tcp_name) &&
+        nc4_router_core(s_tcp_name) != NC4_ROUTE_NONE) {
         link_rx_t rx = { .region = 16410 };   // 2 幀：跨讀時需要餘裕
-        link_rx("TCP", &rx);
+        link_rx(s_tcp_name, &rx);
         out[n++] = (nc_task_res_t){
             .name = "tcp.rx", .bytes = rx.region, .cls = NC_PLAN_INTERNAL, .align = 32,
             .slot_bytes = (uint32_t)rx.region, .n = 1, .flags = NC_BUF_F_STREAM,
@@ -3318,7 +3348,7 @@ static int router_from_cfg(nc4_route_t *out, int max)
         // 呢條 link 冇啟用 → 佢唔會存在，路由都唔應該令嗰個核「有嘢做」
         if (strcmp(row->in, "nctx") != 0 && strcmp(row->in, "outbound") != 0 &&
             !link_enabled(row->in)) {
-            ESP_LOGW(TAG, "router：%s 未啟用（links[].enable=0）→ 跳過呢行", row->in);
+            ESP_LOGW(TAG, "router：%s 不存在或未啟用 → 跳過呢行", row->in);
             continue;
         }
         int core = NC4_ROUTE_NONE;
@@ -3354,8 +3384,15 @@ static int router_from_cfg(nc4_route_t *out, int max)
                 }
                 continue;
             }
-            // link 名 = 轉寄目的地。router 唔驗它是否存在（果度唔應該認識 transport），
-            // 開機尾段的 link 稽核會逐個對名。
+            // link 名 = 轉寄目的地。router 本身唔應該認識 transport，但 config 冇
+            // 這條線（或它未啟用）時，這格直接忽略 —— 一個打錯的名字不應該令
+            // 整張路由表被拒收／令開機停。
+            const nc_link_cfg_t *ol = nc_cfg_link(s);
+            if (ol == NULL || !ol->enable) {
+                ESP_LOGW(TAG, "router：%s → %s 不存在或未啟用 → 忽略這格",
+                         row->in, s);
+                continue;
+            }
             if (n_out >= NC4_ROUTE_OUT_MAX) {
                 ESP_LOGW(TAG, "router：%s 的 out 超過 %d 個 → 忽略 %s",
                          row->in, NC4_ROUTE_OUT_MAX, s);
@@ -3412,7 +3449,7 @@ static int router_defaults(nc4_route_t *out, int max)
 {
     const nc_boot_ctx_t *b = nc_boot_ctx();
     int n = 0;
-    // USB 那條永遠有預設路由：名字由 ph_capability 決定（"CDC" / "usb_jtag"）。
+    // USB 那條永遠有預設路由：名字由 ph_capability 決定（usb_jtag0／cdc0）。
     // 以前這裡分兩種 #if，結果「config 壞掉的 C3」連唯一那條 USB 通道都沒有 ——
     // 而這份表存在的理由正是「config 壞掉時仍然要有一條線」。
     if (b->usb_link != NULL && n < max) {
@@ -3421,14 +3458,20 @@ static int router_defaults(nc4_route_t *out, int max)
 #if NC_HAS_ETH
     // 有乙太網：TCP 走 core0。雙核時 UART 擺 core1，單核時全部 core0。
     if (s_eth_ok) {
-        if (n < max) out[n++] = (nc4_route_t){ .line = "TCP", .core = 0 };
-        if (n < max) out[n++] = (nc4_route_t){ .line = "UART", .core = NC_ROUTE_CORE1 };
+        if (s_tcp_name != NULL && n < max) {
+            out[n++] = (nc4_route_t){ .line = s_tcp_name, .core = 0 };
+        }
+        if (s_uart_name != NULL && n < max) {
+            out[n++] = (nc4_route_t){ .line = s_uart_name, .core = NC_ROUTE_CORE1 };
+        }
     } else
 #endif
     {
         // 冇乙太網（或冇 ETH）：core0 閒置，UART 搬去 core0；core1 索性唔開，
         // 省一個 6 KB 棧同一個 parser 緩衝。單核晶片（C3）永遠走這裡。
-        if (n < max) out[n++] = (nc4_route_t){ .line = "UART", .core = 0 };
+        if (s_uart_name != NULL && n < max) {
+            out[n++] = (nc4_route_t){ .line = s_uart_name, .core = 0 };
+        }
     }
     return n;
 }
@@ -3448,7 +3491,7 @@ static void link_audit(void)
                 ESP_LOGI(TAG, "轉寄：%s → %s ok", line, outs[k]);
                 n_ok++;
             } else {
-                ESP_LOGE(TAG, "轉寄：%s → %s 冇出口（channel 冇建立／名字打錯）→ 會被丟",
+                ESP_LOGW(TAG, "轉寄：%s → %s 冇出口（channel 未建立）→ 忽略",
                          line, outs[k]);
                 n_bad++;
             }
@@ -3532,10 +3575,15 @@ static const nc_task_t s_task_fx = {
 // config → driver 的解析結果（一次，開機時）。
 typedef struct {
     bool        enable;
+    uint8_t     driver;        // nc_eth_driver_t
     int8_t      mdc;
     int8_t      mdio;
     int8_t      ref_clk;
-    uint8_t     addr;
+    int8_t      spi_idx;
+    int8_t      cs;
+    int8_t      rst;
+    int8_t      int_pin;
+    int8_t      addr;
     const char *type;
     bool        from_cfg;      // true = 值來自 hardware.json
 } eth_cfg_t;
@@ -3546,9 +3594,14 @@ static eth_cfg_t eth_cfg_resolve(void)
     if (hw != NULL && hw->eth.present) {
         return (eth_cfg_t){
             .enable  = hw->eth.enable,
+            .driver  = hw->eth.driver,
             .mdc     = hw->eth.mdc,
             .mdio    = hw->eth.mdio,
             .ref_clk = hw->eth.ref_clk,
+            .spi_idx = hw->eth.spi_idx,
+            .cs      = hw->eth.cs,
+            .rst     = hw->eth.rst,
+            .int_pin = hw->eth.int_pin,
             .addr    = hw->eth.phy_addr,
             .type    = nc_cfg_phy_name(hw->eth.phy_type),
             .from_cfg = true,
@@ -3558,9 +3611,11 @@ static eth_cfg_t eth_cfg_resolve(void)
              ETH_MDC_GPIO_DEFAULT, ETH_MDIO_GPIO_DEFAULT, ETH_REFCLK_GPIO_DEFAULT);
     return (eth_cfg_t){
         .enable  = true,
+        .driver  = NC_ETH_DRIVER_RMII,
         .mdc     = ETH_MDC_GPIO_DEFAULT,
         .mdio    = ETH_MDIO_GPIO_DEFAULT,
         .ref_clk = ETH_REFCLK_GPIO_DEFAULT,
+        .spi_idx = -1, .cs = -1, .rst = -1, .int_pin = -1,
         .addr    = ETH_PHY_ADDR_DEFAULT,
         .type    = "IP101",
         .from_cfg = false,
@@ -3720,6 +3775,18 @@ static esp_err_t net_eth_start(void)
         ESP_LOGW(TAG, "ETH 未啟用（hardware.json 的 ETH.enable=0）→ 唔建立 netif、唔宣告 TCP");
         return ESP_ERR_NOT_SUPPORTED;
     }
+    if (eth.driver == NC_ETH_DRIVER_SPI) {
+        // 兩種模式：RMII（現行）與 SPI（W5500 類）。SPI driver 未實作，
+        // 但 config 已經可以寫 driver:"spi"；這裡要明確報，不可以靜靜當 RMII。
+        ESP_LOGE(TAG, "ETH driver=SPI：SPI PHY 未實作（spi_list[%d] cs=%d rst=%d int=%d）→ 唔啟動；"
+                 "SPI 線由 hardware.json 的 SPI.list 註冊，ETH 只 claim index",
+                 eth.spi_idx, eth.cs, eth.rst, eth.int_pin);
+        return ESP_ERR_NOT_SUPPORTED;
+    }
+    if (eth.addr < 0) {
+        ESP_LOGE(TAG, "ETH RMII phy_addr 未設定（%d）→ 唔啟動", eth.addr);
+        return ESP_ERR_INVALID_ARG;
+    }
     if (eth.mdc < 0 || eth.mdio < 0 || eth.ref_clk < 0) {
         // enable=1 但腳位留 -1：這是最常見的「填一半」。講清楚缺哪一條，唔好交給 driver 靜靜失敗。
         ESP_LOGE(TAG, "ETH 腳位不完整（mdc=%d mdio=%d refclk=%d）→ 唔啟動",
@@ -3766,14 +3833,9 @@ static esp_err_t net_eth_start(void)
              eth.type, (unsigned)eth.addr, eth.mdc, eth.mdio, eth.ref_clk,
              eth.from_cfg ? "hardware.json" : "內建");
 
-    // 測試用：固定 IP（DHCP 拿不到時也能量吞吐）
-    esp_netif_dhcpc_stop(netif);
-    esp_netif_ip_info_t ip = {0};
-    ip.ip.addr = esp_ip4addr_aton("10.10.1.50");
-    ip.netmask.addr = esp_ip4addr_aton("255.255.0.0");
-    ip.gw.addr = esp_ip4addr_aton("10.10.1.1");
-    ESP_RETURN_ON_ERROR(esp_netif_set_ip_info(netif, &ip), TAG, "static ip");
-    ESP_LOGW(TAG, "ETH 靜態 IP: 10.10.1.50/16");
+    // IP：預設 DHCP（esp_netif 的 DHCP client 已經在 netif 建立時啟動）。
+    // 唔再在這裡寫死 10.10.1.50；static 要等 network.json 的 lan.ip 接上 typed parser。
+    ESP_LOGW(TAG, "ETH IP: DHCP（預設；network.json 的 static 未實作）");
     {   // 印 link 速度，確認是 100M 還是 10M
         eth_speed_t speed = ETH_SPEED_100M;
         eth_duplex_t duplex = ETH_DUPLEX_FULL;
@@ -3949,7 +4011,31 @@ static esp_err_t ph_capability(void)
                  (unsigned)merge.routes, (unsigned)merge.tasks);
     }
 
-    // ③ USB：CDC（OTG）定 USB-Serial-JTAG；log／msc 兩個閘。讀的是已收斂的 config。
+    // ③ UART 的 line 名：由 config 的 kind=uart 查出，唔寫死 "UART"。
+    //    name 可以由 kind+index 生成（uart0），亦可以用戶覆寫；之後 router、
+    //    buffer 宣告、bus、forward 出口全部用這一個名。
+    s_uart_name = NULL;
+#if NC_HAS_ETH
+    s_tcp_name = NULL;
+#endif
+    const nc_system_cfg_t *sys = nc_cfg_system();
+    if (sys != NULL) {
+        for (uint8_t i = 0; i < sys->n_links; i++) {
+            const nc_link_cfg_t *l = &sys->links[i];
+            if (l->kind == NC_LINK_UART && s_uart_name == NULL) {
+                s_uart_name = l->name;
+            }
+#if NC_HAS_ETH
+            // NC4 的 TCP 線（:80 是 web、:8080 是 WS，兩者都不是 NC4 fallback）
+            else if (l->kind == NC_LINK_TCP && s_tcp_name == NULL &&
+                     l->port != 80 && l->port != 8080) {
+                s_tcp_name = l->name;
+            }
+#endif
+        }
+    }
+
+    // ④ USB：CDC（OTG）定 USB-Serial-JTAG；log／msc 兩個閘。讀的是已收斂的 config。
     usb_resolve();
     return ESP_OK;
 }
@@ -4415,16 +4501,17 @@ static esp_err_t ph_channels(void)
 #endif
 
         int uart_core = -1;
-        if (s_uart_rx_region != NULL && link_core("UART", &uart_core)) {
+        if (s_uart_rx_region != NULL && s_uart_name != NULL &&
+            link_core(s_uart_name, &uart_core)) {
             // 解碼核 = 實際有嘅 decoder 嗰核。bus 的 core、owner_init 的核、
             // producer 的核都由這一個數決定（唔可以同 decoder 索引分家）。
             uart_core = decoder_core(uart_core);
             // 實測：max_read 242 B、slot 峰值 1 格、slot_full 0 → 4×256 就貼身。
             // region 保留 1024（可收 ≤1011 B 的指令；要 4 KB 指令就改 config）。
             link_rx_t rx = { .region = 1024, .chunk = 256, .budget = 8, .slots = 4, .slot = 256 };
-            const int uapplied = link_rx("UART", &rx);   // config 真的寫了幾個 rx 欄位
+            const int uapplied = link_rx(s_uart_name, &rx);   // config 真的寫了幾個 rx 欄位
             const nc4_bus_cfg_t uart_bus = {
-                .name = "UART",
+                .name = s_uart_name,
                 // PUSH：driver 由 owner core 的 producer 讀，讀到就 push + kick（同核）
                 // kind=uart：driver 的 read 會阻塞，所以一定要 producer，唔可以 PULL。
                 .mode = NC4_BUS_PUSH,
@@ -4436,7 +4523,7 @@ static esp_err_t ph_channels(void)
                 .rx_region_bytes = rx.region,
                 // UART 以前是 NULL（只收不回）。接上之後：
                 //   · UART 上的指令會有回覆
-                //   · routes[].out 寫 "UART" 的轉寄有出口
+                //   · routes[].out 寫 s_uart_name 的轉寄有出口
                 // 環仍然 1 KB（零 RAM 成本）→ 4 KB 轉寄會阻塞 ~44 ms，見 tx-path-design §4。
                 .send = nc_uart_drv_send,
                 .read_chunk = rx.chunk,
@@ -4451,14 +4538,15 @@ static esp_err_t ph_channels(void)
                 // 才可以開始讀。見 nc_task_boot() 之後的說明。
                 s_uart_bus = uart_handle;
                 nc4_bus_set_cfg_src(uart_handle, uapplied);   // STATUS 的 cfg_src
-                const esp_err_t lerr = nc4_link_register("UART",
+                const esp_err_t lerr = nc4_link_register(s_uart_name,
                                                      nc_uart_link_adapter, NULL);
-                ESP_LOGI(TAG, "link UART 出口：%s（TX 環 %d B）",
+                ESP_LOGI(TAG, "link %s 出口：%s（TX 環 %d B）", s_uart_name,
                          esp_err_to_name(lerr), UART_TEST_TX_BUF);
             }
             ESP_LOGI(TAG, "UART bus: %s", esp_err_to_name(uerr));
         } else {
-            ESP_LOGW(TAG, "UART：未啟用（links[].enable=0）或冇緩衝 → 唔建立");
+            ESP_LOGW(TAG, "%s：未啟用（links[].enable=0）或冇緩衝 → 唔建立",
+                     (s_uart_name != NULL) ? s_uart_name : "(no uart)");
         }
 
 #if CONFIG_SOC_USB_SERIAL_JTAG_SUPPORTED
@@ -4491,9 +4579,10 @@ static esp_err_t ph_channels(void)
             }
             ESP_LOGI(TAG, "%s bus: %s（parser %u B、chunk %u）", b->usb_link,
                      esp_err_to_name(jerr), (unsigned)s_nc4_rx_bytes, (unsigned)rx.chunk);
-        } else {
-            ESP_LOGW(TAG, "%s：未啟用或冇 parser 緩衝 → 唔建立",
-                     (b->usb_link != NULL) ? b->usb_link : "usb_jtag");
+        } else if (b->usb_mode == NC_USB_JTAG) {
+            // 只有 USJ 走這條；OTG 已在上面建立，唔好再 warning 誤導。
+            ESP_LOGW(TAG, "%s：USJ 未啟用或冇 parser 緩衝 → 唔建立",
+                     (b->usb_link != NULL) ? b->usb_link : "usb");
         }
 #endif
 
@@ -4501,12 +4590,12 @@ static esp_err_t ph_channels(void)
         // TCP 傳輸只在 P4（乙太網）且「ETH 真的起來」時建立
         int tcp_core = -1;
         if (!nc_net_lines_enabled() && s_eth_ok && s_tcp_rx_region != NULL &&
-            link_core("TCP", &tcp_core)) {
+            s_tcp_name != NULL && link_core(s_tcp_name, &tcp_core)) {
             tcp_core = decoder_core(tcp_core);   // 解碼核 = 實際 decoder 嗰核
             link_rx_t rx = { .region = 16410, .chunk = 8192, .budget = 8, .slots = 8, .slot = 8205 };
-            link_rx("TCP", &rx);
+            link_rx(s_tcp_name, &rx);
             const nc4_bus_cfg_t tcp_bus = {
-                .name = "TCP",
+                .name = s_tcp_name,
                 .mode = NC4_BUS_PULL,          // pull：decode 喺 bus 所屬核直接 recv（非阻塞）
                 .core = tcp_core,
                 .read = tcp_nc4_read,          // 只在 PULL 模式使用
@@ -4525,8 +4614,8 @@ static esp_err_t ph_channels(void)
             s_tcp_nc4_bus = tcp_handle;
             if (terr == ESP_OK) {
                 s_tcp_tx_lock = xSemaphoreCreateMutex();   // 跨核轉寄的整幀獨佔
-                const esp_err_t lerr = nc4_link_register("TCP", tcp_link_write, NULL);
-                ESP_LOGI(TAG, "link TCP 出口：%s", esp_err_to_name(lerr));
+                const esp_err_t lerr = nc4_link_register(s_tcp_name, tcp_link_write, NULL);
+                ESP_LOGI(TAG, "link %s 出口：%s", s_tcp_name, esp_err_to_name(lerr));
             }
             ESP_LOGW(TAG, "NC4/TCP：PULL（decode 喺 bus 所屬核讀 socket）%s",
                      s_frame_align ? "，frame-aligned" : "");
@@ -4614,14 +4703,14 @@ void app_main(void)
         s_unknown_chip.cores = (uint8_t)NC_CORE_COUNT;
 #if CONFIG_SOC_USB_SERIAL_JTAG_SUPPORTED
         s_unknown_chip.usb_serial_jtag = true;
-        s_unknown_chip.usb_link = "usb_jtag";
+        s_unknown_chip.usb_link = "usb_jtag0";
         s_unknown_chip.usb_kind = NC_LINK_USBJTAG;
 #if NC_HAS_USB
         s_unknown_chip.usb_otg = true;
 #endif
 #elif NC_HAS_USB
         s_unknown_chip.usb_otg = true;
-        s_unknown_chip.usb_link = "CDC";
+        s_unknown_chip.usb_link = "cdc0";
         s_unknown_chip.usb_kind = NC_LINK_CDC;
 #endif
         s_chip = &s_unknown_chip;

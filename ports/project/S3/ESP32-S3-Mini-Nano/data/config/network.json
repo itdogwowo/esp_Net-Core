@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "_comment": [
+    "Network 層：只放連線參數，不決定誰來解碼。這塊白牌板冇 lan，只有 Wi-Fi（S3 原生 radio）。",
+    "wifi.enable=0：要連 AP 就把 enable 改 1，並填 ssid／ssid_pw（或 credentials[]）。",
+    "wifi 密碼日後要搬 NVS；這裡只是出廠預設（第一次開機 seed 一次）。"
+  ],
+  "hostname": "",
+  "priority": ["wifi"],
+  "wifi": {
+    "enable": 0,
+    "mode": "sta",
+    "ssid": "",
+    "ssid_pw": "",
+    "timeout_s": 60,
+    "ip": { "mode": "dhcp" },
+    "credentials": []
+  }
+}

@@ -3,13 +3,11 @@
   "version": 1,
   "name": "ESP32-P4-ETH",
   "hardware": "P4/ESP32-P4-ETH",
-  "profiles": [
-    "nc4-ws",
-    "nc4-udp"
-  ],
   "seed": [
+    "hardware",
     "system",
     "network",
     "tasks"
-  ]
+  ],
+  "default": true
 }

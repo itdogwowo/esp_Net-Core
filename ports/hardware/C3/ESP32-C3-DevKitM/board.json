@@ -9,7 +9,7 @@
   },
   "psram": null,
   "cpu_mhz": 160,
-  "console": "uart",
+  "console": "uart0",
   "profiles": [],
   "features": {
     "eth": null,

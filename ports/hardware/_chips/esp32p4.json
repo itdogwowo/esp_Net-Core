@@ -5,7 +5,7 @@
     "otg_hs": true,
     "serial_jtag": true,
     "shared_phy": false,
-    "link": "usb_jtag",
+    "link": "usb_jtag0",
     "kind": "usb_jtag",
     "rx_region": 4128
   },

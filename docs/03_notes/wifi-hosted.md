@@ -34,10 +34,13 @@ nc_wifi.c ── esp_wifi.h ──► esp_wifi（remote shim）──► esp_hos
 `firmware/` 的程式碼不動。
 
 ```jsonc
-// ports/hardware/P4/ESP32-P4-C6/board.json
+// ports/hardware/P4/ESP32-P4-FireBeetle2/board.json（舊名 ESP32-P4-C6，alias 保留）
 "profiles": ["eth-rmii", "wifi-hosted-c6"],
-"features": { "eth": "rmii-ip101", "wifi": "hosted-c6" }
+"features": { "eth": "emac-only", "wifi": "hosted-c6" }
 ```
+
+> `eth-rmii` 只是保留 P4 EMAC 的編譯能力；FireBeetle 2（DFR1172）本身冇乙太網 PHY，
+> runtime 由 `wiring.json` 的 `ETH.enable=0` 關閉。
 
 ---
 
@@ -47,8 +50,8 @@ nc_wifi.c ── esp_wifi.h ──► esp_wifi（remote shim）──► esp_hos
 （本專案目前拉到 `esp_hosted 3.1.0`、`esp_wifi_remote 1.6.5`）。
 版本差太遠時，開機 log 會停在 `esp_hosted` 的握手階段而不是 crash —— 先看 log 再懷疑硬件。
 
-> 這塊 P4-C6 之前跑 MicroPython 的 `C6_WIFI` variant 時就已經有 slave firmware；
-> Net-Core 只是換掉 host 那一邊。
+> 這塊 ESP32-P4-FireBeetle2（舊名 P4-C6）之前跑 MicroPython 的 `C6_WIFI` variant
+> 時就已經有 slave firmware；Net-Core 只是換掉 host 那一邊。
 
 ---
 
@@ -61,7 +64,7 @@ nc_wifi.c ── esp_wifi.h ──► esp_wifi（remote shim）──► esp_hos
 | `firmware/main/CMakeLists.txt` | P4 + hosted 時 `PRIV_REQUIRES` 加 `esp_wifi esp_wifi_remote` |
 | `firmware/components/action/test_action/CMakeLists.txt` | `esp_event`／`esp_netif` 由「只在 S3 加」改成「有 `CONFIG_NETCORE_WIFI` 就加」——**這是原本就存在的隱性 transitive 依賴**，P4 一開 Wi-Fi 就爆 |
 | `ports/_profiles/wifi-hosted-c6.defaults`／`-c5.defaults` | 能力碎片（來源：MicroPython `sdkconfig.p4_wifi_common`，去掉 BLE） |
-| `ports/hardware/P4/ESP32-P4-C6/` | 新板：16 MB flash、32 MB HEX PSRAM、P4 rev1.0、C6 作 Wi-Fi |
+| `ports/hardware/P4/ESP32-P4-FireBeetle2/` | 新板（DFRobot FireBeetle 2 ESP32-P4 / DFR1172）：16 MB flash、32 MB HEX PSRAM、P4 rev1.0、C6 作 Wi-Fi；板子冇乙太網 PHY |
 
 ### 為什麼要 `CONFIG_SLAVE_*`
 

@@ -131,12 +131,16 @@ WS / UDP 是訊息導向，沒有 `region` / `chunk`；`max_msg` 就是一次收
 | `out` | 行為 | 舊寫法 |
 |---|---|---|
 | `["decode0"]` | 只本地執行 | `out: ["self"]` |
-| `["UART"]` | 只轉發 | `out: ["uart0"]` |
-| `["decode0", "UART"]` | 執行 ＋ 轉發 | `out: ["self", "uart0"]` |
+| `["uart0"]` | 只轉發 | `out: ["uart0"]` |
+| `["decode0", "uart0"]` | 執行 ＋ 轉發 | `out: ["self", "uart0"]` |
 | `[]` | 丟棄（明確不要） | `out: []` |
 
 `out` 只接受兩種名字：`links[]` 的通道，或 `decodeN`（N = 核心編號）。
 `fxN` **不能**放進 `out`——它不吃幀，按自己的 fps 跑。
+
+**不存在的 link 名 = 直接忽略該格**，不是報錯：`router_from_cfg()` 會跳過它，
+其餘的 `out`（例如同行的 `decode0`）照常生效。一個打錯的名字不會令整張表被拒收、
+更不會令開機停。`in` 指向不存在／未啟用的 link 時，整行跳過。
 
 ### 2.0 一條線的「解」與「包」在同一核
 
@@ -316,7 +320,8 @@ system.json:  { "in": "CDC", "out": ["decode0", "UART"] }
 - **為什麼不能「稍後再送」**：幀的 bytes 住在 parser 環／PUSH 插槽，handler 一返回就會被
   下一幀覆寫。所以失敗只能丟，並在 `net.links[].drops` 計數（不是靜默消失）。
 - **會濾走什麼**：`decodeN`（那是本地執行）、自己（自我反射）、重複目的地。
-  查不到 link（未建立／名字打錯）→ 開機的 link 稽核會 `ESP_LOGE`，執行期每幀計 drop。
+  查不到 link（未建立／名字打錯）→ 開機的 link 稽核只會 warning／忽略，
+  執行期每幀計 drop（不再當成 boot error）。
 - **要先送還是先本地執行**：先送。這樣慢的本地 handler（例如 OTA）不會延遲轉寄。
 - **背壓**：由目的通道自己決定（CDC FIFO 滿 → 等 ≤100 ms 再丟；UART → 等到 ring 排空；
   TCP → 等到對端 ACK）。link 層唔另外加 queue。

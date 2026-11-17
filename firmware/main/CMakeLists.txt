@@ -13,7 +13,7 @@
 # 一個層一個檔：system / network / tasks（存在才嵌）；缺的層由 firmware 的預設補。
 
 # IDF 的 component_get_requirements 會在另一個 CMake context 重新 include 這份檔，
-# 那時 top-level CMakeLists 的普通變數（PORT_DIR／PROJECT_DIR）不會繼承；
+# 那時 top-level CMakeLists 的普通變數（PORT_DIR／NC_PROJECT_DIR）唔一定繼承；
 # -DPORT/-DPROJECT 的 cache 變數也不一定見得到。唯一可靠的是環境變數 NC_PORT／NC_PROJECT。
 if(NOT PORT)
     set(PORT "$ENV{NC_PORT}")
@@ -24,12 +24,14 @@ endif()
 if(NOT PORT_DIR)
     set(PORT_DIR "${CMAKE_CURRENT_LIST_DIR}/../../ports/hardware/${PORT}")
 endif()
-if(NOT PROJECT_DIR AND PROJECT)
-    set(PROJECT_DIR "${CMAKE_CURRENT_LIST_DIR}/../../ports/project/${PROJECT}")
+# 同 top-level 一樣：用 NC_PROJECT_DIR，唔好用 PROJECT_DIR（CMake project() 會蓋）。
+if(NOT NC_PROJECT_DIR AND PROJECT)
+    set(NC_PROJECT_DIR "${CMAKE_CURRENT_LIST_DIR}/../../ports/project/${PROJECT}")
 endif()
 if(NOT EXISTS "${PORT_DIR}/board.json")
     message(FATAL_ERROR "hardware port not found or incomplete: ${PORT_DIR} (PORT=${PORT})")
 endif()
+
 
 # ── 硬體層 → firmware 預設（build-time codegen）──
 # 輸出的 nc_port.c 直接是 nc_hardware_cfg_t 的 static const：
@@ -43,6 +45,14 @@ set(_gen_h   "${_gen_dir}/nc_port.h")
 set(_gen_hw  "${_gen_dir}/preset_hardware.json")
 set(_gen_dep "${PORT_DIR}/board.json" "${PORT_DIR}/wiring.json"
              "${CMAKE_CURRENT_LIST_DIR}/../../tools/ncportgen.py")
+# 晶片能力表（cores／USB link）也是 ncportgen 的輸入；漏了它，改 _chips/*.json
+# 不會觸發 regen，生成的 nc_port.c 會與 _chips 講的唔同（曾經發生）。
+# CONFIGURE_DEPENDS 只可以在正常 configure 用；script mode（component_get_requirements）
+# 會 reject，所以整段要 guard。
+if(NOT CMAKE_SCRIPT_MODE_FILE)
+    file(GLOB _chip_caps CONFIGURE_DEPENDS "${CMAKE_CURRENT_LIST_DIR}/../../ports/hardware/_chips/*.json")
+    list(APPEND _gen_dep ${_chip_caps})
+endif()
 if(EXISTS "${PORT_DIR}/driver.json")
     list(APPEND _gen_dep "${PORT_DIR}/driver.json")
 endif()
@@ -66,9 +76,27 @@ if(NOT CMAKE_SCRIPT_MODE_FILE)
     add_custom_target(ncport_gen DEPENDS "${_gen_c}" "${_gen_h}" "${_gen_hw}")
 endif()
 
-set(_preset_embed "${_gen_hw}")
+# hardware.json：如果 project 層有手寫／已提交的檔案，優先用它（用戶空間看得到、改得到）；
+# 否則用 ncportgen 由 wiring.json 產生的 preset_hardware.json。
+set(_preset_hw "${_gen_hw}")
+if(NC_PROJECT_DIR AND EXISTS "${NC_PROJECT_DIR}/data/config/hardware.json")
+    set(_preset_hw "${CMAKE_CURRENT_BINARY_DIR}/preset_hardware.json")
+    # configure 階段先複製一份，EMBED_FILES 才見得到
+    execute_process(
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${NC_PROJECT_DIR}/data/config/hardware.json" "${_preset_hw}")
+    if(NOT CMAKE_SCRIPT_MODE_FILE)
+        add_custom_command(
+            OUTPUT  "${_preset_hw}"
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                    "${NC_PROJECT_DIR}/data/config/hardware.json" "${_preset_hw}"
+            DEPENDS "${NC_PROJECT_DIR}/data/config/hardware.json"
+            COMMENT "預置 hardware.json → build")
+    endif()
+endif()
+set(_preset_embed "${_preset_hw}")
 foreach(_cfg system network tasks)
-    if(PROJECT_DIR AND EXISTS "${PROJECT_DIR}/data/config/${_cfg}.json")
+    if(NC_PROJECT_DIR AND EXISTS "${NC_PROJECT_DIR}/data/config/${_cfg}.json")
         # 用 build-time 的 copy_if_different，而唔係 configure_file：
         # configure_file 只在「CMake 重跑」時複製，只改 JSON 內容唔會觸發
         # ⇒ 嵌進 firmware 的預置會係舊版（實測：改了 routes 但 seed 出嚟仍係舊值）。
@@ -77,8 +105,8 @@ foreach(_cfg system network tasks)
             add_custom_command(
                 OUTPUT  "${_preset_out}"
                 COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                        "${PROJECT_DIR}/data/config/${_cfg}.json" "${_preset_out}"
-                DEPENDS "${PROJECT_DIR}/data/config/${_cfg}.json"
+                        "${NC_PROJECT_DIR}/data/config/${_cfg}.json" "${_preset_out}"
+                DEPENDS "${NC_PROJECT_DIR}/data/config/${_cfg}.json"
                 COMMENT "預置 ${_cfg}.json → build")
         endif()
         list(APPEND _preset_embed "${_preset_out}")
@@ -88,17 +116,17 @@ if(_preset_embed)
     set(_preset_args EMBED_FILES ${_preset_embed})
 endif()
 
-if(PROJECT_DIR AND EXISTS "${PROJECT_DIR}/data/config/system.json")
+if(NC_PROJECT_DIR AND EXISTS "${NC_PROJECT_DIR}/data/config/system.json")
     set(_has_system_preset 1)
 else()
     set(_has_system_preset 0)
 endif()
-if(PROJECT_DIR AND EXISTS "${PROJECT_DIR}/data/config/network.json")
+if(NC_PROJECT_DIR AND EXISTS "${NC_PROJECT_DIR}/data/config/network.json")
     set(_has_network_preset 1)
 else()
     set(_has_network_preset 0)
 endif()
-if(PROJECT_DIR AND EXISTS "${PROJECT_DIR}/data/config/tasks.json")
+if(NC_PROJECT_DIR AND EXISTS "${NC_PROJECT_DIR}/data/config/tasks.json")
     set(_has_tasks_preset 1)
 else()
     set(_has_tasks_preset 0)
