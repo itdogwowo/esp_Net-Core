@@ -36,3 +36,6 @@ tools/hosttest/ncm_test/_tmp*
 
 # ── macOS ──
 .DS_Store
+
+# ── ncm 樣本模組的 build 產物（由 tools/ncm_samples/build.sh 生成）──
+tools/ncm_samples/out/

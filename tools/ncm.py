@@ -104,13 +104,27 @@ META_SIZE = 540
 META_TYPES = {"buf": 0, "cmd": 1, "hw": 2, "provide": 3, "module": 4}
 
 
+def trunc_utf8(s: str, n: int) -> bytes:
+    """截到最多 n bytes，而且唔會切斷 UTF-8 序列。
+
+    唔可以寫 `s[:n].encode()`：中文字一個 char 3 bytes，char 截完 encode 會
+    超標，而 meta 區塊係**固定 540 B 佈局**（偏移寫死）——超標會令
+    slice assignment 拉長個 bytearray，之後所有欄位偏移晒，firmware 讀到
+    垃圾 n_provides...（2026-11-17 實測：meta 變 561 B）。
+    """
+    b = s.encode("utf-8")[:n]
+    while b and (b[-1] & 0xC0) == 0x80:      # 收尾嘅 continuation byte 剝走
+        b = b[:-1]
+    return b
+
+
 def build_meta(path: str) -> bytes:
     """meta.json → 540 B 二進位 meta 區塊（見 nc_meta.h）。"""
     with open(path, "r", encoding="utf-8") as f:
         m = json.load(f)
-    name = str(m.get("name", ""))[:23].encode("utf-8")
-    desc = str(m.get("desc", ""))[:63].encode("utf-8")
-    usage = str(m.get("usage", ""))[:63].encode("utf-8")
+    name = trunc_utf8(str(m.get("name", "")), 23)
+    desc = trunc_utf8(str(m.get("desc", "")), 63)
+    usage = trunc_utf8(str(m.get("usage", "")), 63)
     reqs = list(m.get("requires", []))[:8]
     provs = list(m.get("provides", []))[:8]
 
@@ -118,7 +132,7 @@ def build_meta(path: str) -> bytes:
         t = META_TYPES.get(str(e.get("type", "")), 0)
         flags = 1 if e.get("exclusive") else 0
         b = int(e.get("bytes", 0)) & 0xFFFF
-        nm = str(e.get("name", ""))[:19].encode("utf-8")
+        nm = trunc_utf8(str(e.get("name", "")), 19)
         return struct.pack("<BBH", t, flags, b) + nm.ljust(20, b"\0")
 
     out = bytearray(META_SIZE)
@@ -131,6 +145,8 @@ def build_meta(path: str) -> bytes:
         out[156 + i * 24: 156 + (i + 1) * 24] = entry(e)
     for i, e in enumerate(provs):
         out[348 + i * 24: 348 + (i + 1) * 24] = entry(e)
+    if len(out) != META_SIZE:
+        die(f"內部錯誤：meta 長度 {len(out)} != {META_SIZE}（欄位偏移會錯）")
     return bytes(out)
 
 
