@@ -97,9 +97,19 @@
 | idle／timer／ipc | ~6.5 KB | FreeRTOS |
 | **合計（release）** | **~24 KB** | |
 
-`ncm.arena` 512 KB 在 **PSRAM**，不佔內部 SRAM。
+`ncm.arena` 512 KB 在 **PSRAM**，不佔內部 SRAM；`nc4.reply0/1`（2×2,615 B）也一樣
+（`NC_PLAN_CLS_BULK`）。
+
+> **2026-11-17 修正**：上面兩句之前其實**唔成立** —— `main.c` 的 `#if CONFIG_SPIRAM`
+> 寫在第一個 `#include` 之前，而 ESP-IDF 6 唔再隱含 `-include sdkconfig.h`，
+> `CONFIG_SPIRAM` 被當成 0 → `NC_PLAN_CLS_BULK` 一直等於 `INTERNAL`。回覆幀因此落在
+> 內部 RAM；test 映像的 512 KB arena 向內部 RAM 要 → plan fail、ncm 任務唔啟動。
+> 修正後（`main.c` 最前面 `#include "sdkconfig.h"`）S3 release 實測：內部 heap
+> **174,015 B**（舊映像 169,035），PSRAM 用 5,230 B 放回覆幀。見 status §7.81。
 
 **開機穩定後剩餘（實測 2026-11-08，S3、tests ON）：內部 286 KB、最大連續 208 KB；PSRAM 7.85 MB。**
+（上列是 11-08 的舊環境。2026-11-17 的 test 映像：內部 ~24 KB、PSRAM 7.85 MB —— test 建置
+把測試任務的棧／緩衝都算進內部 RAM，兩者不可直接比。）
 
 ---
 

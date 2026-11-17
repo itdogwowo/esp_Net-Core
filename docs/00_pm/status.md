@@ -2865,3 +2865,93 @@ config 真係主導下一次開機，而且可逆。
     CDC 未接上，那幾行一定收唔到（log 環已 drop）——S3 只看得到 B09 之後。要睇全表
     就睇 P4 那條 log（P4 有 UART0 console）。
 - `python tools/board.py check`：0 個錯誤（5 個「冇 driver.json」警告同之前一樣）。
+
+### 7.81 2026-11-17 晚上（S3 接回 macOS：三輪 USB NC4 OTA、`BEGIN no reply` 假故障、`NC_PLAN_CLS_BULK` 一直是 INTERNAL）
+
+承接 handoff 2026-11-17 的三個待辦。S3 Mini-Nano（原生 USB）接回 macOS，
+用 [tools/ota.py](../../tools/ota.py) 直接 OTA（唔使 download mode、唔使按鍵）。
+
+**① test 映像 OTA 的 `BEGIN no reply`：主機等得不夠久，唔係狀態機壞**
+
+- 重現：release（app `8cbaf00f`）跑住，推 test 映像 1,224,272 B → caps 正常、BEGIN
+  等滿 5.0 s → `no reply`。
+- 但 BEGIN 其實已開始：之後 `0x221A STATE` 回 **`writing=1`、target `ota_1`**，
+  `0x2218 PROGRESS` 回 `image_size=1,225,296`、`written=0`。係 ACK 遲到，唔係冇做。
+- 真兇：韌體 `on_begin` 的 `esp_ota_begin()` 會**先抹整個目標分區**才回 ACK；
+  1.2 MB 映像實測 **5.17 s**（≈237 KB/s、4 KB sector 逐個抹）。工具舊版硬編
+  `timeout=5.0 s` —— release 映像 1,137,872 B 剛好 4.5–4.8 s「踩線過關」，test 映像
+  只大 7.6% 就跌出窗口，所以症狀睇落好似「只有 test 映像 OTA 壞」。
+- 修法：`tools/ota.py` / `tools/ota_tcp.py` 的 BEGIN 等待改由映像大小估
+  （`10 s + size/100 KB`；1.2 MB → 22 s）；開始前先查 STATE（見到上次留下的
+  `writing` 就叫用家 `--abort`）；新增 `--abort` 單獨清 session；ACK 遲到但 STATE
+  已在 `writing`／`verified` → 當作已開始繼續。
+- 實測（同一塊板、同一條 USB，三次全部 END ok、APPLY 後自動重啟）：
+
+| # | 方向 | 大小 | BEGIN | WRITE | 之後 app hash |
+|---|---|---|---|---|---|
+| 1 | release → test | 1,224,272 B | **5.1 s** | 6.1 s（194.5 KB/s） | `b3bcfdd7` |
+| 2 | test → test（修正版） | 1,224,432 B | 4.8 s | 5.6 s（213.4 KB/s） | `6abf3963` |
+| 3 | test → release | 1,138,032 B | 4.5 s | 5.3 s（209.7 KB/s） | `5cfc874e` |
+
+**② 更大的發現：`NC_PLAN_CLS_BULK` 由 IDF 6 起一直是 INTERNAL**
+
+- 現象：test 映像 `status mem` → `plan.ok=false`、`ncm/ncm.arena`（524,288 B）`ok:false`；
+  `status tasks` → `ncm started=0`；`status ncm` → `arena=0`。即 handoff 說
+  「用 test image 驗 ncm 任務」在板上**由頭到尾冇起過**。
+- 追查：用真的 compile command 預處理（`-E -dM`）見到
+  `#define NC_PLAN_CLS_BULK NC_PLAN_INTERNAL`。原因：`main.c` 第 44 行
+  `#if CONFIG_SPIRAM` 在**第一個 `#include` 之前**，而 ESP-IDF 6 唔再隱含
+  `-include sdkconfig.h`（v5 時代嘅行為）→ `CONFIG_SPIRAM` 當 0 → BULK 永遠 INTERNAL。
+- 後果：S3（8 MB PSRAM）所有 BULK 宣告（2×2,615 B 回覆幀）落內部 RAM；
+  **512 KB ncm arena 向內部 RAM 要 → 必然失敗** → ncm 任務唔啟動。編譯零 warning，
+  只有 `status mem` 的 plan 帳睇得到。
+- 修法：`main.c` 最前面 `#include "sdkconfig.h"`（附註解講清楚原因）；順手令 plan 帳
+  可診斷：`status mem.plan` 新增 `avail{dma,int,psram}`、`carve`（bitmask）、每項 `cls`。
+- 修正後（同一塊板、test 映像）：
+
+| 指標 | 修正前 | 修正後 |
+|---|---|---|
+| plan | `ok=false, fail=1` | `ok=true, fail=0` |
+| `avail` | （冇印） | dma 38,912／int 38,912／psram 8,257,536 |
+| `bytes` | int 10,894／psram 0 | int 5,664／psram 529,518 |
+| `nc4.reply0/1` | INTERNAL | **psram** |
+| `ncm.arena` | fail | ok（524,288 B） |
+| `ncm` 任務 | started=0、arena=0 | **started=1、arena=524,288、loop 跑（frames 2,469）** |
+| release 內部 heap | 169,035（舊 WSL 映像） | **174,015**（回覆幀搬去 PSRAM，+4,980） |
+
+**③ `resources.json` seed（handoff 的「待下一次 OTA 驗證」）：兩次 OTA 後都係 miss=0**
+
+- 舊 release（`8cbaf00f`）：`cfg.res.miss=1`。
+- 第一次 OTA（test，含 `k_min_resources`）開機後：`miss=0`，
+  `/Volumes/NC-2F2C/config/resources.json` = `{"version":1,"resources":[]}`（38 B）。
+- 之後兩次 OTA（test→test、test→release）都保留（seed 只補缺檔）：release 亦
+  `res.miss=0`、`def/inv/unk` 全 0。
+- `ncm` key：release = `{}`（ncm 只在 `NC_ENABLE_TESTS` 建置）；test = 完整
+  `{arena,used,live,frames,backend,period_ms,task_core,modules}`。與 handoff 預期一致。
+- 補：`resources.json` 的 **project preset 現在真的會嵌入 firmware**（`main/CMakeLists`
+  的 `foreach(_cfg system network tasks resources)` ＋ main.c 的
+  `#if NETCORE_HAS_PRESET_RESOURCES`；之前 ports/project 下的 resources.json 是死檔）。
+  刪掉板上的 resources.json 再開機，實測 seed 出 **519 B** 的 project preset
+  （帶 `_comment` 說明；之前只有 38 B 骨架）。`make.py check` 亦把 resources.json
+  加入已知層清單（13 → **5** 個警告，餘下 5 個是本來就有的「冇 driver.json」）。
+
+**④ 主機測試（macOS）：12 支全過**
+
+- `tools/hosttest/run_all.sh`：**12/12 OK**（之前 macOS 有 2 支失敗）。
+- `mod_test`：`tools/hosttest/mod_test/include/dirent.h` 是 MSVC shim，但非 Windows
+  一樣被 `-I` 搶先找到而內容係空 → `DIR` undeclared。加 `#include_next <dirent.h>`
+  交返系統 header。
+- `cfgstruct_test`：① macOS 的 ld64 對未定義 weak function 仍然報 undefined symbol
+  → `stubs.c` 補 `nc_port_hw_defaults()`（回 NULL，語義＝冇 build-time 生成檔）；
+  ② **補 resources 層測試**（handoff §5）：缺檔／正常 5 條／未知 type／名太長／
+  冇 provider／負 bytes／version 不符／非陣列／空陣列／超 16 條／未知鍵，外加真的
+  project preset `resources.json`；178/178 通過。
+- 其餘 10 支（cfg、ncd、task、router、link、hub、plan、buf、portgen、ncm）本來就過。
+
+**⑤ 未做**
+
+- `fps` 由效果移除、新增 `pixel` 消費者 task（handoff 第 3 項）——未開始。
+- `resources.json` 的 `provider` 對 `nc_task_started()` 的檢查已存在（`nc_res_merge`），
+  但 `pixel` 未出現前表保持空；現時板上正是空表（符合 handoff 第 4 項的先後次序）。
+- 本輪只驗到「ncm 任務起得返、arena 拿得到」；`.nct` / `.nce` 真正掃描→declare→attach
+  仍未有樣本檔上板，留待 pixel／effect 模組可用後一併驗。

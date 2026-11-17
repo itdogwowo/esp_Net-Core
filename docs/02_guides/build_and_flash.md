@@ -237,7 +237,15 @@ tools/flash.sh --erase      # 全清
 
 ```bash
 tools/ota.py --port /dev/cu.usbmodem* artifacts/ESP32-P4-ETH.bin
+tools/ota.py --port /dev/cu.usbmodem* --abort      # 清掉中斷／超時留下的 OTA session
 ```
+
+> **BEGIN 等幾秒是正常的**：韌體的 `OTA_BEGIN` 會先把目標分區整段抹掉才回 ACK
+> （S3 實測 ≈237 KB/s → 1.2 MB ≈5.2 s）。工具會照映像大小等（`10 s + size/100 KB`），
+> 唔會再硬編 5 s。
+> 如果上一次 OTA 中斷，裝置會停在 `state=writing`；先 `--abort`，否則下一次 BEGIN
+> 會被拒（`err_begin_partition_conflict`）。詳見
+> [protocol commands §2 OTA 時間語義](../01_protocol/commands.md)。
 
 ---
 

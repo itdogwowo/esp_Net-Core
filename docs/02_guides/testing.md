@@ -196,6 +196,10 @@ driver 的 RX ring 直接溢出。
 2048 → 4096 還是有 1.34 倍，再大要動 `NC4_MAX_PAYLOAD`（8192）這個協議常數，收益有限；
 真正的下一步是**視窗式 ACK**（送 4 塊收 1 個 ACK），把每塊的往返延遲攤掉。
 
+> 上表只量 **WRITE**；`BEGIN` 另有一段同步 erase（≈237 KB/s：327 KB ≈1.4 s、
+> 1.2 MB ≈5.2 s），所以新版 `tools/ota.py` 的 BEGIN timeout 是按映像大小估的
+> （2026-11-17 修正；之前硬編 5 s 會令 1.2 MB 映像假性 `no reply`）。
+
 ### 三種 flash 操作的實測（`0x1801` mode 2/3/4）
 
 > ⚠️ **量測入口已移除**（2026-11-04）。`DEV_BENCH` 的 erase／write 模式（最後是 `0xF001` mode 2/3/4）

@@ -244,6 +244,22 @@ components/action/
 
 ---
 
+### OTA 的時間語義（2026-11-17 實測）
+
+- **`0x2201 OTA_BEGIN` 的 ACK 是同步 erase 之後才發**：韌體先 `esp_ota_begin()`，
+  它會抹 `ALIGN_UP(image_size, 4 KB)`。S3 實測 **≈237 KB/s**：
+  1.2 MB 映像 → **~5.2 s**；327 KB → ~1.4 s。主機的 BEGIN timeout 要按映像大小估
+  （`tools/ota.py`：`10 s + size/100 KB`），唔可以硬編 5 s —— 硬編 5 s 會令「大少少」
+  的映像回 `no reply`（2026-11-17 就是這樣卡了 test 映像；見 status §7.81）。
+- **超時 ≠ 失敗**：ACK 遲到時，隨後用 `0x221A STATE` 會見到 `writing=1`，
+  `0x2218 PROGRESS` 的 `image_size` 已入帳、`written=0`；可以當作已開始繼續寫。
+- **中斷／超時留下的 session**（`state=writing`）要先送 `0x2205 OTA_ABORT` 清掉
+  （`tools/ota.py --abort`），否則下一次 BEGIN 回 `err_begin_partition_conflict`。
+- **`0x2203 OTA_END` 亦會驗整份 image**（`esp_ota_end`）：1.2 MB 約 1–2 s，
+  主機 timeout 用 15–30 s。
+
+---
+
 ## 3. 「不得不加」的指令（目前只有一個）
 
 | 需求 | 為什麼沒有替代 | 建議落點 |
