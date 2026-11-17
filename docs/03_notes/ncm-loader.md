@@ -436,7 +436,7 @@ nc_task_register(&(nc_task_loop_t){
 | `STATUS_GET "ncm"` | ✅ 見下 |
 | 兩種 payload 格式（wasm / aot） | ✅ 錯架構的 AOT 在載入前被擋 |
 | host 測試（不需要板子） | ✅ `tools/hosttest/mod_test/run.sh`，14 組 case / 56 斷言 |
-| **WAMR 執行引擎** | ⬜ 未接（見 §10.8） |
+| **WAMR 執行引擎** | ✅ 2026-11-17 接通（interp；任務 ABI v1 見 [ncm-contract.md](ncm-contract.md) §5.2）。上游對 IDF 6 的補丁由 `tools/patch_wamr.py` 自動套，見 §10.8 與 status §7.82 |
 
 板上實測（S3，`/data/pixel/effects/fire26.nce`，payload 367 B）：
 
@@ -447,7 +447,26 @@ nc_task_register(&(nc_task_loop_t){
 
 `ok:0` 是刻意的：**沒有執行引擎時「載入成功但不能跑」**，不要假裝能跑。
 
-### 10.8 WAMR 相容性（實測：目前編不過）
+### 10.8 WAMR 相容性（2026-11-17：已補丁、可以跑）
+
+> **更新**：下面 2026-11-02 的「編不過」已經解決。做法係**唔 vendor 上游**，
+> 而係由 `tools/patch_wamr.py` 喺每次 configure 後自動補四個位（`managed_components/`
+> 唔入 git；腳本 idempotent）。補完之後 S3 全部有 PSRAM／冇 PSRAM 的板都建置到，
+> 任務模組亦真係跑到（status §7.82）。四個補丁：
+>
+> | # | 檔案 | 補什麼 |
+> |---|---|---|
+> | ① | `espidf_file.c` | `#include <sys/stat.h>`、`S_IS*` 巨集、`renameat` 宣告 |
+> | ② | `espidf_platform.c` | `#include <sys/stat.h>`（fstatat shim 參數） |
+> | ③ | `espidf_thread.c` | `os_self_thread()` 改用 `xTaskGetCurrentTaskHandle()`（IDF 的 `pthread_self()` 對非 pthread task 會 assert） |
+> | ④ | `espidf_memmap.c` | 冇 PSRAM 的 S3 板：`MALLOC_CAP_EXEC` 唔存在 → include＋fallback |
+>
+> 上手須知：WAMR 會 **qsort 你俾佢的 `NativeSymbol` 陣列**，所以唔可以放 flash
+> rodata（要 mutable，否則 S3 即場 cache error）；`wasm_runtime_call_wasm()`
+> 每個 call 都會問 thread identity／stack boundary —— 用 ③ 之後，一般 FreeRTOS
+> task 都可以安全呼叫。
+
+### 10.8.1 原始記錄（2026-11-02，保留作歷史）
 
 在 `/tmp` 的乾淨副本加了 `espressif/wasm-micro-runtime ^2.4.0`，用同一份 sdkconfig 建 S3：
 

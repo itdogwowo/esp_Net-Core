@@ -158,7 +158,7 @@ NCM 引擎 init(arena, bytes) → 切成 slot（NC_MOD_MAX_MODULES = 8）
 |---|---|---|
 | 1 | 容器 / 驗證 / arena / attach / tick / 預算 / strike | ✅ |
 | 2 | 一次一個 active 模組 | 🟡 規則，可改成 N 個 |
-| 3 | 執行引擎（WAMR） | ❌ backend 目前只有 stub，模組「登記得到、跑不到」 |
+| 3 | 執行引擎（WAMR） | ✅ 2026-11-17 接通：interp 模式、`ncm.wamr` backend（status 可見 `backend:"wamr"`）；任務模組 ABI v1（`task_init`／`task_tick`＋6 個 host import，見 [ncm-contract.md](ncm-contract.md) §5.2）。上游 2.4.0 對 IDF 6 的補丁由 `tools/patch_wamr.py` 自動套（見 status §7.82） |
 | 4 | `px` / `fps` 假設模組是週期性輸出 | 🟡 通用化要讓它們變成可選 |
 | 5 | 模組的核由引擎所屬任務決定 | 🟡 要支援多核就得為每核建一個引擎實例 |
 | 6 | 符號前綴仍是 `nc_mod_*` | 🟡 文件叫 NCM 引擎，程式改名是機械工作 |
@@ -173,9 +173,9 @@ NCM 引擎 init(arena, bytes) → 切成 slot（NC_MOD_MAX_MODULES = 8）
 | 階段 | 做什麼 | 驗收方式 |
 |---|---|---|
 | **P1 後端介面固定** | 把 `nc_mod_backend_t {init, render, deinit}` 定義成公開合約（見 [ncm-contract.md](ncm-contract.md)），stub 照合約實作 | host test：載入 → tick → 卸載，stub 的 `render` 被呼叫 N 次 |
-| **P2 接 WAMR** | 把 WAMR 的 `wasm_runtime_instantiate` / `_lookup_function` / `_call` 包進 backend；arena 當 WAMR 的 heap | 一個最簡單的 `.wasm` 能跑 `render()` 並回 0 |
+| **P2 接 WAMR** | ✅ 已完成（2026-11-17）：backend 包好 instantiate／lookup／call；arena 照舊存 payload，WAMR 自己用 custom allocator（大塊 PSRAM／細塊 internal） | `tools/ncm_samples/hello_task` 上板 1 Hz 印 `tick pin21 read=… toggle=…`（status §7.82） |
 | **P3 AOT / XIP** | `fmt == aot` 走 `wasm_runtime_load` 的 AOT 路徑。**注意 S3 是 Xtensa、P4 是 RISC-V**，AOT 映像不可共用 → 靠 `.nct` / `.nce` header 已有的 `target` 欄位分流（`verify_header()` 現在就擋錯 target） | 同一支模組，S3 的 AOT 版與 wasm 版行為一致；P4 拿到 Xtensa 的 AOT 會被拒 |
-| **P4 呼叫固件 API** | 模組要能叫 `nc_hub` / plan 之類；用 WAMR 的 native symbol 註冊，**白名單制**，不是全部開放 | 模組能發一幀 NC4 出去，且只能叫白名單內的函式 |
+| **P4 呼叫固件 API** | 🟡 第一批白名單已開：`nc_print`／`nc_print_i32`／`nc_print2`／`nc_gpio_read`／`nc_gpio_write`／`nc_gpio_toggle`（GPIO 只准安全腳位）。仲未開 NC4 發送、plan、檔案 | hello_task 已用列印＋GPIO 驗證；下一批能力按需要再加 |
 | **P5 多核** | 每個核一個引擎實例（§7 第 5 條）；先確認 P1 的狀態都收在實例裡、沒有 static | 兩核各跑一個模組，互不干擾 |
 
 > 為什麼要分成五步：P1 之前，「接 WAMR」等於同時改介面＋改引擎＋改記憶體，

@@ -2866,7 +2866,7 @@ config 真係主導下一次開機，而且可逆。
     就睇 P4 那條 log（P4 有 UART0 console）。
 - `python tools/board.py check`：0 個錯誤（5 個「冇 driver.json」警告同之前一樣）。
 
-### 7.81 2026-11-17 晚上（S3 接回 macOS：三輪 USB NC4 OTA、`BEGIN no reply` 假故障、`NC_PLAN_CLS_BULK` 一直是 INTERNAL）
+### 7.81 2026-11-17 晚上（S3 接回 macOS：多輪 USB NC4 OTA、`BEGIN no reply` 假故障、`NC_PLAN_CLS_BULK` 一直是 INTERNAL）
 
 承接 handoff 2026-11-17 的三個待辦。S3 Mini-Nano（原生 USB）接回 macOS，
 用 [tools/ota.py](../../tools/ota.py) 直接 OTA（唔使 download mode、唔使按鍵）。
@@ -2955,3 +2955,114 @@ config 真係主導下一次開機，而且可逆。
   但 `pixel` 未出現前表保持空；現時板上正是空表（符合 handoff 第 4 項的先後次序）。
 - 本輪只驗到「ncm 任務起得返、arena 拿得到」；`.nct` / `.nce` 真正掃描→declare→attach
   仍未有樣本檔上板，留待 pixel／effect 模組可用後一併驗。
+
+### 7.82 2026-11-17 深夜（外部任務真的跑起來：WAMR 引擎、任務模組 ABI v1、列印＋GPIO 驗證）
+
+承接 §7.81 的下一步：**唔測效果，先測「任務管理器能唔能夠支援外部任務」**。
+目標係一個由 `/data/tasks/*.nct` 載入、經執行引擎跑、可以印字同讀／反轉 GPIO 的
+外部任務，並且用「驗證列印」收貨。
+
+**① 接了什麼**
+
+| 層 | 位置 | 內容 |
+|---|---|---|
+| 引擎 | `test_mod_tasks/nc_mod_engine.c` | WAMR（interp）backend：init／load／render／unload／deinit；大 allocation 去 PSRAM、細塊留 internal（custom allocator, 16-byte 對齊） |
+| 介面 | `nc_mod.h` | `nc_mod_backend_t` 加可選 `load`／`unload` hook；loader 喺 payload 驗證（header／manifest／CRC）之後才叫引擎實例化 |
+| ABI | `nc_mod_abi.h` | **任務模組 v1**：export `task_tick`（必需）／`task_init`（可選）；import 白名單 6 個：`nc_print`、`nc_print_i32`、`nc_print2`、`nc_gpio_read`、`nc_gpio_write`、`nc_gpio_toggle` |
+| 安全 | 同上 | GPIO 只准安全腳位：0／3／45／46（strap）、7／8（本板 UART）、19／20（USB）、26–37（SPI flash／octal PSRAM）、43／44（UART0）一律拒絕；其餘 0–48 開放 |
+| 排程 | `main.c` | engine init + `nc_mod_load_all()` 喺一次性 8 KB `ncm.boot` task 做（main task 只有 3 KB 棧，WAMR 會 stack overflow）；ncm loop 棧 4 KB → 8 KB |
+| 目錄 | `main.c` seed | 加 `/data/tasks/`（同 `/data/pixel/effects/` 一樣係模組註冊表） |
+
+`idf_component.yml` 加 `espressif/wasm-micro-runtime ^2.4.0`（rule: `target == esp32s3`）。
+WAMR 2.4.0 對 IDF 6／picolibc 有 3 個位編唔過／跑唔起，補丁放
+`tools/patch_wamr.py`，由 `firmware/CMakeLists.txt` 喺 `project()` 之後自動套
+（`managed_components/` 唔入 git；腳本 idempotent，所以上游每次重新抓都補得返）：
+
+| 補丁 | 原因 |
+|---|---|
+| `espidf_file.c`：`#include <sys/stat.h>`＋補 `S_IS*` 巨集＋宣告 `renameat` | IDF 6 標頭收緊、picolibc 冇呢啲；platform 係 glob 收檔，關 WASI 都照編 |
+| `espidf_platform.c`：`#include <sys/stat.h>` | `fstatat()` shim 的參數用 `struct stat` |
+| `espidf_thread.c`：`os_self_thread()` 改 `xTaskGetCurrentTaskHandle()` | IDF 的 `pthread_self()` 只認 `pthread_create()` 開的 thread，我哋由 FreeRTOS task 呼叫 → 直接 assert |
+| `espidf_memmap.c`：`#include "esp_heap_caps.h"`＋`MALLOC_CAP_EXEC` fallback | 冇 PSRAM 的 S3 板（Matrix／SuperMini）行唔到 dual-bus 分支，而 IDF 6 個 macro 要 `CONFIG_HEAP_HAS_EXEC_HEAP` 才有 → 編唔過 |
+
+**② 樣本模組（`tools/ncm_samples/`）**
+
+`hello_task.wat` → `wat2wasm` → `tools/ncm.py pack --kind task --fps 1 …` →
+`out/hello_task.nct`（871 B：payload 259 B wasm、meta 540 B、budget 20 ms）。
+`task_tick` 每 tick 叫 `nc_print2("tick pin21 read=", gpio_read(21), " toggle=", gpio_toggle(21))`。
+上板方式：複製去 MSC 的 `/tasks/` → reboot（開機掃描時載入）。
+
+**③ 驗證（S3 Mini-Nano，USB NC4；映像 app `c066da30`，tests）**
+
+```
+$ tools/nc4.py status ncm
+{"arena":524288,"used":259,"live":"hello_task","frames":…,"backend":"wamr",
+ "period_ms":1000,"modules":[{"name":"hello_task","fmt":"wasm","ok":1,"bad":0,
+ "kind":"task","fps":1,"budget_us":20000,…}]}
+
+$ tools/nc4.py status tasks     # 外部模組以「租戶」登記，唔係服務
+{"name":"hello_task","kind":"normal","level":4,"started":1,"runtime":1}
+
+CDC log（1 Hz，讀 GPIO21＋反轉 GPIO21）：
+  ncm.wamr: [hello_task] tick pin21 read=1  toggle=0
+  ncm.wamr: [hello_task] tick pin21 read=0  toggle=1
+  …交替
+```
+
+即係：檔案系統 → 掃描 → 建表 → attach → WAMR 實例化 → 定時 tick →
+host import（列印／讀 GPIO／反轉 GPIO）全條鏈都通。`ok:1` 同 `backend:"wamr"`
+亦令 `status` 由「登記得到、跑不到」變成真跑。
+
+**④ 三個「只有上板才見到」的坑（全部已修）**
+
+1. **WAMR 會 qsort 你俾佢的 NativeSymbol 陣列**：放喺 flash rodata（`const`）→
+   `Cache error: Dbus write to cache rejected`，840 ms 就 panic reboot。
+   backtrace 指到 `wasm_native.c: register_natives`。改成 RAM 陣列。
+2. **`os_self_thread()` → `pthread_self()` assert**：`wasm_runtime_call_wasm()`
+   每次都會 `wasm_exec_env_set_thread_info()`，而 IDF 的 `pthread_self()` 對非
+   pthread thread 直接 assert（`pthread.c:583`）。用第三個補丁修。
+3. **WAMR 由 flash 執行程式碼 ↔ OTA 抹 flash 撞 task watchdog**：
+   1.3 MB 映像 OTA 期間模組照 tick（1 Hz）→ BEGIN 的同步 erase（≈5 s）／WRITE
+   同另一核 park 撞 → **rst=6（TWDT）**、OTA 中斷（裝置 reboot 返舊 slot）。
+   修法：`nc_ota_action_paused()`（BEGIN 一入嚟就 true，END／ABORT 清），
+   engine 喺 session 期間跳過 tick。實測之後 1.3 MB OTA 帶住模組跑都成功
+   （BEGIN 4.8 s、WRITE 6.0 s 215 KB/s、END ok、rst=3）。
+
+另外 `tools/ncm.py` 有個真 bug：meta 字串用「char 截斷再 encode」，中文字
+（3 bytes）會超標，令 meta 區塊由 540 B 脹到 561 B、之後全部欄位偏移。
+改成 byte-level `trunc_utf8()` 並喺 `build_meta()` 斷言長度。
+
+**⑤ 代價（S3、tests 映像）**
+
+| 項 | 數 |
+|---|---|
+| flash | 1,224,432 → **~1,315,000 B**（WAMR interp＋引擎，+92 KB） |
+| 內部 heap（boot 後） | **~15 KB**（WAMR runtime 結構＋每 module slot 細；linear memory 去 PSRAM） |
+| PSRAM | arena 512 KB＋linear memory 64 KB／模組＋WAMR 大 allocation |
+| 每 tick 成本 | task_tick＋5 個 native（實測無 strike、budget 20 ms 用唔到 1%） |
+
+**⑥ 未做（下一步）**
+
+- manifest 的 `cmd` 表 → 綁 guest export（模組自訂 NC4 指令）未接：而家模組只有
+  `task_tick` 週期執行，不能由主機叫函數。
+- AOT（`fmt=aot`／`wamrc`）未接（P3）；而家只收 wasm。
+- `resources.json` 的 provides/requires 時序：B06 declare 早過 B08 attach，
+  所以模組自己 provide 的資源會喺 merge 時被標「provider 未啟動」。要嘛延後
+  merge，要嘛 provider 檢查放寬到「今次開機已掃到」。pixel 任務出現前一張
+  空表仍然係正確次序。
+- 每核一個引擎實例（P5）未做。
+- `make.py build --all`：8 塊板全部建置成功（C3／P4 release 唔受影響；WAMR 只在
+  S3 的依賴圖，release 唔 link）。
+- `hello_task` 的 GPIO21 只係示範腳位；board 冇外接嘢，read/toggle 用
+  `GPIO_MODE_INPUT_OUTPUT` 讀返自己（輸出同時保留輸入感測）——如果唔用
+  INPUT_OUTPUT，`gpio_get_level()` 喺純輸出腳永遠讀 0，會令「反轉」變成
+  單方向（實測踩過）。
+
+**⑦ 診斷提示（重要，寫給下一次）**
+
+`console=none`＋OTG 之下，B01–B08（USB 之前）的 log 同 panic backtrace 一律收
+唔到，WAMR 開機 crash 的症狀只係「USB 唔見咗」。懷疑有開機 crash 時，暫時把
+`ports/hardware/S3/ESP32-S3-Mini-Nano/sdkconfig.defaults` 的
+`CONFIG_ESP_CONSOLE_NONE=y` 換成 `CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y`，
+由 ROM download mode watchdog-reset 冷開機，就可以用 USJ console 拿 backtrace；
+修好後還原。

@@ -108,6 +108,20 @@
 > **174,015 B**（舊映像 169,035），PSRAM 用 5,230 B 放回覆幀。見 status §7.81。
 
 **開機穩定後剩餘（實測 2026-11-08，S3、tests ON）：內部 286 KB、最大連續 208 KB；PSRAM 7.85 MB。**
+
+### WAMR 執行引擎（tests 建置，2026-11-17 實測）
+
+| 項 | 數 |
+|---|---|
+| flash | 1,224,432 → **~1,315,000 B**（interp＋backend＋模組容器，+92 KB） |
+| 內部 heap（boot 後） | **~15 KB**（WAMR runtime 結構／module slot；linear memory 唔喺度） |
+| PSRAM | 512 KB arena＋每模組 64 KB linear memory＋WAMR 大 allocation（§7.82：boot 後 PSRAM 7.78 MB 可用） |
+| 每個 task 模組 | payload 由 arena 切（hello_task 259 B）；WAMR instance ≈ 64 KB linear memory（PSRAM） |
+| tick 成本 | task_tick＋5 個 native（gpio/print）遠低於 20 ms budget，無 strike |
+
+注意：呢個係 **tests 映像**；release 建置唔會 reference WAMR（`nc_mod_engine.c`
+喺 test-only component），所以 release 映像唔會 link 佢（component 仍會 build，但
+linker 唔拉）。呢個同 §4.5 WiFi blobs 的「build 咗但唔 link」係同一類行為。
 （上列是 11-08 的舊環境。2026-11-17 的 test 映像：內部 ~24 KB、PSRAM 7.85 MB —— test 建置
 把測試任務的棧／緩衝都算進內部 RAM，兩者不可直接比。）
 

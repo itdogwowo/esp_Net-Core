@@ -240,6 +240,28 @@ tools/ota.py --port /dev/cu.usbmodem* artifacts/ESP32-P4-ETH.bin
 tools/ota.py --port /dev/cu.usbmodem* --abort      # 清掉中斷／超時留下的 OTA session
 ```
 
+### 外部任務（ncm / WAMR）
+
+S3 的測試建置會拉入 `espressif/wasm-micro-runtime`（`main/idf_component.yml` 的
+rule: `target == esp32s3`）。上游 2.4.0 對 **IDF 6 + picolibc** 有四個位編唔過／
+跑唔起，所以倉庫唔 vendor 上游，而係用 `tools/patch_wamr.py`：`firmware/CMakeLists.txt`
+喺 `project()` 之後自動套（`managed_components/` 每次重新抓都補得返，腳本 idempotent）。
+詳情見 [ncm-loader.md §10.8](../03_notes/ncm-loader.md)。
+
+樣本模組（列印＋讀／反轉 GPIO）：
+
+```bash
+tools/ncm_samples/build.sh                  # 需要 wat2wasm（brew install wabt）
+cp tools/ncm_samples/out/hello_task.nct /Volumes/NC-<cid>/tasks/
+python3 tools/nc4.py --port /dev/cu.usbmodem* reboot
+python3 tools/nc4_log.py --port /dev/cu.usbmodem*
+```
+
+> 如果 WAMR／模組喺 **USB 之前（B01–B08）** 就 crash，`console=none` 之下收唔到
+> backtrace；暫時把 board sdkconfig 的 `CONFIG_ESP_CONSOLE_NONE=y` 換成
+> `CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y`、由 download mode watchdog-reset 冷開機
+> 就見到（板子檔案的註解有寫）。
+
 > **BEGIN 等幾秒是正常的**：韌體的 `OTA_BEGIN` 會先把目標分區整段抹掉才回 ACK
 > （S3 實測 ≈237 KB/s → 1.2 MB ≈5.2 s）。工具會照映像大小等（`10 s + size/100 KB`），
 > 唔會再硬編 5 s。
