@@ -61,6 +61,18 @@ static nc_cfg_stat_t parse_hw(const char *json, nc_hardware_cfg_t *out)
     return st;
 }
 
+// 解析一段 JSON 並填 resources（外部任務資源表）；回傳 stat
+static nc_cfg_stat_t parse_res(const char *json, nc_resources_cfg_t *out)
+{
+    nc_cfg_stat_t st;
+    cJSON *root = (json != NULL) ? cJSON_Parse(json) : NULL;
+    (void)nc_cfg_apply_resources(root, out, &st);
+    if (root != NULL) {
+        cJSON_Delete(root);
+    }
+    return st;
+}
+
 // 真的出廠 hardware.json：零 invalid／零 unknown，ETH 的 enable 要符合預期。
 static void check_preset_hw(const char *path, int expect_eth)
 {
@@ -90,6 +102,34 @@ static void check_preset_hw(const char *path, int expect_eth)
         ok("啟用時腳位齊", hw.eth.mdc >= 0 && hw.eth.mdio >= 0 && hw.eth.ref_clk >= 0);
     }
     ok("phy_type 非空", hw.eth.phy_type != NC_CFG_PHY_UNKNOWN);
+    cJSON_Delete(root);
+}
+
+// 真的出廠 resources.json（project preset）：零 invalid／零 unknown，_comment 要認得。
+// 目前每個 project 都是空表（pixel provider 未存在前留空，見 handoff 2026-11-17）。
+static void check_preset_res(const char *path)
+{
+    printf("  —— 預置 %s\n", path);
+    FILE *f = fopen(path, "rb");
+    ok("開得到", f != NULL);
+    if (f == NULL) {
+        return;
+    }
+    static char buf[64 * 1024];
+    const size_t n = fread(buf, 1, sizeof(buf) - 1, f);
+    fclose(f);
+    buf[n] = '\0';
+    cJSON *root = cJSON_Parse(buf);
+    ok("合法 JSON", root != NULL);
+    if (root == NULL) {
+        return;
+    }
+    nc_resources_cfg_t res;
+    nc_cfg_stat_t ps;
+    (void)nc_cfg_apply_resources(root, &res, &ps);
+    ok("零 invalid", ps.invalid == 0);
+    ok("零 unknown（_comment 要認得）", ps.unknown == 0);
+    ok("空表（等 pixel 出現才填 provider）", res.n_res == 0);
     cJSON_Delete(root);
 }
 
@@ -522,6 +562,95 @@ int main(void)
            !mt.tasks[3].aff[0] && !mt.tasks[3].aff[1]);
         const nc_cfg_merge_t again = nc_cfg_merge_cores_in(&ms, &mt, 1);
         ok("單核：再跑一次 = 0（冪等）", again.routes == 0 && again.tasks == 0);
+    }
+
+    printf("[25] resources：外部任務資源表（2026-11-17 新增的層）\n");
+    {
+        nc_resources_cfg_t res;
+
+        // 缺檔：missing，但表要是「空表」而不是壞掉
+        nc_cfg_stat_t rs = parse_res(NULL, &res);
+        ok("缺檔 → missing=1", rs.missing == 1);
+        ok("缺檔 → 空表", res.n_res == 0);
+
+        rs = parse_res(
+            "{\"version\":1,\"resources\":["
+            "{\"name\":\"led.frame\",\"type\":\"buf\",\"provider\":\"pixel\",\"bytes\":2704},"
+            "{\"name\":\"i2c0\",\"type\":\"hw\",\"provider\":\"hw\",\"exclusive\":true},"
+            "{\"name\":\"echo\",\"type\":\"cmd\",\"provider\":\"nc4\"},"
+            "{\"name\":\"caps\",\"type\":\"provide\",\"provider\":\"sys\"},"
+            "{\"name\":\"mod\",\"type\":\"module\"}"
+            "]}", &res);
+        ok("5 條資源", res.n_res == 5);
+        ok("buf: name/type/provider/bytes",
+           strcmp(res.res[0].name, "led.frame") == 0 && res.res[0].type == 0 &&
+           strcmp(res.res[0].provider, "pixel") == 0 && res.res[0].bytes == 2704);
+        ok("hw: exclusive=1", res.res[1].type == 2 && res.res[1].exclusive);
+        ok("cmd 型別", res.res[2].type == 1 && strcmp(res.res[2].provider, "nc4") == 0);
+        ok("provide 型別", res.res[3].type == 3);
+        ok("module 型別", res.res[4].type == 4);
+        ok("正常檔零 invalid", rs.invalid == 0);
+
+        // type 不認識 → 整條跳過（不是靜靜收一條 type=0）
+        rs = parse_res("{\"version\":1,\"resources\":["
+                       "{\"name\":\"a\",\"type\":\"lol\"},"
+                       "{\"name\":\"b\",\"type\":\"buf\"}]}", &res);
+        ok("未知 type → 跳過該條", res.n_res == 1 && strcmp(res.res[0].name, "b") == 0);
+        ok("未知 type → invalid>0", rs.invalid > 0);
+
+        // name 太長（>= 24）→ 跳過；唔可以截斷成另一個名
+        rs = parse_res("{\"version\":1,\"resources\":["
+                       "{\"name\":\"A-VERY-LONG-RESOURCE-NAME-X\",\"type\":\"buf\"},"
+                       "{\"name\":\"ok\",\"type\":\"buf\"}]}", &res);
+        ok("名太長 → 跳過", res.n_res == 1 && strcmp(res.res[0].name, "ok") == 0);
+        ok("名太長 → invalid>0", rs.invalid > 0);
+
+        // provider 冇寫 → 收進來但計 defaulted
+        rs = parse_res("{\"version\":1,\"resources\":[{\"name\":\"a\",\"type\":\"buf\"}]}", &res);
+        ok("冇 provider → 仍然收", res.n_res == 1 && res.res[0].provider[0] == '\0');
+        ok("冇 provider → defaulted>0", rs.defaulted > 0);
+
+        // bytes 負數 → 保留條目（0）並計 invalid
+        rs = parse_res("{\"version\":1,\"resources\":["
+                       "{\"name\":\"a\",\"type\":\"buf\",\"bytes\":-1}]}", &res);
+        ok("負 bytes → 0", res.n_res == 1 && res.res[0].bytes == 0);
+        ok("負 bytes → invalid>0", rs.invalid > 0);
+
+        // version 不符 → 整層回預設（空表），但仍然成功
+        rs = parse_res("{\"version\":2,\"resources\":[{\"name\":\"a\",\"type\":\"buf\"}]}", &res);
+        ok("version 2 → bad_version=1", rs.bad_version == 1);
+        ok("version 2 → 空表", res.n_res == 0);
+
+        // resources 不是 array → invalid，空表
+        rs = parse_res("{\"version\":1,\"resources\":{}}", &res);
+        ok("resources 非陣列 → invalid>0", rs.invalid > 0);
+        ok("resources 非陣列 → 空表", res.n_res == 0);
+
+        // 空陣列 = 用戶明示冇外部資源（不是缺檔）
+        rs = parse_res("{\"version\":1,\"resources\":[]}", &res);
+        ok("空陣列 → n=0 且不是 missing", res.n_res == 0 && rs.missing == 0);
+
+        // 超過上限：收 16 條，其餘計 invalid
+        rs = parse_res("{\"version\":1,\"resources\":["
+            "{\"name\":\"r0\",\"type\":\"buf\"},{\"name\":\"r1\",\"type\":\"buf\"},"
+            "{\"name\":\"r2\",\"type\":\"buf\"},{\"name\":\"r3\",\"type\":\"buf\"},"
+            "{\"name\":\"r4\",\"type\":\"buf\"},{\"name\":\"r5\",\"type\":\"buf\"},"
+            "{\"name\":\"r6\",\"type\":\"buf\"},{\"name\":\"r7\",\"type\":\"buf\"},"
+            "{\"name\":\"r8\",\"type\":\"buf\"},{\"name\":\"r9\",\"type\":\"buf\"},"
+            "{\"name\":\"r10\",\"type\":\"buf\"},{\"name\":\"r11\",\"type\":\"buf\"},"
+            "{\"name\":\"r12\",\"type\":\"buf\"},{\"name\":\"r13\",\"type\":\"buf\"},"
+            "{\"name\":\"r14\",\"type\":\"buf\"},{\"name\":\"r15\",\"type\":\"buf\"},"
+            "{\"name\":\"r16\",\"type\":\"buf\"}]}", &res);
+        ok("只收 16 條", res.n_res == 16);
+        ok("超過上限 → invalid>0", rs.invalid > 0);
+
+        // 未知鍵只計數
+        rs = parse_res("{\"version\":1,\"weird_top\":1,"
+                       "\"resources\":[{\"name\":\"a\",\"type\":\"buf\",\"weird\":2}]}", &res);
+        ok("未知鍵 → unknown>0", rs.unknown > 0);
+
+        // 真的出廠檔（project preset）
+        check_preset_res(PRESET_RESOURCES);
     }
 
     printf("\n%d/%d 項通過\n", checks - fails, checks);

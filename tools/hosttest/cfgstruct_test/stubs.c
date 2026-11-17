@@ -16,6 +16,16 @@ uint8_t nc_port_usb_kind(uint8_t idx)
     return (idx == 0) ? (uint8_t)NC_LINK_USBJTAG : (uint8_t)NC_CFG_USB_PORT_NONE;
 }
 
+// 真的 nc_port.c（board.json/wiring.json → 硬體預設）由 tools/ncportgen.py 在
+// build 時生成，host 測試沒有。nc_cfg_defaults.c 用 weak 宣告問「有沒有板級
+// 預設」；Linux 的 ELF 會把未定義 weak 當 0，macOS 的 ld64 則當成普通未定義
+// 符號直接報錯 —— 所以在這裡明確給一個回 NULL 的定義（語義＝沒有生成檔）。
+const nc_hardware_cfg_t *nc_port_hw_defaults(void);
+const nc_hardware_cfg_t *nc_port_hw_defaults(void)
+{
+    return NULL;
+}
+
 static void vlog(const char *lvl, const char *tag, const char *fmt, va_list ap)
 {
     printf("%s[%s] ", lvl, tag ? tag : "?");

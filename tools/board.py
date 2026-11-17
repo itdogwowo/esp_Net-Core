@@ -96,6 +96,8 @@ RUNTIME_KEYS_BY_FILE = {
                       "frame_interval_ms", "boot_strict", "num_pixels", "nc4", "usb"},
     "network.json":  {"version", "_comment", "hostname", "priority", "lan", "wifi", "bt", "espnow"},
     "tasks.json":    {"version", "_comment", "tasks", "override"},
+    # 外部任務資源表（2026-11-17）：頂層只有 version／_comment／resources。
+    "resources.json": {"version", "_comment", "resources"},
     # hardware.json 是 ncportgen 從 wiring.json 產生的「完整硬體預置」；
     # 它出現在 project 層是為了讓用戶在 /data/config 看得到、改得到。
     # 改 wiring 之後跑 tools/sync_hardware_presets.py 同步。
