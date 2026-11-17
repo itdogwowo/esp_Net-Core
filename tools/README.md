@@ -141,7 +141,7 @@ python3 tools/sync_hardware_presets.py           # 重寫 project/data/config/ha
 | `nc4_test.py --port …` | ✅ | 解碼器一致性測試：正常幀 / 黏包 / 拆包 / 壞 CRC / 假 SOF / 錯 addr / 超大 LEN / 錯版本 |
 | `buf_test.py --port …` | ✅ | **統一緩衝（`nc_buf`）的上板自測**（`0xF032`）：64 B 對齊、FIFO 次序、滿了回 NULL、reserve 表頭 + `off`/`len`、S2S·S2P·P2S·P2P 四條 copy、換手；`--status` 順便印 `mem.buf` |
 | `ncm.py pack / dump` | ❌ | **打包 `.nct` / `.nce`**（header + manifest + meta + payload + 指令表）與檢視；`--meta meta.json` 嵌入 name/desc/usage/requires/provides。`pack` 會先擋掉裝置端一定會拒的值 |
-| `ncm_build.py [task…] [--device]` | 裝機時 ✅ | **任務模組獨立編譯工具**：WAT／WASM（C 預留）→ `.nct`；讀 `<name>.build.json`（fps／budget／mem…）；`--list`、`--out`、`--clean`、`--device` 直接複製到 MSC `tasks/`。範例在 `tools/ncm_samples/` |
+| `ncm_build.py [task…] [--device]` | 裝機時 ✅ | **任務模組獨立編譯工具**：WAT／WASM（C 預留）→ `.nct`；讀 `modules/<name>/build.json`（fps／budget／mem…）；`--dir` 可指向外部任務目錄（獨立專案）；`--list`、`--out`、`--clean`、`--device` 直接複製到 MSC `tasks/`。任務源碼在 repo 根 `modules/`，**唔屬於 firmware 樹** |
 | `matrix.py --port … stats\|effect\|dither\|color\|gain\|fps\|zone\|zmask` | ✅ | **8×8 WS2812 矩陣**（`0xF060`）：切效果（第一區／呼吸／波浪／單色／色階）、抖動開關、每區 rate+phase、看實測 fps／late／tx_us。見 [rgb-matrix-dither](../docs/03_notes/rgb-matrix-dither.md) |
 
 firmware image 在 `artifacts/<board>.bin`（先 build 才有；完整可燒組在 `artifacts/<board>/`）。

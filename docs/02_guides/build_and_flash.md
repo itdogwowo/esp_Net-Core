@@ -260,7 +260,7 @@ python3 tools/nc4_log.py --port /dev/cu.usbmodem*
 ```
 
 `ncm_build.py` 是獨立任務編譯工具：讀 `<name>.build.json`（fps／budget／mem…）
-＋`<name>.meta.json`，輸出 `tools/ncm_samples/out/<name>.nct`。
+＋`<name>.meta.json`，輸出 `modules/out/<name>.nct`。
 
 > 如果 WAMR／模組喺 **USB 之前（B01–B08）** 就 crash，`console=none` 之下收唔到
 > backtrace；暫時把 board sdkconfig 的 `CONFIG_ESP_CONSOLE_NONE=y` 換成

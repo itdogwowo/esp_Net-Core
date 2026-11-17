@@ -173,7 +173,7 @@ NCM 引擎 init(arena, bytes) → 切成 slot（NC_MOD_MAX_MODULES = 8）
 | 階段 | 做什麼 | 驗收方式 |
 |---|---|---|
 | **P1 後端介面固定** | 把 `nc_mod_backend_t {init, render, deinit}` 定義成公開合約（見 [ncm-contract.md](ncm-contract.md)），stub 照合約實作 | host test：載入 → tick → 卸載，stub 的 `render` 被呼叫 N 次 |
-| **P2 接 WAMR** | ✅ 已完成（2026-11-17）：backend 包好 instantiate／lookup／call；arena 照舊存 payload，WAMR 自己用 custom allocator（大塊 PSRAM／細塊 internal） | `tools/ncm_samples/hello_task` 上板 1 Hz 印 `tick pin21 read=… toggle=…`（status §7.82） |
+| **P2 接 WAMR** | ✅ 已完成（2026-11-17）：backend 包好 instantiate／lookup／call；arena 照舊存 payload，WAMR 自己用 custom allocator（大塊 PSRAM／細塊 internal） | `modules/hello_task` 上板 1 Hz 印 `tick pin21 read=… toggle=…`（status §7.82） |
 | **P3 AOT / XIP** | `fmt == aot` 走 `wasm_runtime_load` 的 AOT 路徑。**注意 S3 是 Xtensa、P4 是 RISC-V**，AOT 映像不可共用 → 靠 `.nct` / `.nce` header 已有的 `target` 欄位分流（`verify_header()` 現在就擋錯 target） | 同一支模組，S3 的 AOT 版與 wasm 版行為一致；P4 拿到 Xtensa 的 AOT 會被拒 |
 | **P4 呼叫固件 API** | 🟡 第一批白名單已開：`nc_print`／`nc_print_i32`／`nc_print2`／`nc_gpio_read`／`nc_gpio_write`／`nc_gpio_toggle`（GPIO 只准安全腳位）。仲未開 NC4 發送、plan、檔案 | hello_task 已用列印＋GPIO 驗證；下一批能力按需要再加 |
 | **P5 多核** | 每個核一個引擎實例（§7 第 5 條）；先確認 P1 的狀態都收在實例裡、沒有 static | 兩核各跑一個模組，互不干擾 |

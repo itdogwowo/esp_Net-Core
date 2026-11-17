@@ -3210,3 +3210,29 @@ buffer pointer＋length，host 一次過處理。
 - S3 tests 映像 1.31 MB（WAMR 只在 NCM）、release 1.14 MB（clean resolve 冇 WAMR）。
 - 板子：`hello_task` live、`backend:"wamr"`、`ok:1`；api_cost 量測完已還原。
 - 下一步：M2 AOT spike（P3）→ capability provider → M4 S3 RMT LED pipeline。
+
+### 7.86 2026-11-17（外掛任務移出 firmware 樹：`modules/` ＋工具預設路徑）
+
+**定案：外掛任務源碼唔屬於 firmware 專案。**
+
+- 路徑重定義：`tools/ncm_samples/<name>.wat` → **`modules/<name>/`**（一個任務一個資料夾：
+  `<name>.wat`／`build.json`／`meta.json`）。輸出 → `modules/out/<name>.nct`（gitignore）。
+- `tools/ncm_build.py`：預設讀 repo 根 `modules/`；新增 `--dir` 指向**外部任務目錄**
+  （外掛任務可以住在另一個 repo／專案，只帶工具去編譯）；`--device` 直接裝到
+  MSC `/tasks/`。現有 3 個任務（hello_task／bench_task／api_cost）已搬好、重編通過
+  （887／872／519 B）。
+- firmware 樹（`firmware/`）而家只有宿主與驅動；`modules/` 係可搬走的資料/機器碼。
+- 相關文件同步：README 目錄樹、tools/README、build_and_flash、testing、
+  test-register（T-NCM-002/003/017 連結、§3.1）、module-adoption、ncm-contract、
+  ncm-engine、handoff；新增 [modules/README.md](../../modules/README.md)。
+
+**（附）指令動態插入的結論**
+
+- 外掛**私有指令**可以「像模組一樣」在**載入時**插入（boot 或手動 reload），唔係
+  任意 runtime hot-plug：`nc_action_init()` 仍然係開機統計→一次配置→排序→封存，
+  外掛載入早於封存就加入，之後唯讀。
+- 性能：dispatch 係排序陣列的二分搜尋（`nc_action_find`）→ 加 N 條指令只多
+  log2(N) 次比較（幾十條 = 6–7 次）；**核心指令的處理成本完全唔變**。真正成本係
+  「插件指令 → mediator → wasm 呼叫」的沙箱邊界（≈2 µs/call＋直譯成本），所以
+  插件指令適合低頻控制／查詢，唔適合高頻 data path；慢指令要 async（回覆經 ncm
+  任務）＋配額／timeout。

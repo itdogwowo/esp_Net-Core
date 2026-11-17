@@ -25,7 +25,7 @@
 功能測試而家優先做成外掛 `.nct`（唔入固件），用 `tools/ncm_build.py` 編譯：
 
 ```bash
-python3 tools/ncm_build.py                 # 全部樣本 → tools/ncm_samples/out/
+python3 tools/ncm_build.py                 # 全部樣本 → modules/out/
 python3 tools/ncm_build.py hello_task --device   # 編譯＋裝到 /Volumes/NC-*/tasks
 python3 tools/nc4.py --port /dev/cu.usbmodem* reboot
 python3 tools/nc4_log.py --port /dev/cu.usbmodem*

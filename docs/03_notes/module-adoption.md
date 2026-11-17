@@ -115,7 +115,7 @@ symbol table 同 `esp_elf_register_symbol()`；配套 examples：
 | 形態 | 實測 | 備註 |
 |---|---|---|
 | **L2 原生 C**（新測試指令 `0xF050 CPU_BURN`） | **1,683 µs**（5 次：1,677–1,687） | 6–8 cycles/iteration @240 MHz |
-| **L0 wasm 直譯**（`tools/ncm_samples/bench_task.wat`） | **24,887 µs**（5 次：24,868–24,910） | 每次 tick 用 `nc_now_us()` 自量 |
+| **L0 wasm 直譯**（`modules/bench_task/bench_task.wat`） | **24,887 µs**（5 次：24,868–24,910） | 每次 tick 用 `nc_now_us()` 自量 |
 | **倍數** | **≈14.8×** | 同一塊板、同一時段；有一個 335 ms outlier（USB 擷取期間，不計） |
 
 建議門檻（暫定，之後按實測校準）：
