@@ -24,7 +24,16 @@ static const char *TAG = "net_line";
 #define NET_TCP_PORT 6000
 #define NET_UDP_PORT 6001
 #define NET_WS_PORT  8080
-#define NET_WS_MAX    (24 * 1024)
+
+// 緩衝尺寸跟 2026-11-08 buffer-tightening＋2026-11-15 net 量測的「共同 line profile」
+// （見 docs/03_notes/net-results-2026-11-15.md）：TCP 2×8,205、UDP 1×8,205、
+// WS 2×16,384（高頻 batch 建議）。呢條係「config 冇宣告 managed net lines」時的
+// legacy fallback；新板應該用 nc_net_lines + links[].rx（預設同值）。
+#define NET_TCP_SLOT 8205
+#define NET_TCP_REGION 16410
+#define NET_UDP_SLOT 8205
+#define NET_UDP_REGION 8205
+#define NET_WS_MAX   (16 * 1024)
 
 static bool s_declared;
 static bool s_started;
@@ -339,18 +348,18 @@ esp_err_t nc4_line_net_declare(nc4_decoder_t *decoder, int core)
         return ESP_ERR_NO_MEM;
     }
 
-    s_tcp_rx = heap_caps_malloc(8208, MALLOC_CAP_SPIRAM);
-    s_udp_rx = heap_caps_malloc(8208, MALLOC_CAP_SPIRAM);
+    s_tcp_rx = heap_caps_malloc(NET_TCP_REGION, MALLOC_CAP_SPIRAM);
+    s_udp_rx = heap_caps_malloc(NET_UDP_REGION, MALLOC_CAP_SPIRAM);
     s_ws_rx = heap_caps_malloc(NET_WS_MAX + 64, MALLOC_CAP_SPIRAM);
     const nc4_bus_cfg_t tcp = {
         .name = "TCP", .mode = NC4_BUS_PUSH, .read = tcp_read, .send = tcp_send,
-        .core = core, .rx_ring_size = 2048, .rx_slots = 4, .slots_psram = true,
-        .rx_region = s_tcp_rx, .rx_region_bytes = s_tcp_rx ? 8208 : 0,
+        .core = core, .rx_ring_size = NET_TCP_SLOT, .rx_slots = 2, .slots_psram = true,
+        .rx_region = s_tcp_rx, .rx_region_bytes = s_tcp_rx ? NET_TCP_REGION : 0,
     };
     const nc4_bus_cfg_t udp = {
         .name = "UDP", .mode = NC4_BUS_PUSH, .read = udp_read, .send = udp_send,
-        .core = core, .rx_ring_size = 2048, .rx_slots = 4, .slots_psram = true,
-        .rx_region = s_udp_rx, .rx_region_bytes = s_udp_rx ? 8208 : 0,
+        .core = core, .rx_ring_size = NET_UDP_SLOT, .rx_slots = 1, .slots_psram = true,
+        .rx_region = s_udp_rx, .rx_region_bytes = s_udp_rx ? NET_UDP_REGION : 0,
     };
     const nc4_bus_cfg_t ws = {
         .name = "WS", .mode = NC4_BUS_PUSH, .read = ws_read, .send = ws_send,

@@ -15,7 +15,7 @@ static const char *TAG = "nc4_udp";
 
 // 一則 datagram 的上限。8 KB 幀 + 幾個小幀都放得下；
 // 超過 MTU 會由 IP 分片（LAN 上可接受，實測見 testing.md §2.16）。
-#define UDP_MAX_MSG   (16 * 1024)
+#define UDP_MAX_MSG   (8205)   /* 跟 net 量測共同 profile（NC4 幀 ≤8,205 B） */
 
 // 解碼任務釘喺邊個核。decoder 由 main 傳入（已經係收斂後的：只有一個 decoder
 // 時一定係 decoder0），所以「有第二個 decoder」= pin core1；單核 build 一定要

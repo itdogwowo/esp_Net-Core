@@ -96,7 +96,11 @@ void nc_cfg_rx_default(nc_link_kind_t kind, nc_link_rx_t *rx)
                               .slots = 2, .budget = 8 };
         break;
     case NC_LINK_WS:
-        *rx = (nc_link_rx_t){ .region = 16384, .chunk = 8192, .slot_size = 8192,
+        // 2026-11-15 量測（net-results §1／§3）：request/reply 用 2×8,192 已夠，
+        // 但高頻 batch（1K×10、2K×7、4K×3）要 slot 16,384 才追得上 TCP。
+        // 預設揀高頻建議（2×16,384＝32 KB，plan 喺 PSRAM）；細板可以 project
+        // config 覆寫降返 8,192。WS 目前冇 project 啟用，改預設不影響現板。
+        *rx = (nc_link_rx_t){ .region = 32768, .chunk = 16384, .slot_size = 16384,
                               .slots = 2, .budget = 8 };
         break;
     case NC_LINK_UDP:

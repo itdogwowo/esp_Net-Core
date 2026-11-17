@@ -16,8 +16,9 @@
 static const char *TAG = "nc4_ws";
 
 // 一則 WS 訊息的上限。允許「一則訊息塞多個 NC4 幀」以攤提 httpd 的每則固定成本
-// （見 §batching）：24 KB 可以放 2 個 8K 幀、4 個 4K、或 16 個 1K。
-#define WS_MAX_MSG   (24 * 1024)
+// （見 §batching）。跟 2026-11-15 net 量測的高頻建議：16 KB 可以放 2 個 8K 幀、
+// 4 個 4K、8 個 2K、16 個 1K；24 KB 對吞吐冇再提升，只係多食 8 KB。
+#define WS_MAX_MSG   (16 * 1024)
 
 // 解碼／解析跑喺 httpd task 上。釘核跟「decoder 有幾多個」的同一條規則：
 // 有第二個 decoder 才用 core1（避開 core0 的 decode 引擎與 lwIP）；

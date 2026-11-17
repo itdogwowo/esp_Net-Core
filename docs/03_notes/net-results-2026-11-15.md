@@ -142,3 +142,41 @@ raw-only 雙 stream：上載 0.44–0.46，下載 0（timeout）。
 - S3 `10.10.1.31`：shipment firmware，STA AX3000，HTTP 200
 - raw endpoint 已 config gate off
 - 共同 profile：TCP 2×8205、UDP 1×8205、WS 2×8192、mem auto
+
+---
+
+## 6. 固件預設：已把量測最優化寫死（2026-11-18 審核）
+
+**原則**：預設 = 量測最優；`links[].rx` 只係 escape hatch，正常 project 唔應該寫。
+兩條路徑（config 驅動 `nc_net_lines`／legacy `nc4_line_net`）現時同值：
+
+| 線路 | region | chunk | slot_size | slots | 來源 |
+|---|---:|---:|---:|---:|---|
+| CDC／USB | 4,128 | 1,024 | 256 | 4 | buffer-tightening（OTF 4 KB chunk 要 ≥4,115） |
+| USB-Serial-JTAG | 4,128 | 256 | 256 | 4 | 同上（共用 4,192→4,128） |
+| UART | 1,024 | 256 | 256 | 4 | max_read 246、peak 1（921600 baud） |
+| TCP | 16,410 | 8,205 | 8,205 | 2 | 8K burst 要 2 slot（1 slot 實測 493/500） |
+| UDP | 8,205 | 8,205 | 8,205 | 1 | request/reply 1 slot 夠 |
+| WS | 32,768 | 16,384 | 16,384 | 2 | 高頻 batch 建議（1K×10／2K×7／4K×3 追平 TCP） |
+
+其他貼身值：UART driver ring RX/TX 1,024／1,024；`uart.rx` 棧 1,536、
+`cdc.rx` 1,280、decode 3,072、main 3,072、`nc_log` 2,560；
+`NC4_MAX_BUSES 8`（P4-ETH 5 條線，唔減）、plan 宣告 16 格。
+
+**2026-11-18 審核修正**：
+- S3-Matrix `system.json` 的 `wifi_tcp1/2`、`wifi_udp0` 有舊 override
+  （1×8,205／1×8,192／1×4,096）→ 已移除，跟固件預設；
+- WS 預設 2×8,192 → **2×16,384**（高頻建議）；
+- legacy fallback（`nc4_line_net`／`nc4_ws`／`nc4_udp`）由 8,208／2,048×4／24 KB
+  對齊到同一組值。
+
+**幾時仍然要寫 `rx`**：
+
+1. 換線路參數：UART baud 大改、MTU／socket buffer 唔同；
+2. 大幀 profile：要過 4 KB 的 OTA chunk（CDC region 要 ≥ 4,115）；
+3. RAM 壓力：C3／無 PSRAM 板同時開多條線 → 收細 slots；
+4. 新線路未量（BLE／ESP-NOW／自訂 transport）→ 先用預設再量；
+5. 診斷／實驗（臨時加大 slots 量 burst，量完還原）。
+
+改之前先量：`STATUS keys=net` 的 `max_dlen`／`slot_full`／`peak`／`cfg_src`。
+判準同 [measurement-method §4](../02_guides/measurement-method.md)：達標率 ≥90% 就停。

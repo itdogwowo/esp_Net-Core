@@ -31,6 +31,7 @@
 | T-NCM-018 | 任務模組獨立編譯工具 | 工具 | — | [tools/ncm_build.py](../../tools/ncm_build.py)＋每個模組的 `build.json` | `test_hello_tasks`（tasks）＋`bench_compare_lab`／`api_cost_lab`（lab）由工具建出；輸出 887／872／519 B | — | ✅ 2026-11-17 驗證 |
 | T-NCM-019 | 外掛 GPIO 經 owner＋claim（現時直寫 gpio_set_level） | 安全／架構 | L0→L2 | `nc_mod_engine.c`（host_gpio_*）／`hw_gpio` | **未做**：模組寫 GPIO 繞過 `hw_gpio` owner、唔入 snapshot、無 claim | — | ⬜ 下一步（能力＋claim＋狀態一致） |
 | T-NCM-020 | `tasks.json` 的 `prio` 覆寫（租戶 loop 優先級） | 配置 | L2 | `nc_cfg_types.h`／`nc_cfg_load.c`／`nc_task.c` | 解析 **1–6**（7 以上視為無效，唔准搶核心保留區）；loop 用 override；runtime 再夾 ≤6 | 上板：`bench_a` `prio:3` → loop `prio:3`；`prio:10`（無效）→ 回落 `prio:2`；`prio:5` → `prio:5`；租戶 runtime 仍夾 ≤6 | ✅ 2026-11-18 驗證 |
+| T-NET-001 | 網絡／通道緩衝預設＝量測最優（CDC／UART／TCP／UDP／WS） | 配置 | L2 | `nc_cfg_defaults.c`／`nc4_line_net.c`／`nc4_ws.c`／`nc4_udp.c`／project `system.json` | 與 [net-results §6](../03_notes/net-results-2026-11-15.md) 對照；Matrix 過期 override 移除；legacy 對齊 | CDC 4,128×4×256；UART 1,024×4×256；TCP 2×8,205；UDP 1×8,205；WS 2×16,384 | ✅ 2026-11-18 審核 |
 
 ## 2. Host 測試（完全唔入固件，L2 工具）
 

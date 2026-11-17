@@ -5,7 +5,8 @@
     "links 用 composite kind + index（wifi_tcp／wifi_udp）；冇 name 時自動生成 wifi_tcp0／wifi_udp0，routes 用生成名。",
     "HTTP :80 由 web service claim，冇 route；其他線的核心由 routes[].out 的 decodeN 決定。",
     "USB：hardware phy=otg-fs（GPIO19/20）；link 寫 {kind:\"usb\",index:0,msc:1}：personality 由 USB.list[0].phy 決定（otg-fs → cdc，MSC 可行）。",
-    "links[].name：可省略或用 \"name\":\"\" → 自動生成；有非空 name 就用。links[].msc：USB link 的 MSC 開關（只 OTG）。"
+    "links[].name：可省略或用 \"name\":\"\" → 自動生成；有非空 name 就用。links[].msc：USB link 的 MSC 開關（只 OTG）。",
+    "links[].rx 唔寫 = 用固件預設（已按 2026-11-08 buffer-tightening＋2026-11-15 net 量測最優化）；只有特殊負載才覆寫。"
   ],
   "version": 1,
   "cID": "",
@@ -29,40 +30,19 @@
         "name": "wifi_tcp1",
         "kind": "wifi_tcp",
         "index": 1,
-        "port": 6000,
-        "rx": {
-          "region": 8205,
-          "chunk": 4096,
-          "budget": 8,
-          "slots": 1,
-          "slot_size": 8205
-        }
+        "port": 6000
       },
       {
         "name": "wifi_tcp2",
         "kind": "wifi_tcp",
         "index": 2,
-        "port": 8080,
-        "rx": {
-          "region": 8192,
-          "chunk": 8192,
-          "budget": 4,
-          "slots": 1,
-          "slot_size": 8192
-        }
+        "port": 8080
       },
       {
         "name": "wifi_udp0",
         "kind": "wifi_udp",
         "index": 0,
-        "port": 6001,
-        "rx": {
-          "region": 4096,
-          "chunk": 4096,
-          "budget": 8,
-          "slots": 1,
-          "slot_size": 4096
-        }
+        "port": 6001
       }
     ],
     "routes": [

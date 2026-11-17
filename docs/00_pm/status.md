@@ -3385,3 +3385,33 @@ modules/
 （記憶體 declare／硬體 claims／provides／外掛 requires＋resources.json）的
 「怎樣宣告 → 怎樣配對 → 怎樣提交」、B06/B08 配對順序、GPIO owner 契約同
 現況缺口（T-NCM-019）。hw-ownership §9 已有缺口說明。
+
+### 7.91 2026-11-18（網絡緩衝預設審核：全部對齊量測最優；用戶唔需要調）
+
+**① 審核結果：固件預設已經是量測最優，但有三處唔一致**
+
+| 項目 | 之前 | 之後（跟量測） |
+|---|---|---|
+| CDC／USB | 4,128／1,024 chunk／4×256 | 不變（已最優） |
+| UART | 1,024／4×256／driver ring 1,024×2 | 不變（已最優） |
+| TCP | 16,410／2×8,205 | 不變（已最優） |
+| UDP | 8,205／1×8,205 | 不變（已最優） |
+| **WS（config 路徑）** | 16,384／2×8,192 | **32,768／2×16,384**（高頻 batch 建議） |
+| **S3-Matrix project override** | tcp1 1×8,205、tcp2 1×8,192、udp 1×4,096 | **移除 override**，跟固件預設 |
+| **legacy fallback**（`nc4_line_net`／`nc4_ws`／`nc4_udp`） | TCP/UDP 8,208＋2,048×4、WS 24 KB、UDP 16 KB | 對齊共同 profile（2×8,205／1×8,205／WS 16 KB／UDP 8,205） |
+
+- 仍然保留：`NC4_MAX_BUSES 8`（P4-ETH 同時 5 條線，唔可以減）、plan 宣告 16 格、
+  UART driver ring 1,024×2（TX 只係命令／回覆用）。
+- 文件：[net-results §6](../03_notes/net-results-2026-11-15.md) 新增「固件預設＝最優」
+  對照表＋「幾時仍然要寫 rx」清單。
+
+**② 用戶需唔需要設定？→ 正常唔需要**
+
+- 預設 = 量測最優；`links[].rx` 只係 escape hatch，project 唔應該重複寫（single source
+  of truth 在固件）。
+- 只有五種情況值得覆寫：①換線路參數（baud／MTU／socket buffer）；②大幀 profile
+  （要過 4 KB 的 OTA chunk → CDC region ≥4,115）；③RAM 壓力（C3／無 PSRAM 同時多線
+  → 收細 slots）；④未量過的新 transport（BLE／ESP-NOW／自訂）；⑤診斷／實驗（臨時
+  加大 slots 量 burst，量完還原）。
+- 判準：先量 `STATUS keys=net` 的 `max_dlen`／`slot_full`／`peak`／`cfg_src`；達標率
+  ≥90% 就停。實測證明「加大緩衝」對吞吐冇幫助（TCP slots 1 KB→4 KB 一樣 490 KB/s）。

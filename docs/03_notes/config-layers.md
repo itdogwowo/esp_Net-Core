@@ -120,6 +120,10 @@ CDC／MSC／log 三樣都冇人要 → 連 TinyUSB 都唔裝。以前缺名會�
 | `system.json` 的 `nc4.routes` | **Routes** | 幀去 decodeN／轉發 | ✅ |
 | `network.json` | **Connectivity**（不是 Interface） | WiFi STA/AP、hostname、credentials | ✅ |
 | `tasks.json` | Tasks | 任務 level／affinity／prio（1–6，可選） | ✅ |
+
+> **`system.json` 的 `links[].rx` 正常唔需要寫**：固件預設已是量測最優
+> （[net-results §6](net-results-2026-11-15.md)）。只有換線路參數／RAM 壓力／
+> 未量過的新 transport 才覆寫；改之前先用 `STATUS keys=net` 量。
 | `wiring.json` | **F.wiring**（build） | 板級腳位／匯流排預設 | ❌ 要重 build |
 | `board.json`＋`sdkconfig.defaults` | **F.spec／F.build**（build） | flash／PSRAM／CPU／console／OTG／HS／分割表 | ❌ 要重 build |
 
