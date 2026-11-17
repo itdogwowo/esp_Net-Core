@@ -95,7 +95,7 @@ if(NC_PROJECT_DIR AND EXISTS "${NC_PROJECT_DIR}/data/config/hardware.json")
     endif()
 endif()
 set(_preset_embed "${_preset_hw}")
-foreach(_cfg system network tasks)
+foreach(_cfg system network tasks resources)
     if(NC_PROJECT_DIR AND EXISTS "${NC_PROJECT_DIR}/data/config/${_cfg}.json")
         # 用 build-time 的 copy_if_different，而唔係 configure_file：
         # configure_file 只在「CMake 重跑」時複製，只改 JSON 內容唔會觸發
@@ -130,6 +130,11 @@ if(NC_PROJECT_DIR AND EXISTS "${NC_PROJECT_DIR}/data/config/tasks.json")
     set(_has_tasks_preset 1)
 else()
     set(_has_tasks_preset 0)
+endif()
+if(NC_PROJECT_DIR AND EXISTS "${NC_PROJECT_DIR}/data/config/resources.json")
+    set(_has_resources_preset 1)
+else()
+    set(_has_resources_preset 0)
 endif()
 
 # esp_wifi 是「編譯期可得」的相依：P4 冇 radio 所以唔要原生 esp_wifi；
@@ -180,6 +185,7 @@ if(NOT CMAKE_SCRIPT_MODE_FILE)
     target_compile_definitions(${COMPONENT_LIB} PRIVATE NETCORE_HAS_PRESET_TASKS=${_has_tasks_preset})
     target_compile_definitions(${COMPONENT_LIB} PRIVATE NETCORE_HAS_PRESET_SYSTEM=${_has_system_preset})
     target_compile_definitions(${COMPONENT_LIB} PRIVATE NETCORE_HAS_PRESET_NETWORK=${_has_network_preset})
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE NETCORE_HAS_PRESET_RESOURCES=${_has_resources_preset})
     if(NC_ENABLE_TESTS)
         target_compile_definitions(${COMPONENT_LIB} PRIVATE NC_ENABLE_TESTS=1)
         # main 直接 include 測試任務的標頭（nc_mod.h / nc_bench.h …）。

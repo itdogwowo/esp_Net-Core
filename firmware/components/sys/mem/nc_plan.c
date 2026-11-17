@@ -4,6 +4,18 @@
 #include <stdlib.h>
 #include <string.h>
 
+// 帳面用的 class 名字：STATUS mem 的 plan JSON 直接印，查「點解 fail」時
+// 唔使再回去數 enum。host test（plan_test）都會用。
+static const char *cls_name(nc_plan_class_t cls)
+{
+    switch (cls) {
+    case NC_PLAN_DMA:    return "dma";
+    case NC_PLAN_PSRAM:  return "psram";
+    case NC_PLAN_INTERNAL:
+    default:             return "int";
+    }
+}
+
 #ifdef NC_PLAN_HOST_TEST
 #include "plan_host.h"
 #define PLAN_LOG(...) plan_host_log(__VA_ARGS__)
@@ -144,6 +156,7 @@ esp_err_t nc_plan_commit(const size_t avail[NC_PLAN_CLASSES], bool allow_shed)
         s_carve[c] = plan_alloc(s_report.planned[c], 32, (nc_plan_class_t)c);
         if (s_carve[c] == NULL) {
             PLAN_LOG("plan: class %d carve %u B 失敗", c, (unsigned)s_report.planned[c]);
+            s_report.carve_failed[c] = true;
             for (int i = 0; i < s_count; i++) {
                 if (s_entries[i].ok && (int)s_entries[i].decl.cls == c) {
                     s_entries[i].ok = false;
@@ -211,11 +224,22 @@ size_t nc_plan_json(char *buf, size_t cap)
         return 0;
     }
     size_t off = 0;
+    const unsigned carve = (s_report.carve_failed[NC_PLAN_DMA] ? 1u : 0u) |
+                           (s_report.carve_failed[NC_PLAN_INTERNAL] ? 2u : 0u) |
+                           (s_report.carve_failed[NC_PLAN_PSRAM] ? 4u : 0u);
     off += snprintf(buf + off, cap - off,
                     "{\"ok\":%s,\"decl\":%d,\"fail\":%d,"
+                    // avail = 呼叫端（ph_commit）量到的每 class 可用量；
+                    // carve = bitmask（1=dma、2=int、4=psram）整個 class 的 alloc 失敗。
+                    // 有這兩個數字，「fail」係因為唔夠位，定係 carve 本身失敗，一眼分得出。
+                    "\"avail\":{\"dma\":%u,\"int\":%u,\"psram\":%u},\"carve\":%u,"
                     "\"bytes\":{\"dma\":%u,\"int\":%u,\"psram\":%u},\"items\":[",
                     s_report.fail_count == 0 ? "true" : "false",
                     s_report.decl_count, s_report.fail_count,
+                    (unsigned)s_report.avail[NC_PLAN_DMA],
+                    (unsigned)s_report.avail[NC_PLAN_INTERNAL],
+                    (unsigned)s_report.avail[NC_PLAN_PSRAM],
+                    carve,
                     (unsigned)s_report.planned[NC_PLAN_DMA],
                     (unsigned)s_report.planned[NC_PLAN_INTERNAL],
                     (unsigned)s_report.planned[NC_PLAN_PSRAM]);
@@ -223,10 +247,11 @@ size_t nc_plan_json(char *buf, size_t cap)
     for (int i = 0; i < s_count && off < cap; i++) {
         const plan_entry_t *e = &s_entries[i];
         off += snprintf(buf + off, cap - off,
-                        "%s{\"svc\":\"%s\",\"n\":\"%s\",\"lvl\":%d,\"b\":%u,\"ok\":%s}",
+                        "%s{\"svc\":\"%s\",\"n\":\"%s\",\"lvl\":%d,\"cls\":\"%s\","
+                        "\"b\":%u,\"ok\":%s}",
                         first ? "" : ",",
                         e->decl.service ? e->decl.service : "",
-                        e->decl.name, e->decl.level,
+                        e->decl.name, e->decl.level, cls_name(e->decl.cls),
                         (unsigned)e->decl.bytes,
                         e->ok ? "true" : "false");
         first = false;

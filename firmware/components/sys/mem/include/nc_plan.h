@@ -45,6 +45,7 @@ typedef struct {
     size_t planned[NC_PLAN_CLASSES];     // 實際要 carve 的量（成功項的總和）
     size_t allocated[NC_PLAN_CLASSES];   // 真的要到的量
     size_t avail[NC_PLAN_CLASSES];       // 呼叫端給的可用量
+    bool carve_failed[NC_PLAN_CLASSES];  // 整個 class 的 carve（heap_caps_*alloc）失敗
     int decl_count;
     int ok_count;
     int fail_count;

@@ -15,6 +15,15 @@
 //
 // 量測：心跳印「絕對 µs + 間隔」。複製大檔時看 dt，若出現 ~900ms 缺口就是 async IO 沒生效。
 
+// **sdkconfig.h 必須最先 include**：下面幾個能力巨集（NC_HAS_USB／NC_HAS_ETH／
+// NC_PLAN_CLS_BULK）用 CONFIG_* 做條件編譯。ESP-IDF 6 已經**不再**替你 -include
+// sdkconfig.h（v5 時代的隱含行為），所以晚過這裡 include 的話，`#if CONFIG_SPIRAM`
+// 會當成 0 —— 2026-11-17 實測：S3（8 MB PSRAM）的 NC_PLAN_CLS_BULK 靜靜變成
+// INTERNAL，nc4 回覆幀（2×2,615 B）落在內部 RAM，而 ncm 的 512 KB arena 直接
+// 「要內部 RAM 512 KB」→ plan fail → ncm 任務唔啟動。編譯零 warning，只有 status
+// 的 plan 帳看到 fail；這一 include 是那個 bug 的修正。
+#include "sdkconfig.h"
+
 // ── USB 能力（TinyUSB／CDC）─────────────────────────────────────
 // 由 Kconfig 的 NETCORE_USB_OTG 決定，而它的 default 跟官方的 SOC_USB_OTG_SUPPORTED：
 //   有 OTG 的晶片（S3／S2／P4）→ 自動 y，整組 USB 服務組編入；
@@ -280,6 +289,10 @@ extern const uint8_t preset_network_end[]   asm("_binary_preset_network_json_end
 extern const uint8_t preset_tasks_start[]   asm("_binary_preset_tasks_json_start");
 extern const uint8_t preset_tasks_end[]     asm("_binary_preset_tasks_json_end");
 #endif
+#if NETCORE_HAS_PRESET_RESOURCES
+extern const uint8_t preset_resources_start[] asm("_binary_preset_resources_json_start");
+extern const uint8_t preset_resources_end[]   asm("_binary_preset_resources_json_end");
+#endif
 
 
 // ── MSC 事件 ──
@@ -318,12 +331,15 @@ static void seed_file(const char *path, const uint8_t *start, const uint8_t *end
 //
 // 有 project preset 的層就唔需要呢個骨架（main/CMakeLists 會 define
 // NETCORE_HAS_PRESET_*），所以逐個用 #if 包住：否則 -Werror=unused-const-variable
-// 會在「三個 preset 齊全」的 build（例如 P4-ETH 的 default project）直接失敗。
-// seed_text 本身無條件編：resources.json 的骨架一定會用到它。
+// 會在「四個 preset 齊全」的 build（例如 P4-ETH 的 default project）直接失敗。
+// seed_text 一樣要包：全 preset 齊的 build 唔會用到它。
+#if !NETCORE_HAS_PRESET_SYSTEM || !NETCORE_HAS_PRESET_NETWORK || \
+    !NETCORE_HAS_PRESET_TASKS || !NETCORE_HAS_PRESET_RESOURCES
 static void seed_text(const char *path, const char *text)
 {
     seed_bytes(path, (const uint8_t *)text, strlen(text));
 }
+#endif
 
 #if !NETCORE_HAS_PRESET_SYSTEM
 static const char k_min_system[] =
@@ -337,8 +353,10 @@ static const char k_min_network[] =
 static const char k_min_tasks[] =
     "{\n  \"version\": 1,\n  \"tasks\": []\n}\n";
 #endif
+#if !NETCORE_HAS_PRESET_RESOURCES
 static const char k_min_resources[] =
     "{\n  \"version\": 1,\n  \"resources\": []\n}\n";
+#endif
 
 // 目錄結構也是「出廠內容」的一部分：config/ 與 pixel/effects/ 先建好，
 // 使用者插上隨身碟就看得到該把東西放哪裡。
@@ -375,7 +393,11 @@ static void seed_presets(void)
 #else
     seed_text(PRESET_TASKS_PATH, k_min_tasks);
 #endif
+#if NETCORE_HAS_PRESET_RESOURCES
+    seed_file(PRESET_RESOURCES_PATH, preset_resources_start, preset_resources_end);
+#else
     seed_text(PRESET_RESOURCES_PATH, k_min_resources);
+#endif
 }
 
 // ── 卷標：預設叫 NETCORE，不是 NO NAME ──
