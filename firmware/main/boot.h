@@ -68,8 +68,8 @@ typedef struct {
     bool usb_msc;           // 要不要把 FAT 交給 host（只有 OTG 有）
 
     // ③ USB 這條線屬於哪一組（NC_CAP_ROUTER）：B05 建完「線 → 組」表之後寫入。
-    //    -1 = 這條線未路由（config 的 routes[] 沒有它）。之後 B07（回覆幀）、
-    //    B10（TinyUSB／log）、B11（bus）全部讀這裡 —— 唔再各自去問 router，
+    //    -1 = 這條線未路由（config 的 routes[] 沒有它）。之後 B06（回覆幀）、
+    //    B09（TinyUSB／log）、B10（bus）全部讀這裡 —— 唔再各自去問 router，
     //    否則同一個決定會問四次，仲各自帶 fallback。
     int usb_core;
 
@@ -103,8 +103,9 @@ const char *nc_cap_name(uint16_t bit);
 //
 // 命名空間（全專案共用；文件、log、圖、commit message 都用同一個 token）：
 //
-//   B01…   開機階段（下表；順序執行，整輩子一次）      B03 ＝ storage+cfg
-//          B06（pool）已於 2026-11-14 移除 → B06 跳號，B07–B12 不重編號
+//   B01…   開機階段（下表；順序執行，整輩子一次）      B02 ＝ storage+cfg
+//          （第六階段 pool 已於 2026-11-14 移除；2026-11-17 把之後六個階段
+//            前移一號，所以現在 B01–B11 連號、冇空號 —— 見 naming.md §7.3）
 //   T.xxx  任務（nc_task_def.name；有棧、有核）        T.decode0、T.cdc.rx
 //   R.xxx  plan 資源／緩衝（nc_task_res_t.name）       R.usb.rx、R.reply1
 //   L.xxx  通道／線（link 名；NC4 的線名）             L.CDC、L.UART
@@ -144,7 +145,7 @@ typedef enum {
 } nc_boot_state_t;
 
 typedef struct {
-    const char *id;                   // "B07"
+    const char *id;                   // "B06"
     const char *name;
     nc_boot_state_t state;
     esp_err_t err;

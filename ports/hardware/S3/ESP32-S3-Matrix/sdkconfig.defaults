@@ -14,7 +14,7 @@ CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
 
 # ── console：none ──
 # 這塊板改用 TinyUSB OTG（MSC 隨身碟 + CDC log）；S3 的 OTG 與 USJ 共用同一條
-# PHY，所以不能同時用 USJ console。App log 由 CDC（B10 之後）出；bootloader 的
+# PHY，所以不能同時用 USJ console。App log 由 CDC（B09 之後）出；bootloader 的
 # 早期訊息不會有。要拿回 USJ console 就把這行改回 USB_SERIAL_JTAG，並把
 # system.json 的 USB link kind 改回 usb_jtag（MSC 會失效）。
 CONFIG_ESP_CONSOLE_NONE=y

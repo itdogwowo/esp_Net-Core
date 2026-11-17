@@ -18,8 +18,8 @@ S3 的 OTG 與 USJ 共用同一條 PHY，只能二選一。這塊板現在用 **
 - `system.json`：`links[].kind="cdc"`、`usb.msc=1`、`usb.cdc_log=1`
 - `sdkconfig.defaults`：`CONFIG_ESP_CONSOLE_NONE=y`、`CONFIG_ESP_CONSOLE_SECONDARY_NONE=y`
 - 上板後預期：`NC-xxxx` MSC 碟（896 KB）＋ CDC serial（app log）；build 已過，未上板實測
-- **bootloader 早期 log 不會有**；app log 由 CDC（B10 之後）出
-- `msc=1` 時 B10 把 FAT 交給 host；device 只剩唯讀 `/ro`，HTTP static `/data/www` 可能讀不到
+- **bootloader 早期 log 不會有**；app log 由 CDC（B09 之後）出
+- `msc=1` 時 B09 把 FAT 交給 host；device 只剩唯讀 `/ro`，HTTP static `/data/www` 可能讀不到
 
 要回到 USJ console（MSC 會失效）：把 `kind` 改回 `usb_jtag`、`usb.msc=0`、
 `CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y`，再 `make.py build ESP32-S3-Matrix --fresh`。

@@ -81,57 +81,57 @@ DECISIONS = [
     ("D3", "nc_core_probe()（IDF 晶片實際核數）",
      "1 核 → config decode1→decode0、tasks core1→core0；decoder 只建 1 個；全部 clamp core0\n"
      "2 核 → 可按 routes 派 decode0／decode1",
-     "B03；影響 B07 decoder 數、B08 line core、B11 任務核", C_CAP),
+     "B03；影響 B06 decoder 數、B07 line core、B10 任務核", C_CAP),
     ("D4", "links[] 有 enable 的 kind:\"usb\"（→cdc／usb_jtag）？× build 有冇該 transport",
      "JTAG／OTG／NONE；JTAG log 永遠開、OTG 跟 usb.cdc_log；MSC 只 OTG＋link.msc=1",
-     "B03 寫 ctx；B10 照做（冇 runtime 切換）", C_CAP),
+     "B03 寫 ctx；B09 照做（冇 runtime 切換）", C_CAP),
     ("D5", "NC_HAS_ETH（晶片 EMAC）＋ hardware ETH.present／enable＋mdc/mdio/ref_clk 完整",
      "全部成立 → 起 netif／PHY（s_eth_ok=1）；否則 s_eth_ok=0",
      "B05；之後 ETH 通道／legacy TCP 全部跟它", C_HW),
     ("D6", "system.routes[] 有效？（in 的 link enable；out 第一個 decodeN）",
      "每線 core＝第一個 decodeN（單核 clamp、decode1 重寫）；冇有效 routes → 預設表",
-     "B05 router → B07／B08／B11 的核全部由這張表", C_HW),
+     "B05 router → B06／B07／B10 的核全部由這張表", C_HW),
     ("D7", "任何 link：composite kind（eth_tcp／wifi_tcp…）＋ enable ＋ port≠0？",
      "有 → 新 nc_net_lines 接管；冇 → legacy（nc4_line_net／main tcp accept／ws／udp）",
-     "B08／B11 二選一，唔會兩條路同時起", C_LINK),
+     "B07／B10 二選一，唔會兩條路同時起", C_LINK),
     ("D8", "逐條 line：composite kind？enable？port≠0？service claim（port 政策）？routes 有核？decoder 存在？buffer 配到？",
      "全過 → 建 listener／bus；HTTP→core0；NC4／WS→routes core；任一唔過 → 跳過該線（其他照起）；\n"
      "routes[].out 指到不存在 link → 只忽略該格，不令整張表失敗",
-     "B08 宣告、B11 開 listener", C_LINK),
+     "B07 宣告、B10 開 listener", C_LINK),
     ("D9", "任務：kind＝SYSTEM？tenant 的 tasks.json level／affinity？loop enabled()？",
      "SYSTEM 永遠照 C 宣告（config 管唔到）；tenant level≥0 且 affinity 有 1 → loop 開；\n"
      "否則 on_start 照跑、loop 唔開（缺條目＝(0,0)）",
-     "B07 declare、B09 on_start、B11 nc_task_boot", C_TASK),
+     "B06 declare、B08 on_start、B10 nc_task_boot", C_TASK),
     ("D10", "CONFIG_NETCORE_WIFI 編入？network.json wifi.enable？mode sta/ap？有 credentials？",
      "全過 → 起 WiFi；否則唔初始化（0 B heap 以外）",
-     "B08；WiFi manager task＝core1（單核 clamp 0）", C_TASK),
+     "B07；WiFi manager task＝core1（單核 clamp 0）", C_TASK),
     ("D11", "NC_ENABLE_TESTS？fx 任務 started？WAMR 後端有冇接？",
      "測試 build：掃 /data/pixel/effects、/data/tasks 的 .fxe attach；release 唔掃；\n"
      "WAMR 未接 → 登記得到、跑不到",
-     "B09；效果目前只在測試映像出現；FXE 執行後端未完成", C_MEM),
+     "B08；效果目前只在測試映像出現；FXE 執行後端未完成", C_MEM),
     ("D12", "network.json rawbench=1？",
      "開 :5000／:5001 raw 測試 endpoint；release 要關",
-     "B11；繞過 NC4，只作量測", C_BAD),
+     "B10；繞過 NC4，只作量測", C_BAD),
 ]
 
 # ── 核落點 ─────────────────────────────────────────────────────────────
 CORE_RULES = [
-    "app_main（B01→B12）固定 core0；每階段都係順序跑。",
+    "app_main（B01→B11）固定 core0；每階段都係順序跑。",
     "每條 line 的核 = routes[].out 第一個 decodeN；HTTP service 固定 core0。",
-    "producer 必須同 bus / decoder 同核（kick 同核）；B11 會驗，跨核＝ERROR。",
+    "producer 必須同 bus / decoder 同核（kick 同核）；B10 會驗，跨核＝ERROR。",
     "SYSTEM task：照 C 宣告 core（clamp）；tenant：tasks.json affinity 可改（只可一核=1）。",
     "WiFi manager＝core1（clamp）；單核板全部落 core0。",
     "測試任務／fx：宣告／manifest 的 core（只有 NC_ENABLE_TESTS）。",
 ]
 
 CORE0 = [
-    ("app_main", "B01–B12 全部階段（順序）", C_PREP),
+    ("app_main", "B01–B11 全部階段（順序）", C_PREP),
     ("decode0", "條件：routes 有 decode0（幾乎一定有）", C_CAP),
     ("line tasks", "route core0 的 TCP／UDP／WS，core 由 routes", C_LINK),
     ("httpd", "HTTP service（:80）固定 core0", C_LINK),
     ("cdc.rx", "USB 線的核（decoder_core；單 decoder→core0）", C_LINK),
     ("uart.rx", "UART 線的核（decode 起咗才建 producer）", C_LINK),
-    ("心跳", "B12 之後 app_main 每秒 heartbeat", C_TASK),
+    ("心跳", "B11 之後 app_main 每秒 heartbeat", C_TASK),
     ("測試任務", "probe／hello／bench… 依宣告（測試 build）", C_TASK),
 ]
 CORE1 = [
@@ -181,7 +181,7 @@ def build():
     rect(0, 0, W, H, PAPER, PAPER, 0, 0)
 
     text(L, 52, "開機：邊個決定啟動什麼、喺邊個核、什麼情況唔啟動", 25, INK, 600)
-    text(L, 78, "所有決策都喺 B01–B11 之間發生；冇 runtime 熱切換 —— 改 config 之後重啟，全部重算。",
+    text(L, 78, "所有決策都喺 B01–B10 之間發生；冇 runtime 熱切換 —— 改 config 之後重啟，全部重算。",
          12.5, MUTED)
     text(R, 78, "階段明細見 boot.svg", 11, FAINT, anchor="end")
 
@@ -245,12 +245,12 @@ def build():
     panel(L, F_Y, R - L, F_H, "F  總閘", "B02 是總閘：storage+cfg 失敗，後面全部 SKIP")
     text(L + 20, F_Y + 92,
          "· ph_storage 回非 ESP_OK → NC_CAP_STORAGE／CONFIG 唔 give → B03（needs CONFIG）之後全部 SKIP；"
-         "B12 account 仍會跑，然後只剩 app_main 心跳。", 11.2, INK2)
+         "B11 account 仍會跑，然後只剩 app_main 心跳。", 11.2, INK2)
     text(L + 20, F_Y + 114,
          "· config 檔壞 ≠ B02 FAIL：degraded 仍然 give CONFIG，之後用內建預設開機；"
          "所以「壞檔」同「冇碟」後果唔同。", 11.2, INK2)
     text(L + 20, F_Y + 136,
-         "· B10 USB 失敗／B11 單線失敗都只係局部退化（記錄＋跳過），唔會令前面階段重跑。",
+         "· B09 USB 失敗／B10 單線失敗都只係局部退化（記錄＋跳過），唔會令前面階段重跑。",
          11.2, INK2)
 
     text(R, H - 18, "來源：firmware/main/main.c · boot.c · nc_task.c · nc_net_lines.c · nc_wifi.c · nc4_router.c",

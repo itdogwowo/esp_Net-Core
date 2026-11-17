@@ -175,7 +175,7 @@ static const char *TAG = "netcore";
 // UART 的狀態由 driver 管（nc_uart_drv_ready()）。
 
 static uint16_t s_cid = NC4_ADDR_BROADCAST;   // 自己的 2B 協議位址
-// master_cid 只存「這次開機讀到的值」：decoder 要到 B07 才建立，
+// master_cid 只存「這次開機讀到的值」：decoder 要到 B06 才建立，
 // 所以身份一定要記住、等建立之後再套（見 ph_declare 的 decoders_set_identity）。
 static uint16_t s_master_cid = NC4_ADDR_BROADCAST;
 
@@ -1485,7 +1485,7 @@ static size_t status_put_cfg(char *buf, size_t cap)
 //
 // 2026-11-13：**個數由核數決定**。單核（C3／C6／H2）只有一個 decode 任務，
 // 第二個 decoder 同它的回覆幀（2,615 B 內部 RAM，無 PSRAM）一生都用不到。
-// 陣列用編譯期上限，實際個數由 B07 決定（s_ndec），唔再問 core 數 ——
+// 陣列用編譯期上限，實際個數由 B06 決定（s_ndec），唔再問 core 數 ——
 // 「有幾多核」同「實際起咗幾個 decoder」係兩件事（雙核但 core1 冇線 → 只有 1 個）。
 #define NC4_DECODER_SLOTS 2      // 陣列上限 = 框架支援的最大核數
 static nc4_decoder_t *s_decoder[NC4_DECODER_SLOTS];
@@ -1541,7 +1541,7 @@ static int nc4_decoders(void)
 }
 
 // 所有 decoder 共用同一個身份：cid 過濾與 master_cid（回覆位址）必須一致。
-// ⚠️ 時序：呼叫點一定要在 nc4_decoder_create() **之後**（B07）——
+// ⚠️ 時序：呼叫點一定要在 nc4_decoder_create() **之後**（B06）——
 // node_identity_init() 喺 B02 跑，那時 s_decoder[] 全部係 NULL，
 // 喺那裡設定等於把 cid／master 掉進黑洞（decoder 一生都用 0xFFFF）。
 static void decoders_set_identity(uint16_t cid, uint16_t master)
@@ -1884,10 +1884,10 @@ static void node_identity_init(void)
 
     s_cid = cid;
     s_master_cid = master;
-    // decoder 喺 B07 才建立 → 這裡只記住身份；套用喺 ph_declare（建立之後）。
+    // decoder 喺 B06 才建立 → 這裡只記住身份；套用喺 ph_declare（建立之後）。
     // 以前喺這裡呼叫 decoders_set_identity()：s_decoder[] 全部係 NULL，
     // 等於冇做 —— decoder 一生都用 0xFFFF，單播到本機 cid 的幀會被丟。
-    ESP_LOGI(TAG, "cid=0x%04X（config） master_cid=0x%04X（NVS，B07 套到 decoder）",
+    ESP_LOGI(TAG, "cid=0x%04X（config） master_cid=0x%04X（NVS，B06 套到 decoder）",
              cid, master);
 }
 
@@ -4004,7 +4004,7 @@ static esp_err_t ph_storage(void)
 //   ③ USB 人格        → ctx 的 usb_*；declare、ph_usb、ph_channels 讀它
 //
 // ② 排在 ③ 之前是刻意的：先把「硬體事實的後果」全部落地，再決定「用哪一條人格」
-//    （CDC ／ USJ）。之後 B05 router／B07 declare／B09 start 讀到的都是**同一份
+//    （CDC ／ USJ）。之後 B05 router／B06 declare／B08 start 讀到的都是**同一份
 //    已收斂的表**，唔會各自再夾一次（以前那件事散在 router、decoder 個數、
 //    任務管理器、USB 服務組四個地方）。
 //
@@ -4199,7 +4199,7 @@ static esp_err_t ph_hardware(void)
         ESP_LOGI(TAG, "router: %s", s_route_json);
 
         // USB 那條線屬於哪一組：就在這張表裡，**這裡一次講清楚**。
-        // 之後 B07（回覆幀）、B10（TinyUSB／log）、B11（bus＋producer）全部讀
+        // 之後 B06（回覆幀）、B09（TinyUSB／log）、B10（bus＋producer）全部讀
         // ctx 的 usb_core，唔再各自問一次 router（以前問四次，仲各自帶 fallback）。
         // USB 的人格（CDC／USJ、log／msc）是 B03 的事；「入邊一組」是這張表的事 ——
         // 兩件事分開，唔係重複決定 USB。
@@ -4343,8 +4343,8 @@ static esp_err_t ph_start(void)
 //   · OTG 只有「CDC 有登記」或「msc=1」才裝 TinyUSB
 static esp_err_t ph_usb(void)
 {
-    // 每次開機**只會走到這裡一次**：driver／線由 B03 讀 config 決定，B10 init。
-    // 沒有 runtime 切換 —— 要換線就改 config 再重啟（下次 B03 重算、B10 重新 init）。
+    // 每次開機**只會走到這裡一次**：driver／線由 B03 讀 config 決定，B09 init。
+    // 沒有 runtime 切換 —— 要換線就改 config 再重啟（下次 B03 重算、B09 重新 init）。
     const nc_boot_ctx_t *b = nc_boot_ctx();
     esp_err_t err = ESP_ERR_NOT_SUPPORTED;
     (void)err;   // 冇 OTG 的建置只有 JTAG 分支，err 唔會被讀
@@ -4784,8 +4784,9 @@ void app_main(void)
     // 開機階段的**契約**：一張表睇完「有什麼、先後、誰要等誰」。
     //   needs／gives = 依賴（執行器驗；缺了就 SKIP 並講明缺什麼）
     //   次序仍然由這張表的行序決定 —— 但現在改錯次序，契約會喊。
-    //   B06（pool）已於 2026-11-14 整組移除（nc4.pool 冇任何用戶）。
-    //   **ID 唔重編號**：B07–B12 保持原號，中間跳號是刻意的（見 naming.md §7）。
+    //   第六階段 pool 已於 2026-11-14 整組移除（nc4.pool 冇任何用戶）。
+    //   2026-11-17 把後面的階段全部前移一號 → 現在 B01–B11 連號、冇空號
+    //   （見 naming.md §7.3）；之後加減階段照樣順移，唔好再留空號。
     // 加一步：這裡加一行 + 寫一個 ph_*；搬資料：ctx 加欄位（見 boot.h 的三層說明）。
     static const nc_boot_stage_t stages[] = {
         // ID    name             needs                                        gives                           fn
@@ -4794,13 +4795,13 @@ void app_main(void)
         { "B03", "capability",   NC_CAP_CONFIG,                               NC_CAP_CORES | NC_CAP_USB,       ph_capability, false },
         { "B04", "hwcheck",      NC_CAP_CONFIG,                               0,                               ph_hwcheck, false },
         { "B05", "hardware",     NC_CAP_CONFIG,                               NC_CAP_ROUTER,                   ph_hardware, false },
-        { "B07", "declare",      NC_CAP_CONFIG | NC_CAP_CORES | NC_CAP_USB | NC_CAP_ROUTER,
+        { "B06", "declare",      NC_CAP_CONFIG | NC_CAP_CORES | NC_CAP_USB | NC_CAP_ROUTER,
                                                                              NC_CAP_DECLARED,                 ph_declare, false },
-        { "B08", "commit",       NC_CAP_DECLARED,                             NC_CAP_PLAN,                     ph_commit, false },
-        { "B09", "start",        NC_CAP_PLAN | NC_CAP_CONFIG,                 NC_CAP_TASKS,                    ph_start, false },
-        { "B10", "usb",          NC_CAP_USB | NC_CAP_ROUTER,                  0,                               ph_usb, false },
-        { "B11", "channels",     NC_CAP_TASKS | NC_CAP_USB | NC_CAP_ROUTER,   NC_CAP_CHANNELS,                 ph_channels, false },
-        { "B12", "account",      0,                                           0,                               ph_account, false },
+        { "B07", "commit",       NC_CAP_DECLARED,                             NC_CAP_PLAN,                     ph_commit, false },
+        { "B08", "start",        NC_CAP_PLAN | NC_CAP_CONFIG,                 NC_CAP_TASKS,                    ph_start, false },
+        { "B09", "usb",          NC_CAP_USB | NC_CAP_ROUTER,                  0,                               ph_usb, false },
+        { "B10", "channels",     NC_CAP_TASKS | NC_CAP_USB | NC_CAP_ROUTER,   NC_CAP_CHANNELS,                 ph_channels, false },
+        { "B11", "account",      0,                                           0,                               ph_account, false },
     };
     (void)nc_boot_run(stages, NC_BOOT_COUNT(stages));
 

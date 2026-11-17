@@ -11,11 +11,11 @@
 ## 1. 三層
 
 ```text
-System 組件（main + components/sys/*）              ← 唔屬於任何核；B01–B12
+System 組件（main + components/sys/*）              ← 唔屬於任何核；B01–B11
   │
   ├─ 問：這塊板有幾多個核？                          B03 capability
   │
-  ├─ 對每個核建立一個「核心組」                       B07 declare ／ B09 start
+  ├─ 對每個核建立一個「核心組」                       B06 declare ／ B08 start
   │   core0 組
   │    ├─ 解碼器（根）          ADDR 過濾、dispatch、回覆、執行鎖
   │    ├─ 通道（link）          USB／UART／TCP／…：收到幀就交給這個解碼器
@@ -92,14 +92,14 @@ requested core ──(核存在?)──> home = requested
   但語義不同 —— 混在一起就會把「冇線」誤當成「冇核」。
 - **USB 線要分兩個問題**：B03 決定人格（邊條線做 USB、CDC／USJ、log／msc）；
   B05 建「線 → 組」表時決定它入哪一組，並寫入 `ctx.usb_core`。
-  之後 B07（回覆幀）、B10（TinyUSB／log）、B11（bus）只讀 ctx —— 不再各自問 router。
+  之後 B06（回覆幀）、B09（TinyUSB／log）、B10（bus）只讀 ctx —— 不再各自問 router。
 - 推論：
   - **單核**：所有核的要求 home = core0 → 整個 core1 組（解碼器＋任務＋通道的核歸屬）
     在 core0 建立。這是模型的推論，不是「解碼器特例」。
   - **雙核但 core1 冇線**：不建 decoder1（省 2,615 B 回覆幀），
     但如果 `tasks.json` 有任務指定 core1，它們仍然在 core1 跑 ——
     只是「沒有從 core1 收幀」的通道，收指令一律經 decoder0。
-  - **身份（`cid`／`master_cid`）屬於組**：在解碼器建立之後才套（B07）。
+  - **身份（`cid`／`master_cid`）屬於組**：在解碼器建立之後才套（B06）。
     B02 讀到的值只是「這次開機的決定」，不是「已經落到 decoder 身上」。
 
 ---
@@ -110,12 +110,12 @@ requested core ──(核存在?)──> home = requested
 |---|---|---|
 | **B03** capability | 問核數；把「要求」收斂成「落點」（config 的 `decode1`／core1 → core0）；再定 USB 人格 | `nc_core_probe`／`nc_cfg_merge_cores`／`usb_resolve` |
 | **B05** hardware | 線 → 組（router）；USB 那條線的組寫入 ctx 一次（之後只讀） | `nc4_router_set`／`usb_core` |
-| **B07** declare | 對每個有線路由到的核：建解碼器（根）＋套身份；向 plan 要回覆幀 | `s_ndec`／`nc4_decoder_create`／`decoders_set_identity` |
-| **B09** start | 組內任務：由任務管理器建立 loop；loop 的核 = 落點 | `nc_task`／`nc_core_clamp` |
-| **B11** channels | 通道：bus 的核 = 落點；producer 同核 | `ph_channels`／`decoder_core` |
+| **B06** declare | 對每個有線路由到的核：建解碼器（根）＋套身份；向 plan 要回覆幀 | `s_ndec`／`nc4_decoder_create`／`decoders_set_identity` |
+| **B08** start | 組內任務：由任務管理器建立 loop；loop 的核 = 落點 | `nc_task`／`nc_core_clamp` |
+| **B10** channels | 通道：bus 的核 = 落點；producer 同核 | `ph_channels`／`decoder_core` |
 
-次序的理由：落點（B03）一定要早過「線 → 核」（B05）與「建組」（B07）；
-B07 一定要早過 B09（回覆幀的數目決定資源次序），B11 最遲（要等任務與解碼器都在）。
+次序的理由：落點（B03）一定要早過「線 → 核」（B05）與「建組」（B06）；
+B06 一定要早過 B08（回覆幀的數目決定資源次序），B10 最遲（要等任務與解碼器都在）。
 
 ---
 
@@ -127,7 +127,7 @@ B07 一定要早過 B09（回覆幀的數目決定資源次序），B11 最遲�
 - 解碼器那一組設定（decoder 索引、`bus.cfg.core`、producer 釘核、回覆幀索引）由
   `decoder_slot()`／`decoder_core()` 一起回答；核不存在時它與 `nc_core_clamp()`
   給同一個答案（core0）。
-- 身份在 B07 建立之後套（之前寫在 B02，等於沒有套）。
+- 身份在 B06 建立之後套（之前寫在 B02，等於沒有套）。
 - 沒有線的組不建解碼器（`s_ndec` 只看「有冇線路由到 core1」）。
 
 **尚未**：

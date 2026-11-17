@@ -159,7 +159,7 @@ C 名字（`nc_boot_*`、`nc4_bus_*`）解決了「程式裡叫乜」，但**講
 
 | 前綴 | 指乜 | 權威來源（唯一真相） | 例子 |
 |---|---|---|---|
-| `B01`–`B12` | **開機階段**（整輩子一次，順序） | `main.c` 的 `stages[]`、`boot.h` 的契約 | `B02 storage+cfg` |
+| `B01`–`B11` | **開機階段**（整輩子一次，順序） | `main.c` 的 `stages[]`、`boot.h` 的契約 | `B02 storage+cfg` |
 | `T.` | **任務**（有棧、有核、有 loop） | `nc_task_def.name`／`xTaskCreate` 的名 | `T.decode0`、`T.cdc.rx` |
 | `R.` | **plan 資源／緩衝**（宣告→carve） | `nc_task_res_t.name` | `R.usb.rx`、`R.nc4.reply1` |
 | `L.` | **通道／線**（link 名） | `nc4_link_register()` 的名字 | `L.CDC`、`L.UART` |
@@ -190,17 +190,18 @@ USB 的三層詞（線／transport／driver）見 [usb-config.md §0.1](usb-conf
 | `B03` | capability | n/a | 探核數；單核時 core1 的核心組（解碼器＋其上任務）落到 core0（config 只改 RAM）；再定 USB 人格（模式／link／log／msc） |
 | `B04` | hwcheck | n/a | `hardware.json` 的 claim 對帳 |
 | `B05` | hardware | 0.33 ms | PWM 安裝；ETH enable=1 才起；`system.routes` 建「線 → 組」表；USB 那條線的組寫入 ctx（usb_core） |
-| `B07` | declare | 10.45 ms | 向 plan 宣告要幾多（未 malloc） |
-| `B08` | commit | 0.76 ms | plan carve（緩衝真正落地）；`nc_wifi_boot()` |
-| `B09` | start | 5.39 ms | 建 decode0／1 任務（entry 停在閘前） |
-| `B10` | usb | 52.01 ms | TinyUSB 列舉；`nc_log_start()` |
-| `B11` | channels | 1.81 ms | 建 bus／producer；`nc_task_boot()` 放行 |
-| `B12` | account | 0.19 ms | 印「開機剩餘」，之後只剩心跳 |
+| `B06` | declare | 10.45 ms | 向 plan 宣告要幾多（未 malloc） |
+| `B07` | commit | 0.76 ms | plan carve（緩衝真正落地）；`nc_wifi_boot()` |
+| `B08` | start | 5.39 ms | 建 decode0／1 任務（entry 停在閘前） |
+| `B09` | usb | 52.01 ms | TinyUSB 列舉；`nc_log_start()` |
+| `B10` | channels | 1.81 ms | 建 bus／producer；`nc_task_boot()` 放行 |
+| `B11` | account | 0.19 ms | 印「開機剩餘」，之後只剩心跳 |
 
 > **第六階段（pool）已於 2026-11-14 整組移除**：`nc4.pool` 的 stage、config schema、
 > seed 全部刪除（small／bulk 冇用戶、forward 早已改用 `nc_buf`）。
-> 後面的階段**保持原號**，所以號碼由 05 跳到 07 —— 這是刻意的；
-> 唔要為咗靚號碼重編號（ID 是契約）。
+> 當日刻意留空號（05 → 07）。但空號要 log／圖／文件每次都解釋「為何冇 B06」，
+> **2026-11-17 已把後面六個階段前移一號**（舊號碼 07–12 → 06–11），現在連號。
+> 規矩改成：階段一有增減就順移，唔好留空號（搬遷記錄見 status.md §7.80）。
 
 `n/a` ＝ 該階段是量測之後才拆出來的（原本混在別人的時間裡），**不是 0.0 ms**。
 來源見 [status.md](../00_pm/status.md) §7.23。
@@ -217,10 +218,11 @@ USB 的三層詞（線／transport／driver）見 [usb-config.md §0.1](usb-conf
 
 ### 7.5 規矩
 
-1. **講嘢帶前綴。**「`B11` 之後 core1 才有 loop」唔會有人誤會；「channels 之後」會。
-2 . **ID 是契約。** 寫落文件／log／圖之後就唔改。要改＝**換一個新 ID**，並且一齊改
-   引用它的地方（`tools/id_check.py` 掃）。
-3. **數字只代表先後，唔代表重要。** `B07` 唔係因為緊要所以排第七。
+1. **講嘢帶前綴。**「`B10` 之後 core1 才有 loop」唔會有人誤會；「channels 之後」會。
+2 . **ID 是契約。** 寫落文件／log／圖之後就唔改；要改＝一齊改齊所有引用，並用
+   `tools/id_check.py` 掃過（舊 token 唔可以殘留）。只有「未有外部依賴」時才值得重編
+   （2026-11-17 的 B 重編就是這種：ID 只出現在本 repo 的 log／圖／文件）。
+3. **數字只代表先後，唔代表重要。** `B06` 唔係因為緊要所以排第六。
 4. **`NC_CAP_*` 是能力位，唔係階段。** 以前叫 `NC_STAGE_*`，同「階段」撞名 ——
    2026-11-13 改名（`needs`／`gives` 用嘅位元）。
 
@@ -230,7 +232,7 @@ USB 的三層詞（線／transport／driver）見 [usb-config.md §0.1](usb-conf
 |---|---|
 | `firmware/main/boot.h` | `nc_boot_stage_t.id`、`nc_boot_result_t.id`；命名空間寫在 header |
 | `firmware/main/boot.c` | `boot[B02] storage+cfg 126.92 ms ok`；摘要 `B01 9.66 \| B02 126.92 \| …` |
-| `firmware/main/main.c` | 12 行表加 `"B01"…"B12"`；`NC_STAGE_*` → `NC_CAP_*` |
+| `firmware/main/main.c` | 階段表（現 11 行，連號）加 `"B01"…"B11"`；`NC_STAGE_*` → `NC_CAP_*` |
 | `docs/00_pm/boot.svg`、`boot-cores.svg`、`core-timeline.svg` | 三張圖都用 B-id／D-id，同 log 對得上 |
 | `tools/id_check.py` | 掃 docs／SVG 的 ID token，對 code 是否存在（唔存在就 fail） |
 

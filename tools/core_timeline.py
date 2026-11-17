@@ -227,10 +227,11 @@ FWD_ROW = ("runtime", None,
             "唔轉寄就一個 byte 都唔配（單核／冇 PSRAM 直接唔建）"])
 
 
-# B 的號碼是契約（見 naming.md §7）：B06（pool）已於 2026-11-14 移除，
-# 所以這裡保留跳號，不重編號。順序 = ROWS 的順序。
+# B 的號碼是契約（見 naming.md §7.3）：第六階段 pool 已於 2026-11-14 移除，
+# 2026-11-17 把之後的階段前移一號，所以現在連號 B01–B11。
+# 順序 = ROWS 的順序。
 STAGE_IDS = ["B01", "B02", "B03", "B04", "B05",
-             "B07", "B08", "B09", "B10", "B11", "B12"]
+             "B06", "B07", "B08", "B09", "B10", "B11"]
 assert len(STAGE_IDS) == len(ROWS), "STAGE_IDS 同 ROWS 數量對不上"
 
 
@@ -530,7 +531,7 @@ def build():
     # 放喺圖例上一行：讀者掃到 B03 兩個 usb_* 欄位時，唔需要再翻 boot.svg。
     rich(40, H - 36, [
         ("簡寫", MUTED, 600, False),
-        ("：B01–B12 ＝ 開機階段（數字只代表先後）｜"
+        ("：B01–B11 ＝ 開機階段（數字只代表先後）｜"
          "ctx ＝ nc_boot_ctx（跨階段唯一一份：cores／usb_*／usb_core＋ready 帳；usb_core 由 B05 寫）｜"
          "usb_mode／link／log／msc ＝ USB 模式／線名／log 閘／MSC 閘｜"
          "MSC ＝ Mass Storage Class（把 FAT 當隨身碟）｜"

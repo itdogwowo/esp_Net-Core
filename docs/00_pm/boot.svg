@@ -17,7 +17,7 @@
 <text x="290.0" y="187.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11.6" font-weight="400" fill="#3D4247" text-anchor="start">印 IDF／chip／cores／PSRAM／頻率 banner</text>
 <text x="920.0" y="170.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11.2" font-weight="400" fill="#1F5F8B" text-anchor="start">◇D1 開機生命週期在 B02 才讀；本階段無分支</text>
 <text x="1380.0" y="170.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11.2" font-weight="400" fill="#3D4247" text-anchor="start">ctx：nvs 可用</text>
-<text x="1380.0" y="185.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11.2" font-weight="400" fill="#3D4247" text-anchor="start">log ring（RAM，consumer 等 B10）</text>
+<text x="1380.0" y="185.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11.2" font-weight="400" fill="#3D4247" text-anchor="start">log ring（RAM，consumer 等 B09）</text>
 <text x="1380.0" y="200.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11.2" font-weight="400" fill="#3D4247" text-anchor="start">NC_CAP_NVS</text>
 <text x="1660.0" y="170.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="10.6" font-weight="400" fill="#6E747B" text-anchor="start">NVS 失敗 → warning，log 退 console；唔阻開機</text>
 <line x1="60.0" y1="260.0" x2="1900.0" y2="260.0" stroke="#DCD8CE" stroke-width="1"/>
@@ -93,7 +93,7 @@
 <path d="M 64 726 L 64 736" stroke="#9AA0A6" stroke-width="1.1"/>
 <path d="M 61 732 L 64 736 L 67 732" fill="none" stroke="#9AA0A6" stroke-width="1.1"/>
 <rect x="48" y="746" width="4" height="104" rx="2" fill="#7A4E8C"/>
-<text x="56.0" y="762.0" font-family="'Cascadia Mono','Consolas','SF Mono',monospace" font-size="10.5" font-weight="500" fill="#9AA0A6" text-anchor="start">B07</text>
+<text x="56.0" y="762.0" font-family="'Cascadia Mono','Consolas','SF Mono',monospace" font-size="10.5" font-weight="500" fill="#9AA0A6" text-anchor="start">B06</text>
 <text x="90.0" y="762.0" font-family="'Cascadia Mono','Consolas','SF Mono',monospace" font-size="12.5" font-weight="600" fill="#17191C" text-anchor="start">declare</text>
 <text x="290.0" y="760.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11.6" font-weight="400" fill="#3D4247" text-anchor="start">s_ndec = (cores&gt;1 且 router 有 core1 線) ? 2 : 1；每核建一個 decoder</text>
 <text x="290.0" y="777.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11.6" font-weight="400" fill="#3D4247" text-anchor="start">套 cid／master_cid；actions_init（統計→一次配置→封存）</text>
@@ -109,7 +109,7 @@
 <path d="M 64 844 L 64 854" stroke="#9AA0A6" stroke-width="1.1"/>
 <path d="M 61 850 L 64 854 L 67 850" fill="none" stroke="#9AA0A6" stroke-width="1.1"/>
 <rect x="48" y="864" width="4" height="104" rx="2" fill="#7A4E8C"/>
-<text x="56.0" y="880.0" font-family="'Cascadia Mono','Consolas','SF Mono',monospace" font-size="10.5" font-weight="500" fill="#9AA0A6" text-anchor="start">B08</text>
+<text x="56.0" y="880.0" font-family="'Cascadia Mono','Consolas','SF Mono',monospace" font-size="10.5" font-weight="500" fill="#9AA0A6" text-anchor="start">B07</text>
 <text x="90.0" y="880.0" font-family="'Cascadia Mono','Consolas','SF Mono',monospace" font-size="12.5" font-weight="600" fill="#17191C" text-anchor="start">commit</text>
 <text x="290.0" y="878.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11.6" font-weight="400" fill="#3D4247" text-anchor="start">探測每 class 最大連續 → plan commit／carve（一次）</text>
 <text x="290.0" y="895.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11.6" font-weight="400" fill="#3D4247" text-anchor="start">◇D7 managed net lines？有 → nc_net_lines_declare()：逐線 service claim、buffer、bus（◇D8）</text>
@@ -128,7 +128,7 @@
 <path d="M 64 962 L 64 972" stroke="#9AA0A6" stroke-width="1.1"/>
 <path d="M 61 968 L 64 972 L 67 968" fill="none" stroke="#9AA0A6" stroke-width="1.1"/>
 <rect x="48" y="982" width="4" height="104" rx="2" fill="#A8661B"/>
-<text x="56.0" y="998.0" font-family="'Cascadia Mono','Consolas','SF Mono',monospace" font-size="10.5" font-weight="500" fill="#9AA0A6" text-anchor="start">B09</text>
+<text x="56.0" y="998.0" font-family="'Cascadia Mono','Consolas','SF Mono',monospace" font-size="10.5" font-weight="500" fill="#9AA0A6" text-anchor="start">B08</text>
 <text x="90.0" y="998.0" font-family="'Cascadia Mono','Consolas','SF Mono',monospace" font-size="12.5" font-weight="600" fill="#17191C" text-anchor="start">start</text>
 <text x="290.0" y="996.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11.6" font-weight="400" fill="#3D4247" text-anchor="start">nc_task_start_all()：gather 資源 → on_start → prepare loops（◇D9 決定開唔開）</text>
 <text x="290.0" y="1013.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11.6" font-weight="400" fill="#3D4247" text-anchor="start">loop 未開；只建立 task 物件／資源／指令表</text>
@@ -145,7 +145,7 @@
 <path d="M 64 1080 L 64 1090" stroke="#9AA0A6" stroke-width="1.1"/>
 <path d="M 61 1086 L 64 1090 L 67 1086" fill="none" stroke="#9AA0A6" stroke-width="1.1"/>
 <rect x="48" y="1100" width="4" height="104" rx="2" fill="#2E6B4F"/>
-<text x="56.0" y="1116.0" font-family="'Cascadia Mono','Consolas','SF Mono',monospace" font-size="10.5" font-weight="500" fill="#9AA0A6" text-anchor="start">B10</text>
+<text x="56.0" y="1116.0" font-family="'Cascadia Mono','Consolas','SF Mono',monospace" font-size="10.5" font-weight="500" fill="#9AA0A6" text-anchor="start">B09</text>
 <text x="90.0" y="1116.0" font-family="'Cascadia Mono','Consolas','SF Mono',monospace" font-size="12.5" font-weight="600" fill="#17191C" text-anchor="start">usb</text>
 <text x="290.0" y="1114.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11.6" font-weight="400" fill="#3D4247" text-anchor="start">JTAG：nc_log_start() 走 USJ（NC4＋log 共用 TX）；/data 留 APP</text>
 <text x="290.0" y="1131.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11.6" font-weight="400" fill="#3D4247" text-anchor="start">OTG：cdc_wanted＝link enable＋usb_core≠NONE；冇 CDC 又冇 MSC → 唔裝 TinyUSB</text>
@@ -160,7 +160,7 @@
 <path d="M 64 1198 L 64 1208" stroke="#9AA0A6" stroke-width="1.1"/>
 <path d="M 61 1204 L 64 1208 L 67 1204" fill="none" stroke="#9AA0A6" stroke-width="1.1"/>
 <rect x="48" y="1218" width="4" height="104" rx="2" fill="#2E6B4F"/>
-<text x="56.0" y="1234.0" font-family="'Cascadia Mono','Consolas','SF Mono',monospace" font-size="10.5" font-weight="500" fill="#9AA0A6" text-anchor="start">B11</text>
+<text x="56.0" y="1234.0" font-family="'Cascadia Mono','Consolas','SF Mono',monospace" font-size="10.5" font-weight="500" fill="#9AA0A6" text-anchor="start">B10</text>
 <text x="90.0" y="1234.0" font-family="'Cascadia Mono','Consolas','SF Mono',monospace" font-size="12.5" font-weight="600" fill="#17191C" text-anchor="start">channels</text>
 <text x="290.0" y="1232.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11.6" font-weight="400" fill="#3D4247" text-anchor="start">managed：nc_net_lines_start()——HTTP→httpd（core0）、WS／TCP→listen＋task（core=ln）</text>
 <text x="290.0" y="1249.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11.6" font-weight="400" fill="#3D4247" text-anchor="start">UDP→bind；legacy：WiFi line／ETH WS＋UDP／main tcp accept fallback</text>
@@ -177,7 +177,7 @@
 <path d="M 64 1316 L 64 1326" stroke="#9AA0A6" stroke-width="1.1"/>
 <path d="M 61 1322 L 64 1326 L 67 1322" fill="none" stroke="#9AA0A6" stroke-width="1.1"/>
 <rect x="48" y="1336" width="4" height="104" rx="2" fill="#2E6B4F"/>
-<text x="56.0" y="1352.0" font-family="'Cascadia Mono','Consolas','SF Mono',monospace" font-size="10.5" font-weight="500" fill="#9AA0A6" text-anchor="start">B12</text>
+<text x="56.0" y="1352.0" font-family="'Cascadia Mono','Consolas','SF Mono',monospace" font-size="10.5" font-weight="500" fill="#9AA0A6" text-anchor="start">B11</text>
 <text x="90.0" y="1352.0" font-family="'Cascadia Mono','Consolas','SF Mono',monospace" font-size="12.5" font-weight="600" fill="#17191C" text-anchor="start">account</text>
 <text x="290.0" y="1350.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11.6" font-weight="400" fill="#3D4247" text-anchor="start">印內部／PSRAM：free ＋ 最大連續（兩個數字分開睇）</text>
 <text x="290.0" y="1367.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11.6" font-weight="400" fill="#3D4247" text-anchor="start">之後 app_main 只剩 1 秒心跳（heap 快照）</text>

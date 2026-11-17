@@ -65,7 +65,7 @@
 ### 2.3 換 personality 不會「先租後還」——USB 實例（2026-11-13）
 
 S3 的 OTG 與 USJ 共用同一條 FSLS PHY；但「換人格」是**重開機**的決定：
-config 在 B02 讀一次、B03 定 USB 人格、B07 之後才宣告 plan。所以一次開機
+config 在 B02 讀一次、B03 定 USB 人格、B06 之後才宣告 plan。所以一次開機
 **只會宣告其中一個** USB parser 租約；另一個從未存在 —— 不是「先租後還」，
 而是「一開始就只租一個」。
 
@@ -78,7 +78,7 @@ config 在 B02 讀一次、B03 定 USB 人格、B07 之後才宣告 plan。所�
 
 | 位置 | 以前 | 現在 |
 |---|---|---|
-| decoder 回覆幀 | `nc4_decoder_create()` 先 malloc 2,615 B，B09 再被 plan 緩衝換走並 `free` → **carve 之後才 free**，在 heap 留洞 | create 不配；回覆幀只由 plan 的 `nc4.reply0/1` 提供（`nc4_decoder_set_reply`） |
+| decoder 回覆幀 | `nc4_decoder_create()` 先 malloc 2,615 B，B08 再被 plan 緩衝換走並 `free` → **carve 之後才 free**，在 heap 留洞 | create 不配；回覆幀只由 plan 的 `nc4.reply0/1` 提供（`nc4_decoder_set_reply`） |
 | plan JSON（700 B）、任務帳本（900 B） | 各自 `malloc`＋`free` | 共用一塊 static `s_boot_txt[900]` |
 
 **仍然會在開機階段 free 的只有一處**：log 環由 2 KB 換成 8 KB（只在

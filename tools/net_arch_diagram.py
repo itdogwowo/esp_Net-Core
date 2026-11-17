@@ -181,19 +181,19 @@ text(940, 942, "唯一 OTA 路徑＝NC4 0x22xx（line → bus → parser → dec
 text(940, 964, "舊 nc4_ota_http.c／nc4_http.c 已刪；頁面只留靜態說明。", fs=11.5, fill=FAINT)
 
 # ── 05 BOOT ─────────────────────────────────────────────────────────────
-panel(50, 1004, 1700, 140, "05  BOOT ORDER", "line buffer 先 carve，B11 才開 listener／httpd")
+panel(50, 1004, 1700, 140, "05  BOOT ORDER", "line buffer 先 carve，B10 才開 listener／httpd")
 boot = [
-    ("B07", "declare", "decoder／資源", C_CFG),
-    ("B08", "commit", "line buffers → Wi-Fi", C_SVC),
-    ("B09", "start", "decode loops 就緒", C_LINE),
-    ("B10", "usb", "USB／CDC", C_IF),
-    ("B11", "channels", "nc_net_lines_start", C_OK),
-    ("B12", "account", "剩餘記憶體", C_CFG),
+    ("B06", "declare", "decoder／資源", C_CFG),
+    ("B07", "commit", "line buffers → Wi-Fi", C_SVC),
+    ("B08", "start", "decode loops 就緒", C_LINE),
+    ("B09", "usb", "USB／CDC", C_IF),
+    ("B10", "channels", "nc_net_lines_start", C_OK),
+    ("B11", "account", "剩餘記憶體", C_CFG),
 ]
 bx, by, bw2, bh2 = 70, 1072, 250, 56
 for i, (n, t, s, c) in enumerate(boot):
     x = bx + i * (bw2 + 18)
-    hi = n in ("B08", "B11")
+    hi = n in ("B07", "B10")
     rect(x, by, bw2, bh2, fill="#FCFBF7" if hi else WHITE, stroke=c, sw=1.6 if hi else 1)
     text(x + 12, by + 22, n, fs=11, fill=c, mono=True, weight="700")
     text(x + 48, by + 22, t, fs=13, weight="700")

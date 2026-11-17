@@ -54,16 +54,16 @@
 6. **兩個開關只對 OTG 有意義**：MSC（交碟）與獨立 log 管道（`cdc_log`）。
    USJ 冇 MSC；log 與 NC4 共用 TX（arbiter），`cdc_log` 無效。
 
-生命週期：`usb_core` 在 B05 由「線 → 組」表寫入；`usb.rx` 在 B07 宣告、B08 carve、
-B09 租用（交給 nc4 任務）；USB 真正上線（TinyUSB 列舉／log 管道）在 B10。
+生命週期：`usb_core` 在 B05 由「線 → 組」表寫入；`usb.rx` 在 B06 宣告、B07 carve、
+B08 租用（交給 nc4 任務）；USB 真正上線（TinyUSB 列舉／log 管道）在 B09。
 
-> log 由 B01 就在產生（走 console）；B10 開的是**管道出口** —— 兩者的時間線與板子差異見
+> log 由 B01 就在產生（走 console）；B09 開的是**管道出口** —— 兩者的時間線與板子差異見
 > [boot-log.md](boot-log.md)。
 
-**一次開機只初始化一次**：B03 先讀 config 決定這條線用哪個 driver，B10 才 init
+**一次開機只初始化一次**：B03 先讀 config 決定這條線用哪個 driver，B09 才 init
 （OTG 裝 TinyUSB；USJ 唔使裝，本身已經係 CDC-ACM，只開 log 管道）。
 之後**沒有 runtime 切換 API**；要換線就改 `links[]`（或 `usb.*`）再重啟 ——
-下次開機 B03 用新 config 重算，B10 用新 driver init。init 失敗不會在同一次
+下次開機 B03 用新 config 重算，B09 用新 driver init。init 失敗不會在同一次
 開機重試（USB 這次就係冇）。
 
 兩種 transport 的完整能力對照見 §2.0，這裡只釘死「USB 這個字指哪一層」。
@@ -118,8 +118,8 @@ B09 租用（交給 nc4 任務）；USB 真正上線（TinyUSB 列舉／log 管�
 ```
 
 B05 的 hardware 在建立「線 → 組」表時，會把 **USB 那條線的組**寫入
-`ctx.usb_core`（一次）。之後 B07（回覆幀）、B10（TinyUSB／log 管道）、
-B11（bus＋producer）只讀 ctx，不再各自去問一次 router ——
+`ctx.usb_core`（一次）。之後 B06（回覆幀）、B09（TinyUSB／log 管道）、
+B10（bus＋producer）只讀 ctx，不再各自去問一次 router ——
 人格（B03）與組（B05）是兩個問題，不是重複決定。
 
 ② 與 ③ 的分工：`B02` 只負責**讀**（JSON → struct，之後全系統只讀 struct）；
@@ -222,7 +222,7 @@ CDC 模式會 reboot loop。要真正省掉，要連 descriptor 一起關（Phas
 C3 沒有 PSRAM，第二份回覆幀 2,610 B 是**內部 RAM**，以前由頭到尾冇人用。
 `routes[]` 寫 `decode1`、或 `tasks.json` 寫 core1：B03 capability 一次過併到 core0
 （單核根本沒有 core1），只改 RAM、唔寫盤。firmware 自己宣告的 system loop
-（`decode1`、fx 等）仍然是 `nc_core_clamp()` 在 B09 收斂 —— 那些是程式碼，
+（`decode1`、fx 等）仍然是 `nc_core_clamp()` 在 B08 收斂 —— 那些是程式碼，
 不是 config，租約管不到它們。
 
 仍未做：`usb.interfaces[]` 多介面 schema（§2.2–§2.4）、`max_chunk` 協商（§2.5）、

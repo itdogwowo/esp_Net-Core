@@ -36,7 +36,7 @@ S3 的 OTG 與 USJ 共用同一條 PHY，只能二選一。這塊板現在用 **
 - `sdkconfig.defaults`：`CONFIG_ESP_CONSOLE_NONE=y`、`CONFIG_ESP_CONSOLE_SECONDARY_NONE=y`
 - 16 MB flash 用預設 `firmware/partitions.csv` → `data` 7 MB，主機見到約 7 MB 的 `NC-xxxx` 碟
 - 上板後預期：MSC 碟 ＋ CDC serial（app log）；**bootloader 早期 log 冇**
-- link 的 `msc=1` → B10 把 FAT 交 host；device 只剩唯讀 `/ro`
+- link 的 `msc=1` → B09 把 FAT 交 host；device 只剩唯讀 `/ro`
 
 要回到 USJ console（MSC 會失效）：改 `wiring.json` 的 `USB.list[0].phy="usj-fs"`
 （link 唔使改，`index` 會跟住解析成 `usb_jtag`）、把 link 的 `msc` 改 0、

@@ -137,7 +137,7 @@ I2S、I80 等可以經 GPIO matrix 選腳；ETH RMII 的 mdc／mdio／ref_clk �
 - **預設 0**：唔寫就是唔交碟（`nc_cfg_load.c` 寫死 `l.msc = 0`，冇「未指定」狀態）。
   global `system.json` 的 `usb.msc` **已經停用**、唔會 fallback；舊檔寫了它，開機只會出一行
   warning 提醒改寫成 `links[].msc`。
-- `msc=1`：B10 把 FAT 交給 host（只在 **OTG** 有意義；USJ 沒有這個 capability → 跳過／warning）。
+- `msc=1`：B09 把 FAT 交給 host（只在 **OTG** 有意義；USJ 沒有這個 capability → 跳過／warning）。
 - `msc=0`：`/data` 留在 APP；主機不會見到碟。
 - MSC descriptor 是編譯期（`CONFIG_TINYUSB_MSC_ENABLED=y`）；`msc=0` 只代表不交碟，
   driver 仍然安裝。
@@ -187,7 +187,7 @@ MSC 只有 OTG 有，所以這是一個 board-level 的取捨，不是單純加�
 | 選擇 | 設定 | 適合 |
 |---|---|---|
 | **UART0** | `CONFIG_ESP_CONSOLE_UART_DEFAULT=y` | 板子 UART0 有引出、你有 USB-UART 轉接 |
-| **完全冇 console** | `CONFIG_ESP_CONSOLE_NONE=y` | 只有一條 USB；app log 由 CDC（B10 之後）出，bootloader 訊息冇 |
+| **完全冇 console** | `CONFIG_ESP_CONSOLE_NONE=y` | 只有一條 USB；app log 由 CDC（B09 之後）出，bootloader 訊息冇 |
 
 不可以保留 `CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y` 再開 OTG —— 同一條 PHY 會打架。
 
@@ -204,7 +204,7 @@ python3 make.py flash <board> --full   # 分割表沒改；--full 只是確保�
 
 - 一個 **MSC 碟**（卷標 `NC-xxxx`，容量 = `data` 分區，Matrix 4MB 板是 896 KB）。
 - 一個 **CDC serial**（如果 `cdc_log=1`；app log）。
-- `msc=1` 時 B10 已把 FAT 交 host；device 只剩唯讀 `/ro`，
+- `msc=1` 時 B09 已把 FAT 交 host；device 只剩唯讀 `/ro`，
   HTTP static `/data/www` 可能讀不到，測試時要預期。
 
 ### 4.5 本專案現況（2026-11-17 重驗）
@@ -307,7 +307,7 @@ USB 有「shared PHY、personality 二選一、composite functions」這些額�
 先獨立成 `sys/usb`，將來真的有第二種「多 personality 資源」再抽成通用 `sys/res`。
 
 **Boot 次序（目標）**：B03 註冊 port＋收 claim（因為 B05 router 要用已分配的
-USB line），B05 建 router，B07 任務拿 handle，B10 才 init driver。
+USB line），B05 建 router，B06 任務拿 handle，B09 才 init driver。
 
 ## 6. 未做好（下一步）
 

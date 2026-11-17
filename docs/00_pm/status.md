@@ -2338,8 +2338,8 @@ S3 WiFi 連上後開 TCP 6000、UDP 6001、WS 8080。
   - B03：核數收斂 ＋ USB 人格由「晶片能力＋links[]」定；B04 claim 範圍寫明
     SDIO／ETH／PIN／PWM／UART；B05 改「PWM 安裝、ETH `enable=1` 才起、
     `system.routes` 定線→組」（FireBeetle 的 ETH.enable=0 是實例）；
-    B07 寫明「有線到 core1 才建第二個 decoder」；B08 net lines 宣告＋Wi-Fi 兩道閘；
-    B09 測試映像掃 `.fxe`＋帳本；B11 改為 net lines start＋USB／UART bus。
+    B06 寫明「有線到 core1 才建第二個 decoder」；B07 net lines 宣告＋Wi-Fi 兩道閘；
+    B08 測試映像掃 `.fxe`＋帳本；B10 改為 net lines start＋USB／UART bus。
   - **新增 Panel C「B02 的 seed：三個來源、一個方向」**：
     `F.default`（`nc_port.c`）→ `F.preset`（build 揀的 project）→ `F.live`
     （`/data/config`；只缺檔才寫，存在就一個 byte 都唔改）。
@@ -2365,7 +2365,7 @@ S3 WiFi 連上後開 TCP 6000、UDP 6001、WS 8080。
 
 - **問題**：`network-lines.svg` 同 7.71 更新過的圖仍然用舊網絡模型 ——
   HTTP 寫 `/config.json`、`/ota`、`POST .bin`；architecture 仲寫「網絡 OTA」；
-  boot／core-timeline 的 B11 仲寫「net／WS／UDP」舊路徑。另外 `net-lines.md`
+  boot／core-timeline 的 B10 仲寫「net／WS／UDP」舊路徑。另外 `net-lines.md`
   寫「冇 iface、冇 service」，同最新 canonical（kind＋iface＋index）相反。
   使用者指出「圖片唔係最新設定」——正確。
 - **先對照現行 code**（2026-11-16 HEAD）：
@@ -2386,15 +2386,15 @@ S3 WiFi 連上後開 TCP 6000、UDP 6001、WS 8080。
     config 的 `service` 只係 legacy／提示。
   - 04A NC4 path（socket／frame → line slots → nc4_bus → decoder → action）；
     04B web path（httpd → static handlers；NO NC4、冇 `/config.json`、冇 `/ota`）。
-  - 05 boot order（B08 line buffer 先、B11 `nc_net_lines_start`）。
+  - 05 boot order（B07 line buffer 先、B10 `nc_net_lines_start`）。
   - 06 限制／legacy（iface 未 bind、上限、舊路徑、rawbench）；
     07 驗證數字（P4-ETH／S3 WiFi／P4-C6，2026-11-16）。
 - **其他圖／文件同步**：
   - `architecture.svg`：L2 改「bus_net：TCP／UDP／WS；HTTP 係獨立 static service」；
     動態路徑句改「NC4 的線…同一個 parser；HTTP 係獨立 static service，唔經 decoder」；
     PUSH slots 改「格數／大小由 `links[].rx` 決定」。
-  - `boot.svg` B11 改「net lines start：NC4／WS service 各自 listener；HTTP 獨立 static」。
-  - `core-timeline.svg` B11 改「`nc_net_lines_start()`：listener／httpd（service claim）」，
+  - `boot.svg` B10 改「net lines start：NC4／WS service 各自 listener；HTTP 獨立 static」。
+  - `core-timeline.svg` B10 改「`nc_net_lines_start()`：listener／httpd（service claim）」，
     移除舊 `nc4_udp` 描述。
   - [net-lines.md](../03_notes/net-lines.md) 重寫：canonical schema、service claim、
     HTTP 邊界、限制／legacy。 [line-identity.md](../03_notes/line-identity.md)
@@ -2424,7 +2424,7 @@ S3 WiFi 連上後開 TCP 6000、UDP 6001、WS 8080。
   - **S. 唔啟動矩陣（9 項）**：ETH／TCP、新 net line、legacy 網絡、USB stack、MSC、
     WiFi、任務 loop、.fxe、rawbench 各自的「唔啟動條件」。
   - **F. 總閘**：B02 `storage+cfg` 失敗 → CONFIG 唔 give → B03 之後全部 SKIP
-    （B12 account 仍跑，之後只剩心跳）；壞 config ≠ storage 失敗，degraded 仍會開機。
+    （B11 account 仍跑，之後只剩心跳）；壞 config ≠ storage 失敗，degraded 仍會開機。
 - **對照來源**：`main.c` ph_boot…ph_account、`boot.c` needs/gives、`nc_task.c`
   （level／affinity／enabled／ layer）、`nc_net_lines.c`（service claim／line core／
   buffer）、`nc_wifi.c`（兩道閘／mode／credentials）、`nc4_router.c`（routes→核）、
@@ -2492,7 +2492,7 @@ S3 WiFi 連上後開 TCP 6000、UDP 6001、WS 8080。
   route 容錯、USB console／OTG、D11（WAMR 未接）重畫；`architecture.svg` 沿用。
 - **FXE 前仍未做好**：
   1. FXE 執行後端（WAMR）未接；`.fxe` 現在「登記得到、跑不到」。
-  2. D9 外部任務掃描要拆「probe→declare」與「B09 load」兩步；manifest v2
+  2. D9 外部任務掃描要拆「probe→declare」與「B08 load」兩步；manifest v2
      （name／level／require／provide／param／doc TLV）未做。
   3. 效果掃描（`/data/pixel/effects`）與 service registry／claim API 未做。
   4. USB 多通道（P4 三條 PHY）未做；目標改成**資源註冊＋claim**
@@ -2636,7 +2636,7 @@ WSL 見唔到 COM（WSL2 冇 usbipd → `/dev/ttyACM*` 全空），所以燒錄�
 | ESP32-S3 16 MB flash / 8 MB PSRAM（COM30，303A:1001 USJ） | `ESP32-S3-N16R8`（console=USJ） | ✅ 完整開機；`USB：mode=jtag｜link=usb0（kind=usb_jtag）｜log=1｜msc=0` → `{kind:"usb",index:0}` 依 `wiring.json` 的 `usj-fs` 解析成 **usb_jtag**（未修之前會變 `cdc`）|
 | 同上 | `ESP32-S3-Mini-Nano`（`phy=otg-fs`、console=none） | ⚠️ 燒完**完全冇 USB 枚舉**（主機連 303A 都沒有）。呢塊板靠 RTS 復位唔生效，`--after hard-reset` 會留住 ROM download mode；要 `--after watchdog-reset` 才真開機。OTG 版冇 log 可睇 → 待查（要用 BOOT 鍵入 download mode 再燒 USJ console 版） |
 | ESP32-P4（COM34 = CH343 UART0；ECO7 / **rev v3.2**；32 MB flash；周邊係 **ESP32-C5**） | `P4-ETH` / `P4-FireBeetle2` 原版 | ❌ `requires chip revision in range [v0.0 - v1.99]`；`--force` 燒得入但 **boot loop**（ROM `esp32p4-eco7` 反覆重啟）→ repo 兩個 P4 板都寫死 pre-rev3 配方 |
-| 同上 | `P4-FireBeetle2` 暫時改成 `SELECTS_REV_LESS_V3=n` + `REV_MIN_301=y` | ✅ 開機到 B11（UART0 有完整 log）；`USB：mode=jtag｜link=usb0（kind=usb_jtag）｜msc=0` 一樣正確。但這塊板只引出 OTG／CH343，USJ 冇接線 → 主機見唔到 USJ。`esp_hosted` 期望 C6（0x0d）、實板係 C5（0x17）→ Wi-Fi 失敗 |
+| 同上 | `P4-FireBeetle2` 暫時改成 `SELECTS_REV_LESS_V3=n` + `REV_MIN_301=y` | ✅ 開機到 B10（UART0 有完整 log）；`USB：mode=jtag｜link=usb0（kind=usb_jtag）｜msc=0` 一樣正確。但這塊板只引出 OTG／CH343，USJ 冇接線 → 主機見唔到 USJ。`esp_hosted` 期望 C6（0x0d）、實板係 C5（0x17）→ Wi-Fi 失敗 |
 
 順手修：`P4-FireBeetle2` 的 `system.json` 有個**放錯層**的 `"hostname": ""`（`hostname` 屬於
 `network.json`）→ 開機 log 一直 `unk=1`；已移除。`console` 與 `wiring.json` 的暫時改動已
@@ -2658,7 +2658,8 @@ MAC `80:f1:b2:d7:ba:f8`、協處理器 **ESP32-C5** silicon `0x17`）。build �
 - 32 MB 分割表另寫一份（`ota_0 @0x20000`、`ota_1 @0x420000`、`data @0x820000 size 0x1700000`），
   開機 log 見 `data 分區 size 23552 KB`。
 - aliases：`P4-WIFI6-DB`／`ESP32-P4-C5`／`P4-C5`（`ESP32-P4-C6` 仍然屬 FireBeetle2）。
-- 實測：B01–B12 全 `ok`（階段表本身冇 B06）、`hwcheck claims: []`、
+- 實測：階段全 `ok`（當時號碼由 B07 起跳、冇 B06；2026-11-17 已重編成連號 B01–B11，
+  見 §7.80）、`hwcheck claims: []`、
   `TinyUSB Driver installed on port 1`（HS）、
   `links[].msc=0 → /data 留在 APP`。
 
@@ -2799,8 +2800,9 @@ config 真係主導下一次開機，而且可逆。
 
 **P4：三次復位 + flash 回讀**
 
-- 用 pyserial 拉 RTS（EN）連續復位 3 次，每次都完整開到 **B01–B05、B07–B12 全 `ok`**
-  （**冇 B06 —— 階段表本身冇**，見 `main.c` 的階段表）、`eh_sdio: Card init success`、
+- 用 pyserial 拉 RTS（EN）連續復位 3 次，每次都完整開到 **11 個階段全 `ok`**
+  （當時號碼由 B07 起跳、冇 B06；2026-11-17 已重編成連號 B01–B11，見 §7.80）、
+  `eh_sdio: Card init success`、
   `slave chip id 0x17 (esp32c5)`、SDIO `CLK=18 CMD=19 D0=14 D1=15 D2=16 D3=17 RESET=54`、
   `cpu freq 400000000 Hz` → 開機確定性 OK。
 - `read-flash 0x20000 1038640` 回讀 app → sha256 `5472ed85…` 同
@@ -2816,3 +2818,50 @@ config 真係主導下一次開機，而且可逆。
 - 所以 P4 的 NC4／MSC／網絡連線測試全部做唔到。要繼續驗，需要其中一樣：
   ① 4-pin OTG 線插主機（之後可以照 S3 同一套流程驗 CDC／MSC／配置回環）；
   ② 一個真實 AP 的 SSID／密碼（現時種子 SSID `NETCORE-TEST` 不存在，只驗到掃描）。
+
+### 7.80 2026-11-17（B 號碼收返連號：舊編號 07–12 → 06–11；程式、文件、四張圖、實機一齊更新）
+
+**背景：空號比連號貴**
+
+2026-11-14 移除第六階段（pool）之後，刻意留空號（05 → 07），理由寫在
+[naming.md §7.3](../03_notes/naming.md)：ID 是契約，唔為靚號碼重編。實際成本是每次講開機
+（log、四張圖、每份文件）都要解釋一次「為何冇 B06」；而 §7.71 那輪寫圖時其實已經自然用
+連號講（B06 declare、B07 commit…），兩種講法並存更亂。今日趁階段 ID 未有外部依賴
+（未公開、log 即時看、冇存檔比對），一次過將後面六個階段前移一號。
+
+**改動（純改名，行為零變化）**
+
+- `firmware/main/main.c` `stages[]`：舊編號 07–12 那六行 → `B06…B11`。`needs`／`gives`／
+  `ph_*`／次序全部唔動，所以 boot 時間、能力位帳、失敗語義一模一樣。
+- `firmware/main/boot.h`：命名空間註解改成連號講法；`nc_boot_stage_t.id` 例子改 `"B06"`。
+  順手改正一個舊錯：註解寫「B03 ＝ storage+cfg」，其實 storage+cfg 一直係 **B02**。
+- 四支生成器重跑：`tools/{boot_diagram,boot_cores_diagram,core_timeline,net_arch_diagram}.py`
+  → `docs/00_pm/{boot,boot-cores,core-timeline,network-lines}.svg` 四張一齊更新
+  （每張的 B-token 都重新出過，唔係手改 SVG）。
+- `tools/id_check.py` 的階段清單；13 份 docs；4 份 ports 文件（含 `sdkconfig.defaults` 註解）。
+- 合共 **165 個 B-token** 改號。做法是單次 regex 掃換（`{7:6,8:7,9:8,10:9,11:10,12:11}`）：
+  唔可以逐個 `sub`（先 B07→B06 再 B08→B07…），否則會連鎖塌落去 —— 第一次就踩過，全部
+  `git checkout --` 重來。
+- 規矩改：之後階段一有增減就順移，**唔好再留空號**。
+
+**驗證**
+
+- `tools/id_check.py`：B **11 個階段**、20 個 ID token 全部指得到 code ✓。第一次跑被
+  status §7.78／§7.79 的「歷史上跳到 12」字樣叫停（歷史記載都算 ID token）→ 改寫成
+  「號碼由 B07 起跳」的講法，唔再引用已消失的 token。
+- `tools/hosttest/run_all.sh`：11 個 suite 全過。`tools/sync_hardware_presets.py --check`：
+  8 塊板全部已同步。
+- `make.py build --all --fresh --no-doctor`（WSL）：8 塊板全部建置成功；S3 Mini-Nano
+  映像 1.1 MB（分區剩 28%）。
+- **P4-WIFI6-DB（COM34）**：esptool 重燒後 log 見 **B01–B11 連號全 `ok`**，摘要
+  「11 階：0 失敗、0 跳過、0 可選失敗」；`netcore: cid=0xBAF8（config）… （NVS，B06 套到
+  decoder）` 已經用新號；SDIO 4-bit／C5 `0x17`／`fw=0x00020c09` 照樣 init 成功。
+- **S3 Mini-Nano（COM31）**：用 **NC4 OTA**（[tools/ota.py](../../tools/ota.py)，0x22xx）
+  推新映像 —— 唔使 download mode、唔使按鍵：1,135,648 B 以 **207 KB/s** 寫完、
+  `END ok（驗證通過）`、`APPLY` 後自動重啟。`status sys` 見 `app` hash 由 `3d3e59af` →
+  **`a5564178`**、`storage.boot.fw_new: 1`；重啟後 log 見 **B09 usb／B10 channels**
+  （舊 B10／B11 前移後的新號）、`boot 完成：已具備 0x03ff`（能力位帳不變）。
+  - 註：S3 是 `console=none`，B01–B08 全部發生在 USB 列舉之前（B09 才裝 TinyUSB），
+    CDC 未接上，那幾行一定收唔到（log 環已 drop）——S3 只看得到 B09 之後。要睇全表
+    就睇 P4 那條 log（P4 有 UART0 console）。
+- `python tools/board.py check`：0 個錯誤（5 個「冇 driver.json」警告同之前一樣）。
