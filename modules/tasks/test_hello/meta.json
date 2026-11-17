@@ -1,0 +1,11 @@
+{
+  "name": "test-hello",
+  "desc": "外掛煙霧測試（test_）：1 Hz 印字、讀 GPIO21、反轉 GPIO21",
+  "usage": "複製到裝置 /data/tasks/test_hello.nct 再開機；CDC log 每 1 秒一行",
+  "provides": [
+    {
+      "type": "provide",
+      "name": "hello.heartbeat"
+    }
+  ]
+}

@@ -237,7 +237,34 @@ USB 的三層詞（線／transport／driver）見 [usb-config.md §0.1](usb-conf
 | `docs/00_pm/boot.svg`、`boot-cores.svg`、`core-timeline.svg` | 三張圖都用 B-id／D-id，同 log 對得上 |
 | `tools/id_check.py` | 掃 docs／SVG 的 ID token，對 code 是否存在（唔存在就 fail） |
 
-### 7.7 未做
+### 7.7 外掛任務（`modules/`）命名（2026-11-18）
+
+外掛任務**唔屬於 firmware 專案**，住在 repo 根的 `modules/`，由 `tools/ncm_build.py`
+獨立編譯。命名要令「睇路徑就知係乜」：
+
+```
+modules/
+├── tasks/                 任務模組 → 輸出 .nct（kind=task）
+│   ├── test_<name>/       測試／量測（dev only，唔會收納入固件）
+│   ├── demo_<name>/       示範（可展示，未到 production）
+│   └── <name>/            真任務（production 候選）
+├── effects/               效果模組 → 輸出 .nce（kind=effect）
+│   ├── test_<name>/ ...
+│   └── <name>/ ...
+└── out/                   編譯產物（gitignore）
+```
+
+- **role 目錄** = 容器類型：`tasks` → `.nct`、`effects` → `.nce`；`build.json` 的 `kind`
+  可以覆寫（放錯目錄時）。
+- **名稱前綴** = 成熟度：`test_`（測試）／`demo_`（示範）／無前綴（真任務）。
+  前綴同時決定「會唔會收納入固件」——`test_` 嘅唔會，只留測試冊做 golden。
+- 每個資料夾：`<name>.wat`（或 `.c`／`.wasm`）＋`build.json`＋`meta.json`（可選）；
+  資料夾名、payload 檔名、模組名三者一致。
+- **冇 `.nca`**：指令（action）唔係可載入模組，係固件 C 代碼＋const 表；
+  外掛要加自己的指令，係喺 `build.json` 用 `"cmds": [0x3xxx]` 宣告（vendor 區
+  0x3000–0x3FFF，見 [commands.md](../01_protocol/commands.md) §1.1）。
+
+### 7.8 未做
 
 - `T.`／`R.`／`L.`／`C.` 目前只是約定，code 未有前綴、亦未強制檢查（`id_check.py`
   只做「存在性」，唔知語義）。

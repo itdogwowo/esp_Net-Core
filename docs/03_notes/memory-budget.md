@@ -116,7 +116,7 @@
 | flash | 1,224,432 → **~1,315,000 B**（interp＋backend＋模組容器，+92 KB） |
 | 內部 heap（boot 後） | **~15 KB**（WAMR runtime 結構／module slot；linear memory 唔喺度） |
 | PSRAM | 512 KB arena＋每模組 64 KB linear memory＋WAMR 大 allocation（§7.82：boot 後 PSRAM 7.78 MB 可用） |
-| 每個 task 模組 | payload 由 arena 切（hello_task 259 B）；WAMR instance ≈ 64 KB linear memory（PSRAM） |
+| 每個 task 模組 | payload 由 arena 切（test_hello 259 B）；WAMR instance ≈ 64 KB linear memory（PSRAM） |
 | tick 成本 | task_tick＋5 個 native（gpio/print）遠低於 20 ms budget，無 strike |
 
 注意：呢個係 **tests 映像**；release 建置唔會 reference WAMR（`nc_mod_engine.c`

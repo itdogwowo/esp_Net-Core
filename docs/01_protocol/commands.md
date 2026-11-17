@@ -14,20 +14,45 @@
 3. **測試專用一律放 `0xFxxx`**，不得混進產品域。測試指令可以隨時刪，不影響對外契約。
    **`0xFxxx` 整個區段都是「假指令」**：它們不是產品功能，是量測與回歸用的工具。
    上游 `mp_Net-Core` 的 schema **沒有這個區段** —— 看到 `0xF0xx` 就當它不存在（見 §2.1）。
-4. **handler 一律住在 `components/action/`**。`action/` 是**唯一**有指令處理程式的地方；
-   `main.c` 只做裝配（建立 decoder → 呼叫各 action 的 `*_register()`），一條 handler 都不該有。
+4. **handler 住在所屬域**：產品域放 `components/action/<域>_action/`；測試／量測
+   指令放 `components/dev/test_action/`；`main.c` 只做裝配（建 decoder → 呼叫各
+   action 表），唔應該再有新 handler。核心 `sys`／`status` 域的表暫時仍喺
+   `main.c`（歷史遺留，見下表），搬過去係 P2 重構。
 
-   **目錄名 = 上游 schema 的 group 名**（上游 `slave/action/<group>_actions.py` 就是這個規則）：
+   **目錄名 = 上游 schema 的 group 名**：
 
 ```text
 components/action/
-├─ sys_action/      0x1xxx  sys 域（REBOOT / SET_MASTER / SYS_TASK_* / NET_TUNE …）  ⬜ 待建
-├─ status_action/   0x11xx  status 域（STATUS_GET / SET / ACK）                      ⬜ 待建
-├─ file_action/     0x20xx  file 域（FILE_QUERY / ERROR_RSP）                        ✅ 已有
-├─ ota_action/      0x22xx  ota 域                                                   ✅ 已有
-├─ bench_action/    0x18xx  bench 域（BENCH_READY / DATA / RESULT / REPORT）          ⬜ 待建
-└─ test_action/     0xFxxx  測試區（上游冇這個 group，所以只能自訂名）                ⬜ 待建
+├─ file_action/     0x20xx  file 域（FILE_QUERY / ERROR_RSP）        ✅
+├─ ota_action/      0x22xx  ota 域                                   ✅
+├─ sys_action/      0x1xxx  sys 域                                   ⬜ 待建（暫在 main.c）
+├─ status_action/   0x11xx  status 域（STATUS_GET / SET / ACK）      ⬜ 待建（暫在 main.c）
+└─ bench_action/    0x18xx  bench 域                                 ⬜ 待建（暫在 main.c）
+components/dev/
+└─ test_action/     0xFxxx  測試／量測區                              ✅
 ```
+
+### 1.1 指令 ID 分區（含外掛保留區）
+
+| 區段 | 用途 | 實作位置 |
+|---|---|---|
+| `0x1000–0x10FF` | sys 域（REBOOT／SET_MASTER／SYS_TASK_*） | main.c（暫）→ `action/sys_action` |
+| `0x1100–0x11FF` | status／config／route 域 | main.c（暫）→ `action/status_action` |
+| `0x1800–0x18FF` | bench 域 | main.c（暫） |
+| `0x2000–0x20FF` | file 域 | `action/file_action` |
+| `0x2200–0x22FF` | OTA 域 | `action/ota_action` |
+| **`0x3000–0x3FFF`** | **外掛私有指令（保留）**：模組喺 `build.json` 的 `cmds` 宣告，由 ncm 註冊／路由；核心區唔可以由外掛佔用 | `components/host/ncm`（路由，未實作） |
+| `0xF000–0xF0FF` | 測試／量測（唔係產品功能） | `components/dev/test_action`（＋main.c 少量 bench） |
+
+### 1.2 `action` 到底是什麼：表格＋handler，唔係可載入檔案
+
+- **表格**只係索引：`{cmd, handler, owner}`（`nc_action.h`），開機統計→一次配置→
+  排序→封存；`nc_action_find()` 二分搜尋。
+- **具體功能**係每個域自己寫的 C handler（`on_<動詞>`），住喺該域的 component。
+- **唔會引入 `.nca` 副檔名**：`.nct`／`.nce` 係「可載入容器」（資料＋機器碼）；
+  指令 handler 係固件程式碼，唔可以亦唔應該由外部載入（安全／實時／ABI）。
+  如果將來要俾外掛加指令：指令 ID 寫入 `.nct` 的 manifest／`build.json`，
+  由 ncm 受控路由（配額＋timeout），唔係新增檔案格式。
 
 > **已修正（2026-11-04）**：8 條測試指令搬到 `components/action/test_action/`，
 > 由 `NC_ENABLE_TESTS` gate。`main.c` 的 `s_core_actions[]` 只剩 5 條產品指令：

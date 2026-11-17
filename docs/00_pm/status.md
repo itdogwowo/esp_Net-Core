@@ -3236,3 +3236,48 @@ buffer pointer＋length，host 一次過處理。
   「插件指令 → mediator → wasm 呼叫」的沙箱邊界（≈2 µs/call＋直譯成本），所以
   插件指令適合低頻控制／查詢，唔適合高頻 data path；慢指令要 async（回覆經 ncm
   任務）＋配額／timeout。
+
+### 7.87 2026-11-18（命名規範：外掛任務 `modules/<role>/<name>`；action＝表格＋handler，唔加 `.nca`）
+
+**① 外掛任務改名（嚴格命名，睇路徑就知係乜）**
+
+```
+modules/
+├── tasks/                   → .nct（kind=task）
+│   ├── test_<name>/         測試／量測（dev only，唔會收納入固件）
+│   ├── demo_<name>/         示範
+│   └── <name>/              真任務（production 候選）
+├── effects/                 → .nce（kind=effect；預留）
+└── out/                     編譯產物（gitignore）
+```
+
+- 現有 3 個模組改名：`hello_task` → **`modules/tasks/test_hello/`**、
+  `bench_task` → **`test_bench/`**、`api_cost` → **`test_api_cost/`**；
+  `<name>.wat`＋`build.json`＋`meta.json`；輸出 `modules/out/test_*.nct`
+  （887／872／519 B），全部重編通過。
+- `tools/ncm_build.py`：支援 role 目錄（`tasks`／`effects`），`--list` 顯示
+  role／kind；輸出副檔名跟 kind（`.nct`／`.nce`）；`--dir` 外部專案；
+  `build.json` 新增 `"cmds": [0x3xxx]`（外掛私有指令，vendor 區）。
+- 文件：新增 [naming.md §7](../03_notes/naming.md)（外掛命名規則）；
+  [modules/README.md](../../modules/README.md) 重寫；README／tools/README／
+  build_and_flash／testing／test-register／handoff 全部同步。
+
+**② `action` 的定義與 `.nca` 問題（結論）**
+
+- `action` **唔係只有表格**：表格（`nc_action_t{cmd, handler, owner}`）只係索引，
+  具體功能係各域自己寫的 C handler（`on_<動詞>`）。表喺開機統計→一次配置→排序→
+  封存；`nc_action_find()` 二分搜尋。
+- **唔加 `.nca`**：`.nct`／`.nce` 係可載入容器；指令 handler 係固件程式碼，
+  唔可以／唔應該由外部載入（安全、實時、ABI）。外掛要加自己的指令，用
+  `build.json` 的 `cmds` 宣告 **0x3000–0x3FFF vendor 區**，由 ncm 受控路由
+  （未實作；配額＋timeout 一齊做）。
+- [commands.md §1.1／§1.2](../01_protocol/commands.md) 已加入指令 ID 分區表
+  （含外掛保留區）同「action＝表格＋handler」說明；rule 4 更新為
+  「產品域 → `components/action/<域>_action`；測試 → `components/dev/test_action`」。
+
+**③ 驗證**
+
+- `tools/ncm_build.py --list`：3 個模組 role=tasks／kind=task；
+- 全部重編 887／872／519 B；hosttest 12/12；`make.py check` 0 錯 5 舊警告。
+- firmware 無改動（板子仍係 app 8007da05、`test_hello` 上板只係舊檔名；
+  下次換模組時用新名 `test_hello.nct` 即可）。

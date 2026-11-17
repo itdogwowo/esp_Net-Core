@@ -1,0 +1,5 @@
+{
+  "name": "test-bench",
+  "desc": "外掛效能基準（test_）：50000 次 LCG，用 nc_now_us 自量；對照 0xF050",
+  "usage": "複製到裝置 /data/tasks/test_bench.nct 再開機；CDC log 每 tick 一行"
+}

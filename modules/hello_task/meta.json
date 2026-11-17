@@ -1,8 +1,0 @@
-{
-  "name": "hello-task",
-  "desc": "外部任務樣本：列印、讀 GPIO21、反轉 GPIO21（1 Hz）",
-  "usage": "複製到裝置 /data/tasks/hello_task.nct，重新開機；CDC log 每 1 秒一行",
-  "provides": [
-    {"type": "provide", "name": "hello.heartbeat"}
-  ]
-}

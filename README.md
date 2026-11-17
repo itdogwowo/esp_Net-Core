@@ -35,7 +35,10 @@ esp_Net-Core/
 │  ├─ partitions.csv            分割表
 │  └─ build/  managed_components/  sdkconfig  ← 生成物，不進 git
 │
-├─ modules/                    ──【外掛任務層】獨立編譯的 .nct 任務源碼（唔屬於 firmware）──
+├─ modules/                    ──【外掛任務層】獨立編譯（唔屬於 firmware）──
+│  ├─ tasks/                   test_<name>（測試）／demo_<name>（示範）／<name>（真任務）→ .nct
+│  ├─ effects/                 效果任務 → .nce（預留）
+│  └─ out/                     編譯產物（.wasm／.nct／.nce；gitignore）
 ├─ ports/                       ──【配置層】每塊板子的差異，不屬於程式 ──
 │  ├─ hardware/<chip>/<board>/   這塊板「有什麼」：board.json / wiring.json /
 │  │                              driver.json / sdkconfig.defaults / partitions.csv
@@ -50,7 +53,7 @@ esp_Net-Core/
    ├─ flash.sh                  逃生門燒錄
    ├─ nc4.py  ota.py  selftest.py  nc4_test.py   對設備說話
    ├─ ncm.py                     打包／檢視 .nct（容器格式）
-   ├─ ncm_build.py               外掛任務獨立編譯（modules/<name> → .nct；--dir 支援外部專案）
+   ├─ ncm_build.py               外掛任務獨立編譯（modules/tasks/<name> → .nct；--dir 支援外部專案）
    ├─ bench/                    量測（要板子）
    ├─ hosttest/                 主機端 C 測試（不需要板子）
    └─ poc/                      原型驗證（mod_poc：效果模組 ABI）
