@@ -186,6 +186,13 @@ static int32_t host_print2(wasm_exec_env_t env, int32_t p1, int32_t l1, int32_t 
     return 0;
 }
 
+// 時間：等於 MPY 的 time.ticks_us()。i64 返回（WAMR signature "()I"）。
+static uint64_t host_now_us(wasm_exec_env_t env)
+{
+    (void)env;
+    return (uint64_t)esp_timer_get_time();
+}
+
 static int32_t host_gpio_read(wasm_exec_env_t env, int32_t pin)
 {
     (void)env;
@@ -277,6 +284,7 @@ static NativeSymbol s_native[] = {
     { NC_MOD_IMPORT_GPIO_READ,   (void *)host_gpio_read,   "(i)i",  NULL },
     { NC_MOD_IMPORT_GPIO_WRITE,  (void *)host_gpio_write,  "(ii)i", NULL },
     { NC_MOD_IMPORT_GPIO_TOGGLE, (void *)host_gpio_toggle, "(i)i",  NULL },
+    { NC_MOD_IMPORT_NOW_US,      (void *)host_now_us,      "()I",   NULL },
 };
 
 // ───────────────────────── runtime / 實例 ─────────────────────────

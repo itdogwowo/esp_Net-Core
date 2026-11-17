@@ -2482,6 +2482,38 @@ static bool gpio_pin_ok(int pin)
     return pin >= 0 && pin <= 48 && pin != 19 && pin != 20;
 }
 
+// ── 0xF050 CPU_BURN：native C 版本的 LCG 迴圈 ──
+// 用嚟同外掛 wasm 模組做「同 workload」對照（見 docs/03_notes/module-adoption.md）。
+// payload: iters(u32)；回 0xF004 {"iters":N,"us":X,"sum":Y}
+#define NC4_CMD_CPU_BURN 0xF050
+static void on_cpu_burn(nc4_ctx_t *ctx, const nc4_frame_t *f)
+{
+    uint32_t iters = 50000;
+    if (f->len >= 4) {
+        iters = (uint32_t)f->data[0] | ((uint32_t)f->data[1] << 8) |
+                ((uint32_t)f->data[2] << 16) | ((uint32_t)f->data[3] << 24);
+    }
+    if (iters == 0) {
+        iters = 1;
+    }
+    if (iters > 5000000u) {
+        iters = 5000000u;
+    }
+    // 同 wasm 版公平對照：v 留在 register（wasm locals 都係 register/stack），
+    // 用 empty asm 阻止編譯器把整個迴圈收成 closed-form。
+    uint32_t v = 1;
+    const int64_t t0 = esp_timer_get_time();
+    for (uint32_t i = 0; i < iters; i++) {
+        v = v * 1664525u + 1013904223u;
+        __asm__ volatile("" : "+r"(v));
+    }
+    const int64_t us = esp_timer_get_time() - t0;
+    char json[128];
+    snprintf(json, sizeof(json), "{\"iters\":%u,\"us\":%lld,\"sum\":%u}",
+             (unsigned)iters, (long long)us, (unsigned)v);
+    reply_json(ctx, NC4_CMD_HUB_RSP, json);
+}
+
 static void on_gpio_cfg(nc4_ctx_t *ctx, const nc4_frame_t *f)
 {
     if (f->len < 4) {
@@ -4760,6 +4792,7 @@ static const nc_action_t k_actions[] = {
     { NC4_CMD_GPIO_CFG, on_gpio_cfg, "test" },
     { NC4_CMD_GPIO_SET, on_gpio_set, "test" },
     { NC4_CMD_GPIO_GET, on_gpio_get, "test" },
+    { NC4_CMD_CPU_BURN, on_cpu_burn, "test" },
     { NC4_CMD_HW_GPIO, on_hw_gpio, "test" },
     { NC4_CMD_HW_SNAP, on_hw_snap, "test" },
     { NC4_CMD_HW_INFO, on_hw_info, "test" },

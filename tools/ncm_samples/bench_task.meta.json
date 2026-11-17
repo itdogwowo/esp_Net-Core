@@ -1,0 +1,5 @@
+{
+  "name": "bench-task",
+  "desc": "外掛 CPU 基準：50000 次 LCG，用 nc_now_us 自量執行時間（對照 0xF050）",
+  "usage": "複製到 /data/tasks/ 再開機；CDC log 每 tick 一行 bench iters=50000 us=… sum=…"
+}

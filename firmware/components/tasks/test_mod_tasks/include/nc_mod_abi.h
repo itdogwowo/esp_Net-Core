@@ -79,6 +79,7 @@ typedef struct {
 //   nc_print2(p1:i32,l1:i32,v1:i32,p2:i32,l2:i32,v2:i32) -> i32
 //                                       一行過印 "<文字1><v1> <文字2><v2>"
 //                                       （給「讀 GPIO 再 print」這類一行報告用）
+//   nc_now_us() -> i64               開機以來微秒（等於 MPY 的 time.ticks_us()）
 //   nc_gpio_read(pin:i32)      -> i32   讀 GPIO（第一次會設成輸入＋pull-up）
 //   nc_gpio_write(pin:i32,v)   -> i32   設成輸出再寫（回 0／-1）
 //   nc_gpio_toggle(pin:i32)    -> i32   反轉並回新電平（-1 = 失敗）
@@ -87,7 +88,7 @@ typedef struct {
 //   0／3／45／46（boot strap）、7／8（本板 UART）、19／20（USB OTG）、
 //   26–37（SPI flash／octal PSRAM）、43／44（UART0 預設）。
 //
-#define NC_MOD_IMPORT_COUNT   6
+#define NC_MOD_IMPORT_COUNT   7
 
 // 任務模組（.nct）的 export：task_tick 必需，task_init 可選。
 // 節奏 = manifest 的 fps（0 → 預設 10 ms）；budget_us 由 manifest 宣告。
@@ -98,6 +99,7 @@ typedef struct {
 #define NC_MOD_IMPORT_PRINT      "nc_print"
 #define NC_MOD_IMPORT_PRINT_I32  "nc_print_i32"
 #define NC_MOD_IMPORT_PRINT2     "nc_print2"
+#define NC_MOD_IMPORT_NOW_US     "nc_now_us"
 #define NC_MOD_IMPORT_GPIO_READ  "nc_gpio_read"
 #define NC_MOD_IMPORT_GPIO_WRITE "nc_gpio_write"
 #define NC_MOD_IMPORT_GPIO_TOGGLE "nc_gpio_toggle"
