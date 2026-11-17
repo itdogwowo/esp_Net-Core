@@ -177,23 +177,37 @@ S3 的 `/config/system.json` 是舊版（冇 `usb`、冇 `rx`），reboot 後仍
 另一邊（選 `usb_jtag` 時）`rt` 完全冇 `TinyUSB`／`cdc.rx`／`msc_async_io` ——
 未選的 transport 連 task 都唔會建立，唔止唔佔緩衝。
 
-> **S3 的 PHY mux 陷阱（2026-11-13 實測）**：OTG/USJ 的 mux 在 RTC domain，
-> **軟重啟（0x100F）不會重設**。上一次開機跑過 TinyUSB，改成 `usb_jtag` 再軟重啟 →
-> USJ 完全不會枚舉（主機見不到裝置）。修正：每次選 USJ 都呼叫
-> `usb_serial_jtag_ll_phy_enable_external(false)` 把 mux 指返 USJ（`main.c` 的 `ph_usb`）。
-> 修好之後同一個切換（cdc ↔ usb_jtag）雙向都通過，軟重啟亦保持可見。
+> **S3 的 PHY mux（2026-11-13 首次踩到，2026-11-17 改正描述）**
 >
-> **2026-11-17 補充：OTG 方向不用、也不該碰 mux。** `ph_usb` 的 OTG 分支沒有呼叫任何
-> mux API —— `usb_new_phy()` → `usb_wrap_hal_phy_set_external(hal, false)` 會把同一條
-> FSLS PHY 指去 OTG。換句話說：**B03 決定的是「這次開機用哪條 transport」（config／
-> ctx），PHY 的歸屬是實體層、由「最後 enable 它的那家 driver」決定**；兩件事不要混。
-> 只有選 USJ 時才要主動搶回 mux（power-on 預設是 USJ，但軟重啟後不一定）。
-> 實測：S3 燒 OTG 版 → 主機見到 `303A:4003`（CDC＋MSC 兩個介面），USJ 完全不見；
-> 這是預期，不是「USJ 壞了」。
+> 先講清楚：**「開哪一個」沒有爭奪。** 板的 `wiring.json` 的 `USB.list[].phy`
+> （`"usj-fs"`／`"otg-fs"`）是 build-time 事實 → `ncportgen` 生成
+> `nc_port_usb_kind()` → `system.json` 寫 `{kind:"usb",index:0}` 自動跟 → B03 把
+> `usb_mode`／`usb_kind` 寫入 ctx。一份映像只有一條線、只有一個 USB driver 會 init。
+> 早前「被搶」的說法是舊模型（`usb_jtag`／`cdc` 可以在 runtime 揀）留下的語感，
+> 那個切換路徑已經不存在了。
 >
-> **留意**：PHY 歸屬**不會**在斷電後保留（RTC domain 掉電即回預設）。所以「上一個
-> 映像跑過 OTG」這種狀態不會跨拔電；但用 USJ 讀 log 時，開埠的 DTR/RTS 會拉重置線，
-> 一開就 reboot —— 想乾淨抓 log 要改用 `--after watchdog-reset` 或不碰 DTR/RTS。
+> 真正存在的只有**一個寄存器層事實**：S3 的 OTG 與 USJ 共用同一條內部 FSLS PHY，
+> 歸屬寫在 `RTCCNTL.usb_conf`（`sw_hw_usb_phy_sel=1` ＋ `sw_usb_phy_sel`：
+> `0`＝PHY 歸 USJ、`1`＝PHY 歸 USB Wrap／OTG）。這兩個 driver 開機時各自會寫：
+>
+> | 走哪條 | 誰寫 | 寫成 |
+> |---|---|---|
+> | OTG | `usb_new_phy(…, USB_PHY_TARGET_INT)` → `usb_wrap_hal_phy_set_external(hal,false)` → `usb_wrap_ll_phy_enable_external(dev,false)` | `sw_usb_phy_sel=1` |
+> | USJ | `usb_serial_jtag_ll_phy_enable_external(false)`（IDF 的 USJ driver 在 install 時也會寫） | `sw_usb_phy_sel=0` |
+>
+> 兩個仍然要留意的後果：
+>
+> 1. **跨軟重啟殘留**：`RTCCNTL` 在 RTC domain，軟重啟（0x100F／watchdog）**不清**，
+>    斷電才回預設（預設＝USJ）。所以 USJ 分支每次都明確寫一次，不靠預設
+>    （`main.c` 的 `ph_usb`；我們走 LL 而沒 `usb_serial_jtag_driver_install()`，
+>    所以 IDF driver 的 install-time 寫入不會替我們發生）。OTG 分支則**故意不碰**
+>    mux —— `usb_new_phy` 已經寫了同一個值，硬寫 USJ 的值反而會弄壞。
+> 2. **物理上二選一**：同一對腳（GPIO19/20）只能給一邊。實測 S3 燒 `phy:"otg-fs"`
+>    映像 → 主機見到 `303A:4003`（CDC＋MSC），`303A:1001` 完全不見；這是預期。
+>
+> 抓 log 的實務：用 USJ 讀 log 時，開埠的 DTR/RTS 會拉重置線，一開就 reboot（S3 更會
+> 掉進 ROM download mode）—— 想乾淨抓 boot log 要改用 `--after watchdog-reset`
+> 或選不會碰 DTR/RTS 的抓法。
 
 > 未測：P4（OTG FS/HS 與 USJ 三條 PHY）。P4 走的是與 S3 相同的 TinyUSB 分支，
 > 但 PHY／接線不同，仍要實板驗。USJ 那條在 P4 已編入（`SOC_USB_SERIAL_JTAG_SUPPORTED`），

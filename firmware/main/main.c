@@ -4352,11 +4352,20 @@ static esp_err_t ph_usb(void)
     if (b->usb_mode == NC_USB_JTAG) {
 #if CONFIG_SOC_USB_SERIAL_JTAG_SUPPORTED
 #if CONFIG_IDF_TARGET_ESP32S3
-        // S3：OTG 與 USJ 共用同一條 FSLS PHY，而 mux（RTCCNTL.usb_conf）**survives
-        // software reset**。上一次開機如果跑了 TinyUSB（OTG），軟重啟之後 PHY 仍然
-        // 指住 OTG → USJ 完全不會枚舉（2026-11-13 實測：config 改 usb_jtag + 0x100F
-        // 之後主機完全見不到裝置，只有拔電重插才回來）。
-        // 所以每次選 USJ 都要把 mux 指返 USJ；power-on 預設雖然是 USJ，但不可以靠它。
+        // S3：OTG 與 USJ 共用同一條 FSLS PHY。**開哪一個是 build-time 決定的**
+        // （wiring.json 的 USB.list[].phy："usj-fs"／"otg-fs" → 生成的
+        // nc_port_usb_kind() → B03 的 ctx），所以同一份映像只會有一個 driver 去
+        // init，唔存在兩個 driver 搶 —— 這裡寫 mux 唔係為了解決競爭，原因有兩個：
+        //
+        // ① 我們走 LL（見上面 jtag_write 的說明，冇 usb_serial_jtag_driver_install），
+        //    而 IDF 的 USJ driver 是在 install 時才寫 mux；我們冇 install，所以要自己寫。
+        //    對應的 OTG 方向由 usb_new_phy() 負責（見下面 OTG 分支的註解）。
+        // ② mux 在 RTC domain（RTCCNTL.usb_conf），**軟重啟不會清**：上一次開機若跑
+        //    過 TinyUSB，軟重啟之後 PHY 仍然指住 OTG → USJ 完全不會枚舉（2026-11-13
+        //    實測：主機見不到裝置，只有拔電才回來）。power-on 預設雖然是 USJ，但
+        //    不可以靠它 —— 所以每次走到這一支都明確寫一次。
+        //    （`usb_serial_jtag_ll_phy_enable_external(false)` → RTCCNTL.usb_conf 的
+        //      sw_hw_usb_phy_sel=1、sw_usb_phy_sel=0＝內部 FSLS PHY 歸 USJ。）
         usb_serial_jtag_ll_phy_enable_external(false);
 #endif
         if (b->usb_log) {
@@ -4382,11 +4391,15 @@ static esp_err_t ph_usb(void)
             ESP_LOGW(TAG, "config 冇 USB 服務（CDC 未登記、msc=0）→ 唔裝 TinyUSB");
             return ESP_OK;
         }
-        // S3 的 PHY mux 在這裡**故意不碰**：OTG 那邊 usb_new_phy() →
-        // usb_wrap_hal_phy_set_external(hal, false) 會把同一條 FSLS PHY 指去 OTG。
-        // B03 揀的是「用哪條 transport」（ctx 的 usb_mode／usb_kind），PHY 只有
-        // 一條、屬於實體層，誰家 driver 最後 enable 就歸誰 —— 兩件事唔好混。
-        // 反方向（USJ）才要自己搶返 mux，見上面 JTAG 分支的註解。
+        // S3 的 PHY mux 在這裡**故意不碰**：`usb_new_phy(USB_PHY_CTRL_OTG, …INT)` →
+        // usb_wrap_hal_phy_set_external(hal, false) → usb_wrap_ll_phy_enable_external()
+        // 已經把 RTCCNTL.usb_conf 設成 sw_usb_phy_sel=1（內部 FSLS PHY 歸 USB Wrap）。
+        // 再寫一次只會重複同一個值；反之若在這裡硬寫 USJ 的值，反而會弄壞。
+        //
+        // 層次分清楚：B03（ctx 的 usb_mode／usb_kind）決定「這次開機用哪一條線」，
+        // 而「這條線」是 build-time 由 wiring.json 的 phy 定死的 → 一份映像只會
+        // init 一個 USB 驅動，唔會有 runtime 爭奪。PHY 的歸屬只是那個 driver
+        // 開機時順帶寫低的寄存器狀態（而且跨軟重啟殘留，見 JTAG 分支的註解）。
         err = usb_init();
         MAIN_HWM("post-usb");
         if (err != ESP_OK) {

@@ -2711,6 +2711,14 @@ IDF `esp_system/port/soc/esp32p4/Kconfig.cpu` 的 `ESP_DEFAULT_CPU_FREQ_MHZ_360`
   （`artifacts/<board>/` 那層的 `flash_args` 少了 `bootloader/` 前綴）；② 用 USJ 讀 log 一開埠
   DTR/RTS 就拉重置線 → 想乾淨抓 boot log 要用 `--after watchdog-reset`／唔碰 DTR/RTS；
   ③ 燒 OTG 版會令 USJ 掉埠（CDC 重新枚舉），要重開埠搶 ROM 下載窗口。
+- **用詞修正（同日）**：早前講「USJ 的 PHY 被 OTG 搶」是舊模型（`usb_jtag`／`cdc` 可以在
+  runtime 揀）留下的語感。現在 `wiring.json` 的 `phy` 是 build-time 事實、`{kind:"usb"}`
+  自動跟、B03 寫入 ctx —— **一份映像只有一個 USB driver 會 init，不存在爭奪**。剩下的是
+  寄存器事實：`RTCCNTL.usb_conf` 的 `sw_usb_phy_sel` 由兩個 driver 各自在 init 時寫
+  （OTG→1、USJ→0，見 `usb_wrap_ll_phy_enable_external()`／
+  `usb_serial_jtag_ll_phy_enable_external()`），且它在 RTC domain、**軟重啟不清**，
+  所以 USJ 分支每次都明確寫一次（我們走 LL、冇 `usb_serial_jtag_driver_install()`）。
+  完整表見 `docs/03_notes/usb-config.md`。
 
 **仍未做（今輪新增）**
 
