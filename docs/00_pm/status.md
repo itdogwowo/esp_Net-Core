@@ -3415,3 +3415,18 @@ modules/
   加大 slots 量 burst，量完還原）。
 - 判準：先量 `STATUS keys=net` 的 `max_dlen`／`slot_full`／`peak`／`cfg_src`；達標率
   ≥90% 就停。實測證明「加大緩衝」對吞吐冇幫助（TCP slots 1 KB→4 KB 一樣 490 KB/s）。
+
+### 7.92 2026-11-18（網頁工具提升一級：ESP WebMaster 搬到 repo 根，一鍵開）
+
+- `tools/esp_webmaster/` → **`/webmaster/`**（repo 根）。理由：`tools/` 太多命令，
+  網頁工作臺係「人用嘅入口」唔應該埋在工具堆；搬到上層之後路徑即係功能名。
+- 一鍵啟動：
+  - **`./web.sh`**（macOS/Linux）：自動建 `webmaster/.venv`＋裝 deps（`launch.py`）
+    ＋開瀏覽器 → http://127.0.0.1:8010/；`./web.sh --sim` 免硬件、`--serial PORT` 直連；
+  - **雙擊 `WebMaster.command`**（macOS）同一個流程，Terminal 會停住俾你睇 log。
+- 文檔：root README 目錄樹＋「我要找的東西」加 WebMaster 入口；tools/README 頂部
+  加「快速入口」（明確講已搬走）；webmaster/README 重寫啟動段；esp-webmaster-test
+  guide 同 file-transfer／usb-config 的舊路徑更新。
+- `.gitignore` 加 `.venv/`、`.pytest_cache/`（launch.py／pytest 產物）。
+- 驗證：`webmaster/run.py --sim` 真係起得到（curl 200）；webmaster pytest 全過；
+  `bash -n web.sh WebMaster.command` 通過。

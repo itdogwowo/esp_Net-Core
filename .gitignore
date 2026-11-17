@@ -31,6 +31,10 @@ artifacts/
 __pycache__/
 *.pyc
 
+# ── WebMaster（webmaster/）：launch.py 建的 venv 與 pytest 快取 ──
+.venv/
+.pytest_cache/
+
 # ── host test 的暫存（ncm_test 在沙箱下用固定 _tmp）──
 tools/hosttest/ncm_test/_tmp*
 

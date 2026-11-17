@@ -4,6 +4,15 @@
 
 分類規則：**`tools/` 頂層 = 你平常會直接打的命令；子目錄 = 階段性驗證。**
 
+## 快速入口
+
+- **網頁工作臺（ESP WebMaster）** 已搬到 repo 根 **`webmaster/`**（唔再埋在 `tools/`）：
+  `./web.sh` 或雙擊 `WebMaster.command` → http://127.0.0.1:8010/
+- 建置／燒錄／看板：`python3 make.py`（見 `make.py --help`）
+- 對設備說話：`tools/nc4.py --port …`
+- 量測：`tools/bench/`；主機端測試：`tools/hosttest/`
+
+
 ```text
 tools/
 ├─ ncbuild/                     ① 建置工具（make.py 的實作）
@@ -134,7 +143,6 @@ python3 tools/sync_hardware_presets.py           # 重寫 project/data/config/ha
 | 工具 | 需要板子 | 做什麼 |
 |---|---|---|
 | `nc4.py --port … reboot\|status\|raw\|listen` | ✅ | 送單一 NC4 指令 / **查狀態（keys 可選）** / 監看輸出 |
-| `esp_webmaster/` | 可選 | **獨立 Web 工作臺**（`mp_Tools` 版面）：CDC 做 status／log／指令／OTA／**FAT 檔案**（冇 USB driver 都用得）；MSC 隨身碟頁只係有 USB 嘅板可選。`python run.py --sim` 免硬件 |
 | `ota.py --port … <image>` | ✅ | NC4 OTA 推 firmware，**不需要按鍵、不需要 download mode** |
 | `selftest.py --port …` | ✅ | 一鍵自測：STATUS / 解碼器 9 case / 效能 / 突發 / OTA（會匯入同層的 `ota.py`） |
 | `nc4_file.py --port … status\|query <path>\|claim\|release` | ✅ | 檔案查詢（0x2005）與儲存狀態（0x1103/0x1101）。讀取任何模式都通；只有寫入才要 claim，見 [fat-ownership](../docs/03_notes/fat-ownership.md) |

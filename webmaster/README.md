@@ -10,21 +10,26 @@ Web UI 同 AI 都經同一個 API 讀同一份 log／activity。**
 AI 用 `POST /api/select` 切 active，讀指定裝置 log 再加 `device=`。
 人用瀏覽器、AI 用 REST（帶 `X-Actor: ai`）。
 
-## 啟動
+## 啟動（最簡單）
+
+由 repo 根：
 
 ```bash
-cd tools/esp_webmaster
-python -m pip install -r requirements.txt   # 首次：fastapi/uvicorn/pyserial/esptool
-python run.py --sim                # 模擬裝置（唔使板）
-python run.py --serial /dev/cu.usbmodemF0F5BD7554EC1   # 開機自動連 S3
-python run.py --port 8011 --open   # 自訂 HTTP port + 開瀏覽器
-# 連第二台：UI 按「連線／新增」再揀 port，或 POST /api/connect；唔使再開 server。
+./web.sh                 # 自動建 venv＋裝 deps＋開瀏覽器（預設 port 8010）
+./web.sh --sim           # 用模擬裝置，唔使板
+./web.sh --serial /dev/cu.usbmodemXXXX --port 8011
 ```
 
-或者一鍵（自動建 venv + 裝 deps）：
+macOS 亦可以**雙擊 repo 根的 `WebMaster.command`**（Terminal 自動開）。
+
+或者手動：
 
 ```bash
-python launch.py --sim
+cd webmaster
+python3 launch.py --sim     # 一鍵：建 .venv、裝 deps、跑 run.py
+# 或已有 deps：
+python3 run.py --sim
+python3 run.py --serial /dev/cu.usbmodemF0F5BD7554EC1 --port 8011 --open
 ```
 
 瀏覽器開 `http://127.0.0.1:8010/`。
@@ -139,7 +144,7 @@ http://127.0.0.1:8010/?panel=activity#ide
 ## 測試
 
 ```bash
-cd tools/esp_webmaster
+cd webmaster
 python -m pytest -q
 ```
 

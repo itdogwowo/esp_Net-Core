@@ -35,6 +35,8 @@ esp_Net-Core/
 │  ├─ partitions.csv            分割表
 │  └─ build/  managed_components/  sdkconfig  ← 生成物，不進 git
 │
+├─ webmaster/                  ──【網頁工作臺】ESP WebMaster（獨立 server；唔屬於 firmware）──
+│  └─ run.py／launch.py        ./web.sh 一鍵開；UI 做 status／log／指令／OTA／FAT 檔案
 ├─ modules/                    ──【外掛模組層】獨立編譯（唔屬於 firmware）──
 │  ├─ tasks/                   任務模組，leaf 以 _tasks 結尾 → out/<name>.nct
 │  ├─ actions/                 指令模組，leaf 以 _actions 結尾（build.json cmds）
@@ -82,6 +84,7 @@ esp_Net-Core/
 | 實際的 C 程式 | `firmware/main/`、`firmware/components/` |
 | 這塊板子要什麼 | `ports/hardware/<chip>/<board>/`（硬體）＋ `ports/project/<chip>/<board>/`（項目） |
 | 怎麼操作板子 | [tools/README.md](tools/README.md) |
+| 打開網頁工作臺（WebMaster） | `./web.sh`（或雙擊 `WebMaster.command`）→ http://127.0.0.1:8010/ |
 
 ⚠️ `docs/03_notes/component-layout.md` 描述的是**目標架構**（hw/sys/sw/action/tasks/ui/schema 七區）。
 **目前實作只有 `sys/` 與 `app/` 兩區**，其餘仍在 `firmware/main/main.c` 裡。讀那份文件時請分清楚「終點」與「現況」。

@@ -235,7 +235,7 @@ P4 的 JTAG 第二條 link。今次只落地「出廠預設 ＋ 註冊語義 ＋
 
 ### P0 — C3（JTAG CDC）的 4 KB 上傳會失敗：協議假設 vs 實際 region（已止血，正解見 §2.5）
 
-- 4 KB 只是 host 的預設 chunk（`tools/esp_webmaster/files.py:118`），
+- 4 KB 只是 host 的預設 chunk（`webmaster/files.py:118`），
   **不是協議要求**；2 KB、3 KB 一樣合法。真正的不變量是：
   `frame = 9 + (6 + chunk) + 4 = chunk + 19` 必須 ≤ rx parser region。
 - `usb_jtag` 以前沒有專屬的 rx 預設，跌落 `default` 的 **4,096**；

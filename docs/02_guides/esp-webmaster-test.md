@@ -1,11 +1,11 @@
 # ESP WebMaster 上板驗收（CDC FAT）
 
 > 2026-11-12。對象：有 ESP-IDF 的機器 ＋ S3 或 P4 板。
-> UI：`tools/esp_webmaster/`；協議：[file-transfer.md](../03_notes/file-transfer.md)。
+> UI：`webmaster/`；協議：[file-transfer.md](../03_notes/file-transfer.md)。
 >
 > **2026-11-14 更新**：序列埠由 WebMaster server 獨佔；AI／其他工具請用 REST API
 > （`X-Actor: ai`），唔好再直接開 COM。共享 log／IDE／ESPTOOL 見
-> [`tools/esp_webmaster/README.md`](../../tools/esp_webmaster/README.md)。
+> [`webmaster/README.md`](../../webmaster/README.md)。
 
 ---
 
@@ -22,7 +22,7 @@ python make.py flash p4
 
 ```bash
 # 2) 起 UI（同一部機，板插 USB）
-cd tools/esp_webmaster
+cd webmaster
 python run.py --serial COM13
 # 冇 --serial 也可以：開 UI 之後喺左邊揀 port
 ```
@@ -135,7 +135,7 @@ COM13）；JTAG 孔（COM21）只係 console。
    ```
 4. 用 `recover.py` 自動睇晶片／flash size，揀 `artifacts/recovery/` 對應映像：
    ```bash
-   cd tools/esp_webmaster
+   cd webmaster
    python recover.py --port COM25 --dry-run   # 先睇命令
    python recover.py --port COM25             # 真燒
    ```

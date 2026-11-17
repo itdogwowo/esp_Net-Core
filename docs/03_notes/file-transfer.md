@@ -4,7 +4,7 @@
 > 唯一通道就係 USB CDC。所以檔案一定要可以經 NC4 直接操作，唔可以倚賴 MSC。
 >
 > 程式：`firmware/components/action/file_action/nc_file_action.c`
-> UI：`tools/esp_webmaster/`（檔案頁）
+> UI：`webmaster/`（檔案頁；repo 根，`./web.sh` 開）
 > 指令表：[../01_protocol/commands.md](../01_protocol/commands.md)
 
 ---
@@ -142,7 +142,7 @@ UI 由 manifest 每個 entry 的 `p` 旗標顯示「待確認」。
 
 ## 6. 測試
 
-- 協議／UI：`cd tools/esp_webmaster && python -m pytest -q`
+- 協議／UI：`cd webmaster && python -m pytest -q`
   （sim 實作同一套指令，共 37 個測試，含 firmware↔UI 指令碼契約、C 語法 parse、OTA chip guard）
 - C 檔語法／型別：用 MSVC `cl /Zs` ＋ stub headers 檢查通過（唔係 IDF build）。
 - **真 IDF build（2026-11-12，v6.1，WSL）**：

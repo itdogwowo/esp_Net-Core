@@ -29,7 +29,19 @@ try:                                    # Windows cp950 console 唔識 ✘/✔
 except Exception:
     pass
 
-ROOT = Path(__file__).resolve().parents[2]
+def _repo_root() -> Path:
+    """由檔案位置向上找 repo 根（有 firmware/CMakeLists.txt 的那層）。
+
+    唔用固定 parents[N]：WebMaster 由 tools/esp_webmaster/ 搬去 repo 根之後，
+    深度少了一層；用 marker 搵就不怕再搬。
+    """
+    for p in Path(__file__).resolve().parents:
+        if (p / "firmware" / "CMakeLists.txt").exists():
+            return p
+    raise RuntimeError("找唔到 repo 根（firmware/CMakeLists.txt）")
+
+
+ROOT = _repo_root()
 REC = ROOT / "artifacts" / "recovery"
 
 # (chip prefix, flash MB) -> (recovery dir, bootloader offset, flash freq)
