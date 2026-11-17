@@ -3112,3 +3112,46 @@ workload：50,000 次 LCG（`v = v*1664525 + 1013904223`，同一個 checksum）
 3. AOT spike（P3）；
 4. per-module loop／prio／core（manifest 已有欄位，loader 只 attach 未調度）；
 5. 測試冊逐項更新（T-NCM-008 fuzz、T-NCM-009 AOT、T-NCM-010 LED…）。
+
+### 7.84 2026-11-17 深夜（定案：終極目標 = L3 硬件加速；L1.5 native ELF 可選但失去沙箱）
+
+**① 討論定案（記錄）**
+
+- viper／AOT／native ELF 的分別：
+  - `@micropython.viper` = **runtime native emitter**（function 定義時即場編機器碼、放 IRAM、
+    原始 pointer、冇 bounds check）→ 快，但只可信自己 code，**唔係 AOT**；
+  - **L1 AOT** = 離線編機器碼，同一速度級（預期 2–4× C），但**仍然有沙箱**；
+  - **L1.5 native ELF** = ~1× C，但**失去沙箱**（同 firmware 同一 address space、
+    冇 MMU 隔離、crash = reboot、開機自動載入會 boot loop）。
+- 「失去沙箱」的意思已寫入 [module-adoption §2.5](../03_notes/module-adoption.md)：
+  記憶體隔離／能力白名單／失敗隔離三層全部冇；所以只可以俾自己寫／簽名 module。
+- 官方工具：Espressif 有
+  [`espressif/elf_loader`](https://components.espressif.com/components/espressif/elf_loader)
+  （esp-iot-solution），支援 **S3/P4 在 PSRAM 執行 ELF／`.so`**、`dlopen/dlsym`、
+  custom symbol table；所以「自己寫 OS 級動態連結器」唔係唯一路（亦唔係首選）。
+  我們仍要做：收窄 symbol 白名單、ABI version、簽名／allowlist、boot safe mode、
+  任務管理器整合、量 PSRAM 取指速度。估算 PoC 由幾星期降到幾日，但本質風險不變。
+
+**② 終極目標文件**
+
+新增 [goal-hardware-acceleration.md](goal-hardware-acceleration.md)：
+- 「無敵」操作定義：**加功能唔加 CPU；加解像度唔加 jitter**；
+- 三級定義（L1 可更新／L2 可收納／L3 硬件化）＋每級驗收；
+- S3／P4 硬件能力表（IDF v6.0.3 `soc_caps.h` 實查）：P4 有 PPA／DMA2D／JPEG／ISP／CAM，
+  S3 有 RMT／LCD_CAM／I2S／ADC-DMA／GDMA；兩者都有 AES/SHA；
+- 5 個目標場景（LED 矩陣／相機 pipeline／LCD／音頻／密碼校驗）；
+- 里程碑 **M1–M5**：M1 已完成（L1 外掛＋14.8× 量測）→ M2 AOT → M3 L2 收納 →
+  M4 第一條 L3 pipeline（S3 RMT LED 或 P4 CAM→ISP→PPA→JPEG）→ M5「無敵」驗收；
+- 量測方法、前置風險（接線／driver 成熟度／PSRAM 帶寬／信任邊界／fallback）。
+
+**③ 測試冊新增**
+
+T-NCM-013（L1.5 native ELF 可選 PoC）、T-NCM-014（S3 RMT LED L3）、
+T-NCM-015（P4 CAM→ISP→PPA→JPEG）、T-NCM-016（LCD/顯示）。
+
+**④ 下一步（照里程碑）**
+
+1. **M2 AOT spike**（P3）：`wamrc`→Xtensa AOT→S3 PSRAM dual-bus 執行，量 L1；
+2. capability provider 重構（`nc_cap_gpio/time`）＋`nc_cap_led`；
+3. **M4 第一條 L3：S3 RMT LED matrix**（fps／CPU before-after）；
+4. L1.5 native ELF 只作可選 PoC（簽名＋ABI 白名單齊備先做）。

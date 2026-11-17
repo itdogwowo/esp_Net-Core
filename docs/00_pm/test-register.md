@@ -23,6 +23,10 @@
 | T-NCM-010 | LED pattern 任務外掛化（`nc_led_show/info`，driver 留 host） | 功能 | L0→L2 | 未做（先加 `nc_cap_led`） | **未做** | 邊界 copy 2.7 KB ≈68 µs（既有數據） | ⬜ 下一步 |
 | T-NCM-011 | 每模組獨立 loop／prio／core／period（真任務調度） | 架構 | L0→L2 | loader 已 attach、未調度 | **未做** | — | ⬜ 下一步 |
 | T-NCM-012 | TCP 吞吐外掛化 | 功能 | L2-保留 | 安全政策未開 network 能力 | 唔搬：測 host lwIP | — | ⏸ 決定不開放 |
+| T-NCM-013 | Native ELF 外掛（`espressif/elf_loader`，trusted only） | 可選 L1.5 | 未做 | 官方 component；S3 可在 PSRAM 執行 ELF | **未做** | ≈1× C（PSRAM 取指待量）；**無沙箱** | ⬜ 可選 PoC（簽名＋ABI 白名單齊備先做） |
+| T-NCM-014 | L3：S3 RMT LED matrix（DMA→RMT） | 硬件加速 | L3 | 未做（現有 `test_rgb_led_matrix` 為 CPU 波形） | **未做** | 目標 60 fps＋、CPU <10%、零 bit-bang | ⬜ M4 第一條 pipeline |
+| T-NCM-015 | L3：P4 CAM→ISP→PPA→JPEG pipeline | 硬件加速 | L3 | 未做（`esp_driver_cam/isp/ppa/jpeg`） | **未做** | 目標 640×480@30 fps、CPU 只做控制 | ⬜ M4（要接線） |
+| T-NCM-016 | L3：LCD/顯示（PPA/DMA2D→LCD_CAM） | 硬件加速 | L3 | 未做 | **未做** | 全屏刷新 CPU ~0、無 tearing | ⬜ M4/M5 |
 
 ## 2. Host 測試（完全唔入固件，L2 工具）
 

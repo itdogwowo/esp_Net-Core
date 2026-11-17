@@ -13,18 +13,76 @@
 
 唔會一開始就寫入固件；亦唔會為咗外掛而外掛。每一層升級都要有數字支持。
 
-## 2. 四層收納階梯
+## 2. 收納階梯（四層＋一個可選層）
 
-| 層 | 形態 | 位置／格式 | 代價（相對 C） | 適合 |
-|---|---|---|---|---|
-| **L0** | 外掛 wasm（直譯） | `.nct`，`fmt=wasm`；`/data/tasks`、`/data/pixel/effects` | **≈15× 慢**（S3 實測，見 §5） | 邏輯／pattern／狀態機／協議／GPIO 編排 |
-| **L1** | 外掛 wasm（AOT） | 同一個 `.nct`，`fmt=aot`＋`target_id`（S3=xtensa、P4=rv32f） | 預期 **2–4× 慢**（待 P3 實測） | 性能敏感、但仍然要「部署後可換」 |
-| **L2** | 原生 C 固件組件 | `firmware/components/...`（唔再係外掛） | **1×**（基準） | 熱路徑、驅動、timing、buffer、實時性 |
-| **L3** | 硬件加速 | DMA／PPA（P4）／RMT／IRAM placement／assembly | 可能更快／省 CPU | L2 都仍然唔夠（先量，後做） |
+| 層 | 形態 | 位置／格式 | 代價（相對 C） | 沙箱 | 適合 |
+|---|---|---|---|---|---|
+| **L0** | 外掛 wasm（直譯） | `.nct`，`fmt=wasm`；`/data/tasks`、`/data/pixel/effects` | **≈15× 慢**（S3 實測，見 §5） | ✅ | 邏輯／pattern／狀態機／協議／GPIO 編排 |
+| **L1** | 外掛 wasm（AOT） | 同一個 `.nct`，`fmt=aot`＋`target_id`（S3=xtensa、P4=rv32f） | 預期 **2–4× 慢**（待 P3 實測） | ✅ | 性能敏感、但仍然要「部署後可換」 |
+| **L1.5**（可選） | **native ELF／`.so`**（Espressif `elf_loader`） | 由 `/data` 載入 `.elf`／`.so`（S3 可在 PSRAM 執行） | **≈1×**（PSRAM 取指另計） | ❌ **完全受信** | 要 C 速度 **而且**要模組級更新 → **只限自己寫／簽名** |
+| **L2** | 原生 C 固件組件 | `firmware/components/...`（唔再係外掛） | **1×**（基準） | ❌（但係你自己 code） | 熱路徑、驅動、timing、buffer、實時性 |
+| **L3** | 硬件加速 | DMA／RMT／LCD_CAM／I2S／PPA／JPEG／ISP（見 [goal](goal-hardware-acceleration.md)） | 更快／省 CPU | ❌ | L2 都仍然唔夠（先量，後做） |
 
 - 升級係**單向按需要**：L0 夠用就停喺 L0；只有量到 budget 爆或穩定性問題才升。
 - 每升一層，**保留上一層做 golden reference／回退**（行為一致先算收納）。
 - AOT 唔會逃出白名單：佢只係快啲嘅 guest，唔算「加能力」。
+
+## 2.5 沙箱與信任：wasm／AOT／native ELF
+
+| 保證 | wasm L0／L1 | native ELF（L1.5） |
+|---|---|---|
+| **記憶體隔離** | 只有自己 linear memory；每次 access bounds check；指唔到 host | 同 firmware 同一個 address space；wild pointer 可以改任何記憶體 |
+| **能力白名單** | 只可以叫 `env.nc_*`；host 先 validate app addr | 只可以叫 symbol table 內的函數，但**記憶體安全冇咗**（冇 MMU／check） |
+| **失敗隔離** | trap → 標 `bad`、live=NULL，核心照跑 | crash = panic／reboot；開機自動載入就 boot loop（USB 未起，要按 BOOT） |
+
+「失去沙箱」唔係「慢咗」咁簡單，係**信任模型改變**：模組變成 firmware 一部分，
+可以（意外或惡意）讀寫 flash／heap／其他 module、直接寫 GPIO 暫存器、令系統死機。
+所以 L1.5 **只可以俾自己寫／簽名嘅 module**；第三方永遠留在 L0／L1。
+
+> 注：**AOT（L1）仍然有沙箱**——佢係「沙箱內嘅機器碼」，所以係 2–4× C；
+> 想 1× C 就一定要犧牲沙箱（L1.5／L2）。
+
+### 2.5.1 L1.5 用官方工具，唔使自己寫 linker
+
+Espressif 有官方 component
+[`espressif/elf_loader`](https://components.espressif.com/components/espressif/elf_loader)
+（esp-iot-solution 的一部分）：由 filesystem 載入 ELF／`.so`，做 relocation、
+symbol 解析、`dlopen/dlsym/dlclose` 風格介面；README 明確支援
+**ESP32-S3／S2／P4／C6／C61 在 PSRAM 執行 ELF**，有 libc／IDF／customer
+symbol table 同 `esp_elf_register_symbol()`；配套 examples：
+`idf.py elf`（獨立 `.elf`）、`project_so`（`.so`）、`elf_console_example`。
+
+所以「自己寫一個 OS 級動態連結器」**唔係唯一路；亦唔係首選**：
+
+- 唔使寫：loader、relocation（Xtensa `R_XTENSA_32`／`l32r`）、bus mirror、cache sync；
+- 仍然要做：**收窄 symbol table**（只 export `nc_*` 白名單，唔要完整 libc／IDF）、
+  ABI version 檢查、**簽名／allowlist**、boot safe mode、同 firmware OTA 的版本配套、
+  量 PSRAM 取指速度、任務管理器整合（attach 租戶、call tick）。
+- 工程估算：官方 component 之下，一個「trusted native plugin」PoC 由幾星期降到
+  **幾日**（build workflow＋ABI 白名單＋簽名＋測試）。但**安全邊界／ABI 耦合／
+  boot crash 風險係本質，唔會因為有 AI 幫手而消失**。
+
+### 2.5.2 為何唔自己寫動態連結器
+
+- S3 冇 MMU（只有 MPU，作唔到 fine-grained sandbox）；native code 一 wild 就死；
+- Xtensa relocation／cache／PSRAM bus mirror 全部要自己處理（官方 loader 已做）；
+- ABI 綁 firmware：每次 OTA 都可能令舊 module 壞，要 freeze ABI＋版本檢查；
+- 多架構（S3 xtensa／P4 RISC-V）各一套；
+- 結論：**用官方 component 做 PoC 可以，自己寫就唔值**；而且無論邊種做法，
+  都唔會令 native module 變返「安全」。
+
+### 2.5.3 討論紀錄：MicroPython viper vs AOT
+
+- `@micropython.viper` 係 **runtime native emitter**：function 定義時由 firmware
+  內建 compiler 即場編成機器碼，放可執行 RAM（ESP32 係 IRAM）；`int` 係機器字、
+  `ptr8/16/32` 係原始位址、冇 bounds check → 快，但**只可以信自己 code**。
+- `mpy-cross`／`.mpy` 只係 source→bytecode，唔會變機器碼；「MPY 接近 C」主要係
+  viper／`@native` ＋ C module 嘅效果，唔係 AOT。
+- 我們嘅 **L1 AOT = 離線編機器碼**：同一速度級（預期 2–4× C），但唔使 firmware
+  帶 compiler、唔使 runtime IRAM code cache、語言係完整 wasm、仍有沙箱。
+- 兩者限制（IRAM／語言 subset／冇安全）係本質；**唔等於 C**，真 C 只有 L2，
+  硬件加速係 L3。詳情見 [goal-hardware-acceleration.md](../00_pm/goal-hardware-acceleration.md)。
+
 
 ## 3. 通用格式（唔會每層換格式）
 
@@ -81,7 +139,9 @@
 
 ## 7. 唔做
 
-- 由 `/data` 載入 native code 或把 AOT 當「新能力」。
+- **默認唔用** native ELF 外掛（L1.5）：只可以係可信／簽名 module 嘅可選方案；
+  第三方 plugin 永遠 L0／L1。
+- 由 `/data` 載入原生 code 當「新能力」；AOT 亦唔算加能力（仍然白名單）。
 - 把所有測試一次過搬入外掛——測試 host 內部（hub／buf／flash／OTA／partition）
   嘅嘢留 hosttest／dev 固件（搬去 wasm 只會測到 WAMR，見 §7.82）。
 - 外掛模組直接開 raw register／host pointer。
@@ -91,9 +151,12 @@
 - 已達 **L0**：`hello_task`（列印＋GPIO 讀／反轉）＋`bench_task`（性能對照）；
   能力白名單 7 個 import（print／print_i32／print2／gpio_read/write/toggle／now_us）。
 - 已量：interp ≈15× C（上面）；**AOT 未接，未有板上數字**。
-- 下一步：
-  1. capability provider 重構（`nc_cap_*`，先 gpio/time）；
-  2. `nc_cap_led`（`nc_led_show/info`）→ LED pattern 任務 L0 → L2（driver 留 host）；
-  3. **AOT spike**（P3）：`wamrc` 編 Xtensa AOT、S3 PSRAM dual-bus 執行路徑、量 L1；
+- 終極目標：**L3 硬件加速**（DMA／RMT／LCD_CAM／I2S／PPA／JPEG／ISP），
+  里程碑 M1–M5 見 [goal-hardware-acceleration.md](../00_pm/goal-hardware-acceleration.md)。
+- 下一步（照里程碑）：
+  1. **M2 AOT spike**（P3）：`wamrc` 編 Xtensa AOT、S3 PSRAM dual-bus 執行、量 L1；
+  2. capability provider 重構（`nc_cap_*`，先 gpio/time）；`nc_cap_led`；
+  3. **M4 第一條 L3 pipeline：S3 RMT LED matrix**（fps/CPU before-after）；
   4. per-module loop／prio／core（manifest 已有欄位，loader 只 attach 未調度）；
-  5. 測試冊（[test-register](../00_pm/test-register.md)）逐項更新。
+  5. L1.5 native ELF 只作為「可選 PoC」（有需要＋簽名信任模型齊備先做）；
+  6. 測試冊（[test-register](../00_pm/test-register.md)）逐項更新。

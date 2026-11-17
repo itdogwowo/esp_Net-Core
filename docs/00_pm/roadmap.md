@@ -24,6 +24,14 @@ C 版的目標不是「math 快 50%」，而是：
 - **Cross-chip sync**：common timebase + scheduled start + frame id。
 - **Single frame contract**：effects 只 render 到 buffer，不准碰硬體。
 
+> **終極目標（2026-11-17 定案）**：上面呢幾條——deterministic overlap、低 jitter、
+> 並行輸出（RMT／I2S／LCD_CAM）、single frame contract——產品級講法其實就係
+> **L3 硬件加速**：熱路徑全部由硬件做，CPU 只做控制。可量測的里程碑（M1–M5）、
+> S3／P4 硬件能力表同目標場景見
+> [goal-hardware-acceleration.md](goal-hardware-acceleration.md)。
+> 模組收納分級（L0/L1/L1.5/L2/L3）見
+> [module-adoption.md](../03_notes/module-adoption.md)。
+
 ---
 
 ## 1. 已定案
