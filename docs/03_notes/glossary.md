@@ -3,7 +3,7 @@
 > 2026-11-10。**用途**：這個項目用到的字，每個只留一個意思。
 > 原則：**code 用英文、文件用中文，一對一**；同一個字不准指兩樣東西。
 > 相關：[buffers.md](buffers.md)（緩衝工具本體）、[task-model.md](task-model.md)（任務模型）、
-> [naming.md](naming.md) §5（FXE 相關術語）。
+> [naming.md](naming.md) §5（NCM 相關術語）。
 
 ---
 
@@ -20,7 +20,7 @@
 
 | 詞 | 意思 | 易誤會位 |
 |---|---|---|
-| `kind` | `SYSTEM`（韌體一部分、config 管唔到、唔卸載）／`NORMAL`／`EFFECT`（`.fxe`，可黏可拆） | 唔是「類型」，是「邊個有權管它」 |
+| `kind` | `SYSTEM`（韌體一部分、config 管唔到、唔卸載）／`NORMAL`／`EFFECT`（`.nct` / `.nce`，可黏可拆） | 唔是「類型」，是「邊個有權管它」 |
 | `level` | **任務**的次序（細先）：幾時宣告資源、幾時啟動 | 同 `layer` 成對 |
 | `layer` | **線程**的次序（細先）：幾時開跑 | 通常等於 level；唔等要寫註解 |
 | `affinity` | `[core0, core1]`，只准一個 `1` | 唔是效能調優，是「釘死」 |
@@ -71,7 +71,7 @@
 ## 4. 生命週期與接線
 
 `register`（登記）→ `declare`（講要幾多）→ `commit`（一次要）→ `start`（資源到手、`on_start`）
-→ `boot`（開線程）→ `stop`（合作式停）。`attach`／`detach` 只有 `.fxe` 用。
+→ `boot`（開線程）→ `stop`（合作式停）。`attach`／`detach` 只有 `.nct` / `.nce` 用。
 
 | 詞 | 意思 |
 |---|---|

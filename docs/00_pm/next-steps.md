@@ -16,12 +16,12 @@
 
 之前的文件寫「縮到 12 格可省 ~3 KB」。實際數：
 
-- 固定註冊 **8** 個任務（nc4、net、probe、fx、hello、bench_a/b/c）
+- 固定註冊 **8** 個任務（nc4、net、probe、ncm、hello、bench_a/b/c）
   —— 舊版這裡寫 10 個（含已刪的 `core`／`monitor`），2026-11-10 更正
-- `.fxe` 最多 attach **8** 個（`NC_FX_MAX_MODULES = 8`）
+- `.nct` / `.nce` 最多 attach **8** 個（`NC_MOD_MAX_MODULES = 8`）
 - **8 + 8 = 16**
 
-所以 20 格仍然**必要**（留 4 格緩衝）。縮到 12 會在載入第 5 個 `.fxe` 之後
+所以 20 格仍然**必要**（留 4 格緩衝）。縮到 12 會在載入第 5 個 `.nct` / `.nce` 之後
 `nc_task_attach()` 直接回 `ESP_ERR_NO_MEM`，而且是**靜默的功能消失**。
 → **不做**，並已修正三份文件裡的說法。
 

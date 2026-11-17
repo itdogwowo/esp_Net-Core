@@ -147,7 +147,8 @@ static uint8_t (*const s_usb_kind_lookup)(uint8_t) = nc_port_usb_kind;
 #include "nc_state.h"
 #include "nc_file_action.h"
 #ifdef NC_ENABLE_TESTS
-#include "nc_fx.h"
+#include "nc_mod.h"
+#include "nc_res.h"
 #endif
 #include "nc_wifi.h"
 #include "nc_core.h"
@@ -1283,7 +1284,7 @@ static void jappend(char *buf, size_t cap, size_t *off, const char *fmt, ...)
 }
 
 // 把子系統的 JSON 直接接到 buf + *off。
-// 這些函式（nc_plan_json / nc_task_json / nc_fx_status_json …）都回傳「實際寫了幾多」，
+// 這些函式（nc_plan_json / nc_task_json / nc_mod_status_json …）都回傳「實際寫了幾多」，
 // 所以**不需要中間緩衝**——這正是以前那些 static char plan[700] 存在的原因。
 typedef size_t (*nc_json_fn)(char *buf, size_t cap);
 
@@ -1728,7 +1729,7 @@ static void on_status_get(nc4_ctx_t *ctx, const nc4_frame_t *f)
     if (strcmp(keys, "?") == 0) {
         reply_json(ctx, NC4_CMD_STATUS_RSP,
                    "{\"keys\":[\"sys\",\"storage\",\"cfg\",\"log\",\"rt\","
-                   "\"mem\",\"provides\",\"tasks\",\"fx\",\"wifi\",\"net\",\"cmds\"]}");
+                   "\"mem\",\"provides\",\"tasks\",\"ncm\",\"wifi\",\"net\",\"cmds\"]}");
         return;
     }
 
@@ -1770,8 +1771,8 @@ static void on_status_get(nc4_ctx_t *ctx, const nc4_frame_t *f)
         status_add(json, cap, &off, &first, status_put_tasks);
     }
 #ifdef NC_ENABLE_TESTS
-    if (keys_want(keys, "fx")) {
-        status_add(json, cap, &off, &first, nc_fx_status_json);
+    if (keys_want(keys, "ncm")) {
+        status_add(json, cap, &off, &first, nc_mod_status_json);
     }
 #endif
     if (keys_want(keys, "wifi")) {
@@ -1789,7 +1790,7 @@ static void on_status_get(nc4_ctx_t *ctx, const nc4_frame_t *f)
         off = 0;
         jappend(json, cap, &off,
                 "{\"truncated\":1,\"cap\":%u,"
-                "\"tips\":\"keys=sys,storage,cfg,log,mem,provides,tasks,fx 分批問\"}",
+                "\"tips\":\"keys=sys,storage,cfg,log,mem,provides,tasks,ncm 分批問\"}",
                 (unsigned)NC4_REPLY_JSON_MAX);
     } else {
         jappend(json, cap, &off, "}");
@@ -2150,9 +2151,9 @@ static const nc_task_provide_t s_nc4_provides[] = {
 };
 
 #ifdef NC_ENABLE_TESTS
-static const nc_task_provide_t s_fx_provides[] = {
-    { .name = "fx.info", .kind = NC_PROVIDE_JSON, .desc = "live 效果 / arena / 每個實例",
-      .json = nc_fx_info_json },
+static const nc_task_provide_t s_ncm_provides[] = {
+    { .name = "ncm.info", .kind = NC_PROVIDE_JSON, .desc = "live 模組 / arena / 每個實例",
+      .json = nc_mod_info_json },
 };
 #endif
 
@@ -2499,9 +2500,9 @@ static esp_err_t task_net_start(const nc_task_res_view_t *res, int n)
 // 註冊指令（帶擁有權）→ 開 loop。main 只回答「有哪些任務」。
 //
 // 三種 kind 的分工：
-//   system  = 硬體 / driver / 通道 / fx 載入器（固定順序、不可卸載、唔入 tasks.json）
+//   system  = 硬體 / driver / 通道 / ncm 載入器（固定順序、不可卸載、唔入 tasks.json）
 //   normal  = 一般任務（以前的 service 就是這個；probe、hello）
-//   effect  = 由 .fxe 載入的任務（在 nc_fx_load 裡 attach，不在這張表）
+//   effect  = 由 .nct / .nce 載入的任務（在 nc_mod_load 裡 attach，不在這張表）
 //
 // 租戶（normal / effect）的 level / affinity 由 /data/config/tasks.json 決定；
 // 未設定 = (0,0) = 唔跑。核心（system）永遠照這裡的宣告跑。
@@ -3523,61 +3524,64 @@ static void link_audit(void)
 
 
 #ifdef NC_ENABLE_TESTS
-// ⑥ fx（Normal L4）：**POC／原始形態**（2026-11-04 標記）—— arena + 實例表 + render task。
+// ⑥ ncm（Normal L4）：**POC／原始形態**（2026-11-04 標記）—— arena + 實例表 + render task。
 //    運作方式未定義：核心、幀來源、同緩衝交換的接口都係待規劃，唔好當成正式功能。
-#define NC_FX_TASK_CORE 1
+#define NC_MOD_TASK_CORE 1
 // ★ 測試任務的優先級要**低過** UART producer（prio 3）：同級會時間切片（10 ms/tick），
-//   fx 每 10 ms 醒一次，剛好把 uart.rx 壓住一個 tick —— 1 KB 的 UART RX 環（11 ms）
+//   ncm 每 10 ms 醒一次，剛好把 uart.rx 壓住一個 tick —— 1 KB 的 UART RX 環（11 ms）
 //   會因此偶發溢位（實測 15 分鐘 soak 4 次 CRC）。降到 2 之後 uart.rx 永遠先跑。
-//   （release 映像沒有 fx，這個競爭本來就不存在。）
-#define NC_FX_TASK_PRIO 2
+//   （release 映像沒有 ncm，這個競爭本來就不存在。）
+#define NC_MOD_TASK_PRIO 2
 
-static esp_err_t task_fx_start(const nc_task_res_view_t *res, int n)
+static esp_err_t task_ncm_start(const nc_task_res_view_t *res, int n)
 {
     if (n < 1 || res[0].ptr == NULL) {
         return ESP_ERR_NO_MEM;
     }
-    nc_fx_set_task_placement(NC_FX_TASK_CORE, NC_FX_TASK_PRIO);
-    const esp_err_t e = nc_fx_init(res[0].ptr, res[0].len);
+    nc_mod_set_task_placement(NC_MOD_TASK_CORE, NC_MOD_TASK_PRIO);
+    const esp_err_t e = nc_mod_init(res[0].ptr, res[0].len);
     if (e != ESP_OK) {
         return e;
     }
-    // 掃目錄不在這裡做：載入 .fxe = attach 租戶 = 會插入 registry，
+    // 掃目錄不在這裡做：載入 .nct / .nce = attach 租戶 = 會插入 registry，
     // 而此刻 nc_task_start_all() 正在走同一張表（插入會搬動它）。
-    // main 在 start_all 之後呼叫 nc_fx_scan("/data/pixel/effects")。
+    // main 在 start_all 之後呼叫 nc_mod_scan("/data/pixel/effects")。
     return ESP_OK;
 }
 
-static const nc_task_loop_t s_fx_loops[] = {
-    { .name = "fx", .fn = nc_fx_task, .arg = NULL,
-      .stack = 4096, .prio = NC_FX_TASK_PRIO, .core = NC_FX_TASK_CORE,
-      // period_ms = 0：幀週期由 manifest 的 fps 決定，nc_fx_task 自己延遲。
+static const nc_task_loop_t s_ncm_loops[] = {
+    { .name = "ncm", .fn = nc_mod_task, .arg = NULL,
+      .stack = 4096, .prio = NC_MOD_TASK_PRIO, .core = NC_MOD_TASK_CORE,
+      // period_ms = 0：幀週期由 manifest 的 fps 決定，nc_mod_task 自己延遲。
       // 兩邊都延遲會變成兩倍週期。
       .layer = 3, .period_ms = 0 },
 };
 
-static int task_fx_declare(nc_task_res_t *out, int max)
+static int task_ncm_declare(nc_task_res_t *out, int max)
 {
     if (max < 1) {
         return 0;
     }
     out[0] = (nc_task_res_t){
-        .name = "fx.arena", .bytes = NC_FX_ARENA_MAX,
+        .name = "ncm.arena", .bytes = NC_MOD_ARENA_MAX,
         .cls = NC_PLAN_CLS_BULK, .align = 32,
-        // P5：整塊 arena 就是「一格 512 KB」的緩衝區（`.fxe` 之後用 nc_buf_carve 由它切）
-        .slot_bytes = NC_FX_ARENA_MAX, .n = 1, .flags = 0,
+        // P5：整塊 arena 就是「一格 512 KB」的緩衝區（`.nct` / `.nce` 之後用 nc_buf_carve 由它切）
+        .slot_bytes = NC_MOD_ARENA_MAX, .n = 1, .flags = 0,
     };
     return 1;
 }
 
-static const nc_task_t s_task_fx = {
-    // fx 是載入器／renderer，屬核心基建（房東），不是租戶：唔寫入 tasks.json。
-    .name = "fx", .kind = NC_TASK_SYSTEM, .level = 4,
-    .declare = task_fx_declare, .on_start = task_fx_start,
-    .loops = s_fx_loops, .nloops = sizeof(s_fx_loops) / sizeof(s_fx_loops[0]),
-    .provides = s_fx_provides,
-    .nprovides = sizeof(s_fx_provides) / sizeof(s_fx_provides[0]),
+static const nc_task_t s_task_ncm = {
+    // ncm 是載入器／renderer，屬核心基建（房東），不是租戶：唔寫入 tasks.json。
+    .name = "ncm", .kind = NC_TASK_SYSTEM, .level = 4,
+    .declare = task_ncm_declare, .on_start = task_ncm_start,
+    .loops = s_ncm_loops, .nloops = sizeof(s_ncm_loops) / sizeof(s_ncm_loops[0]),
+    .provides = s_ncm_provides,
+    .nprovides = sizeof(s_ncm_provides) / sizeof(s_ncm_provides[0]),
 };
+
+// 開機框架的掃描結果：B06 掃描 + 合併，B08 才載入 payload。
+static nc_mod_scan_t s_mod_scan;
 
 #endif
 #if NC_HAS_ETH
@@ -4259,7 +4263,7 @@ static esp_err_t ph_declare(void)
     nc_task_register(nc_hw_gpio_task()); // L2：GPIO owner（nc_hw resource "gpio"）
 #ifdef NC_ENABLE_TESTS
     nc_task_register(nc_test_probe_task());   // L3：開機自測（hub 交換）
-    nc_task_register(&s_task_fx);      // L4：效果 arena + render task
+    nc_task_register(&s_task_ncm);      // L4：模組 arena + render task
     nc_task_register(nc_rgb_matrix_task());   // L4：8×8 WS2812（Kconfig 開咗才有 loop）
     nc_task_register(nc_hello_task());  // L6：最小框架自測（每秒 Hello World）
     nc_task_register(nc_bench_task_a()); // L4：量測驗證用（預設 (0,0) = 唔跑）
@@ -4267,6 +4271,17 @@ static esp_err_t ph_declare(void)
     nc_task_register(nc_bench_task_c());
 #endif
 
+#ifdef NC_ENABLE_TESTS
+    // ① 掃描 .nct / .nce：只讀 header + manifest + meta，不碰 payload / arena。
+    // ② 建外部任務資源表格：resources.json（系統預設）+ 模組 provides/requires。
+    // ③ 合併 tasks.json：缺的補 [0,0]，已有的套 level / affinity。
+    // ④ 之後才 declare_all —— 模組的 config 在啟動前就定好。
+    nc_mod_scan_all(&s_mod_scan);
+    nc_res_build();
+    nc_mod_declare_res(&s_mod_scan);
+    nc_res_merge();
+    nc_mod_merge_cfg(&s_mod_scan);
+#endif
     nc_task_declare_all();       // → nc_plan_declare + 帳本檢查
     return ESP_OK;
 }
@@ -4316,13 +4331,13 @@ static esp_err_t ph_start(void)
     // ── ③ 任務啟動：資源 → on_start → 指令 → 準備 loop（還不開）──
     nc_task_start_all();
 
-    // ④ 效果租戶：載入 .fxe → 解碼 manifest → attach 到 registry
+    // ④ 效果租戶：載入 .nct / .nce → 解碼 manifest → attach 到 registry
     //    （放在 start_all 之後：attach 會插入 registry，不能跟 start_all 同時走）
 #ifdef NC_ENABLE_TESTS
-    if (nc_task_started("fx")) {
-        nc_fx_scan("/data/pixel/effects");   // 效果類（kind = effect）
-        nc_fx_scan("/data/tasks");           // 任務類（kind = normal）
-        nc_task_sync_cfg();                  // 掃到的 .fxe 也補進 tasks.json
+    if (nc_task_started("ncm")) {
+        nc_mod_load_all(&s_mod_scan);        // ③ 載入 payload（arena 已 commit）
+        // 模組的 tasks.json 條目已在 B06 的 nc_mod_merge_cfg 補寫；
+        // 不再呼叫 nc_task_sync_cfg()，否則 runtime 任務的 cfg_seen=false 會再補一次。
     }
 #endif
 
@@ -4679,7 +4694,7 @@ static esp_err_t ph_channels(void)
         ESP_LOGI(TAG, "NC4 通道: %s", esp_err_to_name(berr));
         link_audit();     // routes[].out 的 link 名逐個對出口（未建立 → 開機就講）
 
-        // 任務已經由各模組在 start 時登記（decode0/1、fx、log）；
+        // 任務已經由各模組在 start 時登記（decode0/1、ncm、log）；
         // 這裡只負責「依 layer 啟動」，不再手動 xTaskCreate 任何 loop。
         nc_task_boot();
         MAIN_HWM("post-boot");

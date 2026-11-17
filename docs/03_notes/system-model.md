@@ -19,7 +19,7 @@ System 組件（main + components/sys/*）              ← 唔屬於任何核�
   │   core0 組
   │    ├─ 解碼器（根）          ADDR 過濾、dispatch、回覆、執行鎖
   │    ├─ 通道（link）          USB／UART／TCP／…：收到幀就交給這個解碼器
-  │    └─ 任務（租戶）          decode0、fx、matrix、probe…
+  │    └─ 任務（租戶）          decode0、ncm、matrix、probe…
   │   core1 組  ── 同構，完全獨立
   │
   └─ 核唔存在 → 整個組落到仍然存在的核               B03 收斂

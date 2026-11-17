@@ -32,8 +32,8 @@ components/action/pixel_action/
 前綴會變成 `nc_task_pixel` / `nc_action_pixel`，兩個不同層的東西擠在同一個字首後面，
 掃檔案時反而難分。
 
-> 目前的 `nc4` / `fx` / `store` 還沒有這個問題（沒有同名域），所以維持
-> `nc_task`、`nc_fx`、`nc_store`；一旦出現同名域，就照上面的後綴規則拆。
+> 目前的 `nc4` / `ncm` / `store` 還沒有這個問題（沒有同名域），所以維持
+> `nc_task`、`nc_mod`、`nc_store`；一旦出現同名域，就照上面的後綴規則拆。
 
 ---
 
@@ -47,7 +47,7 @@ components/action/pixel_action/
 | FAT | store | `nc_store_` | `nc_store.c` |
 | 通道 | WS / UDP / HTTP | `nc4_ws_` / `nc4_udp_` / `nc4_http_` | `nc4_ws.c` … |
 | 動作 | 域 | `nc_<域>_action_` | `nc_ota_action.c` / `nc_file_action.c` |
-| 效果 | fx | `nc_fx_` | `nc_fx.c` / `nc_fx_manifest.c` |
+| 模組 | ncm | `nc_mod_` | `nc_mod.c` / `nc_ncd.c` |
 
 ## 3. 四條規則
 
@@ -78,17 +78,18 @@ components/action/pixel_action/
 
 ---
 
-## 5. 術語表：`fx` 這個字已經太混亂，統一講法
+## 5. 術語表：`ncm` / `NCM` 怎麼講
 
-`fx` 一個字同時指容器、元件、任務、任務種類 —— 四樣東西，所以一律改用下面的講法。
-**完整定義看 [fxe-engine.md](fxe-engine.md)** —— 這裡只列名字。
+`ncm` 是引擎（房東），`NCM` 是容器／模組（租戶）。
+`.nct` = **Net-Core Task**（任務）、`.nce` = **Net-Core Effect**（效果）。
+**完整定義看 [ncm-engine.md](ncm-engine.md)** —— 這裡只列名字。
 
 | 講法 | 指什麼 | 在哪 | 屬於 |
 |---|---|---|---|
-| **FXE 引擎** | 延後綁定：從檔案載入模組、給記憶體、登記成任務、每 tick 回呼、超預算就停用 | `components/tasks/test_fx_tasks/`（`nc_fx.c`） | **房東**（`NC_TASK_SYSTEM`，插件機制本身） |
-| **FXE 模組** | 一個 `.fxe` 載入後的實例（name / payload / decl / 自己的記憶體） | arena 裡 | **租戶**（attach 時 `kind` 由 manifest 決定） |
-| **FXE 容器** | `.fxe` 檔格式：48 B 檔頭 + manifest + payload | `tools/`、`nc_fx_manifest.c` | wire format，**唔改名** |
-| **FXE arena** | 引擎向 plan 宣告的那塊記憶體（**大小是宣告值，不是上限**） | `nc_fx_init()` | 房東 |
+| **NCM 引擎** | 延後綁定：從檔案載入模組、給記憶體、登記成任務、每 tick 回呼、超預算就停用 | `components/tasks/test_mod_tasks/`（`nc_mod.c`） | **房東**（`NC_TASK_SYSTEM`，插件機制本身） |
+| **NCM 模組** | 一個 `.nct` / `.nce` 載入後的實例（name / payload / decl / 自己的記憶體） | arena 裡 | **租戶**（attach 時 `kind` 由 manifest 決定） |
+| **NCM 容器** | `.nct` / `.nce` 檔格式：48 B 檔頭 + manifest + payload | `tools/`、`nc_ncd.c` | wire format，**唔改名** |
+| **NCM arena** | 引擎向 plan 宣告的那塊記憶體（**大小是宣告值，不是上限**） | `nc_mod_init()` | 房東 |
 | **房東 / 租戶** | `NC_TASK_SYSTEM` / `NC_TASK_NORMAL` + `NC_TASK_EFFECT` | `nc_task.h` | — |
 | **`level` / `layer`** | 任務的次序 / loop 的次序 | `nc_task_t` / `nc_task_loop_t` | 見 [task-lifecycle.md](task-lifecycle.md) §4 |
 | **`DATA`** | 幀裡 `LEN` 之後、`CRC32` 之前的那段位元組 | 協議欄位 | 見 [frame.md](../01_protocol/frame.md) §1 |
@@ -100,16 +101,16 @@ components/action/pixel_action/
 
 四條規則：
 
-1. **寫文件時不要只寫「fx」**：寫「FXE 引擎」或「FXE 模組」，讓讀者知道是哪一層。
-2. **`.fxe` 是檔名，不改**（改了工具鏈、manifest、既有檔案全斷）。
-3. **FXE 引擎不綁核**：它自己沒有 loop；每個模組跑哪一核由 manifest / `tasks.json` 決定。
-   「FXE 引擎跑 core1」是錯的說法 —— 跑 core1 的是某個模組的 loop。
+1. **寫文件時不要只寫「ncm」**：寫「NCM 引擎」或「NCM 模組」，讓讀者知道是哪一層。
+2. **`.nct` / `.nce` 是檔名，不改**（改了工具鏈、manifest、既有檔案全斷）。
+3. **NCM 引擎不綁核**：它自己沒有 loop；每個模組跑哪一核由 manifest / `tasks.json` 決定。
+   「NCM 引擎跑 core1」是錯的說法 —— 跑 core1 的是某個模組的 loop。
 4. **描述引擎只用中性動詞**：載入 / 卸載 / 啟用 / 停用 / tick。引擎不知道模組在裡面做什麼。
 
-> ⚠️ **現況 vs 目標**：現在 `fx` 這一個任務同時做兩件事 —— 引擎（房東）
-> **和** 每 tick 回呼的 loop（`NC_FX_TASK_CORE 1`、prio 3、layer 3）。
+> ⚠️ **現況 vs 目標**：現在 `ncm` 這一個任務同時做兩件事 —— 引擎（房東）
+> **和** 每 tick 回呼的 loop（`NC_MOD_TASK_CORE 1`、prio 3、layer 3）。
 > 上面那張表是**目標切法**：引擎留房東、tick loop 降成租戶 ——
-> 因為「每 tick 要做事」是功能，不是開機必需。在那之前，講「FXE 引擎」時指的是**引擎那部分**。
+> 因為「每 tick 要做事」是功能，不是開機必需。在那之前，講「NCM 引擎」時指的是**引擎那部分**。
 
 ---
 
@@ -122,7 +123,7 @@ components/action/pixel_action/
 | `nc4` | `proto.py`（framing + CRC）+ `dispatch.py`（指令表）+ `tasks/bus_decode.py`（解碼迴圈） | 解碼 → 分派 → 兩核 decode loop | **保留 `nc4`**（協議名，上游也叫 NC4） |
 | `net` | `net_bus.py`（`class NetBus`：「純傳輸層 TCP/WS/UDP」） | 傳輸收發 + 每條通道的 RX 緩衝 | **改名 `net_bus`**（同上游；`net` 太窄又太寬） |
 | `core` | （冇對應） | 慢工作佇列 + 一個 worker | 上游冇這個東西 → 自創名，建議 `defer`（講職責） |
-| `fx` | （冇單一對應） | 引擎 + 每 tick 的 loop | **拆**：`fxe`（引擎，房東）／tick loop（租戶） |
+| `ncm` | （冇單一對應） | 引擎 + 每 tick 的 loop | **拆**：`ncm`（引擎，房東）／tick loop（租戶） |
 | `probe` | `tasks/hw_sample_task.py`（性質接近） | 開機自測 | 保留（自測用，不入 config） |
 
 兩點要注意：
@@ -172,7 +173,7 @@ C 名字（`nc_boot_*`、`nc4_bus_*`）解決了「程式裡叫乜」，但**講
 plan 資源的命名規則：**`<擁有者>.<用途>`**。
 
 - 線的收幀／parser 環 → 線名：`usb.rx`、`uart.rx`、`tcp.rx`。
-- 任務的緩衝 → 任務名：`fx.arena`、`probe.hub`。
+- 任務的緩衝 → 任務名：`ncm.arena`、`probe.hub`。
 - 協議引擎每核的狀態 → `nc4.reply0/1`（每核一格回覆幀，2,615 B）。
 
 **NC4 是協議**（分幀、指令、回覆），不是通道、也不是資源的擁有者 ——

@@ -264,3 +264,13 @@ const nc_tasks_cfg_t *nc_cfg_defaults_tasks(void)
 {
     return &k_tasks;
 }
+
+static const nc_resources_cfg_t k_resources = {
+    .version = NC_CFG_SCHEMA_VERSION,
+    .n_res = 0,         // 空 = 全部由模組自己宣告（provides / requires）
+};
+
+const nc_resources_cfg_t *nc_cfg_defaults_resources(void)
+{
+    return &k_resources;
+}

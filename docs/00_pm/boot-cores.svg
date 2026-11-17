@@ -77,10 +77,10 @@
 <rect x="54.0" y="662.0" width="1852.0" height="38.0" rx="4" fill="#FCFBF7" stroke="#DCD8CE" stroke-width="1" opacity="1.0"/>
 <rect x="54" y="662" width="4" height="38" rx="2" fill="#7A4E8C"/>
 <text x="60.0" y="684.0" font-family="'Cascadia Mono','Consolas','SF Mono',monospace" font-size="11" font-weight="700" fill="#7A4E8C" text-anchor="start">D11</text>
-<text x="160.0" y="676.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="10.6" font-weight="400" fill="#17191C" text-anchor="start">NC_ENABLE_TESTS？fx 任務 started？WAMR 後端有冇接？</text>
-<text x="840.0" y="676.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="10.6" font-weight="400" fill="#3D4247" text-anchor="start">測試 build：掃 /data/pixel/effects、/data/tasks 的 .fxe attach；release 唔掃；</text>
+<text x="160.0" y="676.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="10.6" font-weight="400" fill="#17191C" text-anchor="start">NC_ENABLE_TESTS？ncm 任務 started？WAMR 後端有冇接？</text>
+<text x="840.0" y="676.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="10.6" font-weight="400" fill="#3D4247" text-anchor="start">測試 build：掃 /data/pixel/effects、/data/tasks 的 .nce attach；release 唔掃；</text>
 <text x="840.0" y="691.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="10.6" font-weight="400" fill="#3D4247" text-anchor="start">WAMR 未接 → 登記得到、跑不到</text>
-<text x="1440.0" y="676.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="10.4" font-weight="400" fill="#6E747B" text-anchor="start">B08；效果目前只在測試映像出現；FXE 執行後端未完成</text>
+<text x="1440.0" y="676.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="10.4" font-weight="400" fill="#6E747B" text-anchor="start">B08；效果目前只在測試映像出現；NCM 執行後端未完成</text>
 <rect x="54.0" y="706.0" width="1852.0" height="38.0" rx="4" fill="#FCFBF7" stroke="#DCD8CE" stroke-width="1" opacity="1.0"/>
 <rect x="54" y="706" width="4" height="38" rx="2" fill="#A04A3A"/>
 <text x="60.0" y="728.0" font-family="'Cascadia Mono','Consolas','SF Mono',monospace" font-size="11" font-weight="700" fill="#A04A3A" text-anchor="start">D12</text>
@@ -102,7 +102,7 @@
 <text x="1010.0" y="871.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="12" font-weight="700" fill="#1F5F8B" text-anchor="start">·</text>
 <text x="1022.0" y="871.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="10.8" font-weight="400" fill="#3D4247" text-anchor="start">WiFi manager＝core1（clamp）；單核板全部落 core0。</text>
 <text x="1010.0" y="890.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="12" font-weight="700" fill="#1F5F8B" text-anchor="start">·</text>
-<text x="1022.0" y="890.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="10.8" font-weight="400" fill="#3D4247" text-anchor="start">測試任務／fx：宣告／manifest 的 core（只有 NC_ENABLE_TESTS）。</text>
+<text x="1022.0" y="890.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="10.8" font-weight="400" fill="#3D4247" text-anchor="start">測試任務／ncm：宣告／manifest 的 core（只有 NC_ENABLE_TESTS）。</text>
 <rect x="60.0" y="918.0" width="910.0" height="256.0" rx="6" fill="#FCFBF7" stroke="#DCD8CE" stroke-width="1" opacity="0.9"/>
 <text x="74.0" y="942.0" font-family="'Cascadia Mono','Consolas','SF Mono',monospace" font-size="14" font-weight="700" fill="#1F5F8B" text-anchor="start">core 0</text>
 <text x="74.0" y="966.0" font-family="'Cascadia Mono','Consolas','SF Mono',monospace" font-size="11.2" font-weight="600" fill="#17191C" text-anchor="start">app_main</text>
@@ -133,7 +133,7 @@
 <text x="1065.0" y="1044.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="10.4" font-weight="400" fill="#6E747B" text-anchor="start">UART 線 route core1</text>
 <text x="1004.0" y="1070.0" font-family="'Cascadia Mono','Consolas','SF Mono',monospace" font-size="11.2" font-weight="600" fill="#17191C" text-anchor="start">wifi_mgr</text>
 <text x="1071.8" y="1070.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="10.4" font-weight="400" fill="#6E747B" text-anchor="start">WiFi 起咗 → nc_core_clamp(1)；單核→core0</text>
-<text x="1004.0" y="1096.0" font-family="'Cascadia Mono','Consolas','SF Mono',monospace" font-size="11.2" font-weight="600" fill="#17191C" text-anchor="start">fx / rgb matrix</text>
+<text x="1004.0" y="1096.0" font-family="'Cascadia Mono','Consolas','SF Mono',monospace" font-size="11.2" font-weight="600" fill="#17191C" text-anchor="start">ncm / rgb matrix</text>
 <text x="1118.8" y="1096.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="10.4" font-weight="400" fill="#6E747B" text-anchor="start">測試任務，依宣告／manifest core</text>
 <rect x="40.0" y="1200.0" width="1880.0" height="452.0" rx="6" fill="#FFFFFF" stroke="#DCD8CE" stroke-width="1" opacity="0.72"/>
 <text x="58.0" y="1224.0" font-family="'Cascadia Mono','Consolas','SF Mono',monospace" font-size="10.5" font-weight="500" fill="#9AA0A6" text-anchor="start">S  NOT STARTED</text>
@@ -168,8 +168,8 @@
 <text x="300.0" y="1529.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="10.6" font-weight="400" fill="#3D4247" text-anchor="start">tenant level=-1；affinity=(0,0)；enabled() false；layer 超界；config 缺條目 → on_start 照跑、loop 唔開</text>
 <rect x="54.0" y="1554.0" width="1852.0" height="34.0" rx="4" fill="#FCFBF7" stroke="#DCD8CE" stroke-width="1" opacity="1.0"/>
 <rect x="54" y="1554" width="4" height="34" rx="2" fill="#7A4E8C"/>
-<text x="70.0" y="1576.0" font-family="'Cascadia Mono','Consolas','SF Mono',monospace" font-size="11" font-weight="600" fill="#7A4E8C" text-anchor="start">效果 .fxe</text>
-<text x="300.0" y="1569.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="10.6" font-weight="400" fill="#3D4247" text-anchor="start">release build（冇 NC_ENABLE_TESTS）；或 fx 任務未 started</text>
+<text x="70.0" y="1576.0" font-family="'Cascadia Mono','Consolas','SF Mono',monospace" font-size="11" font-weight="600" fill="#7A4E8C" text-anchor="start">效果 .nce</text>
+<text x="300.0" y="1569.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="10.6" font-weight="400" fill="#3D4247" text-anchor="start">release build（冇 NC_ENABLE_TESTS）；或 ncm 任務未 started</text>
 <rect x="54.0" y="1594.0" width="1852.0" height="34.0" rx="4" fill="#FCFBF7" stroke="#DCD8CE" stroke-width="1" opacity="1.0"/>
 <rect x="54" y="1594" width="4" height="34" rx="2" fill="#A04A3A"/>
 <text x="70.0" y="1616.0" font-family="'Cascadia Mono','Consolas','SF Mono',monospace" font-size="11" font-weight="600" fill="#A04A3A" text-anchor="start">rawbench</text>

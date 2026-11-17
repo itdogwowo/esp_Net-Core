@@ -50,7 +50,7 @@ components/action/
 | `0x1006` | SYS_TASK_RSP | sys.json | ✅ |
 | `0x100F` | REBOOT | sys.json | ✅ |
 | `0x1016` | SET_MASTER | sys.json | ✅ |
-| `0x1101` | STATUS_GET（keys：空 / `?` / sys,mem,task,modules,**provides**,storage,fx[,net]） | status.json | ✅ |
+| `0x1101` | STATUS_GET（keys：空 / `?` / sys,mem,task,modules,**provides**,storage,ncm[,net]） | status.json | ✅ |
 | `0x1102` | STATUS_RSP（`status_json`） | status.json | ✅ |
 | `0x1811` | BENCH_READY | bench.json | ✅ |
 | `0x1812` | BENCH_DATA | bench.json | ✅ |
@@ -126,7 +126,7 @@ components/action/
 
 > 常問：「不是輸入 KEY 就回覆嗎？為什麼會有 2.4 KB 那麼大？」
 
-因為 KEY 揀的是**報告**，不是**欄位**。`sys` / `mem` / `tasks` / `provides` / `storage` / `fx`
+因為 KEY 揀的是**報告**，不是**欄位**。`sys` / `mem` / `tasks` / `provides` / `storage` / `ncm`
 每一個都是一整份結構化報告，不是一個數字：
 
 | KEY | 內容 | 大約大小 |
@@ -139,17 +139,17 @@ components/action/
 | `cfg` | 兩層 config 的載入結果：`miss`（缺檔）/`bad`（壞 JSON）/`ver`/`def`（用預設）/`inv`（不合法）/`unk`（不認識的鍵） | ~200 B |
 | `log` | log 管道：`cap`（hook 裝了？）/`run`（consumer 起了？）/`lvl`/`mask`/`buf`/`used`/`peak`/`produced`/`sent`/`dropped`/`busy`/`offline` | ~250 B |
 | `rt` | 執行期 FreeRTOS task 表（name / prio / stack HWM），要 `CONFIG_FREERTOS_USE_TRACE_FACILITY` | ~500 B |
-| `fx` | 每個 `.fxe` 的 manifest（kind / core / fps / px / mem / 指令） | 1,000–2,600 B |
+| `ncm` | 每個 `.nct` / `.nce` 的 manifest（kind / core / fps / px / mem / 指令） | 1,000–2,600 B |
 | `net` | IP / MAC / link 狀態（只在 P4） | ~300 B |
 
 **空 KEY ＝ 全部**，所以加起來 ≈5.8 KB，而回覆幀上限是 `NC4_REPLY_JSON_MAX` = 2,600 B。
 所以「空 KEY」的語意是**盡力而為**，不是「保證全部」：
 
 - 砌得落就照砌，砌唔落就**停手**，改回一個**合法**的物件
-  `{"truncated":1,"cap":2600,"tips":"keys=sys,storage,cfg,log,mem,provides,tasks,fx 分批問"}`。
-- 順序是**由便宜到貴**（sys → storage → cfg → log → rt → mem → provides → tasks → fx → wifi → net），
-  所以截斷時你**一定**拿到便宜那幾份，貴的（`tasks` / `fx`）才可能被切走。
-- 想要全部就**分批問**：先 `keys=sys,storage`，再 `keys=cfg,log`，再 `keys=tasks`，再 `keys=fx`。
+  `{"truncated":1,"cap":2600,"tips":"keys=sys,storage,cfg,log,mem,provides,tasks,ncm 分批問"}`。
+- 順序是**由便宜到貴**（sys → storage → cfg → log → rt → mem → provides → tasks → ncm → wifi → net），
+  所以截斷時你**一定**拿到便宜那幾份，貴的（`tasks` / `ncm`）才可能被切走。
+- 想要全部就**分批問**：先 `keys=sys,storage`，再 `keys=cfg,log`，再 `keys=tasks`，再 `keys=ncm`。
   每份都遠低於 2,600 B，一定完整。
 - `keys=?` 回可用 KEY 清單（唔會回內容），用來探測這版 firmware 支援哪些區塊。
 

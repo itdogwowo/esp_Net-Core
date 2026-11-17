@@ -21,7 +21,7 @@
 | `uart.rx` | S | 1024 | 1 | UART RX plan |
 | `ESPNOW.rx` | S | 64 | 1 | ESP-NOW 小訊息 |
 | `probe.hub` | S | 512 | 1 | probe/hub |
-| `fx.arena` | P | 524288 | 1 | effects arena |
+| `ncm.arena` | P | 524288 | 1 | effects arena |
 
 - `mem.buf`：**14 個**，total **643,438 B**。
 - plan：`int 5,728 B`、`psram 529,518 B`；network slots 是 runtime `nc_buf`，不經 plan。
@@ -56,4 +56,4 @@ decode
 - network slots 搬 PSRAM 後，internal 由 10 KB 回到 ~80 KB。
 - parser `TCP.rx/UDP.rx/WS.rx` 仍佔 internal（約 41 KB 合計）。
 - `WS.slots 24 KB` 是為了 24 KB WS 訊息；如果只傳單幀可縮到 8 KB。
-- `fx.arena 512 KB` 是最大單一 PSRAM buffer，和 network 無關。
+- `ncm.arena 512 KB` 是最大單一 PSRAM buffer，和 network 無關。

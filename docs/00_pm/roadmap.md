@@ -1,7 +1,7 @@
 # esp_Net-Core — C / ESP-IDF 重寫計劃
 
 > **狀態（2026-11-03 更新）**：Phase 0／1 大部分已落地 —— NC4 通道（CDC／UART／TCP／WS／UDP）、
-> 檔案查詢、FAT 擁有者（MSC 只做 recovery）、任務管理器、`tasks.json`、`.fxe` 掃描都已在板上跑過。
+> 檔案查詢、FAT 擁有者（MSC 只做 recovery）、任務管理器、`tasks.json`、`.nct` 掃描都已在板上跑過。
 > Phase 2（pixel pipeline）與 Phase 3（cross-chip sync）**還沒開始**。
 >
 > ⚠️ **近期要做什麼請看 [status.md §7](status.md)，不要照這份的 Phase 順序排** ——
@@ -78,7 +78,7 @@ C 版的目標不是「math 快 50%」，而是：
 ### Phase 1 — C/IDF Foundation 🟡（大部分完成）
 
 > 已落地：IDF 工程骨架（boot／NVS／FAT／WL／logging）、NC4 通道（CDC／UART／TCP／WS／UDP）、
-> 檔案查詢與 HTTP 設定讀寫、任務管理器、`tasks.json`、`.fxe` 掃描。
+> 檔案查詢與 HTTP 設定讀寫、任務管理器、`tasks.json`、`.nct` 掃描。
 > **未做**：asset loader（JSON schema 驗證）、`ASSET_RELOAD`、bundle commit。
 > 驗收項裡的「斷電 20 次」沒有正式跑過。
 
@@ -169,7 +169,7 @@ C 版的目標不是「math 快 50%」，而是：
 
 > 已完成到「可以上板跑」的程度，與原定內容的差異：
 > 1. ~~`docs/nc4_file_protocol.md`~~ → 沒寫；協議現況集中在 [commands.md](../01_protocol/commands.md)。
-> 2. ~~golden tests~~ → 用 `tools/hosttest/`（hub／plan／fx／fxm／task／cfg）代替，沒有獨立 vector 檔。
+> 2. ~~golden tests~~ → 用 `tools/hosttest/`（hub／plan／mod／ncd／task／cfg）代替，沒有獨立 vector 檔。
 > 3. ✅ ESP-IDF skeleton + FS + NC4 UART（另加 CDC／TCP／WS／UDP）。
 > 4. ✅ `README.md` 與 `.gitignore`。
 >

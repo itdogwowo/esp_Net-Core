@@ -70,7 +70,7 @@
 | [contracts.md](03_notes/contracts.md) | **契約總表（單一入口）**：任務管理器界線與硬上限、任務↔緩衝區（C1–C11 摘要）、**優先級保留區 7–15**、解碼器／動作（handler 唔可以重入）、通道／路由、**初次開機與配置生命週期**、現況盤點、待決定清單 |
 | [glossary.md](03_notes/glossary.md) | **字彙表（術語一句話）**：任務 vs 線程、`level` vs `layer`、緩衝區／格／arena／S·P·DMA／S2P 四組合、退役的詞（hub／pool／環／plan）與改用什麼。**新名詞先查這裡** |
 | [buffers.md](03_notes/buffers.md) | **緩衝區 `nc_buf`（全項目唯一緩衝工具）**：三條鐵律（開機一次要齊／永不釋放／只管切）、為什麼冇碎片、S2S·S2P·P2S·P2P 四組合與成本、**佈局與搭配七原則＋S3 逐條 buffer 表**、`mem.buf` 帳、P0–P5 遷移。**取代下面 buffer-manager／buffer-manager-status／buffer-pool／comm-buffers 的設計部分** |
-| [buffer-patterns.md](03_notes/buffer-patterns.md) | **緩衝用法模式（10 個）＋ 小技巧 16 條**：什麼該進工具、什麼寫成模式；RX 流水／命令 staging／回覆打包／TX 環／跨核轉寄／LED 大頁／I80 波形／LCD 分塊／`.fxe` 換場／OTA 輪替，各自形狀、流程、陷阱與數字。**實作前先讀這份** |
+| [buffer-patterns.md](03_notes/buffer-patterns.md) | **緩衝用法模式（10 個）＋ 小技巧 16 條**：什麼該進工具、什麼寫成模式；RX 流水／命令 staging／回覆打包／TX 環／跨核轉寄／LED 大頁／I80 波形／LCD 分塊／`.nct` / `.nce` 換場／OTA 輪替，各自形狀、流程、陷阱與數字。**實作前先讀這份** |
 | [architecture-flow.md](03_notes/architecture-flow.md) | **執行期流程**：mode 決策、NC4 檔案編輯、frame pipeline、ownership matrix |
 | [execution-model.md](03_notes/execution-model.md) | **執行模型**：FreeRTOS 每 loop 一條 task vs 每核合作式大循環，兩者的取捨與選擇 |
 | [execution-rules.md](03_notes/execution-rules.md) | **執行規則**：搶佔的條件、核心隔離（跨核只准有資料、唔准有喚醒）、等待的三種形態、熱路徑零 log、緩衝與堆疊的宣告流程、測試歸類 |
@@ -78,11 +78,11 @@
 | [system-model.md](03_notes/system-model.md) | **系統模型（設計理念）**：System 組件 → 每個核一個「核心組」（解碼器是根＋其上任務）；兩組完全分離；落點只有一條規則（核不存在 → 整組落 core0）；與 B01–B11 的對照、現況落差 |
 | [cross-core.md](03_notes/cross-core.md) | **跨核心：邊些中斷會打到另一個核**：中斷親和性與實際干擾來源 |
 | [decode-routes.md](03_notes/decode-routes.md) | **解碼路線與接收緩衝（現況）**：五條通道各自跑在哪一核、用哪塊緩衝、分派路徑；「執行完才能收下一個」對一半；heap/BSS 的隱形緩衝清單與優先序 |
-| [task-model.md](03_notes/task-model.md) | **任務模型（房東／租戶）**：核心 vs 任務的分界、三個 component、開機流程、`tasks.json` 格式與補寫規則、`.fxe` 怎麼變任務、已驗證清單 |
+| [task-model.md](03_notes/task-model.md) | **任務模型（房東／租戶）**：核心 vs 任務的分界、三個 component、開機流程、`tasks.json` 格式與補寫規則、`.nct` / `.nce` 怎麼變任務、已驗證清單 |
 | [task-lifecycle.md](03_notes/task-lifecycle.md) | **任務生命週期**：建立前要準備什麼（欄位／上限）、四步各做什麼與失敗路徑（**全有或全無**）、資源怎麼加總與建立、`level` vs `layer` 的實際保證（含缺口）、停止順序與**歸還表**（緩衝區不還，靠 `handover` 換手）、狀態機與 log 對照、6 個已知缺口 |
-| [task-fx-open-questions.md](03_notes/task-fx-open-questions.md) | **任務與 fx 的未定問題清單**：已定的 20 條、待決定、已移出的 fx 細節 |
-| [routing.md](03_notes/routing.md) | **解碼路由表（Router × 引擎 × 任務）**：舊專案 `self` / `vbus` 在分什麼、引擎為何不用宣告（decode 由 routes 推、fx 由 manifest 推）、`out` 四種組合、舊→新對照、優先權與配額、開機表、`.fxe` 與 manifest 兩個格式、與現況程式的六項落差 |
-| [naming.md](03_notes/naming.md) | **命名慣例**：一個子系統一個前綴（`nc4_`/`nc_plan_`/`nc_task_`/`nc_store_`/`nc4_ws_`/`nc_fx_`）、**`<域>_task` 與 `<域>_action` 後綴**（同名域不混淆，例 pixel）、檔名＝前綴＋角色、型別與列舉規則、新舊對照、**§5 術語表（FXE 引擎／FXE 模組／FXE 容器／pixel 渲染器）** |
+| [task-mod-open-questions.md](03_notes/task-mod-open-questions.md) | **任務與 ncm 的未定問題清單**：已定的 20 條、待決定、已移出的 ncm 細節 |
+| [routing.md](03_notes/routing.md) | **解碼路由表（Router × 引擎 × 任務）**：舊專案 `self` / `vbus` 在分什麼、引擎為何不用宣告（decode 由 routes 推、ncm 由 manifest 推）、`out` 四種組合、舊→新對照、優先權與配額、開機表、`.nct` / `.nce` 與 manifest 兩個格式、與現況程式的六項落差 |
+| [naming.md](03_notes/naming.md) | **命名慣例**：一個子系統一個前綴（`nc4_`/`nc_plan_`/`nc_task_`/`nc_store_`/`nc4_ws_`/`nc_mod_`）、**`<域>_task` 與 `<域>_action` 後綴**（同名域不混淆，例 pixel）、檔名＝前綴＋角色、型別與列舉規則、新舊對照、**§5 術語表（NCM 引擎／NCM 模組／NCM 容器／pixel 渲染器）** |
 | [component-layout.md](03_notes/component-layout.md) | **三層分區與 component 佈局（目標架構）**：hw/sys/sw/action/tasks/ui/schema 七區、`ports/` 專案層、依賴方向。⚠️ 目前只落地 `sys/` 與 `app/` |
 | [file-write-path.md](03_notes/file-write-path.md) | **分段寫入可行性**：mp 版 `.tmp`→`sha256`→`.bak`→rename 演算法、空間預算（覆蓋要 2×）、實測 141 KB/s、斷電恢復、四個必做條件 |
 | [tx-path-design.md](03_notes/tx-path-design.md) | **發送／轉寄路徑（2026-11-08 討論＋同日落地）**：各通道「交出去」的緩衝與阻塞行為（CDC 4 KB FIFO 不用等、UART 1 KB ring 會排空、P4 TCP >5.7 KB 會等）、`nc4_link` 出口表、`routes[].out` 轉寄（同步、先轉寄後本地）、零複製 vs copy-into-ring vs pin 插槽、4 KB／8 KB 的成本表、DMA 的事實（UART 無 TX DMA）、PSRAM 與 flash 停頓、**上板量測結果與仍未做的清單** |
@@ -106,9 +106,10 @@
 | [buffer-manager.md](03_notes/buffer-manager.md) | **（設計已被 [buffers.md](03_notes/buffers.md) 取代，保留作歷史）** 三階段 declare→commit→take、四種機制、三層 tier、撇除規則、S3 記憶體圖、P0–P4 分期 |
 | [memory.md](03_notes/memory.md) | **記憶體原語**：pool / arena 兩種壽命、三種 heap class、為什麼熱路徑不 malloc、緩衝能不能靠 config 改 |
 | [extension-architecture.md](03_notes/extension-architecture.md) | **擴充架構（兩個插槽、一個帳本、三個仲裁）**：為什麼 TFT 吃 config、LVGL 必須是 code；把 gpio_claim / hw=("lcd") / nc_plan 收斂成一個 ledger；接線 / 排程 / 畫面三個仲裁；六個現在就存在的衝突；P0–P5 計劃 |
-| [fx-contract.md](03_notes/fx-contract.md) | **fx 模組契約**：安全邊界（模組只能碰自己的線性記憶體）、交接緩衝區佈局與時序、ABI 表、失敗模型、狀態機、P0–P4 計劃 |
-| [fx-loader.md](03_notes/fx-loader.md) | **FXE 容器格式與載入流程**：`.fxe` 48 B 檔頭、**§3.1 manifest（模組自我宣告：kind / core / layer / fps / px / 預算 / 指令）**、載入六步 C 骨架、原子指標交換、八種失敗模式對照表、資料驅動替代方案、M1–M5 里程碑、**§10 服務化（三層：wasm / fx / module）與「彈性」的邊界** |
-| [fxe-engine.md](03_notes/fxe-engine.md) | **FXE 引擎是什麼**：**延後綁定**機制（把本來要重燒才能改的功能變成換檔案就換）；什麼時候用／不要用（UI → 驅動 → 效果）；六件專責；三個規則（單一 active / tick / 預算 strike）；arena 是宣告值、只給被載入的模組；與 task manager / plan / backend 的接口；名詞表 |
+| [ncm-contract.md](03_notes/ncm-contract.md) | **NCM 模組契約**：安全邊界（模組只能碰自己的線性記憶體）、交接緩衝區佈局與時序、ABI 表、失敗模型、狀態機、P0–P4 計劃 |
+| [ncm-format.md](03_notes/ncm-format.md) | **NCM 格式標準（`.nct` / `.nce`）**：48 B 檔頭、40 B manifest、**meta 區塊（name / desc / usage / requires / provides）**、指令表、wasm/aot、kind 規則、驗證順序與錯誤碼、版本規則 |
+| [ncm-loader.md](03_notes/ncm-loader.md) | **NCM 容器格式與載入流程**：`.nct` / `.nce` 48 B 檔頭、**§3.1 manifest（模組自我宣告：kind / core / layer / fps / px / 預算 / 指令）**、載入六步 C 骨架、原子指標交換、八種失敗模式對照表、資料驅動替代方案、M1–M5 里程碑、**§10 服務化（三層：wasm / ncm / module）與「彈性」的邊界** |
+| [ncm-engine.md](03_notes/ncm-engine.md) | **NCM 引擎是什麼**：**延後綁定**機制（把本來要重燒才能改的功能變成換檔案就換）；什麼時候用／不要用（UI → 驅動 → 效果）；六件專責；三個規則（單一 active / tick / 預算 strike）；arena 是宣告值、只給被載入的模組；與 task manager / plan / backend 的接口；名詞表 |
 | [effect-language.md](03_notes/effect-language.md) | **分離式固件與燈效語言**：什麼進固件、什麼是檔案（+ 什麼時候才要再燒一次）、六條路線比較（params / IR / 自訂 DSL / WASM AOT / 原生 ELF / mpy）、為什麼選 WAMR + TinyGo、**效果模組 ABI v0**、記憶體放哪裡、P0 spike 清單 |
 
 ---

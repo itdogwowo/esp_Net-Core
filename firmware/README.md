@@ -37,7 +37,7 @@ firmware/
 │  ├─ sys/store/           FAT 擁有權仲裁（USB ↔ APP、唯讀視圖）
 │  ├─ action/ota_action/   OTA 指令（0x22xx）
 │  ├─ action/file_action/  檔案查詢與 STATUS_SET（0x2005 / 0x1103）
-│  └─ app/fx/              效果載入器（.fxe + manifest + 實例表）
+│  └─ tasks/test_mod_tasks/  模組載入器（.nct / .nce + manifest + 實例表）
 ├─ sdkconfig.defaults      共通建置配置（晶片層）
 ├─ partitions.csv          分割表（factory / ota_0 / ota_1 / data / nvs）
 └─ managed_components/  dependencies.lock   ← IDF 依賴生成物，不進 git

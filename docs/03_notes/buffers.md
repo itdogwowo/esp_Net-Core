@@ -96,7 +96,7 @@ config 在 B02 讀一次、B03 定 USB 人格、B06 之後才宣告 plan。所�
 | `put_begin` / `put_end` | 拿一格自己寫滿，再發佈 | hub 的 `write_begin`／`commit` |
 | `put(src, len)` | 一次過寫入（自動處理跨空間 copy） | 新增 |
 | `get` / `get_end` | 拿下一格（或任意一格），用完還 | hub 的 `read_begin`／`read_end`；pool 的 `alloc`／`release` |
-| `carve` | 由一段區域切一條新 buffer（呼叫端保管 cursor）；`.fxe` 換場用 | plan 的宣告 |
+| `carve` | 由一段區域切一條新 buffer（呼叫端保管 cursor）；`.nct` / `.nce` 換場用 | plan 的宣告 |
 | `write`／`read_ptr`／`skip` | **串流模式**：部分寫、看連續一段、部分消費（重同步＝`skip(1)`） | 解析器環 |
 | `put_abort` | 放棄正在寫的那一格（producer 中途失敗） | 新增 |
 | `release` ★ | 只准還「執行期建立」的 buffer（`NC_BUF_F_RUNTIME`）；開機建立的拒絕 | parser 隨通道開關 |
@@ -143,7 +143,7 @@ config 在 B02 讀一次、B03 定 USB 人格、B06 之後才宣告 plan。所�
 |---|---|---|
 | **同一個 buffer**：生產者寫、消費者讀同一格 | 生產者 `put_begin` 寫入、消費者 `get` 借用 | **零複製**（指標本來就係同一塊） |
 | 跨 buffer、**壽命唔同**（parser 環 → 轉寄） | 抄一次 | 一定耍抄 |
-| **整條 buffer 換用戶**（`.fxe` 換場、OTA） | `nc_buf_handover()` | **零複製**（記憶體一動不動） |
+| **整條 buffer 換用戶**（`.nct` / `.nce` 換場、OTA） | `nc_buf_handover()` | **零複製**（記憶體一動不動） |
 | 跨 buffer 交棒、但想唔抄 | descriptor 交接 ＋ refcount | 技術上可行，**本專案唔採用** |
 
 **為什麼唔做 descriptor 交接**（把「指向別人那格」當成自己的一格）：
@@ -167,7 +167,7 @@ config 在 B02 讀一次、B03 定 USB 人格、B06 之後才宣告 plan。所�
 ### 5.1 七條原則
 
 1. **熱路徑 → S**（每幀都掃、每個命令都過的：RX parser、命令 staging、TX 環）。
-2. **冷路徑 → P**（一次過、大、慢：轉發 staging、LED frame、`fx.arena`、回覆幀）。
+2. **冷路徑 → P**（一次過、大、慢：轉發 staging、LED frame、`ncm.arena`、回覆幀）。
 3. **DMA → 一定 S**，而且 `DMA` class（對齊 32／64）。
 4. **PSRAM 頻寬是全核共用的**：兩核同時 copy 會由 20–21 腰斬到 **10 MB/s**。
    → PSRAM copy 集中在一個核、一個時段；另一核避免同時掃 PSRAM。
@@ -192,7 +192,7 @@ config 在 B02 讀一次、B03 定 USB 人格、B06 之後才宣告 plan。所�
 | `log`（兩核） | S | 8,192／1,024 | 9 KB | 熱路徑寫入，consumer 慢 |
 | `reply`（每核一格） | **P** | 2,615 × 2 | 5.1 KB | 現時是 2 份 heap，唔在帳內；改成一個 n=2 的 buffer |
 | `fwd`（轉發） | **P** | 4,160 × 32（16 條 × 2） | 130 KB | 跨核交棒；來源核只寫 0.2 ms／4 KB |
-| `fx.arena` | **P** | 524,288 × 1 | 512 KB | `.fxe` 從這裡 carve（R3） |
+| `ncm.arena` | **P** | 524,288 × 1 | 512 KB | `.nct` / `.nce` 從這裡 carve（R3） |
 | `（→）usb.rx`／`uart.rx` 的形狀 | S | STREAM＋RING | 4,128／1,024 | 2026-11-14 起 parser 環係真 RING（外部 `create_in` 仍可線性；§12） |
 | `small`（命令 staging） | S | 1,024 × 8 | 8 KB | **目標：預設關**（現況開住）；等 header-first assembler 真正用才開 |
 | `bulk`（OTA／FILE） | S 或 P | 4,160 × 3 | 12.2 KB | **目標：預設關**；大而冷，可放 P |
@@ -203,7 +203,7 @@ config 在 B02 讀一次、B03 定 USB 人格、B06 之後才宣告 plan。所�
 
 **合計**：internal ≈ **44 KB**（4.1 ＋ 1 ＋ 1 ＋ 9 ＋ 8 ＋ 12.2 ＋ 8.3，含現況的 `forward` 池 —— P3 移走後約 36 KB），
 未計棧與靜態分區；目標再新增 `led.wave`／`pixel.tile` 72 KB。
-PSRAM ≈ **647 KB**（回覆 5.1 ＋ 轉發 130 ＋ fx 512），佔 8 MB 的 **7.9%**。
+PSRAM ≈ **647 KB**（回覆 5.1 ＋ 轉發 130 ＋ ncm 512），佔 8 MB 的 **7.9%**。
 上板 `sys.h_int` 現值 237,403 B（tests 映像）—— internal 仍然有大量餘裕，
 所以**新東西優先放 PSRAM 是對的，但要記住原則 4**。
 
@@ -225,7 +225,7 @@ PSRAM ≈ **647 KB**（回覆 5.1 ＋ 轉發 130 ＋ fx 512），佔 8 MB 的 **
 // 開機：一次要齊（內部向 arena 拿）
 nc_buf_t *nc_buf_create(const char *name, nc_mem_t where,
                         size_t slot_bytes, int n, uint32_t flags);
-// ★ 執行期：只可以在 arena 內切（未實作，P5／fx 換場時才加）
+// ★ 執行期：只可以在 arena 內切（未實作，P5／ncm 換場時才加）
 nc_buf_t *nc_buf_carve(nc_buf_t *arena, const char *name,
                        size_t slot_bytes, int n);
 
@@ -289,8 +289,8 @@ size_t    nc_buf_json(char *out, size_t cap);         // STATUS keys=mem → mem
 | `STATUS keys=mem` → `mem.buf` | ✅ 上板 858 B／上限 2,600；零值欄位省略，放唔落會標 `truncated` |
 | 上板驗收 | ✅ `0xF032 BUF_TEST` 9 項全 pass；`tools/buf_test.py` 一鍵跑 |
 | hosttest | ✅ `tools/hosttest/buf_test`（9 組、全綠；含 registry 滿、JSON 截斷） |
-| `nc_buf_carve()`（`.fxe` 換場） | ✅ **已實作（2026-11-10）**：無狀態 bump，64 B 對齊、唔夠位回 NULL；hosttest 有覆蓋 |
-| **宣告路徑（P5）** | ✅ **已完成（2026-11-10）**：`nc4.reply0/1`、`usb.rx`、`uart.rx`、`fx.arena` 全部由管理器建立，`on_start` 收 `res[i].buf`；**全 repo 已冇任務 call `nc_plan_get()`** |
+| `nc_buf_carve()`（`.nct` / `.nce` 換場） | ✅ **已實作（2026-11-10）**：無狀態 bump，64 B 對齊、唔夠位回 NULL；hosttest 有覆蓋 |
+| **宣告路徑（P5）** | ✅ **已完成（2026-11-10）**：`nc4.reply0/1`、`usb.rx`、`uart.rx`、`ncm.arena` 全部由管理器建立，`on_start` 收 `res[i].buf`；**全 repo 已冇任務 call `nc_plan_get()`** |
 | arena（把 `nc_plan` 吸收） | ⏸ `nc_plan` 只剩管理器與開機 commit 在用（對外等於內部實作） |
 | **回覆幀**搬過來（P2） | ✅ **已完成（2026-11-10）**：`nc4.reply0/1`（plan 宣告、P、各 2,615 B、n=1），decoder 用 `nc4_decoder_set_reply()` 接管 |
 | **bus 插槽環／chunk**（P3） | ✅ **已完成（2026-11-10）**：`<link>.slots`（FIFO），decode 直接由 slot 解析（唔再經 `chunk`）；手寫的 `slot_state[16]`／`slot_len[16]`／w·r·push_idx 全部刪除 |
@@ -325,7 +325,7 @@ size_t    nc_buf_json(char *out, size_t cap);         // STATUS keys=mem → mem
 
 - 名字**全系統唯一**，前綴用**擁有者**（不是協議名）：
   - 線的收幀環 → 線名：`usb.rx`／`uart.rx`／`tcp.rx`
-  - 任務的緩衝 → 任務名：`fx.arena`／`probe.hub`
+  - 任務的緩衝 → 任務名：`ncm.arena`／`probe.hub`
   - 協議引擎每核的狀態 → 協議引擎名＋核號：`nc4.reply0`／`nc4.reply1`
 - **NC4 是協議**（分幀、指令、回覆），不是通道、不是 owner —— 所以一條線的
   收幀緩衝**不可以**叫 `nc4.*`（那正是舊名 `nc4.rx`／`nc4.jtag` 的錯）。
@@ -381,7 +381,7 @@ size_t    nc_buf_json(char *out, size_t cap);         // STATUS keys=mem → mem
 ### C7 熱路徑 ✅
 
 - 熱路徑只准 `put`／`put_begin`／`put_end`／`get`／`get_end`。
-- `create`／`handover` 只可以**開機**或**換場**（`.fxe` 換模組、OTA 開始）。
+- `create`／`handover` 只可以**開機**或**換場**（`.nct` / `.nce` 換模組、OTA 開始）。
 
 ### C8 對外可見 ✅
 
@@ -390,7 +390,7 @@ size_t    nc_buf_json(char *out, size_t cap);         // STATUS keys=mem → mem
 - 要讓別的任務讀內容 → 用 `provides[]`（`NC_PROVIDE_BUF`），**唔好把 `nc_buf_t *` 周圍傳**。
   provide 的生命週期綁在提供者身上（stop／detach 就消失）。
 
-### C9 執行期任務（`.fxe`）✅
+### C9 執行期任務（`.nct`）✅
 
 - **唔可以宣告**緩衝區（宣告窗口在 commit 關閉）。
 - 只可以由父層 arena `nc_buf_carve()`（★ 未實作，P5 前用 `nc_buf_at()` 接管既有區域）切。
@@ -415,11 +415,11 @@ size_t    nc_buf_json(char *out, size_t cap);         // STATUS keys=mem → mem
 | C2 建立 | plan 逐項 carve、逐項可失敗 | P5 改成 `nc_buf_create`（`where` 由 `cls` 對應） |
 | C3 交付 | `on_start(res_{ptr,len})` | ⏳ P5 才交付 `nc_buf_t *` |
 | C4 生命 | 已經係「唔還」 | — |
-| C5 換手 | `nc_buf_handover` 已實作，未有生產用戶 | 等 P3（`.fxe` 換場） |
+| C5 換手 | `nc_buf_handover` 已實作，未有生產用戶 | 等 P3（`.nct` / `.nce` 換場） |
 | C6 讀寫 | FIFO 已實作、`viol` 已計 | 冇自動序列化（刻意） |
 | C7 熱路徑 | 契約已寫 | 未有 CI 檢查 |
 | C8 帳面 | `mem.buf` 已上板 | plan／pool／hub 三份舊帳仍然並存（P5 收掉） |
-| C9 `.fxe` | 今日用 `nc_fx` 自己的 arena 切 | 未改成 `nc_buf_carve` |
+| C9 `.nct` / `.nce` | 今日用 `nc_mod` 自己的 arena 切 | 未改成 `nc_buf_carve` |
 | C10 上限 | 已實作（滿了回 NULL ＋ log） | — |
 
 ### 9.2 為什麼是這些條，不是更多

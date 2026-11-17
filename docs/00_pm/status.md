@@ -18,7 +18,7 @@ ESP32-P4（另有 S3 port）上的 **NC4 通訊核心**：多條傳輸通道 →
 | 解碼 | 分核、零複製（一格一整幀）、task notification |
 | 架構 | 系統任務（硬體→driver→通道）＋ 一般任務（生命週期）已分層，兩者同一套任務管理器 |
 | 任務模型 | **核心（房東）／任務（租戶）**：`tasks.json` 只管租戶；`level` / `affinity` 由 config 定，**未設定 = `[0,0]` = 唔跑**；缺的條目開機自動補寫（寫 `[0,0]`，預設關閉）（[task-model.md](../03_notes/task-model.md)） |
-| .fxe | 掃 `/data/pixel/effects/` 與 `/data/tasks/`，attach 成 runtime 任務；**WAMR 執行引擎未接** |
+| .nct / .nce | 掃 `/data/pixel/effects/` 與 `/data/tasks/`，attach 成 runtime 任務；**WAMR 執行引擎未接** |
 | 通道存在性 | `system.json` 的 `links[].enable`（缺省 1）：未啟用 → **不宣告緩衝、不建 bus、路由跳過**；要開就改 config ＋ 重啟（2026-11-04） |
 | Wi-Fi | **兩道閘**：編譯期 `CONFIG_NETCORE_WIFI`（預設 n）＋ 執行期 `network.json` `wifi.enable`（不啟用 = 0 heap）。⚠️ 2026-11-08 更正：IDF 6 的 `CONFIG_ESP_WIFI_ENABLED` 是**無 prompt** 符號（S3 強制 y），blobs 用 linker fragment whole-archive 拉入 → **即使 `NETCORE_WIFI=n`，S3 映像仍含 WiFi**（實測 +75 KB flash、−18 KB 內部 RAM，見 §7.26） |
 
@@ -64,7 +64,7 @@ ESP32-P4（另有 S3 port）上的 **NC4 通訊核心**：多條傳輸通道 →
 | 結果 | **0 error、0 warning**，`esp_net_core.bin` = 408,256 B（398.7 KB） |
 | 靜態 RAM | **108,463 B（105.9 KB）**＝ DRAM 段 31.7%（清 handler static 之前是 127,583 B） |
 | 開機 heap | **233,296 B（227.8 KB）**（之前 214,176 B） |
-| 涵蓋 | `nc4.c` / `nc4_bus.c` / **`nc4_router.c`（新檔）** / `main.c` / `nc_task.c` / `nc_cfg.c` / `nc_fx.c` / `nc_file_action.c` |
+| 涵蓋 | `nc4.c` / `nc4_bus.c` / **`nc4_router.c`（新檔）** / `main.c` / `nc_task.c` / `nc_cfg.c` / `nc_mod.c` / `nc_file_action.c` |
 
 > 這次 build 順手修好一個**會令 CMake configure 直接失敗**的問題：
 > `components/sys/task_manager/CMakeLists.txt` 宣告了 `INCLUDE_DIRS "include"`，
@@ -104,7 +104,7 @@ ESP32-P4（另有 S3 port）上的 **NC4 通訊核心**：多條傳輸通道 →
 | **收/解路徑** | 傳輸總線（ID 註冊表）→ 解碼引擎（可換核/可多實例）→ 執行 | [rx-architecture.md](../03_notes/rx-architecture.md) |
 | **配置分層** | System / Hardware / Driver / Network / Tasks / Effects / UI | [config-layers.md](../03_notes/config-layers.md) |
 
-**現況**：`main.c` 只剩一張任務表（核心 `nc4` / `net` / `core` / `fx` ＋ 測試用 `probe` / `hello` / `bench_a/b/c`；
+**現況**：`main.c` 只剩一張任務表（核心 `nc4` / `net` / `core` / `ncm` ＋ 測試用 `probe` / `hello` / `bench_a/b/c`；
 後者在 `NC_ENABLE_TESTS=OFF` 時完全不存在）＋ 一個指令表清單 ＋ 六行生命週期呼叫（register → declare → start → boot）。
 service 與 task 已合併成同一個 `nc_task_t`。
 `tasks.json` 已接（含補寫）；`system.json` 已接 `cID` / `links[]` / `routes[]` / `log_debug_mode`；
@@ -157,12 +157,12 @@ USB 的完整分析：[failure-policy.md §4](../03_notes/failure-policy.md)。
 | `tools/bench/nc4_udp_test.py` | UDP：RTT / 吞吐 / 掉包 |
 | `tools/bench/nc4_stats.py` | 零複製驗證（`copied` 應為 0）+ 邊界測試 |
 | `tools/bench/hub_bench.py` | `0xF003` 雙核 hub 交換 |
-| `tools/fx.py pack / dump` | 打包 / 檢視 `.fxe`（header + manifest + payload + 指令表） |
+| `tools/ncm.py pack / dump` | 打包 / 檢視 `.nct` / `.nce`（header + manifest + payload + 指令表） |
 | `tools/nc4_demux.py` | **NC4 協議唯一實作**：`\x1e`…`\n` = log 行；`"NC"`+VER/LEN/CRC32 才算幀，失敗只前進 1 byte |
 | `tools/nc4_log.py` | 看 log 管道（log 與幀共用 CDC） |
 | `tools/bench/cdc_tx.py` | CDC TX 壓測（log／回覆爭出口時的行為） |
-| `bash tools/hosttest/run_all.sh` | 一次跑完 8 支 host test（cfg / cfgstruct / fxm / task / router / fx / hub / plan），全綠 = 冇 error 亦冇 warning |
-| `tools/hosttest/*/run.sh` | 單支 host 測試，不用板子也不用 IDF：hub / plan / fx / **fxm** / **task** / **cfg** / **router**。Windows 上只有 `cfg` / `fxm` / `task` / `router` 有 `run.bat` |
+| `bash tools/hosttest/run_all.sh` | 一次跑完 8 支 host test（cfg / cfgstruct / ncd / task / router / mod / hub / plan），全綠 = 冇 error 亦冇 warning |
+| `tools/hosttest/*/run.sh` | 單支 host 測試，不用板子也不用 IDF：hub / plan / mod / **ncd** / **task** / **cfg** / **router**。Windows 上只有 `cfg` / `ncd` / `task` / `router` 有 `run.bat` |
 | **WSL + ESP-IDF v6.1.0** | **唯一能 build 的地方**（Windows 冇 IDF）。`firmware/build/` 是兩邊共用的，所以 Windows 上看到的 map 其實是 WSL 上次 build 的結果 |
 | `curl http://10.10.1.50:8080/config.json` | 讀寫設定（GET/PUT） |
 
@@ -200,14 +200,14 @@ USB 的完整分析：[failure-policy.md §4](../03_notes/failure-policy.md)。
 | G | **WS / UDP 緩衝未入 plan**（41 KB BSS，P4 專屬） | ⚠️ | 只在 P4 link 進來；未宣告、不可見 |
 | H | **TCP PUSH 插槽 65,640 B 未入 plan** | ⚠️ | `calloc`，`keys=mem` 看不到 |
 | I | **OTA `esp_ota_end` 仍在解碼路徑** | ❌ | **更正**：唔係「兩核都卡」—— OTA 只會喺一個核跑。真正問題係**收 `OTA_END` 嗰條線嘅解碼迴圈**會停幾百 ms：ACK 遲到、主機可能 timeout 重送，同埋同一條線後面排隊的幀一齊等。佇列（`slow_job_t` + `nc_hub` 8 格）已經存在但未用 |
-| J | **FXE 引擎冇執行後端** | ❌ 下一步計劃 | `.fxe` 載入成功但永遠唔跑（WAMR 未接）。**已寫進 [fxe-engine.md](../03_notes/fxe-engine.md)**，屬於下一階段，不是本輪的 bug |
+| J | **NCM 引擎冇執行後端** | ❌ 下一步計劃 | `.nct` / `.nce` 載入成功但永遠唔跑（WAMR 未接）。**已寫進 [ncm-engine.md](../03_notes/ncm-engine.md)**，屬於下一階段，不是本輪的 bug |
 | K | **`level` 只影響宣告/啟動次序，唔係 barrier** | ⚠️ 設計如此 | `level` 保證「呼叫次序」，唔保證「上一層真係開始跑」（`xTaskCreate` 返嚟唔等於 task body 已執行）。要「上一層 ready 才開下一層」就要 `nc_task_ready()`（見 [task-lifecycle.md](../03_notes/task-lifecycle.md) §7） |
 | L | **CRC / 壞表頭統計** | ✅ 已加（2026-11-03） | `nc4_parser_errors()`，`BUS_STATS` 會出 `crc_err` / `bad_hdr` |
 | M | **`task_manager` 宣告不存在的 `include/`** | ✅ 已修（2026-11-03） | 會令 CMake configure 直接失敗；舊 `build/` 掩蓋了它，**新 clone 第一次 build 必撞** |
 | N | **tinyusb 佔 21.2 KB BSS**（`_cdcd_itf` 12,532 + `_mscd_epbuf` 8,192 + `_cdcd_epbuf` 1,024） | ⚠️ 未處理 | 清完 handler static 之後，它變成**我們這邊最大的單一項**；要再省 SRAM 應該先問「USB 一定要開嗎」 |
 | O | **`build/` 跨平台共用** | ⚠️ | Windows 冇 IDF，build 只能在 WSL 做；在 Windows 開 `build/` 只會見到上次 WSL 的殘留，容易誤判「已經 build 過」 |
-| P | **shell 腳本 CRLF → Linux 全掛** | ✅ 已修（2026-11-03） | `tools/{board,flash}.sh` ＋ `hosttest/{fx,hub,plan}_test/run.sh` 五行尾是 CRLF，在 WSL 跑就 `$'\r': command not found`。已全部轉 LF ＋ 加 `.gitattributes`（`*.sh` 強制 LF、`*.bat` 強制 CRLF） |
-| Q | **`nc_fx_scan()` 路徑截斷** | ✅ 已修（2026-11-03） | `char path[NC_FX_PATH_MAX]`＝80 B，但 `d_name` 最長 255 ＋ `dir` 無上限 → 截斷後會**靜靜開到另一個前綴相同的檔**。現在先驗 `snprintf` 回傳值，放唔落就跳過並計入 `bad` |
+| P | **shell 腳本 CRLF → Linux 全掛** | ✅ 已修（2026-11-03） | `tools/{board,flash}.sh` ＋ `hosttest/{mod,hub,plan}_test/run.sh` 五行尾是 CRLF，在 WSL 跑就 `$'\r': command not found`。已全部轉 LF ＋ 加 `.gitattributes`（`*.sh` 強制 LF、`*.bat` 強制 CRLF） |
+| Q | **`nc_mod_scan()` 路徑截斷** | ✅ 已修（2026-11-03） | `char path[NC_MOD_PATH_MAX]`＝80 B，但 `d_name` 最長 255 ＋ `dir` 無上限 → 截斷後會**靜靜開到另一個前綴相同的檔**。現在先驗 `snprintf` 回傳值，放唔落就跳過並計入 `bad` |
 | R | **FX 狀態 JSON 會送出半截** | ✅ 已修（2026-11-03） | 每個模組 ≈250 B 的 JSON，8 個 ≈2,000 B > 舊的 `part[1,900]` → 主機收到無效 JSON。現在偵測到放唔落就改寫一個**合法**的精簡物件（`"truncated":1` ＋ `"mods":N`） |
 | S | **`STATUS_GET` 完整回覆本身會爆** | ✅ 已修（2026-11-03） | 完整 status ≈2.4 KB，但 `NC4_REPLY_JSON_MAX` 只有 2,100 → **一直靜靜截斷**。已提到 2,600，並改成「砌入回覆幀」 |
 
@@ -218,7 +218,7 @@ USB 的完整分析：[failure-policy.md §4](../03_notes/failure-policy.md)。
 | T | **`router_from_cfg()` use-after-free** | ✅ **已修（2026-11-04）** | 名稱先抄入 `s_route_names[]` 再 `nc_cfg_close()`；`nc4_router_set()` 之後拿到的是有效字串。太長的名字直接跳過（不再截斷） |
 | U | **P4 測試 task（4 條）** | ✅ 已加開關（2026-11-04） | `tcp_sink`×2 / `tcp_src`×2 = 4 × 6,144 = **24,576 B**；`CONFIG_NETCORE_TEST_TASKS` 預設 **n**。`tcp_nc4_accept` 係正式通道，不在其中 |
 | V | **P4 tinyusb 仍被 link（21,748 B）** | ❌ | 不是 main.c；`nc_store.c` 仍然建 MSC LUN。要 guard 整個 MSC 段 |
-| W | `NC_TASK_MAX` 20 格（`s_slots` 7,680 B） | ❌ 不可縮 | 10 個固定任務 ＋ 8 個 `.fxe` = 18；縮到 12 會令 `.fxe` attach 失敗（靜默） |
+| W | `NC_TASK_MAX` 20 格（`s_slots` 7,680 B） | ❌ 不可縮 | 10 個固定任務 ＋ 8 個 `.nct` = 18；縮到 12 會令 `.nct` attach 失敗（靜默） |
 | X | **狀態管理器（三層：熱／冷／封存）** | 🟡 只定案未實作 | 三層、fast 區純數字、字典放 rodata＋PSRAM、`keys` 解析鏈。**不會省 RAM**（+256 B），價值在單一事實 |
 | Y | WS/UDP 改 PSRAM 後的吞吐 | ⚠️ 未量 | 要跑 `tools/bench/nc4_ws_test.py`；P4 的 PSRAM 較快，S3 沒 link 這兩條 |
 | Z | `ssid_pw` 明文在 FAT | ⚠️ | 上游搬 btree／NVS；我們應搬 NVS |
@@ -230,7 +230,7 @@ USB 的完整分析：[failure-policy.md §4](../03_notes/failure-policy.md)。
 | A1 | P4 測試 task 開關 | ✅ | `CONFIG_NETCORE_TEST_TASKS`（預設 n）；4 條 task＝24,576 B runtime |
 | A2 | `0x1005` 截斷 | ✅ | 改用緊湊清單 `nc_task_list_json()`（name/level/affinity/started/loops）；保證合法 JSON，放不下回 `{"truncated":1}` |
 | A3 | round watchdog | ✅ | 新 SYSTEM 任務 `monitor`（core0、1 s、`no_epoch`）：`epoch.rounds` 停滯 5 s → log（含任務清單）；預設**不重啟** |
-| A4 | `NC_TASK_MAX` 20→12 | ❌ 取消 | 10 固定 ＋ 8 `.fxe` = 18，20 格必要 |
+| A4 | `NC_TASK_MAX` 20→12 | ❌ 取消 | 10 固定 ＋ 8 `.nct` / `.nce` = 18，20 格必要 |
 
 > A3 的代價：monitor 自己一條 3,072 B 棧（runtime）。淨效果：P4 測試 task −24,576、
 > monitor +3,072 → **約 −21.5 KB**。
@@ -267,11 +267,11 @@ DIRAM 不變（S3 98,761／P4 129,863），flash 略減。
 
 | 動作 | 內容 |
 |---|---|
-| 搬目錄 | `app/tasks/bench` → `app/test_bench_tasks`；`app/tasks/hello` → `app/test_hello_tasks`；`app/fx` → `app/test_fx_tasks`；`sys/monitor` → `app/test_monitor_tasks` |
-| 分類 | `fx`（POC 燈效引擎）同 `monitor`（實驗 watchdog）都歸測試；release 唔出 |
+| 搬目錄 | `app/tasks/bench` → `app/test_bench_tasks`；`app/tasks/hello` → `app/test_hello_tasks`；`app/fx` → `app/test_mod_tasks`；`sys/monitor` → `app/test_monitor_tasks` |
+| 分類 | `ncm`（POC 燈效引擎）同 `monitor`（實驗 watchdog）都歸測試；release 唔出 |
 | 開關 | `option(NC_ENABLE_TESTS … OFF)`：OFF = `components/tasks` 唔加入編譯（唔係 runtime 關） |
 | 移除 | `CONFIG_NETCORE_TEST_TASKS`（合併入上面嘅開關） |
-| main.c | 測試相關 include／宣告／註冊／`nc_fx_scan` 全部 `#ifdef NC_ENABLE_TESTS` |
+| main.c | 測試相關 include／宣告／註冊／`nc_mod_scan` 全部 `#ifdef NC_ENABLE_TESTS` |
 
 建置矩陣（全部零 warning）：
 
@@ -365,7 +365,7 @@ DIRAM 不變（S3 98,761／P4 129,863），flash 略減。
 | 交接 | [disposition.md](disposition.md)（移除／新做法／保留／待決）｜[next-steps.md](next-steps.md)（排序、決策點、驗收）｜[handoff-2026-11-04.md](handoff-2026-11-04.md)（2026-11-04：記憶體清理、link 閘、Wi-Fi 兩道閘、量測與待辦） |
 | 教學 | [build_and_flash.md](../02_guides/build_and_flash.md)、[testing.md](../02_guides/testing.md)（§2.13–2.16 是量測總表） |
 | 筆記 | [execution-model.md](../03_notes/execution-model.md)（A/B 執行模型取捨與 group 改裝）、[core-isolation.md](../03_notes/core-isolation.md)（核隔離不變式：唯一接口係緩衝）、[cross-core.md](../03_notes/cross-core.md)（跨核中斷與共享狀態清單）、[config-layers.md](../03_notes/config-layers.md)、[writing-a-task.md](../03_notes/writing-a-task.md)、[task-lifecycle.md](../03_notes/task-lifecycle.md)、[rx-architecture.md](../03_notes/rx-architecture.md)、[failure-policy.md](../03_notes/failure-policy.md)、[p4-bringup.md](../03_notes/p4-bringup.md)、[buffer-manager.md](../03_notes/buffer-manager.md)、[memory.md](../03_notes/memory.md)、[memory-budget.md](../03_notes/memory-budget.md)（SRAM 帳）、[decode-routes.md](../03_notes/decode-routes.md)、[naming.md](../03_notes/naming.md)、[component-layout.md](../03_notes/component-layout.md)、[architecture-flow.md](../03_notes/architecture-flow.md)、[roadmap.md](roadmap.md) |
-| 研究 | [effect-language.md](../03_notes/effect-language.md)、[extension-architecture.md](../03_notes/extension-architecture.md)、[fx-loader.md](../03_notes/fx-loader.md) |
+| 研究 | [effect-language.md](../03_notes/effect-language.md)、[extension-architecture.md](../03_notes/extension-architecture.md)、[ncm-loader.md](../03_notes/ncm-loader.md) |
 
 ### 7.12 2026-11-05 早上（實機測試：USB 通，UART 迴路抓到漏 kick）
 
@@ -1135,7 +1135,7 @@ STATUS（108 條、p50 2.29 ms）時由 339.9→**334.9 ms（−1.5%）**。殘�
 decoder**（handler 執行序列化）—— 反映在回覆延遲，不影響 UART 吞吐；per-core decoder
 仍是未做項（§7.21）。
 
-**soak 與 CRC 追查**：UART 在滿載混合 soak 偶發 `crc_err`。六輪對照排除了插槽（`slot_full=0`）、parser、環容量（RX 1 KB→2 KB 照樣出現）；真兇是 `fx` 測試任務與 `uart.rx` **同優先級**（都是 3）→ 10 ms/tick 時間切片剛好壓過 1 KB 環的 11 ms。fx 降到 prio 2 後，事件率由 ≈1/900 降到 **≈1/3,150 循環**（30 分鐘、4,460 循環、2 次；每一輪 300 幀都收齊，沒有真的掉幀）。殘留那次已排除緩衝因素，下一步是數 RX FIFO overrun。規則：**同核的租戶任務不得與 producer 同優先級**。
+**soak 與 CRC 追查**：UART 在滿載混合 soak 偶發 `crc_err`。六輪對照排除了插槽（`slot_full=0`）、parser、環容量（RX 1 KB→2 KB 照樣出現）；真兇是 `ncm` 測試任務與 `uart.rx` **同優先級**（都是 3）→ 10 ms/tick 時間切片剛好壓過 1 KB 環的 11 ms。ncm 降到 prio 2 後，事件率由 ≈1/900 降到 **≈1/3,150 循環**（30 分鐘、4,460 循環、2 次；每一輪 300 幀都收齊，沒有真的掉幀）。殘留那次已排除緩衝因素，下一步是數 RX FIFO overrun。規則：**同核的租戶任務不得與 producer 同優先級**。
 
 **靜態分區**：`s_entries`（plan 宣告）64→16 格、`s_buses` 8→4 格，合計 **−3,136 B**；
 開機內部 heap `287,383 → 290,519`（正好 +3,136），`STATUS mem` 顯示 `decl=4 fail=0`、
@@ -1398,7 +1398,7 @@ forward 成功路徑（要 UART 腳位或第二條可送 link）、pool 接到 R
 
 | 文件 | 改什麼 |
 |---|---|
-| [buffers.md §9](../03_notes/buffers.md) | **新增契約 C1–C11**（宣告／建立／交付／生命／擁有權／讀寫權／熱路徑／對外可見／`.fxe`／上限／驗證）＋現況對照表＋「為什麼是這些條」 |
+| [buffers.md §9](../03_notes/buffers.md) | **新增契約 C1–C11**（宣告／建立／交付／生命／擁有權／讀寫權／熱路徑／對外可見／`.nct` / `.nce`／上限／驗證）＋現況對照表＋「為什麼是這些條」 |
 | [writing-a-task.md](../03_notes/writing-a-task.md) | §0／§1／§2／§3.1／§3.6／§5／§6／§7／§8 全部改講「**資源＝緩衝區**」；`pulse` 範例由 `nc_hub` 改成 `nc_buf_at` |
 | [task-lifecycle.md](../03_notes/task-lifecycle.md) | 欄位表、四步圖、失敗語義、歸還表統一；**更正 `NC_PLAN_MAX_DECLS` 64 → 16**；補 `NC_BUF_MAX 32` |
 | [task-model.md](../03_notes/task-model.md) | 加「記憶體＝緩衝區」指引 |
@@ -1587,7 +1587,7 @@ push 完 notify 即刻被更高的 decode 搶佔。
 
 **做法**：新增 [nc_prio.h](../../firmware/components/sys/task/include/nc_prio.h)，
 把「NC 核心（收 → 解 → 回）」訂成**保留區 7–15**：`decode0/1 = 8`、bus producer = 7、
-其他任務（含 TinyUSB 5／fx 2／log 2／app 1）一律 ≤ 6。規則寫進
+其他任務（含 TinyUSB 5／ncm 2／log 2／app 1）一律 ≤ 6。規則寫進
 [execution-rules §1.3](../03_notes/execution-rules.md)。
 
 **為什麼要保留區**：核心是整個系統的節拍來源；沒有具名常數，下一個人會直接寫 `prio = 8`
@@ -1635,7 +1635,7 @@ push 完 notify 即刻被更高的 decode 搶佔。
 
 | 項目 | 結果 |
 |---|---|
-| 優先級階梯 | `decode0/1 = 8`、`cdc.rx = 7`、`uart.rx = 7`、`TinyUSB 5`、`fx/nc_log 2`、`main/hello 1` ✅ |
+| 優先級階梯 | `decode0/1 = 8`、`cdc.rx = 7`、`uart.rx = 7`、`TinyUSB 5`、`ncm/nc_log 2`、`main/hello 1` ✅ |
 | `0xF032` | **11/11** |
 | 300 幀 burst | **301/300 幀**、`slot_full` **0**、`parse` 475 µs/幀 |
 | `kick_us` | **38 / 104 µs**（平均／最大） |
@@ -1736,7 +1736,7 @@ plan 失敗時仍然退回原本的 heap 分配並印警告。
 |---|---|
 | 計數 | 每 loop 一個 4 B `beats`（`nc_task_rt_t`） |
 | 短 fn | 管理器 trampoline 每輪 `++` |
-| **長跑 fn** | 自己叫 `nc_task_beat()`（`decode0/1`、`fx` 已加） |
+| **長跑 fn** | 自己叫 `nc_task_beat()`（`decode0/1`、`ncm` 已加） |
 | 停滯判斷 | **主機**比對兩次 `STATUS keys=tasks` 的 `b` —— 板子零成本、零新任務 |
 | 曝光 | `keys=tasks` 每個 loop 多一個 `b` 欄位 |
 
@@ -1745,7 +1745,7 @@ plan 失敗時仍然退回原本的 heap 分配並印警告。
 | loop | 心跳 |
 |---|---:|
 | `decode0` / `decode1` | **42 / 40**（閒置 ~21 Hz，受 50 ms 安全網限制） |
-| `fx` | **200**（10 ms 週期 ＝ 100 Hz） |
+| `ncm` | **200**（10 ms 週期 ＝ 100 Hz） |
 | `hello` | 2（1 s 週期） |
 | `bench_a/b/c` | 0（`affinity [0,0]` 未啟用，符合預期） |
 
@@ -1771,7 +1771,7 @@ run.sh 補了 `nc_buf.c`）、建置零 warning。
 | `nc4.reply0/1` | 任務在 `on_start` 自己 `nc_buf_at()` | 宣告 `slot_bytes=2,615, n=1` → 管理器建 |
 | `usb.rx` | 任務 `nc_plan_get()` → parser 自己 `nc_buf_at()` | 宣告 `slot_bytes=region, n=1, flags=STREAM` → 管理器建，bus 用 `cfg.rx_buf` 收 |
 | `uart.rx`／`tcp.rx` | 同上 | 同上 |
-| `fx.arena` | 純區域 | 宣告 `slot_bytes=512 KB, n=1` → 管理器建（`.fxe` 之後用 `nc_buf_carve()` 由它切） |
+| `ncm.arena` | 純區域 | 宣告 `slot_bytes=512 KB, n=1` → 管理器建（`.nct` / `.nce` 之後用 `nc_buf_carve()` 由它切） |
 | `probe.hub` | 純區域 | 保持（probe 自己建 hub，測試專用） |
 
 新增 API：`nc4_parser_create_buf()`（adopt 一個已存在的 STREAM buffer）＋
@@ -1783,9 +1783,9 @@ run.sh 補了 `nc_buf.c`）、建置零 warning。
 **上板驗收**：
 
 ```
-plan: nc4.reply0, nc4.reply1, usb.rx, uart.rx, probe.hub, fx.arena
+plan: nc4.reply0, nc4.reply1, usb.rx, uart.rx, probe.hub, ncm.arena
 buf : nc4.reply0/1（P 2615 n=1）、usb.rx（S 4192 stream）、uart.rx（S 1024 stream）、
-      fx.arena（P 524288 n=1）、CDC.slots、UART.slots、t.*
+      ncm.arena（P 524288 n=1）、CDC.slots、UART.slots、t.*
 ```
 
 | 測試 | 結果 |
@@ -2339,7 +2339,7 @@ S3 WiFi 連上後開 TCP 6000、UDP 6001、WS 8080。
     SDIO／ETH／PIN／PWM／UART；B05 改「PWM 安裝、ETH `enable=1` 才起、
     `system.routes` 定線→組」（FireBeetle 的 ETH.enable=0 是實例）；
     B06 寫明「有線到 core1 才建第二個 decoder」；B07 net lines 宣告＋Wi-Fi 兩道閘；
-    B08 測試映像掃 `.fxe`＋帳本；B10 改為 net lines start＋USB／UART bus。
+    B08 測試映像掃 `.nct` / `.nce`＋帳本；B10 改為 net lines start＋USB／UART bus。
   - **新增 Panel C「B02 的 seed：三個來源、一個方向」**：
     `F.default`（`nc_port.c`）→ `F.preset`（build 揀的 project）→ `F.live`
     （`/data/config`；只缺檔才寫，存在就一個 byte 都唔改）。
@@ -2416,13 +2416,13 @@ S3 WiFi 連上後開 TCP 6000、UDP 6001、WS 8080。
 - **新增 boot-cores.svg**（[tools/boot_cores_diagram.py](../../tools/boot_cores_diagram.py)，1960×1858）：
   - **D. 決策表（12 項）**：D1 boot record（格式化？）／D2 config 缺壞／D3 核數／
     D4 USB 人格／D5 ETH／D6 routes→核／D7 managed vs legacy／D8 每條 line 建唔建／
-    D9 任務 level／affinity／D10 WiFi／D11 .fxe／D12 rawbench；
+    D9 任務 level／affinity／D10 WiFi／D11 .nct／D12 rawbench；
     每項寫「條件（輸入）→ 決定（結果）→ 影響／落點」。
   - **C. 核落點**：6 條規則（app_main 固定 core0；line core＝routes 第一個 decodeN；
-    producer 必須同 bus 同核；SYSTEM／tenant 任務核；WiFi＝core1 clamp；測試／fx）
+    producer 必須同 bus 同核；SYSTEM／tenant 任務核；WiFi＝core1 clamp；測試／ncm）
     ＋ core0／core1 兩條 lane，逐個 object 寫明「什麼條件下才會出現在這個核」。
   - **S. 唔啟動矩陣（9 項）**：ETH／TCP、新 net line、legacy 網絡、USB stack、MSC、
-    WiFi、任務 loop、.fxe、rawbench 各自的「唔啟動條件」。
+    WiFi、任務 loop、.nct、rawbench 各自的「唔啟動條件」。
   - **F. 總閘**：B02 `storage+cfg` 失敗 → CONFIG 唔 give → B03 之後全部 SKIP
     （B11 account 仍跑，之後只剩心跳）；壞 config ≠ storage 失敗，degraded 仍會開機。
 - **對照來源**：`main.c` ph_boot…ph_account、`boot.c` needs/gives、`nc_task.c`
@@ -2468,7 +2468,7 @@ S3 WiFi 連上後開 TCP 6000、UDP 6001、WS 8080。
   `config-layers.md`。
 - **未完成**：service registry／claim API；`iface` 真正 bind（ETH／WiFi 同 port 分離）。
 
-### 7.75 2026-11-16 晚（USB 配置地圖、S3-Matrix OTG MSC、CPU 240、FXE 前 gap）
+### 7.75 2026-11-16 晚（USB 配置地圖、S3-Matrix OTG MSC、CPU 240、NCM 前 gap）
 
 - **文件**：
   - 新增 [usb-layers.md](../03_notes/usb-layers.md)：晶片能力 → 板子 → build → 用戶
@@ -2490,8 +2490,8 @@ S3 WiFi 連上後開 TCP 6000、UDP 6001、WS 8080。
   `board.json`＋`sdkconfig.defaults`，`--fresh` 才生效。執行期調頻未實作。
 - **圖**：`network-lines.svg`、`boot.svg`、`boot-cores.svg` 已按 composite kind、
   route 容錯、USB console／OTG、D11（WAMR 未接）重畫；`architecture.svg` 沿用。
-- **FXE 前仍未做好**：
-  1. FXE 執行後端（WAMR）未接；`.fxe` 現在「登記得到、跑不到」。
+- **NCM 前仍未做好**：
+  1. NCM 執行後端（WAMR）未接；`.nct` / `.nce` 現在「登記得到、跑不到」。
   2. D9 外部任務掃描要拆「probe→declare」與「B08 load」兩步；manifest v2
      （name／level／require／provide／param／doc TLV）未做。
   3. 效果掃描（`/data/pixel/effects`）與 service registry／claim API 未做。
@@ -2792,7 +2792,7 @@ config 真係主導下一次開機，而且可逆。
 
 **S3：NC4 與日誌（console=none 之下的唯一診斷管道）**
 
-- `status` 全部 keys 正常：`sys`／`storage`／`log`／`mem`／`provides`／`tasks`／`fx`／`cfg`；
+- `status` 全部 keys 正常：`sys`／`storage`／`log`／`mem`／`provides`／`tasks`／`ncm`／`cfg`；
   `log` 見 `cap=1 run=1`、`produced=[34,4]`、`sent=38`、`dropped=578`（冇人讀時正常丟棄）。
 - `nc4_log.py` 串流 8 s：1 Hz 心跳、`dt` 抖動 ±100 µs、`heap=169995` 穩定。
 - `REBOOT`：`up_s` 619→12、`rst` 1→3、USB 重新枚舉回 `303A:4003`、`app` hash 不變

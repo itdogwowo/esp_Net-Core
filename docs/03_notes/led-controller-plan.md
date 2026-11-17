@@ -26,7 +26,7 @@ PCA9685 可以是其中一個 backend，但 PWM 不是 controller 本身。
 
 ## 2. C 的界面（沒有 class）
 
-用 `struct + ops`，和 `nc_bus`／`nc_task`／`nc_fx_backend` 同一種做法：
+用 `struct + ops`，和 `nc_bus`／`nc_task`／`nc_mod_backend` 同一種做法：
 
 ```c
 typedef struct nc_led nc_led_t;

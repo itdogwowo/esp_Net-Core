@@ -87,7 +87,7 @@ config 只能管租戶。** 但「冇 config 都開得機」不等於「config �
 1. **只建立、不覆蓋**：檔案存在就永遠不動（連 `version` 都不改）。使用者刪掉 → 下次開機重建。
 2. **建立後行為與「冇檔」一致**：內建最小預設的內容 = 「全部用程式預設」，
    所以「第一次開機」和「刪掉檔案」跑出來的行為一樣，不會出現「重開機才生效」。
-3. **核心不讀 config 也能開機**：`nc4` / `net` / `core` / FXE 引擎都是 `NC_TASK_SYSTEM`，
+3. **核心不讀 config 也能開機**：`nc4` / `net` / `core` / NCM 引擎都是 `NC_TASK_SYSTEM`，
    照 C 宣告跑；`tasks.json` 只影響租戶。所以 ③ 全冇、② 也冇，板子仍然收得到指令。
 
 **2026-11-13 更新：出廠形狀由晶片能力決定。**
@@ -223,7 +223,8 @@ ports/
 │  ├─ hardware.json          完整硬體預設（generated seed；沒寫的欄位回 nc_port.c）
 │  ├─ system.json            身份、開機、NC4 通道與解碼路線
 │  ├─ network.json           IP / mask / gw / DHCP
-│  └─ tasks.json             任務 core / prio / stack 覆蓋
+│  ├─ tasks.json             任務 core / prio / stack 覆蓋
+│  └─ resources.json         外部任務資源表格（誰提供什麼、誰需要什麼）
 └─ pixel/                    ★ 效果自己的樹（見 §5.1）
 ```
 
@@ -235,7 +236,8 @@ ports/
 | `system.json` | 系統層（main） | **硬體起來之後**（分配要看實際硬體） | 只啟動硬體實際支援的通道 |
 | `network.json` | 網路層 | ETH/WiFi 起來前 | 用內建 IP 或 DHCP |
 | `tasks.json` | 任務管理器 | 任務登記前 | 用程式裡宣告的 core/prio |
-| `pixel/`（目錄） | fx | 掃描 `pixel/effects/` | 不啟用效果 |
+| `resources.json` | ncm / 資源表 | 掃描之後、載入之前 | 用固件預設（空表） |
+| `pixel/`（目錄） | ncm | 掃描 `pixel/effects/` | 不啟用效果 |
 
 ---
 
@@ -285,7 +287,7 @@ nc_cfg_close(cfg);
 ⑥ 資源 carve    nc_plan_commit(當下可用量)
 ⑦ NC4 通道啟動  建 transport → 建 bus → 掛 decode 引擎
 ⑧ 任務啟動     nc_task_start_all() → nc_task_boot() 依 layer
-⑨ pixel/（掃 `pixel/effects/*.fxe`，attach 時才載入）
+⑨ pixel/（掃 `pixel/effects/*.nce`，attach 時才載入）
 ```
 
 **為什麼 ④ 在 ②③ 之後**：分配是「把通道/引擎/緩衝放到實際存在的硬體上」。
@@ -337,7 +339,7 @@ ETH PHY 沒 link、UART 沒接，就不該照 config 硬開一條 link。
 
 `routes[].out` 同時接受**通道**（轉發）與 **decode 引擎**（本地執行），跟舊專案的
 `out: ["self"]` 同一個語意（新專案的本機來源叫 `nctx`）；`decodeN` 有人指向才開（N = 核心編號），**不需要宣告引擎**。
-`fxN` 由 `.fxe` manifest 的 `core` 推導，也不能放進 `out`（它不吃幀）。
+`ncmN` 由 `.nct` / `.nce` manifest 的 `core` 推導，也不能放進 `out`（它不吃幀）。
 完整規則見 [routing.md](routing.md)。
 
 > **現況（已接）**：開機 ④ 真的會讀 `routes[]`，每行**第一個** `decodeN` 決定那條線由第 N 核解；
@@ -549,7 +551,7 @@ DMA 大小（1600）與環數（16/16）**不在 config**——那是 build-time
 
 ```text
 /data/pixel/
-├─ effects/          效果檔 *.fxe（載入器掃這個目錄）
+├─ effects/          效果檔 *.nce（載入器掃這個目錄）
 ├─ map/              像素映射（實體排列 → 邏輯索引）
 └─ modes/            模式 / 預設（開機跑哪個、參數）
 ```
@@ -557,7 +559,7 @@ DMA 大小（1600）與環數（16/16）**不在 config**——那是 build-time
 規則：
 
 - **檔案系統就是註冊表**：`ls pixel/effects/` 就知道有哪些效果，沒有另一張總表。
-- 每個 `.fxe` 自帶 manifest（kind / core / fps / px / cmds），載入器驗它，不靠外部設定。
+- 每個 `.nct` / `.nce` 自帶 manifest（kind / core / fps / px / cmds），載入器驗它，不靠外部設定。
 - `map/`、`modes/` 的 schema 等效果引擎落地再定；現在只載入 + 驗證。
 - **UI 暫時不做**（本來要放 `ui.json`，取消）。
 
@@ -588,7 +590,7 @@ DMA 大小（1600）與環數（16/16）**不在 config**——那是 build-time
 | C2 | `hardware.json` / `driver.json` 接掉 `main.c` 的寫死值 | 🟡 ETH 已完成（2026-11-08，含 `enable`）；SDIO 早前已完成；其餘段與 `driver.json` 未做 |
 | C3 | `network.json` / `tasks.json` | IP 與 core 可由檔案覆蓋 |
 | C4 | 出廠預置改成多檔（`ports/project/<board>/data/config/`） | 新板首次開機長出 `config/` 目錄 |
-| C5 | `pixel/` 樹（`effects/`、`map/`、`modes/`） | 拖拉 `.fxe` 進 `pixel/effects/` 就生效 |
+| C5 | `pixel/` 樹（`effects/`、`map/`、`modes/`） | 拖拉 `.nce` 進 `pixel/effects/` 就生效 |
 
 ---
 

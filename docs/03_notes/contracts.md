@@ -26,7 +26,7 @@
 
 | 常數 | 值 | 意思 |
 |---|---:|---|
-| `NC_TASK_MAX` | **20** | 管理器最多幾個任務（固定 8 ＋ `.fxe` 最多 8 ＋ 4 備用） |
+| `NC_TASK_MAX` | **20** | 管理器最多幾個任務（固定 8 ＋ `.nct` 最多 8 ＋ 4 備用） |
 | `NC_TASK_MEM_MAX` | 8 | 一個任務最多幾項資源（`mem[]` ＋ `declare()` 合計） |
 | `NC_TASK_LOOPS_MAX` | 2 | 一個任務最多幾條線程（`nc4` 兩核各一） |
 | `NC_TASK_LAYERS` | 8 | loop 的 layer 只有 0–7 |
@@ -69,11 +69,11 @@
 |---|---|
 | 管理器提供一個 4 B 遞增計數（每 loop 一個） | **唔開計時器、唔開任務**；舊 `monitor`／`epoch` 已刪 |
 | 短 fn（會返回） | 管理器每輪自動 `++` |
-| **長跑 fn（`for(;;)`，例如 `decode0/1`、`fx`）** | **必須自己叫 `nc_task_beat()`**，否則永遠停在 1 |
+| **長跑 fn（`for(;;)`，例如 `decode0/1`、`ncm`）** | **必須自己叫 `nc_task_beat()`**，否則永遠停在 1 |
 | 停滯判斷 | **主機**比對兩次 `STATUS keys=tasks` 的 `b` 差值；差值 0 ＝ 停滯 |
 
 實測（2026-11-10，S3）：`decode0/1` 閒置 21/20 次每秒（受 50 ms 安全網限制）、
-`fx` **100 次每秒**（10 ms 週期）、`hello` 1 次每秒（1 s 週期）、`bench_*` 0（`[0,0]` 未啟用）。
+`ncm` **100 次每秒**（10 ms 週期）、`hello` 1 次每秒（1 s 週期）、`bench_*` 0（`[0,0]` 未啟用）。
 
 ### 1.8 違反會怎樣
 
@@ -120,7 +120,7 @@
 | **15–7 保留** | `decode0/1` = **8**、bus producer（`cdc.rx`／`uart.rx`）= **7** |
 | 6 | 其他任務上限 |
 | 5 | `TinyUSB`（IDF） |
-| 2 | `fx` / `nc_log` |
+| 2 | `ncm` / `nc_log` |
 | 1 | `app_main` / `hello` / bench |
 
 | 約定 | 實測依據（2026-11-10，S3） |
@@ -191,7 +191,7 @@
 | 路由 | `system.json` 表、`0x1105` 查表、轉寄出口、跨核 fwd queue | 環狀拓撲未擋；forward-only route 未支援 |
 | 通道 | CDC（PUSH，實測 kick 42 µs）、UART（PUSH，driver 未開）、ESP-NOW（測試版） | TCP／WS／UDP 只在 P4；UART 等腳位 |
 | 初次開機 | 完整（provisioned／fmt_pending／fw_hash／degraded） | 冇「保留 user_data」機制 |
-| `.fxe` | 掃描、驗證、manifest、attach | WAMR 執行引擎未接（`loops=[]`） |
+| `.nct` / `.nce` | 掃描、驗證、manifest、attach | WAMR 執行引擎未接（`loops=[]`） |
 
 ---
 
@@ -201,5 +201,5 @@
 2. **loop 心跳（stall 偵測）**：要不要每 loop 一個 `_Atomic beats`（4 B）＋ 主機比對？
 3. **換韌體清 `/data`**：要唔要一個「user 專區」唔會被清？
 4. **保留區的強制**：只寫文件，還是在 `nc_task_boot()` 加警告／拒絕？
-5. **`nc_buf_carve()`**：P5 前要不要先做（`.fxe` 現在用自己的 arena）？
+5. **`nc_buf_carve()`**：P5 前要不要先做（`.nct` / `.nce` 現在用自己的 arena）？
 6. **UART 腳位**：SD 佔用 GPIO7/8，要換腳還是等新板？

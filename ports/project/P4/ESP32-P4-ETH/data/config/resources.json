@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "_comment": [
+    "外部任務資源表格：誰提供什麼、誰需要什麼。",
+    "name：資源名；type：buf / cmd / hw / provide / module",
+    "provider：提供者（任務名）；bytes：buf 大小；exclusive：hw 獨占",
+    "缺檔 → 用固件預設；有檔 → 逐條覆蓋。模組自己宣告的 provides/requires 會在開機時合併進來。",
+    "例：{ \"name\": \"led.frame\", \"type\": \"buf\", \"provider\": \"pixel\", \"bytes\": 2704 }"
+  ],
+  "resources": []
+}

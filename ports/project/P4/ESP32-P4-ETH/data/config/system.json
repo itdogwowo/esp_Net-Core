@@ -2,7 +2,7 @@
   "version": 1,
   "_comment": [
     "System 層：身份、開機行為、NC4 通道與路由表。",
-    "引擎不用宣告：decodeN 由 routes[].out 推導（有人指向就開），fxN 由 .fxe manifest 的 core 推導。",
+    "引擎不用宣告：decodeN 由 routes[].out 推導（有人指向就開），ncmN 由 `.nct` / `.nce` manifest 的 core 推導。",
     "任務清單在 tasks.json；設計與規則：docs/03_notes/routing.md",
     "",
     "── 身份 ──",

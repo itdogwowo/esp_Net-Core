@@ -525,7 +525,7 @@ def build():
     text(nb_x + 12, nb_y + 36,
          "NVS 頁快取｜FAT／WL 掛載表｜ETH DMA 16×1,600×2 ≈ 51.2 KB｜TinyUSB ≈ 2–3 KB 任務", 9.5, FAINT)
     text(nb_x + 12, nb_y + 51,
-         "Wi-Fi（啟用時 ~50 KB）｜TCP／WS producer 4,096×N｜fx 4,096（只測試映像）", 9.5, FAINT)
+         "Wi-Fi（啟用時 ~50 KB）｜TCP／WS producer 4,096×N｜ncm 4,096（只測試映像）", 9.5, FAINT)
 
     # ── 簡寫對照（圖上為了排版把 usb_ 前綴省掉；這裡寫返全名）────────────
     # 放喺圖例上一行：讀者掃到 B03 兩個 usb_* 欄位時，唔需要再翻 boot.svg。

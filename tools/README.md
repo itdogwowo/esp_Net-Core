@@ -13,7 +13,7 @@ tools/
 ├─ board.py                     ① 板子清單 / 設定檢查 / 新增板子
 ├─ board.sh                     ① 薄殼 → make.py（相容用）
 ├─ flash.sh                     ① 逃生門燒錄
-├─ nc4.py  ota.py selftest.py nc4_test.py nc4_file.py buf_test.py matrix.py fx.py   ② 對設備說話 / 打包 .fxe
+├─ nc4.py  ota.py selftest.py nc4_test.py nc4_file.py buf_test.py matrix.py ncm.py   ② 對設備說話 / 打包 `.nct` / `.nce`
 ├─ bench/                       ③ 量測（要板子）
 ├─ hosttest/                    ④ 主機端 C 測試（不需要板子）
 └─ poc/                         ⑤ 原型驗證
@@ -140,7 +140,7 @@ python3 tools/sync_hardware_presets.py           # 重寫 project/data/config/ha
 | `nc4_file.py --port … status\|query <path>\|claim\|release` | ✅ | 檔案查詢（0x2005）與儲存狀態（0x1103/0x1101）。讀取任何模式都通；只有寫入才要 claim，見 [fat-ownership](../docs/03_notes/fat-ownership.md) |
 | `nc4_test.py --port …` | ✅ | 解碼器一致性測試：正常幀 / 黏包 / 拆包 / 壞 CRC / 假 SOF / 錯 addr / 超大 LEN / 錯版本 |
 | `buf_test.py --port …` | ✅ | **統一緩衝（`nc_buf`）的上板自測**（`0xF032`）：64 B 對齊、FIFO 次序、滿了回 NULL、reserve 表頭 + `off`/`len`、S2S·S2P·P2S·P2P 四條 copy、換手；`--status` 順便印 `mem.buf` |
-| `fx.py pack / dump` | ❌ | **打包 `.fxe`**（header + manifest + payload + 指令表）與檢視；manifest 欄位＝模組的 kind/core/layer/fps/px/預算。`pack` 會先擋掉裝置端一定會拒的值 |
+| `ncm.py pack / dump` | ❌ | **打包 `.nct` / `.nce`**（header + manifest + meta + payload + 指令表）與檢視；`--meta meta.json` 嵌入 name/desc/usage/requires/provides。`pack` 會先擋掉裝置端一定會拒的值 |
 | `matrix.py --port … stats\|effect\|dither\|color\|gain\|fps\|zone\|zmask` | ✅ | **8×8 WS2812 矩陣**（`0xF060`）：切效果（第一區／呼吸／波浪／單色／色階）、抖動開關、每區 rate+phase、看實測 fps／late／tx_us。見 [rgb-matrix-dither](../docs/03_notes/rgb-matrix-dither.md) |
 
 firmware image 在 `artifacts/<board>.bin`（先 build 才有；完整可燒組在 `artifacts/<board>/`）。
@@ -167,11 +167,12 @@ P4 預設 **DHCP**（舊版寫死的 `10.10.1.50/16` 已移除）；量測前先
 用 `cc` 直接把同一個 `.c` 編進來跑，驗證純邏輯，不用燒板子：
 
 ```bash
-bash tools/hosttest/run_all.sh     # 一次跑全部（11 套；每套印 OK / FAIL）
+bash tools/hosttest/run_all.sh     # 一次跑全部（12 套；每套印 OK / FAIL）
 tools/hosttest/hub_test/run.sh     # nc_hub.c：格子交換 / 自動歸還
 tools/hosttest/plan_test/run.sh    # nc_plan.c：宣告 / commit / 重名
-tools/hosttest/fx_test/run.sh      # nc_fx.c：載入 / 選 / 兩幀釋放 / trap / 超支
-tools/hosttest/fxm_test/run.sh     # .fxe manifest：解碼 / 範圍 / 指令表
+tools/hosttest/mod_test/run.sh      # nc_mod.c：載入 / 選 / 兩幀釋放 / trap / 超支 / 掃描→合併→載入
+tools/hosttest/ncd_test/run.sh     # `.nct` / `.nce` manifest：解碼 / 範圍 / 指令表
+tools/hosttest/ncm_test/run.sh     # ncm.py：pack / dump / 副檔名 / magic / manifest / crc（格式標準）
 tools/hosttest/task_test/run.sh    # 任務管理器：level 排序 / 帳本 / attach / detach / provides / config
 tools/hosttest/cfg_test/run.sh     # nc_cfg_patch：token patch（巢狀 / 陣列 / 轉義）
 tools/hosttest/cfgstruct_test/run.sh  # nc_cfg_load／defaults：三層 config 疊加、線的 kind/index、USB personality
@@ -181,21 +182,24 @@ tools/hosttest/buf_test/run.sh     # nc_buf.c：格狀態機 / FIFO / reserve / 
 tools/hosttest/portgen_test/run.sh # ncportgen.py：從 ports/ 產生 nc_port.c/h（含 USB kind 表）
 ```
 
-Windows（MSVC）用同目錄的 `run.bat`。注意：目前只有 `cfg_test` / `fxm_test` / `router_test` /
-`task_test` 有 `run.bat`；`fx_test` 用到 `dirent.h` / `clock_gettime` 是 POSIX-only，
+Windows（MSVC）用同目錄的 `run.bat`。目前 `cfg_test` / `ncd_test` / `mod_test` / `ncm_test` /
+`router_test` 有可用的 `run.bat`；`task_test` 的 `run.bat` 需要 GCC/Clang（`nc_buf.c` 用
+`__ATOMIC_*`），Windows 請用 WSL 的 `run.sh`。`mod_test` 的 `dirent.h` 由
+`tools/hosttest/mod_test/include/dirent.h` 補上（Win32 `FindFirstFile` shim），
+`clock_gettime` 用 `QueryPerformanceCounter` 代替。`ncm_test` 是 Python（`ncm.py` 的格式標準測試）。
 其餘只是還沒補腳本（純 C，補了就能跑）。`cfgstruct_test`／`portgen_test` 直接吃 `firmware/`
 的標頭與 `ports/`，在 WSL／macOS 跑最省事。
 
-全部都會印 `ALL PASS`。改了 `sys/mem/`、`sys/task/`、`sys/task_manager/`、`sys/config/`、`app/fx/` 之後先跑對應那支。
+全部都會印 `ALL PASS`。改了 `sys/mem/`、`sys/task/`、`sys/task_manager/`、`sys/config/`、`tasks/test_mod_tasks/` 之後先跑對應那支。
 
 ## ⑤ `poc/` — 原型驗證
 
 | 工具 | 需要板子 | 做什麼 |
 |---|---|---|
-| `poc/fx_poc/host.mjs` | ❌ | 效果模組 ABI 的 host 參考實作（node，零依賴）：跑模組、中途換模組、餵壞模組 |
+| `poc/mod_poc/host.mjs` | ❌ | 效果模組 ABI 的 host 參考實作（node，零依賴）：跑模組、中途換模組、餵壞模組 |
 
 ```bash
-node tools/poc/fx_poc/host.mjs tools/poc/fx_poc/fx.wasm --frames 120
+node tools/poc/mod_poc/host.mjs tools/poc/mod_poc/mod.wasm --frames 120
 ```
 
 ---

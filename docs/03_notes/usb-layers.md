@@ -269,7 +269,7 @@ config 只需要「啟不啟用 consumer」（tasks／service 的 level／affini
 > 未實作：現在仍是 `links[].kind`（`usb` 載入時解析成 `cdc`／`usb_jtag`）＋
 > per-link `msc`（預設 0；global `usb.msc` 已停用）／global `usb.cdc_log`。
 > 要做的是 `nc_usb_port_register()`／`nc_usb_claim()` 與 per-port 狀態。
-> 在接 FXE 之前不動這一層。
+> 在接 NCM 之前不動這一層。
 
 ### 5.2 這一層屬於哪裡？不是 router
 

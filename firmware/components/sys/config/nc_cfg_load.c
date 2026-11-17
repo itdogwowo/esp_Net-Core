@@ -23,8 +23,10 @@ static const char *TAG = "cfg";
 
 static nc_system_cfg_t s_sys;
 static nc_tasks_cfg_t  s_tasks;
+static nc_resources_cfg_t s_resources;
 static nc_cfg_stat_t   s_sys_stat;
 static nc_cfg_stat_t   s_tasks_stat;
+static nc_cfg_stat_t   s_resources_stat;
 static nc_hardware_cfg_t s_hw;
 static nc_cfg_stat_t   s_hw_stat;
 static bool s_loaded;
@@ -1044,6 +1046,111 @@ esp_err_t nc_cfg_apply_tasks(const cJSON *root, nc_tasks_cfg_t *out, nc_cfg_stat
     return ESP_OK;
 }
 
+// ───────────────────────── resources ─────────────────────────
+
+esp_err_t nc_cfg_apply_resources(const cJSON *root, nc_resources_cfg_t *out, nc_cfg_stat_t *st)
+{
+    if (out == NULL || st == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    *out = *nc_cfg_defaults_resources();
+    memset(st, 0, sizeof(*st));
+
+    if (root == NULL) {
+        st->missing = 1;
+        return ESP_OK;
+    }
+    if (!cJSON_IsObject(root)) {
+        st->bad_json = 1;
+        *out = *nc_cfg_defaults_resources();
+        return ESP_OK;
+    }
+
+    const cJSON *ver = item(root, "version");
+    if (ver == NULL) {
+        st->defaulted++;
+    } else if (!cJSON_IsNumber(ver) || ver->valueint != NC_CFG_SCHEMA_VERSION) {
+        st->bad_version = 1;
+        return ESP_OK;
+    }
+
+    static const char *const root_keys[] = { "version", "_comment", "resources" };
+    note_unknown(root, root_keys, sizeof(root_keys) / sizeof(root_keys[0]), st);
+
+    const cJSON *arr = item(root, "resources");
+    if (arr == NULL) {
+        st->defaulted++;
+        return ESP_OK;
+    }
+    if (!cJSON_IsArray(arr)) {
+        st->invalid++;
+        return ESP_OK;
+    }
+
+    out->n_res = 0;
+    const cJSON *it = NULL;
+    cJSON_ArrayForEach(it, arr) {
+        if (out->n_res >= NC_CFG_MAX_RES) {
+            st->invalid++;
+            break;
+        }
+        nc_res_cfg_t r;
+        memset(&r, 0, sizeof(r));
+
+        const cJSON *nm = item(it, "name");
+        if (!cJSON_IsString(nm) || nm->valuestring == NULL || nm->valuestring[0] == '\0' ||
+            strlen(nm->valuestring) >= NC_CFG_RES_NAME_MAX) {
+            st->invalid++;
+            continue;
+        }
+        snprintf(r.name, sizeof(r.name), "%s", nm->valuestring);
+
+        const cJSON *ty = item(it, "type");
+        if (!cJSON_IsString(ty) || ty->valuestring == NULL) {
+            st->invalid++;
+            continue;
+        }
+        if (strcmp(ty->valuestring, "buf") == 0) {
+            r.type = 0;
+        } else if (strcmp(ty->valuestring, "cmd") == 0) {
+            r.type = 1;
+        } else if (strcmp(ty->valuestring, "hw") == 0) {
+            r.type = 2;
+        } else if (strcmp(ty->valuestring, "provide") == 0) {
+            r.type = 3;
+        } else if (strcmp(ty->valuestring, "module") == 0) {
+            r.type = 4;
+        } else {
+            st->invalid++;
+            continue;
+        }
+
+        const cJSON *pr = item(it, "provider");
+        if (cJSON_IsString(pr) && pr->valuestring != NULL) {
+            snprintf(r.provider, sizeof(r.provider), "%s", pr->valuestring);
+        } else {
+            st->defaulted++;
+        }
+
+        const cJSON *by = item(it, "bytes");
+        if (cJSON_IsNumber(by) && by->valueint >= 0) {
+            r.bytes = (uint32_t)by->valueint;
+        } else if (by != NULL) {
+            st->invalid++;
+        }
+
+        const cJSON *ex = item(it, "exclusive");
+        if (cJSON_IsBool(ex)) {
+            r.exclusive = cJSON_IsTrue(ex);
+        } else if (ex != NULL) {
+            st->invalid++;
+        }
+
+        out->res[out->n_res++] = r;
+    }
+    return ESP_OK;
+}
+
 // ───────────────────────── 存取 ─────────────────────────
 
 esp_err_t nc_cfg_boot(void)
@@ -1061,6 +1168,11 @@ const nc_tasks_cfg_t *nc_cfg_tasks(void)
     return &s_tasks;
 }
 
+const nc_resources_cfg_t *nc_cfg_resources(void)
+{
+    return &s_resources;
+}
+
 const nc_hardware_cfg_t *nc_cfg_hardware(void)
 {
     return &s_hw;
@@ -1076,6 +1188,9 @@ const nc_cfg_stat_t *nc_cfg_stat_of(const char *layer)
     }
     if (strcmp(layer, "tasks") == 0) {
         return &s_tasks_stat;
+    }
+    if (strcmp(layer, "resources") == 0) {
+        return &s_resources_stat;
     }
     if (strcmp(layer, "hardware") == 0) {
         return &s_hw_stat;
@@ -1265,6 +1380,19 @@ esp_err_t nc_cfg_boot_ex(const char *hw_base_json, size_t hw_base_len)
         }
     }
 
+    exists = false;
+    f = nc_cfg_open_ex("resources", &exists);
+    if (f != NULL) {
+        (void)nc_cfg_apply_resources(nc_cfg_root(f), &s_resources, &s_resources_stat);
+        nc_cfg_close(f);
+    } else {
+        (void)nc_cfg_apply_resources(NULL, &s_resources, &s_resources_stat);
+        if (exists) {
+            s_resources_stat.missing = 0;
+            s_resources_stat.bad_json = 1;
+        }
+    }
+
     s_loaded = true;
 
     ESP_LOGI(TAG, "system: links=%u routes=%u%s%s%s（def=%u inv=%u unk=%u）",
@@ -1292,6 +1420,12 @@ esp_err_t nc_cfg_boot_ex(const char *hw_base_json, size_t hw_base_len)
              s_tasks_stat.bad_json ? " 壞檔" : "",
              (unsigned)s_tasks_stat.defaulted, (unsigned)s_tasks_stat.invalid,
              (unsigned)s_tasks_stat.unknown);
+    ESP_LOGI(TAG, "resources: %u 條%s%s（def=%u inv=%u unk=%u）",
+             (unsigned)s_resources.n_res,
+             s_resources_stat.missing ? " 缺檔" : "",
+             s_resources_stat.bad_json ? " 壞檔" : "",
+             (unsigned)s_resources_stat.defaulted, (unsigned)s_resources_stat.invalid,
+             (unsigned)s_resources_stat.unknown);
     return ESP_OK;
 }
 
@@ -1303,6 +1437,7 @@ void nc_cfg_json(char *buf, size_t cap)
     snprintf(buf, cap,
              "{\"sys\":{\"miss\":%u,\"bad\":%u,\"ver\":%u,\"def\":%u,\"inv\":%u,\"unk\":%u},"
              "\"tasks\":{\"miss\":%u,\"bad\":%u,\"ver\":%u,\"def\":%u,\"inv\":%u,\"unk\":%u},"
+             "\"res\":{\"miss\":%u,\"bad\":%u,\"ver\":%u,\"def\":%u,\"inv\":%u,\"unk\":%u},"
              "\"hw\":{\"miss\":%u,\"bad\":%u,\"ver\":%u,\"def\":%u,\"inv\":%u,\"unk\":%u}}",
              (unsigned)s_sys_stat.missing, (unsigned)s_sys_stat.bad_json,
              (unsigned)s_sys_stat.bad_version, (unsigned)s_sys_stat.defaulted,
@@ -1310,6 +1445,9 @@ void nc_cfg_json(char *buf, size_t cap)
              (unsigned)s_tasks_stat.missing, (unsigned)s_tasks_stat.bad_json,
              (unsigned)s_tasks_stat.bad_version, (unsigned)s_tasks_stat.defaulted,
              (unsigned)s_tasks_stat.invalid, (unsigned)s_tasks_stat.unknown,
+             (unsigned)s_resources_stat.missing, (unsigned)s_resources_stat.bad_json,
+             (unsigned)s_resources_stat.bad_version, (unsigned)s_resources_stat.defaulted,
+             (unsigned)s_resources_stat.invalid, (unsigned)s_resources_stat.unknown,
              (unsigned)s_hw_stat.missing, (unsigned)s_hw_stat.bad_json,
              (unsigned)s_hw_stat.bad_version, (unsigned)s_hw_stat.defaulted,
              (unsigned)s_hw_stat.invalid, (unsigned)s_hw_stat.unknown);

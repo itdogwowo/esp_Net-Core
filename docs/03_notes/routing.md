@@ -3,7 +3,7 @@
 > **一句話**：`routes` 決定每一幀「**誰來解、要不要轉出去**」；
 > `out` 放 `decode0` 就是本地執行，放 `UART` 就是轉發——跟舊專案 `out: ["self"]` 同一個語意。
 >
-> **引擎不用宣告**：`decodeN` 有人指向就開；`fxN` 有 `.fxe` 指定那一核就開。
+> **引擎不用宣告**：`decodeN` 有人指向就開；`ncmN` 有 `.nct` / `.nce` 指定那一核就開。
 
 ---
 
@@ -14,17 +14,17 @@
 | `links[]` | `system.json` | 收幀通道：怎麼收、緩衝多大 | 用戶 |
 | `routes[]` | `system.json` | 這條來源交給誰（引擎或通道） | 用戶 |
 | `tasks[]` | `tasks.json` | 常駐任務（舊稱 service，兩者同一件事）**草案，未定案** | 任務管理器 |
-| **`engines`** | **不用寫** | `decodeN` / `fxN`，由下面的規則推導出來 | 系統 |
+| **`engines`** | **不用寫** | `decodeN` / `ncmN`，由下面的規則推導出來 | 系統 |
 
 **推導規則：**
 
 | 引擎 | 何時存在 | 跑哪一核 |
 |---|---|---|
 | `decodeN` | 任一 `routes[].out` 提到它 | **N**（名字就是核心編號） |
-| `fxN` | 有 `.fxe` 的 manifest 宣告 `core: N`（或 `-1` → 預設核） | N |
+| `ncmN` | 有 `.nct` / `.nce` 的 manifest 宣告 `core: N`（或 `-1` → 預設核） | N |
 
 所以不會出現「宣告了但沒人用」（浪費一個 task），也不會出現「有人用但沒宣告」（跑不起來）。
-兩邊只有一份真相：`decode` 的真相在 `routes`，`fx` 的真相在檔案本身。
+兩邊只有一份真相：`decode` 的真相在 `routes`，`ncm` 的真相在檔案本身。
 
 ```jsonc
 // system.json
@@ -107,7 +107,7 @@ WS / UDP 是訊息導向，沒有 `region` / `chunk`；`max_msg` 就是一次收
 - `extern: "idf"` = IDF 自己建的（Wi-Fi / BT），管理器只記帳、只印表，改不了它的優先權；
   `enable` 的真相在 `network.json`，這裡不重複。
 - `router` **沒有 enable**：路由是必然的，寫了 routes 就生效。
-- `override[]` = 對**任何**任務（包括自動推導出來的 `decodeN` / `fxN`）覆蓋 `prio` / `stack` / `core`。
+- `override[]` = 對**任何**任務（包括自動推導出來的 `decodeN` / `ncmN`）覆蓋 `prio` / `stack` / `core`。
   這是「調校」不是「設計」，開機一定要印 `decode0 prio 4 → 6 (override)`。
 
 ---
@@ -136,7 +136,7 @@ WS / UDP 是訊息導向，沒有 `region` / `chunk`；`max_msg` 就是一次收
 | `[]` | 丟棄（明確不要） | `out: []` |
 
 `out` 只接受兩種名字：`links[]` 的通道，或 `decodeN`（N = 核心編號）。
-`fxN` **不能**放進 `out`——它不吃幀，按自己的 fps 跑。
+`ncmN` **不能**放進 `out`——它不吃幀，按自己的 fps 跑。
 
 **不存在的 link 名 = 直接忽略該格**，不是報錯：`router_from_cfg()` 會跳過它，
 其餘的 `out`（例如同行的 `decode0`）照常生效。一個打錯的名字不會令整張表被拒收、
@@ -216,7 +216,7 @@ UART ──▶│ decode1（拆幀 → 執行）                │
 | 沒寫 `nctx` / `outbound` | 自動補在最前：`nctx → ["decode0"]`、`outbound → []` |
 | 同一個 `in` 兩行 | 開機錯誤，兩行都不生效 |
 | `out` 有未宣告的通道 | 警告 + 忽略該項，其餘照做 |
-| `out` 有 `fxN` | 警告 + 忽略（fx 不吃幀） |
+| `out` 有 `ncmN` | 警告 + 忽略（ncm 不吃幀） |
 | `out` 有 `decodeN`，但板子沒有第 N 核 | 單核板：B03 會把 `decode1` 併入 `decode0`（只改 RAM，開機 log 會講）；雙核板只接受 0/1 |
 | `out` 含 `in` 自己 | 警告 + 忽略（自我反射） |
 | 某條 link 沒有 route | 預設 `out = ["decode0"]`，開機表標 `default` |
@@ -244,8 +244,8 @@ UART ──▶│ decode1（拆幀 → 執行）                │
 kind      name         core  prio  src
 engine    decode0      0     4     route nctx, CDC, TCP
 engine    decode1      1     4     route UART
-engine    fx1          1     3     3 × .fxe（manifest core=1）
-engine    fx0          -     -     （沒有 .fxe 指定 core 0）
+engine    ncm1         1     3     3 × `.nct` / `.nce`（manifest core=1）
+engine    ncm0         -     -     （沒有 `.nct` / `.nce` 指定 core 0）
 task      tcp_accept   0     9     tasks.json
 task      tcp_rx       1     10    tasks.json
 task      wifi         0     23    idf
@@ -256,14 +256,14 @@ route     UART     → decode1           config
 route     TCP      → decode0, UART     config
 ```
 
-- `engine` 那一組標明「為什麼存在」（`route ...` / `N × .fxe`），出問題時一眼看得出。
+- `engine` 那一組標明「為什麼存在」（`route ...` / `N × .nct / .nce`），出問題時一眼看得出。
 - 開機會把「有線路但沒有 route」的來源自動補一行 `{ "in": 線路, "out": [] }`，並寫回 config——
 跟舊專案一樣。這是「用戶沒有機會知道」的補寫：新線路是程式建的，用戶不會知道要自己加 route。
 用戶寫過的值一律不動。
 
 > **現況**：`nc4_router_json()` 的單行 JSON 已經帶 `out`
 > （`{"set":1,"core0":3,"core1":1,"routes":[{"line":"CDC","core":0,"out":["decode0","UART"]},…]}`）；
-> 仍然沒有 `prio` / `src` / `fx` 那幾欄。link 轉寄**已於 2026-11-08 實作**（見 §7.1）。
+> 仍然沒有 `prio` / `src` / `ncm` 那幾欄。link 轉寄**已於 2026-11-08 實作**（見 §7.1）。
 
 ---
 
@@ -277,7 +277,7 @@ route     TCP      → decode0, UART     config
 | 10 | `tcp_rx`、`nc4_udp` | task |
 | 9 | `tcp_accept` | task |
 | 4 | `decode0` / `decode1` | engine（推導） |
-| 3 | `fx0` / `fx1` | engine（推導） |
+| 3 | `ncm0` / `ncm1` | engine（推導） |
 | 2 | `slow_worker` | task |
 
 要調的人寫 `tasks.json` 的 `override`，那是「覆蓋」不是「設計」。
@@ -339,7 +339,7 @@ system.json:  { "in": "CDC", "out": ["decode0", "UART"] }
 | ~~1~~ | ~~兩核共用一個 decoder，handler 被它的 mutex 序列化~~ | 每個被 routes 指到的 `decodeN` 一個 decoder | ✅ 已做（status §7.26：`s_decoder[2]`） |
 | ~~2~~ | ~~`out` 裡的 **link**（轉發）完全被忽略~~ | 依 `out` 把幀送進對應 link 的 tx | ✅ 已做（status §7.28：`nc4_link`＋`nc4_router_links`） |
 | 3 | `tcp_accept`（9）、`tcp_rx`（10）、`nc4_udp`（10）是裸 `xTaskCreatePinnedToCore` | 收進 `tasks[]`，由任務管理器建立與管 | 🔄 收進任務管理器 |
-| 4 | `fx` 是一個固定 task（core 1、prio 3） | 依 manifest 的 `core` 分組，每一核一個 fx 引擎；`-1` → 預設核 | 🔄 依 manifest core |
+| 4 | `ncm` 是一個固定 task（core 1、prio 3） | 依 manifest 的 `core` 分組，每一核一個 ncm 引擎；`-1` → 預設核 | 🔄 依 manifest core |
 | 5 | WS / UDP 在 httpd / udp task 內直接解析 | 納入 `links[]`，各自宣告 rx 區域 | 🔄 納入 links[] |
 | 6 | 只有部分通道有 `send` | `out` 只能指向有 send 的 link | ✅ 約束（保留） |
 
@@ -349,7 +349,7 @@ system.json:  { "in": "CDC", "out": ["decode0", "UART"] }
 
 ---
 
-## 8. 命名：`fx` 還是 `effect`？兩個格式是什麼？
+## 8. 命名：`ncm` 還是 `effect`？兩個格式是什麼？
 
 你記得的「兩個格式」是 **payload 的編譯狀態**，不是兩種檔案：
 
@@ -358,20 +358,20 @@ system.json:  { "in": "CDC", "out": ["decode0", "UART"] }
 | `.wasm`（WAMR 直譯） | 0（通用） | 第一版就出這個；同一份可跑 P4 與 S3 |
 | `.aot`（warmc 預編譯） | 1 = rv32-ilp32f、2 = xtensa | 某個效果實測 > 8 ms/幀 才單獨編 |
 
-兩者都裝在同一個 `.fxe` 容器裡，`flags` bit0 = 有 AOT、bit1 = 有 manifest；
+兩者都裝在同一個 `.nct` / `.nce` 容器裡，`flags` bit0 = 有 AOT、bit1 = 有 manifest；
 載入器看 `target_id` 決定能不能載（AOT 綁架構，wasm 不綁）。
 
-容器本身只有一種 `.fxe`：
+容器本身只有一種 `.nct` / `.nce`：
 - **檔頭 48 B** 回答「怎麼載入」（格式 / 長度 / crc / target）
 - **manifest 40 B** 回答「怎麼活在系統裡」（kind / core / layer / prio / fps / px / mem / budget / 指令）
 
-命名建議：程式碼留 `fx`（已滿地都是），對人的文字用 `effect`（manifest 的 kind 就是 `EFFECT`）。
+命名建議：程式碼留 `ncm`（已滿地都是），對人的文字用 `effect`（manifest 的 kind 就是 `EFFECT`）。
 
 ## 9. 取捨
 
-- **不宣告引擎**：少一份會和 `routes` / `.fxe` 不同步的清單；代價是「這台機器有幾個引擎」要推導，
+- **不宣告引擎**：少一份會和 `routes` / `.nct` / `.nce` 不同步的清單；代價是「這台機器有幾個引擎」要推導，
   所以開機表一定要把推導結果印出來。
-- **`fx` 由檔案決定核心**：模組自己說要跑哪一核（manifest `core`），
-  比在 config 再寫一次可靠——但也意味著 `enable` 的開關是「有沒有 `.fxe` 指定那一核」。
-  要全域關掉就加 `"fx": { "enable": 0 }`（本版未做）。
+- **`ncm` 由檔案決定核心**：模組自己說要跑哪一核（manifest `core`），
+  比在 config 再寫一次可靠——但也意味著 `enable` 的開關是「有沒有 `.nct` / `.nce` 指定那一核」。
+  要全域關掉就加 `"ncm": { "enable": 0 }`（本版未做）。
 - **`tasks.json` 獨立**：任務清單和「這台機器長什麼樣」（system）無關，它會隨功能增減而變。

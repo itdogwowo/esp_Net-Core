@@ -100,7 +100,7 @@
 | **15–7** | **保留**：`decode0/1` = 8、bus producer（`cdc.rx`／`uart.rx`）= 7，其餘留白 |
 | 6 | 其他任務的上限（TinyUSB 5 之上留一格） |
 | 5 | `TinyUSB`（IDF） |
-| 2 | `fx` / `nc_log` |
+| 2 | `ncm` / `nc_log` |
 | 1 | `app_main` / `hello` / bench |
 
 **兩條硬規則**：
@@ -228,7 +228,7 @@ firmware/components/action/
 firmware/components/tasks/
 ├── test_bench_tasks/      bench_a/b/c（量測驗證）
 ├── test_hello_tasks/      hello（框架自測）
-├── test_fx_tasks/         fx（POC 燈效引擎；運作方式未定）
+├── test_mod_tasks/         ncm（POC 燈效引擎；運作方式未定）
 ├── test_probe_tasks/      probe（開機 hub 自測）
 └── test_tcp_tasks/        tcp_sink0/3、tcp_src0/1（P4 吞吐量測，5000–5003）
 
@@ -238,7 +238,7 @@ firmware/components/tasks/
 **現況（2026-11-04）**：
 
 - `components/tasks` 整個目錄由 `NC_ENABLE_TESTS` gate；OFF = 唔加入 `EXTRA_COMPONENT_DIRS` = 唔編譯、唔 link。
-- `fx`／`monitor` 係 POC／實驗，所以同測試放埋一齊（release 唔會出）。
+- `ncm`／`monitor` 係 POC／實驗，所以同測試放埋一齊（release 唔會出）。
 - 全部已搬完（2026-11-04）：`test_action`（8 條測試指令）、`test_probe_tasks`、`test_tcp_tasks`
   （`tcp_sink/src`）；`hub_w/r`、`tx_pack` 隨 `HUB_BENCH`／`TX_BENCH` 一齊入 `test_action`。
 - `main.c` 只剩 5 條真指令（`REBOOT`／`STATUS_GET`／`ROUTE_GET`／`SET_MASTER`／`SYS_TASK_QUERY`）。

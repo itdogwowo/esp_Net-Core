@@ -246,6 +246,26 @@ typedef struct {
     nc_task_cfg_t tasks[NC_CFG_MAX_TASKS];
 } nc_tasks_cfg_t;
 
+// ── 外部任務資源表格（resources.json）──
+// 誰提供什麼、誰需要什麼。模組自己宣告的 provides/requires 會在開機時合併進來；
+// 這個檔是「用戶可調」的那一層（缺檔 → 用預設；有檔 → 逐條覆蓋）。
+#define NC_CFG_MAX_RES       16
+#define NC_CFG_RES_NAME_MAX  24
+
+typedef struct {
+    char     name[NC_CFG_RES_NAME_MAX];
+    uint8_t  type;       // 0=buf 1=cmd 2=hw 3=provide 4=module
+    char     provider[NC_CFG_TASK_NAME_MAX];
+    uint32_t bytes;      // buf 用
+    bool     exclusive;  // hw 用
+} nc_res_cfg_t;
+
+typedef struct {
+    uint16_t      version;
+    uint8_t       n_res;
+    nc_res_cfg_t  res[NC_CFG_MAX_RES];
+} nc_resources_cfg_t;
+
 // 一層的載入結果（給 STATUS 看，不影響行為）
 typedef struct {
     uint32_t missing;      // 檔不存在（1/0）

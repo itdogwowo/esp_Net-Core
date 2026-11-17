@@ -77,7 +77,7 @@ while True:
 | decode0 / decode1 | 阻塞在 notification；8 KB 幀、高效能 | **A** |
 | tcp_rx / httpd / lwIP | 阻塞式 socket；IDF 建 task | **A（必然）** |
 | UDP | 阻塞 `recvfrom` | A（或改非阻塞才可能 B） |
-| fx | 自己 delay、30–50 Hz | A 或 group 都可 |
+| ncm | 自己 delay、30–50 Hz | A 或 group 都可 |
 | hello / probe | 低頻、短工作 | **group（B）最適合** |
 | bench_a/b/c | 固定工作量、5 ms | **group（B）最適合** |
 

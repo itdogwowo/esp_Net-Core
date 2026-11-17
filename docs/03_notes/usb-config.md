@@ -222,7 +222,7 @@ CDC 模式會 reboot loop。要真正省掉，要連 descriptor 一起關（Phas
 C3 沒有 PSRAM，第二份回覆幀 2,610 B 是**內部 RAM**，以前由頭到尾冇人用。
 `routes[]` 寫 `decode1`、或 `tasks.json` 寫 core1：B03 capability 一次過併到 core0
 （單核根本沒有 core1），只改 RAM、唔寫盤。firmware 自己宣告的 system loop
-（`decode1`、fx 等）仍然是 `nc_core_clamp()` 在 B08 收斂 —— 那些是程式碼，
+（`decode1`、ncm 等）仍然是 `nc_core_clamp()` 在 B08 收斂 —— 那些是程式碼，
 不是 config，租約管不到它們。
 
 仍未做：`usb.interfaces[]` 多介面 schema（§2.2–§2.4）、`max_chunk` 協商（§2.5）、

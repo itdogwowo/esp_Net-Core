@@ -74,7 +74,7 @@ esp_Net-Core/
 │  ├─ S3/ESP32-S3-N16R8/              #   data/config/*.json
 │  └─ P4/ESP32-P4-ETH/                #   sdkconfig.defaults、data/config/*.json
 ├─ tools/                             # 主機端：board.sh、clients、bench/、hosttest/、poc/
-│  └─ poc/fx_poc/                     #   效果模組 ABI 的 host 參考實作
+│  └─ poc/mod_poc/                     #   效果模組 ABI 的 host 參考實作
 └─ data/                              # 不進 git：用戶 FS 的鏡像（見 §8）
 ```
 
@@ -178,7 +178,7 @@ fatfs_create_partition_image(data ${CMAKE_CURRENT_LIST_DIR}/data FLASH_IN_PROJEC
 | 分區 | 內容 | runtime 誰能寫 |
 |---|---|---|
 | `factory` / `ota_0` / `ota_1` | firmware（含 schema 表） | 只有 OTA |
-| `data`（FAT，卷標 `NETCORE`） | `config/*.json`（第一次開機寫入）、`pixel/effects/*.fxe`（選用） | host（MSC） |
+| `data`（FAT，卷標 `NETCORE`） | `config/*.json`（第一次開機寫入）、`pixel/effects/*.nce`（選用） | host（MSC） |
 | `nvs` | cID、`master_cid`、`next_mode`、boots 計數 | 程式 |
 
 firmware 走 OTA 分區 → 舊版 `FILE_PROMOTE` 那套（`.bak` ＋ pending ＋ `boots>=3` 自動回滾）**只保留給 assets**。

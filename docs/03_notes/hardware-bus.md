@@ -11,7 +11,7 @@
 
 | 在哪裡決定 | 例子 |
 |---|---|
-| `main.c` 的任務表 | `nc4` 擁有 parser 緩衝與兩條 decode loop；`fx` 擁有 arena 與 render loop |
+| `main.c` 的任務表 | `nc4` 擁有 parser 緩衝與兩條 decode loop；`ncm` 擁有 arena 與 render loop |
 | 各 component 的 `on_start()` | `store` 擁有 FAT 的切換權；`file_action` 只透過它讀寫 |
 | 裝置宣告（未來的 `hw/`） | 哪個 driver 用哪條 SPI / 哪幾隻腳 |
 

@@ -1629,7 +1629,8 @@ function ideExtInfo(path) {
     py: { cls: "py", label: "PY" },
     md: { cls: "md", label: "MD" }, markdown: { cls: "md", label: "MD" },
     sh: { cls: "sh", label: "SH" }, bash: { cls: "sh", label: "SH" },
-    bin: { cls: "bin", label: "BIN" }, fxe: { cls: "bin", label: "FXE" },
+    bin: { cls: "bin", label: "BIN" }, nct: { cls: "bin", label: "NCT" },
+    nce: { cls: "bin", label: "NCE" },
     txt: { cls: "txt", label: "TXT" },
   };
   return map[ext] || { cls: "txt", label: (ext.slice(0, 3) || "•").toUpperCase() };

@@ -108,7 +108,7 @@ uint32_t nc_buf_space(const nc_buf_t *b);     // 仲可以寫幾多（壓實之�
 
 // ── 切一塊（執行期用；呼叫端自己保管 cursor）──
 // 在 [region, region+bytes) 內由 *cursor 起切一條 buffer，cursor 自動前進（64 B 對齊）。
-// 唔夠位 → 回 NULL（唔會部分配置）。這是 `.fxe` 換場時由 arena 切記憶體的唯一入口。
+// 唔夠位 → 回 NULL（唔會部分配置）。這是 `.nct` / `.nce` 換場時由 arena 切記憶體的唯一入口。
 nc_buf_t *nc_buf_carve(void *region, size_t bytes, size_t *cursor,
                        const char *name, nc_buf_where_t where,
                        uint32_t slot_bytes, uint16_t n, uint32_t flags);

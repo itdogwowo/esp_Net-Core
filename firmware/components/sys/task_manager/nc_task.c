@@ -496,7 +496,7 @@ static void append_missing_to_cfg(void)
     }
 }
 
-// runtime 任務（掃 .fxe 之後 attach 的）也要補進 config。
+// runtime 任務（掃 .nct / .nce 之後 attach 的）也要補進 config。
 int nc_task_sync_cfg(void)
 {
     append_missing_to_cfg();

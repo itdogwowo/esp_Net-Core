@@ -28,7 +28,7 @@ esp_Net-Core/
 │  ├─ main/                     裝配 + 目前還住在 main.c 的業務邏輯
 │  ├─ components/               可重用元件
 │  │  ├─ sys/                   nc4（framing/解碼）、mem、task（型別+loop）、task_manager、transport
-│  │  └─ app/                   fx（載入器）、tasks/<name>（每個任務一個）
+│  │  └─ tasks/                test_mod_tasks（載入器）、test_<name>_tasks（每個任務一個）
 │  ├─ sdkconfig.defaults        共通建置配置（晶片層）
 │  ├─ partitions.csv            分割表
 │  └─ build/  managed_components/  sdkconfig  ← 生成物，不進 git
@@ -48,7 +48,7 @@ esp_Net-Core/
    ├─ nc4.py  ota.py  selftest.py  nc4_test.py   對設備說話
    ├─ bench/                    量測（要板子）
    ├─ hosttest/                 主機端 C 測試（不需要板子）
-   └─ poc/                      原型驗證（fx_poc：效果模組 ABI）
+   └─ poc/                      原型驗證（mod_poc：效果模組 ABI）
 ```
 
 判準：**程式在 `firmware/`，板子差異在 `ports/`，給人看的在 `docs/`，給機器跑的在 `tools/`。**

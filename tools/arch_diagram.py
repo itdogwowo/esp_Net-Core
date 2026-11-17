@@ -371,7 +371,7 @@ LAD = [
     ("8", "decode0／decode1 —— 整個系統的節拍", C_NC4, True),
     ("7", "bus producer：cdc.rx／uart.rx／net.rx", C_ASM, True),
     ("6／5", "其他任務上限、TinyUSB（IDF）", MUTED, False),
-    ("2–0", "fx／nc_log／app_main／IDLE", FAINT, False),
+    ("2–0", "ncm／nc_log／app_main／IDLE", FAINT, False),
 ]
 ry = PY3 + 72
 for num, label, color, hi in LAD:
@@ -438,7 +438,7 @@ STEPS = [
     ("hardware", C_HW, "PWM／ETH；router 定核"),
     ("declare", C_BUF, "每核 decoder；任務登記"),
     ("commit", C_BUF, "carve；Wi-Fi＋net bus"),
-    ("start", C_NC4, "on_start；掃 .fxe"),
+    ("start", C_NC4, "on_start；掃 .mode"),
     ("usb", C_NC4, "TinyUSB → FAT 交 host"),
     ("channels", C_NC4, "開 socket、建 bus、boot"),
     ("account", C_NC4, "印剩餘；之後只剩心跳"),

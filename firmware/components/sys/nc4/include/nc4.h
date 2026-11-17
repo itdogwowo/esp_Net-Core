@@ -38,7 +38,7 @@ extern "C" {
 // 指令表的格數。**要對得起實際註冊量**：core 5 + test 11 + test bench 9 +
 // ota 9 + file 10 = 44（測試映像）。曾經是 32 → 最後 4 條靜靜咁註冊失敗
 // （STATUS_SET / FILE_QUERY 永遠答不到）。塞爆會印 ESP_LOGE（見 nc4.c）。
-// 回覆幀的 JSON 上限。完整的 STATUS_GET（sys+mem+tasks+provides+storage+fx）
+// 回覆幀的 JSON 上限。完整的 STATUS_GET（sys+mem+tasks+provides+storage+ncm）
 // 大約 2.4 KB，用小了會**靜靜截斷成無效 JSON**。
 // 這塊緩衝由 decoder 持有（每個 decoder 一份，預設放 PSRAM），**不再放任務棧**：
 // 以前它是 handler 的區域變數，一個 decode 任務的 5,120 B 棧裡面有 2,615 B 就是它。

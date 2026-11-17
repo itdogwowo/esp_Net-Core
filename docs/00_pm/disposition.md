@@ -19,9 +19,9 @@
 | A2 | `routes[].out` 的 link 轉發 | 格式存在、完全未實作 | 🔄 | **先從 `out` 的 schema／文件移除 link 名**，等真的做時再加（config 不該寫未生效的東西） |
 | A3 | `outbound` 永遠 `[]` | 預留列 | ✅ | 保留，但標「未生效」 |
 | A4 | `tcp_accept`／`tcp_rx`／`nc4_udp` 裸 `xTaskCreate` | 繞過任務管理器 | 🔄 | 收進 `tasks[]`，由管理器建立／管核 |
-| A5 | `fx` 寫死 core1；manifest 的 `core` 未用 | 固定 placement | 🔄 | 依 manifest `core` 分組；`-1` → 預設核 |
+| A5 | `ncm` 寫死 core1；manifest 的 `core` 未用 | 固定 placement | 🔄 | 依 manifest `core` 分組；`-1` → 預設核 |
 | A6 | WS／UDP 不在 `links[]` | 在 httpd／udp task 內直接解析 | 🔄 | 納入 `links[]`，才有 enable gate／rx 區域／量測 |
-| A7 | 核歸屬有 4 個來源（router／NVS／fx·WS·UDP 寫死／tasks.json） | 多真相 | 🔄 | 收斂成「宣告 → 一處決定」（見 B 方案） |
+| A7 | 核歸屬有 4 個來源（router／NVS／ncm·WS·UDP 寫死／tasks.json） | 多真相 | 🔄 | 收斂成「宣告 → 一處決定」（見 B 方案） |
 | A8 | NVS `net/rx_core` | 第二個核歸屬來源 | 🗑️ | **移除**：RX 核由 router 的 `decodeN` 推導 |
 | A8b | NVS `net/rx_split`／`frame_align` | 傳輸調校（不是核歸屬） | 🔄 | 搬到 `system.json` 的 `links[].cfg`，跟其他通道參數一起 |
 | A9 | `NC_TASK_CORE_ANY` | 框架支援、目前無人用 | ✅ | 保留，文件標「未使用」 |
@@ -57,7 +57,7 @@
 | C4 | `status.md` §9 | `[rewrite-plan.md](roadmap.md)` 標籤與目標不符 | 🔄 改成 `roadmap.md` |
 | C5 | `routing.md` §7 | 只有「現況／要改成」，沒有處置 | 🔄 已加「處置」欄 |
 | C6 | `execution-model.md` | watchdog 已實作 | ✅ 已更新 |
-| C7 | `task-fx-open-questions.md` | 決策清單 | ✅ 保留 |
+| C7 | `task-mod-open-questions.md` | 決策清單 | ✅ 保留 |
 
 ---
 
@@ -68,7 +68,7 @@
 2. **安全但需要你決定**：
    B2（其餘 `0xF00x` bench handler）→ 整組移除，或搬去 gated 元件。
 3. **改架構（較大）**：
-   A8（拿掉 NVS rx_core）、A4（收編裸 task）、A6（WS/UDP 入 links）、A5（fx core）、A7（核歸屬收斂）。
+   A8（拿掉 NVS rx_core）、A4（收編裸 task）、A6（WS/UDP 入 links）、A5（ncm core）、A7（核歸屬收斂）。
 4. **需要你拍板**：
    A1（per-core decoder）、A10（claims）、A2（out link 是否先移除）。
 

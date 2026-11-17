@@ -131,7 +131,7 @@ A CDC → route CDC=["decode0","ESPNOW"] → nc4_link "ESPNOW"
 
 ### 現況
 
-- 目前 C 固件**沒有 I80 LED driver**；只有 `nc_fx` 效果測試，沒有 16-lane 輸出。
+- 目前 C 固件**沒有 I80 LED driver**；只有 `nc_mod` 效果測試，沒有 16-lane 輸出。
 - `mp_LEDdriver/modled_bus.c` 只到 C0（配置 buffer，`show()` 未接硬體）；`DESIGN.md`/`C_API.md` 是設計母本。
 - `fastLED/tools/patch_fastled_i80.py` 是舊 I80 patch 的參考；`mp_lcd_bus/esp32_src/i80_bus.c` 是 I80 bus 参考。
 - 要真的測 16×600／50 FPS，需先落一個 **I80 WS2812 編碼器＋雙緩衝**（新工作，不是今晚能完成）。

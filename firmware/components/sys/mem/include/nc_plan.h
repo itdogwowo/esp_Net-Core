@@ -35,7 +35,7 @@ typedef struct {
     size_t align;             // 0 → 32
 } nc_plan_decl_t;
 
-// 宣告格數。實測（S3／P4）同時用到的宣告：usb.rx、uart.rx、tcp.rx、fx.arena、probe.hub
+// 宣告格數。實測（S3／P4）同時用到的宣告：usb.rx、uart.rx、tcp.rx、ncm.arena、probe.hub
 // = 5 件；每件 plan_entry_t 36 B＋s_order 4 B。64 格＝2,560 B 的靜態分區，只用得到 8%。
 // 16 格留 3× 餘裕；滿了 nc_plan_declare() 回 ESP_ERR_NO_MEM，帳本會印出來（不是靜默）。
 #define NC_PLAN_MAX_DECLS 16

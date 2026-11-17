@@ -105,10 +105,10 @@ DECISIONS = [
     ("D10", "CONFIG_NETCORE_WIFI 編入？network.json wifi.enable？mode sta/ap？有 credentials？",
      "全過 → 起 WiFi；否則唔初始化（0 B heap 以外）",
      "B07；WiFi manager task＝core1（單核 clamp 0）", C_TASK),
-    ("D11", "NC_ENABLE_TESTS？fx 任務 started？WAMR 後端有冇接？",
-     "測試 build：掃 /data/pixel/effects、/data/tasks 的 .fxe attach；release 唔掃；\n"
+    ("D11", "NC_ENABLE_TESTS？ncm 任務 started？WAMR 後端有冇接？",
+     "測試 build：掃 /data/pixel/effects、/data/tasks 的 .mode attach；release 唔掃；\n"
      "WAMR 未接 → 登記得到、跑不到",
-     "B08；效果目前只在測試映像出現；FXE 執行後端未完成", C_MEM),
+     "B08；效果目前只在測試映像出現；NCM 執行後端未完成", C_MEM),
     ("D12", "network.json rawbench=1？",
      "開 :5000／:5001 raw 測試 endpoint；release 要關",
      "B10；繞過 NC4，只作量測", C_BAD),
@@ -121,7 +121,7 @@ CORE_RULES = [
     "producer 必須同 bus / decoder 同核（kick 同核）；B10 會驗，跨核＝ERROR。",
     "SYSTEM task：照 C 宣告 core（clamp）；tenant：tasks.json affinity 可改（只可一核=1）。",
     "WiFi manager＝core1（clamp）；單核板全部落 core0。",
-    "測試任務／fx：宣告／manifest 的 core（只有 NC_ENABLE_TESTS）。",
+    "測試任務／ncm：宣告／manifest 的 core（只有 NC_ENABLE_TESTS）。",
 ]
 
 CORE0 = [
@@ -140,7 +140,7 @@ CORE1 = [
     ("cdc.rx", "USB 線 route core1（PUSH，同核）", C_LINK),
     ("uart.rx", "UART 線 route core1", C_LINK),
     ("wifi_mgr", "WiFi 起咗 → nc_core_clamp(1)；單核→core0", C_TASK),
-    ("fx / rgb matrix", "測試任務，依宣告／manifest core", C_MEM),
+    ("ncm / rgb matrix", "測試任務，依宣告／manifest core", C_MEM),
 ]
 
 # ── 唔啟動矩陣 ─────────────────────────────────────────────────────────
@@ -158,7 +158,7 @@ SKIP = [
              "冇 credentials；hosted 握手失敗", C_TASK),
     ("任務 loop", "tenant level=-1；affinity=(0,0)；enabled() false；layer 超界；"
                   "config 缺條目 → on_start 照跑、loop 唔開", C_TASK),
-    ("效果 .fxe", "release build（冇 NC_ENABLE_TESTS）；或 fx 任務未 started", C_MEM),
+    ("效果 .mode", "release build（冇 NC_ENABLE_TESTS）；或 ncm 任務未 started", C_MEM),
     ("rawbench", "network.json rawbench≠1（預設唔開）", C_BAD),
 ]
 

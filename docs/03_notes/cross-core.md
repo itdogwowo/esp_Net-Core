@@ -93,7 +93,7 @@
 ## 2. 我們 firmware 的實際觸發點
 
 > 核心分配（預設）：`decode0`→core0、`decode1`→core1（有 UART/TCP 線去 core1 才建立）、
-> `slow_worker`→core0、`fx`→core1、`monitor`→core0、`nc4_udp`→core1、
+> `slow_worker`→core0、`ncm`→core1、`monitor`→core0、`nc4_udp`→core1、
 > `tcp_nc4`（accept）→core0、`tcp_nc4_rx`→`s_rx_core`（預設 1，只有 PUSH 才建）、
 > httpd（WS）→core1、TinyUSB→core1、MSC async IO→無 affinity、lwIP tcpip→無 affinity。
 
@@ -106,14 +106,14 @@
 | [main.c:2255/2266](../../firmware/main/main.c#L2255) `nc4_bus_kick()` | 1 | TCP PUSH 每批資料 | 唔會（預設） |
 | [nc4.c:35](../../firmware/components/sys/nc4/nc4.c#L35) decoder mutex | 4（give 時可能 → 1） | decode0／decode1／udp／WS 任兩邊同時解碼 | **會**（UART 有流量就係） |
 | [nc_ota_action.c:239](../../firmware/components/action/ota_action/nc_ota_action.c#L239) `esp_ota_write()` | **3** | OTA 每 4 KB chunk（erase 時 36 ms/次） | 冇 OTA 就唔會 |
-| [nc_store.c](../../firmware/components/sys/store/nc_store.c) FatFS **讀**（`nc_cfg_load`、`FILE_QUERY`、config GET、`.fxe` 載入） | **3** | 每次讀 ≤16 KB 一個 IPC | **每次讀檔**（開機、HTTP GET、列目錄） |
+| [nc_store.c](../../firmware/components/sys/store/nc_store.c) FatFS **讀**（`nc_cfg_load`、`FILE_QUERY`、config GET、`.nct` / `.nce` 載入） | **3** | 每次讀 ≤16 KB 一個 IPC | **每次讀檔**（開機、HTTP GET、列目錄） |
 | [main.c:1160](../../firmware/main/main.c#L1160) `nvs_set/commit`（NET_TUNE） | **3** | `0xF00A` 寫 NVS | 有人打就係 |
 | [main.c:1502](../../firmware/main/main.c#L1502)、[main.c:1525](../../firmware/main/main.c#L1525) `nvs_commit`（SET_MASTER） | **3** | 改 master CID | 有人打就係 |
 | [nc4_http.c:74](../../firmware/components/sys/transport/nc4_http.c#L74) `fopen/fwrite` 寫 `system.json` | **3** | HTTP PUT config（httpd 在 **core1**） | 有人 PUT 就係 |
 | [nc_store.c:303](../../firmware/components/sys/store/nc_store.c#L303) `s_lock` + FatFS 寫入 | 4 ＋ **3** | MSC 拖檔（TinyUSB core1／async IO 無 affinity）、file action（decode 核） | 拖檔就係 |
 | TinyUSB MSC async IO task（`CONFIG_TINYUSB_MSC_ASYNC_IO=y`，task 無 affinity，`tinyusb_msc.c:1112`） | **3** | 每個 block 寫入 | 拖檔就係 |
 | [nc4_udp.c:187](../../firmware/components/sys/transport/nc4_udp.c#L187) `vTaskDelete(s_task)` | 1 | `nc4_udp_stop()`（目前**零呼叫**） | 唔會（死碼路徑） |
-| [nc_task_loop.c:132/135](../../firmware/components/sys/task/nc_task_loop.c#L132) `xTaskCreatePinnedToCore` | 1 | 開機建立 pin 去另一核的 loop（`decode1`、`fx`、`hello`…） | 開機一次性 |
+| [nc_task_loop.c:132/135](../../firmware/components/sys/task/nc_task_loop.c#L132) `xTaskCreatePinnedToCore` | 1 | 開機建立 pin 去另一核的 loop（`decode1`、`ncm`、`hello`…） | 開機一次性 |
 
 ### 2.2 唔打中斷，但跨核阻塞（類 4）
 
@@ -144,12 +144,12 @@
 
 ## 3. 預設設定下，跨核中斷有幾多
 
-以 P4（UART→core1、TCP→core0、CDC→core0、fx→core1）為例：
+以 P4（UART→core1、TCP→core0、CDC→core0、ncm→core1）為例：
 
 | 來源 | 次數 | 備註 |
 |---|---|---|
 | decode1 的 10 ms 逾時 | **100 /s** | 閒置都有；有 UART 流量時變成「每幀一次 notify?」→ 其實 UART 係 PULL，冇 notify，仍然係 10 ms 一次 |
-| `fx` 的幀延遲（`vTaskDelay`） | 幀率（例如 60 /s） | core1 |
+| `ncm` 的幀延遲（`vTaskDelay`） | 幀率（例如 60 /s） | core1 |
 | `hello`（S3 `tasks.json`，core1，1 s） | 1 /s | |
 | decoder mutex 交接 | 有流量時 ≈ 每幀 | 兩核都解碼才會有 |
 | OTA 4 KB | 每 chunk 1 次 IPC ＋對方核凍結（寫 1.6 ms／擦 36 ms） | 1 MB ≈ 256 次 |
@@ -187,7 +187,7 @@
 
 ## 6. 抽出來之後可以點收斂（未定案）
 
-1. **核歸屬單一化**：decode 全部 core0，core1 只留 fx／租戶 → 跨核只剩下 tick 與 flash，
+1. **核歸屬單一化**：decode 全部 core0，core1 只留 ncm／租戶 → 跨核只剩下 tick 與 flash，
    而且 `decode1` 根本唔會建立（`nc4_want_core1()` 回 false）→ 10 ms 逾時嗰 100 次/秒直接消失。
 2. **PULL → PUSH 唔一定好**：PUSH 會多發 notify（跨核中斷），換來低延遲；要按通道決定。
 3. **flash 寫入集中一核**（例如全部慢工作入 `slow_worker`@core0），另一核保持乾淨；

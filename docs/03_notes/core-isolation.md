@@ -135,7 +135,7 @@
 | `decode0` | 0 | 任務管理器 | `ulTaskNotifyTake(10 ms)` | 逾時喺 core0 本地處理 → I1 冇事；**同 core1 共用 decoder mutex**（I2） | 🔄 per-core decoder |
 | `decode1` | 1 | 任務管理器 | 同上 | 逾時由 **core0 的 tick** 處理 → **I1 違反，100 次/秒** | 🔄 改 poll；或者索性唔開 |
 | ~~`slow_worker`~~ | — | — | — | **已刪（2026-11-04）**：指令一問一答，慢工作佇列唔需要 | 🗑️ |
-| `fx`（**POC／原始形態**） | 1 | 任務管理器 | `vTaskDelay(幀期)` [nc_fx.c:778](../../firmware/components/tasks/test_fx_tasks/nc_fx.c#L778) | **I1 違反**（每幀一次）；運作方式未定義 | 🔄 重新規劃（核心、幀來源、buffer 接口） |
+| `ncm`（**POC／原始形態**） | 1 | 任務管理器 | `vTaskDelay(幀期)` [nc_mod.c:778](../../firmware/components/tasks/test_mod_tasks/nc_mod.c#L778) | **I1 違反**（每幀一次）；運作方式未定義 | 🔄 重新規劃（核心、幀來源、buffer 接口） |
 | ~~`monitor`~~ | — | — | — | **已刪（2026-11-04）**：只係一行 log，`epoch`／`STATUS_GET` 已可即時查 | 🗑️ |
 | `hello` | 0（S3 `tasks.json`） | 任務管理器 | `vTaskDelay(1000)` | 本地 | ✅ |
 | `bench_a/b/c` | 1（預設**關**） | 任務管理器 | `vTaskDelay(5)` | 開啟時 **I1 違反，200 次/秒** | ✅ 要量先開 |
@@ -170,7 +170,7 @@
 | **S3** | `ESP_LOG` → stdout → **TinyUSB CDC VFS**（[main.c:351](../../firmware/main/main.c#L351) `tinyusb_console_init`）→ `tusb_write()`（`_lock_t`）→ TinyUSB FIFO（OSAL mutex）→ **core1 的 TinyUSB task** 送出 | **每一行**：跨核 mutex；而且 core0 寫 FIFO 會喚醒／爭 core1 的 USB task |
 | **P4** | `ESP_LOG` → stdout → **UART0**（USB-Serial/JTAG）→ UART VFS ＋ driver ring，TX ISR 喺安裝核（開機 core0） | 由 core1 log 會爭同一條 ring／driver 鎖 |
 
-⇒ 按 I1／I2，**非 core0 的核唔可以有任何 `ESP_LOG`**（包括 `hello_loop` 每秒印 core id、`fx`、所有錯誤路徑）。
+⇒ 按 I1／I2，**非 core0 的核唔可以有任何 `ESP_LOG`**（包括 `hello_loop` 每秒印 core id、`ncm`、所有錯誤路徑）。
 要保留 core1 的 log，就要自己開一個 **lock-free ring**（core1 只寫、core0 只讀）再由 core0 輸出。
 
 > 呢個就係「還有一個 log」：唔係任務，係一條**每行 log 都會踩**的跨核路徑；
@@ -196,7 +196,7 @@
 | **L0 通訊**（暫時收起） | `nc4_udp`、WS／`httpd`、`tcp_nc4`、`tcp_nc4_rx` | **同 code 解綁**：唔准再喺 `main.c` 寫死核心，由 `links[].core` 決定 | 通道自己決定（PULL = 該核自己 poll） | `links[].enable` |
 | **L1 解碼** | `decode0`／`decode1` | router（`nc4.routes[].out` 的 `decodeN`） | **純 poll，冇 timeout** | router |
 | **L2 系統** | `monitor` | 可配置（預設 0） | 本地 | 常開 |
-| **L3 功能** | `fx` | 可配置（預設 1） | 本地 | manifest |
+| **L3 功能** | `ncm` | 可配置（預設 1） | 本地 | manifest |
 | **L4 log**（新） | `log` | **可配置** | 有資料先印；經中間緩衝收集兩核 | 常開 |
 | **L5 測試** | `hello`、`bench_a/b/c`、`probe`、`hub_w/r`、`tx_pack`、`tcp_sink/src`、`0xF00x` handlers | 測試專用 | — | **`NC_ENABLE_TESTS`（預設 OFF）** |
 
@@ -211,17 +211,17 @@
    「有先印、冇就唔印」；log task 自己嘅核心可以調配。
 5. **每個任務都要有單一核心出處**：唔可以再有「router 講一次、NVS 講一次、code 又寫死一次」。
 
-> **分類更正（2026-11-04 拍板）**：`fx` 係 **POC 原始形態**——燈效引擎當時用來驗證架構，
+> **分類更正（2026-11-04 拍板）**：`ncm` 係 **POC 原始形態**——燈效引擎當時用來驗證架構，
 > **運作方式未定義**，唔係正式功能。`monitor` 亦只係實驗形態（只記錄、未定案）。
 > 兩者都唔歸入「測試開關」（唔應該跟 release 一起消失），但**要打上 `prototype` 標記**，
-> 等將來重新規劃：`fx` 要決定「邊個核 render、幀從邊度嚟、同 buffer 交換點對接」。
+> 等將來重新規劃：`ncm` 要決定「邊個核 render、幀從邊度嚟、同 buffer 交換點對接」。
 
 ### 8.2 分層之後，每條任務的等待策略
 
 | 任務 | 現在 | 目標 |
 |---|---|---|
 | `decode1` | `ulTaskNotifyTake(10 ms)` | poll（`taskYIELD()` 或直接再掃一次；唔可以 timeout） |
-| `fx` | `vTaskDelay(幀期)` | 若留喺 core1 → 改成「用 `esp_timer` 讀時間 + 自旋到下一幀」；或者搬 core0 |
+| `ncm` | `vTaskDelay(幀期)` | 若留喺 core1 → 改成「用 `esp_timer` 讀時間 + 自旋到下一幀」；或者搬 core0 |
 | `monitor` | `vTaskDelay(1000)` | 留 core0（本地），或按配置 |
 | `nc4_udp` | blocking `recvfrom` | 收起；之後用 non-blocking + poll |
 | `tcp_nc4_rx` | `vTaskDelay(1)` + kick | 收起（PUSH 模式本身違反 I1） |
@@ -271,7 +271,7 @@
 | L4 | 開關有 2 套 | `CONFIG_NETCORE_TEST_TASKS`（Kconfig）+ `#if`；文件寫的係 `NC_ENABLE_TESTS`（CMake） |
 | L5 | 指令表產品＋測試同一張 | `s_core_actions[]` 13 條，8 條係測試 |
 | L6 | log 冇層 | 冇 component、冇緩衝、冇任務 |
-| L7 | 核心歸屬 4 個來源 | router／NVS `net/rx_core`／code 寫死（fx、udp、accept、TinyUSB）／`tasks.json` |
+| L7 | 核心歸屬 4 個來源 | router／NVS `net/rx_core`／code 寫死（ncm、udp、accept、TinyUSB）／`tasks.json` |
 | L8 | 任務建立 2 條路 | 任務管理器 vs 裸 `xTaskCreatePinnedToCore`（4 處） |
 | L9 | 記憶體 2 套 | `nc_plan` 宣告 vs 執行期 `malloc`（WS/UDP rx、decoder、hub registry、reply） |
 
@@ -290,7 +290,7 @@
 
 | # | 題目 | 為咩未解耦 |
 |---|---|---|
-| D1 | `fx` 運作方式 | POC 原始形態：render 喺邊個核、幀從邊度嚟、同 buffer 交換點接口都未有 |
+| D1 | `ncm` 運作方式 | POC 原始形態：render 喺邊個核、幀從邊度嚟、同 buffer 交換點接口都未有 |
 | D2 | log task 的核心 | 要等「console 擁有者」定案（S3 係 core1） |
 | D3 | 緩衝協議 | hub slot 要 release/acquire；用內部 SRAM 定 PSRAM 未定 |
 | D4 | 通訊層核心解綁後 | driver ISR 同 consumer 可以唔同核？定係「一條 link 一個核全包」 |
@@ -330,7 +330,7 @@
 |---|---|---|
 | `slow_worker` | core0 常駐 worker + jobs hub | 已刪 |
 | `monitor` | core0 每秒讀兩核 epoch | 已刪 |
-| `fx`（POC） | core1，每幀 `vTaskDelay` | 只喺 `NC_ENABLE_TESTS=ON` 存在 |
+| `ncm`（POC） | core1，每幀 `vTaskDelay` | 只喺 `NC_ENABLE_TESTS=ON` 存在 |
 | `probe`／`tcp_sink/src`／`bench_*`／`hello` | 散在 `main.c`／正式映像 | `tasks/test_*_tasks`，OFF 時唔存在 |
 | 8 條測試指令 | `main.c`，永遠編入 | `commands/test_action`，OFF 時唔存在 |
 | 正式指令表 | 13 條（8 條測試） | **5 條** |

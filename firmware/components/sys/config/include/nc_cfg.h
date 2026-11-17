@@ -51,6 +51,7 @@ bool nc_cfg_append_obj(const char *layer, const char *array_key, const char *obj
 // 預設（最基礎的形狀）。指標有效期限 = 程式執行期。
 const nc_system_cfg_t *nc_cfg_defaults_system(void);
 const nc_tasks_cfg_t  *nc_cfg_defaults_tasks(void);
+const nc_resources_cfg_t *nc_cfg_defaults_resources(void);
 const nc_hardware_cfg_t *nc_cfg_defaults_hardware(void);
 
 // USB hardware.json 的 USB.list[index] → internal link kind（NC_LINK_CDC／USBJTAG）；
@@ -74,6 +75,7 @@ void nc_cfg_rx_default(nc_link_kind_t kind, nc_link_rx_t *rx);
 // 抽出來是為了 host test 可以不用檔案系統直接驗。
 esp_err_t nc_cfg_apply_system(const cJSON *root, nc_system_cfg_t *out, nc_cfg_stat_t *st);
 esp_err_t nc_cfg_apply_tasks(const cJSON *root, nc_tasks_cfg_t *out, nc_cfg_stat_t *st);
+esp_err_t nc_cfg_apply_resources(const cJSON *root, nc_resources_cfg_t *out, nc_cfg_stat_t *st);
 esp_err_t nc_cfg_apply_hardware(const cJSON *root, nc_hardware_cfg_t *out, nc_cfg_stat_t *st);
 
 // 開機載入一次（永遠回 ESP_OK：最差 = 全部預設）。
@@ -84,8 +86,9 @@ esp_err_t nc_cfg_boot(void);
 // 之後全系統只讀這些。
 const nc_system_cfg_t *nc_cfg_system(void);
 const nc_tasks_cfg_t  *nc_cfg_tasks(void);
+const nc_resources_cfg_t *nc_cfg_resources(void);
 const nc_hardware_cfg_t *nc_cfg_hardware(void);
-const nc_cfg_stat_t   *nc_cfg_stat_of(const char *layer);   // "system" / "tasks"
+const nc_cfg_stat_t   *nc_cfg_stat_of(const char *layer);   // "system" / "tasks" / "resources"
 
 // ───────────────────── 核數收斂：單核板的「兩核 → 一核」 ─────────────────────
 // config 是按「最多幾多核」寫的（S3 的 system.json 寫 decode1）；同一份檔搬到

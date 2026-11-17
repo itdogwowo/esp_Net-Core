@@ -10,7 +10,7 @@
 //
 //   SYSTEM  韌體的一部分（硬體/通道/指令表），固定順序、不可卸載
 //   NORMAL  一般任務（含以前的「服務」）
-//   EFFECT  由檔案載入的任務（.fxe），runtime 可 attach/detach
+//   EFFECT  由檔案載入的任務（.nct / .nce），runtime 可 attach/detach
 //
 // 你只要寫一個 `nc_task_t` 並呼叫 `nc_task_register()`，其餘（plan 宣告、
 // loop 建立、層級排序、核心綁定、停止、量測、狀態）都由管理器做。
@@ -19,8 +19,8 @@
 // 開機時註冊一次；任務只負責「把它們恆常化、排程化」（見 docs/03_notes/writing-a-task.md §3.2）。
 //
 // ⚠️ 執行緒：管理器沒有鎖。開機路徑由 app_main 單執行緒走完；runtime 的
-//    attach/detach 目前只從 fx task 呼叫；status 讀取可能看到「正在搬家」的瞬間
-//    （最多少一個/重複一個），不會越界。要從 decode task 直接載入 .fxe 之前先補鎖。
+//    attach/detach 目前只從 ncm task 呼叫；status 讀取可能看到「正在搬家」的瞬間
+//    （最多少一個/重複一個），不會越界。要從 decode task 直接載入 .nct / .nce 之前先補鎖。
 #pragma once
 
 #include <stdbool.h>
@@ -48,7 +48,7 @@ extern "C" {
 typedef enum {
     NC_TASK_SYSTEM = 0,   // 硬體 / driver / 通道 / 指令表：固定順序、不可卸載
     NC_TASK_NORMAL,       // 一般任務（以前的 service 也是這個）
-    NC_TASK_EFFECT,       // 檔案載入的任務（.fxe），runtime 可換
+    NC_TASK_EFFECT,       // 檔案載入的任務（.nct / .nce），runtime 可換
     NC_TASK_KIND_COUNT
 } nc_task_kind_t;
 
@@ -59,7 +59,7 @@ bool nc_task_kind_is_runtime(nc_task_kind_t kind);
 
 // ── 資源（declare → commit → 由 on_start 接收）──
 typedef struct {
-    const char *name;        // 全系統唯一："fx.arena"
+    const char *name;        // 全系統唯一："ncm.arena"
     size_t      bytes;
     nc_plan_class_t cls;
     size_t      align;       // 0 → 32
@@ -95,7 +95,7 @@ typedef enum {
 const char *nc_provide_kind_name(nc_provide_kind_t kind);
 
 typedef struct {
-    const char *name;        // 全系統唯一："usb.rx" / "fx.info"
+    const char *name;        // 全系統唯一："usb.rx" / "ncm.info"
     nc_provide_kind_t kind;
     const char *desc;
     bool   (*buf)(void **ptr, size_t *bytes);   // BUF：回 false = 目前沒有

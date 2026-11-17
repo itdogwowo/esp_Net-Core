@@ -15,7 +15,7 @@
 //   15–7  **NC 核心保留**：decode 8、producer 7，其餘留白
 //    6   緩衝區（留給 TinyUSB 5 之上的安全距離）
 //    5   TinyUSB（IDF）
-//    2   fx / nc_log
+//    2   ncm / nc_log
 //    1   app_main / hello / bench
 //    0   IDLE
 #pragma once

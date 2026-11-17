@@ -77,8 +77,8 @@
 
 | 層 | 內容 | 怎麼更新 | 要重開機 |
 |---|---|---|---|
-| **核（kernel）** | bootloader、分割表、NC4、檔案服務、驅動、frame clock、buffer manager、**WAMR + fx host** | 燒錄 / 整包 OTA | 要 |
-| **效果** | `.fxe`（wasm/aot + manifest） | **檔案** | **不要**，下一幀生效 |
+| **核（kernel）** | bootloader、分割表、NC4、檔案服務、驅動、frame clock、buffer manager、**WAMR + ncm host** | 燒錄 / 整包 OTA | 要 |
+| **效果** | `.nce`（wasm/aot + manifest） | **檔案** | **不要**，下一幀生效 |
 | **參數 / 映射 / 調色盤** | `config.json`、palette、pixel mapping | **檔案** | 不要（`ASSET_RELOAD`） |
 | **schema**（可選） | 指令表、狀態表 | **檔案**（若做成 JSON） | 不要 |
 | **碰硬體的** | 中斷向量、DMA 描述子、PHY 校正、面板初始化時序 | — | 只能燒錄 |
@@ -119,12 +119,12 @@
 
 ```text
 Host                          Device
- tools/fx.py build             NC4 file service
-   tinygo → .wasm              FILE_BEGIN("pixel/effects/fire26.fxe", size, crc)
+ tools/ncm.py build             NC4 file service
+   tinygo → .wasm              FILE_BEGIN("pixel/effects/fire26.nce", size, crc)
    wamrc  → .aot                 ...
-   pack   → .fxe               FILE_END
+   pack   → `.nct` / `.nce`               FILE_END
         │                        validate: header / abi / 預算 / 記憶體宣告
-        └──────────────────────> atomic swap → fx_load("fire26") → 下一幀生效
+        └──────────────────────> atomic swap → mod_load("fire26") → 下一幀生效
 ```
 
 三個好處是現成的：**壞檔不會半寫入**（staging）、**可以回上一版**（`last_good`）、**不用重燒**（`ASSET_RELOAD` 換指標）。
@@ -196,8 +196,8 @@ Pixelblaze（ElectroMage）是同一領域的商業產品：自製的小型 JS �
 
 **代價**：
 
-- 工具鏈三段（tinygo → wamrc → pack），要養 `tools/fx.py`。
-- **AOT 檔格式與 runtime 版本綁定**：`wamrc` 2.4.0 產的 `.aot` 要配 runtime 2.4.0。版本要釘死並寫進 `.fxe` 的 header。
+- 工具鏈三段（tinygo → wamrc → pack），要養 `tools/ncm.py`。
+- **AOT 檔格式與 runtime 版本綁定**：`wamrc` 2.4.0 產的 `.aot` 要配 runtime 2.4.0。版本要釘死並寫進 `.nct` / `.nce` 的 header。
 - Espressif 的 component 是 1 年前（v2.4.0），**你的 IDF 是 v6.0.3**。這是 §9 的第 1 號風險，不是理論風險。
 - `wamrc --target=riscv32` 預設 `ilp32d`，但 **P4 沒有 D 延伸（只有單精度 F）** → 必須 `--target-abi=ilp32f`（或 `ilp32` 走軟浮點，慢）。這一條寫錯的症狀是「AOT 載入就 illegal instruction」，很容易誤診成 runtime bug。
 
@@ -225,7 +225,7 @@ Pixelblaze（ElectroMage）是同一領域的商業產品：自製的小型 JS �
 
 直覺會以為「原生＝最精簡」，其實相反：**wasm 為了「傳輸」優化（小），AOT 為了「執行」優化（快），兩個目標不同，不會同時最小。**
 
-用 `tools/poc/fx_poc/fx.wasm`（367 B）裡的一段當例子：
+用 `tools/poc/mod_poc/mod.wasm`（367 B）裡的一段當例子：
 
 ```wat
 local.get $d2      ; 2 bytes   (0x20 + 索引)
@@ -278,7 +278,7 @@ sw   a0, 12(sp)    ; 4 bytes   ← 存回去
 | 效能夠 | 676 px 每像素 19,700 cycles 的預算（§2），直譯用不到 5% |
 | 跨晶片 | 一份檔案，P4（RISC-V）與 S3（Xtensa）都吃 |
 | 少一段工具鏈 | 不用裝 `wamrc`、不用管 AOT 版本綁定、不用踩 `ilp32f` 那個坑 |
-| 之後加不用改東西 | `.fxe` 的 `flags` bit0 就是「有沒有 AOT」（見 [fx-loader.md](fx-loader.md) §3），有就用、沒有就退回直譯 |
+| 之後加不用改東西 | `.nct` / `.nce` 的 `flags` bit0 就是「有沒有 AOT」（見 [ncm-loader.md](ncm-loader.md) §3），有就用、沒有就退回直譯 |
 
 **什麼時候才值得為某個效果單獨產 `.aot`**：實測 **> 8 ms/幀**（超過 33 ms 的四分之一）。在那之前，AOT 只是多一個依賴。
 
@@ -318,7 +318,7 @@ sw   a0, 12(sp)    ; 4 bytes   ← 存回去
 
 ```text
                  ┌──────────── 主機（Mac / 網頁）────────────┐
-                 │  tools/fx.py：build / pack / push          │
+                 │  tools/ncm.py：build / pack / push          │
                  └───────────────┬───────────────────────────┘
                                  │ NC4 file service（staging → validate → swap）
 ┌────────────────────────────────▼─────────────────────────────────┐
@@ -326,12 +326,12 @@ sw   a0, 12(sp)    ; 4 bytes   ← 存回去
 │                                                                   │
 │  Tier 0  params ──── config.json / MODE_SET        （現在就有）    │
 │  Tier 1  IR     ──── JSON 節點圖 → 原生 kernel      （第二個做）    │
-│  Tier 2  wasm   ──── .fxe → WAMR（interp / AOT）    （第三個做）    │
+│  Tier 2  wasm   ──── `.nct` / `.nce` → WAMR（interp / AOT）    （第三個做）    │
 │                            │                                      │
 │                            ▼                                      │
 │              ┌──────────────────────────┐                         │
 │              │ PixelTask（core 1）       │                         │
-│              │  fx->render(fid, t, span)│  ← 只有這一個呼叫         │
+│              │  ncm->render(fid, t, span)│  ← 只有這一個呼叫         │
 │              └────────────┬─────────────┘                         │
 │                           │ handoff（BACK → READY）                │
 │                           ▼                                       │
@@ -345,11 +345,11 @@ sw   a0, 12(sp)    ; 4 bytes   ← 存回去
 typedef struct {
     const char *name;
     uint32_t    abi;
-    void      (*init)(nc_fx_ctx_t *ctx);
+    void      (*init)(nc_mod_ctx_t *ctx);
     void      (*render)(uint32_t frame_id, uint64_t time_us,
                         uint32_t span_off, uint32_t span_len);
-    void      (*deinit)(nc_fx_ctx_t *ctx);
-} nc_fx_ops_t;
+    void      (*deinit)(nc_mod_ctx_t *ctx);
+} nc_mod_ops_t;
 ```
 
 Tier 1 的 `render` 是「走一遍節點圖」，Tier 2 的 `render` 是「`wasm_runtime_call_wasm` 一次」。**上層完全不知道差別** —— 這是整個設計的價值：你可以先做 Tier 1，之後把 Tier 2 塞進來而不動 pipeline。
@@ -365,14 +365,14 @@ Tier 1 的 `render` 是「走一遍節點圖」，Tier 2 的 `render` 是「`was
 ### 6.1 只有三個 export
 
 ```wat
-fx_abi_version() -> i32            ; 必須回 0
+mod_abi_version() -> i32            ; 必須回 0
 fx_init(desc_ptr: i32) -> i32      ; 0 = OK；非 0 = 拒絕載入
 fx_render(frame_id: i32, time_us: i64, span_off: i32, span_len: i32)
 ```
 
 **為什麼只有三個**：每一次跨邊界呼叫都是 50–100 cycles，而且編譯器不能內聯。把「每像素一次呼叫」設計進去，就注定慢；把介面壓到「每幀一次、載入時一次」，剩下的都在 guest 自己的記憶體裡跑。
 
-沒有 `fx_alloc`：**效果不能配置記憶體**。它要的東西在 `fx_init` 之前就配好了（見 6.3）。
+沒有 `mod_alloc`：**效果不能配置記憶體**。它要的東西在 `fx_init` 之前就配好了（見 6.3）。
 
 ### 6.2 descriptor：host 寫、guest 讀
 
@@ -394,21 +394,21 @@ fx_render(frame_id: i32, time_us: i64, span_off: i32, span_len: i32)
 
 這是把 `buffer-manager.md` 的 declare→commit 延伸到「後期載入」的關鍵。**問題**：commit 在開機就關窗了，效果卻是之後才載入的。
 
-**解法**：開機時把整個 fx 子系統宣告成**一個** plan item，效果在裡面 bump：
+**解法**：開機時把整個 ncm 子系統宣告成**一個** plan item，效果在裡面 bump：
 
 ```c
 // 開機（在 nc_plan_commit 之前）
 nc_plan_declare(&(nc_plan_decl_t){
     // 實際欄位見 nc_plan.h：service / name / level / cls / bytes / align
-    .service = "fx", .name = "fx.arena", .level = 4,   // L4 = 最先被撇除
-    .cls = NC_PLAN_PSRAM, .bytes = NC_FX_ARENA_MAX,     // 例如 512 KB
+    .service = "ncm", .name = "ncm.arena", .level = 4,   // L4 = 最先被撇除
+    .cls = NC_PLAN_PSRAM, .bytes = NC_MOD_ARENA_MAX,     // 例如 512 KB
 });
 ```
 
 ```text
-載入 .fxe 時（執行期，但不再是「向系統要」）：
+載入 `.nct` / `.nce` 時（執行期，但不再是「向系統要」）：
   ① 讀 manifest 的 bufs[]  → 加總 bytes
-  ② 在已 commit 的 fx.arena 裡 bump 出一塊線性記憶體     ← 不會失敗以外的副作用
+  ② 在已 commit 的 ncm.arena 裡 bump 出一塊線性記憶體     ← 不會失敗以外的副作用
   ③ 建 WAMR module instance，linear memory 指到那塊
   ④ 寫 descriptor → fx_init()
   ⑤ 成功才 swap 進去；失敗就保留舊效果
@@ -418,7 +418,7 @@ nc_plan_declare(&(nc_plan_decl_t){
 
 **換檔時記憶體怎麼辦**：兩個選項 —— 重用同一塊（快，但要靠模組自己清；`fx_init` 的第一件事就是 memset 自己那塊），或換一塊（乾淨，但要付一次 64 KB 的填零）。建議**重用**，因為 64 KB 的 reset 比重新 carve 便宜，而且不會把 arena 弄碎。
 
-manifest 長這樣（跟著 `.fxe` 走）：
+manifest 長這樣（跟著 `.nct` / `.nce` 走）：
 
 ```json
 {
@@ -457,8 +457,8 @@ copy 成本：2.7 KB @ PSRAM 約 40 MB/s ≈ **68 µs**，佔 33 ms 的 0.2%。�
 
 ### 6.7 版本與相容
 
-- `abi` 同時存在於 manifest 與 `fx_abi_version()`；host 兩邊都比對，不符就拒絕。
-- `.fxe` header 記 `wamrc` 版本與 target（`riscv32/ilp32f`、`xtensa`）。**AOT 檔不能跨 runtime 版本**，這是最容易在半年後咬人的欄位。
+- `abi` 同時存在於 manifest 與 `mod_abi_version()`；host 兩邊都比對，不符就拒絕。
+- `.nct` / `.nce` header 記 `wamrc` 版本與 target（`riscv32/ilp32f`、`xtensa`）。**AOT 檔不能跨 runtime 版本**，這是最容易在半年後咬人的欄位。
 - 效果可以只帶 `.wasm`（interp 用）或同時帶 `.aot`（快路徑）。device 選哪個是 policy，不是格式。
 
 ---
@@ -471,7 +471,7 @@ copy 成本：2.7 KB @ PSRAM 約 40 MB/s ≈ **68 µs**，佔 33 ms 的 0.2%。�
 | 效果的 AOT code | 5–50 KB | **EXEC**（DIRAM） | 只有 DIRAM 能執行 |
 | 線性記憶體（含 fb + scratch） | 64 KB 起（1 page 粒度） | PSRAM | 大、慢、不能 DMA —— 剛好符合 |
 | 幀緩衝（canonical × 4 槽） | 2,704 × 4 = 10.8 KB | **DMA** | RMT 只能指內部 RAM |
-| fx.arena（所有效果共享） | 128–256 KB | PSRAM | 一次 commit，執行期只 bump |
+| ncm.arena（所有效果共享） | 128–256 KB | PSRAM | 一次 commit，執行期只 bump |
 
 **P4 的特別之處**：`SOC_IRAM_LOW..HIGH = 0x4FF00000..0x4FFC0000`（768 KB），而且 DIRAM 的 I / D 是**同一個位址**（`MAP_DRAM_TO_IRAM(addr) = addr`）。意思是**內部 RAM 配出來就能執行**，不需要額外的 MMU 對映。這讓 AOT 在 P4 上比在 S3 上簡單得多。
 
@@ -495,27 +495,27 @@ wamrc --target=riscv32 --target-abi=ilp32f -o firmware/build/fire26.p4.aot firmw
 wamrc --target=xtensa                      -o firmware/build/fire26.s3.aot firmware/build/fire26.wasm
 
 # ③ 打包 + 上傳（走既有 NC4 file service）
-tools/fx.py pack --manifest effects/fire26.json \
+tools/ncm.py pack --manifest effects/fire26.json \
                  --wasm firmware/build/fire26.wasm --aot firmware/build/fire26.p4.aot \
-                 -o firmware/build/fire26.fxe
-tools/fx.py push firmware/build/fire26.fxe --port /dev/cu.usbmodem...
+                 -o firmware/build/fire26.nce
+tools/ncm.py push firmware/build/fire26.nce --port /dev/cu.usbmodem...
 ```
 
-**② 不是必須的**：第一版只出 `.wasm`（§4.4.4）。等你某個效果實測 > 8 ms/幀，再為它單獨產 `.aot`，`.fxe` 的 flag 會自動選用。
+**② 不是必須的**：第一版只出 `.wasm`（§4.4.4）。等你某個效果實測 > 8 ms/幀，再為它單獨產 `.aot`，`.nce` 的 flag 會自動選用。
 
-`tools/fx.py watch effects/` 可以做成「存檔 → 重編 → 上傳 → 生效」，把迭代壓到 1–2 秒，逼近 mpy 的手感。
+`tools/ncm.py watch effects/` 可以做成「存檔 → 重編 → 上傳 → 生效」，把迭代壓到 1–2 秒，逼近 mpy 的手感。
 
-> `tools/fx.py` 是 P1 的產物，現在還沒有。上面三段指令是它要包起來的東西 —— 先手打驗證，再腳本化。
+> `tools/ncm.py` 是 P1 的產物，現在還沒有。上面三段指令是它要包起來的東西 —— 先手打驗證，再腳本化。
 
 ### 8.2 三個地雷（後兩個只在用 AOT 時）
 
 | 地雷 | 症狀 | 解法 |
 |---|---|---|
 | `--target-abi` 用了預設 `ilp32d` | 載入就 illegal instruction | 明確 `ilp32f`（P4 只有單精度 FPU） |
-| `wamrc` 與 runtime 版本不同 | 載入失敗 / 奇怪的行為 | 釘版本，寫進 `.fxe` header |
+| `wamrc` 與 runtime 版本不同 | 載入失敗 / 奇怪的行為 | 釘版本，寫進 `.nct` / `.nce` header |
 | TinyGo 的 GC | 幀內配置 → 不可預測的停頓 | `-gc=leaking` + 約定「init 之後不配置」 |
 
-**最後一條要靠紀律**：ABI 沒有 `alloc`，所以效果「想配置」只能靠自己在 init 時把記憶體切好。這不是限制，是**把 buffer-manager 的規則延伸到 guest**。真的需要動態配置時，那是 ABI v1 的事，要另外設計（例如 `fx_alloc` 只在 init 期間合法，init 回傳後再呼叫就 trap）。
+**最後一條要靠紀律**：ABI 沒有 `alloc`，所以效果「想配置」只能靠自己在 init 時把記憶體切好。這不是限制，是**把 buffer-manager 的規則延伸到 guest**。真的需要動態配置時，那是 ABI v1 的事，要另外設計（例如 `mod_alloc` 只在 init 期間合法，init 回傳後再呼叫就 trap）。
 
 ---
 
@@ -526,7 +526,7 @@ tools/fx.py push firmware/build/fire26.fxe --port /dev/cu.usbmodem...
 | # | 要驗什麼 | 怎麼驗 | 過 |
 |---|---|---|---|
 | 1 | WAMR component 在 **IDF v6.0.3 + P4** 編得過 | `idf.py add-dependency espressif/wasm-micro-runtime^2.4.0`，build | 編得過、跑得起 `test_wasm.h` |
-| 2 | 跑 `tools/poc/fx_poc/fx.wasm`（interp） | 板上載入、跑 120 幀 | **checksum 與 host 相同**（§10） |
+| 2 | 跑 `tools/poc/mod_poc/mod.wasm`（interp） | 板上載入、跑 120 幀 | **checksum 與 host 相同**（§10） |
 | 3 | `wamrc` 產 P4 可用的 AOT | `--target=riscv32 --target-abi=ilp32f` | 載入 + 執行成功 |
 | 4 | 真實速度 | 676 px 效果，interp vs AOT | AOT ≤ 2 ms/幀；interp ≤ 10 ms/幀 |
 | 5 | AOT code 放哪 | `heap_caps_malloc(MALLOC_CAP_EXEC)`，印 free | 至少 64 KB 可執行記憶體 |
@@ -540,39 +540,39 @@ tools/fx.py push firmware/build/fire26.fxe --port /dev/cu.usbmodem...
 
 ## 10. 已經做出來的：ABI 的 host 參考實作
 
-`tools/poc/fx_poc/` 是一個零依賴的 PoC，在 Mac 上把 §6 的 ABI 跑起來（不需要板子）。它做四件事：算佈局 → 寫 descriptor → `fx_init` → 每幀 `fx_render` 並讀回 fb。
+`tools/poc/mod_poc/` 是一個零依賴的 PoC，在 Mac 上把 §6 的 ABI 跑起來（不需要板子）。它做四件事：算佈局 → 寫 descriptor → `fx_init` → 每幀 `fx_render` 並讀回 fb。
 
 ### 10.1 基本：一個模組跑 120 幀
 
 ```text
-$ node tools/poc/fx_poc/host.mjs tools/poc/fx_poc/fx.wasm --frames 120
+$ node tools/poc/mod_poc/host.mjs tools/poc/mod_poc/mod.wasm --frames 120
 layout      px=676 26x26  fb=64+2704  scratch=2784+2704  total=5488 B (memory 65536 B)
-module A    fx.wasm (367 B wasm, abi 0)  fx_init ok
+module A    mod.wasm (367 B wasm, abi 0)  fx_init ok
 phase A     120 幀  avg 3.5 us  checksum 0x143b0b06
-scratch[0]  120 次  (fx.wasm 被呼叫 120 次)
+scratch[0]  120 次  (mod.wasm 被呼叫 120 次)
 ```
 
 ### 10.2 熱替換：第 120 幀換一份檔案（這就是「分離式固件」）
 
 ```text
-$ node tools/poc/fx_poc/host.mjs tools/poc/fx_poc/fx.wasm --frames 240 \
-       --swap tools/poc/fx_poc/fx2.wasm --at 120
-swap @120   fx2.wasm → fx_init ok（496 us）；同一個 descriptor、同一組 offset，host 沒有重算佈局
+$ node tools/poc/mod_poc/host.mjs tools/poc/mod_poc/mod.wasm --frames 240 \
+       --swap tools/poc/mod_poc/mod2.wasm --at 120
+swap @120   mod2.wasm → fx_init ok（496 us）；同一個 descriptor、同一組 offset，host 沒有重算佈局
 phase A     120 幀  avg 3.4 us  checksum 0x143b0b06
-phase B     120 幀  avg 2.4 us  checksum 0x22cd5444  (fx2.wasm)
+phase B     120 幀  avg 2.4 us  checksum 0x22cd5444  (mod2.wasm)
 ```
 
-![換檔前後（左：徑向脈衝；右：斜向掃描）](../../tools/poc/fx_poc/frame.png)
+![換檔前後（左：徑向脈衝；右：斜向掃描）](../../tools/poc/mod_poc/frame.png)
 
 左邊是 A（徑向脈衝）、右邊是 B（斜向掃描）。**中間沒有重新啟動、沒有重配記憶體、沒有重算佈局** —— 只是把 `render` 的函式指標換掉。
 
 ### 10.3 壞檔：被拒絕，舊的繼續跑
 
 ```text
-$ node tools/poc/fx_poc/host.mjs tools/poc/fx_poc/fx.wasm --frames 240 \
-       --bad tools/poc/fx_poc/fxbad.wasm --at 120
-swap @120   拒絕載入 fxbad.wasm（fx_init 回 1）→ 繼續用 fx.wasm，畫面不中斷
-phase B     —（換檔被拒絕，全程都是 fx.wasm，沒有中斷）
+$ node tools/poc/mod_poc/host.mjs tools/poc/mod_poc/mod.wasm --frames 240 \
+       --bad tools/poc/mod_poc/modbad.wasm --at 120
+swap @120   拒絕載入 modbad.wasm（fx_init 回 1）→ 繼續用 mod.wasm，畫面不中斷
+phase B     —（換檔被拒絕，全程都是 mod.wasm，沒有中斷）
 ```
 
 這是「不需要燒錄」能夠成立的前提：**上傳壞東西的最壞結果是「沒換成功」，不是「變磚」**。ELF 熱載入給不了這個保證。
@@ -580,9 +580,9 @@ phase B     —（換檔被拒絕，全程都是 fx.wasm，沒有中斷）
 ### 10.4 兩個附帶用途
 
 - **conformance test**：效果只用整數運算的話，**host 與 P4 應該得到同一個 checksum**（§9-2 的驗收條件）。
-- **換語言不換 harness**：`fx.wat` 是手寫的測試替身（**不是給人寫燈效的**）。等 TinyGo 的工具鏈好了，把 `fx.wasm` 換掉就行，`host.mjs` 一行都不用改。
+- **換語言不換 harness**：`mod.wat` 是手寫的測試替身（**不是給人寫燈效的**）。等 TinyGo 的工具鏈好了，把 `mod.wasm` 換掉就行，`host.mjs` 一行都不用改。
 
-> 誠實說明：PoC 是 node 的 `WebAssembly`，每個模組自帶 1 page（64 KB）。上板時線性記憶體由 host 從 `fx.arena` 切給模組（WAMR 支援），效果看到的仍然是同一組 offset —— 所以 ABI 一樣，記憶體政策不同。
+> 誠實說明：PoC 是 node 的 `WebAssembly`，每個模組自帶 1 page（64 KB）。上板時線性記憶體由 host 從 `ncm.arena` 切給模組（WAMR 支援），效果看到的仍然是同一組 offset —— 所以 ABI 一樣，記憶體政策不同。
 
 ---
 
@@ -591,9 +591,9 @@ phase B     —（換檔被拒絕，全程都是 fx.wasm，沒有中斷）
 | 階段 | 內容 | 估 | 驗收 |
 |---|---|---|---|
 | **P0 spike** | §9 的 8 項 | 1 天 | 全過 → 繼續；1/3/5 不過 → 回頭評估 C 或 E |
-| **P1 ABI** | `nc_fx_ops_t`、descriptor、`tools/fx.py`、host harness | ~250 行 | 現有 harness 跑得動；ABI 文件化 |
-| **P2 interp 上板** | WAMR component、fx.arena、載入 / 卸載 / 超時 | ~400 行 | 兩個效果可切換；無窮迴圈 3 幀內被踢掉 |
-| **P3 AOT** | wamrc 進 build、`.fxe` 帶 aot、版本檢查 | ~150 行 | 同畫面、≤ 2 ms/幀 |
+| **P1 ABI** | `nc_mod_ops_t`、descriptor、`tools/ncm.py`、host harness | ~250 行 | 現有 harness 跑得動；ABI 文件化 |
+| **P2 interp 上板** | WAMR component、ncm.arena、載入 / 卸載 / 超時 | ~400 行 | 兩個效果可切換；無窮迴圈 3 幀內被踢掉 |
+| **P3 AOT** | wamrc 進 build、`.nct` / `.nce` 帶 aot、版本檢查 | ~150 行 | 同畫面、≤ 2 ms/幀 |
 | **P4 IR tier** | 12 個節點 + 圖求值器 | ~800 行 | 用 IR 重寫 3 個現有效果；與 wasm 效果並存 |
 
 **順序的理由**：P1 是純 host、不需要板子（跟你 `tools/hosttest/plan_test` 的做法一樣）；P2 才需要硬體；IR（P4）**可以跟 P0–P3 平行**，因為它不依賴 wasm。
@@ -629,7 +629,7 @@ phase B     —（換檔被拒絕，全程都是 fx.wasm，沒有中斷）
 | 6 | 超時幾幀後卸載 | 3 幀 |
 | 7 | 效果檔要不要簽章 | 第一版不做（只有你能上傳）；對外開放前再說 |
 | 8 | 換檔時 linear memory 重用還是換一塊 | 重用（模組自己 memset），見 §6.3 |
-| 9 | 要不要做「效果庫」（多個 `.fxe` 駐留、按鍵切換） | 要，但排在 P3 之後 |
+| 9 | 要不要做「效果庫」（多個 `.nce` 駐留、按鍵切換） | 要，但排在 P3 之後 |
 
 ---
 

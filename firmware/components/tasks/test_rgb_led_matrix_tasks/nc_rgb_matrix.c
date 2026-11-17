@@ -114,7 +114,7 @@ static inline uint32_t mul_q15(uint32_t a, int32_t q)
     return (a * (uint32_t)q) >> 15;
 }
 
-static inline uint16_t gamma_fx(uint16_t lin)
+static inline uint16_t gamma_mod(uint16_t lin)
 {
     uint32_t idx = (uint32_t)lin >> 6;          // 0..1023
     const uint32_t frac = (uint32_t)lin & 63u;
@@ -150,9 +150,9 @@ static void zone_zone1(int z)
     }
     for (int x = 0; x < NC_RGB_W; x++) {
         const uint16_t lin = lin_of((uint32_t)(80 + x * 21));   // 顯示值約 20..200
-        s_tgt[x][0] = gamma_fx(lin);
-        s_tgt[x][1] = gamma_fx(lin / 3);
-        s_tgt[x][2] = gamma_fx(lin / 6);
+        s_tgt[x][0] = gamma_mod(lin);
+        s_tgt[x][1] = gamma_mod(lin / 3);
+        s_tgt[x][2] = gamma_mod(lin / 6);
     }
 }
 
@@ -166,7 +166,7 @@ static void zone_breath(int z, uint32_t seg_us)
     const uint32_t ph = (uint32_t)(((uint64_t)(t % seg_us) * 512u) / seg_us);   // 64-bit！12 s 一段 ×512 會爆 32-bit
     const int32_t s = s_sin[ph & 1023u];
     const uint16_t lin = (uint16_t)(((uint32_t)s * 2u * s_cfg.gain) / 255u);
-    const uint16_t v = gamma_fx(lin);
+    const uint16_t v = gamma_mod(lin);
     const int base = z * NC_RGB_ZONE_N;
     for (int i = 0; i < NC_RGB_ZONE_N; i++) {
         s_tgt[base + i][0] = s_tgt[base + i][1] = s_tgt[base + i][2] = 0;
@@ -193,7 +193,7 @@ static void zone_wave(int z, int32_t t_ms)
         w = mul_q15((uint32_t)w, env);                      // × 呼吸包絡
         const uint16_t lin = (uint16_t)(((uint32_t)w * 2u * s_cfg.gain) / 255u);
         for (int c = 0; c < 3; c++) {
-            s_tgt[base + x][c] = (c == seg) ? gamma_fx(lin) : 0;   // 純色：只亮一個通道
+            s_tgt[base + x][c] = (c == seg) ? gamma_mod(lin) : 0;   // 純色：只亮一個通道
         }
     }
 }
@@ -226,7 +226,7 @@ static void zone_ramp(int z)
 {
     const int base = z * NC_RGB_ZONE_N;
     for (int i = 0; i < NC_RGB_ZONE_N; i++) {
-        const uint16_t v = gamma_fx(lin_of((uint32_t)((base + i) * 4)));
+        const uint16_t v = gamma_mod(lin_of((uint32_t)((base + i) * 4)));
         s_tgt[base + i][0] = v;
         s_tgt[base + i][1] = v;
         s_tgt[base + i][2] = v;

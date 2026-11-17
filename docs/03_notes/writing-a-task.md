@@ -1,7 +1,7 @@
 # 怎麼寫一個 Task（任務管理器）
 
 > **適用**：`nc_task`（任務宣告）＋ `nc_task_*`（任務管理器）
-> **相關**：[fx-loader.md](fx-loader.md)（檔案載入的任務）、[extension-architecture.md](extension-architecture.md)、[hardware-bus.md](hardware-bus.md)
+> **相關**：[ncm-loader.md](ncm-loader.md)（檔案載入的任務）、[extension-architecture.md](extension-architecture.md)、[hardware-bus.md](hardware-bus.md)
 > **狀態**：已實作（2026-11-02）。host 測試：`tools/hosttest/task_test/`。
 > **舊名**：這份原本叫「怎麼寫一個 Service」，還有一段時間把 service / task 分成兩層 ——
 > 那是命名造成的誤會，**兩者是同一件事**。現在只有 `nc_task_t`（`kind = NC_TASK_NORMAL`）。
@@ -63,7 +63,7 @@ nc_task_register(&my_task);
 |---|---|---|
 | `NC_TASK_SYSTEM` | 硬體 / driver / 通道 / 指令表（韌體的一部分） | ❌ 固定順序 |
 | `NC_TASK_NORMAL` | 一般任務（**以前的 service 就是這個**） | ❌ 開機登記的不卸載 |
-| `NC_TASK_EFFECT` | 由 `.fxe` 載入的任務 | ✅ runtime attach / detach |
+| `NC_TASK_EFFECT` | 由 `.nct` 載入的任務 | ✅ runtime attach / detach |
 
 ### 1.2 為什麼是 `loops[]` 而不是一個 loop
 
@@ -87,7 +87,7 @@ nc_task_register(&my_task);
 > [buffer-patterns.md](buffer-patterns.md)。
 
 **為什麼 `start` 和 `boot` 分開**：`on_start()` 必須在「所有任務的資源都配好」之後、
-「任何 loop 開始跑」之前完成。例：`fx` 要先拿到 arena，render loop 才能開。
+「任何 loop 開始跑」之前完成。例：`ncm` 要先拿到 arena，render loop 才能開。
 
 > 每一步管理器實際做什麼、失敗會怎樣、資源怎麼加總、停止時誰歸還什麼 ——
 > 全部在 [task-lifecycle.md](task-lifecycle.md)。這節只講「你要知道的四步」。
@@ -243,7 +243,7 @@ void *buf; size_t n;
 if (nc_provide_buf("my.buf", &buf, &n)) { /* 讀 n bytes */ }
 
 char json[256];
-if (nc_provide_json("fx.info", json, sizeof(json)) > 0) { /* ... */ }
+if (nc_provide_json("ncm.info", json, sizeof(json)) > 0) { /* ... */ }
 ```
 
 > ⚠️ `BUF` 的生命週期綁在提供者身上：不要跨提供者的 stop / detach 使用。
@@ -314,9 +314,9 @@ static void on_xxx(nc4_ctx_t *ctx, const nc4_frame_t *f)
 `STATUS_GET keys=tasks` 現在只回**結構**，不回時間：
 
 ```json
-[{"name":"fx","kind":"normal","level":4,"started":1,"runtime":0,
+[{"name":"ncm","kind":"normal","level":4,"started":1,"runtime":0,
   "mem":1,"claims":0,"provides":1,
-  "loops":[{"name":"fx","core":1,"layer":3,"prio":3,"period_ms":0,
+  "loops":[{"name":"ncm","core":1,"layer":3,"prio":3,"period_ms":0,
             "running":1,"enabled":1}]}]
 ```
 
@@ -440,7 +440,7 @@ nc_task_register(&pulse_task);
 
 | 限制 | 影響 | 什麼時候補 |
 |---|---|---|
-| registry 沒有鎖 | attach/detach 與 status 同時發生時，status 可能少一個或重複一個（不會越界）。目前 attach 在開機、detach 在 fx task | 要從 decode task 直接載入 `.fxe` 時 |
+| registry 沒有鎖 | attach/detach 與 status 同時發生時，status 可能少一個或重複一個（不會越界）。目前 attach 在開機、detach 在 ncm task | 要從 decode task 直接載入 `.nct` 時 |
 | `nc_buf` 冇 `destroy` | 停機不會還記憶體；重啟重用同一批指標（契約 C4） | 需要「停用後重配」時：用 `nc_buf_handover()` |
 | 一個任務最多 2 個 loop、8 塊記憶體、8 項 provide | 目前都夠 | 真的不夠再放寬 |
 | `on_stop` 只在「管理器停止」時呼叫 | `run_once` 自己結束的 loop 不會回呼 | 有需求時改成引用計數 |

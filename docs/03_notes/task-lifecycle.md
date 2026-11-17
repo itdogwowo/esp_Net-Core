@@ -147,7 +147,7 @@
 
 **宣告窗口在 `commit` 時關閉**：commit 之後 `nc_plan_declare()` 回 `ESP_ERR_INVALID_STATE`。
 這就是為什麼 **runtime attach 的任務不可以帶 `mem[]`**（`nc_task_attach` 會直接拒絕）——
-它們的記憶體要從父層 arena 切（FXE 引擎的 arena）。
+它們的記憶體要從父層 arena 切（NCM 引擎的 arena）。
 
 ---
 
@@ -160,7 +160,7 @@
 | 誰用 | `declare_all` / `start_all` | `nc_task_boot` |
 
 **兩者互相獨立**：`nc_task_boot()` 只看 `rt->def->layer`，**完全不理任務的 `level`**。
-所以「任務 level 1、它的 loop layer 3」是完全正常的（`fx` 就是這樣）。
+所以「任務 level 1、它的 loop layer 3」是完全正常的（`ncm` 就是這樣）。
 
 ### 實際保證到哪裡
 
@@ -187,7 +187,7 @@ layer 1 的 loop 全部建立
 > 所以「`level` 不是 barrier」**不是缺口**：兩邊都只保證 `on_start` 的 barrier，
 > 兩邊都唔保證「loop 已初始化完成」。
 >
-> 如果將來真的要後者（例如 fx 的 loop 一開頭就要用上一層的 provide），
+> 如果將來真的要後者（例如 ncm 的 loop 一開頭就要用上一層的 provide），
 > 才需要 `nc_task_ready()`（見 §7 缺口 1）。今日**冇需要**。
 
 ### 與上游 `task_manager.py` 的實際差異
@@ -260,7 +260,7 @@ static void my_loop(void *arg)
 | slot（任務格） | 管理器 | `detach` 時 |
 | `claims[]` | 冇 runtime 資源，只是帳 | — |
 | **緩衝區（`nc_buf`）** | **冇人歸還** | 開機一次建立，永久存在；要給下一個用戶用 `handover`（契約 C5） |
-| **FXE 模組的記憶體** | FXE 引擎（arena 回收） | `nc_fx_unload()` |
+| **NCM 模組的記憶體** | NCM 引擎（arena 回收） | `nc_mod_unload()` |
 
 **「停止」≠「釋放記憶體」。** `nc_buf` 冇 destroy：開機建立一次，之後只有「誰拿到」，
 沒有「還回去」（契約 C4）。所以：
@@ -269,7 +269,7 @@ static void my_loop(void *arg)
 - 重新啟動同一個任務 → `gather_resources()` 會拿到**同一批指標**（不是新配的）。
 
 這是刻意的：嵌入式不需要 heap 碎片，也不需要 runtime 重新規劃記憶體。
-runtime 要增減的東西（`.fxe` 模組）走父層 arena：`nc_buf_carve()` 切，換場用
+runtime 要增減的東西（`.nct` / `.nce` 模組）走父層 arena：`nc_buf_carve()` 切，換場用
 `nc_buf_handover()` 換 owner（契約 C9）。
 
 ---

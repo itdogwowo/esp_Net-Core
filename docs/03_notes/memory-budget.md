@@ -54,7 +54,7 @@
 | `payload$3` | 8,192 | tx_bench 測試填充塊 | ✅ 只有跑 `0xF007` 才用 |
 | `s_slots` | 7,680 | task manager 20 個 slot | ⚠️ 20 × 384 B，可以減 slot 數 |
 | `s_entries` | 2,304 | 檔案表（`/data` 快取） | ⚠️ |
-| `s_mods` | 2,016 | FXE 模組實例表 | ⚠️ |
+| `s_mods` | 2,016 | NCM 模組實例表 | ⚠️ |
 | `s_buses` | 1,984 | nc4 8 條 bus | ⚠️ |
 | `s_provs` | 960 | provides 註冊表 | ⚠️ |
 | `ledger$10` / `pj$11` | 900 / 700 | **只在 `app_main` 印一次 log** | ✅ 開機用完即棄 |
@@ -78,7 +78,7 @@
 
 > **2026-11-08 重量**（貼身化之後；逐項依據見 [buffer-tightening.md](buffer-tightening.md)）。
 > 舊表把已刪除的 `slow_worker`／`jobs` 與尚未收斂的 6,144 棧都算進去了，已改成實測值。
-> 測試任務（`fx`／`hello`／`probe`）只在 `NC_ENABLE_TESTS=ON` 存在，release 不含。
+> 測試任務（`ncm`／`hello`／`probe`）只在 `NC_ENABLE_TESTS=ON` 存在，release 不含。
 
 | 項目 | 大小 | 來源 |
 |---|---|---|
@@ -92,12 +92,12 @@
 | CDC 插槽 | 4 × 256 = 1,024 | heap（零複製收斂） |
 | UART 插槽 | 4 × 256 = 1,024 | heap |
 | UART driver 環 | RX 1,024 + TX 1,024 | IDF `uart_driver_install` |
-| `fx` / `hello` 棧（測試） | 4,096 / 2,048 | `s_fx_loops` / `nc_hello` |
+| `ncm` / `hello` 棧（測試） | 4,096 / 2,048 | `s_ncm_loops` / `nc_hello` |
 | `probe.hub`（測試） | 512 | plan（INTERNAL） |
 | idle／timer／ipc | ~6.5 KB | FreeRTOS |
 | **合計（release）** | **~24 KB** | |
 
-`fx.arena` 512 KB 在 **PSRAM**，不佔內部 SRAM。
+`ncm.arena` 512 KB 在 **PSRAM**，不佔內部 SRAM。
 
 **開機穩定後剩餘（實測 2026-11-08，S3、tests ON）：內部 286 KB、最大連續 208 KB；PSRAM 7.85 MB。**
 
@@ -157,7 +157,7 @@
 | 執行模型 | 原生 C，編譯期決定 | 位元組碼 + 解譯器 |
 | 內部 SRAM 主要用途 | 固定緩衝 + 任務棧（每塊有名字） | 解譯器 + GC heap + WiFi/LWIP |
 | heap 形態 | 用完即還，可預測 | 一個大 GC pool，碎片化 |
-| PSRAM | 只放 FXE arena（512 KB） | 有 PSRAM 時 **GC heap 整個搬去 PSRAM** |
+| PSRAM | 只放 NCM arena（512 KB） | 有 PSRAM 時 **GC heap 整個搬去 PSRAM** |
 | 8 MB 板上的 `gc.mem_free()` | — | 約 **7.9 MB**（在 PSRAM，不代表內部 SRAM 餘裕） |
 
 MicroPython 一開機就會向 ESP-IDF 要一大塊 heap 做 GC pool（PSRAM 有的話就從 PSRAM 要），
@@ -325,7 +325,7 @@ DIRAM 總量（P4 572,368 / S3 341,760）
 | P4 測試 task（sink×2／src×2） | 24,576 B | runtime | ✅ 已由 `CONFIG_NETCORE_TEST_TASKS` 關閉（預設 n） |
 | monitor（每核停滯監控） | 3,072 B | runtime | 新增；`no_epoch`，不影響大循環量測 |
 | P4 tinyusb（`_cdcd_itf` ＋ epbuf） | 21,748 B | 靜態 | 由 `nc_store.c` 的 MSC 拉住 |
-| `s_slots`（任務表 20 格） | 7,680 B | 靜態 | ❌ 不可縮：10 固定 ＋ 8 `.fxe` = 18 |
+| `s_slots`（任務表 20 格） | 7,680 B | 靜態 | ❌ 不可縮：10 固定 ＋ 8 `.nct` = 18 |
 
 ### 9.6 建置方式（不污染共用 build）
 

@@ -156,9 +156,9 @@ static void test_handover(void)
     nc_buf_t *b = nc_buf_create("stage", NC_BUF_PSRAM, 128, 2, NC_BUF_F_FIFO);
     void *before = nc_buf_raw(b, 0);
     const uint32_t gen0 = nc_buf_generation(b);
-    CHECK(nc_buf_handover(b, "fx") == ESP_OK, "全部空 → 換手成功");
+    CHECK(nc_buf_handover(b, "ncm") == ESP_OK, "全部空 → 換手成功");
     CHECK(nc_buf_generation(b) == gen0 + 1, "generation +1");
-    CHECK(strcmp(nc_buf_owner(b), "fx") == 0, "owner = fx");
+    CHECK(strcmp(nc_buf_owner(b), "ncm") == 0, "owner = ncm");
     CHECK(nc_buf_raw(b, 0) == before, "記憶體位置一模一樣");
 
     uint8_t v[8] = {0};
