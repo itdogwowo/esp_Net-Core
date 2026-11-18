@@ -15,6 +15,9 @@ esp_Net-Core/
 │
 ├─ README.md                    ← 你在這裡
 ├─ make.py                      ← 建置入口（python3 make.py p4）
+├─ ★ 建置啟動腳本（repo 根；同網頁工具分開）
+│  ├─ build.sh                  macOS／Linux：建置／燒錄／健檢
+│  └─ make.bat                  Windows：同上（= python make.py）
 ├─ LICENSE
 │
 ├─ docs/                        ──【文件層】只放文字，不含可執行物 ──
@@ -35,8 +38,21 @@ esp_Net-Core/
 │  ├─ partitions.csv            分割表
 │  └─ build/  managed_components/  sdkconfig  ← 生成物，不進 git
 │
-├─ webmaster/                  ──【網頁工作臺】ESP WebMaster（獨立 server；唔屬於 firmware）──
-│  └─ run.py／launch.py        ./web.sh 一鍵開；UI 做 status／log／指令／OTA／FAT 檔案
+├─ web_tools/                   ──【網頁工作臺】ESP WebMaster（全部收喺呢個資料夾）──
+│  ├─ README.md                 唯一入口文件（啟動／頁面／API／分類規則）
+│  ├─ settings.json             ★ 基礎數值（port／host／autoconnect／esptool／UI 首頁）
+│  ├─ settings.local.json       ★ 本機覆寫（選用，gitignore）
+│  ├─ WebMaster.bat  web.ps1    Windows 入口（雙擊 / 完整啟動器）
+│  ├─ web.sh  run_web.sh        macOS／Linux 入口
+│  ├─ WebMaster.command         macOS 雙擊
+│  └─ webmaster/                程式本體
+│     ├─ settings.py            讀設定／驗證／合併（＋內建預設池）
+│     ├─ run.py／launch.py      直接起 server；launch.py 會建 venv 裝 deps
+│     ├─ server.py              REST／WS（status／檔案／OTA／容器／腳本／設定／格式化）
+│     ├─ scripts.py             啟動腳本清單：分類 × 平台（UI「啟動」頁的來源）
+│     ├─ formatting.py          JSON 格式化（server 係唯一真相）
+│     ├─ container.py           .nct／.nce／.nca 容器解析
+│     └─ static/                index.html ＋ js/（12 個模組，零 build step）
 ├─ modules/                    ──【外掛模組層】獨立編譯（唔屬於 firmware）──
 │  ├─ tasks/                   任務模組，leaf 以 _tasks 結尾 → out/<name>.nct
 │  ├─ actions/                 指令模組，leaf 以 _actions 結尾（build.json cmds）
@@ -84,7 +100,33 @@ esp_Net-Core/
 | 實際的 C 程式 | `firmware/main/`、`firmware/components/` |
 | 這塊板子要什麼 | `ports/hardware/<chip>/<board>/`（硬體）＋ `ports/project/<chip>/<board>/`（項目） |
 | 怎麼操作板子 | [tools/README.md](tools/README.md) |
-| 打開網頁工作臺（WebMaster） | `./web.sh`（或雙擊 `WebMaster.command`）→ http://127.0.0.1:8010/ |
+| **打開網頁工作臺（WebMaster）** | Windows：雙擊 `web_tools\WebMaster.bat`；macOS：雙擊 `web_tools/WebMaster.command`；Linux：`./web_tools/web.sh` → http://127.0.0.1:8010/ |
+| 燒錄有三條路（NC4 OTA／server esptool／頁面燒錄） | 見 [web_tools/README.md](web_tools/README.md) 的「燒錄：三條路徑」 |
+| 環境缺咩、點裝 ESP-IDF | UI 左邊「環境」頁；或 `GET /api/env` |
+| 網頁工具的文件／API／全部程式 | [web_tools/README.md](web_tools/README.md)（**唯一入口**） |
+| 唔記得邊個啟動腳本啱我部機 | 見上面「啟動腳本對照」表；或 `curl /api/scripts` |
+
+### 啟動腳本對照
+
+**網頁工具全部喺 `web_tools/`；建置腳本喺 repo 根。** 兩者不再混在一起。
+
+| 用途 | Windows | macOS | Linux |
+|---|---|---|---|
+| **開網頁工作臺**<br>（`web_tools/`） | `WebMaster.bat`（雙擊）<br>`.\web_tools\web.ps1 [-Serial COM13]` | `WebMaster.command`（雙擊）<br>`./web_tools/web.sh` | `./web_tools/web.sh`<br>`./web_tools/run_web.sh` |
+| **建置／燒錄／健檢**<br>（repo 根） | `make.bat <args>` | `./build.sh <args>` | `./build.sh <args>` |
+| 等於 | `python make.py <args>` | `python3 make.py <args>` | `python3 make.py <args>` |
+
+- Windows 第一次跑會自動建 `web_tools\webmaster\.venv` 並裝 deps（`web.ps1` 負責；
+  `WebMaster.bat` 只係揀 Python 再交棒，所以唔使改 ExecutionPolicy）。
+- **冇參數 = 真板優先**：跟 [`web_tools/settings.json`](web_tools/settings.json)——`autoconnect: "auto"` 會自動連插住的 ESP（VID 白名單，排除 Intel AMT／藍牙），
+  搵唔到板就唔連、**唔會偷偷開模擬**；要模擬就 `"sim"` 或 `--sim`。
+- 真板：`.\web_tools\web.ps1 -Serial COM13`（Windows）／`./web_tools/web.sh --serial /dev/cu.usbmodemXXXX`。
+- 換 port：改 `web_tools/settings.json` 的 `server.port`，或者 `--port 8011`（命令列贏設定檔）；
+  port 被佔用時**預設會自動揀下一個**（`server.auto_port`），唔會再卡住啟動。
+- 其他基礎數值（預設連邊個裝置、esptool 的 chip／baud／before、UI 首頁）全部喺
+  [`web_tools/settings.json`](web_tools/settings.json)（**同啟動器同層**；可以只寫想改的 key，其餘落返預設池）；本機差異寫 `web_tools/settings.local.json`。
+  睇實際生效值：`python run.py --print-config` 或 UI「啟動」頁的**目前設定**卡。
+- 上面呢張表喺 UI 都有（**啟動** 頁會自動偵測你嘅平台並排前、其他平台變暗、卡片有位置徽章）。
 
 ⚠️ `docs/03_notes/component-layout.md` 描述的是**目標架構**（hw/sys/sw/action/tasks/ui/schema 七區）。
 **目前實作只有 `sys/` 與 `app/` 兩區**，其餘仍在 `firmware/main/main.c` 裡。讀那份文件時請分清楚「終點」與「現況」。

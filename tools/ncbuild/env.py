@@ -206,13 +206,34 @@ def project_name(d: Path | None) -> str:
 
 # ───────────────────────── IDF ─────────────────────────
 
+def _webmaster_idf_dir(repo: Path) -> str | None:
+    """讀 WebMaster 的設定（settings.local.json 優先），支援它裝在非慣例位置。"""
+    for name in ("settings.local.json", "settings.json"):
+        f = repo / "web_tools" / name
+        if not f.exists():
+            continue
+        try:
+            data = json.loads(f.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        d = (data.get("env") or {}).get("idf_dir")
+        if d:
+            return str(d)
+    return None
+
+
 def idf_path_for(chip: str, cfg: dict) -> Path:
     per = (cfg.get("idf") or {}).get("per_chip") or {}
+    repo = Path(__file__).resolve().parents[2]
     candidates = [
         os.environ.get(f"IDF_{chip.upper()}"),
         per.get(chip.upper()) or per.get(chip),
         os.environ.get("IDF_PATH"),
         (cfg.get("idf") or {}).get("path"),
+        os.environ.get("ESPWM_IDF_DIR"),
+        _webmaster_idf_dir(repo),
+        # WebMaster 在受限環境會裝到 repo 內（已 gitignore）
+        str(repo / ".idf" / "esp-idf"),
         str(Path.home() / "esp" / "esp-idf"),
     ]
     for c in candidates:

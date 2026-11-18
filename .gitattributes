@@ -11,5 +11,11 @@
 
 *.sh    text eol=lf
 *.bash  text eol=lf
+*.command text eol=lf
 *.bat   text eol=crlf
 *.cmd   text eol=crlf
+# PowerShell 在 Windows 上預設 CRLF；最重要係 **web.ps1 一定要有 UTF-8 BOM**，
+# 否則 PowerShell 5.1 會用 ANSI 解讀，中文註解會令整個檔案 parse 失敗
+# （症狀：`Missing closing '}' in statement block`）。BOM 由編輯器／工具保持，
+# 呢行只鎖行尾；唔要 `text=auto`（會把既有檔案一次過重新正規化）。
+*.ps1   text eol=crlf

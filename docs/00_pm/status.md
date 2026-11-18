@@ -1,7 +1,7 @@
 # 專案現況總結（單頁）
 
 > **用途**：所有「已經驗證的事實、已定案的設計、還沒做的事」集中在這一頁；
-> 細節都連到對應文件。**最後更新**：2026-11-17。
+> 細節都連到對應文件。**最後更新**：2026-11-18。
 
 ---
 
@@ -3416,6 +3416,10 @@ modules/
 - 判準：先量 `STATUS keys=net` 的 `max_dlen`／`slot_full`／`peak`／`cfg_src`；達標率
   ≥90% 就停。實測證明「加大緩衝」對吞吐冇幫助（TCP slots 1 KB→4 KB 一樣 490 KB/s）。
 
+> **路徑註記（2026-11-18 稍後）**：§7.92–§7.94 寫的是當時的佈局（`webmaster/` 在 repo 根、
+> 啟動腳本散在根目錄）。同日稍後已搬到 **`web_tools/`**（程式在 `web_tools/webmaster/`）——
+> 睇 §7.95。以下保留原文，當作歷史。
+
 ### 7.92 2026-11-18（網頁工具提升一級：ESP WebMaster 搬到 repo 根，一鍵開）
 
 - `tools/esp_webmaster/` → **`/webmaster/`**（repo 根）。理由：`tools/` 太多命令，
@@ -3449,3 +3453,820 @@ modules/
   ＋`test_server.py::test_container_view`（API）；**pytest 50 passed**。
 - 驗證：重啟 server 後 `/api/container?path=/tasks/test_hello_tasks.nct` 回傳
   `valid:true`、kind=task、meta name／requires／provides（見下方板上實測）。
+
+### 7.94 2026-11-18（WebMaster 一級入口：啟動腳本頁、Windows 啟動、格式化收 server）
+
+**① Windows 啟動腳本（之前只有 macOS／Linux）**
+
+- 新增 `WebMaster.bat`（雙擊即用）＋ `web.ps1`（等同 `web.sh` 的 Windows 版）：
+  揀 Python（`py -3` → `python` → `python3`，用 `--version` 探測）→ 建
+  `webmaster\.venv` → `pip install -r requirements.txt` → 起 server → 開瀏覽器。
+- 三個踩過的坑（全部已修，寫進檔頭）：
+  - **`.ps1` 冇 BOM 會被 PowerShell 5.1 當 ANSI 讀** → 中文註解亂碼令整個檔
+    `Missing closing '}'`；`.ps1` 一律存 **UTF-8 with BOM**。
+  - **`.bat` 係 cmd 用主控台代碼頁解** → UTF-8 中文會亂碼／爆語法；`.bat` 一律
+    **純 ASCII**（中文訊息交由 `web.ps1` 輸出）。
+  - **PS 5.1 傳 `-c "…"` 給原生程式時含引號的字串會被拆爛**（Python 回
+    `SyntaxError: File "<string>"`）→ 探測改用 `--version`；`-c` 的內文唔可以
+    有雙引號。
+  - **cmd 唔接受 `cmd1 && ( 多行 ) || ( 多行 )`**（實測「此時不應有 (」→
+    整個 launcher 直接死）→ 一律用單行 `&&` 或 `if errorlevel` ＋ `goto`。
+  - `pip` 用 `--no-cache-dir`：本機 pip wheel 快取目錄可能被 ACL 鎖住（WinError 5），
+    寫快取會令整個 install 失敗。
+- 其他平台入口補齊：`build.sh`（Linux 建置）、`run_web.sh`（Linux 通用）、
+  `make.bat`（Windows 建置）；`web.sh` 檔頭加平台對照。
+
+**② UI 新增「啟動」頁（分類層級）**
+
+- 左邊 rail 第一項 **🚀 啟動**；冇 hash 時它係預設頁（連上裝置才跳去「設備」）。
+- 三層結構：**分類 → 平台 → 腳本卡片**。分類固定四層（空分類唔顯示）：
+  網頁工作臺／建置-燒錄／板子-模擬器／AI-整合。
+- 平台分段（Windows／macOS／Linux／通用）＋ **自動偵測**（UA）：自己平台的卡片高亮
+  「你嘅平台」，其他平台變暗；可勾「只顯示我嘅平台」。`.sh` 顯示 **macOS／Linux**。
+- 每張卡有：中文摘要、**可直接複製的指令**（`.\WebMaster.bat`、`./web.sh`，唔含本機
+  絕對路徑）、提示、參數 chips、**睇內容**（只讀全文，唔會執行）。
+- 後端 `webmaster/scripts.py`：分類／平台／摘要／參數全部有規則可循（檔名關鍵字、
+  副檔名、`param()` 區塊、檔頭註解，支援 `#`／`REM`／`::`／`<# #>`，跳過 shebang／
+  `@echo off`）。已知腳本用 `KNOWN` 表給中文文案（`.bat` 只能寫英文）。
+- **安全**：`read()` 只准 repo 根直屬檔、副檔名白名單、拒絕 `../`、唔跟 symlink。
+- API：`GET /api/scripts`、`GET /api/scripts/one?name=…`。
+
+**③ JSON 格式化收歸 server**
+
+- 新增 `webmaster/formatting.py` ＋ `POST /api/format`（唯一真相；UI 由它接手）。
+- 壞 JSON **唔改內容**，回 `line`／`col`；非 `.json`、>1 MiB 直接拒絕。
+- UI 的 `Ctrl/Cmd-Shift-F` 同「格式化」按鈕改走 API，toast 顯示
+  「第 N 行，第 M 欄」與位元組變化。
+
+**④ 其他**
+
+- `test_flash.py` 兩個測試由 pytest `tmp_path` 改用 `workdir` fixture：
+  Windows sandbox 會為 `tmp_path` 加「只俾建立者」ACL，`scandir` 會 WinError 5
+  （之前一直有 2 個 error）。
+- 測試：新增 `test_scripts.py`（分類／平台／參數／防穿越）、`test_scripts_api.py`
+  （API＋repo 根唔存在）、`test_format.py`（輸出／壞 JSON 位置／大小上限／API）；
+  **pytest 84 passed ＋ 1 skipped**（symlink 需要管理員權限，Windows 會 skip）。
+
+**⑤ 驗證**
+
+- Windows 實機：雙擊流程 `WebMaster.bat → web.ps1 → venv → deps → server` 全程通；
+  `.\web.ps1 -Sim -Port 8019` 起得到，`/api/info` 200。
+- 瀏覽器實測（ego-browser，127.0.0.1:8019）：啟動頁 4 個分類／7 張卡、平台徽章
+  `Windows`／`macOS／Linux`、自動偵測＝Windows、`2/5` 適用數、複製指令、睇內容（771 B）。
+- IDE：`/config/system.json` 壓成一行 → 格式化 → 11 行標準 JSON（66 B → 104 B）；
+  壞 JSON 測試 → toast「第 2 行，第 8 欄：Expecting value」且內容不變。
+
+### 7.95 2026-11-18（網頁工具收納：全部收進 `web_tools/`，根目錄只剩建置工具）
+
+**① 目錄定案**
+
+之前網頁工具「散落一地」：程式在 `webmaster/`、5 個啟動腳本散在 repo 根，
+同與 web 無關的 `make.py`／`build.sh`／`make.bat` 混在一起。
+
+```text
+repo/
+├─ make.py  build.sh  make.bat     建置（同網頁工具無關）
+└─ web_tools/                       ← 網頁工具全部喺呢度
+   ├─ README.md                    唯一入口文件（原本 webmaster/README.md）
+   ├─ WebMaster.bat  web.ps1       Windows
+   ├─ web.sh  run_web.sh           macOS／Linux
+   ├─ WebMaster.command            macOS 雙擊
+   └─ webmaster/                   server ＋ 前端（程式本體）
+      ├─ run.py launch.py server.py scripts.py formatting.py container.py …
+      ├─ static/  tests/  requirements.txt
+      └─ .venv/  .simfs/           生成物（gitignore）
+```
+
+- 全部用 `git mv`（歷史保留）；`.venv` 先刪（venv 唔可以搬，會留絕對路徑）再由
+  `web.ps1` 重建。
+- **根目錄唔留跳板**（用戶決定）：要雙擊就入 `web_tools/`；文件與 UI 都講清楚路徑。
+- 好處：`git status`／新人都只會見到一條界線（建置 vs 網頁工具），
+  唔會再問「web.ps1 同 make.py 有咩關係」。
+
+**② 路徑假設修正（搬移唔止係 `git mv`）**
+
+| 位置 | 之前 | 之後 |
+|---|---|---|
+| `server.py` REPO_ROOT | `BASE_DIR.parent`（=webmaster 上一層） | `BASE_DIR.parent.parent`（repo 根） |
+| 啟動腳本掃描根 | 只有 repo 根 | **兩條**：`<repo>/web_tools` ＋ `<repo>`（新增 `script_roots()`） |
+| `sim.py` 找 `modules/out` 樣本 | `parents[1]` | `parents[2]`（多了一層） |
+| `tests/test_container.py` | `parents[2]` | `parents[3]` |
+| `scripts.py` | 單根 `discover(root)`／`read(root, name)` | `discover(roots)` 多根；`rel` 由 repo 根起算（`web_tools/web.sh`、`make.bat`） |
+| `read()` 防穿越 | 只准單檔名 | 准 `<root>/<檔名>` 或 `<root>/<一層>/<檔名>`，仍然拒絕 `..`／絕對路徑／symlink |
+| API | `?name=web.sh` | `?rel=web_tools/web.sh`（亦可 `?name=` 由 server 找；兩者皆無 → 400） |
+| UI 命令 | `.\WebMaster.bat` | `.\web_tools\WebMaster.bat`（由 repo 根起算，貼落終端就用得） |
+| UI 卡片 | 只有平台徽章 | 多一個**位置徽章** `web_tools/`（repo 根的腳本唔顯示） |
+
+**③ 文件同步**
+
+- `web_tools/README.md`（原 `webmaster/README.md`）：加「呢個資料夾有咩」目錄樹、
+  啟動表改為「`web_tools/` 內 vs repo 根」、API 改 `?rel=`。
+- 根 `README.md`：目錄樹、啟動對照表全部改成 `web_tools/…`；「我要找的東西」加
+  「網頁工具的文件／API／全部程式 → web_tools/README.md（唯一入口）」。
+- `tools/README.md` 的「快速入口」、`docs/README.md`、`docs/03_notes/file-transfer.md`、
+  `docs/03_notes/usb-config.md`、`docs/02_guides/esp-webmaster-test.md` 全部更新。
+- §7.92–7.94 保留原本寫法（係當時的事實），但加咗「路徑已於 §7.95 搬到 web_tools/」註記。
+
+**④ 測試與驗證**
+
+- 測試改成真實佈局（`web_tools/` ＋ repo 根）：`test_scripts.py` 加
+  「`rel` 由 repo 根起算」測試；`test_scripts_api.py` 重寫（多根、`?rel=`、
+  10 種穿越全部 404、冇目標 → 400、repo 根唔存在 → 空清單而唔係 500）。
+- **pytest 90 passed ＋ 1 skipped**。
+- 語法：`web.sh`／`run_web.sh`／`WebMaster.command` `bash -n` 通過；
+  `web.ps1` PS 5.1 parse OK、UTF-8 BOM 保持；`WebMaster.bat` 純 ASCII。
+- 實機：由 repo 根跑 `web_tools\WebMaster.bat --port 8010` → 自動建 venv、裝 deps、
+  起 server、開瀏覽器，`/api/info` 200。
+- 瀏覽器：`/api/scripts` 回 7 個腳本、`roots = web_tools, esp_Net-Core`、
+  `rel`／`location` 正確；啟動頁卡片顯示 `web_tools/` 徽章、指令係 `.\web_tools\web.ps1`。
+
+### 7.96 2026-11-18（WebMaster 設定檔：基礎數值集中，port 被佔用自動換）
+
+**① 問題**
+
+`WebMaster.bat` 雙擊時報「Port 8010 已被佔用（可能係另一個 WebMaster）」並 exit 6，
+要人手換埠。根因唔止係「仲有個 server 開住」，而係**四方各有預設**：
+`web.ps1` 寫死 8010／`run.py` 又一個 8010／`web.sh` 寫死 `--open`／
+沒有地方講「預設連 sim 定唔連」。改一個地方，其餘三個唔會跟。
+
+**② 定案：`web_tools/settings.json`（＋`settings.local.json`）**
+
+- **位置：`web_tools/`——同啟動器同層**（唔係收喺 `webmaster/` 入面）。改 port／預設裝置
+  係「打開工具」那一層的事，打開 `web_tools/` 就見到；程式目錄只有**預設池**
+  （`settings.py` 的 `DEFAULTS`），冇填的 key 就落返預設。
+- 檔：`settings.json`（團隊預設，入 git）／`settings.local.json`（本機覆寫，`web_tools/.gitignore`）。
+- **可以只寫想改的 key**（深層合併）：`{"server":{"port":8020}}` 就夠。
+- **優先次序：命令列 > settings.local.json > settings.json > 內建預設池**；
+  亦支援 `ESPWM_PORT`／`ESPWM_HOST`／`ESPWM_AUTOCONNECT`／`ESPWM_LOG_LEVEL`。
+- 內容（`web_tools/webmaster/settings.py` 有完整 schema＋範圍）：
+
+| 段 | key | 預設 | 說明 |
+|---|---|---|---|
+| server | `host` / `port` | 127.0.0.1 / 8010 | 綁定 |
+| server | `auto_port` / `auto_port_scan` | true / 20 | **被佔用就自動揀下一個** |
+| server | `open_browser` / `log_level` | true / info | |
+| device | `autoconnect` | `"sim"` | `"sim"`／`"COM13"`／`null`（UI 自己揀） |
+| device | `baud` / `sim_dir` | 115200 / null | |
+| flash | `esptool_chip/baud/before/offset` | `""`／460800／usb_reset／0x0 | 固件頁預設 |
+| ui | `default_view` | launch | 冇 hash 時開邊頁 |
+
+- **launcher 唔再寫死任何值**：`web.ps1`／`web.sh` 只把你明確俾的參數轉交 `run.py`；
+  `web.ps1` 先用 `run.py --print-config` 印一行「設定檔：port=… autoconnect=…」再啟動。
+  （所以「改咗設定但仍然報 8010」呢類問題唔會再出現。）
+- **壞值要大聲**：型別錯／超出範圍／枚舉錯 → 報錯並指出 key 同來源檔
+  （`server.port` 收到 `"8010"` 或 `true` 都會即刻擋）；未知 key 只警告，
+  `_comment` 之類靜靜容許。
+- 新指令：`run.py --print-config`（睇實際值＋來源，唔起 server）、
+  `--write-config [--force]`（產生帶註解的 settings.json）、`--auto-port/--no-auto-port`、
+  `--no-open`、`--log-level`。
+- 新 API：`GET /api/config`（唯讀，實際生效值＋邊個檔提供＋local 有冇存在）。
+- UI「啟動」頁新增**目前設定**卡（11 個基礎值一眼睇完，可 ⟳ 重讀）。
+
+**③ 行為對齊（避免改差）**
+
+`device.autoconnect` 預設 `"sim"`：雙擊 `WebMaster.bat` 仍然「一開就有畫面（模擬裝置）」，
+同之前一樣；要真板就 `-Serial COM13`（CLI 永遠贏）或改設定檔。
+
+**④ 驗證**
+
+- 實測自動換埠：先佔 8010 開一個 → 第二個自動去 8011；再開第三個 → 8012
+  （log 有 `Port 8010 已被佔用 → 改用 8011`）。
+- 設定檔：`--print-config` 正確顯示來源；`settings.local.json` 覆寫生效；
+  環境變數覆寫生效；壞 JSON 報「第 N 行第 M 欄」；`"port": "8010"`／`"port": true`
+  都被擋並指出 `server.port`。
+- 測試：新增 `tests/test_settings.py`（18 支）——優先次序、壞值、bool≠int、
+  未知 key 只警告、`write_default` 唔覆蓋、repo 內 settings.json 一定讀得通、
+  `port_in_use`／`find_free_port`、`run.py` 的 CLI 預設一律 None。
+  **pytest 108 passed ＋ 1 skipped**。
+- UI：瀏覽器實測設定卡 11 項正確（`settings.json` 為來源、auto_port=開、autoconnect=sim）。
+
+
+### 7.97 2026-11-18（WebMaster 真板優先：`autoconnect: "auto"`，唔再偷偷開模擬）
+
+**① 問題**
+
+`autoconnect` 預設 `"sim"`，所以每次開機都自動連一個**模擬裝置**；用戶插住真板
+（COM20，`VID:PID=303A:1001` Espressif）卻見到 device strip 寫住「sim · sim」，
+要自己斷線、揀 port、再連線。而 device 下拉更出現 `sim · sim` 這種重複標籤。
+
+**② 定案：真板優先，搵唔到就唔連**
+
+- `device.autoconnect` 預設改為 **`"auto"`**：
+  - 掃 `serial.tools.list_ports`，只認**有 VID 的 USB 序列**，白名單
+    `0x303A`(Espressif 原生 USB)／`0x10C4`(CP210x)／`0x1A86`(CH34x)／`0x0403`(FTDI)／
+    `0x1B4F`／`0x2341`；
+  - **排除**：Intel AMT SOL、藍牙 SPP（就算有 VID 都排除）、冇 VID 的虛擬／PCI 埠；
+  - Espressif 原生 USB 優先；`prefer_port` 可以在 auto 時指定優先埠（但**唔會**讓
+    非板埠過關）。
+  - **搵唔到板 = 唔連**，log 印「未偵測到板子（USB 序列）」，UI 仍可自己揀 port。
+    **唔會** fallback 去模擬。
+- 新增 `settings.device.prefer_port`。
+- 判斷邏輯只有一份：`webmaster/link.py` 的 `is_likely_board()`／`find_board_port()`；
+  `/api/ports` 回 `board`／`suggested` 給 UI，前端唔再自己寫一套 heuristic。
+
+**③ UI 唔再撈亂真板同模擬**
+
+| 之前 | 之後 |
+|---|---|
+| device 下拉：`sim · sim` | `COM20` ／「模擬裝置（無硬件）」 |
+| port 下拉：COM3（Intel AMT）排第一 | `★ COM20` 排第一並預設選中（★ = 疑似板） |
+| 按鈕：模擬裝置 | 按鈕：**模擬（無硬件）**（tooltip 講明唔會碰真板） |
+| 冇板時靜靜咩都唔做 | log 講「未偵測到板子」，UI 照樣可揀埠 |
+
+**④ 驗證（真板：S3 Mini-Nano／COM20）**
+
+- 開 `web_tools\WebMaster.bat` → log「自動偵測到板子：COM20」→ `/api/info`
+  `connected:true sim:false port:COM20`。
+- `/api/status?keys=sys,storage`：`chip=esp32s3`、`fw=0.1.2`、`app=08d1d1ac`、
+  `heap=68,548`、`storage total=872,448 free=798,720`、`mode=app`。
+- `/api/manifest`：10 個檔（`/config/*.json`、`/config/zero.txt` 等），真實 FAT。
+- 終端有真板 log：`I (32486) netcore: t=… dt=1000002 us heap=67844`。
+- `/api/ports`：`COM20 board=true suggested=COM20`；COM3／COM32／COM33 `board=false`。
+- UI：device 下拉 `COM20`、port 下拉 `★ COM20` 排第一且被選中、ticket
+  `esp32s3 / COM20 · app`、設備頁顯示真 chip／fw／heap／storage。
+- 測試：新增 `tests/test_link_ports.py`（18 支）——VID 白名單、Intel AMT／藍牙排除、
+  「冇 VID 唔算板」、「有 VID 但寫明藍牙都唔算」、`prefer_port` 指向系統埠時要忽略、
+  Espressif 優先。**pytest 126 passed ＋ 1 skipped**。
+
+
+### 7.98 2026-11-18（Windows cp950 崩潰 + 自動連線失敗要出聲）
+
+**① `UnicodeEncodeError` 會整個程式收場（唔止亂碼）**
+
+繁中 Windows 的 Python 用主控台代碼頁（`cp950`／Big5）輸出。只要字串有一隻
+Big5 沒有的字，`print()` 就 raise `UnicodeEncodeError` —— **整個 process traceback**，
+唔係「顯示亂碼」咁簡單。實測爆點：
+
+```
+run.py --print-config
+  print(json.dumps(...))        # effective 裡面有 settings.json 的 _comment
+  UnicodeEncodeError: 'cp950' codec can't encode character '\u55ba'
+```
+
+`\u55ba` = **「喺」**（註解文字有「插住嘅真板」「搵唔到就唔連」）。我之前的測試
+全部帶了 `PYTHONIOENCODING=utf-8` 所以冇暴露——**用戶環境冇設就一定死**。
+
+- 修 1：新增 `webmaster/console.py`（`setup()`），同 `make.py` 一樣**只放寬
+  `errors="replace"`、唔改 encoding**（改 utf-8 會令 cp950 主控台整版變亂碼）。
+  `run.py`／`launch.py` 一 import 就呼叫，**喺任何 print 之前**。
+- 修 2：新增 `settings.public()`，把 `_comment*` 這類說明欄位從
+  `--print-config` 同 `/api/config` 的輸出剔除——註解唔係設定值，少印就少一個爆點。
+- 測試：`tests/test_console.py`（6 支）——先證明 cp950 stream 真係會爆，
+  再驗證 `setup()` 之後「怪字變 `?`、正常中文照出」、`public()` 剝註解、
+  `run.main(["--print-config"])` 在 cp950 stream 下 rc=0 且輸出無 `_comment`。
+
+**② 自動連線失敗唔可以靜靜 `connected:false`**
+
+場景：已經有個 WebMaster 開住 COM20，第二個實例（自動換 port 到 8012）再去開
+同一個序列埠 → 開埠失敗。之前只有一行 `autoconnect 失敗：…` 印喺 console，
+**UI 完全唔知**，用戶見到「未連線」會以為板壞。
+
+- `server.py`：`State.autoconnect_error` + `_friendly_connect_error()`，把
+  `Access is denied`／`busy`／`PermissionError` 翻譯成
+  「個埠好似被另一個程式佔用（另一個 WebMaster／Arduino 監控／PuTTY？）」。
+- `/api/info` 回 `autoconnectError`。
+- UI：開機讀到就 `logLine` + `toast`（12 秒），唔會靜靜。
+- 測試：`tests/test_connect_errors.py`（6 支）——佔用／timeout／未知錯誤的文案，
+  以及 `/api/info` 在「連唔到」「冇設定」「連得到」三種情況的值。
+
+**③ 驗證**
+
+- 無 `PYTHONIOENCODING` 下 `python run.py --print-config` rc=0、純設定值。
+- 無 `PYTHONIOENCODING` 下跑 `web.ps1`：`設定檔（web_tools\settings.json）：port=8011
+  … autoconnect=auto` 正常印出。
+- 真板（使用者把 `server.port` 設成 **8011**）：`connected:true sim:false port:COM20`、
+  `chip=esp32s3 fw=0.1.2 heap=68,132`、`storage 798,720/872,448`。
+- 第二個實例：`autoconnectError=連唔到 COM20：個埠好似被另一個程式佔用…`。
+- **pytest 138 passed ＋ 1 skipped**。
+
+
+### 7.99 2026-11-18（把自動偵測講出來：掃一次、唔逐個開埠、跳過要講原因）
+
+**① 用戶問「係唔係一開就掃描全部，然後自動識別？」**
+
+係——但要講清楚**掃幾多、做咩**：
+
+- `serial.tools.list_ports.comports()` 讀的是**中繼資料**（埠名／description／
+  VID-PID／序列號），Windows 上問 SetupAPI／registry，**幾十毫秒、一次性**。
+- **唔會逐個埠開一次試**（開埠會打斷板上程式，亦可能搶走 Arduino 監控／PuTTY
+  正在用的連線）。真正開埠只有最後揀中的那一個。
+- 判斷＝有 VID 的 USB 序列＋VID 白名單（303A／10C4／1A86／0403／1B4F／2341），
+  排除 Intel AMT SOL、藍牙 SPP、冇 VID 的虛擬埠；Espressif 原生 USB 優先。
+
+**② 但之前 log 只講一句「自動偵測到板子：COM20」**
+
+用戶唔知跳過了幾多個、為咩跳過。改成有結構的說明：
+
+```
+[esp_webmaster] 掃描序列埠：共 4 個 -> 疑似板 1 個（只讀 USB 中繼資料，唔會逐個開埠試）
+[esp_webmaster]    選中 COM20（Espressif 303A:1001）
+[esp_webmaster]    跳過：COM3=Intel AMT SOL、COM32=藍牙序列埠、COM33=藍牙序列埠
+```
+
+- `link.scan_ports()` 回結構化結果（total／boards／chosen／others／skipped＋原因），
+  `link.format_scan()` 負責出人話；插兩塊板會多一行提示 `--serial COM21`。
+- 新增 `run.py --list-ports`：只掃描並解釋，**唔起 server**。
+- 用 ASCII 符號（`->`）唔用 `✓`／`·`：cp950 冇 `✓`（U+2713），一印就爆。
+
+**③ 重定向到檔案改寫 UTF-8**
+
+`console.setup()` 分兩種情況：
+
+| 情況 | encoding | errors |
+|---|---|---|
+| 真主控台（tty） | 保持系統碼頁 cp950 | replace |
+| 被 pipe／重定向到檔案 | **UTF-8** | replace |
+
+所以 `WebMaster.bat > boot.log` 的日誌用任何編輯器都讀得明（原本寫 cp950 會亂碼）；
+主控台仍然用 cp950（硬改 utf-8 會令整版中文變亂碼）。
+
+**④ 驗證**
+
+- `python run.py --list-ports` → 上面三行、rc=0、無 `PYTHONIOENCODING` 亦唔爆。
+- 重定向到檔案後以 UTF-8 讀 → 中文完整正確。
+- 所有新訊息用程式檢查過**全部可編成 cp950**。
+- 真板（8011）：`connected:true sim:false port:COM20`、`autoconnectError=null`。
+- **pytest 140 passed ＋ 1 skipped**（`test_console.py` 增到 8 支，涵蓋
+  tty＝cp950／重定向＝UTF-8 兩條路）。
+
+
+### 7.100 2026-11-18（前端拆模組；刪「啟動」頁；JS／Python 分工講清楚）
+
+**① 刪 `#launch`（承認理解錯）**
+
+原本把「快速啓動網頁腳本放進去瀏覽器」理解成「在 UI 裡列出 repo 的啟動腳本」，
+做成 rail 第一項的「啟動」頁。實際用起來係多餘的——**你都已經打開工具了，
+站內再教一次啟動有咩用**。已刪：
+
+- HTML：rail 按鈕、`<section data-view="launch">`、對應 CSS（約 100 行）
+- JS：`launch*`／`loadScripts`／`loadServerConfig`／`copyText` 全部移除
+- `settings.ui.default_view` 唔再接受 `"launch"`（改成 `device|ide|drive|flash|monitor`，預設 `device`）
+- 鍵盤快捷鍵改回 `1`–`5`（設備／IDE／隨身碟／固件／指令）
+- **`/api/scripts` 保留**（AI／CLI 用），只係冇 UI。
+
+**② 前端拆成 12 個模組（`static/js/`）**
+
+本來 2,560 行單一 `app.js`，17 個區塊撈在一起。現在：
+
+```
+00-core(狀態/工具/api) 10-connection 20-terminal 30-status 40-files
+50-drive 60-flash 70-console 75-shell(switchView+bindUI)
+80-ide 85-container 99-app(init)
+```
+
+- **傳統 `<script>` 按檔名次序載入**，唔用 ES module、唔需要打包／build step；
+  `index.html` 換成 12 個 `<script src>`，舊 `app.js` 刪除。
+- 切割用行號機械式進行（唔手抄），每檔都有 `"use strict"`，`node --check` 全過。
+- 新增 `tests/test_frontend.py`（8 支）：模組清單／載入次序（core 首、app 末）／
+  每檔 `use strict`／`node --check`／**JS 的 `$("#id")` 必須存在於 index.html**／
+  `#launch` 冇殘留／`api()` 路徑都係 `/api` 開頭。
+  （拆檔最易中的錯就係「HTML 漏個 id」，瀏覽器只會 `Cannot read properties of null`。）
+
+**③ JS／Python 分工（回答「會不會影響我 JS 的讀取」）**
+
+| 層 | 做咩 | 平台差異 |
+|---|---|---|
+| 瀏覽器 JS | 只做畫面與互動 | 冇（瀏覽器本身跨平台） |
+| server Python | 序列埠、檔案系統、`settings.json`、esptool、NC4 | 都集中在 `link.py`／`flash.py`；`serial.tools.list_ports` 自己處理 Win／macOS／Linux |
+
+- 瀏覽器**冇權**讀序列埠或檔案系統，所以「讀 port／讀檔」只能在 server；
+  JS 只接 JSON。
+- 「這是不是板子」的判斷**只有一份**（`link.is_likely_board()`），經
+  `GET /api/ports` 的 `board`／`suggested` 傳給前端；之前曾在 `app.js` 另寫一套，
+  已收回。所以改 JS 不會跟後端打架。
+
+**④ 驗證**
+
+- 真板 8011：`connected:true sim:false port:COM20`；12 個模組全部 200；舊
+  `/static/app.js` 已 404。
+- 瀏覽器：rail 只剩 5 項、無 `#launch`；`window.*` 的 14 個代表函式全部係 function；
+  逐頁切換（device／ide／drive／flash／monitor）都 render 正常。
+- IDE 實測開真板檔案：`/config/system.json`（2,120 B、`JSON ✓`、12 個樹節點）。
+- 指令頁實測真板：`0x1101` → `0x1102` 94 bytes。
+- **pytest 148 passed ＋ 1 skipped**（新增 `test_frontend.py` 8 支）。
+
+
+### 7.101 2026-11-18（第三條燒錄路徑：esptool-js；環境自檢＋一鍵裝 ESP-IDF）
+
+**① 為什麼加第三條路，而不是取代第二條**
+
+用戶問「可否用 esptool-js 燒錄，其後全靠 API」。技術上可以，但它**不會消滅**
+「序列埠只能有一個主人」這個約束，只是把埠的工作從 server 搬到瀏覽器
+（見 [`esptool-js` README](https://github.com/espressif/esptool-js)：建基於 Web Serial，
+Chrome／Edge 89+，需 user gesture 選埠）。所以定位成**可選的第三條路**，三條並存：
+
+| | ① NC4 OTA | ② server esptool | ③ 頁面燒錄（esptool-js） |
+|---|---|---|---|
+| 要放開埠 | 唔需要 | server 自動 | 手動交接 |
+| AI 可燒 | ✅ | ✅ | ❌ |
+| 適用 | S3／C3 日常 | P4／救磚／首燒 | 零安裝、Chrome |
+
+**② 序列埠交接（新的狀態機）**
+
+- `State.handover = {port, at, device, sim}`；交接期間 server **唔會**自己重開埠。
+- `POST /api/port/release`（關 link、記錄交接）→ 瀏覽器 Web Serial 燒 →
+  `POST /api/port/reclaim`（重連，模擬裝置亦處理）。
+- `GET /api/port/state` 回 `{handover, port, ageSec, stale(>10 分鐘), browserFlash}`。
+- 交接期間其他 API 回 **409 並講明原因**（原本會變成「未連線」這種誤導訊息）。
+- 實測（真板 S3／COM20）：release 後**另一個 process 真的開得到 COM20**
+  （證明埠真空出來）→ reclaim 後 `connected:true`。
+- 設定 `flash.browser_flash`（預設 true）可整張卡停用。
+
+**③ esptool-js vendored 而非 npm**
+
+- `static/vendor/esptool-js/`：`bundle.js`（308.5 KB，pako 已內聯）、`LICENSE.txt`
+  （Apache-2.0，vendor 必須保留）、`VENDOR.md`（版本／來源／怎樣重建）。
+- `bundle.js` 是 **ES module**，本專案其餘是傳統 script → 加 `loader.js` 薄 shim
+  把 export 掛上 `window.esptooljs` 並發 `esptooljs-ready` 事件。
+- 要改行為就在 `static/js/65-browser-flash.js` 外面包（進度／錯誤中文化／交接／自檢），
+  唔好改 minified bundle。
+
+**④ 環境自檢＋安裝（`env.py`）**
+
+- 11 項工具：python／pip／deps／esptool／git／cmake／ninja／node／**idf**／
+  **idf_toolchain**／serial_driver；每項有 `status`／`version`／`impact`／`fix`。
+- **五種能力分開講**（用戶最常混淆「燒到」與「build 到」）：
+  `run_server`／`flash_nc4_ota`／`flash_esptool`／`flash_browser`／`build_firmware`。
+  本機實測：`build_firmware=false`（冇 IDF），其餘四項 true。
+- `cmake 4.x` 會附註「部分 IDF 版本要 `-DCMAKE_POLICY_VERSION_MINIMUM=3.5`」。
+- API：`GET /api/env`、`POST /api/env/install`（**confirm 必填**）、
+  `GET /api/env/install?since=N`（逐次讀新行，唔阻塞）。
+- 安全：**唔會覆蓋非空又唔係 IDF repo 的資料夾**（回 `rc=-2` 並保留檔案）；
+  目標晶片名驗證；命令以 list 傳 `Popen` 不經 shell；一次只准一個工作。
+- 開機自動檢查一次（可用 `--no-env-check` 關），缺的項目印一句並指向 UI／API。
+
+**⑤ UI**
+
+- 新增 rail **「環境」**（第 6 項，鍵盤 `6`）：能力 grid、11 項工具表、
+  安裝區（項目／晶片／路徑）＋即時日誌。
+- 固件頁加第 4 卡「頁面燒錄」：三步按鈕、offset／baud／mode／freq／size／eraseAll、
+  進度條、日誌、`?` 自檢（Web Serial／esptool-js／secure context）。
+- 前端模組由 12 → **14**（+`65-browser-flash.js`、+`90-env.js`）。
+
+**⑥ 驗證**
+
+- pytest **174 passed ＋ 1 skipped**（+`test_port_handover.py` 8 支、`test_env.py` 18 支）。
+- 真板：三條路徑能力全 true；release→外部程式開得到 COM20→reclaim 後重連；
+  交接期間 `/api/status` 回 409 附「交畀瀏覽器」說明。
+- 瀏覽器：`window.esptooljs` 有 22 個 export；`navigator.serial` 存在；
+  環境頁顯示 11 行、能力 5 格；`#launch` 頁已不存在。
+- 開機日誌：`環境：run_server=v flash_nc4_ota=v flash_esptool=v flash_browser=v build_firmware=x`。
+
+
+### 7.102 2026-11-18（AI 也能發起頁面燒錄：佇列＋人在最後按一下）
+
+**① 先釐清問題**
+
+用戶問「頁面燒錄為什麼 AI 不能操作」。準確講法：
+
+- **AI 本來就燒得到**（① NC4 OTA／② server esptool 兩條都係 REST）。
+- ③ 頁面燒錄之所以「AI 不能」，唯一原因是 **Web Serial 的
+  `navigator.serial.requestPort()` 必須有 user gesture**——這是瀏覽器安全模型，
+  任何網頁都繞不過（不是本專案的限制）。
+- 因此正確做法不是「讓 AI 假裝人手勢」，而是 **AI 下指令、人按一下、結果回 AI**。
+
+**② 新增：燒錄請求佇列**
+
+| API | 用途 |
+|---|---|
+| `GET /api/flash/paths` | 三條路徑的可用性＋`aiCanInvoke`＋`needsPortHandover`＋`humanGestureRequired` |
+| `POST /api/flash/request` | AI 上傳 `.bin` 排隊（`offset`／`mode`／`freq`／`size`／`eraseAll`／`note`） |
+| `GET /api/flash/request` | 目前 pending ＋ 最近 5 條歷史 |
+| `GET /api/flash/request/{id}/image` | 瀏覽器下載映像去燒 |
+| `POST .../claim`、`.../result`、`.../cancel` | UI 接手／回報（`ok`／`error`）／拒絕 |
+
+- 狀態機：`pending → claimed → done|failed`（或 `cancelled`）；
+  **同一時間只准一個 pending**，第二個回 409。
+- 映像存 `webmaster/.flashq/`（gitignore、`ESPWM_FLASH_DIR` 可覆寫），
+  **燒完／取消即刪**；上限 8 MiB；offset 驗證非負整數。
+- UI：WS `flash_request` → 固件頁彈「AI 請求燒錄」橫幅＋toast；
+  按「執行」＝claim → release 埠 → `requestPort()`（人手勢）→ `writeFlash`
+  → reclaim → `result(ok)`。開頁時亦會 `GET` 一次，唔會漏掉離線期間的請求。
+- 前端模組 14 → **15**（+`66-flash-request.js`）。
+
+**③ 驗證**
+
+- pytest **188 passed ＋ 1 skipped**（+`test_flash_request.py` 14 支：佇列／映像回讀／
+  claim 兩次 409／result 成功失敗／取消／上限／空檔／壞 offset／未知 id）。
+- 實機流程：`POST /api/flash/request`（X-Actor: ai，1 KiB 測試映像）→
+  `GET` 見到 `pending / by=ai` → 重新載入 UI 自動彈出橫幅（截圖）＋toast
+  「AI 請求燒錄（1.0 KiB）」→ 按「拒絕」→ `history: cancelled`、pending 清空。
+- 員測試殘留：測試改為 monkeypatch `server.FLASH_DIR`，唔會再喺 repo 留 `.flashq/`。
+
+**④ 定位（唔取代 ②）**
+
+頁面燒錄仍然係「server 側冇 esptool／想用瀏覽器埠」時的備選。AI 用 ② 更快更穩；
+③ 的價值是**唔需要 Python 也能燒**，以及可以由 AI 發起、人在最後確認。
+
+
+### 7.103 2026-11-18（IDF 版本化安裝：v6.1.0 根本唔存在；Windows 官方支援）
+
+**① 查證結果（唔靠記憶）**
+
+| 問題 | 查證 | 結論 |
+|---|---|---|
+| IDF 有 Windows 版？ | `esp-idf/v6.1.1/docs/en/get-started/windows-setup.rst` HTTP 200；`install.ps1` 存在 | **有，官方支援** |
+| `v6.1.0` tag 存在？ | GitHub API `git/ref/tags/v6.1.0` → **404**；`v6.1`、`v6.1.1` 存在 | **冇 `.0`**（慣例 `v6.1`＋`v6.1.1`） |
+| Python 版本？ | EIM 先決條件頁：支援 **3.10–3.14**，「3.14 已在 Windows／macOS／Linux 完整支援」 | 本機 3.14.6 ✓ |
+| 可裝進 server 的 venv？ | `install.ps1` 呼叫 `idf_tools.py install-python-env`，在 `%USERPROFILE%\.espressif\python_env\` **自建**環境 | **唔可以亦唔需要** |
+
+**② 實作：版本化安裝**
+
+- `env.fetch_idf_versions()`：GitHub tags，**快取 1 小時**，離線時回舊快取＋`error`（唔 raise）。
+- `env.stable_versions()`：濾走 `-dev`／`-rc`／`-beta`／`-alpha`。
+- `env.normalize_version()`：`latest`／精確 tag／補 `v`／**去掉 `.0`**／同系列取最新修補／
+  未知版本只警告（回原文照試）。回 `(tag, 說明)`，說明會寫入安裝日誌。
+- `clone_command(dir, version)` 加 `--branch <tag>`。
+- `Installer.start(…, version=)`；已存在 repo **唔會**自動切版本（會提示）。
+- API：`GET /api/env/idf/versions`（`force`／`prerelease`）、`POST /api/env/install` 收 `version`。
+- UI：環境頁加**版本下拉**（實時 41 個 tag）＋「↻ 版本」重新拉；記住上次選擇；
+  確認對話框會顯示將要裝的版本。
+
+**③ 驗證**
+
+- `GET /api/env/idf/versions` → `latest=v6.1.1`、40 個版本、`v6.1.0` **不在**清單、
+  `v6.1`／`v6.1.1` 在。
+- `normalize_version("6.1.0")` → `("v6.1", "6.1.0 唔存在（ESP-IDF 冇 .0 tag）→ 用 v6.1")`。
+- 瀏覽器：下拉 41 項、首項「最新正式版（v6.1.1）」、`v6.1.0` 唔存在（與現實一致）。
+- pytest **201 passed ＋ 1 skipped**（+`test_idf_version.py` 13 支）。
+
+
+### 7.104 2026-11-18（開機自動補環境；S／C／P 多晶片安裝）
+
+**① 需求**
+
+「開機時幫我檢查，有問題就順便裝」＋「會裝主流型號：S 系列、C 系列、P 系列」。
+
+**② 自動補齊政策（`env.auto_install`）**
+
+| 模式 | 行為 |
+|---|---|
+| `off` | 只檢查／只報告 |
+| **`safe`（預設）** | 自動補 **deps／esptool**；**唔會**自動裝 1–2 GB 的 IDF |
+| `all` | 連 **IDF** 都自動裝（背景 thread，唔阻塞開機） |
+
+- 為什麼預設唔係 `all`：IDF 1–2 GB／10–30 分鐘，開機偷偷跑會令人以為「卡住」。
+  只缺 IDF 時會明確講「唔影響燒錄」，唔會嚇人。
+- **失敗冷卻 6 小時**（`.env-auto.json`，gitignore）：唔會每次開機都重試失敗項。
+- 背景執行：`env.auto_plan()` 決策 → `env.INSTALLER.start()` → 逐項等完成 →
+  `env.auto_mark()` 記結果。UI「環境」頁可即時睇同一份日誌。
+
+**③ 多晶片：S／C／P**
+
+- `env.KNOWN_TARGETS`：esp32／s2／s3／c2／c3／c6／h2／p4（8 款主流）。
+- `env.DEFAULT_TARGETS = s3／c3／c6／p4`（對應本 repo 實際有板子的三條主線）。
+- `env.TARGET_PRESETS`：`scp_mainstream`（s3/c3/c6/p4）／`s_only`／`c_only`／`p_only`／`all`。
+- `env.normalize_targets()`：接受 preset 名／逗號字串／陣列；驗證晶片名、去重、
+  `all` 只可單獨用；不認識會列出可用值。
+- API `POST /api/env/install` 的 `target` 三種形式都收（UI 傳逗號、AI 可傳陣列/preset）。
+- UI：8 個勾選 chip ＋「S＋C＋P 主流／全選／清空」＋即時提示（`4 個：s3／c3／c6／p4`）。
+
+**④ 驗證**
+
+- `auto_plan` 三種模式（本機實測：deps/esptool 齊 → `off`/`safe` 都唔裝；
+  `all` 只排 IDF）。失敗冷卻、標記讀寫、離線不崩 都有測試。
+- `normalize_targets`：`scp_mainstream` → `esp32s3,esp32c3,esp32c6,esp32p4`；
+  `esp32x9` → 報錯並列出可用值；`all,esp32s3` → 報錯；重複去重。
+- 實機命令：`install.ps1 esp32s3,esp32c3,esp32c6,esp32p4`。
+- 開機日誌（safe + 只缺 IDF）：
+  `只缺 ESP-IDF（唔影響燒錄）；safe 模式唔會自動裝 1–2 GB。要開機自動裝：設 env.auto_install="all"`。
+- 順手修：`settings.write_default()` 產生的 JSON 之前因為註解內有未轉義 `"` 而是壞 JSON
+  （`test_write_default…` 抓到），已改成不含雙引號的寫法。
+- **pytest 220 passed ＋ 1 skipped**（+`test_env_targets.py` 19 支）。
+
+
+### 7.105 2026-11-18（更正：esp32s31 是真的；晶片清單改為「以 IDF 為準」）
+
+**① 我的錯**
+
+上一輪把 `esp32s31` 當成手誤而拒絕，令開機自動安裝失敗：
+
+```
+[esp_webmaster] 自動補 idf 出錯：唔認識嘅晶片：esp32s31；可用：esp32, esp32s2, esp32s3, …
+```
+
+查證：**IDF v6.1.1 的 `components/soc/esp32s31` 確實存在**
+（同批仲有 `esp32c5`／`esp32c61`／`esp32h4`／`esp32h21`）。所以硬編碼清單＋拒絕未知
+是錯的設計。
+
+**② 改為「以 IDF 為準」的三層清單**
+
+| 順序 | 來源 | 說明 |
+|---|---|---|
+| 1 | 已安裝 IDF 的 `components/soc/esp32*` | 最快最準，不用 subprocess |
+| 2 | GitHub API `components/soc` | 未安裝時用，快取 1 小時 |
+| 3 | 內建清單 | 離線 fallback（已補 s31／c5／c61／h4／h21） |
+
+- `targets_known()` 回 (清單, 來源)；`report()` 多回 `targets.live`／`source`。
+- **UI chip 動態產生**（實測 13 款），新晶片自動出現，前端不用改。
+- 預設勾選：UI 上次選擇 → 設定檔 `env.idf_targets` → 內建預設（s3/c3/c6/p4）。
+- 嚴格模式（API）只拒絕**明顯打錯**的名字並列出可用值；
+  **寬鬆模式（設定檔／開機自動安裝）保留未知名字並警告**，交 IDF 判斷。
+
+**③ 安裝位置：自動揀可寫的地方**
+
+實測本環境（沙箱）venv python **唔可以寫** `C:\Users\<user>\esp`
+（PowerShell 可以、venv python 唔可以 → `git clone` 直接 `Permission denied`, rc=128）。
+
+- 候選：`ESPWM_IDF_DIR`／`IDF_INSTALL_DIR` → `~/esp` → `%LOCALAPPDATA%\esp` →
+  `~/.espressif` → `%TEMP%/esp`；每個都**實際試寫**才算可用。
+- 全部唔可寫 → **唔會**白白跑 1–2 GB，開機直接講：
+  「所有預設位置都唔可寫…請喺 settings.json 設 env.idf_dir」。
+- 環境類失敗（權限／缺 git）**不記 6 小時冷卻**（`Installer.env_error`），修好重開即再試。
+
+**④ 順手修的兩個真 bug**
+
+- `settings.DEFAULTS` 之前**冇 `env` 段**（只加在 `settings.json`）→ 若用戶的設定檔缺
+  `env`，`conf["env"]` 會 KeyError。已補。
+- `DEFAULTS` 的 `auto_install` 之前係 `safe`，同用戶期望（開機就裝）不符 → 改 **`all`**。
+
+**⑤ 驗證**
+
+- `GET /api/env` → `targets.live` 13 款（含 `esp32s31`）、`source=GitHub esp-idf`、
+  `configured=[esp32s3,esp32s31,esp32c3,esp32c6,esp32p4]`、`auto.mode=all`。
+- UI：13 個 chip、S31 **已勾選**、來源與模式顯示「開機自動裝（含 IDF）」。
+- 開機日誌（本沙箱冇可寫位置）：清楚列出候選並指示設 `env.idf_dir`。
+- `git ls-remote` 確認 `v6.1.1` tag 存在、`git clone --depth 1` 1.5 秒可連（network OK）。
+- **pytest 231 passed ＋ 1 skipped**（+`test_idf_new_chips.py` 11 支）。
+
+
+### 7.106 2026-11-18（版本新鮮度；自動安裝「為何冇做」看得到；UI 一鍵設 idf_dir）
+
+**① 用戶反映：esptool 冇幫我更新；ESP-IDF 冇幫我安裝**
+
+查證：
+
+- venv 的 esptool = **5.6.0**，PyPI 最新亦係 **5.6.0** → **已經係最新**。
+  但 UI 只顯示「OK v5.6.0」，冇講「已是最新」，所以睇落好似冇做嘢。
+- ESP-IDF：`auto_install=all`、`auto_plan` 有排 idf，但**被 blocked**——
+  因為對 server 這個 python 而言，**4 個候選位置全部唔可寫**
+  （`~/esp`、`%LOCALAPPDATA%\esp`、`~/.espressif`、`%TEMP%\esp` 全部 `x`）。
+  之前只喺 console 印一句，UI 完全睇唔到 → 用戶只會見到「缺」而不知原因。
+
+**② 版本新鮮度（PyPI，快取 6 小時）**
+
+- `env.pypi_latest()`／`installed_version()`／`updates()`：esptool／fastapi／uvicorn／pyserial。
+- 顯示 `已是最新` / `5.3.1 → 5.6.0（可更新）` / `未知（離線？）`。
+- `install_command("esptool")` 改為 `pip install --upgrade esptool`。
+- `auto_plan`：esptool 有新版本也會排自動更新（safe／all）。
+
+**③ 自動安裝狀態上 UI**
+
+- `/api/env` 新增 `auto.plan`（按模式會做咩，含 `blocked`＋`hint`）與
+  `auto.last`（上次結果），並在 `tools[]` 加 `installed/latest/outdated/updateStatus`。
+- UI 新卡「開機自動安裝」：模式 chip、今次會做咩、上次結果、套件版本。
+- 工具表每行加動作按鈕：缺的→「安裝」、可更新的→「更新」，一按帶到安裝卡並預選。
+
+**④ 一鍵解決「冇可寫位置」**
+
+- `env.writable_candidates()`：逐個候選**實測**寫入，回 `[{path, writable}]`。
+- UI「用可寫位置」→ 填第一個真正可寫（冇就明講要手動填）。
+- 新 API `POST /api/env/config`：把 `idf_dir`／`idf_version`／`idf_targets`
+  寫入 **`settings.local.json`**（唔會改團隊的 `settings.json`），先用 schema 驗證。
+- UI「儲存到本機設定」→ 一按即寫，重開生效。
+
+**⑤ 驗證**
+
+- `/api/env`：`updates` 四個套件全部「已是最新」；`auto.plan=[{what:idf, blocked:true, hint:…}]`；
+  `installDirCandidates` 四個全部 `writable:false`（本環境實況）。
+- UI：卡顯示「❌ 唔可以自動補 idf…」＋完整 hint；ESP-IDF 行有「安裝」；
+  esptool 行顯示「已是最新」；按「用可寫位置」會提示「冇一個候選可寫」。
+- **pytest 237 passed ＋ 1 skipped**（+`test_env_config_api.py` 6 支）。
+
+**⑥ 給用戶的結論**
+
+- esptool 唔需要更新（已 5.6.0 = 最新）。
+- IDF 未裝係**權限**：呢部機由本工具（受沙箱限制）開的 server 寫唔到任何候選位置。
+  由 Explorer 雙擊 `web_tools\WebMaster.bat` 開的 server 通常可以；
+  若仍然唔得，用 UI「用可寫位置」／填一個可寫路徑再「儲存到本機設定」。
+
+
+### 7.107 2026-11-18（真的裝到了：repo 內兜底 + IDF_TOOLS_PATH；沙箱寫入限制的說明）
+
+**① 用戶回報**
+
+按「開始安裝」後仍然失敗：
+
+```
+$ git clone ... C:\Users\bl24847\esp\esp-idf
+fatal: could not create work tree dir '...': Permission denied
+```
+
+**② 診斷（唔係 ACL 壞）**
+
+- `icacls C:\Users\bl24847\esp` 顯示 `TVB-OA\BL24847:(OI)(CI)(F)` 正常，**冇 deny ACE**。
+- 用 server 的 venv python 實測：家目錄、`%LOCALAPPDATA%`、`~/.espressif`、`%TEMP%`
+  **全部 PermissionError**；但 **workspace 內可以寫**。
+- 結論：係 **DSH 沙箱對「workspace 以外寫入」的預期限制**（`diagnose-windows-sandbox-acl`
+  技能明確講：write outside workspace 屬 expected denial，唔應該改 ACL）。
+  我啟動的 server 係沙箱的子進程，所以寫唔到 `~/esp`；用戶由 Explorer 自己開的 server 唔受限。
+
+**③ 修正：加一個「一定寫得入」的候選＋把工具鏈也搬過去**
+
+- 候選加入 **`<repo>/.idf/esp-idf`**（workspace 內；已加 `/.idf/` 到 `.gitignore`）。
+  `writable_candidates()` 實測後選中它 → `auto_plan` 不再是 `blocked`。
+- **`IDF_TOOLS_PATH=<idf_dir>/../tools`**：`install.ps1` → `idf_tools.py` 默認把工具鏈
+  裝到 `~/.espressif`（同樣被擋），所以安裝時用 `extra_env` 指去 `<repo>/.idf/tools`。
+- 安裝完成訊息會印出帶 `IDF_TOOLS_PATH` 的 export 指令（PowerShell／bash）。
+
+**④ 實測**
+
+- 重開後 `auto.plan` = `idf`（唔再 blocked），自動安裝即刻開始：
+  `git clone --recursive --depth 1 --branch v6.1.1 … → .idf/esp-idf`
+  進行中（已 267 MB／21,058 檔案；之後會跑 `install.ps1` 下載工具鏈）。
+- `git clone` 前的 `warning: refs/tags/v6.1.1 … is not a commit!` 係 annotated tag
+  ＋ `--depth 1` 的正常提示，之後會 `Note: switching to '<sha>'`，唔影響。
+- pytest 仍 **237 passed ＋ 1 skipped**。
+
+
+### 7.108 2026-11-18（ESP-IDF 裝好並驗證：v6.1.1，五種能力全綠）
+
+**① 真正的失敗原因（第二層）**
+
+第一輪失敗係 `git clone` 寫唔到家目錄（沙箱限制）。改用 repo 內 `<repo>/.idf` 之後，
+clone 同**工具鏈（6.1 GB）都成功**，但最後一步 `install-python-env` 失敗：
+
+```
+WARNING: Building wheel for esptool failed: [WinError 5] 存取被拒。:
+         'c:\users\bl24847\appdata\local\pip\cache\wheels\f2'
+```
+
+→ **pip 的 wheel 快取仍喺家目錄**。修法：安裝時一併指定
+`PIP_CACHE_DIR=<tools>/pip-cache`、`TMP`／`TEMP=<tools>/tmp`。
+（`IDF_TOOLS_PATH` 之前已指去 `<idf_dir>/../tools`；唔指就寫 `~/.espressif`。）
+
+**② 續跑就成功**
+
+`install.ps1` 係 idempotent：已 clone 會跳過、已裝工具鏈會 `Skipping … (already installed)`，
+只重做 python env。結果 **rc=0**。
+
+**③ 偵測與可用性（兩個真相）**
+
+- IDF 裝喺非慣例位置（`<repo>/.idf/esp-idf`），所以 `_check_idf()` 要把
+  `default_idf_dir()` 也列入候選；工具鏈偵測要加 `IDF_TOOLS_PATH` 同 `<idf_dir>/../tools`。
+- `idf_toolchain` 仍是 `warn`（已安裝但未 export）。**`build_firmware` 改成
+  「ok 或 warn」都算可用**（只要建置前 export／用 `idf_env()`），否則永遠紅。
+- `_check_idf()` 改為**真跑 `idf.py --version`**（帶 UTF-8 環境），得到 `v6.1.1`。
+
+**④ `export.ps1` 唔可靠（非互動環境）**
+
+會用 `psutil` 偵測父 shell → `psutil.NoSuchProcess` → `Activation script failed`。
+所以新增 `env.idf_env()`：自己砌 `IDF_PATH`／`IDF_TOOLS_PATH`／`IDF_PYTHON_ENV_PATH`／
+`PATH`（python env Scripts＋各工具鏈 bin），檢查與建置都唔需要 export。
+另外 `export.ps1` 需要 `-ExecutionPolicy Bypass`，提示已更正。
+
+**⑤ `make.py` 識搵新位置**
+
+`tools/ncbuild/env.py::idf_path_for()` 加 `ESPWM_IDF_DIR`、WebMaster 設定
+（`settings.local.json` → `settings.json` 的 `env.idf_dir`）、`<repo>/.idf/esp-idf`。
+實測 `idf_path_for("p4")` 回 `<repo>/.idf/esp-idf`。
+
+**⑥ 結果**
+
+```
+ready = {run_server:true, flash_nc4_ota:true, flash_esptool:true,
+         flash_browser:true, build_firmware:true}
+idf = ok  v6.1.1        auto.plan = []（冇嘢要再裝）
+```
+體積：`.idf` 約 **6.1 GB**（5 個 target 的工具鏈）。UI 顯示「上次自動安裝 idf：成功」。
+pytest **237 passed ＋ 1 skipped**。
+
+
+### 7.109 2026-11-18（Windows 原生 vs WSL 的實測對照；順手令建置真的可用）
+
+**① 為什麼要量**
+
+用戶問「Windows 版同 WSL 係唔係效率差好多」。唔用印象答，直接量。
+
+**② 量測結果（同一台機：Intel Core Ultra 7 265，20 核，NVMe，WSL2 Ubuntu）**
+
+| 項目 | Windows 原生 | WSL2（ext4） | WSL2（/mnt/c） |
+|---|---|---|---|
+| 300 × `git --version`（**進程建立**） | **14,980 ms**（≈50 ms/次） | **254 ms**（≈0.85 ms/次） | — |
+| 300 個小檔 建＋刪（**I/O**） | **180 ms** | **196 ms** | **1,583 ms** |
+| ESP-IDF hello_world（esp32s3）清建置 | **27.7 s**（`set-target` 另計 19.1 s） | 未裝（需另裝 ~7 GB） | — |
+
+**結論**：
+
+- **進程建立**係最大結構差異：Windows **慢約 59 倍**（50 ms vs 0.85 ms）。
+  Ninja 建置每個編譯單元都要 spawn，所以專案越大差距越明顯；
+  但 hello_world 實測只係 27.7 s——**唔係「慢好多」**，係「慢幾成到一倍」。
+- **小檔 I/O**：Windows 原生（180 ms）同 WSL ext4（196 ms）**差不多**；
+  但 WSL 寫 `/mnt/c`（Windows 磁碟，經 9p）慢 **8 倍**。
+  → 所以「WSL 快」只在**原始碼放喺 ext4 內**成立；放喺 `C:` 再用 WSL build 係最差組合。
+- WSL 燒錄要 `usbipd-win` 轉發 COM 埠，額外一層脆弱點；本工具（COM＋UI）本身係 Windows。
+
+**建議**：留喺 Windows 原生（已裝好、27.7 s 可接受）。若日後專案大到建置時間痛，
+把原始碼搬入 WSL ext4 再 build（rsync 同步），唔好喺 `/mnt/c` 上面 build。
+
+**③ 順手修好兩個「建置其實跑唔到」的問題（之前只驗到 `--version`）**
+
+1. `ESP_IDF_VERSION` 冇設 → 新版 component manager 會
+   `Version.coerce(None)` → TypeError，連 `set-target` 都失敗。
+   `idf_env()` 已由 `version.txt`／`git describe` 補上（實測 6.1.1）。
+2. gcc 中間檔寫 `%TEMP%`（受限環境寫唔到）→ CMake compiler check 報
+   `<gcc> - broken`。`idf_env()` 已把 `TMP`／`TEMP` 指去 `<tools>/tmp`。
+
+修完之後：`idf.py set-target esp32s3` rc=0（19.1 s）、`idf.py build` rc=0（27.7 s），
+產出 `hello_world.bin` 同可直接用的 `flash_args`。**建置能力由「偵測 OK」升級為「真的建到」。**
+pytest 仍 **237 passed ＋ 1 skipped**。

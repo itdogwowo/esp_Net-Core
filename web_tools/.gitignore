@@ -1,0 +1,2 @@
+# 只係我部機的設定覆寫（port／COM 埠…）。團隊預設係 settings.json（入 git）。
+settings.local.json

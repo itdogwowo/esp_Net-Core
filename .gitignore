@@ -45,3 +45,6 @@ tools/hosttest/ncm_test/_tmp*
 # out/ = 最終成品（.nct／.nce）；build/ = 中間產物（.wasm）
 modules/out/
 modules/build/
+
+# 可選：IDF 裝喺 repo 內（受限環境兜底；1–2 GB）
+/.idf/

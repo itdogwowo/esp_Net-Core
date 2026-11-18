@@ -1,0 +1,43 @@
+{
+  "_comment": "ESP WebMaster 設定檔（放喺 web_tools/，同啟動器同層）。優先次序：命令列 > settings.local.json > 本檔 > 程式內建預設池。",
+  "_comment_partial": "可以只寫你想改的 key，其餘自動落返預設（深層合併），唔需要抄全文。",
+  "_comment_server": "auto_port=true：port 被佔用就自動揀下一個（唔會卡住啟動）。",
+  "server": {
+    "host": "127.0.0.1",
+    "port": 8011,
+    "auto_port": true,
+    "auto_port_scan": 20,
+    "open_browser": true,
+    "log_level": "info"
+  },
+  "_comment_device": "autoconnect：\"auto\"=自動連插住嘅真板（搵唔到就唔連，唔會開模擬）；\"sim\"=模擬裝置（免硬件）；\"COM13\"／\"/dev/cu.usbmodem…\"=指定序列埠；null=唔自動連，開 UI 自己揀。prefer_port 只在 auto 時用作優先。",
+  "device": {
+    "autoconnect": "auto",
+    "prefer_port": null,
+    "baud": 115200,
+    "sim_dir": null
+  },
+  "_comment_flash": "ESPTOOL（固件頁第 3 卡）的預設值；空字串 = 由 esptool 自動判斷。",
+  "flash": {
+    "esptool_chip": "",
+    "esptool_baud": 460800,
+    "esptool_before": "usb_reset",
+    "esptool_offset": "0x0"
+  },
+  "ui": {
+    "default_view": "device"
+  },
+  "_comment_env": "auto_install：off=只檢查；safe=開機自動補 deps／esptool；all=連 ESP-IDF 都自動裝（背景，10–30 分鐘）。",
+  "env": {
+    "auto_install": "all",
+    "idf_version": null,
+    "idf_targets": [
+      "esp32s3",
+      "esp32s31",
+      "esp32c3",
+      "esp32c6",
+      "esp32p4"
+    ],
+    "idf_dir": null
+  }
+}

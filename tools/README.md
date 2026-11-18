@@ -6,8 +6,11 @@
 
 ## 快速入口
 
-- **網頁工作臺（ESP WebMaster）** 已搬到 repo 根 **`webmaster/`**（唔再埋在 `tools/`）：
-  `./web.sh` 或雙擊 `WebMaster.command` → http://127.0.0.1:8010/
+- **網頁工作臺（ESP WebMaster）** 唔喺 `tools/`，全部收喺 repo 根嘅 **`web_tools/`**：
+  - Windows：雙擊 `web_tools\WebMaster.bat`（或 `.\web_tools\web.ps1`）
+  - macOS：雙擊 `web_tools/WebMaster.command`（或 `./web_tools/web.sh`）
+  - Linux：`./web_tools/web.sh`
+  - → http://127.0.0.1:8010/ ；文件：[web_tools/README.md](../web_tools/README.md)
 - 建置／燒錄／看板：`python3 make.py`（見 `make.py --help`）
 - 對設備說話：`tools/nc4.py --port …`
 - 量測：`tools/bench/`；主機端測試：`tools/hosttest/`

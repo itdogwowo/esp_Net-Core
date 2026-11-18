@@ -1,11 +1,15 @@
 # ESP WebMaster 上板驗收（CDC FAT）
 
 > 2026-11-12。對象：有 ESP-IDF 的機器 ＋ S3 或 P4 板。
-> UI：`webmaster/`；協議：[file-transfer.md](../03_notes/file-transfer.md)。
+> UI：`web_tools/`（程式喺 `web_tools/webmaster/`）；協議：[file-transfer.md](../03_notes/file-transfer.md)。
 >
 > **2026-11-14 更新**：序列埠由 WebMaster server 獨佔；AI／其他工具請用 REST API
 > （`X-Actor: ai`），唔好再直接開 COM。共享 log／IDE／ESPTOOL 見
-> [`webmaster/README.md`](../../webmaster/README.md)。
+> [`web_tools/README.md`](../../web_tools/README.md)。
+>
+> **2026-11-18 更新**：網頁工具全部收喺 **`web_tools/`**（程式喺 `web_tools/webmaster/`）；
+> 加咗 Windows 入口（`web_tools\WebMaster.bat` / `web_tools\web.ps1`）同 UI 的
+> 「啟動」頁。下面第 0 節有平台對照。
 
 ---
 
@@ -20,15 +24,26 @@ python make.py build p4
 python make.py flash p4
 ```
 
-```bash
-# 2) 起 UI（同一部機，板插 USB）
-cd webmaster
-python run.py --serial COM13
-# 冇 --serial 也可以：開 UI 之後喺左邊揀 port
+```powershell
+# 2a) 起 UI — Windows（repo 根）
+.\web_tools\WebMaster.bat                        # 雙擊亦可；預設模擬裝置
+.\web_tools\web.ps1 -Serial COM13                # 真板（S3 原生 USB CDC）
+.\web_tools\web.ps1 -Serial COM13 -Port 8011 -AutoPort
 ```
+
+```bash
+# 2b) 起 UI — macOS／Linux（repo 根）
+./web_tools/web.sh --serial /dev/cu.usbmodemXXXX   # 或者唔加參數：開 UI 後喺左邊揀 port
+```
+
+`WebMaster.bat` 只係揀 Python 再交棒俾 `web.ps1`（唔使改 ExecutionPolicy）；第一次跑
+會自動建 `web_tools\webmaster\.venv`、裝 deps，之後直接起 server。
 
 P4 注意：**CDC（NC4）同 OTG/MSC 係兩個孔**。要 NC4 就插 OTG 孔（HS PHY，
 COM13）；JTAG 孔（COM21）只係 console。
+
+> 唔確定邊個腳本啱你部機？開 UI 左邊 **「啟動」** 頁：分類 × 平台一覽、有「你嘅平台」
+> 高亮、可複製指令、可睇腳本全文（只讀）。
 
 ---
 
@@ -135,7 +150,7 @@ COM13）；JTAG 孔（COM21）只係 console。
    ```
 4. 用 `recover.py` 自動睇晶片／flash size，揀 `artifacts/recovery/` 對應映像：
    ```bash
-   cd webmaster
+   cd web_tools/webmaster
    python recover.py --port COM25 --dry-run   # 先睇命令
    python recover.py --port COM25             # 真燒
    ```
@@ -156,7 +171,44 @@ COM13）；JTAG 孔（COM21）只係 console。
 
 ---
 
-## 7. 要留低嘅證據
+## 7. 啟動頁（唔使板都測得）
+
+開 UI → 左邊第一項 **🚀 啟動**：
+
+| 檢查 | 預期 |
+|---|---|
+| 平台偵測 | 你部機的按鈕（Windows／macOS／Linux）係綠色選中；`偵測我嘅平台` 會重設為自動 |
+| 分類層級 | 見到「網頁工作臺」「建置／燒錄」等分組；空分類**唔會**顯示 |
+| 本機卡片 | `web_tools\WebMaster.bat`／`web.ps1`（Windows）或 `web_tools/web.sh`（macOS／Linux）有綠框＋「你嘅平台」 |
+| 其他平台 | 變暗但仲喺度；`.sh` 徽章係 `macOS／Linux` |
+| 複製指令 | 按「複製指令」→ toast「已複製」；貼出嚟係 `.\web_tools\WebMaster.bat`／`./web_tools/web.sh`（由 repo 根起算）；卡片有 `web_tools/` 位置徽章 |
+| 睇內容 | 按「睇內容」→ 下面顯示腳本全文＋大小；**冇任何副作用**（WebMaster 唔會執行腳本） |
+| 適用數 | 每個分組右上角 `n/m`＝你平台適用數／總數 |
+
+API 自檢：
+
+```bash
+curl -s http://127.0.0.1:8010/api/scripts | python -m json.tool | head -30
+curl -s 'http://127.0.0.1:8010/api/scripts/one?rel=web_tools/web.sh' | python -m json.tool | head -10
+# 防穿越：以下應該全部 404
+curl -s -o /dev/null -w '%{http_code}\n' 'http://127.0.0.1:8010/api/scripts/one?rel=../web.sh'
+```
+
+IDE 格式化自檢（server 側）：
+
+```bash
+curl -s -X POST http://127.0.0.1:8010/api/format -H 'Content-Type: application/json' \
+  -d '{"path":"/config/x.json","text":"{\"a\":1}"}'
+# → {"ok":true,"data":{"text":"{\n  \"a\": 1\n}\n", ...}}
+
+curl -s -X POST http://127.0.0.1:8010/api/format -H 'Content-Type: application/json' \
+  -d '{"path":"/config/x.json","text":"{\"a\":}"}'
+# → {"ok":false,"detail":{"msg":"Expecting value","line":1,"col":6}}（唔會有 text）
+```
+
+---
+
+## 8. 要留低嘅證據
 
 - 終端 `.log`（下載按鈕）
 - `STATUS_GET keys=sys,storage` 的 JSON
