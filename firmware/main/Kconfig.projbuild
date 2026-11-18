@@ -81,50 +81,200 @@ menu "esp_Net-Core"
 
             協處理器型號不只一種：換型號 = 換 profile，應用程式碼不動。
 
-    # ── 8×8 WS2812 矩陣（測試任務）────────────────────────────────
+    # ── 像素渲染器（pixel / nc_pixel）────────────────────────────
     # 板子事實放 ports/<board>/sdkconfig.defaults；程式只認符號。
-    # 只有測試映像（NC_ENABLE_TESTS=ON）才有這個任務。
+    #
+    # 分兩層：
+    #   ① 編譯期（這裡）：這塊板有沒有 I80／SPI 硬體、預設腳位、預設時序；
+    #   ② 執行期（data/config/tasks.json 的 "pixel"）：幾道 lane、幾 fps —— 不用重燒。
+    # 「幾顆燈」是板子事實（同一條 lane 上串了幾顆），所以留在編譯期。
 
-    config NETCORE_RGB_MATRIX
-        bool "8×8 WS2812 矩陣（I80 波形 + 分區時間抖動）"
-        depends on SOC_LCD_I80_SUPPORTED
+    config NETCORE_PIXEL
+        bool "像素渲染器（pixel 任務：環 + 編碼器 + 多後端）"
+        depends on SOC_LCD_I80_SUPPORTED || SOC_SPI_SUPPORTED
         default n
         help
-            Waveshare ESP32-S3-Matrix：64 顆 WS2812B 串成 8×8，資料腳 GPIO14。
-            用 LCD_CAM 的 I80（GDMA）產生 WS2812 波形，一幀 7,936 B ≈ 1.98 ms，
-            所以上限 450 fps；效果亮度用 8.8 定點 + 逐幀誤差回饋抖動，
-            暗階等效多 8 bit 灰階。
+            生產者（內建效果／`.nce`／主機推送）不斷把 R,G,B,W 四位的畫面寫進環，
+            渲染器按自己的節奏取最新一格、用後端的格式編碼、交給驅動。兩邊分開。
+
+            取代舊的 `rgbmatrix` 測試任務：效果變成生產者，送燈變成後端。
+            沒有燈板的板子也可以開（後端退到 mock / direct），整條路照樣跑。
+
+    config NETCORE_PIXEL_LEDS
+        int "每道 lane 的燈數"
+        depends on NETCORE_PIXEL
+        default 64
+        range 1 2048
+        help
+            一條 lane 串幾顆。環的每一格 = 64 B 表頭 + 4 B × 燈數（進位到 64 的倍數）。
+
+            上限 2048 是編碼器的 buffer（NC_PX_MAX_LEDS）；實務上還要看記憶體：
+            2048 顆 × 3 格 = 25 KB／lane。
+
+    config NETCORE_PIXEL_FORMAT
+        string "燈的格式（ws2812 / ws2812w / ws2815 / ws2801 / apa102）"
+        depends on NETCORE_PIXEL
+        default "ws2812w"
+        help
+            只決定「線材上送什麼」：WS2812 是 GRB（3 B，**沒有白**）、
+            WS2812W / SK6812 是 GRBW（4 B，白真的進線）、WS2801 / APA102 是時脈式。
+
+            canonical 一律是 R,G,B,W 四位（白不進線的格式就丟掉 W）——
+            所以「畫面要白色」是產生者的事（R=G=B），不是渲染器的事。
+
+            ⚠ 這個值必須和 NETCORE_PIXEL_I80 / _SPI 對得上：
+              歸零碼格式（ws2812*／ws2815）走 I80；時脈格式（ws2801／apa102）走 SPI。
+
+    config NETCORE_PIXEL_PCLK_HZ
+        int "歸零碼的取樣時鐘（Hz）＝ I80 PCLK"
+        depends on NETCORE_PIXEL_I80
+        default 2500000
+        range 1000000 20000000
+        help
+            一個 bit = NETCORE_PIXEL_BIT_CELLS 個時鐘。預設 2.5 MHz × 3 = 1.200 µs
+            （T0H 0.400 µs、T1H 0.800 µs，最保守）。要 ~450 fps 就升到 8.889 MHz
+            並把 bit_cells 改成 8（0.900 µs／337 ns／675 ns）。
+
+    config NETCORE_PIXEL_BIT_CELLS
+        int "歸零碼：一個 bit 幾個時鐘"
+        depends on NETCORE_PIXEL_I80
+        default 3
+        range 2 16
+        help
+            I80 一個時鐘送一個 byte（8 條資料線）。WS2812 的位元寬度靠這裡湊出來。
+
+    config NETCORE_PIXEL_T0H
+        int "歸零碼：0 碼的高電平時鐘數"
+        depends on NETCORE_PIXEL_I80
+        default 1
+        range 1 15
+        help
+            必須 ≥ 1：整組 bit 都是低電平會被燈當成 reset（畫面會閃／掉格）。
+            編碼器會把 0 夾回 1。
+
+    config NETCORE_PIXEL_T1H
+        int "歸零碼：1 碼的高電平時鐘數"
+        depends on NETCORE_PIXEL_I80
+        default 2
+        range 1 15
+        help
+            必須 ≤ BIT_CELLS（= BIT_CELLS 是 100 % 佔空比，沒有下降緣）。
+            必須 > T0H，否則兩個碼分不出來。編碼器會夾回合法範圍。
+
+    config NETCORE_PIXEL_DITHER_BITS
+        int "亮度精度（8 = 關抖動）"
+        depends on NETCORE_PIXEL
+        default 12
+        range 8 16
+        help
+            燈只有 8 bit／通道。暗階（例如 1/256）在 8 bit 下不是 0 就是 1，
+            看起來會「跳」。用 8.8 定點 + 逐幀誤差回饋把平均做回來，
+            等效多幾 bit 灰階（詳見 docs/03_notes/rgb-matrix-dither.md）。
+
+            成本：每顆每通道幾次整數運算；8 bit 是零成本（直接四捨五入）。
+
+    config NETCORE_PIXEL_DITHER
+        int "抖動方式（0 關 / 1 時間 / 2 時間+空間）"
+        depends on NETCORE_PIXEL
+        default 1
+        range 0 2
+        help
+            1 = 時間抖動：同一個相位區的誤差一起累積（幀率高時看得到微微閃）。
+            2 = 再加 4×4 Bayer 空間圖案：低幀率（≤ 240 fps）下更穩，代價是
+               靜態畫面上有一層很淡的網紋。
+
+    config NETCORE_PIXEL_ZONE_PX
+        int "抖動相位區：每幾顆一個"
+        depends on NETCORE_PIXEL
+        default 4
+        range 0 2048
+        help
+            相鄰的燈不要同時閃，所以把燈鏈切成若干區、每區一個誤差累加器。
+            0 = 整條一區。上限 16 區（NC_PX_CODEC_ZONES_MAX）。
+
+    config NETCORE_PIXEL_FPS
+        int "預設幀率（tasks.json 的 pixel.fps 可覆寫）"
+        depends on NETCORE_PIXEL
+        default 450
+        range 1 1000
+        help
+            送燈的節奏。這和「產生者更新畫面的節奏」是兩件事：內建效果 60 fps，
+            渲染器 450 fps 只會重播同一格（hold）。8×8 一幀 7,936 B ≈ 1.98 ms
+            ⇒ 450 fps 留 ~240 µs 給 reset 與排程。
+
+    config NETCORE_PIXEL_CORE
+        int "渲染器跑哪一核（-1 = 不綁）"
+        depends on NETCORE_PIXEL
+        default -1
+        range -1 1
+        help
+            主機推送／`.nce` 要跟上高幀率時，把渲染器綁到效果不用的那一核。
+
+    config NETCORE_PIXEL_STACK
+        int "渲染器堆疊（B）"
+        depends on NETCORE_PIXEL
+        default 4096
+        range 2048 16384
+        help
+            渲染器只做「取格 → 編碼 → 交出去」，不跑效果，所以堆疊不大。
+
+    config NETCORE_PIXEL_I80
+        bool "I80 後端（LCD_CAM 8080 + DMA 產生歸零碼波形）"
+        depends on NETCORE_PIXEL && SOC_LCD_I80_SUPPORTED
+        default y
+        help
+            用 I80 的 8 條資料線當 8 條 lane：每條 lane 一位，OR 進同一個 byte，
+            所以一次 DMA 同時送 8 條燈鏈 —— 這是 I80 相對 RMT 的唯一好處。
 
             注意 I80 一定要 8 條資料線 + WR + DC 都是有效 GPIO；
-            只有 D0 真正接燈，其餘 7 條資料線與 WR／DC 是 dummy（會出現在排針上）。
+            沒接燈的資料線會出現在排針上（會一直跳，不要接到東西）。
 
-    config NETCORE_RGB_MATRIX_I80_PINS
+    config NETCORE_PIXEL_I80_PINS
         string "I80 腳位（D0..D7,WR,DC 共 10 個，逗號分隔）"
-        depends on NETCORE_RGB_MATRIX
+        depends on NETCORE_PIXEL_I80
         default "14,38,39,40,41,42,47,48,1,2"
         help
-            D0 是真正的燈資料線；D1..D7、WR、DC 只是 I80 需要的 dummy。
+            D0 = lane0、D1 = lane1…… 只有用到的前 NETCORE_PIXEL_I80_LANES 條是真的，
+            其餘與 WR／DC 只是 I80 需要的 dummy。
+
             預設值避開 IMU（IO10–13）、USB（19/20）、UART0（43/44）、
             flash（26–32）、nc_hw_reserved() 視為 PSRAM 的 33–37，
             以及 strapping（0/3/45/46）。
 
-    config NETCORE_RGB_MATRIX_PCLK_HZ
-        int "I80 PCLK（Hz）"
-        depends on NETCORE_RGB_MATRIX
-        default 2500000
-        range 1000000 20000000
+    config NETCORE_PIXEL_I80_LANES
+        int "I80 一次送幾條 lane"
+        depends on NETCORE_PIXEL_I80
+        default 1
+        range 1 8
         help
-            WS2812 一個 bit 用 3 個 PCLK 週期。預設 2.5 MHz
-            → bit 1.200 µs、T0H 0.400 µs、T1H 0.800 µs（最保守，同 demo 一致）。
-            確認燈食得到之後可以先升 pclk 追 fps。改這個等於改 WS2812 時序。
+            1 = 只有 D0 接燈（Waveshare S3-Matrix 就是這種）。
+            8 = 八條燈鏈完全同步，幀率不變 —— 這是 I80 的價值所在。
 
-    config NETCORE_RGB_MATRIX_FPS
-        int "目標幀率上限（fps）"
-        depends on NETCORE_RGB_MATRIX
-        default 450
-        range 60 460
+    config NETCORE_PIXEL_SPI
+        bool "SPI 後端（WS2801／APA102 之類有時脈線的燈）"
+        depends on NETCORE_PIXEL && SOC_SPI_SUPPORTED
+        default n
         help
-            資料本身 1.98 ms／幀（≈ 505 fps），加 reset 之後實際上限約 460 fps。
-            預設 450 fps，留 ~240 µs 給 reset 與排程抖動。
+            時脈式燈：一個 bit = 一個 SPI 時脈，沒有「位元寬度」問題。
+            一條 SPI 只有一個 MOSI，所以這個後端一次一條 lane。
+
+    config NETCORE_PIXEL_SPI_MOSI
+        int "SPI MOSI（資料）"
+        depends on NETCORE_PIXEL_SPI
+        default 11
+
+    config NETCORE_PIXEL_SPI_SCLK
+        int "SPI SCLK（時脈）"
+        depends on NETCORE_PIXEL_SPI
+        default 12
+
+    config NETCORE_PIXEL_SPI_HZ
+        int "SPI 時鐘（Hz）"
+        depends on NETCORE_PIXEL_SPI
+        default 2400000
+        range 100000 40000000
+        help
+            WS2801 上限 25 MHz、APA102 上限 20 MHz（保守起見預設 2.4 MHz）。
+            一顆燈 3–4 B ⇒ 64 顆約 0.7 ms。
 
 endmenu

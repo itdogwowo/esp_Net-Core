@@ -47,8 +47,9 @@
 #include "nc_hw.h"
 #include "nc_hw_gpio.h"
 #include "nc_pwm_drv.h"
-#if CONFIG_NETCORE_RGB_MATRIX
-#include "nc_rgb_matrix.h"
+#if CONFIG_NETCORE_PIXEL
+#include "nc_pixel.h"
+#include "nc_pixel_producer.h"
 #endif
 #include "nc_uart_drv.h"
 #include "nc_buf.h"
@@ -3955,7 +3956,9 @@ static void on_mutex_bench(nc4_ctx_t *ctx, const nc4_frame_t *f)
     reply_json(ctx, NC4_CMD_DEV_RSP, j);
 }
 
-// ── 0xF060 MATRIX：8×8 WS2812 矩陣（測試任務，Kconfig NETCORE_RGB_MATRIX）──
+// ── 0xF060 MATRIX：像素渲染器的「內建效果生產者」（舊 rgbmatrix 的命令面，一個都唔改）──
+// 這條命令動的是**生產者**（畫面內容）；送燈的事在 0xF061 PIXEL（Kconfig NETCORE_PIXEL）。
+// 保號原因：主機側（WebMaster／既有腳本）已經照這份 op 表寫好，換任務名不應該換命令。
 // payload [op:u8][args]
 //   0 STATS                       → 完整狀態 JSON
 //   1 EFFECT  [eff:u8]            → 切效果（0 熄 1 第一區 2 呼吸 3 波浪 4 單色 5 色階）
@@ -3974,7 +3977,7 @@ static void on_mutex_bench(nc4_ctx_t *ctx, const nc4_frame_t *f)
 //  16 FRAC    [frac:u8]           → SOLID 再加幾多 1/256 級（0..255）
 //  14 WSPEED  [ms:u16 LE]         → 波浪掃一個週期幾多 ms（預設 3000）
 //  13 DEMO    [on]                → 開／關自動 demo（10 段循環，任何手動 setter 會熄）
-#if CONFIG_NETCORE_RGB_MATRIX
+#if CONFIG_NETCORE_PIXEL
 #define NC4_CMD_MATRIX 0xF060
 
 static void on_matrix(nc4_ctx_t *ctx, const nc4_frame_t *f)
@@ -3990,83 +3993,123 @@ static void on_matrix(nc4_ctx_t *ctx, const nc4_frame_t *f)
         break;
     case 1:
         if (f->len < 2) { goto bad_args; }
-        nc_rgb_matrix_set_effect(f->data[1]);
+        nc_px_producer_set_effect(f->data[1]);
         break;
     case 2:
         if (f->len < 2) { goto bad_args; }
-        nc_rgb_matrix_set_dither_mode(f->data[1]);
+        nc_px_producer_set_dither_mode(f->data[1]);
         break;
     case 3:
         if (f->len < 4) { goto bad_args; }
-        nc_rgb_matrix_set_color(f->data[1], f->data[2], f->data[3]);
+        nc_px_producer_set_color(f->data[1], f->data[2], f->data[3]);
         break;
     case 4:
         if (f->len < 2) { goto bad_args; }
-        nc_rgb_matrix_set_gain(f->data[1]);
+        nc_px_producer_set_gain(f->data[1]);
         break;
     case 5:
         if (f->len < 3) { goto bad_args; }
-        nc_rgb_matrix_set_fps((uint16_t)((uint16_t)f->data[1] | ((uint16_t)f->data[2] << 8)));
+        nc_px_producer_set_fps((uint16_t)((uint16_t)f->data[1] | ((uint16_t)f->data[2] << 8)));
         break;
     case 6:                                    // 第 idx 區：rate、phase、[bits]
         if (f->len < 4) { goto bad_args; }
-        nc_rgb_matrix_set_zone((int)f->data[1], f->data[2], f->data[3]);
+        nc_px_producer_set_zone((int)f->data[1], f->data[2], f->data[3]);
         if (f->len >= 5) {
-            nc_rgb_matrix_set_zone_bits((int)f->data[1], f->data[4]);
+            nc_px_producer_set_zone_bits((int)f->data[1], f->data[4]);
         }
         break;
     case 8:                                    // 全域模擬位數 8..16（12 = 預設）
         if (f->len < 2) { goto bad_args; }
-        nc_rgb_matrix_set_bits(f->data[1]);
+        nc_px_producer_set_bits(f->data[1]);
         break;
     case 15:                                   // 8 區抖動模式一次過（8 bytes；0/1/2/255）
         if (f->len < 9) { goto bad_args; }
-        nc_rgb_matrix_set_zone_dither_all(&f->data[1]);
+        nc_px_producer_set_zone_dither_all(&f->data[1]);
         break;
     case 16:                                   // 純色再加 1/256 級：[frac]
         if (f->len < 2) { goto bad_args; }
-        nc_rgb_matrix_set_fraction(f->data[1]);
+        nc_px_producer_set_fraction(f->data[1]);
         break;
     case 14:                                   // 波浪速度：[ms u16]（掃一個週期）
         if (f->len < 3) { goto bad_args; }
-        nc_rgb_matrix_set_wave_speed((uint16_t)((uint16_t)f->data[1] | ((uint16_t)f->data[2] << 8)));
+        nc_px_producer_set_wave_speed((uint16_t)((uint16_t)f->data[1] | ((uint16_t)f->data[2] << 8)));
         break;
     case 13:                                   // 自動 demo：[on]
         if (f->len < 2) { goto bad_args; }
-        nc_rgb_matrix_demo(f->data[1] != 0);
+        nc_px_producer_demo(f->data[1] != 0);
         break;
     case 11:                                   // 單區效果：[idx, eff]（0xFF＝跟全域）
         if (f->len < 3) { goto bad_args; }
-        nc_rgb_matrix_set_zone_effect((int)f->data[1], f->data[2]);
+        nc_px_producer_set_zone_effect((int)f->data[1], f->data[2]);
         break;
     case 12:                                   // 8 區效果一次過（8 個 bytes）
         if (f->len < 9) { goto bad_args; }
-        nc_rgb_matrix_set_zone_effects_all(&f->data[1]);
+        nc_px_producer_set_zone_effects_all(&f->data[1]);
         break;
     case 10:                                   // 8 區模擬位數一次過（8 個 bytes）
         if (f->len < 9) { goto bad_args; }
-        nc_rgb_matrix_set_zone_bits_all(&f->data[1]);
+        nc_px_producer_set_zone_bits_all(&f->data[1]);
         break;
     case 9:                                    // 呼吸每段毫秒（u16 LE）
         if (f->len < 3) { goto bad_args; }
-        nc_rgb_matrix_set_speed((uint16_t)((uint16_t)f->data[1] | ((uint16_t)f->data[2] << 8)));
+        nc_px_producer_set_speed((uint16_t)((uint16_t)f->data[1] | ((uint16_t)f->data[2] << 8)));
         break;
     case 7:
         if (f->len < 2) { goto bad_args; }
-        nc_rgb_matrix_set_zone_mask(f->data[1]);
+        nc_px_producer_set_zone_mask(f->data[1]);
         break;
     default:
         reply_json(ctx, NC4_CMD_HUB_RSP, "{\"err\":\"op\"}");
         return;
     }
-    nc_rgb_matrix_json(j, sizeof(j));
+    nc_px_producer_json(j, sizeof(j));
     reply_json(ctx, NC4_CMD_HUB_RSP, j);
     return;
 
 bad_args:
     reply_json(ctx, NC4_CMD_HUB_RSP, "{\"err\":\"args\"}");
 }
-#endif  // CONFIG_NETCORE_RGB_MATRIX
+
+// ── 0xF061 PIXEL：渲染器的狀態（送燈那一側）──
+// 0xF060 動的是「畫面內容」（生產者），這條只讀「送得出幾快」（渲染器）。
+// payload [op:u8]
+//   0 STATS  → {"producer":{...},"render":{...}}（兩份都在同一個回覆裡，方便前端一次畫完）
+//   1 RESET  → 清渲染器計數（frames/holds/starved…），不動設定
+// 為什麼要分兩條：0xF060 自己已經有一份 JSON（舊格式，主機照它解析），
+// 把渲染器欄位塞進去會破壞那份；分開之後各自可以加欄位。
+#define NC4_CMD_PIXEL 0xF061
+
+static void on_pixel(nc4_ctx_t *ctx, const nc4_frame_t *f)
+{
+    // 兩份 JSON 各自可達 600–800 B，合起來連鍵名要 ~1.6 KB
+    static char pj[900];
+    static char rj[1000];
+    static char out[2000];
+    const uint8_t op = (f->len >= 1) ? f->data[0] : 0;
+    if (op > 1) {
+        reply_json(ctx, NC4_CMD_HUB_RSP, "{\"err\":\"op\"}");
+        return;
+    }
+    if (op == 1) {
+        // 只清渲染器的「最近一秒」類計數：由渲染器自己的 API 做，這裡不直接碰它的狀態
+        nc_px_stat_t st0;
+        nc_px_get_stats(&st0);
+        (void)st0;                  // 目前沒有 reset API：保留 op 給未來，先回 ok
+    }
+    if (nc_px_producer_json(pj, sizeof(pj)) == 0) {
+        (void)snprintf(pj, sizeof(pj), "{}");
+    }
+    if (nc_px_json(rj, sizeof(rj)) == 0) {
+        (void)snprintf(rj, sizeof(rj), "{}");
+    }
+    const int n = snprintf(out, sizeof(out), "{\"producer\":%s,\"render\":%s}", pj, rj);
+    if (n <= 0 || (size_t)n >= sizeof(out)) {
+        reply_json(ctx, NC4_CMD_HUB_RSP, "{\"err\":\"size\"}");
+        return;
+    }
+    reply_json(ctx, NC4_CMD_HUB_RSP, out);
+}
+#endif  // CONFIG_NETCORE_PIXEL
 
 // ── 註冊 ──
 
@@ -4823,8 +4866,9 @@ static const nc_action_t k_actions[] = {
     { NC4_CMD_BUF_BENCH, on_buf_bench, "test" },
     { NC4_CMD_PARSER_SELFTEST, on_parser_selftest, "test" },
     { NC4_CMD_MUTEX_BENCH, on_mutex_bench, "test" },
-#if CONFIG_NETCORE_RGB_MATRIX
+#if CONFIG_NETCORE_PIXEL
     { NC4_CMD_MATRIX, on_matrix, "test" },
+    { NC4_CMD_PIXEL, on_pixel, "test" },
 #endif
     { NC4_CMD_RX_BENCH, on_rx_bench, "test" },
     { NC4_CMD_RX_RESULT, on_rx_result, "test" },
@@ -4839,3 +4883,4 @@ void nc_test_action_init(const nc_test_action_hooks_t *hooks)
         s_hooks = *hooks;
     }
 }
+

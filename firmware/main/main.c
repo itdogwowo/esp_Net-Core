@@ -110,7 +110,8 @@
 #ifdef NC_ENABLE_TESTS
 #include "nc_bench.h"
 #include "nc_test_tcp.h"
-#include "nc_rgb_matrix.h"     // 8×8 WS2812 矩陣（I80 + 分區抖動），Kconfig 預設 n
+#include "nc_pixel.h"          // 像素渲染器（sys/pixel）：Kconfig NETCORE_PIXEL 決定有沒有
+#include "nc_pixel_producer.h" // 內建效果生產者（舊 rgbmatrix 的內容）
 #endif
 #include "nvs.h"
 #include "nvs_flash.h"
@@ -4290,11 +4291,16 @@ static esp_err_t ph_declare(void)
     nc_task_register(&s_task_nc4);     // L0：parser 緩衝 + decode0/1
     nc_task_register(&s_task_net);     // L1：UART / TCP 緩衝（照 ETH 是否起來）
     nc_task_register(nc_hw_gpio_task()); // L2：GPIO owner（nc_hw resource "gpio"）
+    // L4：像素渲染器（sys/pixel）。**唔受 NC_ENABLE_TESTS 限制**：
+    // 它是產品功能，取代舊的 rgbmatrix 測試任務。Kconfig 沒開時回 NULL，register 會忽略。
+    // 內建效果生產者（"rgbmatrix" 的名字還留在 0xF060）由它一起帶起來。
+    if (nc_pixel_task() != NULL) {
+        nc_task_register(nc_pixel_task());
+    }
 #ifdef NC_ENABLE_TESTS
     // 測試「功能」改用外掛模組（/data/tasks/*.nct，動態加載）——
-    // hello／probe 等唔再入固件；呢度只留效能測試任務（bench/rgb/tcp）。
+    // hello／probe 等唔再入固件；呢度只留效能測試任務（bench/tcp）。
     nc_task_register(&s_task_ncm);      // L4：模組 arena + render task
-    nc_task_register(nc_rgb_matrix_task());   // L4：8×8 WS2812（Kconfig 開咗才有 loop）
     nc_task_register(nc_bench_task_a()); // L4：量測驗證用（預設 (0,0) = 唔跑）
     nc_task_register(nc_bench_task_b());
     nc_task_register(nc_bench_task_c());

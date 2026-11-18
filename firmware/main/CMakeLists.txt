@@ -163,8 +163,7 @@ if(NC_ENABLE_NCM)
     list(APPEND _nc_test_reqs ncm)
 endif()
 if(NC_ENABLE_TESTS)
-    list(APPEND _nc_test_reqs test_bench_tasks test_rgb_led_matrix_tasks
-                            test_tcp_tasks)
+    list(APPEND _nc_test_reqs test_bench_tasks test_tcp_tasks)
 endif()
 
 idf_component_register(
@@ -202,7 +201,6 @@ if(NOT CMAKE_SCRIPT_MODE_FILE)
         # 變數（NC_ENABLE_TESTS 未定義），嗰次登記就會漏咗 include path。
         target_include_directories(${COMPONENT_LIB} PRIVATE
             "${CMAKE_CURRENT_LIST_DIR}/../components/dev/test_bench_tasks/include"
-            "${CMAKE_CURRENT_LIST_DIR}/../components/dev/test_rgb_led_matrix_tasks/include"
             "${CMAKE_CURRENT_LIST_DIR}/../components/dev/test_tcp_tasks/include"
             "${CMAKE_CURRENT_LIST_DIR}/../components/dev/test_action/include")
     endif()

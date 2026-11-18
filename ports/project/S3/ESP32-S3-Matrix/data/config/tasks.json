@@ -11,7 +11,7 @@
   ],
   "tasks": [
     {
-      "name": "rgbmatrix",
+      "name": "pixel",
       "level": 4,
       "affinity": [
         0,
