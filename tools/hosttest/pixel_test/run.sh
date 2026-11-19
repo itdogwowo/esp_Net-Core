@@ -12,17 +12,18 @@ set -euo pipefail
 cd "$(dirname "$0")/../../.."
 
 CC=${CC:-cc}
-PXF=firmware/components/sys/pixel
+PXF=firmware/components/sw/pixel
+PXT=firmware/components/tasks/render_task
 OUT="tools/hosttest/pixel_test/build"
 mkdir -p "$OUT"
 
 "$CC" -std=c17 -D_DEFAULT_SOURCE -Wall -Wextra -Wno-unused-parameter \
-    -I"$PXF/include" -Itools/hosttest/pixel_test/include \
+    -I"$PXF/include" -I"$PXT/include" -Itools/hosttest/pixel_test/include \
     -o "$OUT/pixel_test" \
     "$PXF/nc_pixel_q.c" \
     "$PXF/nc_pixel_encode.c" \
-    "$PXF/nc_pixel_backend_mock.c" \
-    "$PXF/nc_pixel_backend_direct.c" \
+    "$PXT/nc_pixel_backend_mock.c" \
+    "$PXT/nc_pixel_backend_direct.c" \
     tools/hosttest/pixel_test/pixel_test.c
 
 "$OUT/pixel_test"

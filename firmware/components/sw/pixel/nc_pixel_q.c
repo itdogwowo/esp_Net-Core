@@ -123,7 +123,7 @@ uint32_t nc_px_ring_fill(const nc_pixel_q_t *q)
 
 // ── 生產者 ──
 
-uint8_t *nc_px_ring_begin(nc_pixel_q_t *q)
+static uint8_t *ring_begin(nc_pixel_q_t *q, nc_px_hdr_t **out_hdr)
 {
     if (q == NULL) {
         return NULL;
@@ -140,7 +140,20 @@ uint8_t *nc_px_ring_begin(nc_pixel_q_t *q)
     // 表頭先清一次：seq 是最後的發布旗標（0 = 未提交），其餘欄位由 put_ts 填。
     memset(slot_hdr(q, i), 0, NC_PX_HDR_BYTES);
     atomic_store(&q->state[i], SLOT_FILLING);
+    if (out_hdr != NULL) {
+        *out_hdr = slot_hdr(q, i);
+    }
     return slot_payload(q, i);
+}
+
+uint8_t *nc_px_ring_begin(nc_pixel_q_t *q)
+{
+    return ring_begin(q, NULL);
+}
+
+uint8_t *nc_px_ring_begin_ex(nc_pixel_q_t *q, nc_px_hdr_t **hdr)
+{
+    return ring_begin(q, hdr);
 }
 
 void nc_px_ring_commit(nc_pixel_q_t *q)

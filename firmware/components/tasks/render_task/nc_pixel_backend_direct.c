@@ -9,23 +9,26 @@
 //   acquire → encode → submit →（完成）→ reclaim。
 //   i80／spi 只是把「送」換成真的硬體，登記表語義完全一樣。
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "esp_log.h"
-#include "nc_pixel.h"
+#include "nc_render.h"
 
 static const char *TAG = "px_direct";
 
 #define DIR_SLOTS 3
-#define DIR_UNITS NC_PX_UNITS_MAX
 
 typedef struct {
     nc_pixel_backend_t be;
     nc_pixel_q_t      *q;
     nc_pixel_codec_t  *codec;
     uint32_t           px;
+    uint32_t           units;                // 一幀幾個時序單元（含 reset）
+    uint8_t           *buf;                  // DIR_SLOTS × units（internal）
+    const uint8_t     *pay[DIR_SLOTS];       // 這一格屬於環的哪一份 payload
     uint32_t           seq[DIR_SLOTS];       // 0 = 空閒
-    uint32_t           units[DIR_SLOTS];
+    uint32_t           len[DIR_SLOTS];
     nc_px_format_t     fmt;
     uint32_t           submitted;
     uint32_t           reclaimed;
@@ -34,8 +37,6 @@ typedef struct {
 } dir_t;
 
 static dir_t  s_dir;
-static uint8_t s_dir_buf[DIR_SLOTS][DIR_UNITS];
-static nc_pixel_codec_t *s_dir_codec;
 
 static bool dir_acquire(nc_pixel_backend_t *b, uint32_t post_seq, uint32_t *slot,
                         const uint8_t **payload, uint32_t *px, uint32_t *seq)
@@ -50,9 +51,10 @@ static bool dir_acquire(nc_pixel_backend_t *b, uint32_t post_seq, uint32_t *slot
     }
     for (int i = 0; i < DIR_SLOTS; i++) {
         if (d->seq[i] == 0) {
-            // 記住「這格屬於哪個 seq」：encode 會再用 peek 拿指標，
-            // 所以 slot 與 seq 的對應只在渲染器這一輪有效。
+            // 記住 payload 指標：encode 不可以再 peek（生產者也許已交出新格，
+            // 那會拿到新內容配舊 seq）。這一格在 release 之前 writer 不會覆寫。
             d->seq[i] = *seq;
+            d->pay[i] = p;
             *slot = (uint32_t)i;
             *payload = p;
             *px = d->px;
@@ -65,19 +67,16 @@ static bool dir_acquire(nc_pixel_backend_t *b, uint32_t post_seq, uint32_t *slot
 static bool dir_encode(nc_pixel_backend_t *b, uint32_t slot)
 {
     dir_t *d = (dir_t *)b->ctx;
-    if (slot >= DIR_SLOTS) {
+    if (slot >= DIR_SLOTS || d->pay[slot] == NULL || d->buf == NULL) {
         return false;
     }
-    const uint8_t *p = nc_px_ring_peek(d->q, NULL, NULL);
-    if (p == NULL) {
-        return false;
-    }
-    nc_px_codec_frame(d->codec, d->submitted + 1u);
-    const uint32_t n = nc_px_codec_wave_frame(d->codec, p, d->px, s_dir_buf[slot], DIR_UNITS);
+    nc_px_codec_frame(d->codec, d->seq[slot]);
+    uint8_t *out = d->buf + (size_t)slot * d->units;
+    const uint32_t n = nc_px_codec_wave_frame(d->codec, d->pay[slot], d->px, out, d->units);
     if (n == 0) {
         return false;
     }
-    d->units[slot] = n;
+    d->len[slot] = n;
     return true;
 }
 
@@ -101,6 +100,7 @@ static void dir_reclaim(nc_pixel_backend_t *b)
         if (d->seq[i] != 0) {
             nc_px_ring_release(d->q, d->seq[i]);
             d->seq[i] = 0;
+            d->pay[i] = NULL;
             d->reclaimed++;
             if (d->busy_rows > 0) {
                 d->busy_rows--;
@@ -124,8 +124,18 @@ static size_t dir_json(nc_pixel_backend_t *b, char *out, size_t cap)
 nc_pixel_backend_t *nc_px_backend_direct(void)
 {
     dir_t *d = &s_dir;
+    // codec／緩衝是 nc_px_direct_bind() 配的，這裡只重設執行期帳面。
+    nc_pixel_codec_t *codec = d->codec;
+    uint8_t *buf = d->buf;
+    const uint32_t px = d->px;
+    const uint32_t units = d->units;
+    const nc_px_format_t fmt = d->fmt;
     memset(d, 0, sizeof(*d));
-    memset(s_dir_buf, 0, sizeof(s_dir_buf));
+    d->codec = codec;
+    d->buf = buf;
+    d->px = px;
+    d->units = units;
+    d->fmt = fmt;
     (void)snprintf(d->be.name, sizeof(d->be.name), "direct");
     d->be.lanes = 1;
     d->be.ctx = d;
@@ -159,10 +169,10 @@ bool nc_px_direct_frame(const uint8_t **units, uint32_t *len, uint32_t *seq)
         return false;
     }
     if (units != NULL) {
-        *units = s_dir_buf[best];
+        *units = d->buf + (size_t)best * d->units;
     }
     if (len != NULL) {
-        *len = d->units[best];
+        *len = d->len[best];
     }
     if (seq != NULL) {
         *seq = best_seq;
@@ -177,9 +187,35 @@ void nc_px_direct_bind(const nc_px_codec_cfg_t *codec_cfg)
     if (codec_cfg == NULL) {
         return;
     }
+    if (d->codec != NULL) {
+        nc_px_codec_free(d->codec);
+        d->codec = NULL;
+    }
     d->codec = nc_px_codec_init(nc_px_codec_new(), codec_cfg);
+    if (d->codec == NULL) {
+        return;
+    }
     d->px = codec_cfg->px;
     d->fmt = codec_cfg->fmt;
+    const uint32_t units = nc_px_codec_total_units(d->codec);
+    // 緩衝按這塊板真的幾顆／幾條 lane 配置，不是按 NC_PX_MAX_LEDS
+    // （2048 顆 × 3 槽的靜態版本要 393 KB，S3 根本放不落）。
+    if (d->buf != NULL && units == d->units) {
+        return;
+    }
+    if (d->buf != NULL) {
+        free(d->buf);
+        d->buf = NULL;
+    }
+    d->units = units;
+    if (units == 0) {
+        return;
+    }
+    // malloc 在 firmware 一樣是 internal heap；用 libc 的配置器是為了 host 測試也編同一份。
+    d->buf = calloc(DIR_SLOTS, units);
+    if (d->buf == NULL) {
+        ESP_LOGE(TAG, "direct 緩衝（%u × %u B）配置失敗", DIR_SLOTS, (unsigned)units);
+    }
 }
 
 // 綁環（同 mock：環從哪來由呼叫端決定）

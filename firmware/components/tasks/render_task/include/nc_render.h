@@ -1,10 +1,12 @@
-// nc_pixel.h — firmware 側的完整面：**核心本身就是它**（環 + 編碼器，來自
-// nc_pixel_core.h，firmware 與 hosttest 共用同一份），再加上：
-//   ④ 後端驅動（i80／spi／direct／mock）：自己決定怎麼對齊、怎麼讀
-//   ⑤ 渲染器設定與任務宣告
+// nc_render.h — 渲染任務（render task）：把環裡的幀交給後端／驅動。
 //
-// 生產者（內建效果／`.nce`／主機推送）只需要 nc_pixel_core.h 那一段：
-// canonical R,G,B,W × 4 B，交給一條環。
+// 分工（2026-11-18）：
+//   · 效果／Map：另一個任務（tasks/pixel_task）＋ sw/pixel 的環與編碼器；
+//   · **這個任務只做渲染**：取最新一格 → 編碼 → 後端 → 硬件。
+//     將來 LCD 同 LED 都由同一個 render 任務處理，所以這裡刻意不放效果。
+//
+// 一個 render 任務可以跑多道 lane（每道 lane = 一個後端 + 一條環）；
+// 一條環可以由任何生產者餵（像素效果、`.nce`、主機推送）。
 #pragma once
 
 #include <stdbool.h>
@@ -26,13 +28,14 @@ extern "C" {
 
 // ═══════════════════════ 後端 ═══════════════════════
 // 後端 = 一種驅動。它拿環裡的一格、用共用編碼器寫進自己的 DMA 槽，然後送出去。
-// 渲染器永遠不知道驅動長什麼樣 —— 新增一種驅動 = 新增一個後端，
-// 環、節奏、假消費那一段完全不用改。
+// 渲染器永遠不知道驅動長什麼樣 —— 新增一種驅動 = 新增一個後端。
 typedef struct nc_pixel_backend nc_pixel_backend_t;
 struct nc_pixel_backend {
     char  name[NC_PX_BACKEND_MAX];   // "i80" / "spi" / "direct" / "mock"
     void *ctx;
-    uint8_t lanes;                   // 這個後端幾條 lane（i80 可以 1..8）
+    nc_pixel_q_t *ring;              // 這個後端要讀的環（nc_render_bind_lanes() 設定）
+    uint8_t lanes;                   // 這個後端幾條 lane（i80 可以 1..8／16）
+    uint8_t width;                   // i80 的 bus 寬度（8／16）；其他後端 = 0
 
     // 取一格 seq > post_seq 的。成功填 slot／payload／px／seq。
     bool (*acquire)(nc_pixel_backend_t *b, uint32_t post_seq, uint32_t *slot,
@@ -64,10 +67,13 @@ void nc_px_direct_bind(const nc_px_codec_cfg_t *codec_cfg);
 bool nc_px_direct_frame(const uint8_t **units, uint32_t *len, uint32_t *seq);
 
 // "i80"：esp_lcd I80（LCD_CAM 8080 並口）當 lanes 條 lane 的 DMA 動機。
-//   pins = D0..D(lanes-1)、WR、DC（長度 lanes + 2）；沒用到的資料線自動用 D0 代替。
+//   pins = D0..D7、WR、DC（**固定 10 個**，跟 Kconfig 的字串同一個次序）；
+//   前 lanes 個 D 是真 lane，其餘 D 是 dummy（I80 要求 8 條資料線都是有效 GPIO）。
 typedef struct {
+    // pins = D0..D(width-1)、WR、DC（width=8 → 10 個；width=16 → 18 個）
     const int     *pins;
-    uint8_t        lanes;
+    uint8_t        lanes;     // 1..width：前幾個 D 真的接燈
+    uint8_t        bus_width; // 8 或 16（16 一個 PCLK 出兩條 lane 組，時間同 8-bit）
     uint32_t       pclk_hz;
     uint32_t       px;
     nc_px_format_t fmt;
@@ -96,46 +102,26 @@ typedef struct {
 nc_pixel_backend_t *nc_px_backend_spi(const nc_px_spi_cfg_t *cfg);
 
 // ═══════════════════════ 渲染器 ═══════════════════════
-// 一個任務（名 "pixel"），跑一或多道 lane；每道 lane 一個後端 + 一條環。
+// 一個任務（名 "render"），跑一或多道 lane；每道 lane 一個後端 + 一條環。
 typedef struct {
     char be[NC_PX_BACKEND_MAX];    // 後端名
-    char ring[NC_PX_NAME_MAX + 1]; // 環名（空 = 由後端自己決定 = "<後端>.<lane>"）
+    char ring[NC_PX_NAME_MAX + 1]; // 環名（空 = "<後端>.<lane>"）
 } nc_px_lane_cfg_t;
 
 typedef struct {
-    uint16_t fps;             // 目標幀率（0 = 盡快）
+    uint16_t fps;             // 渲染節拍（0 = 盡快）
     int      nlane;
     nc_px_lane_cfg_t lane[NC_PX_MAX_LANES];
 } nc_pixel_cfg_t;
 
-void                  nc_pixel_set_cfg(const nc_pixel_cfg_t *cfg);
-const nc_pixel_cfg_t *nc_pixel_cfg(void);
-// "i80,spi,direct,mock" → cfg.lane[]
-int                   nc_px_cfg_parse_backends(nc_pixel_cfg_t *cfg, const char *list);
+void                  nc_render_set_cfg(const nc_pixel_cfg_t *cfg);
+const nc_pixel_cfg_t *nc_render_cfg(void);
 
-// 後端在 declare 之前要回答「一顆幾多」：0 = 這塊板沒有這個後端
-uint32_t    nc_px_stage_px(const char *be);
-uint32_t    nc_px_stage_slot_bytes(const char *be);
-const char *nc_px_stage_ring(const char *be, int lane);
-
-// 環註冊表（on_start 內；名字全系統唯一）
-esp_err_t     nc_px_ring_register(nc_pixel_q_t *q);
-nc_pixel_q_t *nc_px_ring_find(const char *name);
-nc_pixel_q_t *nc_px_ring_at(int i);
-int           nc_px_ring_count(void);
-nc_pixel_q_t *nc_px_active_ring(void);
-bool          nc_px_put(const uint8_t *rgbw, uint8_t src, uint16_t gen);
-
-// 後端建立與綁定（on_start 內）
-esp_err_t nc_px_setup_backends(void);
-esp_err_t nc_px_bind_lanes(void);
-
-// ── 渲染器狀態 ──
+// ── 渲染器狀態（0xF061 的 "render" 段）──
 typedef struct {
     uint32_t frames;      // 交出的幀（所有 lane）
     uint32_t fresh;       // 用到新格
-    uint32_t holds;       // 重播上一格（生產者沒更新）
-    uint32_t starved;     // 後端全部在飛（DMA 未回）
+    uint32_t starved;     // 後端全部在飛／沒有新格
     uint32_t late;        // 節拍遲到
     uint32_t fail;        // 編碼／後端失敗
     uint32_t skipped;     // 假消費掉的中間幀
@@ -145,17 +131,13 @@ typedef struct {
     uint32_t enc_us;
     uint32_t tx_us;
     uint32_t fps_x10;
-    // 內建效果生產者（"rgbmatrix"）—— 環的寫入端
-    uint32_t prd_frames;  // 算過並提交幾格
-    uint32_t prd_busy;    // 環滿而跳過幾拍（不覆蓋）
-    uint32_t prd_fps_x10; // 生產者實測更新率
 } nc_px_stat_t;
 
-void   nc_px_get_stats(nc_px_stat_t *out);
-size_t nc_px_json(char *out, size_t cap);     // 0xF061 與 STATUS 用
+void   nc_render_get_stats(nc_px_stat_t *out);
+size_t nc_render_json(char *out, size_t cap);     // 0xF061 與 STATUS 用
 
 // 任務宣告（main.c 在 CONFIG_NETCORE_PIXEL 之下登記；未開回 NULL）
-const nc_task_t *nc_pixel_task(void);
+const nc_task_t *nc_render_task(void);
 
 #ifdef __cplusplus
 }

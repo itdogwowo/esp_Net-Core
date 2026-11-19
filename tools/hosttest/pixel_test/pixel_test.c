@@ -8,11 +8,11 @@
 //   ⑤ 後端：mock 與 direct 走同一份 codec，提交／回收次數一致
 //
 // 用法：
-//   cc -I firmware/components/sys/pixel/include -I tools/hosttest/pixel_test/include \
-//      firmware/components/sys/pixel/nc_pixel_q.c \
-//      firmware/components/sys/pixel/nc_pixel_encode.c \
-//      firmware/components/sys/pixel/nc_pixel_backend_mock.c \
-//      firmware/components/sys/pixel/nc_pixel_backend_direct.c \
+//   cc -I firmware/components/sw/pixel/include -I tools/hosttest/pixel_test/include \
+//      firmware/components/sw/pixel/nc_pixel_q.c \
+//      firmware/components/sw/pixel/nc_pixel_encode.c \
+//      firmware/components/sw/pixel/nc_pixel_backend_mock.c \
+//      firmware/components/sw/pixel/nc_pixel_backend_direct.c \
 //      tools/hosttest/pixel_test/pixel_test.c
 //
 // 「拍」與「打」兩邊都只有一份實作：測試與 firmware 編同一批 .c。
@@ -20,7 +20,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "nc_pixel.h"
+#include "nc_render.h"
 
 static int g_fail;
 static int g_pass;

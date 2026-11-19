@@ -4270,3 +4270,277 @@ pytest **237 passed ＋ 1 skipped**。
 修完之後：`idf.py set-target esp32s3` rc=0（19.1 s）、`idf.py build` rc=0（27.7 s），
 產出 `hello_world.bin` 同可直接用的 `flash_args`。**建置能力由「偵測 OK」升級為「真的建到」。**
 pytest 仍 **237 passed ＋ 1 skipped**。
+
+
+### 7.110 2026-11-18（I80 燈驅動真的跑得起了：pixel 後端 11 個 bug＋LED Textkit 6×20）
+
+**背景**：`688c0bd feat(pixel)` 把 rgbmatrix 改寫成「環＋編碼器＋多後端」，
+但**從來沒有 build 過**（commit 之後立刻是 webmaster 重構）。一 build 就连环爆：
+
+- `main.c`：`nc_pixel.h` 的 include 在 `#ifdef NC_ENABLE_TESTS` 內，但 `nc_pixel_task()`
+  在測試區之外呼叫 → release 全部編不過；`pixel` 亦唔在 main 的 PRIV_REQUIRES。
+- `nc_pixel_task.c`：`s_nplan` 先用後宣告；`.chain` 欄位不存在；
+  `CONFIG_NETCORE_PIXEL_I80_PINS` 係字串，直接塞入 `int[]` 初始化 → 編不過。
+- `nc_pixel_backend_i80.c`：`d->codec[ln]`（codec 只是一個指標）→ 編不過。
+- 後端緩衝按 `NC_PX_MAX_LEDS` 靜態配置：i80 1 MB＋direct 393 KB＋spi 66 KB，
+  S3（無 PSRAM）連 link 都過不了。
+
+修完編譯之後，真正跑起來又暴露 6 個**靜默**問題（全部已修，詳見
+[pixel-renderer.md](../03_notes/pixel-renderer.md) §3／§6）：
+
+| 問題 | 現象 |
+|---|---|
+| i80／spi 建好後端但沒有 `nc_px_backend_register()` | `0xF061` 只見 `mock` lane，`frames=0` |
+| i80／spi 的 `d->q` 從來沒有被設定 | acquire 永遠 false（`starved` 一直加） |
+| 生產者綁死環的第 0 格 | 第二幀之後寫舊格、commit 新格 → 畫面黑／跳格 |
+| `nc_px_json()` 把 `"prd"` 塞在 `"lanes":[` 之後 | 回覆不是合法 JSON |
+| 渲染器 fps 寫死 60（Kconfig 冇作用） | 文件說 450／實際 60 |
+| I80 完成回呼「掃第一個未完成的槽」 | 槽回收重排後認錯格 → 提早還格（torn） |
+| GPIO3 被當保留腳 | LED Textkit（GPIO1–5）起不到 I80（只准 GPIO3 例外） |
+
+**硬體**：ESP32-S3-SuperMini ＋ **LED Textkit：6 條 WS2812 燈鏈、每條 20 顆**
+（D0..D5 = GPIO1..GPIO6；D6/D7 = GPIO7/8、WR = 9、DC = 10 是 I80 必需的 dummy）。
+
+**專案層（新）**：`ports/project/S3/ESP32-S3-SuperMini-LED-Textkit/`
+（硬體仍然係 `S3/ESP32-S3-SuperMini`；project 只帶一份**只覆寫外接裝置**的
+`sdkconfig.defaults`）。`firmware/CMakeLists.txt` 的 `SDKCONFIG_DEFAULTS` 次序變成
+`firmware → hardware → project`；`tools/board.py check` 會擋 project 寫
+flash／PSRAM／CPU／console／分區表／target 這類硬體事實。
+
+**上板（測試映像 0x145dc0／1.33 MB、15% free；6 lan e × 20 顆）**：
+
+```json
+{"producer":{"ready":1,"fps_x10":600,"px":20},
+ "render":{"started":1,"fps":300,"frames":834,"fresh":834,"fail":0,
+           "enc_us":814,"tx_us":7,"frame_us":2058,
+           "lanes":[{"be":"i80","lanes":6,"px":20,"seq":835,"fill":0},
+                    {"be":"mock","lanes":1,"px":20,"seq":0,"fill":0}]}}
+```
+
+- `0xF061`：i80 lane 出現、`fill=0`（有被取走）、`seq` 持續增加、`fail=0`；
+  生產者 60 fps；6 條 lane × 20 顆一次新格編碼 **814 µs**。
+- `0xF060`：`zone1`／`solid`／`gain`／`demo off` 都生效；`0xF061` 兩份 JSON 合法。
+- **肉眼驗證**：6 條燈鏈全部亮、每條 20 顆都有光（solid 30,30,30、gain 120）。
+- 內存：I80 3 槽 × 1,640 B ＋ lane 暫存 1,640 B 全部 internal。
+- release 映像（無 tests／無 0xF060 命令）：**0x11dbc0（1.16 MB，分區剩 26%）**。
+- host：`tools/hosttest/pixel_test` **339 passed**（已加入 `run_all.sh`）。
+- 燒錄注意：USB-Serial-JTAG 有一次卡在 download mode（`esptool` sync 失敗、
+  TX path down）；**拔插 USB 就恢復**。之後用 `--before=usb-reset` 直燒 app 最穩。
+
+
+### 7.111 2026-11-18（分層：pixel 拆出 `sys` → `sw`／`tasks`／`driver`）
+
+**問題**：`components/sys/pixel` 一個 component 同時裝了環、編碼器、效果、
+I80／SPI 硬體與任務生命週期 —— 驅動碼在 `sys/`、任務與硬體混在一起。
+分層規則（[component-layout](../03_notes/component-layout.md) §1、
+[driver-layer](../03_notes/driver-layer.md)）要求「driver 唔知任務；任務唔摸匯流排」。
+
+**新佈局**：
+
+| 層 | 路徑 | 內容 | 依賴 |
+|---|---|---|---|
+| `sw` | `components/sw/pixel/` | 環（`nc_pixel_q.c`）、編碼器（`nc_pixel_encode.c`）、內建效果（`nc_pixel_producer.c`） | 只有 esp_timer／log |
+| `tasks` | `components/tasks/pixel_task/` | `nc_pixel_task.c`＋後端轉接（i80／spi／direct／mock） | task、mem、hw、core、log、pixel |
+| `driver` | `components/driver/drv_i80/` | I80 bus／PCLK／DMA 槽／完成回呼；`nc_i80_drv_install/submit/slot_done` | esp_lcd、heap、log（**唔靠 nc_hw**） |
+| `driver` | `components/driver/drv_spi_led/` | SPI 時脈式燈（WS2801／APA102） | esp_driver_spi、heap |
+
+**邊界**：
+
+- 腳位 claim／保留腳政策留在 `tasks/pixel_task`（`nc_hw` 屬 sys），driver 只驗數值範圍；
+- driver 擁有 DMA 緩衝（`slot_buf(i)`），task 只填資料、submit、問 `slot_done`；
+- `nc_pixel_backend_t.ring` 由 `bind_lanes()` 設定；driver 完全唔知「環」。
+
+**驗證**：
+
+- host：`pixel_test` **339 passed**（路徑已改為 `sw/pixel`＋`tasks/pixel_task`；
+  `run.sh`／`run.bat` 同步）。
+- 建置：Textkit tests 映像 **0x146f10**（1.33 MB，含 0xF062）、release **0x11e470**（1.17 MB），零 pixel 相關 warning；
+  component 清單見到 `pixel`（sw）、`pixel_task`（tasks）、`drv_i80`、`drv_spi_led`。
+- 上板（分層後重燒）：`0xF061` → `be=i80`、`lanes=6`、`px=20`、`fill=1`、
+  `fail=0`、60 fps、`enc_us≈847`；6 條鏈 × 20 顆照常亮。
+- `tools/hosttest/run_all.sh` 已加入 `pixel_test`。
+- **2026-11-18 晚再拆任務**：效果與渲染唔止分 loop，係分**兩個任務**（將來 LCD／LED
+  共用同一個 render 任務）：
+  - `render`（`tasks/render_task/`）：`render` loop，300 fps，4,096 B／prio 6；
+    宣告環、建後端、只做「環 → 編碼 → 硬件」；
+  - `pixel`（`tasks/pixel_task/`）：`prd` loop，60 fps，3,072 B／prio 5；
+    只做效果／Map → 環；環由 render 建立，pixel 按名（含 `prd`）找回；
+  - `sw/pixel` 保持純計算（環、編碼、效果函數），亦負責環註冊表。
+  上板：`status tasks` 見 `render@c1`、`prd@c1` 兩條 running；`0xF061` 生產者 60.0 fps、
+  `be=i80`、`lanes=6`、`px=20`、`fail=0`、`enc_us≈842–958`。
+- **節奏分權（2026-11-18 晚最終）**：
+  - `pixel` 任務**不控 FPS**：環有空間就瘋狂填，填滿就每 1 ms 監控一次等 renderer 還格
+    （實測 ~100 格／秒、環長期 3 格全滿；生產者 JSON `fps=0` 表示自由填環）；
+  - `render` 任務由 **`system.json` 的 `frame_interval_ms`** 控制（預設 20 ms = 50 fps），
+    `CONFIG_NETCORE_PIXEL_FPS` 只在拿不到設定時後備；
+  - render loop 用 **esp_timer 週期信號量**（唔靠 1 ms tick、唔 busy-wait），
+    所以 20 ms → **50.0 fps（late=0）**；
+  - 上板：render `frames` 每秒 +50、環 `fill` 保持 1–3（常滿）；生產者自由填環
+    （~100 格／秒，多數格內容相同）；`fail=0`、`enc_us≈716–1052`。
+- **抖動預設關**（實驗功能）：`CONFIG_NETCORE_PIXEL_DITHER=0`、`DITHER_BITS=8`、
+  producer demo 預設關；要試就 `0xF060 op=2`／`op=8` 或改 Kconfig。
+- **舊設備要重 seed config**：`tasks.json` 多咗 `render` 條目，舊的 data 分區只有
+  `pixel` → `render` 被補成 (0,0)（on_start 有跑、loop 唔開）。用
+  `tools/nc4_file.py set '{"System":{"fs_format":1}}' 1` ＋ reboot 重建 FAT。
+- 交叉建置：S3-Matrix tests（1 lane／64 顆）通過；S3-Mini-Nano release（pixel 未開，
+  走 `#else` stub）零 warning；C3 release（`SOC_LCD_I80_SUPPORTED=0`，driver stub）通過。
+
+
+### 7.112 2026-11-18（極限測試：16 × 600 × 50 FPS 在 S3 做唔到）
+
+新增測試指令 **`0xF062 PXBENCH`**（測試映像；payload `[lanes][px lo][px hi][frames]`），
+用同一份 codec 量「逐 lane 編碼＋多 lane OR 合成」的每幀成本，payload 用變動 pattern
+避開「同上一顆就抄」的快取，scratch／輸出放 PSRAM（真實 backend 要 internal，數字保守）。
+S3 @240 MHz、Textkit 映像實測：
+
+| 配置 | µs／幀 | 上限 fps | 50 fps |
+|---|---:|---:|---|
+| **16 × 600** | **143,166** | **6.9** | ❌（差 7.2×） |
+| 8 × 600 | 72,053 | 13.8 | ❌ |
+| 16 × 300 | 55,076 | 18.1 | ❌ |
+| 6 × 600 | 54,153 | 18.4 | ❌ |
+| 8 × 256 | 20,140 | 49.6 | ❌（臨界） |
+| 8 × 200 | 11,909 | 83.9 | ✅ |
+| 6 × 256 | 15,099 | 66.2 | ✅ |
+| 6 × 20（現況） | 998 | 1002 | ✅ |
+
+**三個獨立瓶頸**：
+
+1. S3 只有一個 I80／LCD_CAM（8 條資料線）→ 16 lane 需要兩個控制器（兩顆 MCU）或
+   16-bit I80（P4）；
+2. 8 lane × 600 px 一幀 = 43,400 B，3 個 DMA 槽 = 130 KB **internal**；S3 開機只剩
+   ~20 KB → 連 8×600 都起不到 backend；
+3. CPU：143 ms／幀 vs 20 ms → 差 7.2 倍。
+
+**可行方向**（未實作）：P4 ＋ 16-bit I80／兩條 bus；兩核各編 8 lane；顏色 pattern
+快取（文字通常幾種顏色，逐像素 memcpy＋OR）；或兩塊 S3 各 8 lane 同步。
+測試指令留在測試映像：`python3 tools/nc4.py --port $P raw 0xF062 10580205`。
+
+
+### 7.113 2026-11-18（I80 16-bit 支援；「20 KB」係測試映像，release 有 172 KB）
+
+**16-bit I80**（用戶指出 8/16-bit 並行輸出應該同時間）：驅動已支援
+`CONFIG_NETCORE_PIXEL_I80_BUS_WIDTH=8|16`；16-bit 用 18 個腳位（D0..D15、WR、DC），
+一個 PCLK 出兩個 byte（lane0–7 低位元組、lane8–15 高位元組），所以 **16 lane 的
+DMA 傳輸時間同 8 lane 一樣**。S3 實測（6 lane 接同一塊 Textkit、其餘 dummy）：
+I80 起得來、50 fps、`enc_us≈825`、`fail=0` → S3 硬件支援 16-bit i80。
+Textkit 專案仍用 8-bit（6 lane），16-bit 係 driver 能力。
+
+**「20 KB」之謎**：係測試映像，唔係 release：
+
+| 映像 | h_int | h_dma |
+|---|---:|---:|
+| tests（NCM/WAMR＋bench＋test_action） | **20,551 B** | 12,763 B |
+| release（NC_ENABLE_TESTS=OFF） | **172,663 B** | 164,875 B |
+
+差 ~152 KB 主要係 NCM/WAMR 引擎、bench 任務與測試指令；正式映像冇呢啲。
+用戶懷疑正確：之前用測試映像睇內存，低估了 release 的空間。
+
+**但 16×600×50 仍然做唔到**：
+
+- CPU：`0xF062` 量到 16×600 = **143 ms／幀（6.9 fps）**；16-bit 只加快傳輸，
+  編碼仍然同 lane 數成正比；
+- 記憶體：16-bit × 600 px 一幀 86,800 B，2 個 DMA 槽 173.6 KB > release
+  DMA-capable 164.9 KB（差 ~9 KB）；1 槽＋scratch 放得落但冇 pipelining；
+- 16-bit 已經解決「16 條一起出」的傳輸時間，剩低係 CPU 編碼同緩衝。
+
+下一步（未做）：顏色 pattern 快取、兩核各編 8 lane、P4／雙 S3。
+
+
+### 7.114 2026-11-18（編碼優化：波形 LUT＋direct-OR；16×600 由 6.9 → 18.6 fps）
+
+對照舊 `mp_Net-Core/slave` 的原則（整數、固定數值域、bulk 掃 buffer、唔逐 pixel 呼叫）
+重寫熱路徑：
+
+- **波形 LUT**（256 × bit_cells×8 B，共用）：逐線材 byte 由 bit 迴圈變 memcpy；
+- **8-bit／無抖動快路徑**：唔入 `dither_ch`；
+- **`nc_px_codec_wave_frame_or()`**：每條 lane 直接 OR 入 I80 DMA 槽，
+  **取消 43 KB lane scratch**（同時解決內部記憶體同一次讀寫）。
+
+`0xF062`（測試映像、PSRAM 緩衝，保守值）：
+
+| 配置 | 之前 | 之後 |
+|---|---:|---:|
+| 16 × 600 | 143 ms / 6.9 fps | **38.5 ms / 25.9 fps** |
+| 8 × 600 | 72 ms / 13.8 fps | **19.2 ms / 52.0 fps** ✅ |
+| 6 × 600 | 54 ms / 18.4 fps | **17.6 ms / 56.7 fps** ✅ |
+| 16 × 300 | 55 ms / 18.1 fps | **18.9 ms / 52.9 fps** ✅ |
+| 6 × 256 | 15 ms / 66 fps | **7.2 ms / 138 fps** |
+
+上板 6×20：`enc_us` 由 ~825 降至 **514**、50 fps、`fail=0`。
+
+**Packed bitstream＋8×8 轉置**（第三輪優化；16×600 拆分：pack 15.3 ms、merge 24.3 ms → 查表唔係瓶頸，merge／PSRAM 輸出寫入才係）：一條 lane 的波形壓成 bitstream
+（每線材 byte 3 B），再 8 條 lane 一組合併；混合量由 691k 次 byte OR 降到
+43k 次位元組，所以有上面嘅大躍進。I80 backend 已改用此路徑。
+
+**結論**：**8×600 @ 50 fps ✅、16×300 @ 50 fps ✅、6×600 56.7 fps**（測試映像
+PSRAM 數字，release internal 更快）。**16×600 @ 50 fps 仍然差**：packed 後 38.5 ms，
+但 16-bit 一幀 86,800 B，2 個 DMA 槽 173.6 KB > release DMA-capable 164.9 KB
+（差 8.7 KB）；單槽放得落但 encode 同 DMA 冇得重疊。下一步 P4／雙 S3／兩核各 8 lane。
+
+
+### 7.115 2026-11-18（純 SRAM 量測：16×600 28.2 fps；瓶頸係 CPU 唔係記憶體）
+
+`CONFIG_NETCORE_PXBENCH=y` 建 release 映像（無 NCM／測試任務），0xF062 的緩衝
+全部 internal（回覆 `sram=1`、11/11）：
+
+| 配置 | PSRAM | **純 SRAM** |
+|---|---:|---:|
+| 16 × 600 | 38.5 ms / 25.9 fps | **35.4 ms / 28.2 fps** |
+| 8 × 600 | 19.2 ms / 52.0 | **17.8 ms / 56.2** ✅ |
+| 16 × 300 | 18.9 ms / 52.9 | **17.7 ms / 56.4** ✅ |
+| 6 × 600 | 17.6 ms / 56.7 | **16.1 ms / 62.0** ✅ |
+
+**純 SRAM 只快 8–10%** → 剩低係 CPU（逐 pixel 映射＋合併），唔係 PSRAM 頻寬。
+16×600 仍差 1.8×；下一步：專化 pack 熱路徑、bit-trick 8×8 轉置、兩核各 8 lane。
+16-bit 雙緩衝 173.6 KB 仍然超 release DMA 164.9 KB（差 8.7 KB）。
+
+另：今次全程用 **NC4 OTA**（無 esptool、無拔插），但 1.17 MB 用 187 s（6.1 KB/s），
+比 CDC OTA 的 ~200 KB/s 慢很多，下一步要查 USJ/OTA chunk 節奏。
+
+
+### 7.116 2026-11-19（OTA 6.2 KB/s 的真相：USJ 每次只讀 64 B ＋ 10 ms 輪詢）
+
+用戶問「傳遞慢就傳少啲再解碼」。先量再改：
+
+- **壓縮比**：app 1,174,064 B → zlib -9 **770,639 B（65.6%）**；即係就算做
+  「壓縮→裝置解壓」，OTA 187 s 只會變 ~123 s（1.5×），而且要加解壓庫（IDF 冇內建）。
+- **Pipelining 無用**：`tools/ota.py --window 4`（一次送 4 個 WRITE、再一次收 ACK）
+  仍然 **186 s / 6.2 KB/s** → 唔係 ACK round-trip 問題。
+- **真正原因**：`STATUS keys=net` 顯示 `max_read=64` —— USB USJ 一個包只 64 B；
+  而 PULL decode loop 每讀完一次（FIFO 空）就 `ulTaskNotifyTake(..., 10 ms)`，
+  即 **64 B / 10 ms ≈ 6.4 KB/s**，同實測完全吻合。1.17 MB 要 18,645 次讀。
+- **已改（未上板驗證）**：`nc4_bus.c` 的 PULL 等待改成「20 ms 內有過資料 → 1 ms 再讀，
+  否則 10 ms」；理論上 64 B/1 ms ≈ **64 KB/s（~10×）**，空閒時仍然 10 ms。
+  這次 OTA 安裝失敗（BEGIN 後 WRITE 中斷），裝置已回到舊 release（app 44e0a599），
+  改動只在源碼，未生效。
+
+**結論**：先修 link 輪詢（10×），再考慮壓縮（1.5×）；壓縮的 decoder 成本／收益
+暫時唔划算。像素傳輸方面本身已經係最少：主機只送 canonical RGBW（4 B/px），
+裝置端再 pack／轉置。
+
+
+### 7.117 2026-11-19（照 FastLED 做：pack/merge 35.4→14.33 ms；16×600 達 69.7 fps CPU）
+
+參考 FastLED `channel_driver_lcd_clockless` + `bit_spread_lut.hpp`：
+
+1. merge 改用 **nibble spread LUT（16×u32）＋u32 OR**（nibble 的 bit j → 第 j 個
+   output byte），取代逐 unit 8 次 shift/OR；
+2. pack 加 8-bit／無抖動專化：直接由 RGBW 按色序抄 3 個 LUT，唔經 `lane_px`；
+3. `drv_i80` DMA 槽改 **PSRAM + MALLOC_CAP_DMA + 64 B 對齊 + esp_cache_msync(C2M)**
+   （FastLED 同款；S3 `SOC_PSRAM_DMA_CAPABLE=1`），失敗才退 internal。
+
+`0xF062`（release、純 SRAM、sram=1）：
+
+| 配置 | 之前 | **現在** |
+|---|---:|---:|
+| 16×600 | 35.4 ms / 28.2 fps | **14.33 ms / 69.7 fps**（pack 7.07＋merge 7.08） |
+| 8×600 | 17.8 ms / 56.2 | **7.24 ms / 138 fps** |
+| 16×300 | 17.7 ms / 56.4 | **7.18 ms / 139 fps** |
+| 6×600 | 16.1 ms / 62.0 | **5.88 ms / 170 fps** |
+
+**16×600×50 的新算式**：CPU 14.33 ms；DMA 17.36 ms；兩個 PSRAM DMA 槽 overlap
+→ frame = max(14.33, 17.36) = **17.36 ms（57.6 fps 上限）**，50 fps 已經過關；
+DMA 傳輸成為新瓶頸。板上 app `c0787583`，6×20 正常；16 lane 實物未上板驗證。
+下一步實驗清單（IRAM、lib8tion、dither、RMT、chunked DMA、ABL）見
+[pixel-experiments.md](../03_notes/pixel-experiments.md)。

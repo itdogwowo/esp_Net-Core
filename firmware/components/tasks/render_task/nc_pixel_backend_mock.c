@@ -11,7 +11,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "nc_pixel.h"
+#include "nc_render.h"
 
 
 #define MOCK_SLOTS 3

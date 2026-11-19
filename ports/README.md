@@ -185,11 +185,16 @@ firmware 不會因為用戶檔缺失而失去硬體預設。
 - `sdkconfig.defaults` 檔尾那段是**產生出來的**，手改會在下次 `sync` 被蓋掉；
   這塊板子獨有的東西請寫在 marker 區塊上方。
 - **所有 build 能力**（`eth-rmii`、`wifi-hosted-c6`、`nc4-ws`、`nc4-udp`…）都寫在
-  `hardware/board.json` 的 `profiles`；project 層冇 `profiles`、冇 `sdkconfig.defaults`。
-- build 時的合併次序：`firmware/sdkconfig.defaults` → `hardware/sdkconfig.defaults`。
-- **project 只放 runtime 設定**（`project.json` ＋ `data/config/*.json`）：project 唔會改
-  Kconfig／能力；但它的 `data/config` 會作為 `F.preset` 嵌進 image，所以換 project
-  （換預置內容）仍然要重 build 一次。要改 build 能力就是改硬體板並重 build。
+  `hardware/board.json` 的 `profiles`；project 層冇 `profiles`。
+- build 時的合併次序：`firmware/sdkconfig.defaults` → `hardware/sdkconfig.defaults`
+  → `project/sdkconfig.defaults`（後者勝）。
+- **project 主要是 runtime 設定**（`project.json` ＋ `data/config/*.json`）；但同一塊硬體
+  可以外接不同的東西（LED 燈鏈、外掛板），那組腳位是 build-time 事實 —— 所以 project
+  **可以選擇性**帶一份 `sdkconfig.defaults`，只覆寫外接裝置（例如 `NETCORE_PIXEL_*`）。
+  硬體事實（flash／PSRAM／CPU／console／分區表／target）一律唔准寫入 project，
+  `board.py check` 會報錯。呢份檔改完要 `--fresh` 才會重新套用。
+- project 的 `data/config` 會作為 `F.preset` 嵌進 image，所以換 project（換預置內容）
+  仍然要重 build 一次。
 
 ---
 

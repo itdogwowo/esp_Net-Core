@@ -132,6 +132,8 @@ def main() -> int:
     ap.add_argument("--port", required=True)
     ap.add_argument("image", nargs="?", help="要推的 app image（--abort 時可省略）")
     ap.add_argument("--chunk", type=int, default=4096)
+    ap.add_argument("--window", type=int, default=1,
+                    help="同時在途的 WRITE 數（pipelining；1 = 逐個等 ACK）")
     ap.add_argument("--no-apply", action="store_true")
     ap.add_argument("--delay-ms", type=int, default=500)
     ap.add_argument("--abort", action="store_true",
@@ -198,17 +200,27 @@ def main() -> int:
 
         # ── WRITE ──
         offset = 0
+        sent = 0
+        pending = []          # [(offset, len)]：已送出、等 ACK
+        window = max(1, int(args.window))
         t0 = time.time()
-        while offset < len(data):
-            chunk = data[offset:offset + args.chunk]
-            ser.write(pack(CMD_WRITE, struct.pack("<I", offset) + chunk))
-            f = rd.wait_for({CMD_ACK, CMD_ERROR_RSP}, timeout=5.0)
+        # Pipelining：一次送 window 個 WRITE，再一次回收 window 個 ACK。
+        # 每個 ACK 仍然逐個核對 offset（裝置是順序處理），但唔再每 4 KB 停一次
+        # USB round-trip —— 呢個就係之前 6 KB/s 的主因。
+        while pending or sent < len(data):
+            while len(pending) < window and sent < len(data):
+                chunk = data[sent:sent + args.chunk]
+                ser.write(pack(CMD_WRITE, struct.pack("<I", sent) + chunk))
+                pending.append((sent, len(chunk)))
+                sent += len(chunk)
+            off_sent, clen = pending.pop(0)
+            f = rd.wait_for({CMD_ACK, CMD_ERROR_RSP}, timeout=10.0)
             if f is None or f[0] == CMD_ERROR_RSP:
-                print(f"\nWRITE 失敗 @ {offset}:", f[1].hex() if f else "no reply")
+                print(f"\nWRITE 失敗 @ {off_sent}:", f[1].hex() if f else "no reply")
                 return 1
             ack_off, written = struct.unpack_from("<II", f[1])
-            if ack_off != offset:
-                print(f"\noffset 回聲不符: {ack_off} != {offset}")
+            if ack_off != off_sent:
+                print(f"\noffset 回聲不符: {ack_off} != {off_sent}")
                 return 1
             offset = written
             pct = 100.0 * offset / len(data)

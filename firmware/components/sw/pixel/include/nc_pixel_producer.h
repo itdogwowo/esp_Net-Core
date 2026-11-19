@@ -73,15 +73,22 @@ typedef struct {
 // 開機預設（gain 60／12 位／呼吸 4 s／demo 開）。**先呼叫它，再 set_cfg 覆寫。**
 void nc_px_producer_defaults(void);
 
-// 綁定：把生產者的 payload 與表頭接到渲染器交付的環那一格（nc_pixel_task.c 叫）。
-// buf 至少要 px × 4 B；hdr 是該格的表頭（24 B）。重複 bind 是安全的。
-esp_err_t nc_px_producer_bind(uint8_t *buf, uint32_t px, void *hdr, uint32_t region_bytes);
+// 綁定：只記住「這條 lane 幾顆」。**不持有環的任何一格** —— 環的 writer 游標每
+// commit 一次就前進一格，所以每次寫入都由呼叫端把 begin() 交出來的 payload／表頭傳進來。
+// 重複 bind 是安全的（px 相同就只是重新初始化 lookup 表與抖動相位）。
+esp_err_t nc_px_producer_bind(uint32_t px);
 bool      nc_px_producer_ready(void);
 
-// 算一格：把目前時間的效果寫進 buffer，並更新表頭（gen 之類）。
-// 回 false = 還沒有綁定（呼叫端不應該 commit）。
-// 生產者不呼叫 nc_px_ring_commit —— 誰擁有環，誰 commit（單一 writer）。
-bool nc_px_producer_frame(int64_t now_us);
+// 算一格：把目前時間的效果寫進呼叫端指定的 dst（px × 4 B）與表頭 hdr（24 B）。
+// dst／hdr 就是 nc_px_ring_begin_ex() 剛交出來的那一格；生產者**不**呼叫 commit。
+// 回 false = 還沒綁定、或參數不對（呼叫端應該 abort 那一格）。
+bool nc_px_producer_frame(uint8_t *dst, void *hdr, int64_t now_us);
+
+// 把上一格算好的內容抄到另一條 lane 的格（**不重算、不推抖動**）。
+// 多條燈鏈要顯示同一個畫面時用（例如 5 條鏈的 LED Textkit）；
+// capacity_bytes = 目標格 payload 可用空間，裝不下就拒絕（避免溢出）。
+// 回 false = 還沒有算過任何一格，或容量不足。
+bool nc_px_producer_copy(uint8_t *dst, void *hdr, uint32_t capacity_bytes);
 
 // 重設抖動誤差到「位置決定」的初始相位（換格式／換區大小之後呼叫）。
 void nc_px_producer_reset(void);

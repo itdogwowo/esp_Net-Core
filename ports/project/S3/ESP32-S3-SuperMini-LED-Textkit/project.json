@@ -1,0 +1,24 @@
+{
+  "_comment": [
+    "Project 層：同一塊硬體（S3/ESP32-S3-SuperMini）上「跑什麼」。",
+    "",
+    "LED Textkit ＝ SuperMini ＋ 6 條 WS2812 燈鏈，資料線 GPIO1–6，每條 20 顆。",
+    "燈鏈的腳位是 build-time 事實（I80 的 8 條資料線 + WR + DC 一定要是有效 GPIO），",
+    "所以這個 project 帶一份 sdkconfig.defaults 只覆寫「外接燈具」那幾項；",
+    "flash／PSRAM／CPU／console 等硬體事實仍然由 ports/hardware/S3/ESP32-S3-SuperMini 提供，",
+    "project 唔准改（tools/board.py check 會擋）。",
+    "",
+    "每條鏈 20 顆（CONFIG_NETCORE_PIXEL_LEDS）；6 條鏈同步顯示同一個畫面",
+    "（I80 一個後端同時送 6 條 lane，內容相同）。要改顆數改 sdkconfig.defaults 再 --fresh。"
+  ],
+  "version": 1,
+  "name": "ESP32-S3-SuperMini-LED-Textkit",
+  "hardware": "S3/ESP32-S3-SuperMini",
+  "aliases": ["textkit", "led-textkit", "textkit-led"],
+  "seed": [
+    "hardware",
+    "system",
+    "network",
+    "tasks"
+  ]
+}

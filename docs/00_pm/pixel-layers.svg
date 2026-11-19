@@ -1,0 +1,111 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1240" height="1240" viewBox="0 0 1240 1240">
+  <style>
+    .t{font-family:-apple-system,"PingFang TC","Helvetica Neue",sans-serif;fill:#0b1d2a}
+    .h{font-size:26px;font-weight:700}
+    .s{font-size:15px;fill:#3c5566}
+    .b{font-size:16px;font-weight:600}
+    .m{font-size:13px;fill:#4a6475}
+    .box{fill:#f7fbfe;stroke:#2b6f95;stroke-width:1.6;rx:10}
+    .hw{fill:#fff4e8;stroke:#c9721a}
+    .drv{fill:#eef8ef;stroke:#3f8f4a}
+    .task{fill:#eef2ff;stroke:#3b5bdb}
+    .sw{fill:#fdf0f8;stroke:#a63d8f}
+    .cfg{fill:#f5f5f5;stroke:#777;stroke-dasharray:6 4}
+    .arr{stroke:#2b6f95;stroke-width:2;fill:none;marker-end:url(#a)}
+    .arr2{stroke:#777;stroke-width:1.5;fill:none;stroke-dasharray:5 4;marker-end:url(#ag)}
+    .note{fill:#fffbe6;stroke:#c9a227;stroke-width:1.2;rx:8}
+    .red{fill:#ffecec;stroke:#c0392b;stroke-width:1.4;rx:8}
+  </style>
+  <defs>
+    <marker id="a" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto">
+      <path d="M0,0 L0,6 L9,3 z" fill="#2b6f95"/>
+    </marker>
+    <marker id="ag" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto">
+      <path d="M0,0 L0,6 L9,3 z" fill="#777"/>
+    </marker>
+  </defs>
+
+  <text x="40" y="44" class="t h">pixel 渲染：抽象層與資料流（2026-11-19）</text>
+  <text x="40" y="72" class="t s">主機只送 canonical RGBW（4 B/px）；裝置端查表、打包、8×8 轉置、DMA 送出。</text>
+
+  <!-- left stack -->
+  <rect class="box task" x="60" y="110" width="430" height="78" rx="10"/>
+  <text x="80" y="140" class="t b">① 生產者  tasks/pixel_task（效果／Map）</text>
+  <text x="80" y="165" class="t m">free-run：有空間就填，環滿 → 1 ms 監控；唔控 FPS</text>
+
+  <rect class="box sw" x="60" y="212" width="430" height="88" rx="10"/>
+  <text x="80" y="242" class="t b">② 環  sw/pixel（canonical R,G,B,W）</text>
+  <text x="80" y="267" class="t m">SPSC、3 槽、滿了不覆蓋、只交最新一格</text>
+  <text x="80" y="288" class="t m">slot = 64 B 表頭 + px×4 B（Textkit 20 顆）</text>
+
+  <rect class="box sw" x="60" y="324" width="430" height="122" rx="10"/>
+  <text x="80" y="354" class="t b">③ 編碼  sw/pixel（LUT）</text>
+  <text x="80" y="379" class="t m">byte 0–255 → packed waveform（3 B／byte，bit_cells=3）</text>
+  <text x="80" y="402" class="t m">8-bit／無抖動：直接 3 次 memcpy；唔逐 bit 展開</text>
+  <text x="80" y="425" class="t m">packed：一條 lane 600 顆 = 5,400 B</text>
+
+  <rect class="box sw" x="60" y="470" width="430" height="122" rx="10"/>
+  <text x="80" y="500" class="t b">④ 合併  8×8 bit 轉置（sw）</text>
+  <text x="80" y="525" class="t m">8 條 lane 的同一個 byte → 8 個 I80 unit byte</text>
+  <text x="80" y="548" class="t m">16 lane → 兩組（低／高 byte）；輸出 byte-per-unit</text>
+  <text x="80" y="571" class="t m">成本：每幀 86,400 output bytes（16×600）</text>
+
+  <rect class="box task" x="60" y="616" width="430" height="88" rx="10"/>
+  <text x="80" y="646" class="t b">⑤ 渲染  tasks/render_task（50 fps）</text>
+  <text x="80" y="671" class="t m">循環：reclaim → acquire → encode → submit</text>
+  <text x="80" y="692" class="t m">節拍：system.json frame_interval_ms（20 = 50 fps）</text>
+
+  <rect class="box drv" x="60" y="728" width="430" height="86" rx="10"/>
+  <text x="80" y="758" class="t b">⑥ 驅動  driver/drv_i80</text>
+  <text x="80" y="783" class="t m">I80 8/16-bit、PCLK 2.5 MHz、3 DMA 槽、完成次序</text>
+  <text x="80" y="804" class="t m">DMA 槽 internal、按 px×lanes 配置</text>
+
+  <rect class="box hw" x="560" y="728" width="610" height="86" rx="10"/>
+  <text x="580" y="758" class="t b">⑦ 硬件</text>
+  <text x="580" y="783" class="t m">LCD_CAM/I80 → WS2812 ×16（每條 600 顆）；ESP32-S3 240 MHz</text>
+  <text x="580" y="804" class="t m">internal SRAM 172 KB free（release）／PSRAM 2 MB</text>
+
+  <!-- arrows left -->
+  <path class="arr" d="M275,188 L275,212"/>
+  <path class="arr" d="M275,300 L275,324"/>
+  <path class="arr" d="M275,446 L275,470"/>
+  <path class="arr" d="M275,592 L275,616"/>
+  <path class="arr" d="M275,704 L275,728"/>
+  <path class="arr" d="M490,771 L560,771"/>
+
+  <!-- right: config and tools -->
+  <rect class="box cfg" x="560" y="110" width="300" height="150" rx="10"/>
+  <text x="580" y="140" class="t b">設定（build-time）</text>
+  <text x="580" y="166" class="t m">ports/project/…/sdkconfig.defaults</text>
+  <text x="580" y="188" class="t m">pins 1–18、lanes 6、width 8/16</text>
+  <text x="580" y="210" class="t m">format ws2812、pclk、bit_cells</text>
+  <text x="580" y="232" class="t m">LEDS=20（每條）</text>
+
+  <rect class="box cfg" x="890" y="110" width="280" height="150" rx="10"/>
+  <text x="910" y="140" class="t b">設定（runtime）</text>
+  <text x="910" y="166" class="t m">system.json frame_interval_ms=20</text>
+  <text x="910" y="188" class="t m">tasks.json render / pixel 開關</text>
+  <text x="910" y="210" class="t m">hardware.json wiring 鏡子</text>
+  <text x="910" y="232" class="t m">（改 runtime 只要 reboot）</text>
+
+  <rect class="box" x="560" y="290" width="610" height="180" rx="10"/>
+  <text x="580" y="320" class="t b">測試流程</text>
+  <text x="580" y="348" class="t m">① host：tools/hosttest/pixel_test（339 assertions）── 環、位元、多 lane、後端回收</text>
+  <text x="580" y="372" class="t m">② build：make.py build esp32-s3-supermini --project textkit [--tests]</text>
+  <text x="580" y="396" class="t m">③ 上板：tools/ota.py（app）；esptool 只 bootloader／分割表／救援</text>
+  <text x="580" y="420" class="t m">④ 指令：0xF060 效果、0xF061 render、0xF062 PXBENCH（吞吐量測）</text>
+  <text x="580" y="444" class="t m">⑤ 驗證：status tasks／0xF061（fps、fill、fail）＋肉眼 6×20</text>
+
+  <rect class="note" x="560" y="492" width="610" height="104" rx="8"/>
+  <text x="580" y="520" class="t b">量測方法（0xF062）</text>
+  <text x="580" y="545" class="t m">payload 用變動 pattern（避開「同上一顆就抄」）；frames≥2；</text>
+  <text x="580" y="567" class="t m">緩衝 internal-first（回報 sram=1/0）；分開量 pack／merge／total。</text>
+  <text x="580" y="589" class="t m">16×600 係合成負載（板上只有 6×20；16 lane 未有實物）。</text>
+
+  <rect class="red" x="560" y="620" width="610" height="86" rx="8"/>
+  <text x="580" y="648" class="t b">樽頸（16 × 600 × 50 fps）</text>
+  <text x="580" y="673" class="t m">CPU：pack 15.3 ms ＋ merge 24.3 ms ＝ 35.4 ms（純 SRAM）vs 20 ms 預算</text>
+  <text x="580" y="695" class="t m">記憶體：16-bit 一幀 86,800 B；2 槽 173.6 KB &gt; 164.9 KB（差 8.7 KB）</text>
+
+  <text x="40" y="1210" class="t s">圖：pixel 抽象層 — 生產者、環、編碼、合併、渲染、驅動、硬件；設定同測試流程在右。</text>
+</svg>

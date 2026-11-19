@@ -100,6 +100,15 @@ menu "esp_Net-Core"
             取代舊的 `rgbmatrix` 測試任務：效果變成生產者，送燈變成後端。
             沒有燈板的板子也可以開（後端退到 mock / direct），整條路照樣跑。
 
+    config NETCORE_PXBENCH
+        bool "像素吞吐量測指令 0xF062（release 映像也可用）"
+        depends on NETCORE_PIXEL
+        default n
+        help
+            加一條 0xF062 PXBENCH 指令量「packed 波形＋8×8 轉置」的每幀成本；
+            緩衝先試 internal SRAM、唔夠才退 PSRAM，回覆有 sram=1/0。
+            量產映像預設關閉。
+
     config NETCORE_PIXEL_LEDS
         int "每道 lane 的燈數"
         depends on NETCORE_PIXEL
@@ -162,9 +171,9 @@ menu "esp_Net-Core"
             必須 > T0H，否則兩個碼分不出來。編碼器會夾回合法範圍。
 
     config NETCORE_PIXEL_DITHER_BITS
-        int "亮度精度（8 = 關抖動）"
+        int "亮度精度（8 = 關抖動；12+ 是實驗）"
         depends on NETCORE_PIXEL
-        default 12
+        default 8
         range 8 16
         help
             燈只有 8 bit／通道。暗階（例如 1/256）在 8 bit 下不是 0 就是 1，
@@ -174,9 +183,9 @@ menu "esp_Net-Core"
             成本：每顆每通道幾次整數運算；8 bit 是零成本（直接四捨五入）。
 
     config NETCORE_PIXEL_DITHER
-        int "抖動方式（0 關 / 1 時間 / 2 時間+空間）"
+        int "抖動方式（0 關 / 1 時間 / 2 時間+空間；暫時預設關）"
         depends on NETCORE_PIXEL
-        default 1
+        default 0
         range 0 2
         help
             1 = 時間抖動：同一個相位區的誤差一起累積（幀率高時看得到微微閃）。
@@ -193,9 +202,9 @@ menu "esp_Net-Core"
             0 = 整條一區。上限 16 區（NC_PX_CODEC_ZONES_MAX）。
 
     config NETCORE_PIXEL_FPS
-        int "預設幀率（tasks.json 的 pixel.fps 可覆寫）"
+        int "後備幀率（實際以 system.json 的 frame_interval_ms 為準）"
         depends on NETCORE_PIXEL
-        default 450
+        default 50
         range 1 1000
         help
             送燈的節奏。這和「產生者更新畫面的節奏」是兩件事：內建效果 60 fps，
@@ -240,6 +249,17 @@ menu "esp_Net-Core"
             預設值避開 IMU（IO10–13）、USB（19/20）、UART0（43/44）、
             flash（26–32）、nc_hw_reserved() 視為 PSRAM 的 33–37，
             以及 strapping（0/3/45/46）。
+
+    config NETCORE_PIXEL_I80_BUS_WIDTH
+        int "I80 資料線寬度（8 或 16；16 需要 18 個腳位）"
+        depends on NETCORE_PIXEL_I80
+        default 8
+        range 8 16
+        help
+            8 = D0..D7（一條 bus 最多 8 lane）；16 = D0..D15（最多 16 lane）。
+            16-bit 每分鐘一個 PCLK 出兩條 lane 組，所以 16 lane 的**傳輸時間同 8 lane 一樣**；
+            但 CPU 仍然要逐條 lane 編碼（編碼時間同 lane 數成正比）。
+            16-bit 的腳位字串要有 18 個：D0..D15、WR、DC。
 
     config NETCORE_PIXEL_I80_LANES
         int "I80 一次送幾條 lane"

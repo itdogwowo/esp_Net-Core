@@ -87,17 +87,21 @@ ports/
 > 上配錯線（Waveshare P4-WIFI6-DB 的 C5 → SDIO CMD5 timeout 0x107）。現在碎片只留
 > slave target，板子符號（`ESP_HOSTED_*_BOARD`）寫在各板 `sdkconfig.defaults`。
 
-> **project 只放 runtime 設定**（`project.json` ＋ `data/config/*.json`）。換部署 = 換
+> **project 主要是 runtime 設定**（`project.json` ＋ `data/config/*.json`）。換部署 = 換
 > project 的 data/config，不需要重 build；要改 build 能力 = 改 hardware 的 profiles 並重 build。
+> 例外（2026-11-18）：同一塊硬體外接不同裝置時，那組腳位是 build-time 事實，所以 project
+> **可以選擇性**帶一份 `sdkconfig.defaults`，只覆寫外接裝置（例如 LED Textkit 的
+> `NETCORE_PIXEL_*`）；硬體事實（flash／PSRAM／CPU／console／分區表／target）一律唔准寫，
+> `tools/board.py check` 會擋。改完要 `--fresh` 才會重新套用。
 
 build 的 `SDKCONFIG_DEFAULTS` 次序：
 
 ```text
-firmware/sdkconfig.defaults → hardware/sdkconfig.defaults
+firmware/sdkconfig.defaults → hardware/sdkconfig.defaults → project/sdkconfig.defaults
 ```
 
 後者勝。`tools/board.py sync` 只會把 hardware 的 `profiles` 寫進
-`hardware/sdkconfig.defaults` 檔尾 marker 區塊；project 層冇 build 設定可以同步。
+`hardware/sdkconfig.defaults` 檔尾 marker 區塊；project 的覆寫要自己維護。
 
 ---
 
@@ -279,7 +283,7 @@ data      0x820000   0x1700000    ← 由 7 MB 增到 23 MB
 - [x] `python3 tools/board.py check` 0 error（4 個「冇 driver.json」warning，都係 USB-only 板）
 - [x] `tools/ncportgen.py` 對每塊板產生 `nc_port.c` / `preset_hardware.json`
 - [x] `python3 tools/board.py resolve ESP32-P4-C6`／`P4-C6`／`S3-Mini-Nano` 都由 alias 命中
-- [x] project 層冇 `sdkconfig.defaults`／`profiles`（`board.py check` 會擋）
+- [x] project 層冇 `profiles`；`sdkconfig.defaults` 只准寫外接裝置（硬體事實會被 `board.py check` 擋）
 - [x] `idf.py build` 兩個 target（IDF 6.1：P4-ETH `0xff040`、S3-N16R8 `0x118e90`）
 - [x] 2026-11-16 本機 IDF 6.0.3：`ESP32-S3-Mini-Nano` `0x114f90`（1.1 MB）、
       `ESP32-P4-FireBeetle2` `0xfd5f0`（1013.5 KB，75% free）

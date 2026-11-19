@@ -107,8 +107,25 @@ uint32_t      nc_px_ring_slot_bytes(const nc_pixel_q_t *q);
 uint32_t      nc_px_ring_fill(const nc_pixel_q_t *q);      // 已填、未取的格數
 const char   *nc_px_ring_name(const nc_pixel_q_t *q);
 
+// 像素編碼吞吐量測（internal-first；回傳統計 JSON）。release 都可以用（0xF062）。
+size_t nc_px_bench_json(uint8_t lanes, uint16_t px, uint8_t frames, char *out, size_t cap);
+
+// ── 環註冊表（跨任務用：renderer 建立／登記，生產者按名找回）──
+// 回 0 = OK；-1 = 參數錯／重名／表滿。註冊表是全域的，但只有開機／on_start
+// 期間會寫（之後只讀），所以不需要鎖。
+int           nc_px_ring_register(nc_pixel_q_t *q);
+nc_pixel_q_t *nc_px_ring_find(const char *name);
+nc_pixel_q_t *nc_px_ring_at(int i);
+int           nc_px_ring_count(void);
+nc_pixel_q_t *nc_px_active_ring(void);     // 第 0 條（給只寫一條環的生產者）
+bool          nc_px_put(const uint8_t *rgbw, uint8_t src, uint16_t gen);  // 寫 active ring
+
 // ── 生產者（單一 writer）──
 uint8_t *nc_px_ring_begin(nc_pixel_q_t *q);     // 滿了回 NULL（**不覆蓋**）
+// 同上，另外交回「這一格」的表頭。生產者要寫 ts/gen/flags/drops 就必須用這個版本 ——
+// 環的 writer 游標每 commit 一次就前進一格，所以「生產者綁死在第 0 格」是錯的：
+// 要寫的格一定是 begin() 當下交出來的那一格，commit() 也只是發布那同一格。
+uint8_t *nc_px_ring_begin_ex(nc_pixel_q_t *q, nc_px_hdr_t **hdr);
 void     nc_px_ring_commit(nc_pixel_q_t *q);
 void     nc_px_ring_abort(nc_pixel_q_t *q);
 bool     nc_px_ring_put(nc_pixel_q_t *q, const uint8_t *rgbw, uint8_t src, uint16_t gen);
@@ -199,6 +216,23 @@ uint32_t nc_px_codec_lane_px(nc_pixel_codec_t *c, const uint8_t *rgbw, uint32_t 
 // 歸零碼整幀：一顆一顆「先編碼、再快取、再展開」，reset 一併補 0
 uint32_t nc_px_codec_wave_frame(nc_pixel_codec_t *c, const uint8_t *rgbw, uint32_t px,
                                 uint8_t *out, uint32_t out_cap);
+// 多 lane 專用：唔經 scratch，直接把 lane 的波形 OR 進 I80 byte。
+//   out 必須先清零；每個單元寫 out[u*stride+off] |= (單元 << shift)。
+//   8-bit bus：stride=1、off=0；16-bit bus：lane0..7 off=0、lane8..15 off=1、stride=2。
+//   回傳一幀幾個單元（含 reset）；0 = 參數錯。
+uint32_t nc_px_codec_wave_frame_or(nc_pixel_codec_t *c, const uint8_t *rgbw, uint32_t px,
+                                   uint8_t *out, uint32_t cap,
+                                   uint32_t stride, uint32_t off, uint8_t shift);
+
+// packed 波形（LSB-first）：一條 lane 的波形壓成 bitstream（每 bit 一個時序單元），
+// 回傳 bytes；配合 nc_px_codec_pack_merge8() 做 8×8 bit 轉置，輸出 I80 byte-per-unit。
+uint32_t nc_px_codec_wave_pack(nc_pixel_codec_t *c, const uint8_t *rgbw, uint32_t px,
+                               uint8_t *out, uint32_t cap);
+// 把 8 條 lane 的 packed 波形合成 I80：out[(u)*stride+off] = bit k ← lane k 的第 u 個單元。
+// 一次性 8 個單元（一個 byte）逐 bit 展開；out 必須先清零（reset 由呼叫端補 0）。
+void nc_px_codec_pack_merge8(const uint8_t *lane[8], uint32_t packed_bytes,
+                             uint8_t *out, uint32_t stride, uint32_t off);
+
 // SPI 整幀（頭部 + 每顆 + 尾巴）：out 每個 byte 一個位（bit0 = MOSI）
 uint32_t nc_px_codec_spi_frame(nc_pixel_codec_t *c, const uint8_t *rgbw, uint32_t px,
                                uint8_t *out, uint32_t out_cap);

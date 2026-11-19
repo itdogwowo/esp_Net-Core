@@ -1,6 +1,12 @@
 # 8×8 WS2812 矩陣：I80 波形 ＋ 分區時間抖動
 
-> 2026-11-11。**性質：測試任務（`CONFIG_NETCORE_RGB_MATRIX`，只在測試映像）**，
+> **2026-11-18 更新**：實作已由 `components/dev/test_rgb_led_matrix_tasks`
+> 改成 **`components/sw/pixel`（環＋編碼器）＋ `components/tasks/pixel_task`（任務）＋ `components/driver/drv_i80`（硬體）**，命令與量測結論不變。
+> 現在的架構、六條契約、修好的 bug 見 [pixel-renderer.md](pixel-renderer.md)。
+> 本文保留 **I80 時序／抖動／上板量測** 那部分作歷史與數據來源。
+>
+> 2026-11-11。**性質：實驗**。2026-11-18 起抖動預設關閉
+> （`CONFIG_NETCORE_PIXEL_DITHER=0`、8-bit 直出）；本文保留當時的量測與原理。
 > 第一版未上板。
 > 相關：[led-controller-plan.md](led-controller-plan.md)（正式 LED Controller 的規劃）、
 > [psram-surface.md](psram-surface.md)（I80／DMA 頻寬）、
@@ -318,8 +324,9 @@ export NC_PORT=/dev/cu.usbmodem*        # 換成實際埠
 
 | 檔案 | 內容 |
 |---|---|
-| `firmware/components/dev/test_rgb_led_matrix_tasks/nc_rgb_matrix.c` | I80、波形編碼、抖動、效果、任務 |
-| `…/include/nc_rgb_matrix.h` | 對外 API（效果／抖動／每區參數／JSON） |
-| `firmware/components/action/test_action/nc_test_action.c` | `0xF060` handler |
+| `components/tasks/pixel_task/nc_pixel_backend_i80.c` → `components/driver/drv_i80/` | I80（GDMA、多 lane 合成） |
+| `components/sw/pixel/nc_pixel_encode.c` | 波形、色序、抖動（唯一一份） |
+| `components/sw/pixel/nc_pixel_producer.c` | 效果／分區參數（舊 `0xF060` 的內容） |
+| `firmware/components/dev/test_action/nc_test_action.c` | `0xF060` 生產者／`0xF061` 渲染器 handler |
 | `ports/hardware/S3/ESP32-S3-Matrix/` | 板子事實、4 MB 分割表、預設 tasks |
 | `firmware/main/Kconfig.projbuild` | `NETCORE_RGB_MATRIX*` |

@@ -65,6 +65,9 @@
 | `bus/bus_core` | ✅ **已建（2026-11-10）** | `nc_bus_t` ＋ ops 表 ＋ 統一 API ＋ `nc_bus_native()` |
 | `bus/bus_uart` | ✅ 已建、**未接線** | UART adapter（`nc_bus_uart_open`），main 仍然直接用 drv |
 | `bus/bus_net` | ⚠️ 暫放 | TCP／WS／UDP／HTTP（原 `sys/transport`）；下一步應改成 socket 線的 adapter |
+| `sw/pixel` | ✅ **2026-11-18** | 環＋編碼器＋內建效果（純軟件，host 測試同一份） |
+| `tasks/render_task` | ✅ **2026-11-18** | 渲染任務：環→編碼→後端（i80／spi／direct／mock）；將來 LCD 共用 |
+| `tasks/pixel_task` | ✅ **2026-11-18** | 效果／Map 生產者任務（寫環，60 fps） |
 | `sys/nc4` | 不變 | NC4 協議本體（含 `nc4_bus.c` 的插槽與 parser） |
 | `driver/drv_lcd`／`drv_led` | ⏸ 未來 | 將來裝在這裡，對外經 `bus` |
 
@@ -83,7 +86,9 @@
 | `driver/drv_usb` | ⏸ 未抽 | TinyUSB 安裝、`cdc_read`／`cdc_send`、RX callback、`cdc.rx` 任務 | **高**（熱路徑、剛調好） |
 | `driver/drv_sd` | ⏸ 未抽 | sdmmc 掛載／卸載（FAT 擁有者仍留在 `sys/store`） | 中（開機依賴） |
 | `driver/drv_eth` | ⏸ 未抽 | `esp_eth` ＋ `esp_netif`（P4 才有） | 低（S3 不編） |
-| `driver/drv_i2c` / `drv_spi` / `drv_i80` | ⏸ 未有 | 等真的有晶片／面板再接 | — |
+| `driver/drv_i2c` / `drv_spi` | ⏸ 未有 | 等真的有晶片／面板再接 | — |
+| `driver/drv_i80` | ✅ **2026-11-18** | I80（LCD_CAM 8080）＋ GDMA：腳位／PCLK／DMA 槽／完成回呼。`nc_i80_drv_install/submit/slot_done` | 低（只被 pixel_task 用） |
+| `driver/drv_spi_led` | ✅ **2026-11-18** | SPI 時脈式燈串（WS2801／APA102）：`nc_spi_led_drv_install/submit` | 低（預設未開） |
 | `bus/bus_net` | ✅ 已搬 | TCP／WS／UDP／HTTP（原 `sys/transport`） | 低（S3 只用 json） |
 | `bus/bus_nc4` | ⏸ 未搬 | 匯流排框架 ＋ 出口表（原 `sys/nc4`） | 中（熱路徑） |
 
@@ -128,4 +133,6 @@
 
 - `main.c` 仍有 **ETH、SD、USB、GPIO 測試、I80 測試** 的硬體碼。
 - `sys/store` 同時管 FAT 與 USB MSC —— **FAT 的擁有者**屬於 store，但「USB 裝置怎麼裝」屬於 `drv_usb`；
+- `pixel` 已經不再放 `sys`：環／編碼／效果在 `sw/pixel`；效果任務在 `tasks/pixel_task`、
+  渲染任務在 `tasks/render_task`；硬體在 `driver/drv_i80`／`drv_spi_led`（2026-11-18）。
   切的時候要保住「一個 owner」這條（見 [fat-ownership.md](fat-ownership.md)）。

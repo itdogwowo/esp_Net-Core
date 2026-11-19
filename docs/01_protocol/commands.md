@@ -224,7 +224,8 @@ components/dev/
 | `0xF01C` MEM_BENCH | `[psram_kb:u16][iters:u16]`（預設 256 KB、4 次）→ `0xF004`：`{int:{kb,memset_mbps,read_mbps,copy_mbps}, psram:{...}, msync_us, msync_err, sum}`。量 internal／PSRAM 實際頻寬與 cache flush；用來決定 PSRAM 可否做 framebuffer |
 | `0xF01D` TILE_BENCH | `[total_kb:u16][tile_kb:u16][iters:u16]`（預設 40/8/8）→ `0xF004`：`{total_kb,tile_kb,iters,full_us,tile_us,full_mbps,tile_mbps,ratio_x10}`。整幀 streaming vs 分塊（cache-hot）的實測；證明單 pass 是 bus-bound、tiling 只快 1.3× |
 | `0xF050` CPU_BURN | `[iters:u32]`（預設 50,000）→ `0xF004` `{iters,us,sum}`：native C 版 LCG 迴圈（同外掛 `bench_task.wat` 同 workload），用嚟量 wasm 直譯 vs C 的實際倍數。2026-11-17 S3 實測 50,000 次：C 1,683 µs、wasm 24,887 µs（≈14.8×），checksum 一致 |
-| `0xF060` MATRIX | `op(u8) [args]` → `0xF004` JSON。8×8 WS2812 矩陣（測試任務，`CONFIG_NETCORE_RGB_MATRIX`）。op：`0` STATS、`1` effect(u8)、`2` dither(u8)、`3` color(r,g,b)、`4` gain(u8)、`5` fps(u16 LE)、`6` zone(idx,rate,phase)、`7` zmask(u8)。回覆見 [rgb-matrix-dither.md](../03_notes/rgb-matrix-dither.md) |
+| `0xF060` MATRIX | `op(u8) [args]` → `0xF004` JSON。像素效果**生產者**（`pixel` 任務；`CONFIG_NETCORE_PIXEL`）。op：`0` STATS、`1` effect(u8)、`2` dither(u8)、`3` color(r,g,b)、`4` gain(u8)、`5` fps(u16 LE)、`6` zone(idx,rate,phase,[bits])、`7` zmask(u8)、`8` bits(u8)、`9` speed(u16)、`10` zbits(8)、`11` zeff(idx,eff)、`12` zeffs(8)、`13` demo(on)、`14` wspeed(u16)、`15` zdither(8)、`16` frac(u8)。回覆見 [pixel-renderer.md](../03_notes/pixel-renderer.md) |
+| `0xF061` RENDER | `op(u8)` → `0xF004` JSON。渲染**任務**（`render`）的狀態。`op=0` STATS：`{"producer":{…},"render":{…}}`；`op=1` 預留（回 ok）。見 [pixel-renderer.md](../03_notes/pixel-renderer.md) |
 
 > ⚠️ 新增測試指令之前先查号：**指令碼重複時只會保留先登記的那一個**（`nc_action_init()`
 > 會在開機 `ESP_LOGE` 並丟棄後來者）。登記次序是 core →（測試的 bench／SD）→ test_action

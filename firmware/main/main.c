@@ -107,11 +107,11 @@
 #include "nc4_router.h"
 #include "nc_task.h"
 #include "nc_prio.h"
+#include "nc_render.h"         // 渲染任務（tasks/render_task）
+#include "nc_pixel_task.h"    // 效果／Map 生產者（tasks/pixel_task）
 #ifdef NC_ENABLE_TESTS
 #include "nc_bench.h"
 #include "nc_test_tcp.h"
-#include "nc_pixel.h"          // 像素渲染器（sys/pixel）：Kconfig NETCORE_PIXEL 決定有沒有
-#include "nc_pixel_producer.h" // 內建效果生產者（舊 rgbmatrix 的內容）
 #endif
 #include "nvs.h"
 #include "nvs_flash.h"
@@ -1286,6 +1286,32 @@ static void on_reboot(nc4_ctx_t *ctx, const nc4_frame_t *f)
     vTaskDelay(pdMS_TO_TICKS(delay_ms + 50));
     esp_restart();
 }
+
+#if CONFIG_NETCORE_PXBENCH
+// 0xF062 PXBENCH：像素編碼吞吐量測（release 映像也可用；見 nc_pixel_bench.c）。
+// payload [lanes:u8][px:u16 LE][frames:u8] → {"…","sram":1/0,…}
+#define NC4_CMD_PXBENCH 0xF062
+static void on_pxbench(nc4_ctx_t *ctx, const nc4_frame_t *f)
+{
+    char j[512];
+    if (f->len < 4) {
+        reply_json(ctx, NC4_CMD_HUB_RSP, "{\"err\":\"args\"}");
+        return;
+    }
+    const uint8_t lanes = f->data[0];
+    const uint16_t px = (uint16_t)(f->data[1] | ((uint16_t)f->data[2] << 8));
+    const uint8_t frames = f->data[3];
+    if (nc_px_bench_json(lanes, px, frames, j, sizeof(j)) == 0) {
+        reply_json(ctx, NC4_CMD_HUB_RSP, "{\"err\":\"mem\"}");
+        return;
+    }
+    reply_json(ctx, NC4_CMD_HUB_RSP, j);
+}
+static const nc_action_t s_pxbench_actions[] = {
+    { NC4_CMD_PXBENCH, on_pxbench, "bench" },
+};
+NC_ACTION_TABLE_DEF(s_pxbench_table, "bench", s_pxbench_actions);
+#endif
 
 // ── 0x1101 STATUS_GET → 0x1102 STATUS_RSP ──
 // keys 語義照 mp 版：空 = 全部、"? "= 目錄、其餘逗號分隔
@@ -3346,6 +3372,9 @@ static void actions_init(void)
 #endif
         &nc_ota_action_table,
         &nc_file_action_table,
+#if CONFIG_NETCORE_PXBENCH
+        &s_pxbench_table,
+#endif
     };
     const esp_err_t err = nc_action_init(tables, sizeof(tables) / sizeof(tables[0]));
     if (err != ESP_OK) {
@@ -4291,9 +4320,12 @@ static esp_err_t ph_declare(void)
     nc_task_register(&s_task_nc4);     // L0：parser 緩衝 + decode0/1
     nc_task_register(&s_task_net);     // L1：UART / TCP 緩衝（照 ETH 是否起來）
     nc_task_register(nc_hw_gpio_task()); // L2：GPIO owner（nc_hw resource "gpio"）
-    // L4：像素渲染器（sys/pixel）。**唔受 NC_ENABLE_TESTS 限制**：
-    // 它是產品功能，取代舊的 rgbmatrix 測試任務。Kconfig 沒開時回 NULL，register 會忽略。
-    // 內建效果生產者（"rgbmatrix" 的名字還留在 0xF060）由它一起帶起來。
+    // L4：渲染同效果係兩個任務（**唔受 NC_ENABLE_TESTS 限制**，是產品功能）。
+    // 次序重要：render 先登記 → 它的 on_start 建立／登記環；pixel 後，
+    // on_start 才找得到那條環。Kconfig 沒開時兩者都回 NULL，register 會忽略。
+    if (nc_render_task() != NULL) {
+        nc_task_register(nc_render_task());
+    }
     if (nc_pixel_task() != NULL) {
         nc_task_register(nc_pixel_task());
     }

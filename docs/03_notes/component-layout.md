@@ -63,9 +63,9 @@ esp_Net-Core/
 │  │  ├─ sys/                         # ✅ nc4/ mem/ tasks/ module/ transport/
 │  │  ├─ app/                         # ✅ ota/
 │  │  ├─ hw/                          # ⬜ apa102/ pca9685/ motor_uart/ tft/ touch/ xl9555/
-│  │  ├─ sw/                          # ⬜ effect_core/ pixel_math/ pixel_layout/ pixel_controller/
+│  │  ├─ sw/                          # 🟡 pixel/（環＋編碼器＋效果；2026-11-18）
 │  │  ├─ action/                      # 🟡 ota_action/ file_action/（其餘 cmd 仍在 main.c）
-│  │  ├─ tasks/                       # ⬜ pixel_task/ net_task/ schedule_task/
+│  │  ├─ tasks/                       # 🟡 hw_gpio/、pixel_task/（效果）、render_task/（渲染）（2026-11-18）
 │  │  ├─ ui/                          # ⬜ pages/
 │  │  └─ schema/                      # ⬜ （生成物）
 │  ├─ sdkconfig.defaults              #   晶片層建置配置

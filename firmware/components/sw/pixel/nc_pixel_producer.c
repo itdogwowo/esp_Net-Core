@@ -20,9 +20,9 @@
 #include "nc_pixel_core.h"
 #include "sdkconfig.h"
 
-static const char *TAG = "px_prd";
-
 #if CONFIG_NETCORE_PIXEL
+
+static const char *TAG = "px_prd";
 
 #define RGB_PI_F 3.14159265358979f
 
@@ -42,10 +42,13 @@ typedef struct {
 _Static_assert(sizeof(prd_hdr_t) == NC_PX_HDR_BYTES, "prd_hdr_t 必須同 nc_px_hdr_t 一樣大");
 
 // ═══════════════════════ 狀態 ═══════════════════════
-static uint8_t *s_buf;              // plan 交付的 payload（px × 4 B）
+static uint8_t *s_buf;              // 這一次寫入的 payload（px × 4 B）
 static prd_hdr_t *s_hdr;
 static uint32_t s_px;               // 這條 lane 幾顆
 static bool     s_bound;
+static uint8_t *s_last_payload;     // 上一格算好的內容（多 lane 複製用）
+static prd_hdr_t s_last_hdr;
+static bool     s_last_valid;
 
 static nc_px_producer_cfg_t s_cfg;
 
@@ -437,24 +440,15 @@ static void manual(void)
 }
 
 // ═══════════════════════ 生命週期 ═══════════════════════
-esp_err_t nc_px_producer_bind(uint8_t *buf, uint32_t px, void *hdr, uint32_t region_bytes)
+esp_err_t nc_px_producer_bind(uint32_t px)
 {
-    if (buf == NULL || hdr == NULL || px == 0) {
+    if (px == 0 || px > NC_PX_MAX_LEDS) {
         return ESP_ERR_INVALID_ARG;
     }
-    // region_bytes = payload 可用空間（不含表頭）。0 = 不檢查（呼叫端自己負責）。
-    if (region_bytes != 0 && region_bytes < px * NC_PX_BPP) {
-        ESP_LOGE(TAG, "環的 payload 只有 %u B，裝不下 %u 顆 × %u B",
-                 (unsigned)region_bytes, (unsigned)px, (unsigned)NC_PX_BPP);
-        return ESP_ERR_INVALID_SIZE;
-    }
-    s_buf = buf;
     s_px = px;
-    s_hdr = (prd_hdr_t *)hdr;
-    memset(s_hdr, 0, sizeof(*s_hdr));
-    s_hdr->src = NC_PX_SRC_BUILTIN;
-    s_hdr->gen = s_gen;
     s_bound = true;
+    s_last_valid = false;
+    s_last_payload = NULL;
     tables_init();
     nc_px_producer_reset();
     ESP_LOGI(TAG, "生產者綁定：%u 顆（畫面 %d 顆），效果 %u，%u fps",
@@ -480,11 +474,15 @@ void nc_px_producer_reset(void)
     }
 }
 
-bool nc_px_producer_frame(int64_t now_us)
+bool nc_px_producer_frame(uint8_t *dst, void *hdr, int64_t now_us)
 {
-    if (!s_bound || s_buf == NULL || s_hdr == NULL) {
+    if (!s_bound || dst == NULL || hdr == NULL) {
         return false;
     }
+    // 每次寫的是「呼叫端剛 begin 的那一格」。環的 writer 游標每次 commit 都前進，
+    // 所以這裡不能綁死任何一格（綁死 = 第二幀之後寫到舊格、commit 卻發布新格）。
+    s_buf = dst;
+    s_hdr = (prd_hdr_t *)hdr;
     int64_t dt = now_us - s_prev_us;
     if (dt < 0 || dt > 200000) {     // 停過（debug／載入）就唔好一次跳好多
         dt = 200000;
@@ -508,6 +506,9 @@ bool nc_px_producer_frame(int64_t now_us)
     }
     s_hdr->drops = s_stat.late;
 
+    s_last_payload = s_buf;
+    s_last_hdr = *s_hdr;
+    s_last_valid = true;
     s_stat.render_us = (uint32_t)(esp_timer_get_time() - t0);
     s_stat.frames++;
     s_frame++;
@@ -518,6 +519,21 @@ bool nc_px_producer_frame(int64_t now_us)
         s_stat.frames = 0;
         s_mark_us = now_us;
     }
+    return true;
+}
+
+bool nc_px_producer_copy(uint8_t *dst, void *hdr, uint32_t capacity_bytes)
+{
+    if (!s_bound || !s_last_valid || dst == NULL || hdr == NULL || s_last_payload == NULL) {
+        return false;
+    }
+    if (capacity_bytes < s_px * NC_PX_BPP) {
+        return false;
+    }
+    memcpy(dst, s_last_payload, (size_t)s_px * NC_PX_BPP);
+    prd_hdr_t *h = (prd_hdr_t *)hdr;
+    *h = s_last_hdr;         // ts/gen/src/flags/drops 跟同一格
+    h->seq = 0;              // seq 由 ring commit 寫
     return true;
 }
 
@@ -543,6 +559,11 @@ void nc_px_producer_set_cfg(const nc_px_producer_cfg_t *cfg)
     if (c.fps == 0) { c.fps = 60; }
     s_cfg = c;
     s_gen++;
+}
+
+nc_px_producer_cfg_t nc_px_producer_cfg(void)
+{
+    return s_cfg;
 }
 
 void nc_px_producer_set_effect(uint8_t effect)
@@ -711,10 +732,11 @@ size_t nc_px_producer_json(char *out, size_t cap)
         s_cfg.zone_phase[0], s_cfg.zone_phase[1], s_cfg.zone_phase[2], s_cfg.zone_phase[3],
         s_cfg.zone_phase[4], s_cfg.zone_phase[5], s_cfg.zone_phase[6], s_cfg.zone_phase[7],
         s_cfg.zone_on, (unsigned)s_gen, (unsigned long)s_px);
-    if (n < 0) {
+    // 截斷 = 回 0（呼叫端會退到 {}），不要交半截 JSON 出去。
+    if (n < 0 || (size_t)n >= cap) {
         return 0;
     }
-    return ((size_t)n < cap) ? (size_t)n : cap - 1;
+    return (size_t)n;
 }
 
 // ═══════════════════════ 預設值／初始化 ═══════════════════════
@@ -725,13 +747,14 @@ void nc_px_producer_defaults(void)
 {
     memset(&s_cfg, 0, sizeof(s_cfg));
     s_cfg.effect = NC_PX_EFF_BREATH;
-    s_cfg.dither = 1;
+    // 抖動係實驗功能：預設 8-bit、唔抖動。要試就 0xF060 op=2／op=8。
+    s_cfg.dither = 0;
     s_cfg.r = s_cfg.g = s_cfg.b = 24;
     s_cfg.gain = 60;
-    s_cfg.bits = 12;
+    s_cfg.bits = 8;
     s_cfg.breath_ms = 4000;
     s_cfg.wave_ms = 3000;
-    s_cfg.fps = 60;
+    s_cfg.fps = 0;            // 0 = 自由填環（節奏由 render 任務控制）
     s_cfg.zone_on = 0xFF;
     memset(s_cfg.zone_eff, 0xFF, sizeof(s_cfg.zone_eff));
     memset(s_cfg.zone_dither, 0xFF, sizeof(s_cfg.zone_dither));
@@ -742,21 +765,33 @@ void nc_px_producer_defaults(void)
         s_cfg.zone_rate[z] = (uint8_t)(1 + (z & 1));
         s_cfg.zone_phase[z] = (uint8_t)z;
     }
-    s_demo = true;                      // 開機自動跑 demo（任何手動指令會熄）
+    // Demo 預設關：它的段落會開 12-bit 抖動（實驗功能），暫時唔想自動開。
+    // 要睇效果導覽：0xF060 op=13,1。
+    s_demo = false;
     s_prev_us = esp_timer_get_time();
     s_mark_us = s_prev_us;
 }
 
 #else   // !CONFIG_NETCORE_PIXEL ── 這塊板冇開 pixel → 全部 no-op（main 仍然可以登記）
 
-esp_err_t nc_px_producer_bind(uint8_t *buf, uint32_t px, void *hdr, uint32_t region_bytes)
+esp_err_t nc_px_producer_bind(uint32_t px)
 {
-    (void)buf; (void)px; (void)hdr; (void)region_bytes;
+    (void)px;
     return ESP_ERR_NOT_SUPPORTED;
 }
 
 bool nc_px_producer_ready(void) { return false; }
-bool nc_px_producer_frame(int64_t now_us) { (void)now_us; return false; }
+bool nc_px_producer_frame(uint8_t *dst, void *hdr, int64_t now_us)
+{
+    (void)dst; (void)hdr; (void)now_us;
+    return false;
+}
+
+bool nc_px_producer_copy(uint8_t *dst, void *hdr, uint32_t capacity_bytes)
+{
+    (void)dst; (void)hdr; (void)capacity_bytes;
+    return false;
+}
 void nc_px_producer_reset(void) { }
 
 nc_px_producer_cfg_t nc_px_producer_cfg(void)

@@ -12,9 +12,10 @@ REM ===========================================================================
 setlocal EnableExtensions
 cd /d "%~dp0\..\..\.."
 
-set "PXF=firmware\components\sys\pixel"
-set "INC=/I%PXF%\include /Itools\hosttest\pixel_test\include"
-set "SRCS=%PXF%\nc_pixel_q.c %PXF%\nc_pixel_encode.c %PXF%\nc_pixel_backend_mock.c %PXF%\nc_pixel_backend_direct.c tools\hosttest\pixel_test\pixel_test.c"
+set "PXF=firmware\components\sw\pixel"
+set "PXT=firmware\components\tasks\render_task"
+set "INC=/I%PXF%\include /I%PXT%\include /Itools\hosttest\pixel_test\include"
+set "SRCS=%PXF%\nc_pixel_q.c %PXF%\nc_pixel_encode.c %PXT%\nc_pixel_backend_mock.c %PXT%\nc_pixel_backend_direct.c tools\hosttest\pixel_test\pixel_test.c"
 
 if "%1"=="gcc" goto gcc
 if "%1"=="cl" goto cl
@@ -33,7 +34,7 @@ exit /b %ERRORLEVEL%
 :gcc
 echo [pixel_test] gcc
 "%PXF%" >nul 2>&1
-gcc -std=c17 -D_DEFAULT_SOURCE -Wall -Wextra -Wno-unused-parameter -I%PXF%\include -Itools\hosttest\pixel_test\include -o "%~dp0build\pixel_test.exe" %SRCS%
+gcc -std=c17 -D_DEFAULT_SOURCE -Wall -Wextra -Wno-unused-parameter -I%PXF%\include -I%PXT%\include -Itools\hosttest\pixel_test\include -o "%~dp0build\pixel_test.exe" %SRCS%
 if errorlevel 1 exit /b 1
 "%~dp0build\pixel_test.exe"
 exit /b %ERRORLEVEL%

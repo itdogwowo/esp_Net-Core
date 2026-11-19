@@ -622,6 +622,9 @@ void nc4_bus_task_entry(void *arg)
         s_loop_count[my_core]++;
         // 跨核轉寄：目的核每輪先清 queue（唔靠 producer kick）
         bool busy = (nc4_fwd_poll(my_core) > 0);
+        // PULL（USB USJ）：資料通常 64 B 一個 USB 包；剛剛有資料就 1 ms 再讀，
+        // 否則 OTA 會變 64 B / 10 ms ≈ 6 KB/s（實測）。
+        int64_t last_data_us = 0;
 
         for (size_t i = 0; i < NC4_MAX_BUSES; i++) {
             struct nc4_bus *b = &s_buses[i];
@@ -699,6 +702,7 @@ void nc4_bus_task_entry(void *arg)
                 if (got == 0) {
                     break;
                 }
+                last_data_us = esp_timer_get_time();
                 if (b->st_commit_us != 0) {
                     const uint32_t d = (uint32_t)(esp_timer_get_time() - b->st_commit_us);
                     b->st_kick_sum_us += d;
@@ -743,7 +747,12 @@ void nc4_bus_task_entry(void *arg)
             // 也永遠等不到空位（2026-11-07 實測：8 MB 幀洪水之後裝置完全唔答指令）。
             // 50 ms 安全網：醒來重掃一次，代價係閒置時 20 次/秒的 no-op。
             // PULL：本來就只能輪詢。
-            ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(has_pull ? DEFAULT_POLL_MS : 50));
+            int poll_ms = has_pull ? DEFAULT_POLL_MS : 50;
+            if (has_pull && last_data_us != 0 &&
+                esp_timer_get_time() - last_data_us < 20000) {
+                poll_ms = 1;          // 資料流未完：1 ms 再讀，唔好等 10 ms
+            }
+            ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(poll_ms));
         }
     }
 }

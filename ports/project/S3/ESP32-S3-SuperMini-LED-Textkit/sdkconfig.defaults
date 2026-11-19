@@ -1,0 +1,35 @@
+# ESP32-S3-SuperMini-LED-Textkit — project 覆寫（只限外接燈具）
+#
+# 硬體板仍然是 ports/hardware/S3/ESP32-S3-SuperMini（flash／PSRAM／CPU／console 全部由它提供）。
+# 這裡只覆寫 pixel（I80）的設定：同一塊 SuperMini 接上 6 條 WS2812 燈鏈。
+#
+# 接線：D0..D5 = GPIO1..GPIO6（每條 20 顆）。
+# I80（LCD_CAM 8080）硬性要求 8 條資料線＋WR＋DC 都是有效 GPIO，所以：
+#   D6/D7 = GPIO7/8（dummy，會出現在排針上，唔好接東西）
+#   WR = GPIO9、DC = GPIO10（dummy）
+# GPIO3 在 S3 是 strapping（JTAG signal source）：bootloader 讀完之後拿來送燈冇問題
+# （WS2812 的 DIN 是高阻抗輸入），pixel 的 I80 後端有明確例外＋警告。
+#
+# ⚠ 改這份之後要 `python3 make.py build esp32-s3-supermini --project textkit --fresh`
+#   （sdkconfig 已存在時，IDF 不會重新套用 defaults）。
+CONFIG_NETCORE_PIXEL=y
+CONFIG_NETCORE_PIXEL_LEDS=20
+CONFIG_NETCORE_PIXEL_FORMAT="ws2812"
+
+CONFIG_NETCORE_PIXEL_I80=y
+CONFIG_NETCORE_PIXEL_I80_PINS="1,2,3,4,5,6,7,8,9,10"
+CONFIG_NETCORE_PIXEL_I80_LANES=6
+
+# 2.5 MHz × 3 個時序單元 = 1.200 µs/bit（T0H 0.400、T1H 0.800，最保守）
+CONFIG_NETCORE_PIXEL_PCLK_HZ=2500000
+CONFIG_NETCORE_PIXEL_BIT_CELLS=3
+CONFIG_NETCORE_PIXEL_T0H=1
+CONFIG_NETCORE_PIXEL_T1H=2
+
+# 抖動係實驗功能，暫時關：8-bit 直出（要試就改 12 + 1，或 0xF060 op 即時切）
+CONFIG_NETCORE_PIXEL_DITHER_BITS=8
+CONFIG_NETCORE_PIXEL_DITHER=0
+CONFIG_NETCORE_PIXEL_ZONE_PX=8
+# 6 條 lane 的編碼在同一條 loop 上（每幀 6 次），300 fps 留餘裕。
+CONFIG_NETCORE_PIXEL_CORE=-1
+CONFIG_NETCORE_PIXEL_SPI=n

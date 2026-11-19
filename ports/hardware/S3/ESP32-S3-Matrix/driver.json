@@ -100,7 +100,7 @@
     ]
   },
   "LED": {
-    "_comment": "8×8 WS2812B 燈陣（GPIO14）。真正的驅動在 pixel 任務的 i80 後端（sys/pixel），這裡只是宣告板上有什麼。",
+    "_comment": "8×8 WS2812B 燈陣（GPIO14）。真正的驅動在 driver/drv_i80（pixel_task 的 i80 轉接層），這裡只是宣告板上有什麼。",
     "enable": 1,
     "type": "ws2812b",
     "count": 64,

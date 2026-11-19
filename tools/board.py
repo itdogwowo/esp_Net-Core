@@ -313,6 +313,35 @@ def _check_profiles(d: Path, declared: list[str], label: str, r: Report) -> None
             r.warn(f"{rel(path)} 有 {prof!r} 的區塊，但 {label} 沒宣告（sync 會移除）")
 
 
+
+# 硬體事實：project 唔准覆寫（同一個 project 換板子會靜默出事）。
+_PROJECT_FORBIDDEN_PREFIXES = (
+    "ESPTOOLPY_FLASHSIZE_", "ESPTOOLPY_FLASHFREQ_", "ESPTOOLPY_FLASHMODE_",
+    "SPIRAM", "ESP_DEFAULT_CPU_FREQ_MHZ_", "PARTITION_TABLE_", "ESP_CONSOLE",
+    "IDF_TARGET",
+)
+
+
+def _check_project_sdkconfig(pdir: Path, r: "Report") -> None:
+    """project 可以帶 sdkconfig.defaults，但只准覆寫「外接裝置」（例如 LED 燈鏈腳位）。
+
+    硬體事實（flash／PSRAM／CPU／console／分區表／target）一律留在 hardware 層：
+    同一個 project 的燈具換到另一塊板都應該講得通，這些值唔可以跟項目走。
+    """
+    path = pdir / "sdkconfig.defaults"
+    if not path.is_file():
+        return
+    kv = parse_kconfig(path)
+    if not kv:
+        r.warn(f"{rel(path)} 存在但解析不到任何 CONFIG_*（空檔？）")
+        return
+    for k in kv:
+        if any(k.startswith(pfx) for pfx in _PROJECT_FORBIDDEN_PREFIXES):
+            r.err(f"{rel(path)} 有硬體事實 {k} —— 這一定屬 hardware/sdkconfig.defaults，"
+                  f"project 只准寫外接裝置的設定（例如 NETCORE_PIXEL_*）")
+    r.warn(f"{rel(path)} 是 project 層的 build 覆寫（只限外接裝置）；"
+           f"改完要 --fresh 才會重新套用")
+
 def _check_seeds(pdir: Path, declared: list[str], r: Report) -> None:
     cfg_dir = pdir / "data" / "config"
     for name in declared:
@@ -537,9 +566,7 @@ def check_board(d: Path, cfg_common: dict, cfg_port: dict) -> Report:
         if "profiles" in p:
             r.err(f"{rel(pdir)}/project.json 有 profiles：能力碎片屬 hardware 層，"
                   f"搬去 hardware/board.json 的 profiles（project 只放 runtime 設定）")
-        if (pdir / "sdkconfig.defaults").is_file():
-            r.err(f"{rel(pdir)}/sdkconfig.defaults 係 build 設定，唔應該放 project 層；"
-                  f"搬去 hardware/sdkconfig.defaults")
+        _check_project_sdkconfig(pdir, r)
         _check_seeds(pdir, p.get("seed") or [], r)
         known_p = {"version", "name", "hardware", "seed", "aliases", "default", "_comment"}
         for k in p:

@@ -1,0 +1,11 @@
+{
+  "_comment": "Network 層：只放 Wi-Fi（這塊板沒有 ETH）。enable=0 → 開機不會呼叫 esp_wifi_init。",
+  "version": 1,
+  "wifi": {
+    "enable": 0,
+    "ssid": "",
+    "ssid_pw": "",
+    "timeout_s": 60,
+    "mode": "sta"
+  }
+}

@@ -48,7 +48,7 @@
 #include "nc_hw_gpio.h"
 #include "nc_pwm_drv.h"
 #if CONFIG_NETCORE_PIXEL
-#include "nc_pixel.h"
+#include "nc_render.h"
 #include "nc_pixel_producer.h"
 #endif
 #include "nc_uart_drv.h"
@@ -3957,7 +3957,7 @@ static void on_mutex_bench(nc4_ctx_t *ctx, const nc4_frame_t *f)
 }
 
 // ── 0xF060 MATRIX：像素渲染器的「內建效果生產者」（舊 rgbmatrix 的命令面，一個都唔改）──
-// 這條命令動的是**生產者**（畫面內容）；送燈的事在 0xF061 PIXEL（Kconfig NETCORE_PIXEL）。
+// 這條命令動的是**生產者**（畫面內容）；送燈的事在 0xF061 RENDER（Kconfig NETCORE_PIXEL）。
 // 保號原因：主機側（WebMaster／既有腳本）已經照這份 op 表寫好，換任務名不應該換命令。
 // payload [op:u8][args]
 //   0 STATS                       → 完整狀態 JSON
@@ -3982,7 +3982,7 @@ static void on_mutex_bench(nc4_ctx_t *ctx, const nc4_frame_t *f)
 
 static void on_matrix(nc4_ctx_t *ctx, const nc4_frame_t *f)
 {
-    char j[600];
+    static char j[900];
     if (f->len < 1) {
         reply_json(ctx, NC4_CMD_HUB_RSP, "{\"err\":\"args\"}");
         return;
@@ -4062,7 +4062,10 @@ static void on_matrix(nc4_ctx_t *ctx, const nc4_frame_t *f)
         reply_json(ctx, NC4_CMD_HUB_RSP, "{\"err\":\"op\"}");
         return;
     }
-    nc_px_producer_json(j, sizeof(j));
+    if (nc_px_producer_json(j, sizeof(j)) == 0) {
+        reply_json(ctx, NC4_CMD_HUB_RSP, "{\"err\":\"size\"}");
+        return;
+    }
     reply_json(ctx, NC4_CMD_HUB_RSP, j);
     return;
 
@@ -4070,16 +4073,16 @@ bad_args:
     reply_json(ctx, NC4_CMD_HUB_RSP, "{\"err\":\"args\"}");
 }
 
-// ── 0xF061 PIXEL：渲染器的狀態（送燈那一側）──
+// ── 0xF061 RENDER：渲染任務的狀態（送燈那一側）──
 // 0xF060 動的是「畫面內容」（生產者），這條只讀「送得出幾快」（渲染器）。
 // payload [op:u8]
 //   0 STATS  → {"producer":{...},"render":{...}}（兩份都在同一個回覆裡，方便前端一次畫完）
 //   1 RESET  → 清渲染器計數（frames/holds/starved…），不動設定
 // 為什麼要分兩條：0xF060 自己已經有一份 JSON（舊格式，主機照它解析），
 // 把渲染器欄位塞進去會破壞那份；分開之後各自可以加欄位。
-#define NC4_CMD_PIXEL 0xF061
+#define NC4_CMD_RENDER 0xF061
 
-static void on_pixel(nc4_ctx_t *ctx, const nc4_frame_t *f)
+static void on_render(nc4_ctx_t *ctx, const nc4_frame_t *f)
 {
     // 兩份 JSON 各自可達 600–800 B，合起來連鍵名要 ~1.6 KB
     static char pj[900];
@@ -4093,13 +4096,13 @@ static void on_pixel(nc4_ctx_t *ctx, const nc4_frame_t *f)
     if (op == 1) {
         // 只清渲染器的「最近一秒」類計數：由渲染器自己的 API 做，這裡不直接碰它的狀態
         nc_px_stat_t st0;
-        nc_px_get_stats(&st0);
+        nc_render_get_stats(&st0);
         (void)st0;                  // 目前沒有 reset API：保留 op 給未來，先回 ok
     }
     if (nc_px_producer_json(pj, sizeof(pj)) == 0) {
         (void)snprintf(pj, sizeof(pj), "{}");
     }
-    if (nc_px_json(rj, sizeof(rj)) == 0) {
+    if (nc_render_json(rj, sizeof(rj)) == 0) {
         (void)snprintf(rj, sizeof(rj), "{}");
     }
     const int n = snprintf(out, sizeof(out), "{\"producer\":%s,\"render\":%s}", pj, rj);
@@ -4108,6 +4111,241 @@ static void on_pixel(nc4_ctx_t *ctx, const nc4_frame_t *f)
         return;
     }
     reply_json(ctx, NC4_CMD_HUB_RSP, out);
+}
+
+// ── 0xF062 PXBENCH：像素編碼吞吐量測（唔需要燈板）──
+// payload [lanes:u8][px:u16 LE][frames:u8]
+// 量「每幀：逐 lane 編碼（canonical → 波形單元）＋ 多 lane OR 合成」要幾多 µs，
+// 用嚟答「16×600×50 FPS 做唔做得到」。scratch／輸出放 PSRAM，數字係保守值
+// （真實 backend 的 scratch 要 internal）。
+#define NC4_CMD_PXBENCH 0xF062
+
+// 先試 internal SRAM，唔夠才退 PSRAM；回報邊種，方便量「純 SRAM」性能。
+static void *bench_alloc(size_t n, int *is_int)
+{
+    void *p = heap_caps_malloc(n, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    if (p != NULL) {
+        *is_int += 1;
+        return p;
+    }
+    return heap_caps_malloc(n, MALLOC_CAP_SPIRAM);
+}
+
+static void on_pxbench(nc4_ctx_t *ctx, const nc4_frame_t *f)
+{
+    static char j[512];
+    if (f->len < 4) {
+        reply_json(ctx, NC4_CMD_HUB_RSP, "{\"err\":\"args\"}");
+        return;
+    }
+    uint8_t lanes = f->data[0];
+    if (lanes == 0) { lanes = 1; }
+    if (lanes > 16) { lanes = 16; }
+    uint16_t px = (uint16_t)(f->data[1] | ((uint16_t)f->data[2] << 8));
+    if (px == 0) { px = 1; }
+    if (px > NC_PX_MAX_LEDS) { px = NC_PX_MAX_LEDS; }
+    uint8_t frames = f->data[3];
+    if (frames == 0) { frames = 1; }
+    if (frames > 50) { frames = 50; }
+
+    nc_px_codec_cfg_t cc = { 0 };
+    nc_px_format_t fmt = NC_PX_FMT_WS2812;
+    (void)nc_px_format_parse(CONFIG_NETCORE_PIXEL_FORMAT, &fmt);
+    cc.fmt = fmt;
+    nc_px_wave_default(fmt, &cc.wave);
+    cc.wave.clk_hz = CONFIG_NETCORE_PIXEL_PCLK_HZ;
+    cc.wave.bit_cells = CONFIG_NETCORE_PIXEL_BIT_CELLS;
+    cc.wave.t0h = CONFIG_NETCORE_PIXEL_T0H;
+    cc.wave.t1h = CONFIG_NETCORE_PIXEL_T1H;
+    cc.bits = 8;                    // 量測用 8-bit（唔開實驗性抖動）
+    cc.dither_mode = 0;
+    cc.zone_px = (uint16_t)CONFIG_NETCORE_PIXEL_ZONE_PX;
+    cc.px = px;
+    cc.bright = 255;
+
+    nc_pixel_codec_t *c0 = nc_px_codec_init(nc_px_codec_new(), &cc);
+    if (c0 == NULL) {
+        reply_json(ctx, NC4_CMD_HUB_RSP, "{\"err\":\"codec\"}");
+        return;
+    }
+    const uint32_t units = nc_px_codec_total_units(c0);
+    nc_pixel_codec_t **cd = heap_caps_calloc(lanes, sizeof(*cd), MALLOC_CAP_INTERNAL);
+    uint8_t *payload = heap_caps_malloc((size_t)px * NC_PX_BPP, MALLOC_CAP_INTERNAL);
+    int int_cnt = 0;
+    int int_expect = 0;
+    uint8_t *scratch = bench_alloc(units, &int_cnt);
+    int_expect++;
+    uint8_t *out0 = bench_alloc(units, &int_cnt);
+    int_expect++;
+    uint8_t *out1 = bench_alloc(units, &int_cnt);
+    int_expect++;
+    if (out0 != NULL) { memset(out0, 0, units); }
+    if (out1 != NULL) { memset(out1, 0, units); }
+    const uint32_t lb = nc_px_codec_lane_bytes(c0);
+    const uint32_t bc = (CONFIG_NETCORE_PIXEL_BIT_CELLS > 0) ? CONFIG_NETCORE_PIXEL_BIT_CELLS : 3;
+    const uint32_t pack_bytes = px * lb * ((bc * 8u + 7u) / 8u);
+    uint8_t *pack[8];
+    for (int i = 0; i < 8; i++) { pack[i] = NULL; }
+    bool ok = cd != NULL && payload != NULL && scratch != NULL && out0 != NULL && out1 != NULL;
+    if (ok) {
+        // 唔可以用單一顏色：codec 有「同上一顆一樣就抄」的快取路徑，全灰會假快。
+        // 用一條會變的pattern（每像素 4 個通道都唔同）逼近真實文字／圖案。
+        for (uint32_t i = 0; i < (uint32_t)px * NC_PX_BPP; i++) {
+            payload[i] = (uint8_t)((i * 37u + (i >> 3)) & 0xFFu);
+        }
+        cd[0] = c0;
+        for (uint8_t i = 1; i < lanes && ok; i++) {
+            cd[i] = nc_px_codec_init(nc_px_codec_new(), &cc);
+            ok = cd[i] != NULL;
+        }
+        for (int i = 0; i < 8 && ok; i++) {
+            pack[i] = bench_alloc(pack_bytes, &int_cnt);
+            int_expect++;
+            ok = pack[i] != NULL;
+        }
+    }
+
+    int64_t us_enc = 0;
+    int64_t us_mix = 0;
+    int64_t us_direct = 0;
+    int64_t us_packed = 0;
+    int64_t us_pack = 0;
+    int64_t us_merge = 0;
+    if (ok) {
+        // ① 只做編碼（寫 scratch），唔做 OR 合成
+        const int64_t t0 = esp_timer_get_time();
+        for (uint8_t fr = 0; fr < frames; fr++) {
+            for (uint8_t ln = 0; ln < lanes; ln++) {
+                nc_px_codec_frame(cd[ln], (uint32_t)fr + 1u);
+                if (nc_px_codec_wave_frame(cd[ln], payload, px, scratch, units) == 0) {
+                    ok = false;
+                    break;
+                }
+            }
+        }
+        us_enc = (esp_timer_get_time() - t0) / (int64_t)frames;
+        // ② 只做 OR 合成（讀同一份 scratch，寫 out0/out1）；成本同 lane 數成正比
+        if (ok) {
+            const int64_t t1 = esp_timer_get_time();
+            for (uint8_t fr = 0; fr < frames; fr++) {
+                for (uint8_t ln = 0; ln < lanes; ln++) {
+                    uint8_t *o = (ln < 8) ? out0 : out1;
+                    const uint8_t bit = (uint8_t)(1u << (ln & 7));
+                    for (uint32_t u = 0; u < units; u++) {
+                        if (scratch[u] != 0) {
+                            o[u] |= bit;
+                        }
+                    }
+                }
+            }
+            us_mix = (esp_timer_get_time() - t1) / (int64_t)frames;
+        }
+        // ③ 真正的後端路徑：直接 OR 進輸出（唔經 scratch）
+        if (ok) {
+            memset(out0, 0, units);
+            memset(out1, 0, units);
+            const int64_t t2 = esp_timer_get_time();
+            for (uint8_t fr = 0; fr < frames; fr++) {
+                for (uint8_t ln = 0; ln < lanes; ln++) {
+                    uint8_t *o = (ln < 8) ? out0 : out1;
+                    nc_px_codec_frame(cd[ln], (uint32_t)fr + 1u);
+                    if (nc_px_codec_wave_frame_or(cd[ln], payload, px, o, units, 1, 0,
+                                                  (uint8_t)(ln & 7u)) == 0) {
+                        ok = false;
+                        break;
+                    }
+                }
+                if (!ok) { break; }
+            }
+            us_direct = (esp_timer_get_time() - t2) / (int64_t)frames;
+        }
+        // ④ packed 波形 + 8×8 轉置（每 8 條 lane 一組）：波形以 bitstream 儲存、
+        // 混合時一次 8 個單元，輸出仍然係 I80 byte-per-unit。
+        if (ok) {
+            memset(out0, 0, units);
+            memset(out1, 0, units);
+            const int64_t t3 = esp_timer_get_time();
+            for (uint8_t fr = 0; fr < frames; fr++) {
+                for (uint8_t g = 0; g < lanes; g += 8) {
+                    const uint8_t n = (uint8_t)((lanes - g > 8) ? 8 : (lanes - g));
+                    for (uint8_t k = 0; k < n; k++) {
+                        nc_px_codec_frame(cd[g + k], (uint32_t)fr + 1u);
+                        if (nc_px_codec_wave_pack(cd[g + k], payload, px, pack[k],
+                                                  pack_bytes) == 0) {
+                            ok = false;
+                            break;
+                        }
+                    }
+                    if (!ok) { break; }
+                    nc_px_codec_pack_merge8((const uint8_t **)pack, pack_bytes,
+                                            (g == 0) ? out0 : out1, 1, 0);
+                }
+                if (!ok) { break; }
+            }
+            us_packed = (esp_timer_get_time() - t3) / (int64_t)frames;
+        }
+        // ⑤ packed 拆開：只 pack（寫 bitstream）／只 merge（轉置＋寫 I80）
+        if (ok) {
+            const int64_t t4 = esp_timer_get_time();
+            for (uint8_t fr = 0; fr < frames; fr++) {
+                for (uint8_t ln = 0; ln < lanes; ln++) {
+                    nc_px_codec_frame(cd[ln], (uint32_t)fr + 1u);
+                    if (nc_px_codec_wave_pack(cd[ln], payload, px, pack[ln & 7],
+                                              pack_bytes) == 0) {
+                        ok = false;
+                        break;
+                    }
+                }
+            }
+            us_pack = (esp_timer_get_time() - t4) / (int64_t)frames;
+        }
+        if (ok) {
+            memset(out0, 0, units);
+            memset(out1, 0, units);
+            const int64_t t5 = esp_timer_get_time();
+            for (uint8_t fr = 0; fr < frames; fr++) {
+                for (uint8_t g = 0; g < lanes; g += 8) {
+                    nc_px_codec_pack_merge8((const uint8_t **)pack, pack_bytes,
+                                            (g == 0) ? out0 : out1, 1, 0);
+                }
+            }
+            us_merge = (esp_timer_get_time() - t5) / (int64_t)frames;
+        }
+    }
+    if (!ok) {
+        (void)snprintf(j, sizeof(j), "{\"err\":\"mem\"}");
+    } else {
+        const uint32_t enc = (uint32_t)((us_enc > 0) ? us_enc : 1);
+        const uint32_t mix = (uint32_t)((us_mix > 0) ? us_mix : 1);
+        const uint32_t direct = (uint32_t)((us_direct > 0) ? us_direct : 1);
+        const uint32_t packed = (uint32_t)((us_packed > 0) ? us_packed : 1);
+        const uint32_t max_fps_x10 = (uint32_t)(10000000u / packed);
+        (void)snprintf(j, sizeof(j),
+                       "{\"lanes\":%u,\"px\":%u,\"frames\":%u,\"units\":%u,"
+                       "\"us_enc\":%u,\"us_mix\":%u,\"us_direct\":%u,\"us_packed\":%u,"
+                       "\"us_pack\":%u,\"us_merge\":%u,"
+                       "\"sram\":%d,\"sram_blocks\":%d,\"sram_expect\":%d,"
+                       "\"max_fps_x10\":%u,\"pass50\":%u}",
+                       (unsigned)lanes, (unsigned)px, (unsigned)frames, (unsigned)units,
+                       (unsigned)enc, (unsigned)mix, (unsigned)direct, (unsigned)packed,
+                       (unsigned)us_pack, (unsigned)us_merge,
+                       (int_cnt == int_expect) ? 1 : 0, int_cnt, int_expect,
+                       (unsigned)max_fps_x10, (max_fps_x10 >= 500u) ? 1u : 0u);
+    }
+    for (uint8_t i = 0; i < lanes; i++) {
+        if (cd != NULL && cd[i] != NULL) {
+            nc_px_codec_free(cd[i]);
+        }
+    }
+    if (cd != NULL) { heap_caps_free(cd); }
+    if (payload != NULL) { heap_caps_free(payload); }
+    if (scratch != NULL) { heap_caps_free(scratch); }
+    if (out0 != NULL) { heap_caps_free(out0); }
+    if (out1 != NULL) { heap_caps_free(out1); }
+    for (int i = 0; i < 8; i++) {
+        if (pack[i] != NULL) { heap_caps_free(pack[i]); }
+    }
+    reply_json(ctx, NC4_CMD_HUB_RSP, j);
 }
 #endif  // CONFIG_NETCORE_PIXEL
 
@@ -4868,7 +5106,8 @@ static const nc_action_t k_actions[] = {
     { NC4_CMD_MUTEX_BENCH, on_mutex_bench, "test" },
 #if CONFIG_NETCORE_PIXEL
     { NC4_CMD_MATRIX, on_matrix, "test" },
-    { NC4_CMD_PIXEL, on_pixel, "test" },
+    { NC4_CMD_RENDER, on_render, "test" },
+    { NC4_CMD_PXBENCH, on_pxbench, "test" },
 #endif
     { NC4_CMD_RX_BENCH, on_rx_bench, "test" },
     { NC4_CMD_RX_RESULT, on_rx_result, "test" },

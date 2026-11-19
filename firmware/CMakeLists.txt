@@ -27,17 +27,20 @@ endif()
 set(ENV{NC_PORT} "${PORT}")
 set(ENV{NC_PROJECT} "${PROJECT}")
 
-# 建置設定（SDKCONFIG_DEFAULTS）＝ 共通預設 → 硬體板覆蓋（後者勝）。
-# project 層**唔參與 build**：它只有 runtime 設定（project.json ＋ data/config），
-# 冇 sdkconfig.defaults。能力碎片（eth-rmii／wifi-hosted-*／nc4-ws／nc4-udp）
-# 全部寫在 board.json 的 profiles，由 tools/ncbuild 用 -DSDKCONFIG_DEFAULTS 傳入。
+# 建置設定（SDKCONFIG_DEFAULTS）＝ 共通預設 → 硬體板覆蓋 → project 覆蓋（後者勝）。
+# project 主要是 runtime 設定（project.json ＋ data/config）；但同一塊硬體可以掛
+# 不同的外接組合（例如 SuperMini ＋ LED Textkit 佔 GPIO1–5），那組腳位是 build-time
+# 的事實，所以 project 可以選擇性帶一份 sdkconfig.defaults 覆寫。沒有這個檔的
+# project（絕大多數）行為完全不變。
+# 注意：sdkconfig 已經存在時改 defaults 不會自動生效 —— 要 `make.py build … --fresh`。
+# 能力碎片（eth-rmii／wifi-hosted-*／nc4-ws／nc4-udp）
+# 仍然寫在 board.json 的 profiles，由 tools/ncbuild 用 -DSDKCONFIG_DEFAULTS 傳入。
 set(SDKCONFIG_DEFAULTS "${CMAKE_CURRENT_LIST_DIR}/sdkconfig.defaults")
 if(EXISTS "${PORT_DIR}/sdkconfig.defaults")
     list(APPEND SDKCONFIG_DEFAULTS "${PORT_DIR}/sdkconfig.defaults")
 endif()
 if(PROJECT AND EXISTS "${NC_PROJECT_DIR}/sdkconfig.defaults")
-    message(WARNING "${NC_PROJECT_DIR}/sdkconfig.defaults 存在但**唔會被使用**："
-                    "project 層只放 runtime 設定，build 設定請搬到 hardware 層。")
+    list(APPEND SDKCONFIG_DEFAULTS "${NC_PROJECT_DIR}/sdkconfig.defaults")
 endif()
 
 # ── 測試／開發專用（components/dev）──
@@ -68,8 +71,14 @@ set(_nc_extra_dirs
     # ── 匯流排（通用：NC4 幀、LED(SPI)、LCD(I80) 都會用）──
     # 一個「線的實作」一個組件：bus/net（TCP/WS/UDP）、之後 bus/nc4、bus/led、bus/lcd
     "${CMAKE_CURRENT_LIST_DIR}/components/bus"
-    # ── 硬體 owner（生產任務，不是測試）──
-    "${CMAKE_CURRENT_LIST_DIR}/components/tasks/hw_gpio")
+    # ── 軟件（效果／math；唔碰硬體、唔開任務）──
+    # pixel：環＋編碼器＋內建效果生產者（host 測試編同一份）
+    "${CMAKE_CURRENT_LIST_DIR}/components/sw/pixel"
+    # ── 任務（生產任務，不是測試）──
+    "${CMAKE_CURRENT_LIST_DIR}/components/tasks/hw_gpio"
+    # pixel_task：效果／Map 生產者；render_task：渲染（LED 現在，LCD 將來）
+    "${CMAKE_CURRENT_LIST_DIR}/components/tasks/pixel_task"
+    "${CMAKE_CURRENT_LIST_DIR}/components/tasks/render_task")
 # 外部任務宿主（ncm）。NC_ENABLE_NCM=OFF 時連 component 都唔加入 →
 # 唔編譯、唔 link、唔 fetch WAMR 依賴（components/host/ncm/idf_component.yml）。
 # 注意：一定要放喺 components 之下第二層（components/*/ncm）—— IDF 會自動把

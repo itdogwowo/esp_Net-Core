@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "_comment": [
+    "Tasks 層：只列「用戶任務」（租戶）。核心任務（nc4 / net / core / ncm）永遠照固件宣告跑，唔入呢個檔。",
+    "pixel：像素渲染器（送 6 條 WS2812 燈鏈）。level 4、core1 → 開機就會跑兩條 loop：",
+    "       prd（效果→環，60 fps）＋ pixel（環→硬件，300 fps）；",
+    "       冇呢條 → 補成 (0,0)＝只行 on_start、唔開 loop（燈唔會更新）。",
+    "fps 由 project 的 sdkconfig.defaults 給（CONFIG_NETCORE_PIXEL_FPS=300）；",
+    "生產者（效果）自己 60 fps 更新，6 條 chain 由同一個 I80 後端同步送。"
+  ],
+  "tasks": [
+    {
+      "name": "render",
+      "level": 4,
+      "affinity": [0, 1]
+    },
+    {
+      "name": "pixel",
+      "level": 4,
+      "affinity": [0, 1]
+    }
+  ]
+}
