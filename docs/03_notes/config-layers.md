@@ -556,25 +556,34 @@ DMA 大小（1600）與環數（16/16）**不在 config**——那是 build-time
   唔 `on_start` —— 環與後端都唔會建，`plan` 也不會記它的帳（`slot_will_run()`）。
 - 缺席的條目：開機會自動補寫（只加不改）。
 
-### 5.1 `pixel/`：效果自己的樹
+### 5.1 `pixel/`：效果自己的樹（DATA 平面）
 
-效果不是「一個設定檔」——它是**資產**（程式 + 映射 + 模式），所以自己一棵樹：
+效果不是「一個設定檔」——它是**資產**，所以自己一棵樹。這棵樹就是
+[behavior-taxonomy.md](behavior-taxonomy.md) 的 **DATA 平面**，照
+`mp_Net-Core/slave/pixel/` 的四層設計：
 
 ```text
 /data/pixel/
-├─ effects/          效果檔 *.nce（載入器掃這個目錄）
-├─ map/              像素映射（實體排列 → 邏輯索引）
-└─ modes/            模式 / 預設（開機跑哪個、參數）
+├─ effects/          效果：*.json（program 波形＋參數）＋ *.nce（外掛效果）
+├─ map/              像素映射：群組 → 有序段選擇（可交叉型別／反序／重疊）
+├─ modes/            模式：效果 × 群組 + write／range + 播放參數
+└─ registry.json     播放清單：auto_play + list
 ```
 
 規則：
 
 - **檔案系統就是註冊表**：`ls pixel/effects/` 就知道有哪些效果，沒有另一張總表。
 - 每個 `.nct` / `.nce` 自帶 manifest（kind / core / fps / px / cmds），載入器驗它，不靠外部設定。
-- `map/`、`modes/` 的 schema 等效果引擎落地再定；現在只載入 + 驗證。
+- `.json` 效果由 CORE 的 program interpreter 解釋（有界，冇指標）；壞檔＝跳過＋保留 last-good。
+- `map/`、`modes/` 的 schema 見 behavior-taxonomy.md §8 Q2–Q4（設計階段，未凍結）。
 - **UI 暫時不做**（本來要放 `ui.json`，取消）。
 
 >`pixel/` 的檔案由使用者用隨身碟管理；firmware 只讀，`ASSET_RELOAD` 才重新掃描。
+
+> **內建效果唔係呢棵樹**：編譯入固件的效果住 `firmware/components/effects/<domain>_effects/`，
+> **框架**（契約、registry、interpreter、波表）住 `firmware/components/sw/pixel/`。
+> 三者同一個 canonical frame 契約，只差交付方式 —— 見
+> [behavior-taxonomy.md](behavior-taxonomy.md) §3。
 
 ---
 
@@ -583,7 +592,7 @@ DMA 大小（1600）與環數（16/16）**不在 config**——那是 build-time
 | 東西 | 位置 | 狀態 |
 |---|---|---|
 | `nc_cfg_open/root/version/close` | `firmware/components/sys/config/` | ✅ 已實作（`nc_cfg_load.c`；缺檔／壞檔回預設） |
-| 各層自己的 parser | 各 component（`sys/store`、`sys/transport`、`main`） | ✅ 已接（hardware／system／network／tasks；`pixel/` 樹仍在 ncm） |
+| 各層自己的 parser | 各 component（`sys/config`、`sw/pixel`、`main`） | 🟡 hardware／system／network／tasks 已接；`pixel/` 四層（effects／map／modes／registry）未做 |
 | 出廠預置（每個檔一份） | `ports/project/<chip>/<board>/data/config/*.json` | ❌ 現在只有一個 `config.json`（321 B，只有 System + Network.lan） |
 | 效果樹 | `/data/pixel/`（`effects/`、`map/`、`modes/`） | 🟡 載入器掃 `pixel/effects/`（路徑本輪改） |
 | NVS 覆蓋 | `net/rx_core`、`net/rx_split`、`cid` … | ✅ 已有（優先於 config） |

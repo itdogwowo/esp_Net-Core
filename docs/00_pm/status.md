@@ -4899,3 +4899,30 @@ DMA 仍然 17.36 ms（43,400 PCLK ÷ 2.5 MHz）→ 16×600 是 **CPU-bound**，
   ＝4,808 B（比 6×20 的 1,640 B 多），所以 enc 348 µs 是預期，不是回歸。
 - **注意**：Matrix 映像 `console=none`、log 走 TinyUSB CDC ＋ MSC（VID 303A:4003），
   燒錄後 USJ 的 COM 會消失、出現新的 CDC COM。
+
+### 7.127 2026-11-19（行為分類重新設計：三平面 CORE／USER／DATA；參考 mp_Net-Core/slave）
+
+- **背景**：`firmware/` 冇正式位置放效果器；`sw/pixel/nc_pixel_producer.c` 一個檔做效果數學、
+  抖動、demo／時間基準、參數面。文件只有零散規則，冇一份講「邊種行為放邊」。
+- **參考 MP**：`mp_Net-Core/slave` 全部係 user space（`.py`＋JSON），所以只需要一個軸
+  （角色）；佢有四個習慣值得照抄 —— **資料先於程式**（畫波寫 JSON，寫唔出才寫 py）、
+  **框架／內容分離**（`lib/sw/effect_core.py` vs `pixel/effects/`）、**計算／播送分離**
+  （`pixel_task` vs `render.py`）、**檔案系統就是註冊表**（`effects.json`／`map`／`modes`／
+  `registry.json`）。
+- **定案：角色 × 平面**。C 有編譯邊界，要多一個軸：
+  **CORE**（`firmware/components/`，特權、開機必需）／**USER**（repo 根 `modules/`，載入、
+  沙箱）／**DATA**（裝置 `/data/`，值與宣告）。**USER 只准 effect／task／action／ui 四個
+  角色**；driver／bus／sys／sw／host 永遠唔准（佢哋碰硬件、記憶體、載入器）。
+- **效果器**：一個角色、**三種交付**（DATA program／CORE C／USER `.nce`，同一 canonical
+  frame 契約）、**四層資料**（effect／map／mode／playlist）。**框架**（契約、registry、
+  program interpreter、波表）住 `sw/pixel`；**內容**住 `components/effects/<域>_effects/`；
+  **mapping／modes／playlist** 住 `/data/pixel/`。
+- **落地**：[behavior-taxonomy.md](../03_notes/behavior-taxonomy.md) 重寫（設計階段，
+  §8 有 Q1–Q10 待定）；`firmware/components/effects/README.md`、`component-layout`、
+  `docs/README` 索引、`modules/README` 已更新。CORE-only 的 component 目錄暫時只有
+  README，冇 CMakeLists（加了 IDF 就會當它是一個 component）。
+- **未做（M1–M8）**：拆框架／內容 → 契約＋畫布由環 px 決定（取消 64 限）→ DATA program
+  ＋interpreter → mapping＋scatter → modes＋playlist → `.nce` framebuffer → `pixel_action`
+  （release）＋主機推送。
+- **判準一句**：加一個效果應該係「加一個 JSON／丟一個 `.nce`」；要重燒 C 才出得到，
+  就代表擺錯咗平面。

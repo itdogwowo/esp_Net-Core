@@ -65,7 +65,8 @@
 | `bus/bus_core` | ✅ **已建（2026-11-10）** | `nc_bus_t` ＋ ops 表 ＋ 統一 API ＋ `nc_bus_native()` |
 | `bus/bus_uart` | ✅ 已建、**未接線** | UART adapter（`nc_bus_uart_open`），main 仍然直接用 drv |
 | `bus/bus_net` | ⚠️ 暫放 | TCP／WS／UDP／HTTP（原 `sys/transport`）；下一步應改成 socket 線的 adapter |
-| `sw/pixel` | ✅ **2026-11-18** | 環＋編碼器＋內建效果（純軟件，host 測試同一份） |
+| `sw/pixel` | ✅ **2026-11-18** | 環＋編碼器（純軟件，host 測試同一份）；內建效果 M3 之後搬去 `effects/pixel_effects/` |
+| `effects/pixel_effects` | 🟡 **2026-11-19 立家** | 內建效果內容（時間＋參數 → canonical 畫面）；框架在 `sw/pixel`；目前仍在 `sw/pixel/nc_pixel_producer.c`，見 [behavior-taxonomy.md](behavior-taxonomy.md) §9 |
 | `tasks/render_task` | ✅ **2026-11-18** | 渲染任務：環→編碼→後端（i80／spi／direct／mock）；將來 LCD 共用 |
 | `tasks/pixel_task` | ✅ **2026-11-18** | 效果／Map 生產者任務（寫環，60 fps） |
 | `sys/nc4` | 不變 | NC4 協議本體（含 `nc4_bus.c` 的插槽與 parser） |
@@ -133,6 +134,7 @@
 
 - `main.c` 仍有 **ETH、SD、USB、GPIO 測試、I80 測試** 的硬體碼。
 - `sys/store` 同時管 FAT 與 USB MSC —— **FAT 的擁有者**屬於 store，但「USB 裝置怎麼裝」屬於 `drv_usb`；
-- `pixel` 已經不再放 `sys`：環／編碼／效果在 `sw/pixel`；效果任務在 `tasks/pixel_task`、
-  渲染任務在 `tasks/render_task`；硬體在 `driver/drv_i80`／`drv_spi_led`（2026-11-18）。
+- `pixel` 已經不再放 `sys`：環／編碼在 `sw/pixel`、效果在 `effects/pixel_effects/`（目標；
+  現時仍在 `sw/pixel`）；效果宿主在 `tasks/pixel_task`、渲染在 `tasks/render_task`；
+  硬體在 `driver/drv_i80`／`drv_spi_led`（2026-11-18／11-19）。
   切的時候要保住「一個 owner」這條（見 [fat-ownership.md](fat-ownership.md)）。

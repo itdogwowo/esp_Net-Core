@@ -4,6 +4,9 @@
 > **對象**：要選型的人、要動 effect → pixel pipeline 那一格的人。
 > **狀態**：研究完成、建議已定；**P0 spike 未做**（見 §9，這是唯一會推翻結論的地方）。
 > **相關**：[architecture-flow.md](architecture-flow.md)（compute 這一格）· [buffer-manager.md](buffer-manager.md)（effect 的記憶體從哪來）· [memory.md](memory.md)（pool / arena）
+>
+> **落位（2026-11-19）**：本文的 `.nce` 係三平面模型的 **USER 平面**；效果框架、內建效果、
+> DATA 四層（effect／map／mode／playlist）的分工見 [behavior-taxonomy.md](behavior-taxonomy.md) §3。
 
 ---
 

@@ -128,6 +128,10 @@ class Component:
 
 **關鍵**：`kind` 只有四種，`claims()` 只有一種寫法。這兩件事加起來，就讓「config 生成的 driver」和「手寫的 LVGL 頁面」在系統眼裡**完全一樣** —— 它們都只是「宣告了資源、有生命週期、可能每幀跑一次」的東西。
 
+> **`kind` → 目錄**：這一節講的是概念分類；實際住哪個 component（`driver/`、`effects/`、
+> `tasks/`…）見 [behavior-taxonomy.md](behavior-taxonomy.md) §2。兩者是同一件事的
+> 「概念名」與「位置名」，唔好各自再定一套。
+
 ---
 
 ## 4. 三個仲裁者

@@ -1,32 +1,43 @@
 # esp_Net-Core — 分層、component 與專案佈局
 
-> 狀態：定案（對應 `../00_pm/roadmap.md` Phase 1 的專案骨架）
-> 原則：**程式分七區、專案分 ports；箭頭只能向下。**
+> 狀態：2026-11-19 更新（原 2026-10 定案）
+> 原則：**程式按角色分區、專案分 ports；箭頭只能向下。**
+> **角色 → 目錄 → 命名的權威表在 [behavior-taxonomy.md](behavior-taxonomy.md)**；本頁只講分區與依賴方向。
+> **CORE 只是三個平面之一**：CORE（`firmware/components/`）／USER（repo 根 `modules/`）／
+> DATA（裝置 `/data/`）。三平面規則見 behavior-taxonomy.md §2；本頁只講 CORE 內部。
 > 相關：`architecture-flow.md`（執行期流程）、`../00_pm/roadmap.md`（分期）
 
-> ⚠️ **這份寫的是終點，不是現況。** 目前只落地 `sys/` 與 `app/` 兩區；
-> `hw` / `sw` / `action` / `tasks` / `ui` / `schema` 尚未建立，指令 handler 仍在
-> `firmware/main/main.c`。看目錄時請以 §3 的 ✅ / ⬜ 標記為準。
+> **現況（2026-11-19）**：已落地 `driver/`、`bus/`、`sys/`、`sw/`、
+> `effects/`（目錄已立、效果 M2 才遷入）、`tasks/`、`action/`、`host/`；
+> `hw/`（具體晶片）、`ui/`、`schema/` 未落地。
+> 看目錄時以 §3 的 ✅ / 🟡 / ⬜ 標記為準。
 
 ---
 
-## 1. 七個程式分區
+## 1. 程式分區（按角色）
 
 | 分區 | 一句話 | 知道什麼 | 可以依賴 |
 |---|---|---|---|
-| **hw** | 硬件 | 暫存器、時序、匯流排 | 只有 `esp_driver_*` |
-| **sys** | 系統 | 協議、設定、FS、匯流排、節拍 | hw、`esp_*` |
-| **sw** | 軟件 | 效果引擎、layout、math（功能實作） | sys |
-| **action** | 政策 | 參數怎麼驗、選哪個機制、回什麼 | sys、sw |
-| **tasks** | 迴圈 | 誰在什麼核心上、跑多久 | sys、sw（觸發指令走 service） |
+| **driver** | 周邊驅動 | 暫存器、時序、腳位 | 只有 `esp_driver_*`／`soc` |
+| **hw** | 晶片 | 一顆具體晶片的寄存器序列／封包（用 bus 讀寫） | bus |
+| **bus** | 線路 | 一條線的統一讀寫語義 | driver |
+| **sys** | 系統 | 協議、設定、FS、記憶體、任務、節拍 | driver、bus、`esp_*` |
+| **sw** | 共用算法 | 環、編碼、layout、效果的**框架**／interpreter（**唔養行為、唔放具體效果**） | sys |
+| **effects** | 效果內容 | （時間, 參數, 幾何）→ canonical 畫面（框架在 `sw/`） | sw（契約／框架） |
+| **action** | 政策 | 參數怎麼驗、選哪個機制、回什麼 | sys、sw、effects（只設參數） |
+| **tasks** | 迴圈 | 誰在什麼核心上、跑多久 | sys、sw、effects（＋後端轉接例外） |
+| **host** | 宿主 | 載入並執行外部模組（ncm／WAMR） | sys |
 | **ui** | 介面 | 頁面、觸控 | sys、sw（觸發指令走 service） |
 | **schema** | 契約 | 指令表（build 時生成） | 無 |
 
-三條機械規則：
+五條機械規則：
 
-1. `hw` 不准 include `sys` / `sw` / `action`。
-2. `action` 不准被 `sys` / `sw` include（反向觸發走 `disp` service）。
-3. `ui` 與 `tasks` 不准 include `action`（同上，走 service）。
+1. `driver` 不准 include `hw` / `bus` / `sys` / `sw` / `effects` / `tasks` / `action`；
+   `hw` 不准 include `sys` / `sw` / `effects` / `tasks` / `action`。
+2. `effects` 不准 include `tasks` / `action` / `driver` / `bus` / `host`；唔准開 task、唔准配置記憶體。
+3. `action` 不准被 `sys` / `sw` include（反向觸發走 `disp` service）。
+4. `ui` 與 `tasks` 不准 include `action`（同上，走 service）。
+5. 同層唔互相 include；要共用就落 `sw/`。
 
 ---
 
@@ -37,13 +48,15 @@
                           │
         ┌─────────────┬───┴───┬─────────────┐
         ▼             ▼       ▼             ▼
-      tasks          ui    action         (裝配)
-        ╎             ╎       │
-        ╎ (service)   ╎       ▼
-        └─────────────╊──►   sw ──► sys ──► hw
-                      ╎
-              ui ↔ action 走 disp service，不互相 include
+      tasks          ui    action         host
+        ╎             ╎       │             │
+        ╎ (service)   ╎       ▼             │
+        └─────────────╊──► effects ──► sw ──► sys ──► bus ──► driver
+                      ╎                          ▲
+              ui ↔ action 走 disp service         │
+              host 經 sys 載入模組 ────────────────┘（外掛效果係檔案，唔入固件）
 
+   tasks／action ──► hw（晶片）──► bus ──► driver（晶片用線路；上層用晶片，唔可以反向）
 schema ──► sys/nc4
 ```
 
@@ -60,12 +73,15 @@ esp_Net-Core/
 │  ├─ CMakeLists.txt                  #   PORT 選擇、sdkconfig 疊層、EXTRA_COMPONENT_DIRS
 │  ├─ main/main.c                     #   ✅ 目前 = 裝配 + 尚未拆出的 handler
 │  ├─ components/
-│  │  ├─ sys/                         # ✅ nc4/ mem/ tasks/ module/ transport/
-│  │  ├─ app/                         # ✅ ota/
-│  │  ├─ hw/                          # ⬜ apa102/ pca9685/ motor_uart/ tft/ touch/ xl9555/
-│  │  ├─ sw/                          # 🟡 pixel/（環＋編碼器＋效果；2026-11-18）
-│  │  ├─ action/                      # 🟡 ota_action/ file_action/（其餘 cmd 仍在 main.c）
-│  │  ├─ tasks/                       # 🟡 hw_gpio/、pixel_task/（效果）、render_task/（渲染）（2026-11-18）
+│  │  ├─ driver/                      # ✅ drv_uart/ drv_i80/ drv_spi_led/ drv_pwm/
+│  │  ├─ hw/                          # ⬜ 具體晶片（TFT／PCA9685／XL9555）；等第二顆晶片才建
+│  │  ├─ bus/                         # ✅ bus_core/ bus_net/ bus_uart/
+│  │  ├─ sys/                         # ✅ nc4/ mem/ config/ task/ store/ hw/ state/ nclog/ core/
+│  │  ├─ sw/                          # 🟡 pixel/（環＋編碼器＋效果框架＋layout；唔放具體效果）
+│  │  ├─ effects/                     # 🟡 README 已立；pixel_effects/（內建效果內容）M2 遷入
+│  │  ├─ action/                      # 🟡 ota_action/ file_action/ test_action/（dev）
+│  │  ├─ tasks/                       # 🟡 hw_gpio/、pixel_task/（效果宿主）、render_task/（渲染）
+│  │  ├─ host/                        # 🟡 ncm/（模組載入＋WAMR）
 │  │  ├─ ui/                          # ⬜ pages/
 │  │  └─ schema/                      # ⬜ （生成物）
 │  ├─ sdkconfig.defaults              #   晶片層建置配置
@@ -121,14 +137,16 @@ fatfs_create_partition_image(data ${CMAKE_CURRENT_LIST_DIR}/data FLASH_IN_PROJEC
 
 | 既有 | C 版 |
 |---|---|
-| `lib/hw/` | `components/hw/` |
+| `lib/hw/` | `components/hw/`（具體晶片；未落地） |
+| `slave/driver/*_drv.py` | `components/driver/drv_*`（周邊／匯流排） |
 | `lib/sys/` | `firmware/components/sys/` |
 | `lib/sw/` | `components/sw/` |
 | `action/` | `components/action/` |
 | `tasks/` | `components/tasks/` |
 | `ui/` | `components/ui/` |
 | `schema/*.json` | `components/schema/`（build 時轉 C 表） |
-| `pixel/` | **消失**：程式在 `sw/`，資料在 FAT |
+| `pixel/`（程式） | **拆開**：環／編碼 → `sw/pixel/`；效果 → `effects/pixel_effects/`；資料 → FAT `pixel/` |
+| `modules/effects/*.nce` | repo 根 `modules/effects/`（外掛效果；唔入 firmware 樹） |
 | `cores/` | 併入 `tasks/`（core pin 表） |
 | `ports/<chip>/<board>/config/*.json` | `ports/project/<chip>/<board>/data/config/*.json` ＋ `ports/hardware/<chip>/<board>/{board,wiring}.json` |
 | `config/*.json`（base） | firmware 內建預設值（找不到檔案時用） |
@@ -171,6 +189,10 @@ fatfs_create_partition_image(data ${CMAKE_CURRENT_LIST_DIR}/data FLASH_IN_PROJEC
 
 現階段只做「載入 + 驗證 + 失敗保留舊版」的骨架；effect program 的 interpreter、mapping 展開、mode 的 range 切片留到之後。
 
+> **唔好同內建效果混淆**：`.nce` 係用戶資產（FAT）；**內建**效果係程式碼，住
+> `components/effects/<domain>_effects/`（[behavior-taxonomy.md](behavior-taxonomy.md) §4）。
+> 兩者同一個角色、同一個 canonical frame 契約，只差交付方式。
+
 ---
 
 ## 9. Partition 佈局
@@ -188,7 +210,10 @@ firmware 走 OTA 分區 → 舊版 `FILE_PROMOTE` 那套（`.bak` ＋ pending �
 ## 10. 判準（review 時逐條問）
 
 - [ ] 這個改動是「硬體變了」「節拍變了」「內容變了」還是「政策變了」？（決定分區）
-- [ ] 箭頭有沒有反向？（`hw` → 上層、`sys` → `action`、`ui`/`tasks` → `action` 都是錯的）
+- [ ] 它的**角色**是哪一個？（先查 [behavior-taxonomy.md](behavior-taxonomy.md) §2；答唔到就唔好開檔）
+- [ ] 它的**平面**是哪一個？（CORE／USER／DATA；有冇特權？改一次要唔要重燒？）
+- [ ] 效果內容有冇住 `effects/`、框架有冇留 `sw/`？有冇偷碰 driver／task／環？
+- [ ] 箭頭有沒有反向？（`driver` → 上層、`sys` → `action`、`ui`/`tasks` → `action`、`effects` → `tasks` 都是錯的）
 - [ ] `main.c` 有沒有出現 if / for / 字串解析？
 - [ ] `action` 的 handler 有沒有超過「驗參數、選機制、回結果」？
 - [ ] 新增的設定，是專案（`ports/`）、執行期（`data/`）還是機器狀態（NVS）？

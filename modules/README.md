@@ -1,7 +1,19 @@
-# modules/ — 外掛模組（唔屬於 firmware 專案）
+# modules/ — USER 平面（外掛模組）
 
-> **原則**：外掛模組由工具獨立編譯，**唔進入 firmware 的原始碼樹**。
-> firmware 只負責載入＋執行。命名見 [naming.md §7](../docs/03_notes/naming.md)。
+> **這是三平面中的 USER 平面**：可載入、可換、有沙箱；CORE 係 `firmware/components/`，
+> DATA 係裝置 `/data/`。規則見 [behavior-taxonomy.md](../docs/03_notes/behavior-taxonomy.md) §2。
+>
+> **原則**：外掛由工具獨立編譯，**唔進入 firmware 的原始碼樹**；firmware 只負責載入＋執行。
+> USER 只准 **effect／task／action／ui** 四個角色；driver／bus／sys／sw／host 永遠唔准。
+> 命名見 [naming.md §7](../docs/03_notes/naming.md)。
+>
+> ⚠️ **內建效果唔係住呢度**：編譯入固件的效果住
+> `firmware/components/effects/<域>_effects/`，框架住 `firmware/components/sw/pixel/`。
+> 兩者同一個 canonical frame 契約，只差交付方式。見
+> [behavior-taxonomy.md](../docs/03_notes/behavior-taxonomy.md) §3.1。
+>
+> ⚠️ **`lab/` 唔係角色**：它係一次性實驗／量測暫存區，唔會收納；唔好照抄去
+> `firmware/`。
 
 ## 命名規則（睇路徑就知係乜）
 

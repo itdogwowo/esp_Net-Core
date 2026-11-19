@@ -1,6 +1,9 @@
 # 渲染任務（render）＋ 效果任務（pixel）＋ 驅動
 
 > 2026-11-18。取代舊的 `components/dev/test_rgb_led_matrix_tasks`（`rgbmatrix` 測試任務）。
+> **2026-11-19 結構更新**：內建效果嘅家定咗喺 `components/effects/pixel_effects/`
+> （現時仍在 `sw/pixel/nc_pixel_producer.c`，遷移 M2–M3 見
+> [behavior-taxonomy.md](behavior-taxonomy.md) §9）。`sw/pixel` 之後只留環、編碼器、環註冊表。
 > **同日兩次修正**：
 > 1. 原本全部塞在 `components/sys/pixel`（環、效果、驅動、任務混在一起）→ 拆出
 >    `sw/`（純軟件）、`tasks/`（任務）、`driver/`（硬體）；
@@ -16,8 +19,9 @@
 
 | 層 | 路徑 | 內容 | 依賴 |
 |---|---|---|---|
-| `sw` | `components/sw/pixel/` | 環、編碼器、內建效果（純 C；host 測試同一份） | `esp_timer`／`log` |
+| `sw` | `components/sw/pixel/` | 環、編碼器、**效果框架**（契約／registry／program interpreter；純 C） | `esp_timer`／`log` |
 | `tasks` | `components/tasks/pixel_task/` | **效果／Map 生產者任務**：按自己的節奏算一格、寫環 | `task`、`pixel` |
+| `effects` | `components/effects/pixel_effects/` | **內建效果內容**（時間＋參數 → canonical 畫面）；框架在 `sw/pixel` | `pixel` |
 | `tasks` | `components/tasks/render_task/` | **渲染任務**：環 → 編碼 → 後端 → 硬件（LED 現在，LCD 將來） | `task`、`mem`、`hw`、`core`、`pixel`、driver |
 | `driver` | `components/driver/drv_i80/`、`drv_spi_led/` | 腳位、PCLK、DMA、完成回呼 | `esp_lcd`／`esp_driver_spi` |
 
@@ -40,12 +44,13 @@ driver/drv_i80、drv_spi_led（腳位／PCLK／DMA／完成）
 
 - `pixel` 任務：只管「畫面內容」——效果、Map、參數；
 - `render` 任務：只管「把環裡的幀送到硬件」——唔跑效果；
-- `sw`：兩邊共用的純計算（環、編碼、效果函數）；
+- `sw`：兩邊共用的純計算＋效果框架（環、編碼、layout、interpreter）；
+- `effects`：具體內建效果（內容）；M2 由 `sw/pixel/nc_pixel_producer.c` 拆出；
 - `driver`：只知硬體，唔知像素。
 
 **為什麼效果計算唔搬入 tasks**：同一份 `nc_pixel_producer_frame()` 要能被 host 測試、
 `.nce` 外掛、主機推送共用。放 `tasks` 會令它依賴 FreeRTOS／任務管理器，失去可測試性；
-「幾時算」在 `pixel_task`，「點算」在 `sw/pixel`。
+「幾時算」在 `pixel_task`，「點算」在 `effects/pixel_effects/`（現時仍在 `sw/pixel`）。
 
 ## 2. 任務與 loop
 

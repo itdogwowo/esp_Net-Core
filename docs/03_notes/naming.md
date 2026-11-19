@@ -7,30 +7,36 @@
 
 ## 0. 一句話
 
-**`nc_<子系統>_<角色>`；同一個字同時有任務與動作時，用 `<域>_task` / `<域>_action` 後綴區分。**
+**`nc_<子系統>_<角色>`；同一個字同時有任務、動作與效果時，用 `<域>_task` / `<域>_action` / `<域>_effects` 後綴區分。**
 
 ---
 
-## 1. 為什麼是後綴：`pixel_task` vs `pixel_action`
+## 1. 為什麼是後綴：`pixel_task` vs `pixel_action` vs `pixel_effects`
 
-同一個「域」可以同時有兩種東西，而且未來一定會遇到（`pixel` 就是）：
+同一個「域」可以同時有多種角色（`pixel` 就是）：
 
-| 東西 | 是什麼 | 名字 |
-|---|---|---|
-| **任務** | 一條 loop：收發、渲染、節拍；佔核心、佔 stack | `pixel_task` |
-| **動作** | 一組指令：cmd → handler；跑在解碼核上 | `pixel_action` |
+| 東西 | 是什麼 | 住哪 | 名字 |
+|---|---|---|---|
+| **任務** | 一條 loop：收發、渲染、節拍；佔核心、佔 stack | `components/tasks/` | `pixel_task` |
+| **動作** | 一組指令：cmd → handler；跑在解碼核上 | `components/action/` | `pixel_action` |
+| **效果** | 時間＋參數 → canonical 畫面；唔開 loop、唔碰硬件 | `components/effects/` | `pixel_effects`（component）／`nc_pixel_fx_*`（符號） |
 
 ```text
 components/tasks/pixel_task/
     nc_pixel_task.c            const nc_task_t nc_pixel_task;      ← 給 nc_task_register()
 components/action/pixel_action/
     nc_pixel_action.c          nc_pixel_action_register(dec);      ← 開機註冊指令
+components/effects/pixel_effects/
+    nc_pixel_fx_breath.c       const nc_fx_desc_t …                 ← 效果表的一個住戶
 ```
 
-**後綴而不是前綴**：`pixel` 是「做什麼」，`task` / `action` 是「它在系統裡的角色」；
-先讀域、再讀角色，跟口語一致（「pixel 的 task」「pixel 的 action」）。
+**後綴而不是前綴**：`pixel` 是「做什麼」，`task` / `action` / `effects` 是「它在系統裡的角色」；
+先讀域、再讀角色，跟口語一致（「pixel 的 task」「pixel 的效果」）。
 前綴會變成 `nc_task_pixel` / `nc_action_pixel`，兩個不同層的東西擠在同一個字首後面，
 掃檔案時反而難分。
+
+> **角色 → 目錄 → 命名的完整規則**（包括 `effects/` 的契約）見
+> [behavior-taxonomy.md](behavior-taxonomy.md) §2／§6。
 
 > 目前的 `nc4` / `ncm` / `store` 還沒有這個問題（沒有同名域），所以維持
 > `nc_task`、`nc_mod`、`nc_store`；一旦出現同名域，就照上面的後綴規則拆。
@@ -47,6 +53,8 @@ components/action/pixel_action/
 | FAT | store | `nc_store_` | `nc_store.c` |
 | 通道 | WS / UDP / HTTP | `nc4_ws_` / `nc4_udp_` / `nc4_http_` | `nc4_ws.c` … |
 | 動作 | 域 | `nc_<域>_action_` | `nc_ota_action.c` / `nc_file_action.c` |
+| 效果內容 | 域 | `nc_<域>_fx_` | `effects/<域>_effects/nc_<域>_fx_*.c`／`include/nc_<域>_fx.h` |
+| 效果框架 | 域 | `nc_fx_`／`nc_<域>_fx_core_` | `sw/<域>/include/nc_fx.h`、`sw/<域>/nc_px_fx_core.c` |
 | 模組 | ncm | `nc_mod_` | `nc_mod.c` / `nc_ncd.c` |
 
 ## 3. 四條規則
@@ -265,6 +273,12 @@ modules/
 - **成品同中間產物分開**：`out/` 只放 `.nct`／`.nce`；`.wasm` 放 `build/`。
 - **冇 `.nca`**：指令唔係可載入模組；外掛指令用 `build.json` 的 `"cmds"` 宣告
   （見 [commands.md](../01_protocol/commands.md) §1.1–1.2）。
+
+> **三種交付**：`modules/effects/<name>_effects/` 係 **USER 平面**（`.nce`）；
+> **CORE** 內建效果住 `firmware/components/effects/<域>_effects/`；
+> **DATA** 的畫波 program 住 `/data/pixel/effects/*.json`。
+> 三者同一個 canonical frame 契約，只差交付方式 ——
+> 見 [behavior-taxonomy.md](behavior-taxonomy.md) §3。
 
 ### 7.8 未做
 

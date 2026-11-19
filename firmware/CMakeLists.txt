@@ -106,9 +106,13 @@ set(_nc_extra_dirs
     # ── 匯流排（通用：NC4 幀、LED(SPI)、LCD(I80) 都會用）──
     # 一個「線的實作」一個組件：bus/net（TCP/WS/UDP）、之後 bus/nc4、bus/led、bus/lcd
     "${CMAKE_CURRENT_LIST_DIR}/components/bus"
-    # ── 軟件（效果／math；唔碰硬體、唔開任務）──
-    # pixel：環＋編碼器＋內建效果生產者（host 測試編同一份）
+    # ── 軟件（共用演算法／math；唔碰硬體、唔開任務、唔養行為）──
+    # pixel：環＋編碼器（host 測試編同一份）。內建效果 M2 之後搬去 components/effects/
     "${CMAKE_CURRENT_LIST_DIR}/components/sw/pixel"
+    # ── 效果器（時間＋參數 → canonical 畫面）──
+    # 一個域一個 component：components/effects/<域>_effects/。規則見
+    # docs/03_notes/behavior-taxonomy.md §3。框架留 sw/pixel；M2 搬入後在這裡加：
+    #   "${CMAKE_CURRENT_LIST_DIR}/components/effects/pixel_effects"
     # ── 任務（生產任務，不是測試）──
     "${CMAKE_CURRENT_LIST_DIR}/components/tasks/hw_gpio"
     # pixel_task：效果／Map 生產者；render_task：渲染（LED 現在，LCD 將來）
