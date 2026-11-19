@@ -9,8 +9,8 @@
 |---|---|---|---|
 | **00_pm** 項目管理 | 想知道「做到哪、接下來做什麼」的人 | 現況、路線圖、決策與待辦 | 6 |
 | **01_protocol** 協議層 | 對接方 / 寫 transport / 寫 PC 工具的人 | NC4 在哪些通道上跑、每個通道要自己做什麼 | 3 |
-| **02_guides** 使用教學 | 要 build / 燒錄 / 跑測試 / 選連線的人 | 工具怎麼用、測試怎麼跑、連線怎麼選、數字怎麼判讀、**量測方法怎麼重跑** | 4 |
-| **03_notes** 設計筆記 | 維護者 / 想了解設計脈絡的人 | 架構、分層、路由、任務模型、記憶體、研究、上板紀錄 | 57 |
+| **02_guides** 使用教學 | 要 build / 燒錄 / 跑測試 / 選連線 / 改設定的人 | 工具怎麼用、測試怎麼跑、連線怎麼選、**設定放哪怎樣生效**、數字怎麼判讀 | 5 |
+| **03_notes** 設計筆記 | 維護者 / 想了解設計脈絡的人 | 架構、分層、路由、任務模型、記憶體、研究、上板紀錄 | 58 |
 
 > **趕時間先看**：[00_pm/status.md](00_pm/status.md) —— 一頁涵蓋「已驗證的數字、已定案的架構、還沒做的事、要測的場景」。
 
@@ -45,6 +45,7 @@
 | 文件 | 內容 |
 |---|---|
 | [build_and_flash.md](02_guides/build_and_flash.md) | **建置與燒錄**：IDF v6.0.3 安裝、macOS 26 的兩個地雷（libexpat / pip truststore）、`app-flash` vs `flash`、疑難排解 |
+| [configuration.md](02_guides/configuration.md) | **配置實務**：一個設定放哪（build 層 vs runtime 層）、**WiFi 的兩道閘**、**LED 的 Kconfig／runtime 分工**、開機 B01–B11 邊一步讀它、改完怎樣驗證 |
 | [testing.md](02_guides/testing.md) | **測試方法與結果**：環境、9 個解碼器 case、benchmark 怎麼打、OTA 怎麼推、怎麼重跑、未測清單、紀錄表 |
 | [measurement-method.md](02_guides/measurement-method.md) | **量測方法（可重跑）**：四條原則（含**用物理上限當參考線／達標率**）、S0–S7 流程、`buf_probe.py` 每個子命令回答什麼、尺寸公式（region/slot/slots/stack/環）、雙核＋同核隔離驗收、偶發事件追法、**十條踩過的陷阱**、紀錄模板（多了「物理上限／達標率」兩欄）、OTA-only 的安全規則 |
 | [connectivity.md](02_guides/connectivity.md) | **連線方式怎麼選**：`lan` / `wifi` / `bt` / `espnow` 的分別、每個參數的意思、能力矩陣（哪塊板支援什麼）、一起開會怎樣、藍牙專章 |
@@ -74,6 +75,7 @@
 | [architecture-flow.md](03_notes/architecture-flow.md) | **執行期流程**：mode 決策、NC4 檔案編輯、frame pipeline、ownership matrix |
 | [execution-model.md](03_notes/execution-model.md) | **執行模型**：FreeRTOS 每 loop 一條 task vs 每核合作式大循環，兩者的取捨與選擇 |
 | [execution-rules.md](03_notes/execution-rules.md) | **執行規則**：搶佔的條件、核心隔離（跨核只准有資料、唔准有喚醒）、等待的三種形態、熱路徑零 log、緩衝與堆疊的宣告流程、測試歸類 |
+| [test-build-levels.md](03_notes/test-build-levels.md) | **測試編譯層（設計）**：`NC_ENABLE_TESTS` 一個 boolean 控制 58 條指令會互相污染 → 改成累加式 `NC_TEST_LEVEL`（0 release／1 measure／2 network／3 pixel／4 ncm）＋工具與驗收 |
 | [core-isolation.md](03_notes/core-isolation.md) | **核隔離不變式（2026-11-04 定義）**：兩個核各自擁有什麼、什麼可以跨、違規清單 |
 | [system-model.md](03_notes/system-model.md) | **系統模型（設計理念）**：System 組件 → 每個核一個「核心組」（解碼器是根＋其上任務）；兩組完全分離；落點只有一條規則（核不存在 → 整組落 core0）；與 B01–B11 的對照、現況落差 |
 | [cross-core.md](03_notes/cross-core.md) | **跨核心：邊些中斷會打到另一個核**：中斷親和性與實際干擾來源 |

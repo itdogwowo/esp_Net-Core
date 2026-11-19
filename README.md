@@ -29,11 +29,12 @@ esp_Net-Core/
 ├─ firmware/                    ──【原始碼層】ESP-IDF 工程本體，可獨立 build ──
 │  ├─ CMakeLists.txt            IDF 工程根（idf.py 在這裡跑）
 │  ├─ main/                     裝配 + 目前還住在 main.c 的業務邏輯
-│  ├─ components/               可重用元件
+│  ├─ components/               可重用元件（路徑＝層，名字後綴＝種類）
 │  │  ├─ sys/                   nc4（framing/解碼）、mem、task（型別+loop）、task_manager、transport
+│  │  ├─ action/                *_action：指令表（file／ota／test）
+│  │  ├─ tasks/                 *_tasks：任務（hw_gpio、pixel、render）
 │  │  ├─ host/ncm/              外部任務宿主（loader＋WAMR 引擎；NC_ENABLE_NCM）
-│  │  ├─ tasks/                生產任務（一個任務一個 component；現有 hw_gpio）
-│  │  └─ dev/                  開發／效能測試（test_action、bench、rgb matrix、tcp；NC_ENABLE_TESTS）
+│  │                            測試＝名字 test_*（同層，冇 dev/）；OFF 時唔編譯、唔存在
 │  ├─ sdkconfig.defaults        共通建置配置（晶片層）
 │  ├─ partitions.csv            分割表
 │  └─ build/  managed_components/  sdkconfig  ← 生成物，不進 git
@@ -93,6 +94,7 @@ esp_Net-Core/
 | NC4 指令有哪些、怎麼加新指令 | [docs/01_protocol/commands.md](docs/01_protocol/commands.md) |
 | 有哪些通道、各自要實作什麼 | [docs/01_protocol/transports.md](docs/01_protocol/transports.md) |
 | 怎麼建置、怎麼燒、踩過哪些雷 | [docs/02_guides/build_and_flash.md](docs/02_guides/build_and_flash.md) |
+| 某個設定放哪、改完怎樣生效（WiFi／燈／幀率） | [docs/02_guides/configuration.md](docs/02_guides/configuration.md) |
 | 怎麼跑測試、數字怎麼判讀 | [docs/02_guides/testing.md](docs/02_guides/testing.md) |
 | 要調緩衝／棧、要證明「沒變慢」 | [docs/02_guides/measurement-method.md](docs/02_guides/measurement-method.md) |
 | 有線／無線／藍牙／ESP-NOW 怎麼選 | [docs/02_guides/connectivity.md](docs/02_guides/connectivity.md) |

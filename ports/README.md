@@ -16,11 +16,11 @@ ports/
 │  ├─ board.json                 F.spec   晶片／flash／PSRAM／CPU／console／能力
 │  ├─ wiring.json                F.wiring 腳位、匯流排、板載晶片（**firmware 預設的唯一來源**）
 │  ├─ driver.json                F.device 掛在匯流排上的裝置（build-time；runtime 逐段接）
-│  ├─ sdkconfig.defaults         F.build  硬體事實（flash/PSRAM/CPU/console/ETH/WiFi）
+│  ├─ sdkconfig.defaults         F.build  硬體事實（flash/PSRAM/CPU/console/ETH）
 │  ├─ partitions.csv             這塊 flash 的分割表（可選；沒有就用 firmware/partitions.csv）
 │  └─ README.md
 │
-├─ project/<chip>/<board>/      這塊板「跑什麼」——**只有 runtime 設定，冇 build 設定**
+├─ project/<chip>/<board>/      這塊板「跑什麼」——runtime 設定＋（選用）project 層 build 覆寫
 │  ├─ project.json               F.project  name／hardware 指回哪塊板／seed 清單
 │  └─ data/config/               F.preset  出廠執行期預置（system/network/tasks）
 │
@@ -53,6 +53,15 @@ ports/
 
 > **PSRAM、flash 大小、flash 頻率永遠不可能用 config.json 換**——它們在 bootloader 與
 > 記憶體初始化階段就決定了。寫進 runtime config 只會被 `tools/board.py check` 擋下來。
+
+> **WiFi 預設唔開，開關在 project 層**：`Kconfig NETCORE_WIFI` 預設 `n`。
+> 要開就在 **`project/<chip>/<board>/sdkconfig.defaults`** 加 `CONFIG_NETCORE_WIFI=y`
+> （原生 radio；P4 改用 `wifi-hosted-c5`／`wifi-hosted-c6` 碎片）。
+> 冇寫 = esp_wifi 完全唔 link：省 flash，亦省 **~28 KB 靜態 BSS** ＋ **~100 KB
+> 執行期 internal**（libphy／libbb／net80211 的緩衝 —— 即使 `network.json` 的
+> `wifi.enable=0` 唔會呼叫 `esp_wifi_init`，靜態部分仍然佔住 SRAM）。
+> `hardware/board.json` 的 `features.wifi` 只描述「這塊晶片有沒有 radio」，不是開關。
+> 完整操作（兩道閘、驗證、踩過的坑）見 [configuration.md](../docs/02_guides/configuration.md) §2。
 
 ---
 

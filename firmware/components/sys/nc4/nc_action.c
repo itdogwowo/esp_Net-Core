@@ -10,6 +10,47 @@ static const char *TAG = "action";
 static nc_action_t *s_actions;
 static size_t s_count;
 
+// ── 指令表登記（每個 component 的 NC_ACTION_TABLE_DEF 在 constructor 交過來）──
+// **冇固定上限**：先收在 8 格靜態表，滿了就 malloc 更大的再搬過去。
+// （constructor 在 main task 內、heap 已初始化之後跑，所以可以 malloc。）
+static const nc_action_table_t *s_fixed[8];
+static const nc_action_table_t **s_tables = s_fixed;
+static size_t s_ntables;
+static size_t s_cap = sizeof(s_fixed) / sizeof(s_fixed[0]);
+
+void nc_action_add(const nc_action_table_t *t)
+{
+    if (t == NULL) {
+        return;
+    }
+    if (s_ntables == s_cap) {
+        const size_t cap = s_cap * 2;
+        const nc_action_table_t **p =
+            (const nc_action_table_t **)malloc(cap * sizeof(*p));
+        if (p == NULL) {
+            ESP_LOGE(TAG, "指令表登記失敗（要 %u 格）", (unsigned)cap);
+            return;
+        }
+        memcpy(p, s_tables, s_ntables * sizeof(*p));
+        if (s_tables != s_fixed) {
+            free((void *)s_tables);
+        }
+        s_tables = p;
+        s_cap = cap;
+    }
+    s_tables[s_ntables++] = t;
+}
+
+esp_err_t nc_action_init_all(void)
+{
+    if (s_ntables == 0) {
+        ESP_LOGW(TAG, "冇任何指令表（link 進來的 action component 是 0）");
+        return ESP_OK;
+    }
+    ESP_LOGI(TAG, "指令表：%u 張（component 自己登記，冇上限）", (unsigned)s_ntables);
+    return nc_action_init(s_tables, s_ntables);
+}
+
 static int cmp_cmd(const void *a, const void *b)
 {
     const nc_action_t *x = (const nc_action_t *)a;

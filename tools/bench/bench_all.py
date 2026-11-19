@@ -6,6 +6,7 @@
     tools/bench/bench_all.py --mode pull     # 改成 PULL（同核）
     tools/bench/bench_all.py --mode push-slot# PUSH 但走舊的兩次複製
     tools/bench/bench_all.py --mb 16 --json out.json
+    tools/bench/bench_all.py --skip-raw      # 跳過 A 段（raw 端點要 rawbench 才開）
 
 會依序量：
     A. 純 TCP：下載單/雙、上傳單/雙、全雙工
@@ -251,6 +252,42 @@ def set_mode(host, mode):
     return False
 
 
+def section_a(host, mb, add):
+    """A 段：純 TCP。端點來自 `nc_net_raw`（:5000／:5001，config 的 rawbench=1）。
+
+    舊的 `test_tcp_tasks`（sink 5000/5003、src 5001/5002）已於 2026-11-19 刪除，
+    所以 :5002／:5003 冇咗 —— 雙線（A2／A4）只會量到 rawbench 接得住的部分，
+    唔想撞連線失敗就用 --skip-raw 跳過整段。
+    """
+    print("\nA. 純 TCP")
+    v, _ = tcp_download(host, SINK_PORTS[0], mb)
+    add("A1", "下載（1 條）", "純 TCP", "單核 core1", v)
+
+    (r1, r2), wall = parallel([
+        lambda: tcp_download(host, SINK_PORTS[0], mb),
+        lambda: tcp_download(host, SINK_PORTS[1], mb),
+    ])
+    add("A2", "下載（2 條）", "純 TCP", "雙核 core1+core0", r1[0] + r2[0],
+        note=f"{r1[0]:.2f} + {r2[0]:.2f}")
+
+    v, _ = tcp_upload(host, SRC_PORTS[0], mb)
+    add("A3", "上傳（1 條）", "純 TCP", "單核 core0", v)
+
+    (u1, u2), _ = parallel([
+        lambda: tcp_upload(host, SRC_PORTS[0], mb),
+        lambda: tcp_upload(host, SRC_PORTS[1], mb),
+    ])
+    add("A4", "上傳（2 條）", "純 TCP", "雙核 core0+core1", u1[0] + u2[0],
+        note=f"{u1[0]:.2f} + {u2[0]:.2f}")
+
+    (d, u), _ = parallel([
+        lambda: tcp_download(host, SINK_PORTS[0], mb),
+        lambda: tcp_upload(host, SRC_PORTS[0], mb / 2),
+    ])
+    add("A5", "全雙工（同時）", "純 TCP", "雙核", d[0] + u[0],
+        note=f"下 {d[0]:.2f} + 上 {u[0]:.2f}")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--host", default="10.10.1.50")
@@ -258,6 +295,8 @@ def main():
                     default="current")
     ap.add_argument("--mb", type=float, default=16)
     ap.add_argument("--json", default="")
+    ap.add_argument("--skip-raw", action="store_true",
+                    help="跳過 A 段純 TCP（:5000–5003 需要 rawbench；test_tcp_tasks 已刪）")
     a = ap.parse_args()
 
     rows = []
@@ -282,33 +321,10 @@ def main():
     c.close()
 
     # ── A ──
-    print("\nA. 純 TCP")
-    v, _ = tcp_download(a.host, SINK_PORTS[0], a.mb)
-    add("A1", "下載（1 條）", "純 TCP", "單核 core1", v)
-
-    (r1, r2), wall = parallel([
-        lambda: tcp_download(a.host, SINK_PORTS[0], a.mb),
-        lambda: tcp_download(a.host, SINK_PORTS[1], a.mb),
-    ])
-    add("A2", "下載（2 條）", "純 TCP", "雙核 core1+core0", r1[0] + r2[0],
-        note=f"{r1[0]:.2f} + {r2[0]:.2f}")
-
-    v, _ = tcp_upload(a.host, SRC_PORTS[0], a.mb)
-    add("A3", "上傳（1 條）", "純 TCP", "單核 core0", v)
-
-    (u1, u2), _ = parallel([
-        lambda: tcp_upload(a.host, SRC_PORTS[0], a.mb),
-        lambda: tcp_upload(a.host, SRC_PORTS[1], a.mb),
-    ])
-    add("A4", "上傳（2 條）", "純 TCP", "雙核 core0+core1", u1[0] + u2[0],
-        note=f"{u1[0]:.2f} + {u2[0]:.2f}")
-
-    (d, u), _ = parallel([
-        lambda: tcp_download(a.host, SINK_PORTS[0], a.mb),
-        lambda: tcp_upload(a.host, SRC_PORTS[0], a.mb / 2),
-    ])
-    add("A5", "全雙工（同時）", "純 TCP", "雙核", d[0] + u[0],
-        note=f"下 {d[0]:.2f} + 上 {u[0]:.2f}")
+    if a.skip_raw:
+        print("\nA. 純 TCP（跳過：--skip-raw）")
+    else:
+        section_a(a.host, a.mb, add)
 
     # ── B ──
     print("\nB. NC4 下載（PC→裝置，裝置解析）")

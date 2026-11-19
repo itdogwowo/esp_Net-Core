@@ -42,15 +42,50 @@ endif()
 if(PROJECT AND EXISTS "${NC_PROJECT_DIR}/sdkconfig.defaults")
     list(APPEND SDKCONFIG_DEFAULTS "${NC_PROJECT_DIR}/sdkconfig.defaults")
 endif()
+# 臨時／實驗覆寫：-DNC_EXTRA_DEFAULTS="a.defaults;b.defaults" 追加在最後（後者勝）。
+# 用途：不改 ports/ 的正式設定就跑一次極限配置（例如 16×600）。
+# 注意：呢個變數一定要 append 喺上面三段之後，否則會被 set() 蓋掉。
+if(NC_EXTRA_DEFAULTS)
+    list(APPEND SDKCONFIG_DEFAULTS ${NC_EXTRA_DEFAULTS})
+endif()
 
-# ── 測試／開發專用（components/dev）──
-# OFF 時整個 components/dev 唔加入編譯：測試指令與效能測試任務「唔存在」，
-# 而唔係靠命名或 runtime 開關。
-# 約定（2026-11-17 重組）：
+# ── 測試（名字就是分類：test_*）──
+# 測試唔另開「用途資料夾」：目錄名 `test_` 開頭就係測試，後綴決定住邊一層
+#   · `test_*_action` → components/action/（指令表）
+#   · `test_*_tasks`  → components/tasks/（任務）
+# 「測試」同「行為」係同一個座標系：同層，靠名字分辨，唔另開用途資料夾。
+# OFF 時呢啲元件**唔加入 EXTRA_COMPONENT_DIRS**：唔編譯、唔 link、唔註冊 ——
+# 「唔存在」而唔係靠命名或 runtime 開關。
+# 約定：
 #   · 測試「功能」→ 用外掛模組（.nct，動態加載）驗證，唔入固件；
-#   · 效能測試（bench／rgb matrix／tcp 吞吐）→ 留 dev 固件（components/dev）；
-#   · 宿主能力（ncm loader／WAMR）→ components/ncm（暫時跟 tests 開）。
-option(NC_ENABLE_TESTS "測試指令與效能測試任務（components/dev）" OFF)
+#   · 測試「指令」（0xF0xx 量測）→ components/action/test_action（名字帶 test_）；
+#   · 效能任務（bench_a/b/c、tcp_sink/src）2026-11-19 已刪 —— 量測改用 0xF0xx
+#     指令＋nc_net_raw（rawbench）；
+#   · 宿主能力（ncm loader／WAMR）→ components/host/ncm（暫時跟 tests 開）。
+option(NC_ENABLE_TESTS "測試元件（components/<層>/test_*）" OFF)
+# 測試 ID（分類；**只在 NC_ENABLE_TESTS=ON 時有意義**）：
+#   0 = 公共（所有 build 都收，永遠允許）
+#   1 = measure    2 = network    3 = pixel    4 = ncm    5..7 保留
+# 用法：-DNC_TEST_IDS=0,2,3（0 會自動加入）
+# 一個模組可以屬於多個 ID：native 在 build.json 寫 "test_ids": [..]（任何一個被允許就收）；
+# C 碼用 #if NC_TEST_ALLOW_<id>。完整契約見 docs/03_notes/test-ids.md。
+set(NC_TEST_IDS "0" CACHE STRING "允許的測試 ID（逗號分隔；0=公共，永遠允許）")
+set(NC_TEST_ID_DEFS "")
+if(NC_ENABLE_TESTS)
+    string(REPLACE "," ";" _nc_ids "${NC_TEST_IDS}")
+    string(REPLACE " " ";" _nc_ids "${_nc_ids}")
+    list(APPEND _nc_ids 0)
+    list(REMOVE_DUPLICATES _nc_ids)
+    foreach(_id RANGE 0 7)
+        list(FIND _nc_ids "${_id}" _pos)
+        if(_pos GREATER -1)
+            list(APPEND NC_TEST_ID_DEFS "NC_TEST_ALLOW_${_id}=1")
+        else()
+            list(APPEND NC_TEST_ID_DEFS "NC_TEST_ALLOW_${_id}=0")
+        endif()
+    endforeach()
+    message(STATUS "測試 ID：${_nc_ids}（0 = 公共）")
+endif()
 option(NC_STACK_ANALYSIS "產生 .su/.ci（給 tools/stack_depth.py 算最壞棧深）" OFF)
 
 # 外部任務宿主（ncm：loader＋WAMR engine）。現階段測試映像先開；
@@ -87,9 +122,21 @@ set(_nc_extra_dirs
 if(NC_ENABLE_NCM)
     list(APPEND _nc_extra_dirs "${CMAKE_CURRENT_LIST_DIR}/components/host/ncm")
 endif()
-# 開發／效能測試組件（NC_ENABLE_TESTS=OFF 時唔加入 → 唔編譯、唔 link、唔存在）
+# 測試元件：唔逐一列出 —— 名字 `test_` 開頭就係登記。
+# 位置由後綴決定（test_*_action 在 action/、test_*_tasks 在 tasks/），
+# 所以新增測試元件只要放對層、叫對名，唔使再改呢個檔。
+# NC_ENABLE_TESTS=OFF 時一個都唔加入 → 唔編譯、唔 link、唔存在。
 if(NC_ENABLE_TESTS)
-    list(APPEND _nc_extra_dirs "${CMAKE_CURRENT_LIST_DIR}/components/dev")
+    file(GLOB _nc_test_dirs CONFIGURE_DEPENDS
+         "${CMAKE_CURRENT_LIST_DIR}/components/*/test_*")
+    foreach(_nc_test_dir IN LISTS _nc_test_dirs)
+        if(IS_DIRECTORY "${_nc_test_dir}"
+           AND EXISTS "${_nc_test_dir}/CMakeLists.txt")
+            list(APPEND _nc_extra_dirs "${_nc_test_dir}")
+        endif()
+    endforeach()
+    unset(_nc_test_dirs)
+    unset(_nc_test_dir)
 endif()
 set(EXTRA_COMPONENT_DIRS ${_nc_extra_dirs})
 

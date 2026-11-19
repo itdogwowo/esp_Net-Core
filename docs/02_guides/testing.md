@@ -32,7 +32,9 @@ python3 tools/nc4_log.py --port /dev/cu.usbmodem*
 ```
 
 驗收睇 `status ncm`（`backend:"wamr"`、`live`、`ok:1`、`frames` 增長）＋ CDC log。
-效能測試（bench／rgb matrix／tcp）仍然留 dev 固件（`--tests` 建置）；測試 host 內部
+量測指令（`0xF0xx`）留**測試固件**（`--tests` 建置），住 `components/action/test_action`
+（元件名 `test_*`）；**bench_a/b/c 與 tcp_sink/src 任務已於 2026-11-19 刪除** —— 吞吐
+量測改用 `nc_net_raw` 的 `rawbench`（:5000／:5001）或 `0xF0xx` 指令；測試 host 內部
 （hub／buffer／flash）留 `tools/hosttest/`。
 
 ## 1. 解碼器一致性
@@ -849,7 +851,7 @@ FreeRTOS HZ=1000、PC = macOS、每筆 ≈ 16 MB、TCP RTT ≈ 8–10 ms。
 | `tools/bench/nc4_tcp.py`（下載）、`tools/bench/nc4_tx_bench.py`（上傳） | TCP |
 | `tools/bench/nc4_ws_test.py`（RTT／吞吐／邊界 10 項） | WS |
 | `tools/bench/nc4_udp_test.py`（RTT／吞吐／掉包） | UDP |
-| `tools/bench/bench_all.py`（TCP 全表）、`tools/bench/nc4_stats.py`（零複製驗證） | 全部 |
+| `tools/bench/bench_all.py`（TCP 全表；A 段純 TCP 要 `rawbench`，冇就加 `--skip-raw`）、`tools/bench/nc4_stats.py`（零複製驗證） | 全部 |
 
 ---
 

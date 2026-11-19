@@ -117,6 +117,10 @@ menu "esp_Net-Core"
         help
             一條 lane 串幾顆。環的每一格 = 64 B 表頭 + 4 B × 燈數（進位到 64 的倍數）。
 
+            ⚠ 冇硬上限（程式唔會擋），但超過要付代價：CPU 同 lane×px 成正比、
+            DMA 同 px 成正比。實測上限與「超過會 WDT 重啟」的後果見
+            docs/03_notes/pixel-renderer.md §13。
+
             上限 2048 是編碼器的 buffer（NC_PX_MAX_LEDS）；實務上還要看記憶體：
             2048 顆 × 3 格 = 25 KB／lane。
 
@@ -265,10 +269,15 @@ menu "esp_Net-Core"
         int "I80 一次送幾條 lane"
         depends on NETCORE_PIXEL_I80
         default 1
-        range 1 8
+        range 1 16
         help
             1 = 只有 D0 接燈（Waveshare S3-Matrix 就是這種）。
+            上限 = bus_width（8-bit 最多 8、16-bit 最多 16）。
             8 = 八條燈鏈完全同步，幀率不變 —— 這是 I80 的價值所在。
+
+            ⚠ lane 數只影響 CPU（pack 隨 lane 線性、merge 每 8 條一組），
+            **不影響 DMA 時間**（那只看 px）；「4 條 600、其他 0」不會更快。
+            實測見 docs/03_notes/pixel-renderer.md §13。
 
     config NETCORE_PIXEL_SPI
         bool "SPI 後端（WS2801／APA102 之類有時脈線的燈）"

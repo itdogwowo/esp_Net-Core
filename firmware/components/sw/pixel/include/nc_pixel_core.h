@@ -232,6 +232,10 @@ uint32_t nc_px_codec_wave_pack(nc_pixel_codec_t *c, const uint8_t *rgbw, uint32_
 // 一次性 8 個單元（一個 byte）逐 bit 展開；out 必須先清零（reset 由呼叫端補 0）。
 void nc_px_codec_pack_merge8(const uint8_t *lane[8], uint32_t packed_bytes,
                              uint8_t *out, uint32_t stride, uint32_t off);
+// 同上，但用 store 覆蓋（唔 OR）：第一組 lane 用這個，之後的組仍然用 OR。
+// 咁樣就唔需要每幀先 memset 整格（16×600 省 ~2–3.6 ms）；16-bit 第二組要用 OR。
+void nc_px_codec_pack_merge8_store(const uint8_t *lane[8], uint32_t packed_bytes,
+                                   uint8_t *out, uint32_t stride, uint32_t off);
 
 // SPI 整幀（頭部 + 每顆 + 尾巴）：out 每個 byte 一個位（bit0 = MOSI）
 uint32_t nc_px_codec_spi_frame(nc_pixel_codec_t *c, const uint8_t *rgbw, uint32_t px,

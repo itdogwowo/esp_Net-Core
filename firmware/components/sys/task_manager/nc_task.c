@@ -307,9 +307,17 @@ static esp_err_t insert_slot(const nc_task_t *t, bool runtime)
         return ESP_ERR_NO_MEM;
     }
 
-    // 依 level 插入（小的先）；同 level 保持登記順序
+    // 依 (level, order) 插入（小的先）；兩者都相同才保持登記順序。
+    // order 是「同 level 的次序」，令自行登記（constructor）唔受 link 次序影響。
     int pos = s_count;
-    while (pos > 0 && s_slots[pos - 1].def->level > t->level) {
+    while (pos > 0) {
+        const nc_task_t *p = s_slots[pos - 1].def;
+        if (p->level < t->level) {
+            break;
+        }
+        if (p->level == t->level && p->order <= t->order) {
+            break;
+        }
         s_slots[pos] = s_slots[pos - 1];
         pos--;
     }
@@ -517,13 +525,31 @@ int nc_task_sync_cfg(void)
     return 0;
 }
 
+// 一個任務「會唔會跑」＝ tasks.json 的 level ≥ 0 **而且** affinity 唔係 (0,0)。
+// 「唔跑」就唔宣告記憶體、唔 gather、唔 on_start —— 這就是「唔啟用就唔佔資源」。
+// SYSTEM 任務唔讀 tasks.json（cfg_aff=-1），所以永遠會跑。
+static bool slot_will_run(const tm_slot_t *s)
+{
+    if (s->cfg_level < 0) {
+        return false;
+    }
+    if (s->cfg_aff[0] >= 0 || s->cfg_aff[1] >= 0) {
+        const int a0 = (s->cfg_aff[0] < 0) ? 0 : (s->cfg_aff[0] != 0);
+        const int a1 = (s->cfg_aff[1] < 0) ? 0 : (s->cfg_aff[1] != 0);
+        if ((a0 + a1) == 0) {
+            return false;                 // (0,0) → 唔跑，連 on_start 都唔跑
+        }
+    }
+    return true;
+}
+
 int nc_task_declare_all(void)
 {
     load_cfg();
     append_missing_to_cfg();
     int total = 0;
     for (int i = 0; i < s_count; i++) {
-        if (s_slots[i].used && s_slots[i].cfg_level >= 0) {
+        if (s_slots[i].used && slot_will_run(&s_slots[i])) {
             total += declare_one(&s_slots[i]);
         }
     }
@@ -656,7 +682,7 @@ int nc_task_start_all(void)
 {
     int started = 0;
     for (int i = 0; i < s_count; i++) {
-        if (s_slots[i].used && s_slots[i].cfg_level >= 0 &&
+        if (s_slots[i].used && slot_will_run(&s_slots[i]) &&
             start_slot(&s_slots[i], false) == ESP_OK) {
             started++;
         }

@@ -79,7 +79,7 @@ while True:
 | UDP | 阻塞 `recvfrom` | A（或改非阻塞才可能 B） |
 | ncm | 自己 delay、30–50 Hz | A 或 group 都可 |
 | hello / probe | 低頻、短工作 | **group（B）最適合** |
-| bench_a/b/c | 固定工作量、5 ms | **group（B）最適合** |
+| ~~bench_a/b/c~~ | 固定工作量、5 ms | **已刪（2026-11-19）**（原本 group（B）最適合） |
 
 ---
 

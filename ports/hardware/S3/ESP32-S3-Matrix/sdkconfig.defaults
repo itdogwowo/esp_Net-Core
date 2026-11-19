@@ -51,5 +51,7 @@ CONFIG_NETCORE_PIXEL_DITHER=1
 # 送燈 450 fps；內建效果 60 fps 更新 → 渲染器大部分時間在重播同一格（hold）
 CONFIG_NETCORE_PIXEL_SPI=n
 
-# ── Wi-Fi（S3 原生 radio）──
-CONFIG_NETCORE_WIFI=y
+# ── Wi-Fi：預設不開（Kconfig NETCORE_WIFI=n，esp_wifi 完全唔 link）──
+# 建置開關在 **project 層**：ports/project/<chip>/<board>/sdkconfig.defaults
+#   加 CONFIG_NETCORE_WIFI=y 才會編入（這塊板的 project 目前冇加 → 關）。
+# 執行期再有一層：project/data/config/network.json 的 wifi.enable。

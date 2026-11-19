@@ -7,4 +7,5 @@ idf_component_register(
     INCLUDE_DIRS "include"
     REQUIRES task pixel
     PRIV_REQUIRES freertos esp_timer
+    WHOLE_ARCHIVE
 )

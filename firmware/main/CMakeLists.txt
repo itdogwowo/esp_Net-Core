@@ -157,14 +157,8 @@ if(IDF_TARGET STREQUAL "esp32s3" OR IDF_TARGET STREQUAL "esp32s2" OR IDF_TARGET 
     list(APPEND _nc_priv_extra espressif__esp_tinyusb)
 endif()
 # 外部任務宿主（ncm）只在 NC_ENABLE_NCM=ON 時存在；OFF 時連 component 都冇。
-# 效能測試任務只在 NC_ENABLE_TESTS=ON 時存在（components/dev）。
-set(_nc_test_reqs)
-if(NC_ENABLE_NCM)
-    list(APPEND _nc_test_reqs ncm)
-endif()
-if(NC_ENABLE_TESTS)
-    list(APPEND _nc_test_reqs test_bench_tasks test_tcp_tasks)
-endif()
+# （原本還有一個 `_nc_test_reqs` 變數收集 ncm／test_*_tasks，但佢從來冇進
+#   PRIV_REQUIRES，2026-11-19 清掉。）
 
 idf_component_register(
     SRCS "main.c" "nc_wifi.c" "boot.c" ${_gen_c}
@@ -187,6 +181,7 @@ idf_component_register(
 if(NOT CMAKE_SCRIPT_MODE_FILE)
     add_dependencies(${COMPONENT_LIB} ncport_gen)
 
+
     target_compile_definitions(${COMPONENT_LIB} PRIVATE NETCORE_HAS_PRESET_TASKS=${_has_tasks_preset})
     target_compile_definitions(${COMPONENT_LIB} PRIVATE NETCORE_HAS_PRESET_SYSTEM=${_has_system_preset})
     target_compile_definitions(${COMPONENT_LIB} PRIVATE NETCORE_HAS_PRESET_NETWORK=${_has_network_preset})
@@ -197,14 +192,12 @@ if(NOT CMAKE_SCRIPT_MODE_FILE)
             "${CMAKE_CURRENT_LIST_DIR}/../components/host/ncm/include")
     endif()
     if(NC_ENABLE_TESTS)
-        target_compile_definitions(${COMPONENT_LIB} PRIVATE NC_ENABLE_TESTS=1)
-        # main 直接 include 效能測試任務的標頭（nc_bench.h …）。
+        target_compile_definitions(${COMPONENT_LIB} PRIVATE NC_ENABLE_TESTS=1 ${NC_TEST_ID_DEFS})
+        # main 直接 include 測試指令的標頭（nc_test_action.h）。
         # 不靠 PRIV_REQUIRES：組件掃描階段（component manager）睇唔到本專案的
         # 變數（NC_ENABLE_TESTS 未定義），嗰次登記就會漏咗 include path。
         target_include_directories(${COMPONENT_LIB} PRIVATE
-            "${CMAKE_CURRENT_LIST_DIR}/../components/dev/test_bench_tasks/include"
-            "${CMAKE_CURRENT_LIST_DIR}/../components/dev/test_tcp_tasks/include"
-            "${CMAKE_CURRENT_LIST_DIR}/../components/dev/test_action/include")
+            "${CMAKE_CURRENT_LIST_DIR}/../components/action/test_action/include")
     endif()
 
     # 最小映像（只印心跳，不碰 USB/MSC/ETH）：用來確認新板子的基礎能不能跑

@@ -907,11 +907,11 @@ def cmd_new(args) -> int:
                 f"  --eth {args.eth} 沒有對應的 build 設定；W5500（SPI）driver 亦未實作。\n"
                 f"  先用 --eth rmii，或先加 {prof}.defaults 再建板。")
         profiles.append(prof)
-    # Wi-Fi 有兩種完全不同的 build 路徑：
-    #   · 晶片有原生 radio（S3／C3／C6…）→ 一個 CONFIG_NETCORE_WIFI=y，不用碎片
-    #   · P4 沒有 radio → 一定要 wifi-hosted-* 碎片（外掛 C5／C6）
-    native_wifi = bool(args.wifi) and chip != "esp32p4"
-    if args.wifi and not native_wifi:
+    # Wi-Fi 的 **build 開關在 project 層**：ports/project/<chip>/<board>/sdkconfig.defaults
+    # 寫 CONFIG_NETCORE_WIFI=y 才編入（預設唔寫＝唔 link esp_wifi）。
+    # board 只記「hardware 有冇 radio」（board.json 的 features.wifi）。
+    # P4 冇 radio → 一定要 wifi-hosted-* 碎片（外掛 C5／C6），呢個仍然屬 board。
+    if args.wifi and chip == "esp32p4":
         profiles.append(args.wifi if str(args.wifi).startswith("wifi-") else "wifi-hosted-c6")
 
     board = {
@@ -948,9 +948,7 @@ def cmd_new(args) -> int:
            f"CONFIG_SPIRAM_MODE_{PSRAM_MODE[args.psram_mode.lower()]}=y\n"
            f"CONFIG_SPIRAM_SPEED_{args.psram_speed}M=y\n" if args.psram else "")
         + f"\n# ── CPU ──\nCONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_{args.cpu}=y\n"
-        + f"\n# ── console ──\nCONFIG_{CONSOLE_SYM[args.console.lower()]}=y\n"
-        + ("\n# ── Wi-Fi（晶片原生 radio；runtime 仍由 network.json 的 wifi.enable 決定）──\n"
-           "CONFIG_NETCORE_WIFI=y\n" if native_wifi else ""),
+        + f"\n# ── console ──\nCONFIG_{CONSOLE_SYM[args.console.lower()]}=y\n",
         encoding="utf-8",
     )
     (d / "wiring.json").write_text(json.dumps({

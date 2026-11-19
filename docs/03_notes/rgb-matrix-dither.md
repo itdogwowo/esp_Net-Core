@@ -327,6 +327,6 @@ export NC_PORT=/dev/cu.usbmodem*        # 換成實際埠
 | `components/tasks/pixel_task/nc_pixel_backend_i80.c` → `components/driver/drv_i80/` | I80（GDMA、多 lane 合成） |
 | `components/sw/pixel/nc_pixel_encode.c` | 波形、色序、抖動（唯一一份） |
 | `components/sw/pixel/nc_pixel_producer.c` | 效果／分區參數（舊 `0xF060` 的內容） |
-| `firmware/components/dev/test_action/nc_test_action.c` | `0xF060` 生產者／`0xF061` 渲染器 handler |
+| `components/action/test_action/nc_test_action.c` | `0xF060` 生產者／`0xF061` 渲染器 handler |
 | `ports/hardware/S3/ESP32-S3-Matrix/` | 板子事實、4 MB 分割表、預設 tasks |
 | `firmware/main/Kconfig.projbuild` | `NETCORE_RGB_MATRIX*` |

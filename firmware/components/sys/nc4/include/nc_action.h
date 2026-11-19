@@ -44,13 +44,27 @@ typedef struct {
 
 // 用這個巨集宣告表：count 一定等於陣列長度，冇人手寫錯的機會。
 //（手寫 .count 是唯一可以令「統計」同「填入」數唔一致的途徑，直接封死。）
+//
+// **component 自己現身**：巨集在 app_main 之前（constructor）把表交去管理器。
+// 管理器一開始收在 8 格靜態表，滿了就配更大的 —— **冇固定上限**。
+// 有 link 進來就有這條表、冇 link 就冇；main 唔需要「有哪些模組」的清單。
 #define NC_ACTION_TABLE_DEF(_var, _svc, _list) \
     const nc_action_table_t _var = { \
         .svc = (_svc), .list = (_list), .count = NC_ACTION_COUNT(_list), \
+    }; \
+    static void __attribute__((constructor, used)) _nc_action_reg_##_var(void) \
+    { \
+        nc_action_add(&_var); \
     }
 
-// 建立指令表：統計所有表 → 一次 malloc（不碎片）→ 填入 → 排序。
-// tables/n 由 main 提供（main 是唯一知道「有哪些模組」的地方）。
+// 由 constructor 呼叫：把一條表交去管理器（main 之前跑完）。
+void nc_action_add(const nc_action_table_t *t);
+
+// 用「所有已登記的表」建立指令表（統計 → 一次 malloc → 填入 → 排序）。
+// main 只需要叫這一個；唔需要知道有幾多張表、係邊個模組。
+esp_err_t nc_action_init_all(void);
+
+// 低階入口（保留給測試／特殊情況）：自己提供表清單。
 esp_err_t nc_action_init(const nc_action_table_t *const *tables, size_t n_tables);
 
 size_t nc_action_count(void);

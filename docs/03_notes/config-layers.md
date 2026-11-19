@@ -219,7 +219,8 @@ ports/
   project/<chip>/<board>/
     project.json             ← 項目選擇（hardware 指回哪塊板 / seed）
     data/config/             ← 只放給用戶的 seed（hardware/system/network/tasks）
-    （**冇 sdkconfig.defaults**：project 只放 runtime 設定，唔參與 build）
+    sdkconfig.defaults       ← （選用）**只限外接裝置／能力開關**（例：pixel 燈具、
+                               CONFIG_NETCORE_WIFI）；硬體事實由 board.py check 擋
 
 【runtime，USB 只看見這個】
 /data/
@@ -490,9 +491,13 @@ DMA 大小（1600）與環數（16/16）**不在 config**——那是 build-time
 
 **能力是 build-time 決定的**：config 只能「打開」這個 build 已經編進去的東西。
 - **Wi-Fi** 用 `CONFIG_NETCORE_WIFI`（`firmware/main/Kconfig.projbuild`，預設 **n**）編進 image。
+  **建置開關在 project 層**（`ports/project/<chip>/<board>/sdkconfig.defaults`），
+  不是 hardware：板子只描述「有沒有 radio」（`board.json` 的 `features.wifi`）。
   未編入時 `wifi.enable: 1` 只會在 log 說「未編入」，而**靜態與 flash 都是 0**。
-  編入但 `enable: 0` 仍然要付 **48,992 B 靜態 ＋ 548,768 B flash**（S3 實測），
-  所以預設關閉 —— 兩道閘要同時開才會真的用 Wi-Fi。
+  編入但 `enable: 0` 仍然要付代價（2026-11-19 實測）：**靜態 SRAM −54,180 B 的差**
+  （bss 19,248＋data 7,792＋IRAM 27,140）＋ **flash ~492 KB**（app 841,440 ↔ 1,368,048 B），
+  開機後 internal heap **128,475 ↔ 4,975 B**。兩道閘要同時開才會真的用 Wi-Fi。
+  完整操作見 [configuration.md §2](../02_guides/configuration.md)。
 - BT / ESP-NOW 的 build-time 能力（`ports/_profiles/*.defaults`）尚未建立；
   將來照同一個模式（Kconfig ＋ runtime `enable`）做。
 - **Classic / BTDM 只有初代 ESP32 有**：S3 與 C 系列只有 BLE，P4 連 radio 都沒有。
@@ -547,6 +552,8 @@ DMA 大小（1600）與環數（16/16）**不在 config**——那是 build-time
 
 - `level`：`-1` = 唔啟動；同一 level 內按註冊次序。
 - `affinity`：`[core0, core1]`，只可以有一個 `1`；`[0,0]` = 唔跑。
+  **2026-11-19 起 `[0,0]` 與 `level:-1` 完全等價**：唔 declare、唔 gather、
+  唔 `on_start` —— 環與後端都唔會建，`plan` 也不會記它的帳（`slot_will_run()`）。
 - 缺席的條目：開機會自動補寫（只加不改）。
 
 ### 5.1 `pixel/`：效果自己的樹
@@ -575,8 +582,8 @@ DMA 大小（1600）與環數（16/16）**不在 config**——那是 build-time
 
 | 東西 | 位置 | 狀態 |
 |---|---|---|
-| `nc_cfg_open/root/version/close` | `firmware/components/sys/config/` | ❌ 還沒有 |
-| 各層自己的 parser | 各 component（`sys/store`、`sys/transport`、`main`） | ❌ 還沒有 |
+| `nc_cfg_open/root/version/close` | `firmware/components/sys/config/` | ✅ 已實作（`nc_cfg_load.c`；缺檔／壞檔回預設） |
+| 各層自己的 parser | 各 component（`sys/store`、`sys/transport`、`main`） | ✅ 已接（hardware／system／network／tasks；`pixel/` 樹仍在 ncm） |
 | 出廠預置（每個檔一份） | `ports/project/<chip>/<board>/data/config/*.json` | ❌ 現在只有一個 `config.json`（321 B，只有 System + Network.lan） |
 | 效果樹 | `/data/pixel/`（`effects/`、`map/`、`modes/`） | 🟡 載入器掃 `pixel/effects/`（路徑本輪改） |
 | NVS 覆蓋 | `net/rx_core`、`net/rx_split`、`cid` … | ✅ 已有（優先於 config） |

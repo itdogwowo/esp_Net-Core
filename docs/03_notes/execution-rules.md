@@ -218,19 +218,17 @@ round 永遠完成唔到 → `rounds` / `duty` 永遠 0。一個永遠 0 的指�
 
 ---
 
-## 6. 測試歸類（2026-11-17 重組：功能測試走外掛，效能測試留 dev）
+## 6. 測試歸類（名字＝分類：`test_*`；2026-11-19 取消 `dev/`、刪掉效能任務）
 
 ```
 firmware/components/
-├── action/{file_action,ota_action}/   真功能
-├── bus/ driver/ sys/                  真功能／宿主
-├── host/ncm/                          外部任務宿主（loader＋WAMR；NC_ENABLE_NCM）
-├── tasks/hw_gpio/                     生產任務
-└── dev/                               開發／效能測試（NC_ENABLE_TESTS）
-    ├── test_action/                   0xF0xx 開發／量測指令
-    ├── test_bench_tasks/              bench_a/b/c（效能）
-    ├── test_rgb_led_matrix_tasks/     LED 矩陣（效能／視覺）
-    └── test_tcp_tasks/                TCP 吞吐（效能）
+├── sys/ bus/ driver/ sw/                   真功能（路徑＝層）
+├── action/
+│   ├── file_action/  ota_action/           產品指令表（*_action）
+│   └── test_action/                        0xF0xx 開發／量測指令（test_* = 測試）
+├── tasks/
+│   └── hw_gpio/  pixel_task/  render_task/ 生產任務（*_tasks）
+└── host/ncm/                               外部任務宿主（loader＋WAMR；NC_ENABLE_NCM）
 ```
 
 **規則**
@@ -238,10 +236,24 @@ firmware/components/
 - **功能測試**（hello 之類）→ 做成外掛 `.nct`，喺 tests 固件動態加載；驗證完才按
   [module-adoption](../03_notes/module-adoption.md) 分層收納。
   `test_hello_tasks`、`test_probe_tasks` 已刪（2026-11-17）。
-- **效能測試**（bench／rgb matrix／tcp 吞吐）留 dev 固件，因為要量 native 基準。
-- `components/dev` 整個目錄由 `NC_ENABLE_TESTS` gate；OFF = 唔加入 `EXTRA_COMPONENT_DIRS`。
+- **測試指令留固件**：`0xF0xx` 全部在 `action/test_action/`（名字帶 `test_`）。
+  **但「一條開關」已經不夠**：58 條指令＋17 個 `#ifdef` 全部綁在同一個
+  `NC_ENABLE_TESTS`，量測會互相污染（實例：`espnow_boot` 令記憶體多 56 KB、
+  `0xF062` 跑第二次會重置）。分級方案見
+  [test-build-levels.md](test-build-levels.md)：`NC_TEST_LEVEL`（0 release／
+  1 measure／2 network／3 pixel／4 ncm），累加式，唔准用 bitmask 亂組合。
+  **效能「任務」唔留**：`bench_a/b/c`（`test_bench_tasks`）與 `tcp_sink/src`
+  （`test_tcp_tasks`）2026-11-19 已刪 —— 前者預設 `(0,0)` 從來唔跑，後者同
+  `nc_net_raw`（`rawbench`）重疊。量測走指令＋host 工具。
+- **分類只有兩個軸**：路徑＝層（`action/`、`tasks/`…），名字＝種類（`*_action`、
+  `*_tasks`）＋「`test_` 開頭就係測試」。**冇 `dev/` 呢種用途資料夾**
+  （2026-11-17 曾用 `components/dev/` 做第二套分類，2026-11-19 取消 —— 同一個
+  東西唔應該有兩個座標）。
+- `NC_ENABLE_TESTS` 只係「加唔加入 `EXTRA_COMPONENT_DIRS`」嘅開關：ON 時 CMake
+  自動收 `components/*/test_*`；OFF = 唔編譯、唔 link、唔註冊。現時只剩
+  `action/test_action` 一個。
 - `components/host/ncm` 由 `NC_ENABLE_NCM` gate（tests 自動開）；release 預設唔加入，
-  WAMR 依賴只喺呢個 component 的 `idf_component.yml`（唔使靠 linker 唔拉）。
+  WAMR 依賴只喺呢個 component 的 `idf_component.yml`（唔使靠 linker 唔拉)。
 
 **指令分類（15 條 → 7 真 + 8 測試）**
 

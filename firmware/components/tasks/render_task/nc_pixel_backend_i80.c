@@ -83,7 +83,9 @@ static bool i80_encode(nc_pixel_backend_t *b, uint32_t slot)
         return false;
     }
     const uint32_t stride = (d->bus_width == 16) ? 2u : 1u;
-    memset(out, 0, d->units * stride);          // OR 的前提：整格先清零
+    // 唔再每幀 memset 整格：第一組（lane 0–7）用 store 直接把整格寫死（未用的 lane
+    // 交 NULL → 寫 0），第二組（16-bit 的 lane 8–15）才 OR 進高位 byte。
+    // 16×600 一幀 86,800 B，省掉 memset 就是省 ~2–3.6 ms（PSRAM 寫入）。
     // 每 8 條 lane 一組：packed 波形（bitstream）→ 8×8 轉置 → I80 byte-per-unit。
     for (uint8_t g = 0; g < d->lanes; g += 8) {
         const uint8_t n = (uint8_t)((d->lanes - g > 8) ? 8 : (d->lanes - g));
@@ -104,7 +106,11 @@ static bool i80_encode(nc_pixel_backend_t *b, uint32_t slot)
             lp[k] = d->pack[k];
         }
         const uint32_t off = (d->bus_width == 16 && g >= 8) ? 1u : 0u;
-        nc_px_codec_pack_merge8(lp, d->pack_bytes, out, stride, off);
+        if (g == 0) {
+            nc_px_codec_pack_merge8_store(lp, d->pack_bytes, out, stride, off);
+        } else {
+            nc_px_codec_pack_merge8(lp, d->pack_bytes, out, stride, off);
+        }
     }
     return true;
 }

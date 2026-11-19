@@ -26,5 +26,7 @@ CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
 CONFIG_PARTITION_TABLE_CUSTOM=y
 CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="../ports/hardware/S3/ESP32-S3-SuperMini/partitions.csv"
 
-# ── Wi-Fi（S3 原生 radio；runtime 仍由 network.json 的 wifi.enable 決定）──
-CONFIG_NETCORE_WIFI=y
+# ── Wi-Fi：預設不開（Kconfig NETCORE_WIFI=n，esp_wifi 完全唔 link）──
+# 建置開關在 **project 層**：ports/project/<chip>/<board>/sdkconfig.defaults
+#   加 CONFIG_NETCORE_WIFI=y 才會編入（這塊板的 project 目前冇加 → 關）。
+# 執行期再有一層：project/data/config/network.json 的 wifi.enable。

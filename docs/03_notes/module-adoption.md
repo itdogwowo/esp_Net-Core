@@ -134,7 +134,7 @@ symbol table 同 `esp_elf_register_symbol()`；配套 examples：
 | 層 | 測試位置 |
 |---|---|
 | L0／L1 | **tests 固件**（`NC_ENABLE_TESTS=ON`）＋外掛模組＋CDC log；PC 先跑 `wasmtime` stub（待做） |
-| L2 | `tools/hosttest/`（唔上板）＋ dev 固件 bench 指令（`0xF001`／`0xF01C`／`0xF050`…）＋對比 L0/L1 |
+| L2 | `tools/hosttest/`（唔上板）＋ 測試固件 bench 指令（`0xF001`／`0xF01C`／`0xF050`…）＋對比 L0/L1 |
 | L3 | [measurement-method.md](../02_guides/measurement-method.md) 的程序（同一 binary 三次、環境固定） |
 
 ## 7. 唔做
@@ -143,7 +143,7 @@ symbol table 同 `esp_elf_register_symbol()`；配套 examples：
   第三方 plugin 永遠 L0／L1。
 - 由 `/data` 載入原生 code 當「新能力」；AOT 亦唔算加能力（仍然白名單）。
 - 把所有測試一次過搬入外掛——測試 host 內部（hub／buf／flash／OTA／partition）
-  嘅嘢留 hosttest／dev 固件（搬去 wasm 只會測到 WAMR，見 §7.82）。
+  嘅嘢留 hosttest／測試固件（搬去 wasm 只會測到 WAMR，見 §7.82）。
 - 外掛模組直接開 raw register／host pointer。
 
 ## 8. 現況與下一步
@@ -152,8 +152,10 @@ symbol table 同 `esp_elf_register_symbol()`；配套 examples：
   `test_api_cost_tasks`（API 成本量測）；能力白名單 7 個 import
   （print／print_i32／print2／gpio_read/write/toggle／now_us）。
 - **2026-11-17 重組**：功能測試（hello／probe）已由固件移出（刪 component，改外掛
-  `.nct` 驗證）；效能測試留 `components/dev/`；宿主 ncm 搬到 `components/host/ncm`
-  並有 `NC_ENABLE_NCM` 開關（release 預設唔開、唔 fetch WAMR）。
+  `.nct` 驗證）；效能測試留固件，住 `components/action/test_action`＋
+  `components/tasks/test_*_tasks`（2026-11-19 起同正式碼同層，唔再另開 `dev/`）；
+  宿主 ncm 搬到 `components/host/ncm` 並有 `NC_ENABLE_NCM` 開關
+  （release 預設唔開、唔 fetch WAMR）。
 - **API 成本實測**：`nc_now_us` ≈2.0 µs/call、`nc_gpio_read` ≈2.4 µs/call
   （S3、N=2000，空迴圈底 0.36 µs/iter）→ 每 tick／每 frame 叫幾次可忽略；
   每 pixel／每 element 叫就係災難（要 batching）。見測試冊 T-NCM-017。

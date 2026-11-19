@@ -143,10 +143,13 @@ static const nc_task_t s_task = {
     .name = "hw_gpio",
     .kind = NC_TASK_SYSTEM,
     .level = 2,
+    .order = 10,
     .loops = s_loops,
     .nloops = 1,
     .on_start = on_start,
 };
+
+NC_TASK_AUTO_REG(hw_gpio, &s_task);
 
 const nc_task_t *nc_hw_gpio_task(void)
 {

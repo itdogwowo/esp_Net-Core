@@ -150,17 +150,24 @@ esp_err_t nc_i80_drv_install(const nc_i80_drv_cfg_t *cfg)
         i80_free(d);
         return ESP_FAIL;
     }
+    // 槽放哪裡：小幀（整組 ≤ 48 KB）先試 internal —— internal 不在 cache 管轄，
+    // submit 完全唔需要 msync（實測 6×20 的 tx_us 由 76 µs 回到 ~5 µs）；
+    // 大幀（16×600 一槽 86.8 KB × 3 槽 = 260 KB）internal 放唔落，才用 PSRAM，
+    // cache writeback 交由 esp_lcd 的 tx_color 做（見 nc_i80_drv_submit）。
+    const bool prefer_int = ((size_t)d->slot_bytes * d->slots) <= (48u * 1024u);
     for (uint32_t i = 0; i < d->slots; i++) {
-        // FastLED 做法：S3 的 PSRAM 是 DMA-capable（SOC_PSRAM_DMA_CAPABLE=1），
-        // 先把槽放 PSRAM（2 MB 空間，16×600 兩槽都夠）；唔得才退 internal。
-        // 提交前一定要 esp_cache_msync(C2M)，否則 DMA 可能讀到舊 cache 內容。
-        d->tx[i] = heap_caps_aligned_calloc(64, d->slot_bytes, 1,
-                                            MALLOC_CAP_SPIRAM | MALLOC_CAP_DMA | MALLOC_CAP_8BIT);
-        d->tx_ext[i] = (d->tx[i] != NULL);
-        if (d->tx[i] == NULL) {
-            d->tx[i] = heap_caps_calloc(1, d->slot_bytes, MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
-            d->tx_ext[i] = false;
+        bool ext = false;
+        if (prefer_int) {
+            d->tx[i] = heap_caps_aligned_calloc(64, d->slot_bytes, 1,
+                                                MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
         }
+        if (d->tx[i] == NULL) {
+            d->tx[i] = heap_caps_aligned_calloc(64, d->slot_bytes, 1,
+                                                MALLOC_CAP_SPIRAM | MALLOC_CAP_DMA |
+                                                MALLOC_CAP_8BIT);
+            ext = (d->tx[i] != NULL);
+        }
+        d->tx_ext[i] = ext;
         if (d->tx[i] == NULL) {
             ESP_LOGE(TAG, "DMA 槽 %u（%u B）配置失敗", (unsigned)i, (unsigned)d->slot_bytes);
             i80_free(d);
@@ -213,12 +220,10 @@ bool nc_i80_drv_submit(int slot)
     }
     const uint32_t ord = d->submit_order + 1u;
     d->order[slot] = ord;
-#if NC_HAS_CACHE_MSYNC
-    if (d->tx_ext[slot]) {
-        const size_t sync = (d->slot_bytes + 63u) & ~(size_t)63u;
-        (void)esp_cache_msync((void *)d->tx[slot], sync, ESP_CACHE_MSYNC_FLAG_DIR_C2M);
-    }
-#endif
+    // ⚠ 唔在這裡做 esp_cache_msync：esp_lcd 的 panel_io_i80_tx_color() 已經對
+    // cache 管轄的緩衝（PSRAM）自己做 C2M writeback（esp_lcd_panel_io_i80.c
+    // 「flush data from cache to the physical memory」）。以前兩邊各做一次，
+    // 86.8 KB 的槽就係多一次 cache 掃描。internal 槽唔經 cache，更加唔需要。
     // esp_lcd 的 tx_color 排進佇列就返回，完成時才回呼。
     const esp_err_t e = esp_lcd_panel_io_tx_color(d->io, -1, d->tx[slot], d->slot_bytes);
     if (e != ESP_OK) {

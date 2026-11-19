@@ -138,12 +138,12 @@
 | `ncm`（**POC／原始形態**） | 1 | 任務管理器 | `vTaskDelay(幀期)` [nc_mod.c:778](../../firmware/components/host/ncm/nc_mod.c#L778) | **I1 違反**（每幀一次）；運作方式未定義 | 🔄 重新規劃（核心、幀來源、buffer 接口） |
 | ~~`monitor`~~ | — | — | — | **已刪（2026-11-04）**：只係一行 log，`epoch`／`STATUS_GET` 已可即時查 | 🗑️ |
 | `hello` | 0（S3 `tasks.json`） | 任務管理器 | `vTaskDelay(1000)` | 本地 | ✅ |
-| `bench_a/b/c` | 1（預設**關**） | 任務管理器 | `vTaskDelay(5)` | 開啟時 **I1 違反，200 次/秒** | ✅ 要量先開 |
+| ~~`bench_a/b/c`~~ | — | — | — | **已刪（2026-11-19）**：預設 `(0,0)` 從來唔跑；量測用 `0xF0xx` 指令 | 🗑️ |
 | `probe` | — | — | 只有 `on_start`，冇 loop | 唔係任務 | ✅ |
 | `nc4_udp` | 1 | 裸 `xTaskCreatePinnedToCore` [nc4_udp.c:169](../../firmware/components/sys/transport/nc4_udp.c#L169) | **blocking `recvfrom`** | **I1 違反**（每個 datagram 由 lwIP 喚醒）＋共用 decoder mutex | 🔄 改 non-blocking poll，或搬 core0 |
 | `tcp_nc4`（accept） | 0 | 裸建立 [main.c:2631](../../firmware/main/main.c#L2631) | blocking `accept()` | 本地；但喚醒來自 lwIP（無 pin，I3 風險） | 🔄 收編入管理器 |
 | `tcp_nc4_rx` | 1（`s_rx_core` 預設 1，**只有 PUSH 才建**） | 裸建立 [main.c:2837](../../firmware/main/main.c#L2837) | `recv(DONTWAIT)`＋`vTaskDelay(1)`＋`nc4_bus_kick` | **I1 違反**（跨核 notify＋1 ms 逾時） | 🔄 或直接唔用 PUSH |
-| `tcp_sink0/3`、`tcp_src0/1` | 0／1 | 裸建立（`CONFIG_NETCORE_TEST_TASKS`，預設關） | `vTaskDelay`＋blocking recv | 測試專用 → I1 | ✅ 預設關 |
+| ~~`tcp_sink0/3`、`tcp_src0/1`~~ | — | — | — | **已刪（2026-11-19）**：同 `nc_net_raw`（`rawbench`）重疊 | 🗑️ |
 | `hub_w`／`hub_r`／`tx_pack` | 1／0／1 | 測試 handler 內臨時建立 | 自旋／延遲 | 測試專用 → I1 | ✅ 只喺量測時 |
 | `usb_reconn` | **無 affinity** | 裸建立 [nc_store.c:219](../../firmware/components/sys/store/nc_store.c#L219) | `vTaskDelay(800/300)` | **I1 違反**（可能落 core1 就由 core0 tick 喚醒）＋**I2**（同 TinyUSB task 爭 USB 狀態） | 🔄 pin core1；或收編 |
 
@@ -198,15 +198,17 @@
 | **L2 系統** | `monitor` | 可配置（預設 0） | 本地 | 常開 |
 | **L3 功能** | `ncm` | 可配置（預設 1） | 本地 | manifest |
 | **L4 log**（新） | `log` | **可配置** | 有資料先印；經中間緩衝收集兩核 | 常開 |
-| **L5 測試** | `hello`、`bench_a/b/c`、`probe`、`hub_w/r`、`tx_pack`、`tcp_sink/src`、`0xF00x` handlers | 測試專用 | — | **`NC_ENABLE_TESTS`（預設 OFF）** |
+| **L5 測試** | ~~`hello`~~、~~`bench_a/b/c`~~、~~`probe`~~、~~`tcp_sink/src`~~、`hub_w/r`、`tx_pack`、`0xF00x` handlers | 測試專用 | — | **`NC_ENABLE_TESTS`（預設 OFF）**<br>任務類已刪（2026-11-17 刪 hello／probe、2026-11-19 刪 bench／tcp），只剩指令 |
 
 ### 8.1 五條決議
 
 1. **通訊層與解碼一樣要獨立分離**，而且「核心」係配置，唔係 code。呢一步**暫時收起**（唔改功能），
    但 `main.c` 之後唔可以再有 `.core = 0/1` 寫死喺通訊任務上。
 2. **`slow_worker` 不存在** —— 已刪（見 §7.1；理由：指令一問一答，慢指令擋唔到下一條）。
-3. **測試全部搬去 `test_*`**：2026-11-17 重組後是 `firmware/components/dev/`（效能測試）＋外掛 `.nct`（功能測試），
-   由**一個**編譯開關 `NC_ENABLE_TESTS`（預設 OFF）控制；閂咗 = 唔編譯、唔註冊、唔佔 stack。
+3. **測試全部搬去 `test_*`**：效能測試住 `components/action/test_action/` ＋
+   `components/tasks/test_*_tasks/`（2026-11-19 起唔再有 `dev/` 資料夾，名字就係分類），
+   功能測試走外掛 `.nct`；全部由**一個**編譯開關 `NC_ENABLE_TESTS`（預設 OFF）控制；
+   閂咗 = 唔編譯、唔註冊、唔佔 stack。
 4. **log 兩核都唔准直接印**：`ESP_LOG*` 一律入中間緩衝；由**一條** log task 印，
    「有先印、冇就唔印」；log task 自己嘅核心可以調配。
 5. **每個任務都要有單一核心出處**：唔可以再有「router 講一次、NVS 講一次、code 又寫死一次」。
@@ -331,8 +333,8 @@
 | `slow_worker` | core0 常駐 worker + jobs hub | 已刪 |
 | `monitor` | core0 每秒讀兩核 epoch | 已刪 |
 | `ncm`（POC） | core1，每幀 `vTaskDelay` | 只喺 `NC_ENABLE_TESTS=ON` 存在 |
-| `probe`／`tcp_sink/src`／`bench_*`／`hello` | 散在 `main.c`／正式映像 | `tasks/test_*_tasks`，OFF 時唔存在 |
-| 8 條測試指令 | `main.c`，永遠編入 | `commands/test_action`，OFF 時唔存在 |
+| `probe`／`tcp_sink/src`／`bench_*`／`hello` | 散在 `main.c`／正式映像 | 先搬 `test_*_tasks`，再全部刪（hello／probe 2026-11-17、bench／tcp 2026-11-19） |
+| 8 條測試指令 | `main.c`，永遠編入 | `components/action/test_action`，OFF 時唔存在 |
 | 正式指令表 | 13 條（8 條測試） | **5 條** |
 
 ### 10.3 一個 config 就解決得掉的部分

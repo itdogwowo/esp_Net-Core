@@ -39,21 +39,26 @@
 `cfg`、`cfgstruct`（含 resources 層）、`ncd`、`task`、`router`、`link`、`mod`、
 `hub`、`plan`、`buf`、`portgen`、`ncm`。
 
-## 3. 固件內測試／工具任務處置（2026-11-17 重組後）
+## 3. 固件內測試／工具任務處置（2026-11-19 歸位：名字＝分類）
 
-規則：**功能測試用外掛模組（動態加載）；效能測試留 dev 固件**（要 native 基準）；
-測試 host 內部的東西留 hosttest／dev 固件。
+規則：**功能測試用外掛模組（動態加載）；效能測試留測試固件**（要 native 基準）；
+測試 host 內部的東西留 hosttest／測試固件。
+效能測試**唔另開資料夾**：名字 `test_*` 就係測試，後綴決定住邊層
+（`test_*_action` → `action/`、`test_*_tasks` → `tasks/`）。
 
-| 組件 | 新位置 | 處置 |
+| 組件 | 位置 | 處置 |
 |---|---|---|
 | `hw_gpio` | `components/tasks/hw_gpio` | 正式（留固件） |
 | ncm（前 `test_mod_tasks`：loader／WAMR engine） | `components/host/ncm` | 外掛宿主；`NC_ENABLE_NCM` 開關（tests 自動開；release 預設冇、亦唔 fetch WAMR） |
-| `test_action`（0xF0xx 55 條＋0xF050） | `components/dev/test_action` | 留 dev 固件（開發／量測工具，唔係任務） |
-| `test_bench_a/b/c` | `components/dev/test_bench_tasks` | 效能測試 → 留 dev 固件（native 基準） |
-| `test_rgb_led_matrix` | `components/dev/test_rgb_led_matrix_tasks` | 效能／視覺測試 → 留 dev；pattern 可外掛（T-NCM-010） |
-| `test_tcp` | `components/dev/test_tcp_tasks` | 效能（吞吐）→ 留 dev 固件 |
+| `test_action`（0xF0xx 55 條＋0xF050） | `components/action/test_action` | 留測試固件（開發／量測工具，唔係任務） |
+| `test_bench_a/b/c` | **已刪（2026-11-19）** | 預設 `(0,0)` 從來唔跑；native 基準對照由 `0xF050 CPU_BURN`／`0xF0xx` 指令提供 |
+| `test_rgb_led_matrix` | **已刪（2026-11-18）** | 由 pixel 生產者／渲染器取代（`components/sw/pixel`＋`tasks/render_task`；量測走 `0xF060`／`0xF061`） |
+| `test_tcp`（`tcp_sink0/3`、`tcp_src0/1`） | **已刪（2026-11-19）** | 同 `components/bus/bus_net/nc_net_raw.c`（`rawbench`，:5000／:5001）重疊；吞吐量測走 rawbench 或指令 |
 | `test_hello_tasks` | **已刪（2026-11-17）** | 功能測試改用外掛 `test_hello_tasks.nct` |
 | `test_probe` | **已刪（2026-11-17）** | 測 host hub 內部；由 hosttest `hub_test` ＋ `0xF003 HUB_BENCH` 覆蓋 |
+
+> 舊的 `components/dev/`（2026-11-17 引入）已取消：測試同正式碼同層，
+> 只用名字區分。`NC_ENABLE_TESTS=OFF` 時 CMake 唔會收 `components/*/test_*`。
 
 ## 3.1 任務模組編譯工具
 

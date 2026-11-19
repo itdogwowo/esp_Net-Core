@@ -327,6 +327,22 @@ static void on_xxx(nc4_ctx_t *ctx, const nc4_frame_t *f)
 
 ---
 
+## 4.5 任務自己現身（2026-11-19；`main.c` 冇清單）
+
+任務同指令表一樣，**由 component 自己登記**：
+
+```c
+static const nc_task_t s_task = { .name = "pulse", .kind = NC_TASK_NORMAL,
+                                  .level = 4, .order = 40, ... };
+NC_TASK_AUTO_REG(pulse, &s_task);   // constructor，app_main 之前跑
+```
+
+- 冇 `main.c` 清單；**component 有 link 就有這個任務**。代價同 action 一樣：
+  `idf_component_register(... WHOLE_ARCHIVE)`，否則 linker 會整份 object 丟掉。
+- **次序**由 `nc_task_t` 的 `(level, order)` 決定（小的先）；`order` 是「同 level 的
+  次序」，所以 render（10）一定在 pixel（20）之前，唔受 link 次序影響。
+- ⚠️ **唔可以喺 `app_main` 再 `nc_task_reset()`**：constructor 已經登記好，
+  reset 會清空 → 開機 0 個任務（2026-11-19 實際踩到，已移除並加註解）。
 ## 5. 執行期控制
 
 ```c

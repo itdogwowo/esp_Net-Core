@@ -4544,3 +4544,342 @@ PSRAM 數字，release internal 更快）。**16×600 @ 50 fps 仍然差**：pac
 DMA 傳輸成為新瓶頸。板上 app `c0787583`，6×20 正常；16 lane 實物未上板驗證。
 下一步實驗清單（IRAM、lib8tion、dither、RMT、chunked DMA、ABL）見
 [pixel-experiments.md](../03_notes/pixel-experiments.md)。
+
+
+### 7.118 2026-11-19（結構歸位：取消 `components/dev`；測試就係名字 `test_*`）
+
+用戶指出 `firmware/components/dev/` 唔應該存在：測試已經用**名字**分（`test_*`／
+`_action`／`_tasks`）、用**路徑**分層（`components/action`、`components/tasks`、
+`modules/`），`dev/` 係第三個（用途）座標 —— 同一個東西兩個位置。
+
+| 之前 | 之後 |
+|---|---|
+| `components/dev/test_action/` | `components/action/test_action/` |
+| `components/dev/test_bench_tasks/` | `components/tasks/test_bench_tasks/` |
+| `components/dev/test_tcp_tasks/` | `components/tasks/test_tcp_tasks/` |
+| `components/dev/`（整個目錄） | **刪除** |
+
+**規則（只有兩個軸）**
+
+- **路徑＝層**：`action/`＝指令表、`tasks/`＝任務（`sys/ bus/ driver/ sw/` 同前）。
+- **名字＝種類**：`*_action`、`*_tasks`；**`test_` 開頭＝測試**。
+- `NC_ENABLE_TESTS` 只係「加唔加入編譯」嘅開關，唔再兼任目錄分類。
+
+**CMake**
+
+- `firmware/CMakeLists.txt`：ON 時 `file(GLOB components/*/test_* CONFIGURE_DEPENDS)`
+  自動收（只收有 `CMakeLists.txt` 的目錄）；OFF 時一個都唔加入。新增測試元件
+  只要放對層、叫對名，唔使改 CMake。
+- `firmware/main/CMakeLists.txt`：測試標頭的 include 路徑跟住搬。
+- 仍然係「optional 組件放第二層」：`components/action`、`components/tasks` 本身
+  冇 `CMakeLists.txt`，IDF 唔會自動收，所以 OFF 時佢哋真係唔存在（同 ncm 同理）。
+
+**文件同步**：README、[commands.md](../01_protocol/commands.md) §1、
+[execution-rules.md](../03_notes/execution-rules.md) §6、[test-register.md](test-register.md)
+§3、[core-isolation.md](../03_notes/core-isolation.md)、[module-adoption.md](../03_notes/module-adoption.md)、
+[testing.md](../02_guides/testing.md)。[test-register.md](test-register.md) 亦順手改正
+`test_rgb_led_matrix`（2026-11-18 已由 pixel 生產者／渲染器取代）。
+
+**驗證**（S3／`ESP32-S3-N16R8`、IDF 6.1.1、`idf.py reconfigure` 兩種旗標各建一個乾淨 build dir）
+
+| `NC_ENABLE_TESTS` | build components | `test_*` 元件 |
+|---|---:|---|
+| ON | 175 | `test_action`、`test_bench_tasks`、`test_tcp_tasks`（＋`ncm`，因為 tests 會開 NCM） |
+| OFF | 170 | **0 個** —— 三個都唔喺 build 圖，OFF 時真係「唔存在」 |
+
+即係搬完之後 gate 冇漏、亦冇多收。`tools/id_check.py` 亦照跑（指令 ID 全部指得到
+code ✓）。驗證用的 build dir／component cache 已清、ON 那次為 ncm 抓落的
+`espressif__wasm-micro-runtime`（gitignore）已刪，維持原本的樹。
+
+> 順帶一提：`firmware/main/CMakeLists.txt` 的 `_nc_test_reqs`（原本 append
+> `ncm`／`test_bench_tasks`／`test_tcp_tasks`）**從來冇被用過**（冇進
+> `PRIV_REQUIRES`），係死變數 —— 今次冇動它，要清就另開一次。
+
+
+### 7.119 2026-11-19（刪掉效能測試任務：bench_a/b/c、tcp_sink/src；指令保留）
+
+用戶：「`test_bench_tasks` 這些不太重要的任務其實可以搬去模組那邊，因為已經不用了、
+棄用了，指令可以保留。」→ 拍板**直接刪除**，唔搬 `modules/`、唔留存檔（git 歷史已有）。
+
+| 刪除 | 位置（上一版） | 為什麼 |
+|---|---|---|
+| `test_bench_tasks`（bench_a/b/c） | `components/tasks/test_bench_tasks/` | 註冊時預設 affinity `(0,0)`，**從來冇跑過**；native 基準改由 `0xF050 CPU_BURN` 等指令提供 |
+| `test_tcp_tasks`（sink 5000/5003、src 5001/5002） | `components/tasks/test_tcp_tasks/` | 同 `components/bus/bus_net/nc_net_raw.c`（`rawbench`，:5000／:5001）重疊 |
+
+**保留**：`components/action/test_action`（0xF0xx 55 條＋0xF050）—— 指令完全唔動。
+
+**連帶改動**
+
+- `main.c`：移除 `nc_bench.h`／`nc_test_tcp.h` include、`nc_test_tcp_start()` 呼叫、
+  三條 `nc_task_register(nc_bench_task_*)`。`NC_ENABLE_TESTS` 區塊現只剩 ncm 註冊。
+- `main/CMakeLists.txt`：移除兩個測試 include path；順手清掉 `_nc_test_reqs`
+  （§7.118 提到的死變數）。
+- `tools/bench/bench_all.py`：A 段（純 TCP）抽成 `section_a()` 並加 `--skip-raw`
+  —— `:5002`／`:5003` 已經冇 listener，要用 rawbench（只有 :5000／:5001）。
+- 文件：test-register、execution-rules §6、core-isolation（任務表與 L5 清單）、
+  testing、disposition B7、execution-model、README、firmware/CMakeLists 註解。
+
+**驗證**
+
+- S3 `--tests` 全量 build 跑到 `nc_pixel_bench.c` 才停 —— **同今次改動無關**（見下面
+  的既有問題）。`main.c` 與 `nc_test_action.c` 用同一份 `compile_commands.json` 的
+  參數單獨編譯：**exit 0、0 error、0 warning**。
+- `tools/id_check.py`：指令 ID 仍然全部指得到 code（模塊 35 → 33）。
+- `bench_all.py` `py_compile` 通過。
+
+> **順帶發現（既有問題，唔係今次改動造成）**：`components/sw/pixel/nc_pixel_bench.c`
+> 無條件用 `CONFIG_NETCORE_PIXEL_FORMAT／PCLK_HZ／BIT_CELLS／T0H／T1H／ZONE_PX`，
+> 但嗰幾個 Kconfig 只喺 `NETCORE_PIXEL_I80=y` 的板（現時只有 `S3/ESP32-S3-Matrix`
+> 同 `S3/ESP32-S3-SuperMini-LED-Textkit` project）才會生成。其餘板（N16R8、
+> Mini-Nano、SuperMini、P4、C3）一 build 就爆 —— 係 467af43（2026-11-19）把
+> `nc_pixel_bench.c` 加進 pixel 組件 `SRCS` 時漏咗 guard。未修。
+
+
+### 7.120 2026-11-19（上板重測編碼：真配置 19.44 ms，不是 14.33 ms）
+
+之前 §7.117 的 14.33 ms 是 `sram=1`（11 個 bench 緩衝全在 internal）。這次用
+SuperMini＋Textkit（project 預設 6 lane × 20 px、2.5 MHz、bit_cells=3；**實物接線
+不是 6×20 —— 其中一條是 GPIO14 的 8×8 矩陣**）建 **tests 映像**
+（`NC_ENABLE_TESTS=ON`，1,368,048 B），NC4 OTA 上板（218.5 s、6.1 KB/s），
+用 `0xF062` 量同一塊板：
+
+| lanes × px | `us_packed` | `us_pack` | `us_merge` | `sram` |
+|---|---:|---:|---:|---:|
+| 16 × 600 | **19,440–19,444 µs**（3 次） | 8,201 | 11,290 | **0（0/11）** |
+| 8 × 600 | 10,162 | 4,254 | 5,999 | 0（0/11） |
+| 6 × 600 | 9,109 | 3,021 | 5,995 | 0（0/11） |
+| 16 × 300 | 8,881 | 3,716 | 5,504 | 0（0/11） |
+| 6 × 20 | 234 | 97 | 135 | 0（6/11） |
+
+**為何差 36%**：這塊板在真固件下 **internal 只剩 4,975 B**（`h_int`；ncm arena 在
+PSRAM、WAMR／WiFi／任務已佔滿）。16×600 的工作集要 `2×43,400 + 8×5,400 + 2,400
+≈ 132 KB` internal 才 `sram=1` —— 實際一個都配不到，全部落 PSRAM，所以
+`us_merge` 由 7.08 → 11.29 ms（+60%）、`us_packed` 由 14.33 → **19.44 ms**。
+舊的 release 固件 internal 也只有 ~64 KB（`h_int`），一樣做不到 `sram=1`。
+
+**其他路徑（同一輪、16×600、PSRAM）**：`us_enc`（只編碼寫 scratch）49.2 ms、
+`us_mix`（只 OR）74.8 ms、`us_direct`（direct-OR 全路徑）54.4 ms —— packed 在
+PSRAM 下仍然是 direct-OR 的 **2.8×**，但已不是 internal 版的 3.8×。
+
+**順帶更正**：§7.117 說「雙槽 173.6 KB > release DMA 164.9 KB 所以放不下」——
+那是 *internal* DMA。`drv_i80` 的槽已經改 PSRAM（同一個 commit），這塊板
+PSRAM 有 1.5 MB，3 槽 260 KB 完全放得下。**記憶體牆不成立**，真正的上限回到
+CPU：`1/19.44 ms = 51.4 fps`（DMA 17.36 ms 由實測 `units=43,400 ÷ 2.5 MHz`
+得出，仍比 CPU 低）。
+
+**缺口**：真渲染任務在這塊板的 `tasks.json` 是 `enabled:0`（`render`／`pixel`
+兩個 loop 都冇跑），所以 `0xF061` 的 `enc_us` 是 0。§7.117 的 514 µs（6×20）
+要先把那兩個任務打開才量得到；本次只量到同尺寸的純編碼 234 µs（差 ~280 µs，
+是 acquire／memset／submit 的固定開銷）。
+
+**記憶體（同一塊板、tests 映像、開機後）**
+
+| 項目 | 剩餘 |
+|---|---:|
+| internal SRAM（`h_int`） | **4,983 B** |
+| DMA-capable（`h_dma`） | **3,343 B** |
+| PSRAM（`h_ps`） | **1,514,152 B**（1.44 MiB／2 MiB） |
+| 計劃期最大塊（`mem.plan.avail`） | int 31,744／psram 2,064,384 |
+
+靜態佔用（map）：`.bss` 202,000 ＋ `.data` 47,799 ＋ `.iram0.text` 85,739 ＋
+vectors 1,028 = **336,566 B（329 KB）**。最大幾塊 `.bss`：
+
+| 大小 | 符號 | 誰 |
+|---:|---|---|
+| 17,664 | `s_res` | ncm（資源表） |
+| 16,644 | `_cdcd_itf` | TinyUSB CDC |
+| 16,410 | `s_parse_scratch` | nc4 parser |
+| 11,656／6,400 | `s_mod_scan`／`s_mods` | ncm（模組掃描） |
+| 9,120 | `s_slots` | 任務管理器 |
+| 8,192×3＋4,104 | `s_bb_*`／`g_cnxMgr` | WiFi |
+| 4,096×3 | `s_big$8`／`work$9`／`s_bench_pat` | test_action（只在 tests 映像） |
+
+剩返嗰 5 KB 內部 heap 就是任務堆疊（HWM：ncm 7,588、TCP 5,200、UDP 5,136、
+wifi 4,536、esp_timer 3,304…）＋ WiFi／lwIP 執行期緩衝。
+
+**16×600 的記憶體需求**：3 個 DMA 槽 × 86,800 B = **260.4 KB PSRAM**（剩 1.44 MiB）
+＋ packed scratch 43.2 KB → 放得下。**記憶體不是牆。**
+
+**16×600 的 CPU（encode 19.44 實測 ＋ 其餘計算）**
+
+| 項 | 值 | 依據 |
+|---|---:|---|
+| pack＋merge（PSRAM） | 19.44 ms | 實測 |
+| memset 槽 86,800 B | 2.2–3.6 ms | quad PSRAM 80 MHz 上限 40 MB/s（2.17 ms）～實際 60–70% |
+| `esp_cache_msync` 86,800 B | 0.1–0.2 ms | 估計 |
+| **合計 CPU／幀** | **21.7–23.2 ms** | → **43–46 fps** |
+
+DMA 仍然 17.36 ms（43,400 PCLK ÷ 2.5 MHz）→ 16×600 是 **CPU-bound**，
+50 fps（20 ms）做不到。最直接的補法：**省掉 memset** —— 16-bit 時 group0
+（lane 0–7）用 store、group1（lane 8–15）才 OR，整格唔需要先清零，
+省 2.2–3.6 ms → 約 19.4–20 ms，剛好貼線。
+
+> ⚠️ `CONFIG_NETCORE_PIXEL_I80_LANES` 是 `range 1 8`，所以 **真 backend 開不到
+> 16 lane**（bench 不受此限）。要實測 16 lane 渲染，先要改 range 1..16。
+
+### 7.121 2026-11-19（WiFi 預設改為不開：靜態 -54 KB、heap +128 KB；修 boot loop）
+
+**改動**
+
+- 4 塊 S3 板（SuperMini／Matrix／Mini-Nano／N16R8）的 `sdkconfig.defaults` 移除
+  `CONFIG_NETCORE_WIFI=y` —— Kconfig 本身預設 `n`，係板子手寫開的。
+- **開關放回 project 層**：要 WiFi 的 project 在自己的 `sdkconfig.defaults` 寫
+  `CONFIG_NETCORE_WIFI=y`；`hardware/board.json` 的 `features.wifi` 只描述
+  「晶片有沒有 radio」，不是開關。`tools/board.py --wifi` 不再寫 CONFIG；
+  `ports/README.md` 同步（`_profiles/wifi.defaults` 已撤回）。
+- **修 boot loop**：`nc_net_lines.c` 在 `CONFIG_NETCORE_WIFI=n` 時跳過 `iface=wifi`
+  的線。之前照樣 bind socket，但 `esp_netif`／lwIP 係 `nc_wifi_init()` 初始化的 →
+  `assert failed: tcpip_send_msg_wait_sem (Invalid mbox)` → 無限重啟
+  （實測 12 秒 21 次）。修好之後開機正常。
+
+**量測（SuperMini＋Textkit tests 映像）**
+
+| | WiFi on | WiFi off |
+|---|---:|---:|
+| app image | 1,368,048 B | **841,440 B** |
+| `.bss` | 202,000 | 182,752 |
+| `.data` | 47,799 | 40,007 |
+| IRAM | 85,739 | 58,599 |
+| 靜態 SRAM | 336,566 | **282,386** |
+| `h_int`（開機後） | 4,975 | **128,475–144,183** |
+| `h_dma` | 3,335 | 120,687 |
+
+`0xF062` 重測：16×600 **19,440 → 15,392 µs**（`sram=0` 但 9/11 塊 internal）；
+16×300 **7,051 µs（11/11 internal，139 fps）**；8×600 7,657；6×20 210（11/11）。
+
+**歸屬更正**：`s_bb_kf`／`s_bb_stream`／`s_bb_slot_mem`（8,192×3）係 **test_action**
+的 byte-buffer 測試緩衝（8 個 1 KB slot ＋ 兩條 8 KB 流），唔係 WiFi。WiFi 係
+`g_cnxMgr`（4,104）＋執行期緩衝（呢部分才是大頭，~100 KB internal）。
+
+**新發現（未修）**
+
+1. `0xF050` 重複註冊：`NC4_CMD_CPU_BURN`（nc_test_action.c:2489）同
+   `NC4_CMD_TCP_SEND`（:4355）都用 0xF050 → 後者被丟棄（boot log 有 error）。
+2. `0xF062` 16×600 第二次執行會觸發重置（第一次正常 15.39 ms；16×300／6×20 冇事）。
+3. 兩次 OTA 槽內容一度不一致（bootloader 揀錯槽會見到舊的 assert）；已把兩個槽
+   都刷成同一顆。
+
+### 7.122 2026-11-19（渲染三招：store-first 免 memset、小幀槽回 internal、移除重複 msync）
+
+**改動**
+
+1. `nc_px_codec_pack_merge8_store()`：第一組 lane（0–7）用 **store 覆蓋**整格，
+   之後的組才 OR → 每幀唔再 `memset` 整格（16×600 一幀 86,800 B，省 ~2–3.6 ms
+   的 PSRAM 寫入）。`nc_pixel_backend_i80.c` 的 `encode()` 已改用它。
+2. `drv_i80` 槽配置：**整組 ≤ 48 KB 先試 internal**（internal 唔經 data cache），
+   大幀（16×600 一槽 86.8 KB）才落 PSRAM。之前一律 PSRAM，連 1,640 B 的小幀
+   都要每幀 msync。
+3. `nc_i80_drv_submit()` **移除自家的 `esp_cache_msync`** —— esp_lcd 的
+   `panel_io_i80_tx_color()` 已經對 cache 管轄的緩衝做 C2M writeback，之前兩邊
+   各做一次。
+
+**實測（SuperMini＋Textkit、6 lane × 20 px、WiFi off、50 fps）**
+
+| | 之前 | 之後 |
+|---|---:|---:|
+| `tx_us`（submit） | 74–76 µs | **9–13 µs** |
+| `enc_us`（編碼） | 194–210 µs | 202–203 µs |
+| `frame_us`／fps | 20,000 µs／50.0 | 20,000 µs／50.0 |
+| `fail` | 0 | 0 |
+
+映像 841,440 → **842,208 B**（`0xcd8e0`），分區仍剩 46%。
+
+**備註**
+
+- `pixel` 任務本來就係自由填（`fps=0`、`fps_x10=1000`、`render_us` 56 µs）；
+  `render` 由 `system.json` 的 `frame_interval_ms` 控 50 fps —— 今次在實機確認
+  兩者行為相符（`fill` 保持 2–3、`enc_us` 穩定）。
+- `starved` 每秒 +51 是 **mock** lane（冇生產者）造成，不是 i80。
+- 0xF061 的 `producer.frames` 與 0xF060 的 `frames`／`fps_x10` 對不上（前者 +2/s、
+  後者 100 fps），計數命名要再清 —— 未修。
+- 16×600 的**真渲染**仍未做：要先把 `CONFIG_NETCORE_PIXEL_I80_LANES` 由
+  `range 1 8` 放寬到 16，並配 16-bit（18 個 dummy 腳）。
+
+### 7.123 2026-11-19（16×600 極限實測：enc 18.4–20.1 ms、tx 1.16 ms、33 fps，然後 WDT 重啟）
+
+**怎麼跑起來的**
+
+- Kconfig 放寬：`NETCORE_PIXEL_I80_LANES` 由 `range 1 8` → `1 16`（8-bit 8、16-bit 16）。
+- 新增 `-DNC_EXTRA_DEFAULTS=...`（`firmware/CMakeLists.txt`）：根 CMake 自己 set
+  `SDKCONFIG_DEFAULTS`，之前命令列傳第四個 defaults 會被覆蓋 → 16×600 從來冇生效。
+- 測試配置（`artifacts/16x600.defaults`，不改 ports）：LEDS=600、LANES=16、
+  BUS_WIDTH=16、18 腳＝D1,2,4..18,21（避開 0/3/19/20/26–37/43/44/45/46）。
+- 插槽仍有上限：DMA 3 槽、環 3 槽；16×600 一槽 86,800 B → 260.4 KB PSRAM。
+
+**真機數字（SuperMini、16 lane × 600 px、16-bit、50 fps 目標）**
+
+| 指標 | 值 |
+|---|---:|
+| `enc_us`（編碼） | **18,436–20,071 µs** |
+| `tx_us`（提交＝esp_lcd 對 86,800 B 的 msync） | **1,157–1,187 µs** |
+| `frame_us` | 37,853–39,581 µs（第 3 次量到 8–12 µs 是重啟後） |
+| 實際幀率 | **~33–34 fps**（`render_frames` +33/34 每秒） |
+| `fail` | 0 |
+
+**穩定性：唔過關。** 跑幾秒之後會 **Task WDT panic 重啟**（每約 8 秒一次，
+`up_s` 一直停在 8）。sdkconfig 證實：`CONFIG_ESP_TASK_WDT_TIMEOUT_S=5`、
+`CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU1=y`、`PANIC=y` —— render loop
+（19.6–21.2 ms／20 ms 週期）幾乎 100% 佔住 core 1，IDLE1 餓死 → 5 秒後 panic。
+
+**同 §7.122 的 6×20 比較**：`enc_us` 由 203 µs（120 px）變成 18.4–20.1 ms
+（9,600 px）＝約 1.9–2.1 µs/px，線性；`tx_us` 由 9–13 µs 變 1.16 ms，
+全部是 86.8 KB 的 PSRAM msync（≈75 MB/s 等效）。
+
+**下一步（未做）**
+
+1. `pixel`（生產者）釘 core 0、`render` 留 core 1 —— 效果計算 ~1.7 ms 就不再同
+   編碼爭同一核，core 1 有機會回到 <20 ms。
+2. chunked submit（每 4 KB msync＋DMA）把 1.16 ms 攤到 DMA 期間。
+3. 若仍超支，把 `frame_interval_ms` 提到 25（40 fps）先求穩定，再逐項優化。
+
+### 7.124 2026-11-19（WiFi on/off 緩衝前後對比；能力閘補上 ETH）
+
+**方法**：同一個 project、同一份 config，只用 `-DNC_EXTRA_DEFAULTS` 加／不加
+`CONFIG_NETCORE_WIFI=y`，各自 build → flash → 量。兩邊都係 tests 映像、6×20。
+
+| | WiFi off | WiFi on | 差 |
+|---|---:|---:|---:|
+| app image | **842,128 B** | **1,368,608 B** | +526,480 |
+| `.bss` | 182,752 | 202,000 | +19,248 |
+| `.data` | 40,007 | 47,799 | +7,792 |
+| IRAM | 58,599 | 85,739 | +27,140 |
+| 靜態合計 | 281,358 | 335,538 | +54,180 |
+| `h_int`（開機後） | **120,255** | **10,063** | **−110,192** |
+| `h_dma` | 112,467 | 2,275 | −110,192 |
+| `h_ps` | 1,560,920 | 1,560,848 | ≈0 |
+| plan `int`／`psram` | 5,280／526,903 | 5,280／526,903 | 0 |
+
+- **plan 完全一樣**：WiFi 不在 plan 裡（driver 自己 malloc），所以「宣告制」看不到它。
+- 靜態 54 KB 之外，**runtime 再多 ~56 KB**（110,192 − 54,180）：`status rt` 多出
+  `wifi`（HWM 4,508）、`tcpip`（2,832）、`sys_evt`（2,040）、`espnow_rx`（3,160）
+  等任務與驅動緩衝。
+- **更正（同日）**：這 110 KB 是 **tests 映像**的數字，其中只有 **54 KB 是「編進來」
+  的靜態成本**，另外 ~56 KB 是 **測試 hook**（`nc_test_action_espnow_boot()`，main.c
+  B08 之後）自動開 ESP-NOW 造成的 —— 唔係 `enable:0` 的代價。
+  真正規則：`network.json` 的 `wifi.enable=0` → `nc_wifi_boot()` 在建 netif 之前就
+  return（`nc_wifi.c:615-619`）→ **0 B runtime**。所以：
+  - **編進來**（`CONFIG_NETCORE_WIFI=y`）＝ 靜態 54 KB ＋ flash 526 KB，無論開唔開。
+  - **開啓**（`enable=1` 且有名單）＝ 才付 runtime heap ＋ 任務 stack。
+
+**能力閘補齊**：`nc_net_lines.c` 之前只擋 `iface=wifi`（未編入時）。現在連
+`iface=eth` 都檢查 `hardware.json` 的 `ETH.enable`：`0`（或冇 ETH 段）→ 跳過並
+警告，不再照 bind（冇 lwIP 會 `assert: Invalid mbox`）。這是「先確保有能力、
+再設定」在 network 層的落實。
+
+### 7.125 2026-11-19（指令表＋任務都改成「自己現身」；`main.c` 冇清單）
+
+- **Action**：`NC_ACTION_TABLE_DEF` 產生 constructor → `nc_action_add()`；`main.c`
+  只叫 `nc_action_init_all()`。登記表 8 格起、滿了配大（**冇固定上限**）。
+- **Task**：`NC_TASK_AUTO_REG(tag, &task)` 同樣在 constructor 登記；`main.c` 的 6 個
+  `nc_task_register()` 全部刪除。次序改由 `(level, order)` 決定
+  （nc4 10／net 10／hw_gpio 10／render 10／pixel 20／ncm 30 ），唔受 link 次序影響。
+- **必要條件**：`file_action`／`ota_action`／`test_action`／`hw_gpio`／`render_task`／
+  `pixel_task` 都要 `WHOLE_ARCHIVE` —— 冇 symbol 被 main 引用，linker 會整份丟掉
+  （實測：漏加時映像少 7 KB、任務 0 個）。
+- **踩到的 bug**：`app_main` 原本有 `nc_task_reset()`，在 constructor 之後把登記清空
+  → 開機「0 個任務、0 條通道」。已移除並在現場留註解。
+- **驗證**（S3 6×20 測試映像）：任務次序 nc4→net→hw_gpio→render→pixel→ncm、
+  `cmds` 85（0xF0xx 58）、50 fps、`enc_us` 191、`h_int` 120,247。
+- **方向**：`modules/` 之後放所有測試／模組化功能；build 工具在特定模式下把
+  `modules/actions/` 當成 `firmware/components/action/`（tasks 同理），因為兩者都
+  自行登記，所以「放進去就生效」；另一條路是編成 `.nct/.nce/.nca` 由 ncm 載入。

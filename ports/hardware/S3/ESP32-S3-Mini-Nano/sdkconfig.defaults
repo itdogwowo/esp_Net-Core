@@ -32,5 +32,7 @@ CONFIG_ESP_CONSOLE_NONE=y
 # 不要 USJ secondary：OTG 與 USJ 共用 PHY
 CONFIG_ESP_CONSOLE_SECONDARY_NONE=y
 
-# ── Wi-Fi（晶片原生 radio；runtime 仍由 network.json 的 wifi.enable 決定）──
-CONFIG_NETCORE_WIFI=y
+# ── Wi-Fi：預設不開（Kconfig NETCORE_WIFI=n，esp_wifi 完全唔 link）──
+# 建置開關在 **project 層**：ports/project/<chip>/<board>/sdkconfig.defaults
+#   加 CONFIG_NETCORE_WIFI=y 才會編入（這塊板的 project 目前冇加 → 關）。
+# 執行期再有一層：project/data/config/network.json 的 wifi.enable。

@@ -287,6 +287,8 @@ python3 tools/nc4_log.py --port /dev/cu.usbmodem*
 | `idf.py flash` 找不到埠 | app 佔著 TinyUSB | 用 `tools/flash.sh`（會等 ROM 埠） |
 | 燒完板子沒反應 | hard-reset 對 USB-JTAG 無效 | `tools/flash.sh` 已用 watchdog-reset 處理 |
 | `esp_tinyusb` 抓不到 | component manager 沒網路 | 檢查 `dependencies.lock` 與網路 |
+| **Windows 建 P4**：`ninja: fatal: CreateProcess: The parameter is incorrect (is the command line too long?)` | P4 會拉 `esp_hosted`／`wifi_remote`，include 路徑令命令列超過 Windows 的 ~32 KB 上限（**不是程式不相容**；同一棵樹在 WSL／Linux 建得過） | 建置時加 `-DCMAKE_NINJA_FORCE_RESPONSE_FILE=ON`（把命令列寫進 response file）<br>例：`idf.py -C firmware -B <build> -DIDF_TARGET=esp32p4 -DPORT=P4/ESP32-P4-ETH -DCMAKE_NINJA_FORCE_RESPONSE_FILE=ON build` |
+| 建 P4/C3 時 `Target 'esp32s3' in sdkconfig … does not match IDF_TARGET` | `firmware/sdkconfig` 是上一次 S3 建置留下的（沒傳 `-DSDKCONFIG`） | 刪 `firmware/sdkconfig`，或每次都傳 `-DSDKCONFIG=<build>/sdkconfig` |
 
 ---
 

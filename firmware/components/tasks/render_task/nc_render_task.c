@@ -605,12 +605,15 @@ static const nc_task_t s_task = {
     .name = "render",
     .kind = NC_TASK_NORMAL,
     .level = 4,
+    .order = 10,
     .declare = px_declare,
     .on_start = px_start,
     .on_stop = px_stop,
     .loops = s_loops,
     .nloops = 1,
 };
+
+NC_TASK_AUTO_REG(render, &s_task);
 
 const nc_task_t *nc_render_task(void)
 {

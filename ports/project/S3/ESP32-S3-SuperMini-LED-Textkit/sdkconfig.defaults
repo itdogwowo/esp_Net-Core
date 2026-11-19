@@ -33,3 +33,7 @@ CONFIG_NETCORE_PIXEL_ZONE_PX=8
 # 6 條 lane 的編碼在同一條 loop 上（每幀 6 次），300 fps 留餘裕。
 CONFIG_NETCORE_PIXEL_CORE=-1
 CONFIG_NETCORE_PIXEL_SPI=n
+
+# ── Wi-Fi：預設關（build 開關在 project 層）──
+# 要開就把下面一行解除註解；執行期再有一層 network.json 的 wifi.enable。
+# CONFIG_NETCORE_WIFI=y

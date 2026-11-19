@@ -15,4 +15,10 @@ idf_component_register(
     SRCS "nc_test_action.c"
     INCLUDE_DIRS "include"
     REQUIRES ${_req}
+    # 指令表由 NC_ACTION_TABLE_DEF 的 constructor 自己登記；main 已經唔再引用
+    # nc_test_action_table，唔加 WHOLE_ARCHIVE 成個 object 會被 linker 丟掉。
+    WHOLE_ARCHIVE
 )
+
+# 測試版本號（1..4；開關本身由 firmware/CMakeLists 的 NC_ENABLE_TESTS 決定）
+target_compile_definitions(${COMPONENT_LIB} PRIVATE ${NC_TEST_ID_DEFS})

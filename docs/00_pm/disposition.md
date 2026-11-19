@@ -42,7 +42,7 @@
 | B4 | `nc4_bus_start()` | 定義＋宣告、零呼叫 | 🗑️ | ✅ 已刪（連 header 註解、`s_task`、`DEFAULT_TASK_STACK/PRIO`） |
 | B5 | `NC4_CMD_RESET_TO_DOWNLOAD`（0x1019） | 定義了、零使用（文件已說刪） | 🗑️ | ✅ 已刪；`nc4.h` 原位留註解：0x1019 保留給 `ASSET_RELOAD` |
 | B6 | `main.c` 重複 `#include "nc_task.h"`（L54/L63） | 重複 | 🗑️ | ✅ 已刪一行 |
-| B7 | `tcp_sink`／`tcp_src` 測試 task | 已由 `CONFIG_NETCORE_TEST_TASKS` gate | ✅ | 保留（預設關） |
+| B7 | `tcp_sink`／`tcp_src` 測試 task | 已由 `CONFIG_NETCORE_TEST_TASKS` gate | 🗑️ | ✅ **已刪（2026-11-19）**：`components/tasks/test_tcp_tasks` 移除；同 `nc_net_raw`（`rawbench`）重疊 |
 | B8 | `hub_bench`／`tx_bench` 用的 static hub | 只在測試 handler 內 | 🗑️ | 跟 B2 一起處理 |
 
 ---

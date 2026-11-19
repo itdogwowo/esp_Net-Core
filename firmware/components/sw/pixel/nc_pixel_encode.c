@@ -615,6 +615,44 @@ void nc_px_codec_pack_merge8(const uint8_t *lane[8], uint32_t packed_bytes,
                           | (s_spread_nibble[b4 >> 4] << 4) | (s_spread_nibble[b5 >> 4] << 5)
                           | (s_spread_nibble[b6 >> 4] << 6) | (s_spread_nibble[b7 >> 4] << 7);
         uint8_t *dst = out + (j * 8u) * stride + off;
+        dst[0 * stride] |= (uint8_t)lo;
+        dst[1 * stride] |= (uint8_t)(lo >> 8);
+        dst[2 * stride] |= (uint8_t)(lo >> 16);
+        dst[3 * stride] |= (uint8_t)(lo >> 24);
+        dst[4 * stride] |= (uint8_t)hi;
+        dst[5 * stride] |= (uint8_t)(hi >> 8);
+        dst[6 * stride] |= (uint8_t)(hi >> 16);
+        dst[7 * stride] |= (uint8_t)(hi >> 24);
+    }
+}
+
+// 同 pack_merge8，但用 **store** 覆蓋（唔用 OR）。
+// 目的：16-bit 時第一組（lane 0–7）可以把整格寫死，之後的組才 OR，
+// 這樣就唔需要每幀先 memset 整格（16×600 省 ~2–3.6 ms）。
+void nc_px_codec_pack_merge8_store(const uint8_t *lane[8], uint32_t packed_bytes,
+                                   uint8_t *out, uint32_t stride, uint32_t off)
+{
+    if (lane == NULL || out == NULL || stride == 0) {
+        return;
+    }
+    for (uint32_t j = 0; j < packed_bytes; j++) {
+        const uint32_t b0 = (lane[0] != NULL) ? lane[0][j] : 0u;
+        const uint32_t b1 = (lane[1] != NULL) ? lane[1][j] : 0u;
+        const uint32_t b2 = (lane[2] != NULL) ? lane[2][j] : 0u;
+        const uint32_t b3 = (lane[3] != NULL) ? lane[3][j] : 0u;
+        const uint32_t b4 = (lane[4] != NULL) ? lane[4][j] : 0u;
+        const uint32_t b5 = (lane[5] != NULL) ? lane[5][j] : 0u;
+        const uint32_t b6 = (lane[6] != NULL) ? lane[6][j] : 0u;
+        const uint32_t b7 = (lane[7] != NULL) ? lane[7][j] : 0u;
+        const uint32_t lo = s_spread_nibble[b0 & 15u] | (s_spread_nibble[b1 & 15u] << 1)
+                          | (s_spread_nibble[b2 & 15u] << 2) | (s_spread_nibble[b3 & 15u] << 3)
+                          | (s_spread_nibble[b4 & 15u] << 4) | (s_spread_nibble[b5 & 15u] << 5)
+                          | (s_spread_nibble[b6 & 15u] << 6) | (s_spread_nibble[b7 & 15u] << 7);
+        const uint32_t hi = s_spread_nibble[b0 >> 4] | (s_spread_nibble[b1 >> 4] << 1)
+                          | (s_spread_nibble[b2 >> 4] << 2) | (s_spread_nibble[b3 >> 4] << 3)
+                          | (s_spread_nibble[b4 >> 4] << 4) | (s_spread_nibble[b5 >> 4] << 5)
+                          | (s_spread_nibble[b6 >> 4] << 6) | (s_spread_nibble[b7 >> 4] << 7);
+        uint8_t *dst = out + (j * 8u) * stride + off;
         dst[0 * stride] = (uint8_t)lo;
         dst[1 * stride] = (uint8_t)(lo >> 8);
         dst[2 * stride] = (uint8_t)(lo >> 16);

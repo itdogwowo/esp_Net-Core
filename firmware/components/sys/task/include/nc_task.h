@@ -133,6 +133,7 @@ typedef struct nc_task {
     const char *name;        // 全系統唯一
     nc_task_kind_t kind;
     int level;               // 小的先宣告、先啟動
+    int order;               // 同 level 的次序（小的先）；0 = 未指定，排最後
 
     // 資源
     const nc_task_res_t *mem; // 靜態需求（可留空）
@@ -162,6 +163,14 @@ void nc_task_reset(void);                                   // 清空（重開�
 
 // ① 登記一個任務（只登記，不啟動）。重名回 ESP_ERR_INVALID_STATE。
 esp_err_t nc_task_register(const nc_task_t *task);
+
+// 任務自己登記（constructor，app_main 之前跑完）：component 有 link 就有這個任務。
+// 第一個參數只是 C 識別字（用來命名 constructor），第二個是任務宣告。
+#define NC_TASK_AUTO_REG(_tag, _task_expr) \
+    static void __attribute__((constructor, used)) _nc_task_reg_##_tag(void) \
+    { \
+        (void)nc_task_register(_task_expr); \
+    }
 
 // 補寫：把「固件有／runtime attach 了、但 tasks.json 沒有」的租戶任務補進去。
 int nc_task_sync_cfg(void);

@@ -14,6 +14,7 @@
 #include "freertos/task.h"
 #include "lwip/sockets.h"
 #include "esp_random.h"
+#include "sdkconfig.h"
 
 #include "nc4_bus.h"
 #include "nc4_router.h"
@@ -784,6 +785,28 @@ esp_err_t nc_net_lines_declare(nc_net_decoder_fn get_decoder)
         }
         ln->listen_fd = -1;
         ln->fd = -1;
+
+#if !CONFIG_NETCORE_WIFI
+        // Wi-Fi 冇編入（NETCORE_WIFI=n）→ iface=wifi 的線一律跳過。
+        // 唔可以「照樣開 socket」：esp_netif／lwIP 係 nc_wifi_init() 初始化的，
+        // 冇 Wi-Fi 就冇 tcpip task，第一次 bind／connect 就會
+        // assert（tcpip_send_msg_wait_sem: Invalid mbox）→ 開機 boot loop。
+        if (l->iface == NC_CFG_IFACE_WIFI) {
+            ESP_LOGW(TAG, "line %s：iface=wifi 但 CONFIG_NETCORE_WIFI=n → 跳過",
+                     l->name);
+            continue;
+        }
+#endif
+        // 能力檢查：iface=eth 但這塊板冇開 ETH（wiring 的 ETH.enable=0）→ 跳過。
+        // 同一道理：冇 netif 就冇 tcpip task，開 socket 只會 assert。
+        if (l->iface == NC_CFG_IFACE_ETH) {
+            const nc_hardware_cfg_t *hw = nc_cfg_hardware();
+            if (hw == NULL || !hw->eth.present || !hw->eth.enable) {
+                ESP_LOGW(TAG, "line %s：iface=eth 但 hardware.json 的 ETH.enable=0 → 跳過",
+                         l->name);
+                continue;
+            }
+        }
 
         if (ln->service == NLS_HTTP) {
             ln->core = 0;                 // web 不需要 decoder；core 只係 httpd task

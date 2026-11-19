@@ -109,10 +109,6 @@
 #include "nc_prio.h"
 #include "nc_render.h"         // 渲染任務（tasks/render_task）
 #include "nc_pixel_task.h"    // 效果／Map 生產者（tasks/pixel_task）
-#ifdef NC_ENABLE_TESTS
-#include "nc_bench.h"
-#include "nc_test_tcp.h"
-#endif
 #include "nvs.h"
 #include "nvs_flash.h"
 #include "esp_mac.h"
@@ -2590,18 +2586,22 @@ static const nc_task_loop_t s_nc4_loops[] = {
 };
 
 static const nc_task_t s_task_nc4 = {
-    .name = "nc4", .kind = NC_TASK_SYSTEM, .level = 0,
+    .name = "nc4", .kind = NC_TASK_SYSTEM, .level = 0, .order = 10,
     .declare = task_nc4_declare, .on_start = task_nc4_start,
     .loops = s_nc4_loops, .nloops = sizeof(s_nc4_loops) / sizeof(s_nc4_loops[0]),
     .provides = s_nc4_provides,
     .nprovides = sizeof(s_nc4_provides) / sizeof(s_nc4_provides[0]),
 };
+NC_TASK_AUTO_REG(nc4, &s_task_nc4);
+
 
 // ② net（System L1）：UART / TCP 的 parser 緩衝（照實際硬體宣告）
 static const nc_task_t s_task_net = {
-    .name = "net", .kind = NC_TASK_SYSTEM, .level = 1,
+    .name = "net", .kind = NC_TASK_SYSTEM, .level = 1, .order = 10,
     .declare = task_net_declare, .on_start = task_net_start,
 };
+NC_TASK_AUTO_REG(net, &s_task_net);
+
 
 // ④ Action：NC4 指令（核心執行能力，不屬於任何任務）
 //
@@ -3360,23 +3360,10 @@ NC_ACTION_TABLE_DEF(s_main_test_action_table, "bench", s_main_test_actions);
 
 static void actions_init(void)
 {
-    // 每個模組宣告自己的 const 表；呢度只負責「列出有邊幾張表」。
-    // 統計、一次配置、排序、封存全部喺 nc_action_init() 裡面（唔會碎片）。
-    static const nc_action_table_t *const tables[] = {
-        &s_core_action_table,
-#ifdef NC_ENABLE_TESTS
-#if NC_HAS_USB
-        &s_main_test_action_table,
-#endif
-        &nc_test_action_table,
-#endif
-        &nc_ota_action_table,
-        &nc_file_action_table,
-#if CONFIG_NETCORE_PXBENCH
-        &s_pxbench_table,
-#endif
-    };
-    const esp_err_t err = nc_action_init(tables, sizeof(tables) / sizeof(tables[0]));
+    // 冇清單：每張表由自己嗰個 component 的 NC_ACTION_TABLE_DEF（constructor）
+    // 在 app_main 之前登記好；main 只需要叫一次 init。
+    // 「有冇這條指令」＝「嗰個 component 有冇 link 進來」，唔再由 main 決定。
+    const esp_err_t err = nc_action_init_all();
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "指令表建立失敗：%s", esp_err_to_name(err));
         return;
@@ -3632,12 +3619,14 @@ static int task_ncm_declare(nc_task_res_t *out, int max)
 
 static const nc_task_t s_task_ncm = {
     // ncm 是載入器／renderer，屬核心基建（房東），不是租戶：唔寫入 tasks.json。
-    .name = "ncm", .kind = NC_TASK_SYSTEM, .level = 4,
+    .name = "ncm", .kind = NC_TASK_SYSTEM, .level = 4, .order = 30,
     .declare = task_ncm_declare, .on_start = task_ncm_start,
     .loops = s_ncm_loops, .nloops = sizeof(s_ncm_loops) / sizeof(s_ncm_loops[0]),
     .provides = s_ncm_provides,
     .nprovides = sizeof(s_ncm_provides) / sizeof(s_ncm_provides[0]),
 };
+NC_TASK_AUTO_REG(ncm, &s_task_ncm);
+
 
 // 開機框架的掃描結果：B06 掃描 + 合併，B08 才載入 payload。
 static nc_mod_scan_t s_mod_scan;
@@ -4215,9 +4204,6 @@ static esp_err_t ph_hardware(void)
     esp_err_t nerr = net_eth_start();
     s_eth_ok = (nerr == ESP_OK);
     if (s_eth_ok) {
-#ifdef NC_ENABLE_TESTS
-        nc_test_tcp_start();   // 吞吐量測端點（5000–5003）
-#endif
         if (!nc_net_lines_enabled()) {
             xTaskCreatePinnedToCore(tcp_nc4_accept_task, "tcp_nc4", 6144, NULL, 9, NULL, 0);
         }
@@ -4296,7 +4282,8 @@ static esp_err_t ph_declare(void)
     }
 
     nc_plan_reset();
-    nc_task_reset();
+    // 唔可以喺呢度 nc_task_reset()：任務已經由 NC_TASK_AUTO_REG（constructor）
+    // 喺 app_main 之前登記好，reset 會把它們全部清空（2026-11-19 踩過：0 個任務）。
 
     // 每個核心一個 decoder：兩個 decode 任務的 handler 可以同時執行（互不等待）。
     // 指令表只有一份（唯讀）；第二份 decoder 只多 2.6 KB 回覆幀 ——
@@ -4317,25 +4304,13 @@ static esp_err_t ph_declare(void)
     if (s_decoder[0] != NULL) {
         actions_init();                    // 統計 → 一次配置 → 封存（不需要任何任務）
     }
-    nc_task_register(&s_task_nc4);     // L0：parser 緩衝 + decode0/1
-    nc_task_register(&s_task_net);     // L1：UART / TCP 緩衝（照 ETH 是否起來）
-    nc_task_register(nc_hw_gpio_task()); // L2：GPIO owner（nc_hw resource "gpio"）
-    // L4：渲染同效果係兩個任務（**唔受 NC_ENABLE_TESTS 限制**，是產品功能）。
-    // 次序重要：render 先登記 → 它的 on_start 建立／登記環；pixel 後，
-    // on_start 才找得到那條環。Kconfig 沒開時兩者都回 NULL，register 會忽略。
-    if (nc_render_task() != NULL) {
-        nc_task_register(nc_render_task());
-    }
-    if (nc_pixel_task() != NULL) {
-        nc_task_register(nc_pixel_task());
-    }
+    // 任務註冊已經改成「component 自己現身」（NC_TASK_AUTO_REG，constructor），
+    // 呢度唔再有清單。次序由 nc_task_t 的 (level, order) 決定：
+    // render order=10 → pixel order=20，所以 render 的 on_start 一定先建立環。
 #ifdef NC_ENABLE_TESTS
     // 測試「功能」改用外掛模組（/data/tasks/*.nct，動態加載）——
-    // hello／probe 等唔再入固件；呢度只留效能測試任務（bench/tcp）。
-    nc_task_register(&s_task_ncm);      // L4：模組 arena + render task
-    nc_task_register(nc_bench_task_a()); // L4：量測驗證用（預設 (0,0) = 唔跑）
-    nc_task_register(nc_bench_task_b());
-    nc_task_register(nc_bench_task_c());
+    // hello／probe 等唔再入固件；bench_a/b/c 與 tcp_sink/src 已於 2026-11-19 刪除
+    // （量測用 0xF0xx 指令＋nc_net_raw，見 commands.md）。
 #endif
 
 #ifdef NC_ENABLE_TESTS

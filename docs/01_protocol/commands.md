@@ -15,9 +15,10 @@
    **`0xFxxx` 整個區段都是「假指令」**：它們不是產品功能，是量測與回歸用的工具。
    上游 `mp_Net-Core` 的 schema **沒有這個區段** —— 看到 `0xF0xx` 就當它不存在（見 §2.1）。
 4. **handler 住在所屬域**：產品域放 `components/action/<域>_action/`；測試／量測
-   指令放 `components/dev/test_action/`；`main.c` 只做裝配（建 decoder → 呼叫各
-   action 表），唔應該再有新 handler。核心 `sys`／`status` 域的表暫時仍喺
-   `main.c`（歷史遺留，見下表），搬過去係 P2 重構。
+   指令放 `components/action/test_action/`（**名字 `test_` 開頭就係測試**，同產品域
+   同層，唔另開 `dev/`）；`main.c` 只做裝配（建 decoder → 呼叫各 action 表），
+   唔應該再有新 handler。核心 `sys`／`status` 域的表暫時仍喺 `main.c`
+   （歷史遺留，見下表），搬過去係 P2 重構。
 
    **目錄名 = 上游 schema 的 group 名**：
 
@@ -27,9 +28,8 @@ components/action/
 ├─ ota_action/      0x22xx  ota 域                                   ✅
 ├─ sys_action/      0x1xxx  sys 域                                   ⬜ 待建（暫在 main.c）
 ├─ status_action/   0x11xx  status 域（STATUS_GET / SET / ACK）      ⬜ 待建（暫在 main.c）
-└─ bench_action/    0x18xx  bench 域                                 ⬜ 待建（暫在 main.c）
-components/dev/
-└─ test_action/     0xFxxx  測試／量測區                              ✅
+├─ bench_action/    0x18xx  bench 域                                 ⬜ 待建（暫在 main.c）
+└─ test_action/     0xFxxx  測試／量測區（test_* = 測試）             ✅
 ```
 
 ### 1.1 指令 ID 分區（含外掛保留區）
@@ -42,7 +42,26 @@ components/dev/
 | `0x2000–0x20FF` | file 域 | `action/file_action` |
 | `0x2200–0x22FF` | OTA 域 | `action/ota_action` |
 | **`0x3000–0x3FFF`** | **外掛私有指令（保留）**：模組喺 `build.json` 的 `cmds` 宣告，由 ncm 註冊／路由；核心區唔可以由外掛佔用 | `components/host/ncm`（路由，未實作） |
-| `0xF000–0xF0FF` | 測試／量測（唔係產品功能） | `components/dev/test_action`（＋main.c 少量 bench） |
+| `0xF000–0xF0FF` | 測試／量測（唔係產品功能） | `components/action/test_action`（＋main.c 少量 bench） |
+
+### 1.1.1 指令表由 component 自己登記（2026-11-19）
+
+以前 `main.c` 有一張寫死的清單（`tables[] = { &s_core_action_table, … }`）——
+「邊條指令入映像」由 `main.c` 決定。現在改成**自己現身**：
+
+- 每個 component 用 `NC_ACTION_TABLE_DEF(...)` 宣告表；巨集會產生一個
+  **constructor**，在 `app_main` 之前呼叫 `nc_action_add()` 把表交去管理器。
+- `main.c` 只叫 `nc_action_init_all()`，**冇清單、冇 `#ifdef` 列表**。
+- 登記表**冇固定上限**：先收在 8 格靜態表，滿了 `malloc` 更大再搬（constructor 在 heap 初始化之後跑）。
+- 代價：component 冇任何 symbol 被 main 引用 → 要加 `WHOLE_ARCHIVE`
+  （`file_action`／`ota_action`／`test_action` 已加），否則 linker 會整份丟掉。
+- 效果：**「呢個 component 有冇 link 進來」就是唯一開關** —— 加／減一個 action
+  資料夾就加／減一組指令，`main.c` 唔使改。實測（2026-11-19，S3 測試映像）：
+  改前改後 `status cmds` 都是 **85 條（其中 0xF0xx 58 條）**。
+
+> 對照舊專案 `mp_Net-Core/slave/action/registry.py`：那邊是「每個 module 自己
+> `register(app)`，`app.py` 只叫 `register_all(app)`」。C 版把 registry 也拿走，
+> 由 linker／constructor 做，所以連 registry 清單都唔需要。
 
 ### 1.2 `action` 到底是什麼：表格＋handler，唔係可載入檔案
 

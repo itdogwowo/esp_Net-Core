@@ -9,4 +9,5 @@ idf_component_register(
     INCLUDE_DIRS "include"
     REQUIRES task mem hw core log config pixel
     PRIV_REQUIRES freertos esp_timer esp_driver_gpio drv_i80 drv_spi_led
+    WHOLE_ARCHIVE
 )

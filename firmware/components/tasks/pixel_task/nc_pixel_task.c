@@ -145,11 +145,14 @@ static const nc_task_t s_task = {
     .name = "pixel",
     .kind = NC_TASK_NORMAL,
     .level = 4,
+    .order = 20,
     .on_start = prd_start,
     .on_stop = prd_stop,
     .loops = s_loops,
     .nloops = 1,
 };
+
+NC_TASK_AUTO_REG(pixel, &s_task);
 
 const nc_task_t *nc_pixel_task(void)
 {
