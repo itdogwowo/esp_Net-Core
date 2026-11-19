@@ -1,0 +1,24 @@
+{
+  "_comment": [
+    "Project 層：S3/ESP32-S3-Matrix 硬體上跑「LED Textkit」的東西。",
+    "",
+    "跟 ESP32-S3-SuperMini-LED-Textkit 的分別只在硬體：",
+    "  · Matrix：64 顆 WS2812 串成一條鏈、資料腳 GPIO14（I80 只有 D0 用）",
+    "  · SuperMini-LED-Textkit：6 條鏈 × 20 顆，GPIO1–6",
+    "燈的幾何（lanes／pins／leds）仍然由 ports/hardware/S3/ESP32-S3-Matrix 的",
+    "sdkconfig.defaults 提供 —— 這裡只選擇 project 與執行期預置。",
+    "",
+    "執行期預置（data/config）：system.json 的 frame_interval_ms＝20（50 fps）、",
+    "tasks.json 開 render／pixel（level 4、core1）。要改行為改這些檔，唔使 rebuild。"
+  ],
+  "version": 1,
+  "name": "ESP32-S3-Matrix-LED-Textkit",
+  "hardware": "S3/ESP32-S3-Matrix",
+  "aliases": ["matrix-textkit", "matrix-led-textkit"],
+  "seed": [
+    "hardware",
+    "system",
+    "network",
+    "tasks"
+  ]
+}

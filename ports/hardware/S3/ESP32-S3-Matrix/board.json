@@ -7,7 +7,11 @@
     "freq_mhz": 80,
     "mode": "dio"
   },
-  "psram": null,
+  "psram": {
+    "size_mb": 2,
+    "mode": "quad",
+    "speed_mhz": 80
+  },
   "cpu_mhz": 240,
   "console": "none",
   "profiles": [],
@@ -16,6 +20,6 @@
     "wifi": true,
     "usb": true
   },
-  "verified": null,
-  "notes": "Waveshare ESP32-S3-Matrix（SKU 27119）：4 MB flash、無 PSRAM、240 MHz；板載 64 顆 WS2812B-0807 串成 8×8，資料腳 GPIO14（Demo：Adafruit_NeoPixel(64, 14, NEO_RGB + NEO_KHZ800)），Dout 可再串。板載 QMI8658（IO10–13）。8×8 的驅動／抖動測試見 docs/03_notes/rgb-matrix-dither.md。"
+  "verified": "2026-11-19：ESP32-S3FH4R2（4 MB flash／2 MB PSRAM）；來源 Waveshare 文件＋CircuitPython 板頁＋vendor demo",
+  "notes": "Waveshare ESP32-S3-Matrix（SKU 27119）：ESP32-S3FH4R2（4 MB flash、2 MB PSRAM quad 80 MHz、512 KB SRAM、240 MHz）；板載 64 顆 WS2812B-0807 串成 8×8，資料腳 GPIO14（Demo：Adafruit_NeoPixel(64, 14, NEO_RGB + NEO_KHZ800)），Dout 可再串。板載 QMI8658 IMU：I2C SDA=GPIO11、SCL=GPIO12（見 vendor demo WS_QMI8658.cpp）。USB OTG FS = GPIO19/20，console=none。8×8 的驅動／抖動測試見 docs/03_notes/rgb-matrix-dither.md；完整板子筆記（含 IMU I2C 與燒錄注意）見同一目錄的 README.md。"
 }

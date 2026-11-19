@@ -52,7 +52,7 @@ def cmd_build(cfg: dict, args: argparse.Namespace) -> int:
         clean=args.clean, fresh=args.fresh,
         do_doctor=not args.no_doctor,
         do_archive=False if args.no_archive else None,
-        tests=args.tests,
+        tests=args.tests, wifi=args.wifi,
         project=args.project, no_project=args.no_project,
     )
 
@@ -205,6 +205,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--tests", action="store_true",
                    help="測試映像（NC_ENABLE_TESTS=ON：0xF00x 指令與 test_* 任務）；"
                         "預設 OFF＝出貨映像。之前靠 CMake cache 記住上一個值，現在每次都明確傳")
+    p.add_argument("--wifi", dest="wifi", action="store_true", default=None,
+                   help="把 CONFIG_NETCORE_WIFI=y 編進映像（只影響這次 build；預設照 project）")
+    p.add_argument("--no-wifi", dest="wifi", action="store_false",
+                   help="明確關掉 WiFi（CONFIG_NETCORE_WIFI=n）")
     p.add_argument("--jobs", type=int, help="平行編譯數（預設讓 IDF 決定）")
     p.add_argument("--clean", action="store_true", help="先清這塊板的 artifacts/build/<board>/")
     p.add_argument("--fresh", action="store_true", help="先清 build dir 與 sdkconfig（重新套用 defaults）")

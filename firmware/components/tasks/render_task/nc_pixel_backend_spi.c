@@ -5,7 +5,7 @@
 // 環的 acquire/release 與 slot ↔ seq 對應。
 //
 // 一位 = 一個 SPI 時脈。WS2801／APA102 是這個後端唯一的用途；
-// WS2812 這類歸零碼燈走 I80（見 nc_pixel_backend_i80.c）。
+// WS2812 這類歸零碼燈走 I80（見 nc_i80_out.c）。
 #include <sdkconfig.h>
 
 #if CONFIG_NETCORE_PIXEL_SPI

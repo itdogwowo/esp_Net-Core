@@ -81,13 +81,14 @@
     ]
   },
   "I2C": {
-    "enable": 0,
+    "enable": 1,
     "list": [
       {
-        "freq": 400000,
+        "_comment": "板載 QMI8658 IMU：SDA=11／SCL=12（vendor demo WS_QMI8658.cpp）；nc_cfg 未 parse I2C，現時只是文件影子。見同一目錄的 README.md",
+    "freq": 400000,
         "GPIO": {
-          "scl": null,
-          "sda": null
+          "scl": 12,
+          "sda": 11
         }
       }
     ]

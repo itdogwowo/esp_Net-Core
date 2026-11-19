@@ -4883,3 +4883,19 @@ DMA 仍然 17.36 ms（43,400 PCLK ÷ 2.5 MHz）→ 16×600 是 **CPU-bound**，
 - **方向**：`modules/` 之後放所有測試／模組化功能；build 工具在特定模式下把
   `modules/actions/` 當成 `firmware/components/action/`（tasks 同理），因為兩者都
   自行登記，所以「放進去就生效」；另一條路是編成 `.nct/.nce/.nca` 由 ncm 載入。
+
+### 7.126 2026-11-19（Matrix 板事實修正、Matrix-LED-Textkit project、上板驗證）
+
+- **板子定義修正**：`ports/hardware/S3/ESP32-S3-Matrix` 之前寫「無 PSRAM」，實際是
+  **ESP32-S3FH4R2：4 MB flash ＋ 2 MB PSRAM（quad 80 MHz）**。
+  `board.json` 的 `psram` 已補、`sdkconfig.defaults` 由 `CONFIG_SPIRAM=n` 改成
+  `SPIRAM=y／QUAD／80M`；notes 補上 IMU（QMI8658，I2C SDA=11／SCL=12，來自 vendor demo）。
+  來源：Waveshare 文件、CircuitPython 板頁、`ESP32-S3-Matrix-Demo`（WS_Matrix.h：GPIO14、64 顆）。
+- **新 project**：`ports/project/S3/ESP32-S3-Matrix-LED-Textkit`（alias `matrix-textkit`），
+  hardware = `S3/ESP32-S3-Matrix`，預置沿用 64 顆／50 fps／render+pixel core1。
+- **上板驗證**（Matrix 映像 `1e23943d`，USB CDC COM24）：
+  `0xF061` → `lanes=[{be:"i80",lanes:1,width:8,px:64}]`、`fps=50`、`enc_us=348`、
+  `frame_us=19,985`、`h_int=102,119`、`h_ps=1,560,896`。1 lane 64 顆的 units
+  ＝4,808 B（比 6×20 的 1,640 B 多），所以 enc 348 µs 是預期，不是回歸。
+- **注意**：Matrix 映像 `console=none`、log 走 TinyUSB CDC ＋ MSC（VID 303A:4003），
+  燒錄後 USJ 的 COM 會消失、出現新的 CDC COM。

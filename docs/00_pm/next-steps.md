@@ -243,3 +243,57 @@
 > 唯一的緩衝工具；`0xF032` P4 11/11、S3-Matrix（無 PSRAM）8/8，`0xF02F` S3／P4 都
 > `parser_ring:true`。仍留白的是 **9.9**（可等待／tap／per-link max_frame）與
 > plan 公開 API 未收；這些係規劃取捨，不是已知 bug。
+
+---
+
+## 12. 待執行：WiFi 記憶體（2026-11-19 量測，未定案）
+
+**已量到（release 對 release，S3 6×20）**
+
+| | 未編入 | 編入・`enable=0` | 編入・`enable=1` |
+|---|---:|---:|---:|
+| app | 687,712 | 1,201,824 | — |
+| 靜態（bss+data+IRAM） | 192,838 | 246,930 | — |
+| `h_int` | 218,279 | 161,943 | 74,963 |
+| `h_ps` | 2,085,208 | 2,085,208 | 1,984,808 |
+
+- 編入＝flash **+514,112 B**、靜態 **+54,092 B**（IRAM 27,356 是 `IRAM_OPT`）。
+- 開啟＝internal 再 −86,980、PSRAM −100,400（netline plan 緩衝）。
+- 早前「−110 KB」是 tests 映像被 `espnow_boot` 污染，已作廢。
+
+**待做**
+
+| # | 項目 | 狀態 |
+|---:|---|---|
+| 12.1 | 乾淨 2×2：build off/on × enable 0/1，每次 `fs_format` 再量（今次 lowmem 那組 FAT 是舊的，數字不可信） | ⏸ |
+| 12.2 | `SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y`：把 lwIP／WiFi 緩衝推去 PSRAM，量 internal 差 | ⏸ 初步：靜態 IRAM −18,124，但 enable=1 的 internal 反而 +7 KB（待 12.1 重測） |
+| 12.3 | `ESP_WIFI_IRAM_OPT=n`／`RX_IRAM_OPT=n` 的效能代價（TX/RX 吞吐、RTT） | ⏸ |
+| 12.4 | 縮 `STATIC_RX_BUFFER_NUM`(10)、`DYNAMIC_RX/TX`(32/32)、`LWIP_MAX_SOCKETS`(10) 的取捨 | ⏸ |
+| 12.5 | 定案：WiFi 預設關（project 開關）、文件寫明「編入＝+514 KB flash／+54 KB SRAM；開啟＝−87 KB internal／−100 KB PSRAM」 | ⏸ |
+
+---
+
+## 13. 待執行：I80 分層與命名（2026-11-19 提出）
+
+**問題**：`nc_pixel_backend_i80.c` 這個名字把 I80 綁在 pixel 上；但 I80 是通用匯流排，
+pixel 只是其中一個使用者。**2026-11-19：已更名為 `nc_i80_out.c`（同目錄），TAG `i80_out`。**
+
+**目標分層**
+
+| 層 | 應該知什麼 | 不應該知什麼 |
+|---|---|---|
+| `driver/drv_i80`（通用） | bus、PCLK、DMA 槽、完成回呼、送出一塊 byte buffer | pixel、環、lane 合併 |
+| `i80 out`（通用送出 API） | lane 數、每 lane 的 packed bytes、時序 | 效果、像素格式、環 |
+| `sw/pixel`（pixel 側） | 環、編碼、lane 合併、pixel 格式 | I80 register 細節 |
+
+**步驟**
+
+| # | 工作 | 狀態 |
+|---:|---|---|
+| 13.1 | 在 `drv_i80` 抽一個通用 `nc_i80_out_submit(buf, bytes, lanes, ...)`（唔用 `nc_pixel_*` 型別） | ⏸ |
+| 13.2 | ~~搬去 `sw/pixel`~~ → 留在 `render_task`：它實作 renderer 的 backend 介面，搬去 pixel 會反向依賴 | ✅ 決定 |
+| 13.3 | 改名（`nc_i80_out.c`／TAG `i80_out`）＋ `drv_i80` 證實零 pixel 引用 | ✅ 完成 |
+| 13.4 | 驗證：Textkit 6×20 通過；**Matrix（1 lane GPIO14）2026-11-19 上板通過**：`0xF061` lanes=1／px=64、50 fps、enc 348 µs、PSRAM 2 MB | ✅ |
+
+**未定**：通用送出 API 叫咩（`nc_i80_out_*`／`nc_i80_bus_*`）；`nc_pixel_backend_t`
+是否留在 pixel 層（建議留）。

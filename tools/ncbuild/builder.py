@@ -36,7 +36,30 @@ def _env_prefix(port: env.Port) -> str:
     return f'NC_PORT="{port.hw_rel}" NC_PROJECT="{port.pj_rel}" '
 
 
-def _idf_args(port: env.Port, build: Path, minimal: bool, tests: bool = False) -> list[str]:
+def _wifi_defaults(build: Path, wifi: bool) -> Path:
+    """--wifi／--no-wifi 的臨時 defaults：只加（或明確關掉）CONFIG_NETCORE_WIFI。
+
+    唔改 ports/：WiFi 是「能力開關」，屬 build 層，但用一次性的 override 就夠。
+    """
+    p = build / ("wifi_on.defaults" if wifi else "wifi_off.defaults")
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text("CONFIG_NETCORE_WIFI=y\n" if wifi
+                 else "# CONFIG_NETCORE_WIFI is not set\n", encoding="utf-8")
+    return p
+
+
+def _wifi_now(build: Path) -> bool | None:
+    """讀這個 build 的 sdkconfig 有沒有 CONFIG_NETCORE_WIFI=y；冇檔回 None。"""
+    sc = build / "sdkconfig"
+    if not sc.exists():
+        return None
+    for line in sc.read_text(encoding="utf-8", errors="replace").splitlines():
+        if line.startswith("CONFIG_NETCORE_WIFI="):
+            return line.strip().endswith("=y")
+    return False
+
+def _idf_args(port: env.Port, build: Path, minimal: bool, tests: bool = False,
+              wifi: bool | None = None) -> list[str]:
     args = [f'-DPORT={port.hw_rel}', f'-DPROJECT={port.pj_rel}',
             f'-DIDF_TARGET={port.chip}',
             # 每個 build dir 自己的 sdkconfig：多塊板並存時不用互相切 target。
@@ -46,6 +69,8 @@ def _idf_args(port: env.Port, build: Path, minimal: bool, tests: bool = False) -
     # 明確傳：CMake 的 cache 會記住上一次的值，靠「不傳」＝靠運氣。
     # 之前的坑：`make.py build s3` 看似建 release，其實重用了 NC_ENABLE_TESTS=ON 的 cache。
     args.append("-DNC_ENABLE_TESTS=" + ("ON" if tests else "OFF"))
+    if wifi is not None:
+        args.append("-DNC_EXTRA_DEFAULTS=" + shlex.quote(str(_wifi_defaults(build, wifi))))
     return args
 
 
@@ -66,7 +91,7 @@ def build(cfg: dict, board_query: str | None, *, minimal: bool = False,
           jobs: int | None = None, clean: bool = False, fresh: bool = False,
           do_doctor: bool = True, do_archive: bool | None = None,
           tests: bool = False, project: str | None = None,
-          no_project: bool = False) -> int:
+          no_project: bool = False, wifi: bool | None = None) -> int:
     port = env.resolve_board(board_query, project=project, no_project=no_project)
     d, b, chip = port.hw, port.board, port.chip
     board = port.output_name
@@ -81,6 +106,9 @@ def build(cfg: dict, board_query: str | None, *, minimal: bool = False,
             print("\n先修上面的問題再 build；--no-doctor 可跳過。")
             return 1
 
+    if wifi is not None and not fresh and _wifi_now(build) is not None and _wifi_now(build) != wifi:
+        print("→ --wifi 與現有 sdkconfig 不符：刪 sdkconfig 重新套用")
+        fresh = True
     if fresh:
         for p in (build / "sdkconfig", build / "sdkconfig.old"):
             if p.exists():
@@ -92,7 +120,7 @@ def build(cfg: dict, board_query: str | None, *, minimal: bool = False,
             print(f"→ 清掉 {build.relative_to(env.ROOT) if build.is_relative_to(env.ROOT) else build}")
 
     build.parent.mkdir(parents=True, exist_ok=True)
-    args = _idf_args(port, build, minimal, tests)
+    args = _idf_args(port, build, minimal, tests, wifi)
     out_dir = env.artifacts_dir(cfg)
     ts = artifacts.stamp()
     log = out_dir / "logs" / f"{board}_{ts}{'_minimal' if minimal else ''}.log"

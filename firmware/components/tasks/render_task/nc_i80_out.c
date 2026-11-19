@@ -1,10 +1,10 @@
-// nc_pixel_backend_i80.c — 渲染器 ↔ I80 驅動的轉接層（task 側）。
+// nc_i80_out.c — I80 輸出轉接層（renderer 側；唔含 pixel 命名、唔碰 driver 內部）。
 //
-// 分工（2026-11-18 分層）：
-//   · driver/drv_i80：I80 bus／PCLK／DMA 槽／完成回呼（唔知像素、唔知環）
-//   · 這一支：政策（腳位保留／claim、GPIO3 例外）、codec、lane 合成、環的
-//     acquire/release、slot ↔ seq 對應
-//   · sw/pixel：環＋編碼器＋效果
+// 分層（2026-11-19 更名）：
+//   · driver/drv_i80：I80 bus／PCLK／DMA 槽／完成回呼 —— 通用，完全唔識 pixel
+//   · 這一支：I80 輸出政策（lane 合成、腳位 claim、slot↔seq、環的 acquire/release）
+//   · sw/pixel：環＋編碼器＋效果；render_task：節拍與後端編排
+//   · 新增第二個 I80 使用者時，改這裡與 drv_i80，不用動編碼器
 //
 // 多 lane 合成：codec 每條 lane 輸出一串「單元」（每單元 1 byte，0/1）。
 //   這裡把 lane0..laneN 的單元 OR 起來 → 一個 I80 byte（bit0 = D0 = lane0 的資料）。
@@ -22,7 +22,7 @@
 #include "nc_i80_drv.h"
 #include "nc_render.h"
 
-static const char *TAG = "px_i80";
+static const char *TAG = "i80_out";
 
 #define I80_SLOTS_MAX NC_I80_DRV_SLOTS_MAX
 #define I80_LANES_MAX 16                       // 8-bit = 8、16-bit = 16
