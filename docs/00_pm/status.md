@@ -5221,7 +5221,8 @@ DMA 仍然 17.36 ms（43,400 PCLK ÷ 2.5 MHz）→ 16×600 是 **CPU-bound**，
   |---|---|---:|---:|---:|---|---|
   | 1 | tests | 838,944 B | 3.3 s | 132.4 s（6.2 KB/s） | ✅ verified | `app ad49f374`、`h_int 120,663` |
   | 2 | release | 678,448 B | 2.6 s | 108.3 s（6.1 KB/s） | ✅ verified | `app 7a4b7e37`、`h_int 219,347` |
-  | 3 | release（0xF063 修正後） | 678,448 B | 2.6 s | 108.3 s | ✅ verified | `app a96af8fc` |
+  | 3 | release（0xF063 修正後，dirty 樹） | 678,448 B | 2.6 s | 108.3 s | ✅ verified | `app a96af8fc` |
+  | 4 | release（commit `4fb33ea`，乾淨樹） | 678,448 B | 2.6 s | 106.9 s（6.2 KB/s） | ✅ verified | `app 63c2259f`、`git_dirty=false` |
 
   - 三次 `APPLY` 都自動重開；`storage.boot.fw_new=1` → 換韌體照設計格式化 `/data` 再 provision
     （所以 `/data` 回到 project 預置，config 的 sha 會變）。
