@@ -73,11 +73,11 @@ def stats(s):
     return hub_json(s, 0xF060, b"\x00", 0.2)
 
 
-def run_prog(s, px_list, as_json: bool, per_led: bool = False) -> int:
+def run_prog(s, px_list, as_json: bool, per_led: bool = False, psram: bool = False) -> int:
     """模式③：0xF064 PROGBENCH → 逐型別 value ns ＋ plan／frame（scatter）成本。"""
     ok = False
     for px in px_list:
-        r = hub_json(s, 0xF064, struct.pack("<HB", px, 1 if per_led else 0), 4.0)
+        r = hub_json(s, 0xF064, struct.pack("<HB", px, (1 if per_led else 0) | (2 if psram else 0)), 6.0)
         if r is None:
             print("冇回覆：板上 build 要有 0xF064（test_action ＋ CONFIG_NETCORE_PIXEL）")
             return 1
@@ -86,7 +86,9 @@ def run_prog(s, px_list, as_json: bool, per_led: bool = False) -> int:
             print(json.dumps(r, ensure_ascii=False))
             continue
         v = r.get("val_ns", {})
-        print(f"\npx={r.get('px')}  sram={'internal' if r.get('sram') else 'psram'}"
+        print(f"\npx={r.get('px')}  canvas={'psram' if r.get('canvas') else 'internal'}"
+              f"  pair12={r.get('pair12_ns')} ns  conv={r.get('conv_ns')} ns"
+              f"  dither={r.get('dither_ns')} ns"
               f"  plan={r.get('plan_us')} us  frame={r.get('frame_ns')} ns")
         print(f"  {'type':<16}{'ns/值':>8}")
         for k in ("keep", "math_now", "square", "pulse_wave", "pulse", "starter"):
@@ -149,6 +151,8 @@ def main() -> int:
     ap.add_argument("--px", default="64,960,9600", help="模式③ 的燈鏈長度（逗號分隔）")
     ap.add_argument("--per-led", action="store_true",
                     help="模式③ 極限：每個 LED 都算自己一個值（pixel_hint = px）")
+    ap.add_argument("--psram", action="store_true",
+                    help="模式③：12-bit 畫布放 PSRAM（預設 internal）")
     args = ap.parse_args()
 
     with serial.Serial(args.port, args.baud, timeout=0.2) as s:
@@ -158,7 +162,7 @@ def main() -> int:
             return run_sin(s, iters, args.json)
         if args.prog:
             px_list = [max(8, min(16384, int(x))) for x in args.px.split(",") if x.strip()]
-            return run_prog(s, px_list, args.json, args.per_led)
+            return run_prog(s, px_list, args.json, args.per_led, args.psram)
 
         send(s, 0xF060, bytes([8, 8]))      # BITS = 8（8-bit 原生）
         send(s, 0xF060, bytes([2, 0]))      # DITHER off

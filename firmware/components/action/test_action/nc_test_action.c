@@ -4528,7 +4528,9 @@ static void on_progbench(nc4_ctx_t *ctx, const nc4_frame_t *f)
     if (f->len >= 2) {
         px = (uint16_t)(f->data[0] | ((uint16_t)f->data[1] << 8));
     }
-    const bool per_led = (f->len >= 3) && (f->data[2] != 0);   // 1 = 每個 LED 一個值
+    const uint8_t flags = (f->len >= 3) ? f->data[2] : 0;
+    const bool per_led = (flags & 0x01) != 0;      // 每顆 LED 一個值
+    const bool use_psram = (flags & 0x02) != 0;    // 12-bit 畫布放 PSRAM
     if (px < 8) { px = 8; }
     if (px > 16384) { px = 16384; }
 
@@ -4578,13 +4580,70 @@ static void on_progbench(nc4_ctx_t *ctx, const nc4_frame_t *f)
         heap_caps_free(canvas);
     }
 
+    // [3] 12-bit 畫布：pair_apply12（internal vs PSRAM）＋ 12→8（有／冇抖動）
+    uint32_t pair12_ns = 0, conv_ns = 0, dither_ns = 0;
+    int canvas_kind = 0;                             // 0=internal 1=psram
+    uint16_t *c12 = heap_caps_malloc((size_t)px * 4u * sizeof(uint16_t),
+                                     use_psram ? MALLOC_CAP_SPIRAM
+                                               : (MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
+    canvas_kind = use_psram ? 1 : 0;
+    if (c12 == NULL && !use_psram) {
+        c12 = heap_caps_malloc((size_t)px * 4u * sizeof(uint16_t), MALLOC_CAP_SPIRAM);
+        canvas_kind = 1;
+    }
+    uint8_t *c8 = heap_caps_malloc((size_t)px * 4u, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    if (c12 != NULL && c8 != NULL) {
+        memset(c12, 0, (size_t)px * 4u * sizeof(uint16_t));
+        prog_fill_asset(&s_bpa, NC_PX_SEG_MATH_NOW);
+        memset(&s_bpp, 0, sizeof(s_bpp));
+        s_bpp.njobs = 1;
+        s_bpp.job[0].asset = &s_bpa;
+        s_bpp.job[0].write = NC_PX_WRITE_RGB;
+        s_bpp.job[0].nranges = 1;
+        s_bpp.job[0].rng[0].base = 0;
+        s_bpp.job[0].rng[0].count = px;
+        s_bpp.job[0].nled = px;
+        (void)nc_px_engine_program_compile(&s_bpa, &s_bpp.job[0].prog);
+
+        const uint32_t frames = (px > 2000) ? 50 : 300;
+        uint16_t vals[256];
+        const uint16_t nv = nc_px_job_vals(&s_bpp.job[0], 0, vals, 256);
+        int64_t t0 = esp_timer_get_time();
+        for (uint32_t i = 0; i < frames; i++) {
+            nc_px_pair_apply12(&s_bpp.job[0], vals, nv, c12);
+        }
+        pair12_ns = (uint32_t)((esp_timer_get_time() - t0) * 1000 / (int64_t)frames);
+
+        int32_t err[4] = { 0, 0, 0, 0 };
+        t0 = esp_timer_get_time();
+        for (uint32_t i = 0; i < frames; i++) {
+            nc_px_canvas12_to_8(c12, c8, px * 4u, false, err);
+        }
+        conv_ns = (uint32_t)((esp_timer_get_time() - t0) * 1000 / (int64_t)frames);
+
+        int32_t err2[4] = { 0, 0, 0, 0 };
+        t0 = esp_timer_get_time();
+        for (uint32_t i = 0; i < frames; i++) {
+            nc_px_canvas12_to_8(c12, c8, px * 4u, true, err2);
+        }
+        dither_ns = (uint32_t)((esp_timer_get_time() - t0) * 1000 / (int64_t)frames);
+    }
+    if (c12 != NULL) {
+        heap_caps_free(c12);
+    }
+    if (c8 != NULL) {
+        heap_caps_free(c8);
+    }
+
     (void)snprintf(j, sizeof(j),
                    "{\"px\":%u,\"val_ns\":{\"keep\":%u,\"math_now\":%u,"
                    "\"square\":%u,\"pulse_wave\":%u,\"pulse\":%u,\"starter\":%u},"
-                   "\"plan_us\":%u,\"frame_ns\":%u,\"sram\":%d,\"per_led\":%d}",
+                   "\"plan_us\":%u,\"frame_ns\":%u,\"sram\":%d,\"per_led\":%d,"
+                   "\"canvas\":%d,\"pair12_ns\":%u,\"conv_ns\":%u,\"dither_ns\":%u}",
                    (unsigned)px, (unsigned)v_keep, (unsigned)v_math, (unsigned)v_sq,
                    (unsigned)v_pw, (unsigned)v_pu, (unsigned)v_st,
-                   (unsigned)plan_us, (unsigned)frame_us, sram, per_led ? 1 : 0);
+                   (unsigned)plan_us, (unsigned)frame_us, sram, per_led ? 1 : 0,
+                   canvas_kind, (unsigned)pair12_ns, (unsigned)conv_ns, (unsigned)dither_ns);
     reply_json(ctx, NC4_CMD_HUB_RSP, j);
 }
 #endif  // CONFIG_NETCORE_PIXEL
