@@ -258,84 +258,120 @@ esp_err_t nc_px_show_plan(const nc_px_mode_t *mode, const nc_px_map_t *map,
     return ESP_OK;
 }
 
+uint16_t nc_px_job_vals(const nc_px_job_t *job, uint32_t step, uint16_t *out, uint16_t cap)
+{
+    if (job == NULL || job->asset == NULL || out == NULL || cap == 0) {
+        return 0;
+    }
+    const nc_px_asset_t *a = job->asset;
+    uint16_t n = a->pixel_hint;
+    if (n == 0) {
+        n = 1;
+    }
+    if (n > cap) {
+        n = cap;
+    }
+    const uint16_t speed = (a->speed == 0) ? 1 : a->speed;
+    uint32_t ph = ((uint32_t)(step / speed) * (uint32_t)a->step + (uint32_t)a->offset);
+    ph = (job->prog.total != 0) ? (ph % job->prog.total) : 0;
+    for (uint16_t i = 0; i < n; i++) {
+        const uint16_t idx = a->reverse ? (uint16_t)(n - 1u - i) : i;
+        uint32_t p = ph + (uint32_t)idx * (uint32_t)a->spacing;
+        p = (job->prog.total != 0) ? (p % job->prog.total) : 0;
+        out[i] = nc_px_engine_program_value(&job->prog, p);
+    }
+    return n;
+}
+
+void nc_px_pair_apply(const nc_px_job_t *job, const uint16_t *vals, uint16_t nv, uint8_t *dst)
+{
+    if (job == NULL || dst == NULL) {
+        return;
+    }
+    uint16_t k = 0;
+    for (uint8_t r = 0; r < job->nranges; r++) {
+        for (uint16_t x = 0; x < job->rng[r].count; x++, k++) {
+            uint8_t *o = dst + ((uint32_t)(job->rng[r].base + x) << 2);
+            switch (job->write) {
+            case NC_PX_WRITE_R:
+                o[0] = (nv > 0) ? (uint8_t)(vals[k % nv] >> 4) : 0;
+                break;
+            case NC_PX_WRITE_G:
+                o[1] = (nv > 0) ? (uint8_t)(vals[k % nv] >> 4) : 0;
+                break;
+            case NC_PX_WRITE_B:
+                o[2] = (nv > 0) ? (uint8_t)(vals[k % nv] >> 4) : 0;
+                break;
+            case NC_PX_WRITE_W:
+                o[3] = (nv > 0) ? (uint8_t)(vals[k % nv] >> 4) : 0;
+                break;
+            case NC_PX_WRITE_WW: {
+                o[0] = 0;
+                o[1] = 0;
+                if (nv > 0) {
+                    const uint16_t v = vals[k % nv];
+                    o[2] = (uint8_t)(v & 0xFFu);
+                    o[3] = (uint8_t)(v >> 8);
+                } else {
+                    o[2] = 0;
+                    o[3] = 0;
+                }
+                break;
+            }
+            case NC_PX_WRITE_RGB:
+                if (nv > 0) {
+                    o[0] = (uint8_t)(vals[(uint16_t)((3u * k) % nv)] >> 4);
+                    o[1] = (uint8_t)(vals[(uint16_t)((3u * k + 1u) % nv)] >> 4);
+                    o[2] = (uint8_t)(vals[(uint16_t)((3u * k + 2u) % nv)] >> 4);
+                } else {
+                    o[0] = 0;
+                    o[1] = 0;
+                    o[2] = 0;
+                }
+                o[3] = 0;
+                break;
+            case NC_PX_WRITE_RGBW:
+                if (nv > 0) {
+                    o[0] = (uint8_t)(vals[(uint16_t)((4u * k) % nv)] >> 4);
+                    o[1] = (uint8_t)(vals[(uint16_t)((4u * k + 1u) % nv)] >> 4);
+                    o[2] = (uint8_t)(vals[(uint16_t)((4u * k + 2u) % nv)] >> 4);
+                    o[3] = (uint8_t)(vals[(uint16_t)((4u * k + 3u) % nv)] >> 4);
+                } else {
+                    o[0] = 0;
+                    o[1] = 0;
+                    o[2] = 0;
+                    o[3] = 0;
+                }
+                break;
+            case NC_PX_WRITE_WWWW:
+                if (nv > 0) {
+                    const uint8_t v8 = (uint8_t)(vals[k % nv] >> 4);
+                    o[0] = v8;
+                    o[1] = v8;
+                    o[2] = v8;
+                    o[3] = v8;
+                } else {
+                    o[0] = 0;
+                    o[1] = 0;
+                    o[2] = 0;
+                    o[3] = 0;
+                }
+                break;
+            default:
+                break;
+            }
+        }
+    }
+}
+
 void nc_px_show_frame(const nc_px_plan_t *plan, uint32_t step, uint8_t *dst)
 {
     if (plan == NULL || dst == NULL) {
         return;
     }
+    uint16_t vals[VAL_MAX];
     for (uint8_t j = 0; j < plan->njobs; j++) {
-        const nc_px_job_t *job = &plan->job[j];
-        const nc_px_asset_t *a = job->asset;
-        uint16_t n = a->pixel_hint;
-        if (n == 0) {
-            n = 1;
-        }
-        if (n > VAL_MAX) {
-            n = VAL_MAX;
-        }
-        uint16_t vals[VAL_MAX];
-        const uint16_t speed = (a->speed == 0) ? 1 : a->speed;
-        uint32_t ph = ((uint32_t)(step / speed) * (uint32_t)a->step + (uint32_t)a->offset);
-        if (job->prog.total != 0) {
-            ph %= job->prog.total;
-        } else {
-            ph = 0;
-        }
-        for (uint16_t i = 0; i < n; i++) {
-            const uint16_t idx = a->reverse ? (uint16_t)(n - 1u - i) : i;
-            uint32_t p = ph + (uint32_t)idx * (uint32_t)a->spacing;
-            if (job->prog.total != 0) {
-                p %= job->prog.total;
-            } else {
-                p = 0;
-            }
-            vals[i] = nc_px_engine_program_value(&job->prog, p);
-        }
-
-        uint16_t k = 0;
-        for (uint8_t r = 0; r < job->nranges; r++) {
-            const uint16_t base = job->rng[r].base;
-            const uint16_t cnt = job->rng[r].count;
-            for (uint16_t x = 0; x < cnt; x++, k++) {
-                const uint16_t o = (uint16_t)((base + x) * 4u);
-                const uint16_t idx = (uint16_t)(k % n);
-                uint8_t rv = 0, gv = 0, bv = 0, wv = 0;
-                switch (job->write) {
-                case NC_PX_WRITE_RGB:
-                    rv = (uint8_t)(vals[(uint16_t)((3u * idx) % n)] >> 4);
-                    gv = (uint8_t)(vals[(uint16_t)((3u * idx + 1u) % n)] >> 4);
-                    bv = (uint8_t)(vals[(uint16_t)((3u * idx + 2u) % n)] >> 4);
-                    break;
-                case NC_PX_WRITE_RGBW:
-                    rv = (uint8_t)(vals[(uint16_t)((4u * idx) % n)] >> 4);
-                    gv = (uint8_t)(vals[(uint16_t)((4u * idx + 1u) % n)] >> 4);
-                    bv = (uint8_t)(vals[(uint16_t)((4u * idx + 2u) % n)] >> 4);
-                    wv = (uint8_t)(vals[(uint16_t)((4u * idx + 3u) % n)] >> 4);
-                    break;
-                case NC_PX_WRITE_W:
-                    wv = (uint8_t)(vals[idx] >> 4);
-                    break;
-                case NC_PX_WRITE_WW:
-                case NC_PX_WRITE_WWWW:
-                    wv = (uint8_t)(vals[(uint16_t)((2u * idx) % n)] >> 4);
-                    break;
-                case NC_PX_WRITE_R:
-                    rv = (uint8_t)(vals[idx] >> 4);
-                    break;
-                case NC_PX_WRITE_G:
-                    gv = (uint8_t)(vals[idx] >> 4);
-                    break;
-                case NC_PX_WRITE_B:
-                    bv = (uint8_t)(vals[idx] >> 4);
-                    break;
-                default:
-                    break;
-                }
-                dst[o + 0] = rv;
-                dst[o + 1] = gv;
-                dst[o + 2] = bv;
-                dst[o + 3] = wv;
-            }
-        }
+        const uint16_t nv = nc_px_job_vals(&plan->job[j], step, vals, VAL_MAX);
+        nc_px_pair_apply(&plan->job[j], vals, nv, dst);
     }
 }

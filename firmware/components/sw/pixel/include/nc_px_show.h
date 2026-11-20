@@ -60,6 +60,19 @@ esp_err_t nc_px_show_plan(const nc_px_mode_t *mode, const nc_px_map_t *map,
                           const nc_px_hw_inv_t *inv, uint8_t ninv,
                           nc_px_plan_t *out);
 
+// ── 配對層（generic）：效果交「值緩衝」，唔理佢係六工具／.nce／未來效果器 ──
+// 語義逐條照 mp `pixel_layout._SCATTER`：
+//   r/g/b/w  只寫該通道（其餘不動；重疊寫可以疊加）
+//   ww       寫 o[0]=0,o[1]=0, o[2]=v&0xFF, o[3]=v>>8（12-bit 拆兩個 byte）
+//   wwww     同一個 v（>>4）寫晒四通道
+//   rgb      寫 R,G,B，W 清零
+//   rgbw     寫 R,G,B,W
+//   nv==0    按上面規則寫 0（單通道只清自己嗰個）
+void nc_px_pair_apply(const nc_px_job_t *job, const uint16_t *vals, uint16_t nv, uint8_t *dst);
+
+// 由 program asset 算一個 job 的 vals（給六工具；未來效果器自己出 buffer 就跳過呢個）
+uint16_t nc_px_job_vals(const nc_px_job_t *job, uint32_t step, uint16_t *out, uint16_t cap);
+
 // 算一幀：step = 全域步數；dst = px × 4（R,G,B,W，0..255）。
 // 只覆寫 plan 有涉及的像素；呼叫端負責先清畫布。
 void nc_px_show_frame(const nc_px_plan_t *plan, uint32_t step, uint8_t *dst);

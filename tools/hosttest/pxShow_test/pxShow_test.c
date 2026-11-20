@@ -146,6 +146,72 @@ int main(void)
     free(map_txt);
     free(mode_txt);
 
+    // 配對層語義（照 mp pixel_layout._SCATTER 逐條）
+    printf("[5] 配對語義（generic buffer）\n");
+    {
+        nc_px_job_t job;
+        memset(&job, 0, sizeof(job));
+        job.nranges = 1;
+        job.rng[0].base = 0;
+        job.rng[0].count = 2;
+        const uint16_t vals[4] = { 0x0ABC, 0x0123, 0, 0 };
+
+        // 單通道：只改自己嗰個 byte，其餘不動
+        static uint8_t cv[2 * 4];
+        memset(cv, 0x7F, sizeof(cv));
+        job.write = NC_PX_WRITE_G;
+        nc_px_pair_apply(&job, vals, 2, cv);
+        bool only_g = true;
+        for (int i = 0; i < 2; i++) {
+            if (cv[i * 4 + 0] != 0x7F || cv[i * 4 + 2] != 0x7F || cv[i * 4 + 3] != 0x7F) {
+                only_g = false;
+            }
+        }
+        check(only_g && cv[1] == (0xABC >> 4) && cv[5] == (0x123 >> 4),
+              "g：只改 G，其餘通道保留");
+
+        // ww：12-bit 拆成 B/W 兩個 byte
+        memset(cv, 0, sizeof(cv));
+        job.write = NC_PX_WRITE_WW;
+        nc_px_pair_apply(&job, vals, 2, cv);
+        check(cv[0] == 0 && cv[1] == 0 && cv[2] == (0xABC & 0xFF) && cv[3] == (0xABC >> 8),
+              "ww：o[2]=v&0xFF、o[3]=v>>8");
+
+        // wwww：同一個值寫晒四通道
+        memset(cv, 0, sizeof(cv));
+        job.write = NC_PX_WRITE_WWWW;
+        nc_px_pair_apply(&job, vals, 2, cv);
+        check(cv[0] == (0xABC >> 4) && cv[1] == (0xABC >> 4) &&
+              cv[2] == (0xABC >> 4) && cv[3] == (0xABC >> 4), "wwww：四通道同值");
+
+        // rgb：R/G/B 同 W 清零；重疊寫保留之前通道
+        static uint8_t cv2[1 * 4];
+        memset(cv2, 0, sizeof(cv2));
+        nc_px_job_t job2;
+        memset(&job2, 0, sizeof(job2));
+        job2.nranges = 1;
+        job2.rng[0].base = 0;
+        job2.rng[0].count = 1;
+        job2.write = NC_PX_WRITE_RGB;
+        const uint16_t vals3[3] = { 0xF00, 0x0F0, 0x00F };
+        nc_px_pair_apply(&job2, vals3, 3, cv2);
+        check(cv2[0] == 0xF0 && cv2[1] == 0x0F && cv2[2] == 0x00 && cv2[3] == 0,
+              "rgb：vals[3k..] → R,G,B、W=0");
+
+        job2.write = NC_PX_WRITE_G;
+        nc_px_pair_apply(&job2, vals3, 3, cv2);
+        check(cv2[0] == 0xF0 && cv2[1] == 0xF0,
+              "重疊寫：g 覆寫 G，但唔會清走之前 R");
+
+        // 未來效果器：直接交 buffer（唔經 asset/program）
+        static uint8_t cv3[1 * 4];
+        memset(cv3, 0, sizeof(cv3));
+        job2.write = NC_PX_WRITE_W;
+        const uint16_t ext_buf[1] = { 0xFFF };
+        nc_px_pair_apply(&job2, ext_buf, 1, cv3);
+        check(cv3[3] == 0xFF, "外部效果器交 buffer（唔經 program）都配到");
+    }
+
     printf("\n%s（%d 個失敗）\n", g_fail ? "FAILED" : "ALL PASS", g_fail);
     return g_fail ? 1 : 0;
 }

@@ -5410,3 +5410,28 @@ context 執行；數字係 3 次取最小（逐值）／500 或 100 幀平均（
   ＝ 50 FPS 預算（20 ms）的 **11.6%**；仍有一粒完整 core 的時間做編碼／送燈。
 - scatter 主導：9,600 px 由 64 值升到每 LED 一值只多 181 µs（+8%），其餘係 4 B/px 寫入。
 - 對照 host x86：`math_now` 7.8 ns（host）vs 482 ns（S3）≈ 62×；所以 host 數字只可作相對比較。
+
+### 7.145 2026-11-20（配對層對齊 mp `_SCATTER`；效果交「值緩衝」）
+
+**問題**：我原本 `nc_px_show_frame()` 自己算 vals 再寫畫布，等於把「效果輸出」同
+「配對」綁死；而且兩處語義同 mp 唔同：
+
+| 寫法 | mp 行為 | 我原本（錯） |
+|---|---|---|
+| `r/g/b/w` | **只改該通道，其餘不動** | 四通道全寫（清走其他效果寫的通道） |
+| `ww` | `o[2]=v&0xFF`、`o[3]=v>>8`（12-bit 拆兩個 byte） | 當單通道寫 W |
+| `wwww` | 同一個 `v>>4` 寫晒四通道 | 只寫 W |
+
+**修正**：拆出通用配對層
+- `nc_px_pair_apply(job, vals, nv, dst)`：任何效果器（六工具／`.nce`／未來）交
+  `uint16_t *vals + nv` 就配到；八種寫法逐條照 `pixel_layout._SCATTER`。
+- `nc_px_job_vals(job, step, out, cap)`：六工具用（program → vals）；未來效果器自己
+  出 buffer 就跳過呢個。
+- `nc_px_show_frame()` = `job_vals()` ＋ `pair_apply()`（行為不變）。
+
+**驗證**：`pxShow_test` 加 6 條配對語義測試（單通道保留其他通道、`ww` 拆 byte、
+`wwww` 四通道、`rgb` 的三值對位、重疊寫保留、**外部 buffer 直配**）；`run_all.sh` 19 支全綠。
+
+**延伸點（未做）**：未來彩色效果器可能交 RGB8／HSV buffer（`PixelMathMethod` 已有
+hsv↔rgb bulk）。到時在 `nc_px_pair_apply` 前面加一層「buffer 格式 → 12-bit 值流」，
+配對層本身唔使改。
