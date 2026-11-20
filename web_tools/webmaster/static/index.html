@@ -539,6 +539,10 @@ code { font-family: var(--font-mono); color: var(--bench-100); font-size: 11.5px
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="m8 9-3 3 3 3M16 9l3 3-3 3M14 6l-4 12"/></svg>
       <span>IDE</span>
     </button>
+    <button class="nav" data-view="wave" aria-current="false" title="波形模擬器（六工具合成）">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12c2-5 4-5 6 0s4 5 6 0 4-5 6 0"/></svg>
+      <span>波形</span>
+    </button>
     <button class="nav" data-view="drive" aria-current="false" title="隨身碟">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v10m0 0 3-3m-3 3-3-3M5 16v3a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-3"/></svg>
       <span>隨身碟</span>
@@ -695,6 +699,7 @@ code { font-family: var(--font-mono); color: var(--bench-100); font-size: 11.5px
                 <button id="btnIdeSave" class="btn sm primary" disabled>儲存</button>
                 <button id="btnIdeConfirm" class="btn sm" disabled>確認</button>
                 <button id="btnIdeUndo" class="btn sm" disabled>復原</button>
+                <button id="btnIdeWave" class="btn sm" disabled title="把目前檔案的 program 送入波形模擬器">🌊 波形</button>
                 <button id="btnIdeDownload" class="btn sm" disabled>下載</button>
                 <button id="btnIdeDelete" class="btn sm danger" disabled>刪除</button>
                 <button id="btnIdeFormat" class="btn sm" disabled title="JSON 格式化（Ctrl/Cmd-Shift-F）">格式化</button>
@@ -727,6 +732,36 @@ code { font-family: var(--font-mono); color: var(--bench-100); font-size: 11.5px
         </section>
 
         <!-- 隨身碟（MSC 捷徑） -->
+                <!-- 波形模擬器（六工具合成；唔使連板） -->
+        <section class="view" data-view="wave">
+          <div class="pad" style="display:flex;flex-direction:column;gap:10px;height:100%;overflow:auto">
+            <div class="card">
+              <div class="card-h">
+                <span class="label">波形模擬器（六工具合成）</span>
+                <span class="grow"></span>
+                <input id="wavePath" class="input mono" style="max-width:300px" placeholder="/pixel/effects/effects.json">
+                <button id="btnWaveRead" class="btn sm">讀取裝置檔案</button>
+                <button id="btnWaveOpenFile" class="btn sm">開啟本機檔</button>
+                <input id="waveFile" type="file" accept=".json,.txt" style="display:none">
+              </div>
+              <div class="card-b">
+                <textarea id="waveJson" class="cfg-text" placeholder="貼上 effects.json／單一效果／純 program 段陣列，再按『解析／預覽』"></textarea>
+                <div class="btn-row" style="margin-top:8px">
+                  <button id="btnWaveParse" class="btn primary">解析／預覽</button>
+                  <select id="waveEffect" class="sel" style="max-width:220px"></select>
+                  <button id="btnWavePlay" class="btn">▶ 播放</button>
+                  <button id="btnWaveZero" class="btn ghost">step 0</button>
+                  <span id="waveInfo" class="chip">—</span>
+                </div>
+              </div>
+            </div>
+            <div class="card"><div class="card-b"><canvas id="waveStrip" width="1200" height="120" class="wave-canvas"></canvas></div></div>
+            <div class="card"><div class="card-b"><canvas id="waveCurve" width="1200" height="260" class="wave-canvas"></canvas></div></div>
+            <div class="card"><div class="card-h"><span class="label">段組合</span></div>
+              <div class="card-b"><pre id="waveSegs" class="result">—</pre></div></div>
+          </div>
+        </section>
+
         <section class="view" data-view="drive">
           <div class="pad wiz">
             <h1>隨身碟</h1>
@@ -1029,6 +1064,7 @@ code { font-family: var(--font-mono); color: var(--bench-100); font-size: 11.5px
 <script src="/static/js/80-ide.js"></script>
 <script src="/static/js/85-container.js"></script>
 <script src="/static/js/90-env.js"></script>
+<script src="/static/js/95-wave.js"></script>
 <script src="/static/js/99-app.js"></script>
 </body>
 </html>

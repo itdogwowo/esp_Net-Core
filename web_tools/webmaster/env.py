@@ -1050,7 +1050,8 @@ class Installer:
                     self.log(f"[版本] {note}")
                 if tag:
                     self.log(f"[版本] 用 {tag}")
-                self.steps = [f"clone ESP-IDF {tag or ""} → {d}", f"install（{target}）"]
+                tag_txt = tag or "（預設）"
+                self.steps = [f"clone ESP-IDF {tag_txt} → {d}", f"install（{target}）"]
                 if (d / ".git").exists():
                     self.log(f"{d} 已經係 IDF repo，跳過 clone")
                     if tag:

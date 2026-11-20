@@ -252,3 +252,13 @@ body.sidebar-collapsed .content { flex: 1; }
   .grid-2, .grid-3, .grid-4 { grid-template-columns: 1fr; }
   .terminal { height: 60vh; }
 }
+
+/* ── 波形模擬器（六工具合成）── */
+.wave-canvas {
+  width: 100%;
+  height: auto;
+  display: block;
+  background: #0b0d10;
+  border-radius: 6px;
+  image-rendering: pixelated;
+}

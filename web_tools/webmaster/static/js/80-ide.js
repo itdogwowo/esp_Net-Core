@@ -83,6 +83,7 @@ function ideSyncBar() {
   $("#btnIdeConfirm").disabled = !tab;
   $("#btnIdeUndo").disabled = !tab;
   $("#btnIdeDownload").disabled = !tab;
+  $("#btnIdeWave").disabled = !tab || binary;   // 波形模擬器：文字檔先可以解析
   $("#btnIdeDelete").disabled = !tab;
   $("#btnIdeFormat").disabled = !tab || binary;
   $("#btnIdeValidate").disabled = !tab || binary;
