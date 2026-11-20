@@ -264,13 +264,14 @@ curl -s http://127.0.0.1:8011/api/scripts | python -m json.tool | head -30
 | 讀取裝置檔案 | 填路徑（例如 `/pixel/effects/effects.json`）→ 經 `/api/file` |
 | 列出裝置效果 | 由 manifest 篩 `/pixel/effects/*.json` → 下拉即載（要連線） |
 | 開啟本機檔 | 直接揀 `.json` |
-| IDE | 開檔後按工具列「🌊 波形」→ 目前內容直接送入模擬器 |
+| IDE | 開檔後按工具列「🌊 波形」→ **由裝置路徑直接讀同一個檔**（唔使貼），URL 變成 `#wave?file=…`，refresh 都仲喺同一條效果 |
 
 - **段編輯**：表格即場改 `type／end_Time／l_max／l_lim／F／phi`，畫面即時更新；
   「＋段」「✕」增刪；「複製 JSON」帶走。
 - **存到裝置**：`PUT /api/file?path=…`（預設 `/pixel/effects/effects.json`），
   會保留原檔的 `version`／其他效果，只換被編輯嗰條。
-- deep link：`http://127.0.0.1:8778/#wave`。
+- deep link：`#wave`（空白）或 `#wave?file=/pixel/effects/effects.json`（自動讀裝置檔）。
+- `static/index.html` 的 js／css 有 `?v=` 版本戳，改前端之後唔會食到舊 cache。
 
 ## 容器檢視（`.nct` / `.nce` / `.nca`）
 

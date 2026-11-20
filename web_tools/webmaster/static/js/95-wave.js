@@ -325,6 +325,37 @@ const WaveSim = (function () {
     return list.length;
   }
 
+  // 由裝置路徑載入（IDE 跳轉、deep link 用）；成功會順手改 URL 方便 refresh
+  async function loadFromPath(path, { updateUrl = true } = {}) {
+    if (!path) { return false; }
+    try {
+      const r = await fetch("/api/file?path=" + encodeURIComponent(path));
+      if (!r.ok) { throw new Error("HTTP " + r.status); }
+      const text = await r.text();
+      document.querySelector("#waveJson").value = text;
+      S.sourcePath = path;
+      loadText(text, path.split("/").pop());
+      switchView("wave");
+      if (updateUrl) {
+        const want = "#wave?file=" + encodeURIComponent(path);
+        if (location.hash !== want) { history.replaceState(null, "", want); }
+      }
+      toast("波形分析：" + path, "ok");
+      return true;
+    } catch (e) {
+      toast("讀取失敗（未連線？）：" + e.message, "err", 6000);
+      return false;
+    }
+  }
+
+  function fileFromHash() {
+    const h = location.hash || "";
+    const q = h.indexOf("?");
+    if (q < 0) { return ""; }
+    const params = new URLSearchParams(h.slice(q + 1));
+    return params.get("file") || "";
+  }
+
   function tick() {
     if (!S.comp || !S.comp.total) { return; }
     S.step = (S.step + 1) % S.comp.total;
@@ -463,14 +494,19 @@ const WaveSim = (function () {
     // IDE 工具列：把目前編輯器內容送入波形模擬器
     const ideBtn = document.querySelector("#btnIdeWave");
     if (ideBtn) {
-      ideBtn.onclick = () => {
-        const cm = (typeof ideEnsureCM === "function") ? ideEnsureCM() : state.ideCM;
+      ideBtn.onclick = async () => {
         const tab = state.ideTabs && state.ideTabs.find((t) => t.path === state.ideActive);
-        const text = cm ? cm.getValue() : (tab ? tab.text : "");
-        if (!text) { toast("IDE 未開啟檔案", "warn"); return; }
         if (tab && tab.path && tab.path.endsWith(".bin")) {
           toast("二進位檔唔可以模擬", "warn"); return;
         }
+        // 有裝置路徑 → 直接由裝置讀（同 IDE 顯示一致，存檔亦預設返同一路徑）
+        if (tab && tab.path) {
+          const ok = await loadFromPath(tab.path);
+          if (ok) { return; }
+        }
+        const cm = (typeof ideEnsureCM === "function") ? ideEnsureCM() : state.ideCM;
+        const text = cm ? cm.getValue() : (tab ? tab.text : "");
+        if (!text) { toast("IDE 未開啟檔案", "warn"); return; }
         document.querySelector("#waveJson").value = text;
         try { loadText(text, tab ? tab.path.split("/").pop() : "ide"); } catch (e) {
           toast("解析失敗：" + e.message, "err"); return;
@@ -480,7 +516,11 @@ const WaveSim = (function () {
     }
   }
 
-  document.addEventListener("DOMContentLoaded", () => setTimeout(bind, 0));
+  document.addEventListener("DOMContentLoaded", () => setTimeout(() => {
+    bind();
+    const p = fileFromHash();
+    if (p) { setTimeout(() => loadFromPath(p, { updateUrl: false }), 150); }
+  }, 0));
 
-  return { loadText: loadText, play: play, tick: tick };
+  return { loadText: loadText, loadFromPath: loadFromPath, play: play, tick: tick };
 })();
