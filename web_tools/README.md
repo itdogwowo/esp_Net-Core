@@ -252,6 +252,28 @@ curl -s http://127.0.0.1:8011/api/scripts | python -m json.tool | head -30
 # → 分類（webmaster/build/device/ai）× 平台 × 摘要 × 指令
 ```
 
+## 模式預覽（四層合成，`#mode`）
+
+pixel 子系統係**四層**，唔好混：
+
+| 層 | 檔案 | 內容 |
+|---|---|---|
+| effect | `pixel/effects/effects.json` | 波形 program（六工具）＋空間參數 |
+| mapping | `pixel/map/*.json` | 群組排列（`groups[].sel` 按硬體型別選燈） |
+| mode | `pixel/modes/*.json` | `map:[{group, effect, write, range}]` ＋ `mapping`／`play_loop`／`maxF` |
+| 播放清單 | `pixel/registry.json` | `list`（mode 序列）＋ `auto_play` |
+
+「🧩 模式」頁：載入裝置 `/pixel` 樹（registry＋modes＋map＋effects）→ 選 mode →
+照 `pixel_task` 的 scatter 語義合成整條鏈：
+
+- 單通道（`r/g/b/w`）讀 `vals[k]`；`rgb` 讀 `vals[3k..3k+2]`；`rgbw` 讀 `vals[4k..]`
+  （同 `pixel_layout._scatter_*` 一致）
+- `range` 用 Python slice 語義（`0:16`、`16:32`、`:`…），燈鏈長度會自動跟 range 最大值
+- 50 fps 播放／step 0；下面列出 mode.map[] 同 registry.json 原文
+
+> **限制**：離線預覽假設「群組 = 整條鏈、順序排列」（硬件 controller 數量在板上面）。
+> 多 controller／跳線的實際 offsets 要連板用 `pixel_layout` 的 controller 表才知。
+
 ## 波形模擬器（六工具合成，`#wave`）
 
 左邊 rail「🌊 波形」＝離線波形預覽：讀 `program`（`keep`／`math_now`／`square_wave_now`／

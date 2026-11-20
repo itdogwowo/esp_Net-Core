@@ -539,6 +539,10 @@ code { font-family: var(--font-mono); color: var(--bench-100); font-size: 11.5px
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="m8 9-3 3 3 3M16 9l3 3-3 3M14 6l-4 12"/></svg>
       <span>IDE</span>
     </button>
+    <button class="nav" data-view="mode" aria-current="false" title="模式預覽（mode × map × effect 合成）">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+      <span>模式</span>
+    </button>
     <button class="nav" data-view="wave" aria-current="false" title="波形模擬器（六工具合成）">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12c2-5 4-5 6 0s4 5 6 0 4-5 6 0"/></svg>
       <span>波形</span>
@@ -732,7 +736,35 @@ code { font-family: var(--font-mono); color: var(--bench-100); font-size: 11.5px
         </section>
 
         <!-- 隨身碟（MSC 捷徑） -->
-                <!-- 波形模擬器（六工具合成；唔使連板） -->
+                        <!-- 模式預覽：mode × map × effect 四層合成 -->
+        <section class="view" data-view="mode">
+          <div class="pad" style="display:flex;flex-direction:column;gap:10px;height:100%;overflow:auto">
+            <div class="card">
+              <div class="card-h">
+                <span class="label">模式預覽（registry → mode → map → effect）</span>
+                <span class="grow"></span>
+                <input id="modeBase" class="input mono" style="max-width:180px" value="/pixel">
+                <button id="btnModeLoad" class="btn sm primary">載入裝置 pixel 樹</button>
+                <span id="modeInfo" class="chip">未載入</span>
+              </div>
+              <div class="card-b">
+                <div class="btn-row">
+                  <select id="modeSelect" class="sel" style="max-width:260px"></select>
+                  <button id="btnModePlay" class="btn">▶ 播放</button>
+                  <button id="btnModeZero" class="btn ghost">step 0</button>
+                  <label class="muted">燈鏈長度 <input id="modeLeds" type="number" value="64" style="width:70px" class="input"></label>
+                </div>
+              </div>
+            </div>
+            <div class="card"><div class="card-b"><canvas id="modeStrip" width="1200" height="120" class="wave-canvas"></canvas></div></div>
+            <div class="card"><div class="card-h"><span class="label">組合表（mode.map[]）</span></div>
+              <div class="card-b"><pre id="modeEntries" class="result">—</pre></div></div>
+            <div class="card"><div class="card-h"><span class="label">播放清單（registry.json）</span></div>
+              <div class="card-b"><pre id="modeRegistry" class="result">—</pre></div></div>
+          </div>
+        </section>
+
+        <!-- 波形模擬器（六工具合成；唔使連板） -->
         <section class="view" data-view="wave">
           <div class="pad" style="display:flex;flex-direction:column;gap:10px;height:100%;overflow:auto">
             <div class="card">
@@ -1074,7 +1106,8 @@ code { font-family: var(--font-mono); color: var(--bench-100); font-size: 11.5px
 <script src="/static/js/80-ide.js?v=20261120b"></script>
 <script src="/static/js/85-container.js?v=20261120b"></script>
 <script src="/static/js/90-env.js?v=20261120b"></script>
-<script src="/static/js/95-wave.js?v=20261120b"></script>
+<script src="/static/js/95-wave.js?v=20261120c"></script>
+<script src="/static/js/96-mode.js?v=20261120c"></script>
 <script src="/static/js/99-app.js?v=20261120b"></script>
 </body>
 </html>

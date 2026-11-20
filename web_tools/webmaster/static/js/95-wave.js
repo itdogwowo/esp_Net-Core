@@ -522,5 +522,6 @@ const WaveSim = (function () {
     if (p) { setTimeout(() => loadFromPath(p, { updateUrl: false }), 150); }
   }, 0));
 
-  return { loadText: loadText, loadFromPath: loadFromPath, play: play, tick: tick };
+  return { loadText: loadText, loadFromPath: loadFromPath, play: play, tick: tick,
+           rawCompile: compile, rawValue: valueAt };
 })();

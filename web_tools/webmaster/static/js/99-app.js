@@ -24,7 +24,7 @@ async function init() {
   } catch (_) { /* 設定讀唔到就照內建預設 */ }
 
   const deep = location.hash.replace("#", "");
-  const deepOk = ["device", "files", "drive", "flash", "monitor", "ide", "env", "wave"].includes(deep);
+  const deepOk = ["device", "files", "drive", "flash", "monitor", "ide", "env", "wave", "mode"].includes(deep);
   if (deepOk) {
     switchView(deep);
   } else {
