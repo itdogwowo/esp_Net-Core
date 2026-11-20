@@ -5304,3 +5304,49 @@ DMA 仍然 17.36 ms（43,400 PCLK ÷ 2.5 MHz）→ 16×600 是 **CPU-bound**，
   - 重複 id → 只收第一個（rejected=1）；目錄唔存在 → `NOT_FOUND`
   - `bash tools/hosttest/run_all.sh` **19 支全綠**
 - **未做**：pixel_task 接線（用真 controller 做 inventory、按 registry 播 plan）。
+
+### 7.142 2026-11-20（架構決定：效果／map／mode 同 pixel_task 的分工）
+
+**問題**：`pixel_task` 應該只做「canonical canvas → 總線緩衝」；咁「燈效好幾組」＋
+map／mode 委派應該擺邊？效果任務同 map 分開定一齊？
+
+**決定：map／mode／registry 係「效果任務」的資料，唔係獨立任務。**
+
+```
+┌─ 效果任務（producer，現時 pixel_task 的 prd loop）
+│    四層：effects（六工具/.nce）＋ map（group→offsets）
+│          ＋ modes/registry（排程）
+│    每步：plan 逐 job 算 vals → scatter → canonical canvas（px×4，R,G,B,W 0-255）
+│    換場／重載：clear tables → load_all → rebuild plan（同一任務內，原子）
+└─ prd 環（既有，4 B/px，格式不變）
+┌─ pixel_task／render（transport）
+│    只做：canvas → 編碼（lane 合併／波形單元）→ 總線緩衝 → DMA
+└─ 硬件
+```
+
+理由：
+
+1. **同一 tick 要一致**：效果與 group 對應必須同一幀對齊；map 拆去另一個任務，
+   換場時會出現「新 map + 舊效果」的半幀。
+2. **map 冇獨立生命週期**：只在換場／重載時重算；每幀只係查表（微秒級）。
+3. **介面已經係現成的**：canonical canvas 就係 prd 環的 4 B/px；transport 側
+   完全唔需要知 map／mode／效果名。
+
+**「燈效有好幾組」**：一個 mode 的 `map[]` 就係多組（`demo_eyes` = 0:16 eyes/rgb ＋
+16:32 wave/g）；`nc_px_show_plan()` 已經支援 N 個 job。只有「各組要唔同更新率／
+唔同核心」時才需要拆多個 producer（代價：每組一份 canvas 再合成）。
+
+**什麼情況才拆**：
+
+- `.nce` 需要 sandbox（WAMR）→ 把 `.nce` 執行放另一個任務，但**介面仍然是
+  「交一塊 frame buffer」**；map／mode 留在 producer。
+- 雙核：producer（core1）／transport（core0）—— 呢個已經係現時 render／pixel
+  的分核方式，同 map 無關。
+
+**接線步驟（下一階段）**：
+
+1. producer 開機：`nc_px_store_fs_base()`＋`/pixel` → `nc_px_layer_load_all()`
+2. inventory：由 backend 的 controller（型別＋px）推 `{hw, base, px}`
+3. `nc_px_show_plan()`：registry/mode → plan（冇 mode 就 fallback 現有內建效果）
+4. 每步：`nc_px_show_frame(plan, step, canvas)` → 寫 prd 環（格式不變）
+5. 換場：reload → clear → load_all → rebuild（同一任務）
