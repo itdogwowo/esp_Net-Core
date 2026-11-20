@@ -252,6 +252,26 @@ curl -s http://127.0.0.1:8011/api/scripts | python -m json.tool | head -30
 # → 分類（webmaster/build/device/ai）× 平台 × 摘要 × 指令
 ```
 
+## 波形模擬器（六工具合成，`#wave`）
+
+左邊 rail「🌊 波形」＝離線波形預覽：讀 `program`（`keep`／`math_now`／`square_wave_now`／
+`pulse_wave`／`pulse`／`starter`），用**同 firmware 一樣嘅公式**（`nc_px_engine_program`）
+即時算波表，畫整條燈鏈＋時間曲線＋段組合，50 fps 播放。**唔使連板**。
+
+| 入口 | 用法 |
+|---|---|
+| 貼 JSON | effects.json／單一效果／純 program 陣列 → 「解析／預覽」 |
+| 讀取裝置檔案 | 填路徑（例如 `/pixel/effects/effects.json`）→ 經 `/api/file` |
+| 列出裝置效果 | 由 manifest 篩 `/pixel/effects/*.json` → 下拉即載（要連線） |
+| 開啟本機檔 | 直接揀 `.json` |
+| IDE | 開檔後按工具列「🌊 波形」→ 目前內容直接送入模擬器 |
+
+- **段編輯**：表格即場改 `type／end_Time／l_max／l_lim／F／phi`，畫面即時更新；
+  「＋段」「✕」增刪；「複製 JSON」帶走。
+- **存到裝置**：`PUT /api/file?path=…`（預設 `/pixel/effects/effects.json`），
+  會保留原檔的 `version`／其他效果，只換被編輯嗰條。
+- deep link：`http://127.0.0.1:8778/#wave`。
+
 ## 容器檢視（`.nct` / `.nce` / `.nca`）
 
 IDE 左邊檔案樹揀 `.nct`／`.nce`（或任何帶 NCM magic 的 `.nca`）→ 右邊會出容器摘要：

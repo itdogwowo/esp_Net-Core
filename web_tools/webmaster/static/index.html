@@ -741,6 +741,8 @@ code { font-family: var(--font-mono); color: var(--bench-100); font-size: 11.5px
                 <span class="grow"></span>
                 <input id="wavePath" class="input mono" style="max-width:300px" placeholder="/pixel/effects/effects.json">
                 <button id="btnWaveRead" class="btn sm">讀取裝置檔案</button>
+                <button id="btnWaveListDev" class="btn sm" title="由裝置 manifest 列出 /pixel/effects/*.json">列出裝置效果</button>
+                <select id="waveDevFiles" class="sel" style="max-width:240px"><option value="">（未連線／未掃描）</option></select>
                 <button id="btnWaveOpenFile" class="btn sm">開啟本機檔</button>
                 <input id="waveFile" type="file" accept=".json,.txt" style="display:none">
               </div>
@@ -757,6 +759,14 @@ code { font-family: var(--font-mono); color: var(--bench-100); font-size: 11.5px
             </div>
             <div class="card"><div class="card-b"><canvas id="waveStrip" width="1200" height="120" class="wave-canvas"></canvas></div></div>
             <div class="card"><div class="card-b"><canvas id="waveCurve" width="1200" height="260" class="wave-canvas"></canvas></div></div>
+            <div class="card">
+              <div class="card-h"><span class="label">段編輯（改完即時預覽）</span><span class="grow"></span>
+                <button id="btnWaveAddSeg" class="btn sm">＋ 段</button>
+                <button id="btnWaveCopy" class="btn sm">複製 JSON</button>
+                <button id="btnWaveSave" class="btn sm primary">存到裝置…</button>
+              </div>
+              <div class="card-b"><div id="waveEditor" class="wave-edit">—</div></div>
+            </div>
             <div class="card"><div class="card-h"><span class="label">段組合</span></div>
               <div class="card-b"><pre id="waveSegs" class="result">—</pre></div></div>
           </div>

@@ -84,7 +84,8 @@ const WaveSim = (function () {
   }
 
   // ── 狀態 ────────────────────────────────────────────
-  const S = { effects: [], cur: null, comp: null, wave: [], step: 0, timer: null };
+  const S = { effects: [], cur: null, comp: null, wave: [], step: 0, timer: null,
+              doc: null, single: false, sourcePath: "" };
 
   function normalize(e, fallbackName) {
     const prog = Array.isArray(e.program) ? e.program
@@ -226,17 +227,86 @@ const WaveSim = (function () {
     drawStrip(); drawCurve(); renderSegs();
   }
 
+  function recompute() {
+    if (!S.cur) { return; }
+    const c = compute(S.cur);
+    S.comp = c.comp; S.wave = c.wave;
+    if (S.step >= S.comp.total) { S.step = 0; }
+  }
+
   function selectEffect(i) {
     if (!S.effects[i]) { return; }
     S.cur = S.effects[i];
     S.step = 0;
-    const c = compute(S.cur);
-    S.comp = c.comp; S.wave = c.wave;
+    recompute();
     renderAll();
+    renderEditor();
+  }
+
+  // ── 段編輯器（改完即時預覽；唔重建輸入框，焦點唔會走）──
+  function renderEditor() {
+    const box = document.querySelector("#waveEditor");
+    if (!box) { return; }
+    if (!S.cur) { box.textContent = "—"; return; }
+    const opts = (sel) => TOOLS.map((t) =>
+      `<option value="${t}"${t === sel ? " selected" : ""}>${t}</option>`).join("");
+    const rows = S.cur.program.map((sg, i) => {
+      const val = (k, d) => (sg[k] == null ? d : sg[k]);
+      return `<tr data-i="${i}">
+        <td>${i + 1}</td>
+        <td><select data-k="type">${opts(sg.type || "keep")}</select></td>
+        <td><input data-k="end_Time" type="number" value="${val("end_Time", 0)}"></td>
+        <td><input data-k="l_max" type="number" value="${val("l_max", 4095)}"></td>
+        <td><input data-k="l_lim" type="number" value="${val("l_lim", 0)}"></td>
+        <td><input data-k="F" type="number" value="${val("F", 1)}"></td>
+        <td><input data-k="phi" type="number" value="${val("phi", 0)}"></td>
+        <td><button class="btn sm danger" data-del="1" title="刪除段">✕</button></td>
+      </tr>`;
+    }).join("");
+    box.innerHTML = `<table><thead><tr><th>#</th><th>type</th><th>end_Time</th>
+      <th>l_max</th><th>l_lim</th><th>F</th><th>phi</th><th></th></tr></thead>
+      <tbody>${rows}</tbody></table>`;
+    box.querySelectorAll("tr[data-i]").forEach((tr) => {
+      const i = parseInt(tr.dataset.i, 10);
+      tr.querySelectorAll("[data-k]").forEach((el) => {
+        el.oninput = () => {
+          const k = el.dataset.k;
+          const v = (k === "type") ? el.value : (parseInt(el.value, 10) || 0);
+          S.cur.program[i][k] = v;
+          recompute(); renderAll();
+        };
+      });
+      const del = tr.querySelector("[data-del]");
+      if (del) {
+        del.onclick = () => {
+          S.cur.program.splice(i, 1);
+          if (!S.cur.program.length) { S.cur.program.push({ type: "keep", end_Time: 20 }); }
+          recompute(); renderAll(); renderEditor();
+        };
+      }
+    });
+  }
+
+  function currentJson() {
+    const e = { id: S.cur.id, name: S.cur.name, pixel_n: S.cur.pixel_n,
+                program: S.cur.program, step: S.cur.step, spacing: S.cur.spacing,
+                offset: S.cur.offset, speed: S.cur.speed, reverse: S.cur.reverse };
+    if (S.doc && Array.isArray(S.doc.effects) && S.doc.effects.length === S.effects.length) {
+      const idx = S.effects.indexOf(S.cur);
+      const out = Object.assign({}, S.doc);
+      out.effects = S.doc.effects.map((x, i) => (i === idx ? Object.assign({}, x, e) : x));
+      return out;
+    }
+    return e;
   }
 
   function loadText(text, hintName) {
     const list = parseText(text);
+    try {
+      const doc = JSON.parse(text);
+      S.doc = doc;
+      S.single = !(doc && Array.isArray(doc.effects));
+    } catch (_) { S.doc = null; S.single = true; }
     if (hintName && list.length === 1) { list[0].name = hintName; }
     S.effects = list;
     const sel = document.querySelector("#waveEffect");
@@ -314,6 +384,82 @@ const WaveSim = (function () {
         } catch (e) { toast("讀取失敗：" + e.message, "err"); }
       };
     }
+    const addSeg = document.querySelector("#btnWaveAddSeg");
+    if (addSeg) {
+      addSeg.onclick = () => {
+        if (!S.cur) { toast("先解析一條效果", "warn"); return; }
+        const last = S.cur.program[S.cur.program.length - 1] || { end_Time: 0 };
+        S.cur.program.push({ type: "math_now", F: 5, l_max: 4095, l_lim: 0, phi: 0,
+                             end_Time: (parseInt(last.end_Time, 10) || 0) + 20 });
+        recompute(); renderAll(); renderEditor();
+      };
+    }
+    const copyBtn = document.querySelector("#btnWaveCopy");
+    if (copyBtn) {
+      copyBtn.onclick = async () => {
+        if (!S.cur) { return; }
+        const text = JSON.stringify(currentJson(), null, 2);
+        try {
+          await navigator.clipboard.writeText(text);
+          toast("已複製 JSON（" + text.length + " B）", "ok");
+        } catch (_) {
+          document.querySelector("#waveJson").value = text;
+          toast("剪貼簿不可用：已放返上面文字框", "warn");
+        }
+      };
+    }
+    const saveBtn = document.querySelector("#btnWaveSave");
+    if (saveBtn) {
+      saveBtn.onclick = async () => {
+        if (!S.cur) { return; }
+        const path = prompt("存到裝置哪個路徑？", S.sourcePath || "/pixel/effects/effects.json");
+        if (!path) { return; }
+        const body = JSON.stringify(currentJson(), null, 2);
+        try {
+          await api("/api/file?path=" + encodeURIComponent(path), {
+            method: "PUT", headers: { "Content-Type": "application/json" }, body: body,
+          });
+          toast("已寫入 " + path + "（" + body.length + " B）", "ok");
+          logLine("波形模擬器寫檔 " + path, "ok");
+          if (typeof loadManifest === "function") { loadManifest({ quiet: true }); }
+        } catch (e) { toast("寫入失敗：" + e.message, "err", 6000); }
+      };
+    }
+    const listBtn = document.querySelector("#btnWaveListDev");
+    if (listBtn) {
+      listBtn.onclick = async () => {
+        try {
+          const j = await api("/api/manifest");
+          const paths = Object.keys(j.data || {})
+            .filter((p) => /\/pixel\/effects\/.*\.json$/.test(p)).sort();
+          const sel = document.querySelector("#waveDevFiles");
+          sel.innerHTML = paths.length ? "" :
+            '<option value="">（裝置上冇 /pixel/effects/*.json）</option>';
+          paths.forEach((p) => {
+            const o = document.createElement("option");
+            o.value = p; o.textContent = p;
+            sel.appendChild(o);
+          });
+          sel.onchange = async () => {
+            const pth = sel.value;
+            if (!pth) { return; }
+            try {
+              const r = await fetch("/api/file?path=" + encodeURIComponent(pth));
+              if (!r.ok) { throw new Error("HTTP " + r.status); }
+              const text = await r.text();
+              document.querySelector("#waveJson").value = text;
+              S.sourcePath = pth;
+              loadText(text, pth.split("/").pop());
+              toast("已載入 " + pth, "ok");
+            } catch (e) { toast("讀取失敗：" + e.message, "err"); }
+          };
+          toast("搵到 " + paths.length + " 個效果檔", "ok");
+        } catch (e) { toast("列出失敗（未連線？）：" + e.message, "err"); }
+      };
+    }
+    const devSel = document.querySelector("#waveDevFiles");
+    if (devSel) { devSel.onchange = null; }
+
     // IDE 工具列：把目前編輯器內容送入波形模擬器
     const ideBtn = document.querySelector("#btnIdeWave");
     if (ideBtn) {

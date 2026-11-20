@@ -262,3 +262,10 @@ body.sidebar-collapsed .content { flex: 1; }
   border-radius: 6px;
   image-rendering: pixelated;
 }
+
+/* 波形段編輯器 */
+.wave-edit { font: 400 12px/1.6 var(--font-mono); }
+.wave-edit table { width: 100%; border-collapse: collapse; }
+.wave-edit th { text-align: left; color: var(--bench-400); font-weight: 500; padding: 2px 4px; }
+.wave-edit td { padding: 2px 4px; }
+.wave-edit input, .wave-edit select { width: 100%; }
