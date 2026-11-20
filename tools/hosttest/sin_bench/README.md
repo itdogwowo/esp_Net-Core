@@ -1,52 +1,68 @@
 # sin_bench — 正弦算法量測（host ＋ 真機）
 
-> **不是** pass/fail 測試，所以唔入 `run_all.sh`。目的係答兩個問題：
-> 「邊個算法最快／最準」同「喺真機上值幾多」。
+> **不是** pass/fail 測試，所以唔入 `run_all.sh`。目的係答三個問題：
+> 「邊個算法最快／最準」、「出貨嘅三個函數實際誤差幾多」、
+> 「喺真機上逐次 sine 值幾多」。
 
 ## 檔案
 
 | 檔案 | 角色 |
 |---|---|
-| `sin_bench.c` | host 微基準：5 種算法 ×（min／median／p99）＋精度＋記憶體 |
+| `sin_bench.c` | host 微基準：**直接 link 出貨中的 `nc_px_engine_tables.c`** ＋ 幾個對照算法 |
 | `run.sh` | 建置＋跑（POSIX，`CC=clang` 可換編譯器） |
-| `dev_probe.py` | 經 NC4（USB CDC）在**真機**切效果／分區，量引擎自己報的 `render_us`；跑完會還原設定 |
+| `dev_probe.py --sin` | 真機 `0xF063 SINBENCH`：逐次 sine 成本＋精度（唔使切效果） |
+| `dev_probe.py`（預設） | 真機 `0xF060`：切效果讀 `render_us`，量合成斜率（舊模式） |
 
 ## Host
 
 ```bash
-bash tools/hosttest/sin_bench/run.sh
+bash tools/hosttest/sin_bench/run.sh            # 完整（REP=120）
+bash tools/hosttest/sin_bench/run.sh --quick    # 快（REP=20）
+bash tools/hosttest/sin_bench/run.sh --json     # 機器可讀（存檔／比較）
 ```
 
-輸出（2026-11-20，x86-64／MSVC /O2；10 萬次 × 120 批取 min）：
+★ = 固件出貨中的函數（工具唔會再自己抄一份，固件改咗就跟住改）。
+2026-11-20，x86-64／gcc -O2；100k 次 × 120 批取 min：
 
-| 算法 | 表 | ns/call | ms/10k | max 誤差（0..4095） |
+| case | 表 | min ns | max 誤差（LSB） | 註 |
 |---|---|---|---|---|
-| `lut_1024` | 2 KB | 0.20 | 0.002 | 12.38 |
-| `lut_4096` | 8 KB | 0.20 | 0.002 | 2.97 |
-| `poly_q12`（MP） | 0 | 1.13 | 0.011 | 3.74 |
-| `hyb64_lin` | 130 B | 0.49 | 0.005 | 2.53 |
-| `hyb128_lin` | 258 B | 0.48 | 0.005 | 0.69 |
-| `hyb256_lin` | 514 B | 0.46 | 0.005 | **0.23** |
-| `cordic_q15` | 60 B | 12.0 | 0.120 | 0.66 |
-| `sinf`（libm） | — | 3.34 | 0.033 | — |
+| ★ `eng_sin` | 2 KB | 1.3 | 13.31 | 1024 點 Q15 最近點；內建效果用 |
+| ★ `eng_sin_lin` | 514 B | 1.8 | **0.72** | 256 錨點＋線性插值；四捨五入後 |
+| ★ `eng_sin_q12` | 0 | 1.8 | 3.74 | MP 多項式；DATA program 用 |
+| `lut_4096` | 8 KB | 0.4 | 3.91 | 對照：4096 點最近點 |
+| `hyb64_lin` | 130 B | 1.1 | 3.52 | 對照：64 錨點 |
+| `hyb128_lin` | 258 B | 1.1 | 1.68 | 對照：128 錨點 |
+| `cordic_q15` | 60 B | 16.8 | 1.57 | 對照：15 次迭代 |
+| `sinf_libm` | — | 2.2 | 1.00 | 對照：libm |
 
-結論：**混合（錨點表＋線性插值，n=256）比多項式快 2.4×、準 16×，表 514 B**。
-引擎已落地 `nc_px_engine_sin_lin()`；MP 多項式保留做 `nc_px_engine_sin_q12()`。
+誤差域 = 0..4095（1 LSB = 1/4096 滿刻度），ideal 先夾到 [0, 4095]（12-bit 表示不到 4096）。
+
+**讀數要小心**：`min ns` 在虛擬機／有背景工作的機器上會跳（同一份 code 見過 1.2–2.0）；
+相對次序穩定：`lut_4096` < `hyb*` ≈ `eng_sin_lin` < `eng_sin_q12` ≪ `cordic`。
 
 ## 真機
 
 ```bash
+# ① 逐次 sine（推薦；build 要有 0xF063）
+python tools/hosttest/sin_bench/dev_probe.py --port COM24 --sin
+python tools/hosttest/sin_bench/dev_probe.py --port COM24 --sin --iters 200000 --json
+
+# ② 合成斜率（只有 0xF060 的 build 都可以）
 python tools/hosttest/sin_bench/dev_probe.py --port COM24 --samples 40
 ```
 
-前提：板上跑有 `test_action`（`0xF060`）的 build，NC4 走 USB CDC。
-會切 `BITS=8`、`DITHER=off`、`ZMASK=0xFF`，量完還原（分區效果跟全域、effect=BREATH）。
+模式① 直接回（`err` 係 milli-LSB，即 ×100）：
 
-最新數字同解讀見 [`docs/00_pm/status.md` §7.134](../../../docs/00_pm/status.md)。
+```json
+{"n":50000,"smp":4096,
+ "q12":{"ns":12,"err":374},"lin":{"ns":5,"err":72},"sin":{"ns":4,"err":1331}}
+```
+
+模式② 會切 `BITS=8`、`DITHER=off`、`ZMASK=0xFF`，量完還原（分區效果跟全域、effect=BREATH）。
 
 ## 注意
 
-- host 數字只代表**相對**成本；板上 cache／in-order 會拉高 absolute。
-- `dev_probe.py` 只量到「sine ＋ wave 其餘數學」的合成斜率（≈444 ns／單位），
-  逐次 sine 成本要 flash 專用 bench 才分得開。
-- 相位一律由 `volatile` 陣列讀，避免被向量化／常數折疊。
+- host 數字只代表**相對**成本；板上 cache／in-order 會拉高 absolute → 用 `--sin` 量實機。
+- 精度閘門已經搬入 `pxEngine_test`（`check_sin_accuracy()`）：三個函數超出界限就紅，
+  所以「改壞正弦」唔會靜靜過關。呢支工具只負責量同研究，唔做 gate。
+- `--json` 輸出可以存檔對比（例如換算法前後）；格式：`{n, rep, fpp, cases:[{name,min_ns,...,max_err,table}]}`。

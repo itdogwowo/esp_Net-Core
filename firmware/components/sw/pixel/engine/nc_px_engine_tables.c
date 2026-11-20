@@ -65,7 +65,10 @@ uint16_t nc_px_engine_sin_lin(uint32_t phase)
     const int32_t a = s_sin_lin[i];
     const int32_t b = s_sin_lin[i + 1];
     const int32_t v = a + (((b - a) * (int32_t)f) >> 8);      // Q15 有號
-    return (uint16_t)((v >> 4) + 2048);                        // → 0..4095
+    // Q15 → 0..4095 **四捨五入**（+8 再 >>4）。截斷會偏 -0.5 LSB：
+    // 量測（sin_bench 全相位掃描）max 誤差 1.23 → 0.72 LSB。
+    const int32_t w = ((v + 8) >> 4) + 2048;
+    return (uint16_t)((w > 4095) ? 4095 : (w < 0 ? 0 : w));    // 峰值 32767 會掂到 4096
 }
 
 // 0..65535 相位 → 0..4095 的正弦：拋物線基底＋二次修正（`922*(y²−y)>>12`），

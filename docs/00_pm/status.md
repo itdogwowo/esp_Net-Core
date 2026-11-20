@@ -1,7 +1,7 @@
 # 專案現況總結（單頁）
 
 > **用途**：所有「已經驗證的事實、已定案的設計、還沒做的事」集中在這一頁；
-> 細節都連到對應文件。**最後更新**：2026-11-18。
+> 細節都連到對應文件。**最後更新**：2026-11-20。
 
 ---
 
@@ -5135,3 +5135,63 @@ DMA 仍然 17.36 ms（43,400 PCLK ÷ 2.5 MHz）→ 16×600 是 **CPU-bound**，
 - **驗收**：`pxEngine_test` golden **15/15 逐 byte 不變**（新函式冇人用），另加 10 個取值、
   0..16384 單調、上下半週期對稱的斷言（成功唔出聲）——全綠。
 - **未做**：板上逐次 ns/call（要 flash；今次只有 host 數字＋§7.134 的實機合成斜率）。
+
+### 7.136 2026-11-20（program interpreter 落地：`nc_px_engine_program_*`；波形語義對齊 MP）
+
+- **做咗**：`sw/pixel/engine/nc_px_engine_program.c` ＋ `include/nc_px_program.h` ——
+  compile（段落 → 預算值）、value（幀 → 12-bit 等級）、phase（第 t 幀起點）、
+  levels（一幀的空間分布）、canvas（12-bit → 8.8 畫布：gain／gamma／顏色）。
+  純函數、有界、無 malloc；compile 之後熱路徑只剩陣列索引＋加減＋一次正弦（`sin_q12`）。
+- **語義權威 = MP**（`mp_Net-Core/slave/lib/sw/PixelMathMethod.py` 的 compile／value_at、
+  `effect_core.py` 的 `Effect.frame`），刻意保留：
+  `step_phase = (65536·F)/10/fs`（**兩次整除的次序**）、`phi4 = phi<<4`、
+  `l_range = l_max − l_lim`、`gap = fs/F`、`width = pulse % gap`、
+  `g0 = ((t/speed)·step + offset) % total`、之後每顆 px `g += spacing % total`（單次減法取模）、
+  reverse 由尾寫起。C 唯一偏離：`l_range` clamp ≥ 0、輸出 clamp 0..4095（壞資料唔會出負數）。
+- **契約加嚴（`nc_px_asset.c`）**：
+  - `pulse` 入 struct（`nc_px_seg_t`，缺省 **2047** = MP 預設）；以前 `pulse` 被當未知鍵跳過，
+    `pulse_wave` 會靜靜畫錯。
+  - `end_Time` 必須**嚴格遞增**（0 亦唔收），否則整個資產拒絕 —— MP 的波長 = 最後一段
+    `end_Time`，唔遞增的 program 畫唔出連續波形。副作用：`{"type":"keep"}`（冇 end_Time）
+    以前照收但實際畫唔到，現在會大聲拒絕；`pxAsset_test` 的 fixtures 已補。
+- **驗證**：新 `tools/hosttest/pxProgram_test`（入 `run_all.sh`；`run.sh`＋`run.bat`）。
+  **期望值全部由 Python 版跑出來**（唔係 C 自己解釋一次）：
+  3 個 program 的 compile 欄位逐項比對、320／300／128 點波表 FNV-1a 指紋、段邊界／pulse 開關／
+  繞回取樣、4 組 frame（speed 1／2 × reverse）、phase、canvas（gain／gamma／顏色）、7 個拒絕路徑。
+- **順手修（測試漂移）**：`task_test` 自 e0b4617（2026-11-19「自行登記」）之後一直紅 3 項 ——
+  測試仍當「未設定 = 照跑」，但現行契約係「未設定 = `[0,0]` = 唔跑（連 on_start 都唔跑）」。
+  已把 fixture 改成明確配置 beta／gamma／delta，並把「未設定」的期望改成唔啟動。
+  `bash tools/hosttest/run_all.sh` **16 支全綠**（新增 pxProgram_test 之後）。
+- **未做**：`nc_effect_program`（把選中的資產畫上畫布的效果）＋ `pixel_task` 接線
+  （`nc_store_fs_base()` ＋ `/pixel/effects`）、`registry.json`／`map`／`modes` 三層、
+  `.nce` manifest 取真名。全部**未經 IDF 建置**（本機冇 IDF／板）。
+
+### 7.137 2026-11-20（算法工具收斂：sin_bench 量出貨函數、0xF063 上板量測、精度閘門）
+
+- **問題**：`sin_bench` 自己抄了一份多項式／混合算法。固件改咗而工具冇跟，量到的就係
+  另一個算法；而且「實機逐次 sine 成本」一路未量到（§7.134 的「未做」）。
+- **工具改法**（`tools/hosttest/sin_bench/`）：
+  - `sin_bench.c` 直接 **link `sw/pixel/engine/nc_px_engine_tables.c`**，主行就是出貨中的
+    `eng_sin`／`eng_sin_lin`／`eng_sin_q12`（★ 標記）；只保留對照組
+    （`lut_4096`／`hyb64`／`hyb128`／`cordic`／`sinf`）。**工具冇得再走樣**。
+  - 新增 `--quick`（REP=20）、`--json`（存檔／前後對比）；輸出多 rms 誤差與表大小。
+- **量到一個真問題**：`nc_px_engine_sin_lin()` 的 Q15→12-bit 用**截斷**（`>>4`），
+  平均偏 −0.5 LSB → 出貨版本的 max 誤差係 **1.23 LSB**。
+  ⚠️ **更正 §7.135 的「0.23 LSB」**：那只係**插值誤差**，唔計 Q15→12-bit 這一步量化。
+  改成四捨五入（`(v + 8) >> 4`，峰值 clamp 4095）→ **0.72 LSB**，速度不變。
+  另外：直接 link 真函數之後，`sin_lin` 同 `sin_q12` 在 host **打成平手**（≈1.8 vs 1.8 ns；
+  §7.135 的「快 2.4×」係工具自己抄一份時的數字）—— `sin_lin` 的價值在**精度 5×**
+  （0.72 vs 3.74 LSB）同「唔使跟 MP 的公式」，唔係速度。
+  `pxEngine_test` 的 10 個 `sin_lin` 期望值同步更新（`2048→2448`、`4096→2832`、
+  `40960/57344→600`）；golden 不變（冇效果用 `sin_lin`）。
+- **精度定義修正**：理想值要先夾到 **[0, 4095]**（12-bit 表示不到 4096；峰值 p=16384 的
+  ideal = 4096，唔夾就永遠差 1 LSB）。host bench／`pxEngine_test`／板上 0xF063 三處用同一條定義。
+- **新指令 `0xF063 SINBENCH`**（`test_action`，`CONFIG_NETCORE_PIXEL` 內）：
+  payload `[iters:u16 LE]`（預設 50000，夾 100..500000）→
+  `{"n","smp","q12":{"ns","err"},"lin":{…},"sin":{…}}`（`err` = milli-LSB）。
+  相位用 LCG、3 次取最小。配 `dev_probe.py --sin`，一次 flash 就有齊實機數字。
+- **精度閘門**：`pxEngine_test` 新增 `check_sin_accuracy()` —— 三個函數對 double 的
+  全相位最大誤差（sin ≤ 14.5／sin_lin ≤ 1.0／q12 ≤ 4.0 LSB）。成功唔出聲，golden 不變；
+  已驗證收緊界限會即刻紅（收緊到 0.1 → max 0.72 即刻報）。
+- **文件**：`commands.md` 補 `0xF062`（之前漏了）＋ `0xF063`；`sin_bench/README` 重寫。
+- **未做**：上板跑 `0xF063`（要 WSL/IDF flash；本機冇 IDF）—— 數字一有就補入 §7.134／§7.135。

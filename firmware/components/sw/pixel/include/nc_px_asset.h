@@ -43,7 +43,8 @@ typedef struct {
     uint16_t l_max;     // 0..4095
     uint16_t l_lim;     // 0..4095
     uint16_t phi;       // 相位偏移 0..4095
-    uint16_t end_f;     // MP 的 end_Time（frame；0 = 一直用）
+    uint16_t end_f;     // MP 的 end_Time：**絕對幀、必須嚴格遞增**；最後一段 = 波長
+    uint16_t pulse;     // pulse／pulse_wave 的 12-bit 門檻（缺省 2047，與 MP 一致）
 } nc_px_seg_t;
 
 // ═══════════════════════ 一個效果資產 ═══════════════════════

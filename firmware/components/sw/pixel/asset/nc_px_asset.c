@@ -361,6 +361,8 @@ static bool parse_seg(js_t *j, nc_px_seg_t *seg, bool *ok)
                 seg_num(j, 4095u, &seg->phi, ok);
             } else if (strcmp(key, "end_Time") == 0) {
                 seg_num(j, 65535u, &seg->end_f, ok);
+            } else if (strcmp(key, "pulse") == 0) {
+                seg_num(j, 4095u, &seg->pulse, ok);
             } else if (!js_skip(j)) {
                 return false;
             }
@@ -391,8 +393,19 @@ static bool parse_program(js_t *j, nc_px_asset_t *a, bool *ok)
     for (;;) {
         nc_px_seg_t seg;
         memset(&seg, 0, sizeof(seg));
+        seg.pulse = 2047;                     // MP 的 `seg.get("pulse", 2047)`
         if (!parse_seg(j, &seg, ok)) {
             return false;
+        }
+
+        // end_Time 是**絕對幀**，MP 的波表長度 = 最後一段的 end_Time。
+        // 唔遞增（含 0）就畫唔出連續波形 → 整個資產拒絕，寧願唔畫。
+        const uint16_t prev_end = (a->nseg > 0) ? a->seg[a->nseg - 1].end_f : 0;
+        if (seg.end_f <= prev_end) {
+            ESP_LOGW(TAG, "%s：end_Time 必須嚴格遞增（%u <= %u）",
+                     a->name[0] != '\0' ? a->name : "(未命名)",
+                     (unsigned)seg.end_f, (unsigned)prev_end);
+            *ok = false;
         }
 
         if (a->nseg >= NC_PX_SEG_MAX) {

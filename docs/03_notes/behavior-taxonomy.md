@@ -198,12 +198,12 @@ MP 只有一條路（全部 Python），C 要按「風險 × 成本」分三級�
 
 | 層 | MP | C 平面 | C 位置 | 現況 |
 |---|---|---|---|---|
-| **effect**（怎麼動） | `pixel/effects/effects.json` + `.py` | DATA＋CORE＋USER | `/data/pixel/effects/{effects.json,*.json,*.nce}`；`components/effects/`；`modules/effects/` | 🟡 CORE 5 個 `.c` 有；DATA 讀取器＋interpreter 未有 |
+| **effect**（怎麼動） | `pixel/effects/effects.json` + `.py` | DATA＋CORE＋USER | `/data/pixel/effects/{effects.json,*.json,*.nce}`；`components/effects/`；`modules/effects/` | 🟡 CORE 5 個 `.c` 有；DATA 讀取器＋program interpreter 有（§7.136）；把資產畫上畫布的效果／接線未有 |
 | **mapping**（怎麼排） | `pixel/map/*.json` + `lib/sw/pixel_layout.py` | DATA＋CORE | `/data/pixel/map/*.json`；`sw/pixel/layout` | ❌ 冇（8×8 寫死） |
 | **mode**（點配對） | `pixel/modes/*.json` | DATA＋CORE | `/data/pixel/modes/*.json`；`sw/pixel/mode` | ❌ 冇（一次一個全局效果） |
 | **playlist**（播什麼） | `pixel/registry.json` | DATA＋CORE | `/data/pixel/registry.json`；`tasks/pixel_task`（show runner） | ❌ 冇 |
-| **引擎** | `lib/sw/effect_core.py` | CORE（sw） | `sw/pixel/engine/`（`nc_px_engine_core` / `nc_px_engine_program`） | ✅ 已分家（M2）；`program` interpreter 未寫 |
-| **資產** | （MP 無此層：程式與資料混在一起） | CORE（讀取器）＋DATA | `sw/pixel/asset/`（`nc_px_asset_*`）；檔案在 `/data/pixel/` | 🟡 讀取器已實作（`nc_px_asset.c` 解析＋`nc_px_asset_scan.c` 掃目錄，host 測試綠）；interpreter／接線未做 |
+| **引擎** | `lib/sw/effect_core.py` | CORE（sw） | `sw/pixel/engine/`（`nc_px_engine_core` / `nc_px_engine_program`） | ✅ 已分家（M2）；`program` interpreter 已落地（§7.136，host 測試對 MP golden） |
+| **資產** | （MP 無此層：程式與資料混在一起） | CORE（讀取器）＋DATA | `sw/pixel/asset/`（`nc_px_asset_*`）；檔案在 `/data/pixel/` | 🟡 讀取器已實作（解析＋掃目錄，host 測試綠）；interpreter 已有（`nc_px_program.h`）；效果／任務接線未做 |
 | **計算** | `tasks/pixel_task.py` | CORE | `tasks/pixel_task/` | 🟡 有，但只係「算一格寫環」 |
 | **播送** | `tasks/render.py` | CORE | `tasks/render_task/` | ✅ |
 | **指令** | `action/pixel_actions.py` | CORE | `action/pixel_action/` | 🟡 只在 `test_action`（dev） |

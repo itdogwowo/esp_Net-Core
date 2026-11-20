@@ -245,6 +245,8 @@ components/action/
 | `0xF050` CPU_BURN | `[iters:u32]`（預設 50,000）→ `0xF004` `{iters,us,sum}`：native C 版 LCG 迴圈（同外掛 `bench_task.wat` 同 workload），用嚟量 wasm 直譯 vs C 的實際倍數。2026-11-17 S3 實測 50,000 次：C 1,683 µs、wasm 24,887 µs（≈14.8×），checksum 一致 |
 | `0xF060` MATRIX | `op(u8) [args]` → `0xF004` JSON。像素效果**生產者**（`pixel` 任務；`CONFIG_NETCORE_PIXEL`）。op：`0` STATS、`1` effect(u8)、`2` dither(u8)、`3` color(r,g,b)、`4` gain(u8)、`5` fps(u16 LE)、`6` zone(idx,rate,phase,[bits])、`7` zmask(u8)、`8` bits(u8)、`9` speed(u16)、`10` zbits(8)、`11` zeff(idx,eff)、`12` zeffs(8)、`13` demo(on)、`14` wspeed(u16)、`15` zdither(8)、`16` frac(u8)。回覆見 [pixel-renderer.md](../03_notes/pixel-renderer.md) |
 | `0xF061` RENDER | `op(u8)` → `0xF004` JSON。渲染**任務**（`render`）的狀態。`op=0` STATS：`{"producer":{…},"render":{…}}`；`op=1` 預留（回 ok）。見 [pixel-renderer.md](../03_notes/pixel-renderer.md) |
+| `0xF062` PXBENCH | `[lanes:u8][px:u16 LE][frames:u8]` → `0xF004` `{lanes,px,frames,units,us_enc,us_mix,us_direct,us_packed,us_pack,us_merge,sram,max_fps_x10,pass50}`：像素編碼吞吐量測（唔需要燈板） |
+| `0xF063` SINBENCH | `[iters:u16 LE]`（可省，預設 50000，夾 100..500000）→ `0xF004` `{"n","smp","q12":{"ns","err"},"lin":{…},"sin":{…}}`；`err` = milli-LSB（×100）。量**固件三個正弦函數**的實機 ns/call ＋ 對 double 的最大誤差（q12／lin／sin）。見 [sin_bench/README](../../tools/hosttest/sin_bench/README.md) |
 
 > ⚠️ 新增測試指令之前先查号：**指令碼重複時只會保留先登記的那一個**（`nc_action_init()`
 > 會在開機 `ESP_LOGE` 並丟棄後來者）。登記次序是 core →（測試的 bench／SD）→ test_action

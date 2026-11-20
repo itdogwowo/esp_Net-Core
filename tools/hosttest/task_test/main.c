@@ -159,6 +159,14 @@ static const nc_task_t s_mod_tenant = {
     .loops = s_tenant_loops, .nloops = 1,
 };
 
+// 開機預設（對齊 e0b4617 的契約）：核心由 C 宣告（不受 config 管）；
+// 租戶要 tasks.json 明確寫 affinity 才會跑（未設定 = (0,0) = 唔跑）。
+static const cfg_stub_task_t s_cfg_boot[] = {
+    { .name = "beta",  .level = 1, .has_level = true, .aff = { 1, 0 }, .has_aff = true },
+    { .name = "gamma", .level = 3, .has_level = true, .aff = { 0, 1 }, .has_aff = true },
+    { .name = "delta", .level = 3, .has_level = true, .aff = { 0, 1 }, .has_aff = true },
+};
+
 // 每個 case 一份假 tasks.json（aff = -1 代表 JSON 的 null）
 static const cfg_stub_task_t s_cfg_core0[] = {
     { .name = "tenant", .level = 1, .has_level = true, .aff = { 1, 0 }, .has_aff = true },
@@ -198,6 +206,7 @@ int main(void)
 
     case_begin("登記（依 level 排序，不是依 add 順序）");
     nc_task_reset();
+    cfg_stub_set(s_cfg_boot, 3);          // beta／gamma／delta 要明確啟用才會跑
     CHECK(nc_task_register(&s_mod_gamma) == ESP_OK, "gamma L3");
     CHECK(nc_task_register(&s_mod_alpha) == ESP_OK, "alpha L0");
     CHECK(nc_task_register(&s_mod_beta) == ESP_OK, "beta L1");
@@ -285,14 +294,14 @@ int main(void)
     CHECK(nc_task_kind_is_runtime(NC_TASK_EFFECT), "effect 可 runtime");
     CHECK(!nc_task_kind_is_runtime(NC_TASK_SYSTEM), "system 不可 runtime");
 
-    case_begin("config：未設定 → (0,0)，條目照報但 loop 唔開");
+    case_begin("config：未設定 → (0,0)，唔啟動（連 on_start 都唔跑）");
     CHECK(tenant_boot(NULL, 0) == 0, "沒有任何 loop 被開");
     CHECK(cfg_stub_appended_count() == 1, "缺條目 → 補寫 1 條（實際 %d）",
           cfg_stub_appended_count());
     CHECK(cfg_stub_appended(0) != NULL &&
           strstr(cfg_stub_appended(0), "\"affinity\": [0, 0]") != NULL,
           "補寫的條目是 (0,0)：%s", cfg_stub_appended(0) ? cfg_stub_appended(0) : "(null)");
-    CHECK(nc_task_started("tenant"), "on_start 照跑（started = 1）");
+    CHECK(!nc_task_started("tenant"), "未設定 → 唔啟動（唔宣告、唔 on_start）");
     CHECK(!mod_stub_loop_running("tenant_loop"), "loop 沒開");
 
     case_begin("config：affinity [1,0] → 跑 core 0");

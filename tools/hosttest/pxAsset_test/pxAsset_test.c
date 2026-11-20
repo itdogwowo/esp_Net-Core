@@ -112,9 +112,11 @@ static void test_reject(void)
 static void test_dup(void)
 {
     nc_px_asset_clear();
-    check(add("{\"name\":\"a\",\"program\":[{\"type\":\"keep\"},{\"type\":\"keep\"}]}", "a") == ESP_OK,
+    check(add("{\"name\":\"a\",\"program\":[{\"type\":\"keep\",\"end_Time\":10},"
+              "{\"type\":\"keep\",\"end_Time\":20}]}", "a") == ESP_OK,
           "dup：第一個加入");
-    check(add("{\"name\":\"a\",\"program\":[{\"type\":\"math_now\"}]}", "a") == ESP_ERR_INVALID_STATE,
+    check(add("{\"name\":\"a\",\"program\":[{\"type\":\"math_now\",\"end_Time\":10}]}", "a")
+              == ESP_ERR_INVALID_STATE,
           "dup：第二個回 INVALID_STATE");
     check(nc_px_asset_count() == 1, "dup：表仍然 1 個");
     const nc_px_asset_t *a = nc_px_asset_find("a");
@@ -149,8 +151,8 @@ static void test_limits(void)
     char buf[4096];
     size_t u = (size_t)snprintf(buf, sizeof(buf), "{\"name\":\"many\",\"program\":[");
     for (int i = 0; i < 20; i++) {
-        u += (size_t)snprintf(buf + u, sizeof(buf) - u, "%s{\"type\":\"keep\",\"end_Time\":1}",
-                              (i == 0) ? "" : ",");
+        u += (size_t)snprintf(buf + u, sizeof(buf) - u, "%s{\"type\":\"keep\",\"end_Time\":%d}",
+                              (i == 0) ? "" : ",", i + 1);
     }
     snprintf(buf + u, sizeof(buf) - u, "]}");
     check(add(buf, "many") == ESP_OK, "20 段：照收（截斷）");
@@ -178,7 +180,8 @@ static void test_limits(void)
 static void test_status(void)
 {
     nc_px_asset_clear();
-    check(add("{\"name\":\"breathing\",\"program\":[{\"type\":\"math_now\"}]}", "breathing") == ESP_OK,
+    check(add("{\"name\":\"breathing\",\"program\":[{\"type\":\"math_now\",\"end_Time\":10}]}",
+              "breathing") == ESP_OK,
           "status：加入第一個");
     check(add("{\"name\":\"wave\",\"program\":[]}", "wave") == ESP_OK, "status：加入第二個");
 
@@ -191,6 +194,33 @@ static void test_status(void)
 
     char tiny[8];
     check(nc_px_asset_json(tiny, sizeof(tiny)) == 0, "status：buffer 太細回 0");
+}
+
+// ── 9. program 契約：pulse 缺省、end_Time 必須遞增 ───────────────────
+static void test_program_rules(void)
+{
+    nc_px_asset_clear();
+    check(add("{\"name\":\"pulse_def\",\"program\":[{\"type\":\"math_now\",\"end_Time\":10}]}",
+              "pulse_def") == ESP_OK,
+          "pulse：冇寫照收");
+    const nc_px_asset_t *a = nc_px_asset_find("pulse_def");
+    check(a != NULL && a->seg[0].pulse == 2047, "pulse：缺省 2047（同 MP 一致）");
+
+    nc_px_asset_clear();
+    check(add("{\"name\":\"pulse_set\",\"program\":[{\"type\":\"pulse_wave\","
+              "\"pulse\":1200,\"end_Time\":10}]}", "pulse_set") == ESP_OK,
+          "pulse：明寫照收");
+    a = nc_px_asset_find("pulse_set");
+    check(a != NULL && a->seg[0].pulse == 1200, "pulse：明寫 = 1200");
+
+    nc_px_asset_clear();
+    check(add("{\"name\":\"flat\",\"program\":[{\"type\":\"keep\",\"end_Time\":10},"
+              "{\"type\":\"keep\",\"end_Time\":10}]}", "flat") == ESP_ERR_INVALID_ARG,
+          "end_Time 冇遞增：拒絕");
+    check(nc_px_asset_count() == 0, "end_Time 冇遞增：唔會入表");
+    check(add("{\"name\":\"zero\",\"program\":[{\"type\":\"keep\",\"end_Time\":0}]}", "zero")
+              == ESP_ERR_INVALID_ARG,
+          "end_Time = 0：拒絕");
 }
 
 // ── 8. 掃一個目錄（檔案系統外殼）────────────────────────────────────
@@ -229,7 +259,7 @@ static void test_scan(void)
 
     write_file(TMPDIR_NAME, "effects.json",
                "{\"version\":1,\"effects\":["
-               "{\"name\":\"batch_a\",\"program\":[{\"type\":\"keep\"}]},"
+               "{\"name\":\"batch_a\",\"program\":[{\"type\":\"keep\",\"end_Time\":10}]},"
                "{\"name\":\"batch_b\",\"program\":[]}]}");
     write_file(TMPDIR_NAME, "solo.json",
                "{\"name\":\"batch_a\",\"program\":[]}");   // 撞名：批次先到，應該贏
@@ -269,6 +299,7 @@ int main(void)
     test_extra_keys();
     test_limits();
     test_status();
+    test_program_rules();
     test_scan();
 
     printf("%s\n", g_fail ? "FAIL" : "OK");

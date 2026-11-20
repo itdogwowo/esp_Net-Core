@@ -12,6 +12,7 @@
 // 用法：
 //   bash tools/hosttest/pxEngine_test/run.sh           跑並對 golden
 //   bash tools/hosttest/pxEngine_test/run.sh --update  重影 golden（只可以在「已知行為變更」時用）
+#include <math.h>
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -103,9 +104,9 @@ static void check_sin_q12(void)
     }
     // 混合（錨點表＋線性插值）的取值：同樣係純整數，期望值由 Python 精算
     static const struct { uint16_t ph; uint16_t want; } k2[] = {
-        {     0, 2048 }, {  2048, 2447 }, {  4096, 2831 }, {  8192, 3496 },
-        { 16384, 4095 }, { 24576, 3496 }, { 32768, 2048 }, { 40960,  599 },
-        { 49152,    0 }, { 57344,  599 },
+        {     0, 2048 }, {  2048, 2448 }, {  4096, 2832 }, {  8192, 3496 },
+        { 16384, 4095 }, { 24576, 3496 }, { 32768, 2048 }, { 40960,  600 },
+        { 49152,    0 }, { 57344,  600 },
     };
     for (size_t i = 0; i < sizeof(k2) / sizeof(k2[0]); i++) {
         const uint16_t got = nc_px_engine_sin_lin(k2[i].ph);
@@ -140,6 +141,49 @@ static void check_sin_q12(void)
             printf("sin_q12 唔對稱：p=%u\n", (unsigned)p);
             g_fail++;
             break;
+        }
+    }
+}
+
+// ── 三個出貨函數的**精度閘門**：對 double sin() 的最大誤差（0..4095 域）──
+// 數字來自 sin_bench 的全相位掃描（host）；界限放寬少少，避免 libm 差異造成假紅。
+// 成功唔出聲（golden 不變）；失敗印出係邊個算法、差幾多。
+static void check_sin_accuracy(void)
+{
+    static const struct { const char *name; double limit; } lim[] = {
+        { "nc_px_engine_sin",      14.5 },   // 1024 點 Q15 表（最近點取樣 ~13.3）
+        { "nc_px_engine_sin_lin",   1.0 },   // 256 錨點混合（四捨五入後 0.72；截斷版係 1.23）
+        { "nc_px_engine_sin_q12",   4.0 },   // MP 多項式
+    };
+    for (size_t k = 0; k < 3; k++) {
+        double mx = 0.0;
+        uint32_t worst = 0;
+        for (uint32_t p = 0; p < 65536u; p += 16u) {
+            double ideal = 2048.0 + 2048.0 *
+                sin(2.0 * 3.141592653589793 * (double)p / 65536.0);
+            if (ideal > 4095.0) {                 // 12-bit 表示不到 4096（峰值）
+                ideal = 4095.0;
+            } else if (ideal < 0.0) {
+                ideal = 0.0;
+            }
+            double got;
+            if (k == 0) {
+                got = (double)((nc_px_engine_sin(p >> 6) >> 4) + 2048);
+            } else if (k == 1) {
+                got = (double)nc_px_engine_sin_lin(p);
+            } else {
+                got = (double)nc_px_engine_sin_q12(p);
+            }
+            const double e = fabs(got - ideal);
+            if (e > mx) {
+                mx = e;
+                worst = p;
+            }
+        }
+        if (mx > lim[k].limit) {
+            printf("%s 精度超標：max %.2f LSB（界限 %.1f）@ p=%u\n",
+                   lim[k].name, mx, lim[k].limit, (unsigned)worst);
+            g_fail++;
         }
     }
 }
@@ -211,6 +255,7 @@ int main(void)
     run("px100", &c, 100);
 
     check_sin_q12();                  // 純整數斷言；成功唔印嘢（golden 不變）
+    check_sin_accuracy();             // 三個出貨函數對 double 的精度閘門
 
     printf("%s\n", g_fail ? "FAIL" : "OK");
     return g_fail ? 1 : 0;

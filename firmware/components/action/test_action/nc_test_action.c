@@ -4,6 +4,7 @@
 #include "nc_test_action.h"
 #include "nc_action.h"
 
+#include <math.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -4347,6 +4348,114 @@ static void on_pxbench(nc4_ctx_t *ctx, const nc4_frame_t *f)
     }
     reply_json(ctx, NC4_CMD_HUB_RSP, j);
 }
+
+// ── 0xF063 SINBENCH：三種正弦算法的**實機**成本＋最大誤差（唔需要燈板）──
+// payload [iters:u16 LE]（可省；預設 50000，夾到 100..500000）
+//   量的是固件真正用嘅三個函數（`nc_px_engine_tables.c`），唔係另寫一份：
+//     q12 = nc_px_engine_sin_q12（MP 多項式，0 表）—— DATA program 用
+//     lin = nc_px_engine_sin_lin（256 錨點混合，514 B）
+//     sin = nc_px_engine_sin（1024 點 Q15 表，2 KB）—— 內建效果用
+//   相位序列 = LCG 高位（唔會被常數折疊，亦唔會同一個相位重複命中 cache）。
+//   誤差 = 對 double `sin()` 的最大差（4096 個取樣點、0..4095 域、milli-LSB = ×100）。
+//   為什麼要這條：host 的 ns 只代表相對成本；板上 cache／in-order 會拉高絕對值
+//   （status §7.134 一直未量到逐次 sine 成本）。
+#define NC4_CMD_SINBENCH 0xF063
+
+static volatile uint32_t s_sinbench_sink;      // 讀走累加值，防止整個 loop 被優化掉
+
+static uint32_t sinbench_loop(uint32_t iters, uint8_t algo)
+{
+    uint32_t acc = 0;
+    if (algo == 0) {
+        for (uint32_t i = 0; i < iters; i++) {
+            acc += nc_px_engine_sin_q12((i * 2654435761u) >> 16);
+        }
+    } else if (algo == 1) {
+        for (uint32_t i = 0; i < iters; i++) {
+            acc += nc_px_engine_sin_lin((i * 2654435761u) >> 16);
+        }
+    } else {
+        for (uint32_t i = 0; i < iters; i++) {
+            acc += (uint32_t)((nc_px_engine_sin((i * 2654435761u) >> 22) >> 4) + 2048);
+        }
+    }
+    return acc;
+}
+
+// 3 次取最小（單次量容易被中斷／tick 拉高；ns 解析度 1 µs ÷ iters）。
+static uint32_t sinbench_ns(uint32_t iters, uint8_t algo)
+{
+    uint32_t best = 0xFFFFFFFFu;
+    for (int r = 0; r < 3; r++) {
+        const int64_t t0 = esp_timer_get_time();
+        const uint32_t acc = sinbench_loop(iters, algo);
+        const int64_t dt = esp_timer_get_time() - t0;
+        s_sinbench_sink += acc;
+        const uint32_t ns = (uint32_t)(((dt > 0) ? dt : 1) * 1000 / (int64_t)iters);
+        if (ns < best) {
+            best = ns;
+        }
+    }
+    return best;
+}
+
+static uint32_t sinbench_err(uint8_t algo)
+{
+    double mx = 0.0;
+    for (uint32_t p = 0; p < 65536u; p += 16u) {
+        double ideal = 2048.0 + 2048.0 *
+            sin(2.0 * 3.141592653589793 * (double)p / 65536.0);
+        if (ideal > 4095.0) {                 // 12-bit 表示不到 4096（峰值）
+            ideal = 4095.0;
+        } else if (ideal < 0.0) {
+            ideal = 0.0;
+        }
+        int32_t w;
+        if (algo == 0) {
+            w = (int32_t)nc_px_engine_sin_q12(p);
+        } else if (algo == 1) {
+            w = (int32_t)nc_px_engine_sin_lin(p);
+        } else {
+            w = (nc_px_engine_sin(p >> 6) >> 4) + 2048;
+        }
+        const double e = fabs((double)w - ideal);
+        if (e > mx) {
+            mx = e;
+        }
+    }
+    return (uint32_t)(mx * 100.0 + 0.5);      // milli-LSB
+}
+
+static void on_sinbench(nc4_ctx_t *ctx, const nc4_frame_t *f)
+{
+    static char j[256];
+    uint32_t iters = 50000;
+    if (f->len >= 2) {
+        iters = (uint32_t)f->data[0] | ((uint32_t)f->data[1] << 8);
+    }
+    if (iters < 100) {
+        iters = 100;
+    }
+    if (iters > 500000u) {
+        iters = 500000u;
+    }
+    const uint32_t q12_ns = sinbench_ns(iters, 0);
+    const uint32_t lin_ns = sinbench_ns(iters, 1);
+    const uint32_t sin_ns = sinbench_ns(iters, 2);
+    const uint32_t q12_err = sinbench_err(0);
+    const uint32_t lin_err = sinbench_err(1);
+    const uint32_t sin_err = sinbench_err(2);
+    (void)snprintf(j, sizeof(j),
+                   "{\"n\":%u,\"smp\":4096,"
+                   "\"q12\":{\"ns\":%u,\"err\":%u},"
+                   "\"lin\":{\"ns\":%u,\"err\":%u},"
+                   "\"sin\":{\"ns\":%u,\"err\":%u}}",
+                   (unsigned)iters,
+                   (unsigned)q12_ns, (unsigned)q12_err,
+                   (unsigned)lin_ns, (unsigned)lin_err,
+                   (unsigned)sin_ns, (unsigned)sin_err);
+    reply_json(ctx, NC4_CMD_HUB_RSP, j);
+}
 #endif  // CONFIG_NETCORE_PIXEL
 
 // ── 註冊 ──
@@ -5108,6 +5217,7 @@ static const nc_action_t k_actions[] = {
     { NC4_CMD_MATRIX, on_matrix, "test" },
     { NC4_CMD_RENDER, on_render, "test" },
     { NC4_CMD_PXBENCH, on_pxbench, "test" },
+    { NC4_CMD_SINBENCH, on_sinbench, "test" },
 #endif
     { NC4_CMD_RX_BENCH, on_rx_bench, "test" },
     { NC4_CMD_RX_RESULT, on_rx_result, "test" },
