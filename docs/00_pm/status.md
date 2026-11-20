@@ -5350,3 +5350,31 @@ map／mode 委派應該擺邊？效果任務同 map 分開定一齊？
 3. `nc_px_show_plan()`：registry/mode → plan（冇 mode 就 fallback 現有內建效果）
 4. 每步：`nc_px_show_frame(plan, step, canvas)` → 寫 prd 環（格式不變）
 5. 換場：reload → clear → load_all → rebuild（同一任務）
+
+### 7.143 2026-11-20（配對／排版成本量測：map 值唔值獨立一層？）
+
+工具：`tools/hosttest/pxMap_bench/`（host x86，同一份 C 實作；量 plan 建立、逐幀 scatter、
+同「純效果計算」分開報）。
+
+| 畫布 | jobs | plan（換場一次） | frame（每幀） | eval | scatter | ns/px |
+|---:|---:|---:|---:|---:|---:|---:|
+| 64 px | 1 | 0.5 µs | 0.75 µs | 0.39 | 0.36 | 11.7 |
+| 64 px | 4 | 0.5 µs | 2.98 µs | 1.96 | 1.03 | 46.6 |
+| 960 px | 1 | 4.4 µs | 5.59 µs | 0.49 | 5.10 | 5.8 |
+| 960 px | 4 | 3.6 µs | 5.35 µs | 1.65 | 3.70 | 5.6 |
+| 9,600 px | 1 | 26.5 µs | 33.30 µs | 0.38 | **32.92** | 3.5 |
+| 9,600 px | 4 | 24.2 µs | 24.30 µs | 1.32 | **22.98** | 2.5 |
+
+（4 jobs 反而平過 1 job：奇數 job 係 `wave(g)` 單通道，寫入少過 RGB。）
+
+**判讀**：
+
+1. **每幀成本 = scatter（配對）主導**：`eval` 只係每 job `pixel_hint` 個值（64 個），
+   scatter 就係 px 次寫入；9,600 px ≈ 33 µs（x86）。換算 S3（240 MHz，約 8–10×）≈
+   **0.26–0.33 ms/幀 → 50 FPS 預算 1.3–1.7%**。map 唔係瓶頸。
+2. **plan（排版管理）只喺換場做一次**：9,600 px 26.5 µs（x86）→ 板上約 0.2 ms；
+   同「每幀」冇關，唔需要獨立任務。
+3. **記憶體**：`plan` 4,424 B（8 jobs × 預編譯 prog）、`map` 2,618 B、`asset table` 8,386 B
+   —— 全部放 producer 的 static 就夠，唔使跨任務共享。
+4. 所以 §7.142 的結論有數據支持：**effects／map／mode 留喺同一個效果任務**；
+   `pixel_task`（encode）只認 canvas。
