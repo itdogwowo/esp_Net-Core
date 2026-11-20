@@ -5286,3 +5286,21 @@ DMA 仍然 17.36 ms（43,400 PCLK ÷ 2.5 MHz）→ 16×600 是 **CPU-bound**，
   - `bash tools/hosttest/run_all.sh` **18 支全綠**
 - **未做**：掃描器（`/data/pixel/{effects,map,modes}` ＋ registry）同 pixel_task 接線
   （把 plan 接去 render backend／真 controller offsets）。
+
+### 7.141 2026-11-20 晚（掃描／登記：map／modes／registry ＋ `nc_px_layer_load_all()`）
+
+- **做咗**：`include/nc_px_layer_scan.h` ＋ `asset/nc_px_layer_scan.c`
+  - `nc_px_map_scan(dir)`：`map/*.json` → `nc_px_map_tbl_t`（檔名排序；id／name 重複跳過）
+  - `nc_px_mode_scan(dir)`：`modes/*.json` → `nc_px_mode_tbl_t`（按 `id` 排序；重複跳過）
+  - `nc_px_show_load(path)`：`registry.json` → `nc_px_show_t`
+  - **`nc_px_layer_load_all(base)`**：一次掃齊四層（`base = …/pixel`）——
+    effects → map → modes → registry，同 MP `pixel_task` 開機流程一樣；
+    effects 失敗回 `ESP_ERR_NOT_FOUND`，其餘只 warn（唔會令整棵樹失效）
+  - 查詢：`nc_px_map_find()`／`nc_px_mode_find()`（name 或數字 id）
+- **驗證**：新 `tools/hosttest/pxScan_test`（入 `run_all.sh`）
+  - 用 mp 真檔：6 effects（`uart_motor` 自訂型別被拒）、**3 mappings**（matrix／test／gundam）、
+    2 modes（排序 demo_eyes→motor_sine）、registry `auto_play=false`
+  - `load_all()` → `6 effects／3 maps／2 modes／list 0`
+  - 重複 id → 只收第一個（rejected=1）；目錄唔存在 → `NOT_FOUND`
+  - `bash tools/hosttest/run_all.sh` **19 支全綠**
+- **未做**：pixel_task 接線（用真 controller 做 inventory、按 registry 播 plan）。
