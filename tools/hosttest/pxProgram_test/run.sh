@@ -18,6 +18,7 @@ mkdir -p "$OUT"
 
 "$CC" -std=c17 -Wall -Wextra -Werror -O1 \
     -I"$PXF/include" -I"$T/include" -I"$T" \
+    "$PXF/asset/nc_px_json.c" \
     "$PXF/asset/nc_px_asset.c" \
     "$PXF/engine/nc_px_engine_tables.c" \
     "$PXF/engine/nc_px_engine_program.c" \

@@ -14,7 +14,7 @@ cd /d "%~dp0\..\..\.."
 set "PXF=firmware\components\sw\pixel"
 set "T=tools\hosttest\pxProgram_test"
 set "OUT=%T%\build"
-set "SRCS=%PXF%\asset\nc_px_asset.c %PXF%\engine\nc_px_engine_tables.c %PXF%\engine\nc_px_engine_program.c %T%\pxProgram_test.c"
+set "SRCS=%PXF%\asset\nc_px_json.c %PXF%\asset\nc_px_asset.c %PXF%\engine\nc_px_engine_tables.c %PXF%\engine\nc_px_engine_program.c %T%\pxProgram_test.c"
 
 if not exist "%OUT%" mkdir "%OUT%"
 
