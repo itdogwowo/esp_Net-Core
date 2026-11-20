@@ -1,0 +1,28 @@
+{
+  "version": 1,
+  "_comment": [
+    "Tasks 層（EffectPerf）：**只**開 effect_bench。",
+    "",
+    "render／pixel 明確 level=-1：這個映像不點燈、不跑基礎燈效，也不初始化 I80。",
+    "effect_bench 開機 8 秒後跑一次 64 px（8×8），之後回 0xF065 由主機指定 px。",
+    "level 4＝一般任務層；effect_bench 在 render／pixel 之後（但它們已關）。"
+  ],
+  "tasks": [
+    {
+      "name": "render",
+      "level": -1
+    },
+    {
+      "name": "pixel",
+      "level": -1
+    },
+    {
+      "name": "effect_bench",
+      "level": 4,
+      "affinity": [
+        0,
+        1
+      ]
+    }
+  ]
+}

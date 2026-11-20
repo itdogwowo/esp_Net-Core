@@ -1,0 +1,30 @@
+{
+  "_comment": [
+    "Project 層：S3/ESP32-S3-Matrix（Waveshare 8×8、GPIO14、64 顆 WS2812B）上",
+    "「只測效果管線效能」的專用映像。",
+    "",
+    "跟 ESP32-S3-Matrix-LED-Textkit 的分別：",
+    "  · 這個 project 不跑 render／pixel 任務（tasks.json 兩條都 level=-1）：",
+    "    不點燈、不跑基礎燈效（OFF/SOLID/ZONE1/RAMP/BREATH/WAVE），也不佔 I80 腳；",
+    "  · 只編 CONFIG_NETCORE_EFFECT_BENCH（自己一個 component、自己一條 0xF065），",
+    "    不開 NC_ENABLE_TESTS、不含 0xF060–0xF064、network、ncm、其他量測指令；",
+    "  · 開機 8 秒後 effect_bench 任務自動跑一次 64 px（8×8）並印 log；",
+    "    其他 px（960／9600，量 PSRAM）用 0xF065 由主機指定。",
+    "",
+    "重點量的是「效果」：program interpreter → 12-bit 配對 → 抖動／12→8 → 畫布；",
+    "canvas 分 internal／PSRAM／混合、單塊／分塊、1／2／4 個 job。",
+    "",
+    "建置：python3 make.py build ESP32-S3-Matrix --project ESP32-S3-Matrix-EffectPerf --fresh",
+    "OTA ：tools/effect_bench.py --via http://127.0.0.1:8011  # 或 tools/ota.py"
+  ],
+  "version": 1,
+  "name": "ESP32-S3-Matrix-EffectPerf",
+  "hardware": "S3/ESP32-S3-Matrix",
+  "aliases": ["effect-perf", "effect-bench", "matrix-effect"],
+  "seed": [
+    "hardware",
+    "system",
+    "network",
+    "tasks"
+  ]
+}

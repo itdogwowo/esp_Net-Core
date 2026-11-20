@@ -247,6 +247,10 @@ components/action/
 | `0xF061` RENDER | `op(u8)` → `0xF004` JSON。渲染**任務**（`render`）的狀態。`op=0` STATS：`{"producer":{…},"render":{…}}`；`op=1` 預留（回 ok）。見 [pixel-renderer.md](../03_notes/pixel-renderer.md) |
 | `0xF062` PXBENCH | `[lanes:u8][px:u16 LE][frames:u8]` → `0xF004` `{lanes,px,frames,units,us_enc,us_mix,us_direct,us_packed,us_pack,us_merge,sram,max_fps_x10,pass50}`：像素編碼吞吐量測（唔需要燈板） |
 | `0xF063` SINBENCH | `[iters:u16 LE]`（可省，預設 50000，夾 100..500000）→ `0xF004` `{"n","smp","q12":{"ns","err"},"lin":{…},"sin":{…}}`；`err` = milli-LSB（×100）。量**固件三個正弦函數**的實機 ns/call ＋ 對 double 的最大誤差（q12／lin／sin）。見 [sin_bench/README](../../tools/hosttest/sin_bench/README.md) |
+| `0xF064` PROGBENCH | `[px:u16][flags:u8]`（flags bit0=per-led、bit1=canvas 放 PSRAM）→ `0xF004` `{px,val_ns:{keep,math_now,square,pulse_wave,pulse,starter},plan_us,frame_ns,sram,per_led,canvas,pair12_ns,conv_ns,dither_ns}`：六工具的**實機**逐值＋plan／scatter＋12-bit 畫布成本 |
+| `0xF065` EFBENCH | `[px:u16 LE][frames:u16 LE]`（frames=0 按 px 自動）→ **`0xF066`** `{px,fr,rep,nv,mem:{c8i,c8p,c12i,c12p,ifree,pfree},eval_ns,vals_ns,pair8,pair12,conv,pipe:{i8,p8,i12,p12,mix},chunk:{64,256,1024},jobs:{j2,j4}}`。**只測效果管線**：program 逐值／逐幀、8／12-bit 配對、12→8 捨入／抖動、internal／PSRAM／混合、分塊、多 job。`CONFIG_NETCORE_EFFECT_BENCH`（不需要 `NC_ENABLE_TESTS`）；見 [effect-perf.md](../00_pm/effect-perf.md) |
+| `0xF067` PSRAMBENCH | `[size_kb:u16 LE][iters:u16 LE]`（預設 256 KB、8 次，夾 16..1024 KB、1..32）→ **`0xF068`** `{size,it,ok,int:{wr,rd,cp},psram:{wr,wr_cold,rd,rd_cold,cp},mix:{i2p,p2i,p2p},chunk:{1k,4k,16k,64k},msync_us:{c2m,m2c},msync_err}`（全部 MiB/s）。大 buffer 留 PSRAM、以 chunk 讀入 internal 的純搬運量測；`CONFIG_NETCORE_EFFECT_BENCH`；見 [effect-perf.md §9](../00_pm/effect-perf.md#L268) |
+| `0xF069` PIPEBENCH | `[px:u16 LE][frames:u16 LE][mode:u8]`（mode 0=1 值/px wwww、1=3 值/px rgb、2=1 值/px w）→ **`0xF06A`** `{px,nv,mode,fr,rep,gen_us,pair_us:{range,table,rnd},conv_us,full_us:{range,table,rnd,ps},mem}`（µs）。9,600 個效果值→配對→12→8 的全流程；RGBW→I80 不在內。`CONFIG_NETCORE_EFFECT_BENCH`；見 [effect-perf.md §10](../00_pm/effect-perf.md#L315) |
 
 > ⚠️ 新增測試指令之前先查号：**指令碼重複時只會保留先登記的那一個**（`nc_action_init()`
 > 會在開機 `ESP_LOGE` 並丟棄後來者）。登記次序是 core →（測試的 bench／SD）→ test_action

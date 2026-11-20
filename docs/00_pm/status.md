@@ -5491,3 +5491,134 @@ ws2812：30 µs/LED/幀（24 bit × 1.25 µs）。視覺更新 50 FPS（20 ms）
   4 個誤差累加器），但**總線時間 × M**，所以高 FPS／多子幀之下可支援 LED 數下降。
 - 6×20 = 120 顆、6 條 lane 並行：每子幀 0.6 ms → 20 ms 內可送 **33 個子幀**，
   抖動空間非常充裕；反過來 960 px 單鏈連 50 FPS 都做唔到（28.8 ms/幀）。
+
+### 7.148 2026-11-20 晚（EffectPerf 專案：純效果量測；64／960／4,096／9,600 px 真機）
+
+**背景**：§7.147 量到 9,600 px 的 12-bit 畫布在滿載映像落 PSRAM，配對＋抖動 10 ms/幀；
+下一步要分開「畫布本身」與「其他模組佔 internal」的影響，而且用戶要一個**只測 Effect**
+的專案（不要基礎燈效、不要其他測試）。
+
+**做咗**：
+
+- 新 `CONFIG_NETCORE_EFFECT_BENCH`（release 映像也可用，**不需要 `NC_ENABLE_TESTS`**）＋
+  `firmware/components/tasks/effect_bench/`：自己一條 `0xF065 EFBENCH`／`0xF066`，
+  沒有 `0xF060–0xF064`、network、ncm、其他量測。
+- 新 project **`ESP32-S3-Matrix-EffectPerf`**（`ports/project/S3/`）：render／pixel
+  `level=-1`（不亮燈、不初始化 I80、不跑六個內建效果），tasks.json 只開
+  `effect_bench`；開機 8 秒後自動跑 64 px／2,000 幀，其餘 px 由 `0xF065` 指定。
+- 量測覆蓋：program 逐值／逐幀、8／12-bit 配對、12→8 捨入／抖動、
+  internal／PSRAM／混合、分塊 64／256／1024、2／4 job。
+- 工具 `tools/effect_bench.py`（`--via` WebMaster REST 或 `--port` 直接 CDC）；
+  詳細設計／數字見 [effect-perf.md](effect-perf.md)。
+
+**實機數字（S3 240 MHz、IDF 6.0.3、EffectPerf 映像、nc4 跑住）**
+
+| px | 整條 12-bit internal | 整條 12-bit PSRAM | 混合（12p→8i） | 分塊 1024 | i12 佔 20 ms |
+|---:|---:|---:|---:|---:|---:|
+| 64（8×8） | **63.8 µs** | 63.8 µs | 63.8 µs | 63.9 µs | **0.32%** |
+| 960 | 500.6 µs | 500.6 µs | 500.6 µs | 500.7 µs | 2.5% |
+| 4,096 | 2.039 ms | 3.433 ms | 2.039 ms | 2.128 ms | 10.2%（p12 17.2%） |
+| **9,600** | **4.738 ms** | **11.095 ms** | **8.701 ms** | **5.005 ms** | **23.7%（p12 55.5%）** |
+
+- **64／960 px：internal 與 PSRAM 同速**（畫布 512 B／7.7 KB，cache 吸掉）；
+  PSRAM 代價由 **4,096 px（32 KB）** 開始，9,600 px 的 12-bit 配對慢 **2.03×**。
+- **分塊 1024 px** 把 9,600 px 由 11.095 → **5.005 ms**（只比全 internal 慢 5.6%，
+  比整塊 PSRAM 快 2.22×）；256 px 是 5.836 ms，64 px 反而 9.556 ms（固定成本太高）。
+  ⇒ §7.147 的「256 px 一塊」修正為 **1024 px 一塊**。
+- **EffectPerf 隔離出 ~132 KB internal**（開機 heap 234.7 KB vs tests 映像 102.1 KB）：
+  同一塊 9,600 px 12-bit 畫布（76.8 KB）在 EffectPerf **internal 分得到**，
+  滿載映像分不到。所以「畫布落 PSRAM」很多時候是其他模組先佔了 internal，不是畫布太大。
+- 8×8 的 63.8 µs 中 **33.7 µs（53%）是算 64 個效果值**；配對＋轉換只 30 µs。
+  8×8 要再快，先減 `pixel_hint`／`eval`，換畫布放置冇用。
+
+**踩到並修正**：
+
+1. 分塊 scratch 用了畫布絕對 `base` → 9,600 px 寫出界（960 px 剛好還在 8 KB 內）；
+   改成 scratch base=0，寫完再交回 `c8 + off*4`。
+2. `vTaskDelay(1)` 餵不到 idle（decode 優先級高，每個 tick 都搶先）→ 量測幾秒後
+   `task_wdt`（`rst=6`）；改 `vTaskDelay(2)`，數字不變。
+
+**驗證**：`tools/effect_bench.py --px 64,960,4096,9600` 全部回 `0xF066`；
+開機自測 `ebench` 14.4 s 完成（8 s 延遲＋6 s 量測）、`loop [ebench] 結束`、無 WDT；
+OTA 6 次（`app` 最後 `51b88127`、image 670.9 KB），每次 `APPLY` 自動重開。
+
+**未做**：encode／I80 端到端（EffectPerf 不開 render）；network／ncm 同時跑的
+cache 污染；temporal／spatial 抖動差異；apa102 16-bit／pca9685 12-bit 直出。
+
+### 7.149 2026-11-20 深夜（0xF067 PSRAMBENCH：大 buffer 放 PSRAM、純搬運頻寬＋混合讀取）
+
+**背景**：§7.148 之後的結論是「大 canvas 放 PSRAM、1024 px 分塊入 internal」；
+但之前只由 effect 管線反推，未直接量 PSRAM 的純 read／write／copy。今次補一條
+**只做資料搬運**的指令，確認「大資料放 PSRAM、讀取盡量快、混合使用」的實際上限。
+
+**做咗**：
+
+- `0xF067 PSRAMBENCH`（回 `0xF068`，同一個 `CONFIG_NETCORE_EFFECT_BENCH` component）：
+  `memset`／sequential read／`memcpy`、PSRAM cold read（每次 M2C）／writeback（C2M）、
+  internal↔PSRAM 混合 copy、1/4/16/64 KB chunk 讀。工具 `tools/psram_bench.py`。
+- OTA 第 7 次（`app 49ff3d64`、image 673.9 KB）；`status cmds` 仍只有 `0xF065`／`0xF067`，
+  冇 `0xF060–64`、network、ncm。
+
+**真機數字（S3 240 MHz、2 MB quad PSRAM 80 MHz、buffer 64 B 對齊）**
+
+| 大小 | internal wr/rd/cp | PSRAM wr / wr_cold | PSRAM rd / rd_cold | PSRAM cp | 混合 i2p/p2i/p2p |
+|---:|---:|---:|---:|---:|---:|
+| 64 KB | 725 / 129 / 361 MiB/s | 14 / 13 | 24 / 26 | 9 | 14 / 24 / 9 |
+| 256 KB | internal 不足 | 13 / 13 | 25 / 26 | 9 | 13 / 25 / 9 |
+| 512 KB | internal 不足 | 13 / 13 | 25 / 26 | 9 | 13 / 25 / 9 |
+| **1 MB** | internal 不足 | 13 / 13 | 25 / 26 | — | 13 / 25 / — |
+
+- **PSRAM 順序讀 25–26 MiB/s、寫 13 MiB/s、copy 9 MiB/s**；1 MB 仍然同一水平線。
+  internal copy 361 MiB/s → PSRAM copy **慢 ~40×**。
+- **chunk 1/4/16/64 KB 純讀全部 ~25 MiB/s**：PSRAM 係 bandwidth-bound，
+  分塊細唔會慢；1–4 KB 反而 cache footprint 更細。
+- cold/hot 幾乎一樣（26 vs 25）——64 KB 已超過 L1，重讀都係 PSRAM。
+- `esp_cache_msync`：256 KB–1 MB 約 **C2M 17 µs、M2C 12 µs**，相對搬運可忽略；
+  64 KB 第一次 178 µs 是 warm-up。
+- 換算：9,600 px 12-bit 畫布 76.8 KB → 讀 **3.0 ms**、寫 **5.6 ms**、copy **8.3 ms**，
+  同 §7.148 的 effect `p12 11.1 ms`／`mix 8.7 ms`／分塊 5.0 ms 對得上。
+  1 MB → 讀 40 ms、寫 77 ms、copy 111 ms：**大 buffer 只可以做冷資料，唔可以每幀全掃**。
+
+**定案（用既有 `nc_buf`，唔另開 allocator/header）**：full canvas／asset arena 等冷 buffer
+放 PSRAM（`where=P`）；1,024 px chunk（8 KB 12-bit scratch）＋8-bit 輸出留 internal（`where=S`）；
+DMA 槽依 backend 契約（drv_i80 大幀已有 PSRAM 槽例外）。`0xF067` 只量 raw bandwidth，
+正式 buffer 用 `nc_buf` 的 `slot_bytes × n`／`reserve`／`off`／`len`／`handover`。由 PSRAM 讀入 internal 用 1–4 KB chunk 就夠；
+pair/dither 在 internal 做，只把最終結果寫 PSRAM（寫比讀貴一倍）。
+詳見 [effect-perf.md §9](effect-perf.md#L268)。
+
+### 7.150 2026-11-21 凌晨（0xF069 PIPEBENCH：9,600 個波→配對→12→8 的樽頸）
+
+**背景**：§7.148/§7.149 的 effect bench 用 `pixel_hint=64`，只代表 8×8；
+16×600 要「每顆 LED 一個波」時，生成器要跑 9,600 次（RGB 28,800 次）。
+今次加 `0xF069 PIPEBENCH`（回 `0xF06A`），把 **gen／pair／conv** 分開量，
+RGBW→I80 編碼／送燈唔計（render backend 已有）。
+
+**真機（9,600 px、S3 240 MHz、12-bit canvas internal、frames=2）**
+
+| 階段 | 1 值/px（wwww） | 3 值/px（rgb） |
+|---|---:|---:|
+| gen（nc_px_job_vals） | **5.155 ms** | **15.587 ms** |
+| pair range（pair_apply12） | 4.790 ms | 4.894 ms |
+| pair 連續 table | 5.302 ms | 5.303 ms |
+| pair 打亂 table | **19.941 ms** | **19.939 ms** |
+| conv 12→8 | 3.425 ms | 3.426 ms |
+| **full（gen＋pair＋conv）** | **13.530 ms（67.7%）** | **24.167 ms（120.8%）** |
+| 50 FPS 剩餘 | **6.47 ms** | **−4.17 ms** |
+
+- 1 值/px：gen 38%、pair 35%、conv 25% —— 三段都重要。
+- 3 值/px：**gen 65%**、pair 20%、conv 14% —— 生成器是主瓶頸。
+- pair 的 W 與 WWWW 同價（4.77 vs 4.79 ms）：成本在 `k % nv`／range 迴圈，不是寫 4 通道。
+- 連續 table 比 range 慢 11%；**打亂 table 4.2×**（19.9 ms）——表唔貴，非連續目的地才貴；
+  配對器應該用 **runs（連續段）**，唔好逐顆 table。
+
+**下一步（未做）**
+
+1. **波表快取**（MP `effect_core.py` 的 `_WAVE_CACHE`）：`program` 的 total=256 預算成
+   `uint16_t wave[256]`，逐幀只索引；生成可望由 5.16／15.59 ms 降到 <1 ms。
+2. pair 在 `nv >= nled` 時省掉 `% nv`（每幀 9,600 次除法）。
+3. 非連續 group 先排成 runs 或分塊，避免 19.9 ms random scatter。
+4. `full_ps`（canvas 在 PSRAM）今次 `c12p` 配不到，未取得；之前 0xF065 的
+   `p12=11.1 ms`／`mix=8.7 ms` 仍有效。
+
+**驗證**：OTA 後 `app 618f7233`；`status cmds` 只有 `0xF065`／`0xF067`／`0xF069`，
+冇其他測試。詳見 [effect-perf.md §10](effect-perf.md#L315)。

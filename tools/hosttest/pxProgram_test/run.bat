@@ -25,14 +25,14 @@ goto gcc
 
 :cl
 echo [pxProgram_test] MSVC
-cl /nologo /utf-8 /std:c17 /experimental:c11atomics /W3 /I%PXF%\include /I%T%\include /I%T% /Fe:"%OUT%\pxProgram_test.exe" /Fo:"%OUT%\\" %SRCS%
+cl /nologo /utf-8 /std:c17 /experimental:c11atomics /W3 /I%PXF%\include /I%T%\include /I%T% /Itools\hosttest\pxEngine_test\include /Fe:"%OUT%\pxProgram_test.exe" /Fo:"%OUT%\\" %SRCS%
 if errorlevel 1 exit /b 1
 "%OUT%\pxProgram_test.exe"
 exit /b %ERRORLEVEL%
 
 :gcc
 echo [pxProgram_test] gcc
-gcc -std=c17 -Wall -Wextra -Werror -O1 -I%PXF%\include -I%T%\include -I%T% -o "%OUT%\pxProgram_test.exe" %SRCS% -lm
+gcc -std=c17 -Wall -Wextra -Werror -O1 -I%PXF%\include -I%T%\include -I%T% -Itools\hosttest\pxEngine_test\include -o "%OUT%\pxProgram_test.exe" %SRCS% -lm
 if errorlevel 1 exit /b 1
 "%OUT%\pxProgram_test.exe"
 exit /b %ERRORLEVEL%

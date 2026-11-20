@@ -1,0 +1,12 @@
+# ESP32-S3-Matrix-EffectPerf — 只加 effect_bench，不改任何硬體事實。
+#
+# 硬體事實（flash／PSRAM／CPU／console／分區表／燈的腳位與顆數）一律留在
+# ports/hardware/S3/ESP32-S3-Matrix/sdkconfig.defaults；project 只覆寫「這個映像
+# 多編哪個功能」。
+#
+# 不開 NC_ENABLE_TESTS：
+#   effect_bench 是 CONFIG_NETCORE_EFFECT_BENCH 的獨立 component，
+#   不是 test_action 的 58 條測試指令，所以不會把 network／ncm／0xF060–0xF064 拉進來。
+CONFIG_NETCORE_EFFECT_BENCH=y
+# 這不是吞吐量映像；PXBENCH 保持關閉（它屬於 test_action，本來就不會進來）。
+CONFIG_NETCORE_PXBENCH=n

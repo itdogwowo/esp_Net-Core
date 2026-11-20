@@ -11,7 +11,7 @@ SHIM=tools/hosttest/pxLayer_test/include
 mkdir -p "$OUT"
 
 "$CC" -std=c17 -Wall -Wextra -Werror -O1 \
-    -I"$PXF/include" -I"$SHIM" \
+    -I"$PXF/include" -I"$SHIM" -I"tools/hosttest/pxEngine_test/include" \
     "$PXF/asset/nc_px_json.c" \
     "$PXF/asset/nc_px_asset.c" \
     "$PXF/asset/nc_px_layer.c" \

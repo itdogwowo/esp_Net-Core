@@ -118,7 +118,11 @@ set(_nc_extra_dirs
     "${CMAKE_CURRENT_LIST_DIR}/components/tasks/hw_gpio"
     # pixel_task：效果／Map 生產者；render_task：渲染（LED 現在，LCD 將來）
     "${CMAKE_CURRENT_LIST_DIR}/components/tasks/pixel_task"
-    "${CMAKE_CURRENT_LIST_DIR}/components/tasks/render_task")
+    "${CMAKE_CURRENT_LIST_DIR}/components/tasks/render_task"
+    # effect_bench：純效果效能（0xF065）。**不是** test_* 測試元件 ——
+    # 由 CONFIG_NETCORE_EFFECT_BENCH 開關，release 映像也可以有；
+    # CONFIG 關閉時 .c 內容為空、不登記任何指令／任務。
+    "${CMAKE_CURRENT_LIST_DIR}/components/tasks/effect_bench")
 # 外部任務宿主（ncm）。NC_ENABLE_NCM=OFF 時連 component 都唔加入 →
 # 唔編譯、唔 link、唔 fetch WAMR 依賴（components/host/ncm/idf_component.yml）。
 # 注意：一定要放喺 components 之下第二層（components/*/ncm）—— IDF 會自動把

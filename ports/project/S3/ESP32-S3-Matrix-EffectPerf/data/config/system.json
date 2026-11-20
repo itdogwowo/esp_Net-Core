@@ -1,0 +1,88 @@
+{
+  "_comment": [
+    "System 層（EffectPerf）：身份、開機行為、NC4 通道與路由表（S3-Matrix）。",
+    "這個 project 只跑 nc4＋effect_bench；render／pixel 在 tasks.json 是 -1，不會初始化 I80。",
+    "frame_interval_ms／num_pixels 保留給同板其他 project 的預置值，effect_bench 不讀它們。",
+    "USB：hardware phy=otg-fs（GPIO19/20）；link {kind:\"usb\",index:0,msc:1}：personality 由 USB.list[0].phy 決定（otg-fs → cdc，MSC 可行）。",
+    "links[].name：可省略或用 \"name\":\"\" → 自動生成；有非空 name 就用。links[].msc：USB link 的 MSC 開關（只 OTG）。",
+    "links[].rx 唔寫 = 用固件預設；只有特殊負載才覆寫。"
+  ],
+  "version": 1,
+  "cID": "",
+  "frame_interval_ms": 20,
+  "num_pixels": 64,
+  "nc4": {
+    "links": [
+      {
+        "name": "usb0",
+        "kind": "usb",
+        "index": 0,
+        "msc": 1
+      },
+      {
+        "name": "wifi_tcp0",
+        "kind": "wifi_tcp",
+        "index": 0,
+        "port": 80
+      },
+      {
+        "name": "wifi_tcp1",
+        "kind": "wifi_tcp",
+        "index": 1,
+        "port": 6000
+      },
+      {
+        "name": "wifi_tcp2",
+        "kind": "wifi_tcp",
+        "index": 2,
+        "port": 8080
+      },
+      {
+        "name": "wifi_udp0",
+        "kind": "wifi_udp",
+        "index": 0,
+        "port": 6001
+      }
+    ],
+    "routes": [
+      {
+        "in": "nctx",
+        "out": [
+          "decode0"
+        ]
+      },
+      {
+        "in": "outbound",
+        "out": []
+      },
+      {
+        "in": "usb0",
+        "out": [
+          "decode0"
+        ]
+      },
+      {
+        "in": "wifi_tcp1",
+        "out": [
+          "decode0"
+        ]
+      },
+      {
+        "in": "wifi_tcp2",
+        "out": [
+          "decode0"
+        ]
+      },
+      {
+        "in": "wifi_udp0",
+        "out": [
+          "decode0"
+        ]
+      }
+    ]
+  },
+  "usb": {
+    "cdc_log": 1
+  },
+  "log_debug_mode": 0
+}

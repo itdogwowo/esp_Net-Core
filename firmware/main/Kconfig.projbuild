@@ -109,6 +109,25 @@ menu "esp_Net-Core"
             緩衝先試 internal SRAM、唔夠才退 PSRAM，回覆有 sram=1/0。
             量產映像預設關閉。
 
+    config NETCORE_EFFECT_BENCH
+        bool "效果效能專用測試（0xF065 EFBENCH；release 映像也可用）"
+        depends on NETCORE_PIXEL
+        default n
+        help
+            加入一個**只測效果管線**的效能任務與指令：
+            0xF065 EFBENCH 會量 program interpreter（逐值／逐幀）、
+            8-bit／12-bit 配對、12→8（四捨五入／抖動）、
+            internal SRAM／PSRAM／混合放置、分塊（chunk）與多 job 合成。
+
+            這一支**不屬於** NC_ENABLE_TESTS 的 58 條測試指令：它自己一個
+            component、自己一條 0xF065／0xF066，沒有 0xF060–0xF064、沒有
+            network／ncm／其他量測。專案
+            `ESP32-S3-Matrix-EffectPerf` 用它開一個「純效果」映像：
+            render／pixel 任務關閉（唔點燈、唔跑基礎效果），
+            只留 nc4＋這個 bench。
+
+            量產映像預設關閉。
+
     config NETCORE_PIXEL_LEDS
         int "每道 lane 的燈數"
         depends on NETCORE_PIXEL
