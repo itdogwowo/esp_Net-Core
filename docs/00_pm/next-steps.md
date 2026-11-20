@@ -312,7 +312,7 @@ pixel 只是其中一個使用者。**2026-11-19：已更名為 `nc_i80_out.c`�
 | 14.3 | `nc_effect_program`：把**選中**的資產畫上畫布 | ⏸ **下一步** | 要決定「邊個資產」放邊：cfg 加 index／name？0xF060 加子命令？zone 各自一個？ |
 | 14.4 | `pixel_task` 接線 | ⏸ | 現在**零呼叫者**：`nc_px_asset_scan()` 未接 `nc_store_fs_base()`＋`/pixel/effects`，`ASSET_RELOAD` 未有 |
 | 14.5 | `registry.json`／`map`／`modes` 三層 | ⏸ | Q2–Q4 仍開（見 behavior-taxonomy §4） |
-| 14.6 | IDF 建置＋上板 | ⏸ | 本機冇 IDF（只有 host 測試）；先在 WSL build，再 S3-Matrix 驗一個 program 效果的實際波形。上板時順手跑 `0xF063 SINBENCH`（`dev_probe.py --sin`）補實機 sine 數字 |
+| 14.6 | IDF 建置＋上板 | ✅ **完成（2026-11-20，SuperMini-LED-Textkit）** | macOS `~/esp/esp-idf` v6.0.3 build；tests／release 兩次 OTA 驗證；`0xF063` 實機 sine 數字已入 status §7.138。仍然未做：P4 板、program 效果上畫布（14.3） |
 
 **風險**：14.3 之前，interpreter 係「已驗證但冇人用」的部件（同 `sin_q12` 一樣）。
 決定 cfg 形狀時要順便想「換效果時 gen 要唔要 +1」（現時換 effect id 會 +1）。

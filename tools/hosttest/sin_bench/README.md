@@ -40,6 +40,17 @@ bash tools/hosttest/sin_bench/run.sh --json     # 機器可讀（存檔／比較
 **讀數要小心**：`min ns` 在虛擬機／有背景工作的機器上會跳（同一份 code 見過 1.2–2.0）；
 相對次序穩定：`lut_4096` < `hyb*` ≈ `eng_sin_lin` < `eng_sin_q12` ≪ `cordic`。
 
+### 實機（ESP32-S3 240 MHz，`0xF063 SINBENCH`，2026-11-20）
+
+| case | ns/call | ≈cycles | max 誤差 |
+|---|---:|---:|---:|
+| `eng_sin` | 88 | 21 | 13.31 |
+| `eng_sin_lin` | 146 | 35 | 0.72 |
+| `eng_sin_q12` | 157 | 38 | 3.74 |
+
+板上 `sin_lin` 比多項式快 7%、準 5.2×（host 兩者打平）。誤差必須**全相位 65536 點**掃，
+每 16 點取樣會漏掉峰值（10.37 vs 13.31）—— 0xF063 已改成全掃。
+
 ## 真機
 
 ```bash

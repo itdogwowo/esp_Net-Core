@@ -4356,7 +4356,7 @@ static void on_pxbench(nc4_ctx_t *ctx, const nc4_frame_t *f)
 //     lin = nc_px_engine_sin_lin（256 錨點混合，514 B）
 //     sin = nc_px_engine_sin（1024 點 Q15 表，2 KB）—— 內建效果用
 //   相位序列 = LCG 高位（唔會被常數折疊，亦唔會同一個相位重複命中 cache）。
-//   誤差 = 對 double `sin()` 的最大差（4096 個取樣點、0..4095 域、milli-LSB = ×100）。
+//   誤差 = 對 double `sin()` 的最大差（**65536 個相位全掃**、0..4095 域、milli-LSB = ×100）。
 //   為什麼要這條：host 的 ns 只代表相對成本；板上 cache／in-order 會拉高絕對值
 //   （status §7.134 一直未量到逐次 sine 成本）。
 #define NC4_CMD_SINBENCH 0xF063
@@ -4399,10 +4399,13 @@ static uint32_t sinbench_ns(uint32_t iters, uint8_t algo)
     return best;
 }
 
-static uint32_t sinbench_err(uint8_t algo)
+// 全相位掃描（65536 點）一次算齊三個算法的誤差。
+// **必須逐相位**：實測 step=16 會漏掉峰值（sin 報 10.37，實際 13.31）。
+// 參考值 = double `sin()`（每個相位只算一次，三個算法共用）。
+static void sinbench_err(uint32_t out[3])
 {
-    double mx = 0.0;
-    for (uint32_t p = 0; p < 65536u; p += 16u) {
+    double m0 = 0.0, m1 = 0.0, m2 = 0.0;
+    for (uint32_t p = 0; p < 65536u; p++) {
         double ideal = 2048.0 + 2048.0 *
             sin(2.0 * 3.141592653589793 * (double)p / 65536.0);
         if (ideal > 4095.0) {                 // 12-bit 表示不到 4096（峰值）
@@ -4410,20 +4413,25 @@ static uint32_t sinbench_err(uint8_t algo)
         } else if (ideal < 0.0) {
             ideal = 0.0;
         }
-        int32_t w;
-        if (algo == 0) {
-            w = (int32_t)nc_px_engine_sin_q12(p);
-        } else if (algo == 1) {
-            w = (int32_t)nc_px_engine_sin_lin(p);
-        } else {
-            w = (nc_px_engine_sin(p >> 6) >> 4) + 2048;
+        const double q = (double)nc_px_engine_sin_q12(p);
+        const double l = (double)nc_px_engine_sin_lin(p);
+        const double s = (double)((nc_px_engine_sin(p >> 6) >> 4) + 2048);
+        double e = fabs(q - ideal);
+        if (e > m0) {
+            m0 = e;
         }
-        const double e = fabs((double)w - ideal);
-        if (e > mx) {
-            mx = e;
+        e = fabs(l - ideal);
+        if (e > m1) {
+            m1 = e;
+        }
+        e = fabs(s - ideal);
+        if (e > m2) {
+            m2 = e;
         }
     }
-    return (uint32_t)(mx * 100.0 + 0.5);      // milli-LSB
+    out[0] = (uint32_t)(m0 * 100.0 + 0.5);    // milli-LSB
+    out[1] = (uint32_t)(m1 * 100.0 + 0.5);
+    out[2] = (uint32_t)(m2 * 100.0 + 0.5);
 }
 
 static void on_sinbench(nc4_ctx_t *ctx, const nc4_frame_t *f)
@@ -4442,11 +4450,13 @@ static void on_sinbench(nc4_ctx_t *ctx, const nc4_frame_t *f)
     const uint32_t q12_ns = sinbench_ns(iters, 0);
     const uint32_t lin_ns = sinbench_ns(iters, 1);
     const uint32_t sin_ns = sinbench_ns(iters, 2);
-    const uint32_t q12_err = sinbench_err(0);
-    const uint32_t lin_err = sinbench_err(1);
-    const uint32_t sin_err = sinbench_err(2);
+    uint32_t err[3];
+    sinbench_err(err);
+    const uint32_t q12_err = err[0];
+    const uint32_t lin_err = err[1];
+    const uint32_t sin_err = err[2];
     (void)snprintf(j, sizeof(j),
-                   "{\"n\":%u,\"smp\":4096,"
+                   "{\"n\":%u,\"smp\":65536,"
                    "\"q12\":{\"ns\":%u,\"err\":%u},"
                    "\"lin\":{\"ns\":%u,\"err\":%u},"
                    "\"sin\":{\"ns\":%u,\"err\":%u}}",

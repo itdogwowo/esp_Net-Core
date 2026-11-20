@@ -163,7 +163,7 @@ USB 的完整分析：[failure-policy.md §4](../03_notes/failure-policy.md)。
 | `tools/bench/cdc_tx.py` | CDC TX 壓測（log／回覆爭出口時的行為） |
 | `bash tools/hosttest/run_all.sh` | 一次跑完 8 支 host test（cfg / cfgstruct / ncd / task / router / mod / hub / plan），全綠 = 冇 error 亦冇 warning |
 | `tools/hosttest/*/run.sh` | 單支 host 測試，不用板子也不用 IDF：hub / plan / mod / **ncd** / **task** / **cfg** / **router**。Windows 上只有 `cfg` / `ncd` / `task` / `router` 有 `run.bat` |
-| **WSL + ESP-IDF v6.1.0** | **唯一能 build 的地方**（Windows 冇 IDF）。`firmware/build/` 是兩邊共用的，所以 Windows 上看到的 map 其實是 WSL 上次 build 的結果 |
+| **ESP-IDF 環境** | macOS：`~/esp/esp-idf` **v6.0.3**（2026-11-20 實測可以直接 `make.py build` ＋ OTA）；Windows：WSL 內 v6.1.0（Windows 本身冇 IDF）。`firmware/build/` 兩邊共用，看 map 時留意是哪邊 build 的 |
 | `curl http://10.10.1.50:8080/config.json` | 讀寫設定（GET/PUT） |
 
 ---
@@ -5195,3 +5195,40 @@ DMA 仍然 17.36 ms（43,400 PCLK ÷ 2.5 MHz）→ 16×600 是 **CPU-bound**，
   已驗證收緊界限會即刻紅（收緊到 0.1 → max 0.72 即刻報）。
 - **文件**：`commands.md` 補 `0xF062`（之前漏了）＋ `0xF063`；`sin_bench/README` 重寫。
 - **未做**：上板跑 `0xF063`（要 WSL/IDF flash；本機冇 IDF）—— 數字一有就補入 §7.134／§7.135。
+
+### 7.138 2026-11-20 晚（上板：0xF063 實機 sine 數字；OTA 兩次＋release 驗證）
+
+- **上板環境**：ESP32-S3-SuperMini ＋ project `ESP32-S3-SuperMini-LED-Textkit`
+  （6 條 WS2812、GPIO1–6、每條 20 顆），IDF **v6.0.3**、macOS 本機 `~/esp/esp-idf`。
+  ⚠️ 更正 §6「只有 WSL 能 build」：macOS 一樣 build 得（`source ~/esp/esp-idf/export.sh`
+  之後 `python3 make.py build …`），所以本機可以 build → OTA 一條龍。
+- **實機 sine（`0xF063 SINBENCH`，iters=50000，**65536 個相位全掃**）**：
+
+  | 算法 | host ns | 實機 ns | ≈cycles@240 MHz | max 誤差（LSB） |
+  |---|---:|---:|---:|---:|
+  | `nc_px_engine_sin`（1024 點 Q15） | 1.29 | **88** | 21 | 13.31 |
+  | `nc_px_engine_sin_lin`（256 錨點） | 1.83 | **146** | 35 | **0.72** |
+  | `nc_px_engine_sin_q12`（MP 多項式） | 1.81 | **157** | 38 | 3.74 |
+
+  ⇒ 板上 `sin_lin` 比多項式**快 7%**、準 **5.2×**；host 兩者打平（§7.137 已更正「快 2.4×」
+  係工具抄算法時的數字，作廢）。1024 查表最快，但誤差 13.3 LSB。
+- **量測陷阱（已修）**：0xF063 最初每 16 個相位取樣，`sin` 報 10.37 LSB，實際 13.31 ——
+  峰值剛好落在取樣點之間。改成**全掃 65536 點**（回覆 `smp:65536`，三個算法共用一次
+  double `sin()`）之後，實機數字同 host **逐位一致**（0.72／3.74／13.31）。
+- **OTA 驗證（同一塊板、USB CDC，`tools/ota.py`）**：
+
+  | # | 映像 | 大小 | BEGIN | WRITE | END | 重開後 |
+  |---|---|---:|---:|---:|---|---|
+  | 1 | tests | 838,944 B | 3.3 s | 132.4 s（6.2 KB/s） | ✅ verified | `app ad49f374`、`h_int 120,663` |
+  | 2 | release | 678,448 B | 2.6 s | 108.3 s（6.1 KB/s） | ✅ verified | `app 7a4b7e37`、`h_int 219,347` |
+  | 3 | release（0xF063 修正後） | 678,448 B | 2.6 s | 108.3 s | ✅ verified | `app a96af8fc` |
+
+  - 三次 `APPLY` 都自動重開；`storage.boot.fw_new=1` → 換韌體照設計格式化 `/data` 再 provision
+    （所以 `/data` 回到 project 預置，config 的 sha 會變）。
+  - 重開後任務表全部起得來：`nc4`（`decode0` run）、`net`、`hw_gpio`、`render`（`render` run）、
+    `pixel`（`prd` run）；`prd` 計數 34,779（≈1,000/s）、`render` 1,582、`decode0` 3,164。
+  - `0xF060`／`0xF061` 只存在於 tests 映像；release 映像冇（符合 `NC_ENABLE_TESTS` 契約）。
+- **建置**：tests 819.3 KB（分區剩 47%）、release 662.5 KB（剩 57%）；WiFi 未編入
+  （project 預設 `CONFIG_NETCORE_WIFI` 註解、runtime `network.json.wifi.enable=0`）。
+- **未做**：P4-ETH（`10.10.1.50` 今次不在線）未上；OTA 速度 6 KB/s 明顯低於文件記錄的
+  140 KB/s（未查是 macOS 序列埠還是 chunk 設定）。
