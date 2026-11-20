@@ -5435,3 +5435,24 @@ context 執行；數字係 3 次取最小（逐值）／500 或 100 幀平均（
 **延伸點（未做）**：未來彩色效果器可能交 RGB8／HSV buffer（`PixelMathMethod` 已有
 hsv↔rgb bulk）。到時在 `nc_px_pair_apply` 前面加一層「buffer 格式 → 12-bit 值流」，
 配對層本身唔使改。
+
+### 7.146 2026-11-20（不變量落地：效果層永遠 12-bit，位深轉換／抖動只在最尾）
+
+**規則**（用戶確認）：所有 LED 在效果狀態都係 **12-bit（0..4095）**，再按輸出需要轉換；
+數據來源必然 12-bit，呢點係將來抖動的鋪墊。
+
+**做咗**：
+
+- `nc_px_pair_apply12(job, vals, nv, uint16_t *dst12)`：12-bit 原生配對，
+  八種寫法語義同 8-bit 版一致，但**唔做 `>>4`**（`ww` 仍然照 MP 的 byte 打包）。
+- `nc_px_canvas12_to_8(src, dst, nch, dither, err[4])`：
+  - `dither=false` → 四捨五入
+  - `dither=true` → 1D 誤差擴散（低 4 位帶去下一顆），平均亮度守得住
+  - 未來 >8-bit 輸出（apa102 16-bit／pca9685 12-bit）可以直接食 12-bit，唔使轉
+- `nc_px_pair_apply()`（8-bit）保留做「已經轉好」的管線用；12-bit 版係正路。
+
+**驗證**：`pxShow_test` 加 5 條：12-bit 原值保存、wwww 四通道、12→8 四捨五入、
+抖動 0/1 交錯且總和守恆、0xFFF → 255。`run_all.sh` 19 支全綠；IDF build 通過。
+
+**成本備註**：12-bit 畫布 = px × 4 × 2 B；9,600 px = **76.8 KB**（internal SRAM 要預留；
+或者分塊 256 px 一段處理，兼顧 cache）。8-bit 畫布只 38.4 KB。

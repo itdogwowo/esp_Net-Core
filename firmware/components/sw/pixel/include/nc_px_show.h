@@ -70,6 +70,19 @@ esp_err_t nc_px_show_plan(const nc_px_mode_t *mode, const nc_px_map_t *map,
 //   nv==0    按上面規則寫 0（單通道只清自己嗰個）
 void nc_px_pair_apply(const nc_px_job_t *job, const uint16_t *vals, uint16_t nv, uint8_t *dst);
 
+// ── 12-bit 原生配對（效果層的真身）──
+// 不變量：**效果狀態永遠 12-bit 0..4095**；位深轉換／抖動只喺最尾（encode）做。
+// dst12 = px × 4 個 uint16（每通道 0..4095，2 B/channel；9,600 px = 76.8 KB）。
+// 寫法語義同 8-bit 版一樣，只係唔做 `>>4`（ww 仍然照 MP 的 byte 打包）。
+void nc_px_pair_apply12(const nc_px_job_t *job, const uint16_t *vals, uint16_t nv,
+                        uint16_t *dst12);
+
+// 12-bit → 8-bit：dither=false 四捨五入；true 用 1D 誤差擴散（err 要 4 個 int32，
+// 跨像素保留），令低 4 位唔會白丟。未來 >8-bit 輸出（apa102 16-bit、pca9685 12-bit）
+// 就唔使轉，直接交 12-bit。
+void nc_px_canvas12_to_8(const uint16_t *src, uint8_t *dst, uint32_t nch, bool dither,
+                         int32_t err[4]);
+
 // 由 program asset 算一個 job 的 vals（給六工具；未來效果器自己出 buffer 就跳過呢個）
 uint16_t nc_px_job_vals(const nc_px_job_t *job, uint32_t step, uint16_t *out, uint16_t cap);
 

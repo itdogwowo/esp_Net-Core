@@ -212,6 +212,61 @@ int main(void)
         check(cv3[3] == 0xFF, "外部效果器交 buffer（唔經 program）都配到");
     }
 
+    // 12-bit 原生（效果層不變量）
+    printf("[6] 12-bit 原生＋抖動轉換\n");
+    {
+        nc_px_job_t job;
+        memset(&job, 0, sizeof(job));
+        job.nranges = 1;
+        job.rng[0].base = 0;
+        job.rng[0].count = 2;
+        const uint16_t vals[2] = { 0x0ABC, 0x0123 };
+        static uint16_t cv12[2 * 4];
+
+        memset(cv12, 0, sizeof(cv12));
+        job.write = NC_PX_WRITE_G;
+        nc_px_pair_apply12(&job, vals, 2, cv12);
+        check(cv12[1] == 0xABC && cv12[5] == 0x123, "12-bit 原值保存（唔做 >>4）");
+
+        memset(cv12, 0, sizeof(cv12));
+        job.write = NC_PX_WRITE_WWWW;
+        nc_px_pair_apply12(&job, vals, 2, cv12);
+        check(cv12[0] == 0xABC && cv12[1] == 0xABC && cv12[2] == 0xABC && cv12[3] == 0xABC,
+              "wwww：12-bit 四通道同值");
+
+        // 12→8：唔抖動 = 四捨五入
+        uint16_t src[16];
+        for (int i = 0; i < 16; i++) {
+            src[i] = 8;
+        }
+        uint8_t out[16];
+        int32_t err[4] = { 0, 0, 0, 0 };
+        nc_px_canvas12_to_8(src, out, 16, false, err);
+        check(out[0] == 1 && out[15] == 1, "12→8 四捨五入（8 → 1）");
+
+        // 12→8：1D 誤差擴散，平均亮度守得住（16 × 8/16 = 8）
+        memset(out, 0, sizeof(out));
+        int32_t err2[4] = { 0, 0, 0, 0 };
+        nc_px_canvas12_to_8(src, out, 16, true, err2);
+        int sum = 0;
+        bool binary = true;
+        for (int i = 0; i < 16; i++) {
+            sum += out[i];
+            if (out[i] > 1) {
+                binary = false;
+            }
+        }
+        check(binary && sum == 8, "12→8 抖動：0/1 交錯、總和 = 8（平均 0.5）");
+
+        // 高值：0xFFF 抖動後仍然係 255
+        for (int i = 0; i < 16; i++) {
+            src[i] = 0xFFF;
+        }
+        int32_t err3[4] = { 0, 0, 0, 0 };
+        nc_px_canvas12_to_8(src, out, 16, true, err3);
+        check(out[0] == 255 && out[15] == 255, "12→8 抖動：0xFFF → 255");
+    }
+
     printf("\n%s（%d 個失敗）\n", g_fail ? "FAILED" : "ALL PASS", g_fail);
     return g_fail ? 1 : 0;
 }

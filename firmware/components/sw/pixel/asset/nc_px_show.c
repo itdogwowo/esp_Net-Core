@@ -364,6 +364,104 @@ void nc_px_pair_apply(const nc_px_job_t *job, const uint16_t *vals, uint16_t nv,
     }
 }
 
+void nc_px_pair_apply12(const nc_px_job_t *job, const uint16_t *vals, uint16_t nv,
+                        uint16_t *dst)
+{
+    if (job == NULL || dst == NULL) {
+        return;
+    }
+    uint16_t k = 0;
+    for (uint8_t r = 0; r < job->nranges; r++) {
+        for (uint16_t x = 0; x < job->rng[r].count; x++, k++) {
+            uint16_t *o = dst + ((uint32_t)(job->rng[r].base + x) << 2);
+            switch (job->write) {
+            case NC_PX_WRITE_R:
+                o[0] = (nv > 0) ? vals[k % nv] : 0;
+                break;
+            case NC_PX_WRITE_G:
+                o[1] = (nv > 0) ? vals[k % nv] : 0;
+                break;
+            case NC_PX_WRITE_B:
+                o[2] = (nv > 0) ? vals[k % nv] : 0;
+                break;
+            case NC_PX_WRITE_W:
+                o[3] = (nv > 0) ? vals[k % nv] : 0;
+                break;
+            case NC_PX_WRITE_WW:
+                o[0] = 0;
+                o[1] = 0;
+                if (nv > 0) {
+                    const uint16_t v = vals[k % nv];
+                    o[2] = (uint16_t)(v & 0xFFu);
+                    o[3] = (uint16_t)(v >> 8);
+                } else {
+                    o[2] = 0;
+                    o[3] = 0;
+                }
+                break;
+            case NC_PX_WRITE_RGB:
+                if (nv > 0) {
+                    o[0] = vals[(uint16_t)((3u * k) % nv)];
+                    o[1] = vals[(uint16_t)((3u * k + 1u) % nv)];
+                    o[2] = vals[(uint16_t)((3u * k + 2u) % nv)];
+                } else {
+                    o[0] = 0;
+                    o[1] = 0;
+                    o[2] = 0;
+                }
+                o[3] = 0;
+                break;
+            case NC_PX_WRITE_RGBW:
+                if (nv > 0) {
+                    o[0] = vals[(uint16_t)((4u * k) % nv)];
+                    o[1] = vals[(uint16_t)((4u * k + 1u) % nv)];
+                    o[2] = vals[(uint16_t)((4u * k + 2u) % nv)];
+                    o[3] = vals[(uint16_t)((4u * k + 3u) % nv)];
+                } else {
+                    o[0] = 0;
+                    o[1] = 0;
+                    o[2] = 0;
+                    o[3] = 0;
+                }
+                break;
+            case NC_PX_WRITE_WWWW: {
+                const uint16_t v = (nv > 0) ? vals[k % nv] : 0;
+                o[0] = v;
+                o[1] = v;
+                o[2] = v;
+                o[3] = v;
+                break;
+            }
+            default:
+                break;
+            }
+        }
+    }
+}
+
+void nc_px_canvas12_to_8(const uint16_t *src, uint8_t *dst, uint32_t nch, bool dither,
+                         int32_t err[4])
+{
+    if (src == NULL || dst == NULL) {
+        return;
+    }
+    for (uint32_t i = 0; i < nch; i++) {
+        const uint32_t ch = i & 3u;
+        int32_t acc = (int32_t)src[i] + (dither ? err[ch] : 0);
+        int32_t v8 = (acc + 8) >> 4;
+        if (v8 < 0) {
+            v8 = 0;
+        }
+        if (v8 > 255) {
+            v8 = 255;
+        }
+        dst[i] = (uint8_t)v8;
+        if (dither) {
+            err[ch] = acc - (v8 << 4);        // 低 4 位帶去下一顆（1D 誤差擴散）
+        }
+    }
+}
+
 void nc_px_show_frame(const nc_px_plan_t *plan, uint32_t step, uint8_t *dst)
 {
     if (plan == NULL || dst == NULL) {
