@@ -50,7 +50,10 @@
 #include "nc_pwm_drv.h"
 #if CONFIG_NETCORE_PIXEL
 #include "nc_render.h"
+#include "nc_px_asset.h"
 #include "nc_px_engine.h"
+#include "nc_px_program.h"
+#include "nc_px_show.h"
 #endif
 #include "nc_uart_drv.h"
 #include "nc_buf.h"
@@ -4466,6 +4469,124 @@ static void on_sinbench(nc4_ctx_t *ctx, const nc4_frame_t *f)
                    (unsigned)sin_ns, (unsigned)sin_err);
     reply_json(ctx, NC4_CMD_HUB_RSP, j);
 }
+
+// ── 0xF064 PROGBENCH：畫波（六工具）＋ plan／scatter 的**實機**成本 ──
+// payload [px:u16]（可省，預設 960）→ 回 JSON：
+//   {"px":N,"val_ns":{"keep":..,"math_now":..,...},"plan_us":..,"frame_us":..,"sram":0/1}
+// 「一個 LED 一個值」＝ val_ns 那組（每型別 10,000 次取 min）；frame 包 vals＋scatter。
+#define NC4_CMD_PROGBENCH 0xF064
+
+static volatile uint32_t s_prog_sink;
+static nc_px_asset_t     s_bpa;
+static nc_px_plan_t      s_bpp;
+
+static void prog_fill_asset(nc_px_asset_t *a, uint8_t type)
+{
+    memset(a, 0, sizeof(*a));
+    strcpy(a->name, "bench");
+    a->kind = NC_PX_ASSET_PROGRAM;
+    a->nseg = 1;
+    a->pixel_hint = 64;
+    a->speed = 1;
+    a->seg[0].type = type;
+    a->seg[0].f = 10;
+    a->seg[0].l_max = 4095;
+    a->seg[0].l_lim = 100;
+    a->seg[0].phi = 0;
+    a->seg[0].end_f = 100;
+    a->seg[0].pulse = 2047;
+}
+
+static uint32_t prog_value_ns(uint8_t type, uint32_t iters)
+{
+    prog_fill_asset(&s_bpa, type);
+    nc_px_prog_t p;
+    if (nc_px_engine_program_compile(&s_bpa, &p) != ESP_OK) {
+        return 0;
+    }
+    uint32_t best = 0xFFFFFFFFu;
+    for (int r = 0; r < 3; r++) {
+        uint32_t acc = 0;
+        const int64_t t0 = esp_timer_get_time();
+        for (uint32_t i = 0; i < iters; i++) {
+            acc += nc_px_engine_program_value(&p, (i * 2654435761u) >> 16);
+        }
+        const int64_t dt = esp_timer_get_time() - t0;
+        s_prog_sink += acc;
+        const uint32_t ns = (uint32_t)(((dt > 0 ? dt : 1) * 1000) / (int64_t)iters);
+        if (ns < best) {
+            best = ns;
+        }
+    }
+    return best;
+}
+
+static void on_progbench(nc4_ctx_t *ctx, const nc4_frame_t *f)
+{
+    static char j[512];
+    uint16_t px = 960;
+    if (f->len >= 2) {
+        px = (uint16_t)(f->data[0] | ((uint16_t)f->data[1] << 8));
+    }
+    const bool per_led = (f->len >= 3) && (f->data[2] != 0);   // 1 = 每個 LED 一個值
+    if (px < 8) { px = 8; }
+    if (px > 16384) { px = 16384; }
+
+    // [1] 六個工具：逐值成本（10,000 次取 min）
+    const uint32_t iters = 10000;
+    const uint32_t v_keep = prog_value_ns(NC_PX_SEG_KEEP, iters);
+    const uint32_t v_math = prog_value_ns(NC_PX_SEG_MATH_NOW, iters);
+    const uint32_t v_sq = prog_value_ns(NC_PX_SEG_SQUARE_WAVE_NOW, iters);
+    const uint32_t v_pw = prog_value_ns(NC_PX_SEG_PULSE_WAVE, iters);
+    const uint32_t v_pu = prog_value_ns(NC_PX_SEG_PULSE, iters);
+    const uint32_t v_st = prog_value_ns(NC_PX_SEG_STARTER, iters);
+
+    // [2] plan ＋ frame：一個 job（RGB）覆蓋 px 顆
+    uint8_t *canvas = heap_caps_malloc((size_t)px * 4u,
+                                       MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    const int sram = (canvas != NULL) ? 1 : 0;
+    if (canvas == NULL) {
+        canvas = heap_caps_malloc((size_t)px * 4u, MALLOC_CAP_SPIRAM);
+    }
+    uint32_t plan_us = 0, frame_us = 0;
+    if (canvas != NULL) {
+        prog_fill_asset(&s_bpa, NC_PX_SEG_MATH_NOW);
+        if (per_led) {
+            s_bpa.pixel_hint = px;          // 極限：每顆 LED 都算一個值
+        }
+        memset(&s_bpp, 0, sizeof(s_bpp));
+        const int64_t p0 = esp_timer_get_time();
+        s_bpp.njobs = 1;
+        s_bpp.job[0].asset = &s_bpa;
+        s_bpp.job[0].write = NC_PX_WRITE_RGB;
+        s_bpp.job[0].nranges = 1;
+        s_bpp.job[0].rng[0].base = 0;
+        s_bpp.job[0].rng[0].count = px;
+        s_bpp.job[0].nled = px;
+        (void)nc_px_engine_program_compile(&s_bpa, &s_bpp.job[0].prog);
+        plan_us = (uint32_t)(esp_timer_get_time() - p0);
+        s_bpp.px = px;
+
+        const uint32_t frames = (px > 2000) ? 100 : 500;
+        memset(canvas, 0, (size_t)px * 4u);
+        const int64_t t0 = esp_timer_get_time();
+        for (uint32_t i = 0; i < frames; i++) {
+            nc_px_show_frame(&s_bpp, i, canvas);
+        }
+        const int64_t dt = esp_timer_get_time() - t0;
+        frame_us = (uint32_t)((dt * 1000) / (int64_t)frames);   // ns → 用 ns 回
+        heap_caps_free(canvas);
+    }
+
+    (void)snprintf(j, sizeof(j),
+                   "{\"px\":%u,\"val_ns\":{\"keep\":%u,\"math_now\":%u,"
+                   "\"square\":%u,\"pulse_wave\":%u,\"pulse\":%u,\"starter\":%u},"
+                   "\"plan_us\":%u,\"frame_ns\":%u,\"sram\":%d,\"per_led\":%d}",
+                   (unsigned)px, (unsigned)v_keep, (unsigned)v_math, (unsigned)v_sq,
+                   (unsigned)v_pw, (unsigned)v_pu, (unsigned)v_st,
+                   (unsigned)plan_us, (unsigned)frame_us, sram, per_led ? 1 : 0);
+    reply_json(ctx, NC4_CMD_HUB_RSP, j);
+}
 #endif  // CONFIG_NETCORE_PIXEL
 
 // ── 註冊 ──
@@ -5228,6 +5349,7 @@ static const nc_action_t k_actions[] = {
     { NC4_CMD_RENDER, on_render, "test" },
     { NC4_CMD_PXBENCH, on_pxbench, "test" },
     { NC4_CMD_SINBENCH, on_sinbench, "test" },
+    { NC4_CMD_PROGBENCH, on_progbench, "test" },
 #endif
     { NC4_CMD_RX_BENCH, on_rx_bench, "test" },
     { NC4_CMD_RX_RESULT, on_rx_result, "test" },

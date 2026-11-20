@@ -5378,3 +5378,35 @@ map／mode 委派應該擺邊？效果任務同 map 分開定一齊？
    —— 全部放 producer 的 static 就夠，唔使跨任務共享。
 4. 所以 §7.142 的結論有數據支持：**effects／map／mode 留喺同一個效果任務**；
    `pixel_task`（encode）只認 canvas。
+
+### 7.144 2026-11-20（真機極限數據：S3 逐值／scatter／plan）
+
+命令：`0xF064 PROGBENCH`（tests 映像；payload `[px:u16][per_led:u8]`）；
+工具：`python3 tools/hosttest/sin_bench/dev_probe.py --port <PORT> --prog --px 64,960,9600 [--per-led]`。
+量測條件：板上正常任務全部跑住（NC4／pixel producer／render／net），命令喺 test_action
+context 執行；數字係 3 次取最小（逐值）／500 或 100 幀平均（frame）。
+
+**逐值成本（一個 LED 一個波形值，12-bit，S3 240 MHz）**
+
+| 型別 | ns/值 |
+|---|---:|
+| `keep` | 266 |
+| `starter` | 199 |
+| `math_now` | **482** |
+| `square_wave_now` | 485 |
+| `pulse_wave` | 489 |
+| `pulse` | 273 |
+
+**整幀（values ＋ scatter，RGB 一個 job 覆蓋全鏈，canvas 喺 internal SRAM）**
+
+| 燈鏈 px | 共享 64 值（vals 循環用） | 每 LED 一個值（極限） | 極限 ns/px |
+|---:|---:|---:|---:|
+| 64 | 48.7 µs | 48.7 µs | 760 |
+| 960 | 242.4 µs | 352.8 µs | 368 |
+| **9,600** | 2,148.5 µs | **2,329.4 µs** | **243** |
+
+- **plan（換場）**：4–5 µs（真機；比 host 26 µs 仲快，因為 9600 px 個 case 只係 1 個 job）。
+- **極限情境**：9,600 px、每顆 LED 都有自己一個波形值 → **2.33 ms/幀**
+  ＝ 50 FPS 預算（20 ms）的 **11.6%**；仍有一粒完整 core 的時間做編碼／送燈。
+- scatter 主導：9,600 px 由 64 值升到每 LED 一值只多 181 µs（+8%），其餘係 4 B/px 寫入。
+- 對照 host x86：`math_now` 7.8 ns（host）vs 482 ns（S3）≈ 62×；所以 host 數字只可作相對比較。
