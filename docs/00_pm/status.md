@@ -5233,3 +5233,33 @@ DMA 仍然 17.36 ms（43,400 PCLK ÷ 2.5 MHz）→ 16×600 是 **CPU-bound**，
   （project 預設 `CONFIG_NETCORE_WIFI` 註解、runtime `network.json.wifi.enable=0`）。
 - **未做**：P4-ETH（`10.10.1.50` 今次不在線）未上；OTA 速度 6 KB/s 明顯低於文件記錄的
   140 KB/s（未查是 macOS 序列埠還是 chunk 設定）。
+
+### 7.139 2026-11-20 晚（DATA 平面第二～四層：map／modes／registry 的 C 解析器）
+
+- **問題**：ESP 側一路只有第一層（effects.json 的 program）。mp 的四層結構
+  （effect／mapping／mode／registry）在 ESP 完全冇對應，所以「讀陣列分組」同
+  「委派（group×effect×write×range）」都做不到。
+- **做咗（資料層，未接硬件）**：
+  - 抽出共用迷你 JSON reader：`include/nc_px_json.h` ＋ `asset/nc_px_json.c`
+    （`nc_px_js_open/eat/str/num/skip/key/bool`；`nc_px_asset.c` 改用同一支，**行為不變**）。
+  - 新 `include/nc_px_layer.h` ＋ `asset/nc_px_layer.c`：
+    - `nc_px_map_t`：groups（id／name／sel[]＝hw＋slice），hw 對應
+      `ws2812/apa102/pca9685/pwm/uartMotor1`。
+    - `nc_px_mode_t`：`mapping`／`play_loop`（-1＝無限）／`maxF`／
+      `entry[] = {group, effect, write, range}`；write 收 `r/g/b/w/ww/rgb/rgbw/wwww`。
+    - `nc_px_show_t`：`auto_play` ＋ `list[]`（registry.json）。
+  - 解析規則同 asset 層一致：缺欄位＝預設；未知 write／壞 range／缺 group＝**跳過該項**
+    （唔會靜默用錯通道）；壞 JSON＝整份拒絕；支援 UTF-8 BOM。
+  - slice 解析 `nc_px_slice_parse()`：`:`／`0:16`／`16:`／`::-1`（stop=0 代表到尾、step=0 代表 1）。
+- **驗證**：
+  - 新 `tools/hosttest/pxLayer_test`（入 `run_all.sh`）—— golden 直接用 mp 的真檔
+    （`map/matrix.json`、`modes/demo_eyes.json`、`modes/motor_sine.json`、`registry.json`）；
+    驗 `matrix.full/eyes/rgb/0:16` ＋ `matrix.full/wave/g/16:32`、`play_loop=-1`、`maxF=500` 等；
+    另有壞 JSON／未知 write／壞 range／缺欄位／slice／hw／write 的負面測試。全綠。
+  - `tools/hosttest/run_all.sh` **17 支全綠**（新增 pxLayer_test）。
+  - IDF v6.0.3 build 通過（`nc_px_json.c`／`nc_px_layer.c` 已入 CMakeLists）。
+- **未做（下一階段）**：
+  - 掃描／載入：`/data/pixel/{effects,map,modes}` ＋ `registry.json` 的掃描器同表（map／mode 表）。
+  - **委派執行**：group 引用解析（`matrix.full`／`3.full`／`full`）→ 用實際 controller
+    offsets 展開 `offs[]`；mode 播放逐 entry 建 generator、`write` 分派、`range` 子段 scatter。
+  - 上板驗 `demo_eyes`（0:16 eyes/rgb ＋ 16:32 wave/g）。

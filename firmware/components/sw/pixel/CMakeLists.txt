@@ -8,7 +8,8 @@ idf_component_register(
     SRCS "nc_pixel_q.c" "nc_pixel_encode.c" "nc_pixel_registry.c" "nc_pixel_bench.c"
          "engine/nc_px_engine_core.c" "engine/nc_px_engine_tables.c"
          "engine/nc_px_engine_program.c"
-         "asset/nc_px_asset.c" "asset/nc_px_asset_scan.c"
+         "asset/nc_px_asset.c" "asset/nc_px_asset_scan.c" "asset/nc_px_json.c"
+         "asset/nc_px_layer.c"
     INCLUDE_DIRS "include"
     PRIV_REQUIRES esp_timer log heap
 )
