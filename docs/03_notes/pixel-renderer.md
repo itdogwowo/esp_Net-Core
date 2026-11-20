@@ -1,9 +1,10 @@
 # 渲染任務（render）＋ 效果任務（pixel）＋ 驅動
 
 > 2026-11-18。取代舊的 `components/dev/test_rgb_led_matrix_tasks`（`rgbmatrix` 測試任務）。
-> **2026-11-19 結構更新**：內建效果嘅家定咗喺 `components/effects/pixel_effects/`
-> （現時仍在 `sw/pixel/nc_pixel_producer.c`，遷移 M2–M3 見
-> [behavior-taxonomy.md](behavior-taxonomy.md) §9）。`sw/pixel` 之後只留環、編碼器、環註冊表。
+> **2026-11-20 M2 落地**：內建效果搬去 `components/effects/pixel_effects/`
+> （`nc_effect_*.c`）；引擎（契約、registry、抖動、emit）住 `sw/pixel/engine/`
+> （`nc_px_engine_*.c`）。`sw/pixel` 只留工具：環、編碼器、環註冊表、引擎。
+> 拆法見 [behavior-taxonomy.md](behavior-taxonomy.md) §2.0／§9。
 > **同日兩次修正**：
 > 1. 原本全部塞在 `components/sys/pixel`（環、效果、驅動、任務混在一起）→ 拆出
 >    `sw/`（純軟件）、`tasks/`（任務）、`driver/`（硬體）；
@@ -44,13 +45,13 @@ driver/drv_i80、drv_spi_led（腳位／PCLK／DMA／完成）
 
 - `pixel` 任務：只管「畫面內容」——效果、Map、參數；
 - `render` 任務：只管「把環裡的幀送到硬件」——唔跑效果；
-- `sw`：兩邊共用的純計算＋效果框架（環、編碼、layout、interpreter）；
-- `effects`：具體內建效果（內容）；M2 由 `sw/pixel/nc_pixel_producer.c` 拆出；
+- `sw`：兩邊共用的工具（環、編碼、layout、**效果引擎** `nc_px_engine_*`）；
+- `effects`：具體內建效果（實作）；M2 已由 `nc_pixel_producer.c` 拆出（`nc_effect_*.c`）；
 - `driver`：只知硬體，唔知像素。
 
-**為什麼效果計算唔搬入 tasks**：同一份 `nc_pixel_producer_frame()` 要能被 host 測試、
+**為什麼效果計算唔搬入 tasks**：同一份 `nc_px_engine_frame()` 要能被 host 測試、
 `.nce` 外掛、主機推送共用。放 `tasks` 會令它依賴 FreeRTOS／任務管理器，失去可測試性；
-「幾時算」在 `pixel_task`，「點算」在 `effects/pixel_effects/`（現時仍在 `sw/pixel`）。
+「幾時算」在 `pixel_task`，「點算」在 `effects/pixel_effects/`。
 
 ## 2. 任務與 loop
 

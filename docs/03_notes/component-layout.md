@@ -22,8 +22,8 @@
 | **hw** | 晶片 | 一顆具體晶片的寄存器序列／封包（用 bus 讀寫） | bus |
 | **bus** | 線路 | 一條線的統一讀寫語義 | driver |
 | **sys** | 系統 | 協議、設定、FS、記憶體、任務、節拍 | driver、bus、`esp_*` |
-| **sw** | 共用算法 | 環、編碼、layout、效果的**框架**／interpreter（**唔養行為、唔放具體效果**） | sys |
-| **effects** | 效果內容 | （時間, 參數, 幾何）→ canonical 畫面（框架在 `sw/`） | sw（契約／框架） |
+| **sw** | 共用工具 | 環、編碼、抖動、layout、**效果引擎**（registry／interpreter；**唔養行為、唔放具體效果**） | sys |
+| **effects** | 效果實作 | （時間, 參數, 幾何）→ canonical 畫面（引擎在 `sw/pixel/engine/`） | sw（只 include 契約 header） |
 | **action** | 政策 | 參數怎麼驗、選哪個機制、回什麼 | sys、sw、effects（只設參數） |
 | **tasks** | 迴圈 | 誰在什麼核心上、跑多久 | sys、sw、effects（＋後端轉接例外） |
 | **host** | 宿主 | 載入並執行外部模組（ncm／WAMR） | sys |
@@ -77,8 +77,8 @@ esp_Net-Core/
 │  │  ├─ hw/                          # ⬜ 具體晶片（TFT／PCA9685／XL9555）；等第二顆晶片才建
 │  │  ├─ bus/                         # ✅ bus_core/ bus_net/ bus_uart/
 │  │  ├─ sys/                         # ✅ nc4/ mem/ config/ task/ store/ hw/ state/ nclog/ core/
-│  │  ├─ sw/                          # 🟡 pixel/（環＋編碼器＋效果框架＋layout；唔放具體效果）
-│  │  ├─ effects/                     # 🟡 README 已立；pixel_effects/（內建效果內容）M2 遷入
+│  │  ├─ sw/                          # 🟡 pixel/（環＋編碼＋engine/；ring/·encode/ 仍平放）
+│  │  ├─ effects/                     # ✅ pixel_effects/（5 個效果實作＋登記表）
 │  │  ├─ action/                      # 🟡 ota_action/ file_action/ test_action/（dev）
 │  │  ├─ tasks/                       # 🟡 hw_gpio/、pixel_task/（效果宿主）、render_task/（渲染）
 │  │  ├─ host/                        # 🟡 ncm/（模組載入＋WAMR）

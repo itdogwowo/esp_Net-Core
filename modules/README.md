@@ -8,7 +8,8 @@
 > 命名見 [naming.md §7](../docs/03_notes/naming.md)。
 >
 > ⚠️ **內建效果唔係住呢度**：編譯入固件的效果住
-> `firmware/components/effects/<域>_effects/`，框架住 `firmware/components/sw/pixel/`。
+> `firmware/components/effects/<域>_effects/`（實作 `nc_effect_*`），
+> 引擎住 `firmware/components/sw/pixel/engine/`（`nc_px_engine_*`）。
 > 兩者同一個 canonical frame 契約，只差交付方式。見
 > [behavior-taxonomy.md](../docs/03_notes/behavior-taxonomy.md) §3.1。
 >

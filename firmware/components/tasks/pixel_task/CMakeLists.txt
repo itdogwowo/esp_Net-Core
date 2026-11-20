@@ -5,7 +5,7 @@
 idf_component_register(
     SRCS "nc_pixel_task.c"
     INCLUDE_DIRS "include"
-    REQUIRES task pixel
+    REQUIRES task pixel pixel_effects
     PRIV_REQUIRES freertos esp_timer
     WHOLE_ARCHIVE
 )

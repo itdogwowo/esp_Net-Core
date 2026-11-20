@@ -49,7 +49,7 @@
 #include "nc_pwm_drv.h"
 #if CONFIG_NETCORE_PIXEL
 #include "nc_render.h"
-#include "nc_pixel_producer.h"
+#include "nc_px_engine.h"
 #endif
 #include "nc_uart_drv.h"
 #include "nc_buf.h"
@@ -3993,76 +3993,76 @@ static void on_matrix(nc4_ctx_t *ctx, const nc4_frame_t *f)
         break;
     case 1:
         if (f->len < 2) { goto bad_args; }
-        nc_px_producer_set_effect(f->data[1]);
+        nc_px_engine_set_effect(f->data[1]);
         break;
     case 2:
         if (f->len < 2) { goto bad_args; }
-        nc_px_producer_set_dither_mode(f->data[1]);
+        nc_px_engine_set_dither_mode(f->data[1]);
         break;
     case 3:
         if (f->len < 4) { goto bad_args; }
-        nc_px_producer_set_color(f->data[1], f->data[2], f->data[3]);
+        nc_px_engine_set_color(f->data[1], f->data[2], f->data[3]);
         break;
     case 4:
         if (f->len < 2) { goto bad_args; }
-        nc_px_producer_set_gain(f->data[1]);
+        nc_px_engine_set_gain(f->data[1]);
         break;
     case 5:
         if (f->len < 3) { goto bad_args; }
-        nc_px_producer_set_fps((uint16_t)((uint16_t)f->data[1] | ((uint16_t)f->data[2] << 8)));
+        nc_px_engine_set_fps((uint16_t)((uint16_t)f->data[1] | ((uint16_t)f->data[2] << 8)));
         break;
     case 6:                                    // 第 idx 區：rate、phase、[bits]
         if (f->len < 4) { goto bad_args; }
-        nc_px_producer_set_zone((int)f->data[1], f->data[2], f->data[3]);
+        nc_px_engine_set_zone((int)f->data[1], f->data[2], f->data[3]);
         if (f->len >= 5) {
-            nc_px_producer_set_zone_bits((int)f->data[1], f->data[4]);
+            nc_px_engine_set_zone_bits((int)f->data[1], f->data[4]);
         }
         break;
     case 8:                                    // 全域模擬位數 8..16（12 = 預設）
         if (f->len < 2) { goto bad_args; }
-        nc_px_producer_set_bits(f->data[1]);
+        nc_px_engine_set_bits(f->data[1]);
         break;
     case 15:                                   // 8 區抖動模式一次過（8 bytes；0/1/2/255）
         if (f->len < 9) { goto bad_args; }
-        nc_px_producer_set_zone_dither_all(&f->data[1]);
+        nc_px_engine_set_zone_dither_all(&f->data[1]);
         break;
     case 16:                                   // 純色再加 1/256 級：[frac]
         if (f->len < 2) { goto bad_args; }
-        nc_px_producer_set_fraction(f->data[1]);
+        nc_px_engine_set_fraction(f->data[1]);
         break;
     case 14:                                   // 波浪速度：[ms u16]（掃一個週期）
         if (f->len < 3) { goto bad_args; }
-        nc_px_producer_set_wave_speed((uint16_t)((uint16_t)f->data[1] | ((uint16_t)f->data[2] << 8)));
+        nc_px_engine_set_wave_speed((uint16_t)((uint16_t)f->data[1] | ((uint16_t)f->data[2] << 8)));
         break;
     case 13:                                   // 自動 demo：[on]
         if (f->len < 2) { goto bad_args; }
-        nc_px_producer_demo(f->data[1] != 0);
+        nc_px_engine_demo(f->data[1] != 0);
         break;
     case 11:                                   // 單區效果：[idx, eff]（0xFF＝跟全域）
         if (f->len < 3) { goto bad_args; }
-        nc_px_producer_set_zone_effect((int)f->data[1], f->data[2]);
+        nc_px_engine_set_zone_effect((int)f->data[1], f->data[2]);
         break;
     case 12:                                   // 8 區效果一次過（8 個 bytes）
         if (f->len < 9) { goto bad_args; }
-        nc_px_producer_set_zone_effects_all(&f->data[1]);
+        nc_px_engine_set_zone_effects_all(&f->data[1]);
         break;
     case 10:                                   // 8 區模擬位數一次過（8 個 bytes）
         if (f->len < 9) { goto bad_args; }
-        nc_px_producer_set_zone_bits_all(&f->data[1]);
+        nc_px_engine_set_zone_bits_all(&f->data[1]);
         break;
     case 9:                                    // 呼吸每段毫秒（u16 LE）
         if (f->len < 3) { goto bad_args; }
-        nc_px_producer_set_speed((uint16_t)((uint16_t)f->data[1] | ((uint16_t)f->data[2] << 8)));
+        nc_px_engine_set_speed((uint16_t)((uint16_t)f->data[1] | ((uint16_t)f->data[2] << 8)));
         break;
     case 7:
         if (f->len < 2) { goto bad_args; }
-        nc_px_producer_set_zone_mask(f->data[1]);
+        nc_px_engine_set_zone_mask(f->data[1]);
         break;
     default:
         reply_json(ctx, NC4_CMD_HUB_RSP, "{\"err\":\"op\"}");
         return;
     }
-    if (nc_px_producer_json(j, sizeof(j)) == 0) {
+    if (nc_px_engine_json(j, sizeof(j)) == 0) {
         reply_json(ctx, NC4_CMD_HUB_RSP, "{\"err\":\"size\"}");
         return;
     }
@@ -4099,7 +4099,7 @@ static void on_render(nc4_ctx_t *ctx, const nc4_frame_t *f)
         nc_render_get_stats(&st0);
         (void)st0;                  // 目前沒有 reset API：保留 op 給未來，先回 ok
     }
-    if (nc_px_producer_json(pj, sizeof(pj)) == 0) {
+    if (nc_px_engine_json(pj, sizeof(pj)) == 0) {
         (void)snprintf(pj, sizeof(pj), "{}");
     }
     if (nc_render_json(rj, sizeof(rj)) == 0) {

@@ -7,7 +7,7 @@
 // 環由 plan 宣告（declare），生產者（pixel 任務／.nce／主機）按名字找回同一條環。
 //
 // 檔案分工：
-//   sw/pixel                   環、編碼器、效果（純 C，host 測試同一份）
+//   sw/pixel                   環、編碼器、效果引擎（純 C，host 測試同一份）
 //   tasks/render_task          這個檔＋後端轉接（i80／spi／direct／mock）
 //   driver/drv_i80、drv_spi_led 硬件（PCLK／DMA／完成）
 #include "nc_render.h"

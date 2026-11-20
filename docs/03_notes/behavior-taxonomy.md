@@ -104,6 +104,19 @@ pixel_task（core1）：playlist → mode → generator → array('H') 畫布
 
 ## 2. C 多了什麼：三個平面
 
+### 2.0 詞彙：三個唔同嘅嘢，唔用同一個字
+
+「效果」呢兩個字在本專案有三種意思，**落位之前先認清手上係邊一種**：
+
+| 名 | 係咩 | 住邊 | 例 | 判準 |
+|---|---|---|---|---|
+| **引擎**（engine／工具） | 提供能力：契約、registry、program interpreter、波表快取、layout | `sw/pixel/engine/` | `include/nc_px_engine.h`、`nc_px_engine_core.c`、`nc_px_engine_program.c` | 拿掉所有實作，它依然可編、可測、可跑 |
+| **實作**（implementation／內容） | 用引擎做出嚟嘅具體效果 | `components/effects/<域>_effects/` | `pixel_effects/nc_effect_breath.c` | 加／刪一個效果，引擎一行都唔使改 |
+| **呼叫方**（caller） | 用引擎嘅節奏、指令、載入器 | `tasks/`／`action/`／`host/` | `pixel_task`（show runner）、`pixel_action`、`host/ncm` | 有核、有 fps、有生命週期 |
+
+> **一條規則**：`sw/` **只放工具**。任何「用工具做出嚟嘅嘢」（效果實作、task、action）都唔准住 `sw/`。
+> 命名亦分開：引擎 `nc_px_engine_*`（`sw/pixel/engine/`）；實作 `nc_effect_<name>.c`（`effects/`）。見 §6。
+
 ### 2.1 三個平面
 
 | 平面 | 住哪 | 係咩 | 換一次要 | 誰可以改 |
@@ -149,8 +162,8 @@ pixel_task（core1）：playlist → mode → generator → array('H') 畫布
 | **hw**（晶片） | `hw/<chip>/` | ❌ 永遠唔准 | `hardware.json`（值） |
 | **bus** | `bus/*` | ❌ 永遠唔准 | — |
 | **sys** | `sys/*` | ❌ 永遠唔准 | `config/*.json` |
-| **sw** | `sw/*`（環、編碼、layout、效果框架、program interpreter） | ❌ 永遠唔准 | — |
-| **effect** | `effects/<域>_effects/`（內建）＋ `sw/*`（框架） | `modules/effects/<name>_effects/` → `.nce` | `pixel/effects/*.json`（program）、`pixel/map/`、`pixel/modes/`、`pixel/registry.json` |
+| **sw**（工具） | `sw/pixel/`（`ring/`·`encode/`·`dither/`·**`engine/`**＝效果引擎 `nc_px_engine_*`） | ❌ 永遠唔准 | — |
+| **effect**（實作） | `effects/<域>_effects/`（內建效果，`nc_effect_*.c`） | `modules/effects/<name>_effects/` → `.nce` | `pixel/effects/*.json`（program）、`pixel/map/`、`pixel/modes/`、`pixel/registry.json` |
 | **task** | `tasks/*_task/` | `modules/tasks/<name>_tasks/` → `.nct` | `config/tasks.json`（開關／核心） |
 | **action** | `action/*_action/` | `modules/actions/<name>_actions/` → `.nct`（`cmds`） | `schema/*.json`（build 時生成，唔入 FAT） |
 | **host** | `host/ncm/`（loader＋WAMR） | ❌ 永遠唔准 | — |
@@ -186,7 +199,7 @@ MP 只有一條路（全部 Python），C 要按「風險 × 成本」分三級�
 | **mapping**（怎麼排） | `pixel/map/*.json` + `lib/sw/pixel_layout.py` | DATA＋CORE | `/data/pixel/map/*.json`；`sw/pixel/layout` | ❌ 冇（8×8 寫死） |
 | **mode**（點配對） | `pixel/modes/*.json` | DATA＋CORE | `/data/pixel/modes/*.json`；`sw/pixel/mode` | ❌ 冇（一次一個全局效果） |
 | **playlist**（播什麼） | `pixel/registry.json` | DATA＋CORE | `/data/pixel/registry.json`；`tasks/pixel_task`（show runner） | ❌ 冇 |
-| **框架** | `lib/sw/effect_core.py` | CORE（sw） | `sw/pixel`（`nc_px_fx_core` / `nc_px_fx_program`） | 🟡 同 producer 混在一起 |
+| **引擎** | `lib/sw/effect_core.py` | CORE（sw） | `sw/pixel/engine/`（`nc_px_engine_core` / `nc_px_engine_program`） | 🟡 同 producer 混在一起 |
 | **計算** | `tasks/pixel_task.py` | CORE | `tasks/pixel_task/` | 🟡 有，但只係「算一格寫環」 |
 | **播送** | `tasks/render.py` | CORE | `tasks/render_task/` | ✅ |
 | **指令** | `action/pixel_actions.py` | CORE | `action/pixel_action/` | 🟡 只在 `test_action`（dev） |
@@ -198,33 +211,34 @@ MP 只有一條路（全部 Python），C 要按「風險 × 成本」分三級�
 - mode：**點配對**（哪個效果放哪個群組、哪個通道、播幾次）
 - playlist：**播什麼**（順序、auto_play）
 
-### 3.3 框架 vs 內容（MP 的規矩，C 照跟）
+### 3.3 引擎 vs 實作（MP 的規矩，C 照跟）
 
-| | 框架（CORE／sw） | 內容（CORE effects／USER modules／DATA） |
+| | 引擎（工具：CORE `sw/pixel/engine/`） | 實作（內容：CORE `effects/`／USER modules／DATA） |
 |---|---|---|
-| 有咩 | `nc_fx_desc_t`、registry、program interpreter、波表快取、衝突檢查 | 具體效果（呼吸／波浪／文字／火焰） |
+| 有咩 | `nc_px_engine_desc_t`、registry、program interpreter、波表快取、衝突檢查 | 具體效果（呼吸／波浪／文字／火焰） |
 | 改一次 | 重燒（少） | 改 DATA 或丟 `.nce`（多） |
 | 唔准 | **唔准包含任何一個具體效果** | **唔准自己開 task／寫環／碰 driver** |
 
 MP 的 `effect_core.py` 開頭明寫：「具體效果一律放 `slave/pixel/effects/`，本模組不寫任何效果。」
-C 版一樣：`sw/pixel` 的 fx 框架唔准出現 `breath` / `wave` 呢啲名。
+C 版一樣：`sw/pixel/engine/` 唔准出現 `breath` / `wave` 呢啲名；實作一律住
+`components/effects/pixel_effects/`（`nc_effect_*.c`），只 include 契約 header。
 
 ### 3.4 效果契約（唯一一份，三個交付共用）
 
 ```c
-// firmware/components/sw/pixel/include/nc_fx.h（目標形狀；M3 凍結）
+// firmware/components/sw/pixel/include/nc_px_engine.h（目標形狀；M3 凍結）
 typedef struct {
     uint32_t px;          // 這塊畫布幾顆
     uint16_t w, h;        // 幾何；h == 1 表示一維鏈
     int64_t  now_us;      // 唯一時間來源
     const void *params;   // 效果參數（DATA／action 寫入，effect 只讀）
-} nc_fx_in_t;
+} nc_px_engine_in_t;
 
 typedef struct {
     const char *name;
     uint32_t    state_bytes;   // 0 = 無狀態；>0 由 caller 提供
-    bool (*render)(void *st, const nc_fx_in_t *in, uint8_t *dst);  // dst = px × 4（R,G,B,W）
-} nc_fx_desc_t;
+    bool (*render)(void *st, const nc_px_engine_in_t *in, uint8_t *dst);  // dst = px × 4（R,G,B,W）
+} nc_px_engine_desc_t;
 ```
 
 六條不變式（違反就係 bug）：
@@ -253,7 +267,7 @@ typedef struct {
 /data/pixel/effects/*.json   /data/pixel/map/*.json   /data/pixel/modes/*.json   /data/pixel/registry.json
         │                          │                         │                          │
         ▼                          ▼                         ▼                          ▼
-  nc_px_fx_program            nc_px_layout              nc_px_mode                playlist
+  nc_px_engine_program        nc_px_layout              nc_px_mode                playlist
   （波形 → 畫布）              （群組 → 全域 index）       （效果 × 群組 + 參數）      （播什麼）
         └──────────────┬───────────┴─────────────┬───────────────┘
                        ▼                         ▼
@@ -276,7 +290,7 @@ typedef struct {
 ├─ 用 bus 去操作一顆具體晶片（寄存器／封包）？ ─► CORE hw/<chip>
 ├─ 係一條線的統一讀寫語義？ ──────────────────► CORE bus/<bus_x>
 ├─ 協議／記憶體／設定／儲存／狀態／任務管理？ ─► CORE sys/<name>
-├─ 只係演算法／資料結構（環、編碼、layout、框架）？ ► CORE sw/<name>
+├─ 只係工具（演算法／資料結構：環、編碼、layout、效果引擎）？ ► CORE sw/<name>
 ├─ 「時間／參數 → 畫面」的行為？ ─────────────► 先問交付：
 │    ├─ 波形寫得出（keep / math / square / pulse）？ ► DATA program（/data/pixel/effects/*.json）
 │    ├─ 開發者、要最快、可重燒？ ─────────────────► CORE effects/<域>_effects/
@@ -291,7 +305,7 @@ typedef struct {
 
 1. **佢有冇特權？**（碰硬件／記憶體／開機必要）→ 有就只可以 CORE。
 2. **佢改一次要唔要重燒？** → 要就 CORE，唔要就 DATA／USER。
-3. **佢係內容定係框架？** → 內容放 effects／modules／data；框架放 sw。
+3. **佢係工具、實作、定係呼叫方？** → 工具（引擎）放 `sw/`；實作放 `effects/`／`modules/`／`data/`；呼叫方放 `tasks/`／`action/`／`host/`。
 
 ---
 
@@ -331,10 +345,10 @@ DATA（/data/）
 |---|---|---|
 | CORE 晶片 | `components/hw/<chip>/` | `pca9685`（`nc_pca9685.c`） |
 | CORE 效果 component | `components/effects/<域>_effects/` | `pixel_effects` |
-| CORE 效果檔 | `nc_<域>_fx_<name>.c` | `nc_pixel_fx_breath.c` |
-| 效果契約 | `sw/pixel/include/nc_fx.h` | `nc_fx_desc_t` / `nc_fx_in_t` |
-| 效果框架 | `sw/pixel/nc_px_fx_core.c` / `nc_px_fx_program.c` | registry、波表、interpreter |
-| 效果符號 | `nc_<域>_fx_*` / `nc_<域>_fx_t` | `nc_pixel_fx_render()` |
+| CORE 效果檔（實作） | `nc_effect_<name>.c`（住 `<域>_effects/`，域由 component 名講） | `pixel_effects/nc_effect_breath.c` |
+| 效果契約 | `sw/pixel/include/nc_px_engine.h` | `nc_px_engine_desc_t` / `nc_px_engine_in_t` |
+| 效果引擎（工具） | `sw/pixel/engine/nc_px_engine_core.c` / `nc_px_engine_program.c` | registry、波表、interpreter |
+| 效果符號 | 引擎 `nc_px_engine_*`；實作 `nc_effect_<name>` | `nc_px_engine_register()`、`nc_effect_breath` |
 | USER 效果 | `modules/effects/<name>_effects/` → `out/<name>.nce` | `fire_effects` |
 | DATA 效果檔 | `/data/pixel/effects/<name>.json` | `breathing.json` |
 | DATA mapping | `/data/pixel/map/<name>.json` | `matrix.json` |
@@ -376,13 +390,14 @@ DATA（/data/）
 | D1 | 三個平面：CORE／USER／DATA | C 有編譯邊界；MP 的一個軸唔夠 |
 | D2 | 角色表＋平面表＝權威 | 一個功能會被拆成幾個家；唔准按功能放 |
 | D3 | USER 只准 effect／task／action／ui 四個角色 | 其餘角色碰特權，放 USER 等於開後門 |
-| D4 | 效果框架住 `sw/`，內容住 `effects/` | 跟 MP 的 `lib/sw/effect_core.py` vs `pixel/effects/` |
+| D4 | 效果**引擎**（工具）住 `sw/pixel/engine/`，**實作**住 `effects/<域>_effects/` | 跟 MP 的 `lib/sw/effect_core.py` vs `pixel/effects/`；`sw/` 只放工具 |
 | D5 | 效果三種交付：DATA program／CORE C／USER `.nce`，同一契約 | 風險 × 成本分級；MP 的路 A/B/C 對應 |
 | D6 | 效果只畫畫布；mapping／scatter／commit 係 CORE | 效果唔知 lane／硬件，`.nce` 先可以跨平台 |
 | D7 | 四層資料（effect／map／mode／playlist）全部先行設計 | MP 已驗證；C 缺呢四層就永遠係「一個全局效果」 |
 | D8 | DATA 用檔案系統做註冊表，壞檔降級不擋開機 | 跟 MP；亦係現有 config 原則 |
 | D9 | 計算（pixel_task）與播送（render_task）繼續分開 | 已有、MP 同構；效果節奏唔綁 fps |
 | D10 | 平面之間只傳資料，唔傳指標 | wasm 線性記憶體、C ABI 邊界 |
+| D11 | **引擎／實作／呼叫方三個名分開**：引擎＝`sw/pixel/engine/`（`nc_px_engine_*`）、實作＝`effects/`（`nc_effect_*`）、呼叫方＝`tasks/`／`action/`／`host/` | 「effects」一個字有兩個意思（工具＋實作）；唔分開就永遠擺錯位 |
 
 ### 8.2 待定（實作前要拍板）
 
@@ -406,8 +421,8 @@ DATA（/data/）
 | 步 | 做什麼 | 產出 | 驗收 |
 |---|---|---|---|
 | **M1** | 本文＋三平面規則＋`components/effects/`＋README | 文件、目錄 | 文件連結零 broken；`git grep` 找得到規則 |
-| **M2** | 拆框架／內容：`nc_pixel_producer` 的「效果數學」搬去 `effects/pixel_effects/`；框架留 `sw/pixel` | CORE 兩層 | build 0 warning；同一 `(t, params)` 出同一 frame（hosttest） |
-| **M3** | 效果契約 `nc_fx.h`；畫布由環 px 決定（取消 64 限） | 契約 header＋adapter | 20／64／100 顆鏈都出得畫面 |
+| **M2** ✅（2026-11-20） | 拆引擎／實作：效果數學 → `effects/pixel_effects/`（`nc_effect_*.c`）；引擎 → `sw/pixel/engine/`（`nc_px_engine_*`）。**demo＋參數面暫時仍住引擎**（0xF060 要讀 demo stage；搬去 task 要先改狀態通道）→ 留 M2b | CORE 兩層 | ✅ 8 塊板建置過、新檔 0 warning；✅ `fx_test` 15 個案例 × 15 幀 payload hash 同重構前逐 byte 一致 |
+| **M3** | 效果契約 `nc_px_engine.h`（含 `nc_px_engine_desc_t`）；畫布由環 px 決定（取消 64 限） | 契約 header＋adapter | 20／64／100 顆鏈都出得畫面 |
 | **M4** | DATA program：`/data/pixel/effects/*.json`＋interpreter＋波表 | 路 A | 加一個 JSON = 多一個效果，唔使重燒 |
 | **M5** | mapping：`/data/pixel/map/*.json`＋layout engine（scatter） | 路 B | 非 8 寬／多鏈／反序都正確 |
 | **M6** | modes＋playlist：配對、`range`、`auto_play` | 路 C | 一個畫面可以兩個效果／兩個區域 |
@@ -415,6 +430,7 @@ DATA（/data/）
 | **M8** | `action/pixel_action/`（release 可用）＋主機推送（`NC_PX_SRC_HOST`） | 指令面 | release 映像改得到效果 |
 
 > M2–M3 係「結構」；M4–M6 係「MP 的內容層」；M7–M8 係「USER 平面」。可以分開 review、分開上板。
+> M2 已落地（引擎／實作分家）；M3（契約凍結＋畫布由環 px 決定）未做。
 > `components/hw/` 唔急：等第二顆具體晶片（TFT／PCA9685／XL9555）出現才建，唔好為咗對稱而開空層。
 
 ---
@@ -440,7 +456,7 @@ DATA（/data/）
 |---|---|---|
 | 效果 `include freertos/`／`driver/` | 效果被綁死 CORE；`.nce` 永遠做唔到 | 時間由 `now_us`；硬件交 host |
 | 效果自己 `begin`／`commit` 環 | 效果綁死 single-ring、冇得假消費 | 宿主 task 負責；效果只寫 `dst` |
-| 框架入面有一個具體效果（`breath`） | 框架同內容混埋；換效果要改框架 | 效果放 `effects/`／DATA |
+| 引擎入面有一個具體效果（`breath`） | 工具同實作混埋；換效果要改工具 | 效果放 `effects/`／DATA |
 | task 入面有效果數學 | 換效果要改 task；效果冇得獨立測 | 搬去 `effects/`／DATA |
 | action 入面有 `nc_px_ring_begin()`／DMA | 政策層唔應該知機制 | action 只設參數／呼叫 effect API |
 | driver 入面有 pixel／WS2812 概念 | 換燈種要改驅動；LCD 用不到 | 通用波形介面（`drv_i80` 已經係咁） |
@@ -473,14 +489,17 @@ grep -rn "modules/" firmware/components/ --include='*.c' --include='*.h'
 # USER 唔准 include CORE 內部（只准契約 header）
 grep -rnE '#include "(driver|sys|tasks|sw|effects)/' modules/ --include='*.c' --include='*.h'
 
-# 效果框架唔准出現具體效果名
-grep -rnE "\b(breath|wave|solid|ramp|zone1)\b" firmware/components/sw/pixel/nc_px_fx_core.c 2>/dev/null
+# 引擎（sw/pixel/engine）唔准出現具體效果名
+grep -rnE "\b(breath|wave|solid|ramp|zone1)\b" firmware/components/sw/pixel/engine/ 2>/dev/null
+
+# 實作（effects/）只准 include 契約 header，唔准掂引擎內部
+grep -rnE '#include "(sw|sys|tasks|driver|bus|host)/' firmware/components/effects/ --include='*.c' 2>/dev/null
 
 # DATA 唔准有 code
 find ports/*/*/data -name '*.c' -o -name '*.py' -o -name '*.wasm'
 ```
 
-四條都應該**零結果**（註解除外）。有結果＝平面被繞過，唔係「例外」。
+五條都應該**零結果**（註解除外）。有結果＝平面被繞過，唔係「例外」。
 
 ---
 
@@ -488,5 +507,6 @@ find ports/*/*/data -name '*.c' -o -name '*.py' -o -name '*.wasm'
 
 > **MP 一個軸：角色。C 兩個軸：角色 × 平面。**
 > 效果係一個角色、三種交付（DATA program／CORE C／USER `.nce`）、四層資料（effect／map／mode／playlist）。
-> 框架住 `sw/`，內容住 `effects/`，設定住 `/data/`；加一個效果應該係「加一個 JSON／丟一個檔」，
-> 要重燒 C 才出得到，就代表你擺錯咗平面。
+> **三個名分開**：引擎（工具）住 `sw/pixel/engine/`、實作住 `effects/<域>_effects/`、
+> 呼叫方住 `tasks/`·`action/`·`host/`；設定住 `/data/`。
+> 加一個效果應該係「加一個 JSON／丟一個檔」，要重燒 C 才出得到，就代表你擺錯咗平面。

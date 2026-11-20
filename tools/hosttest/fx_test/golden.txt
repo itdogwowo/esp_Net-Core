@@ -1,0 +1,16 @@
+default                        566d9aecea50b983
+off                            dfb0bc639e24b783
+zone1                          acfed685ceab8c3c
+breath-gain255                 ed828bfa9942d583
+breath-12bit-dither            314dbdcc0ef18272
+wave-gain120                   ab7e52c3e9e92b23
+wave-10bit-spatial             dc5a03cc7e4f0ee1
+wave-12bit-spatial-static      0eeab3758062e5f0
+solid-frac                     8b9d540482435183
+ramp-12bit                     7512e056cb082c10
+sim6                           c507227c530bd738
+zones-mixed                    0d982a226dcb1c3e
+zone-bits-mixed                57e563c3d94e061e
+min-speeds                     9d072c2de9156b83
+px100                          e164f522fd9b1c73
+OK

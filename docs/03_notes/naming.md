@@ -19,7 +19,7 @@
 |---|---|---|---|
 | **任務** | 一條 loop：收發、渲染、節拍；佔核心、佔 stack | `components/tasks/` | `pixel_task` |
 | **動作** | 一組指令：cmd → handler；跑在解碼核上 | `components/action/` | `pixel_action` |
-| **效果** | 時間＋參數 → canonical 畫面；唔開 loop、唔碰硬件 | `components/effects/` | `pixel_effects`（component）／`nc_pixel_fx_*`（符號） |
+| **效果** | 時間＋參數 → canonical 畫面；唔開 loop、唔碰硬件 | `components/effects/`（實作） | `pixel_effects`（component）／`nc_effect_<name>.c`（檔） |
 
 ```text
 components/tasks/pixel_task/
@@ -27,13 +27,19 @@ components/tasks/pixel_task/
 components/action/pixel_action/
     nc_pixel_action.c          nc_pixel_action_register(dec);      ← 開機註冊指令
 components/effects/pixel_effects/
-    nc_pixel_fx_breath.c       const nc_fx_desc_t …                 ← 效果表的一個住戶
+    nc_effect_breath.c         const nc_px_engine_desc_t …          ← 效果表的一個住戶
+components/sw/pixel/engine/
+    nc_px_engine_core.c        registry＋衝突檢查（工具，唔放具體效果）
 ```
 
 **後綴而不是前綴**：`pixel` 是「做什麼」，`task` / `action` / `effects` 是「它在系統裡的角色」；
 先讀域、再讀角色，跟口語一致（「pixel 的 task」「pixel 的效果」）。
 前綴會變成 `nc_task_pixel` / `nc_action_pixel`，兩個不同層的東西擠在同一個字首後面，
 掃檔案時反而難分。
+
+> **「效果」有兩個名，唔可以共用**：**引擎**（工具）＝`nc_px_engine_*`，住 `sw/<域>/engine/`；
+> **實作**（內容）＝`nc_effect_<name>.c`，住 `components/effects/<域>_effects/`。
+> 判斷標準見 [behavior-taxonomy.md](behavior-taxonomy.md) §2.0。
 
 > **角色 → 目錄 → 命名的完整規則**（包括 `effects/` 的契約）見
 > [behavior-taxonomy.md](behavior-taxonomy.md) §2／§6。
@@ -53,8 +59,8 @@ components/effects/pixel_effects/
 | FAT | store | `nc_store_` | `nc_store.c` |
 | 通道 | WS / UDP / HTTP | `nc4_ws_` / `nc4_udp_` / `nc4_http_` | `nc4_ws.c` … |
 | 動作 | 域 | `nc_<域>_action_` | `nc_ota_action.c` / `nc_file_action.c` |
-| 效果內容 | 域 | `nc_<域>_fx_` | `effects/<域>_effects/nc_<域>_fx_*.c`／`include/nc_<域>_fx.h` |
-| 效果框架 | 域 | `nc_fx_`／`nc_<域>_fx_core_` | `sw/<域>/include/nc_fx.h`、`sw/<域>/nc_px_fx_core.c` |
+| 效果內容 | 域 | `nc_effect_` | `effects/<域>_effects/nc_effect_<name>.c` |
+| 效果引擎 | 域 | `nc_px_engine_` | `sw/<域>/include/nc_px_engine.h`、`sw/<域>/engine/nc_px_engine_core.c` |
 | 模組 | ncm | `nc_mod_` | `nc_mod.c` / `nc_ncd.c` |
 
 ## 3. 四條規則

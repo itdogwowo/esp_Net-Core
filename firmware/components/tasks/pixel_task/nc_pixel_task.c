@@ -16,7 +16,8 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "nc_pixel_core.h"
-#include "nc_pixel_producer.h"
+#include "nc_pixel_effects.h"
+#include "nc_px_engine.h"
 #include "nc_prio.h"
 #include "sdkconfig.h"
 
@@ -50,7 +51,7 @@ static nc_pixel_q_t *find_prd_ring(void)
 // 的耗用速度限流（平均生產率 = 渲染率），唔需要生產者自己計節拍。
 static bool producer_tick(int64_t now_us)
 {
-    if (s_prd.q == NULL || !nc_px_producer_ready()) {
+    if (s_prd.q == NULL || !nc_px_engine_ready()) {
         return false;
     }
     nc_px_hdr_t *hdr = NULL;
@@ -58,7 +59,7 @@ static bool producer_tick(int64_t now_us)
     if (p == NULL) {
         return false;                     // 環滿
     }
-    if (!nc_px_producer_frame(p, hdr, now_us)) {
+    if (!nc_px_engine_frame(p, hdr, now_us)) {
         nc_px_ring_abort(s_prd.q);
         return false;
     }
@@ -96,9 +97,11 @@ static esp_err_t prd_start(const nc_task_res_view_t *res, int nres)
 {
     (void)res;
     (void)nres;
+    // 內建效果交去引擎 registry（冪等；引擎唔知道有邊幾個效果，只認 id）。
+    nc_pixel_effects_register();
     // 預設值立一次（效果／亮度／位數／demo）。生產者 fps 不再參與節奏（0 = 自由填環）。
     if (!s_prd.defaults_done) {
-        nc_px_producer_defaults();
+        nc_px_engine_defaults();
         s_prd.defaults_done = true;
     }
     s_prd.q = find_prd_ring();
@@ -107,7 +110,7 @@ static esp_err_t prd_start(const nc_task_res_view_t *res, int nres)
         ESP_LOGW(TAG, "找不到 prd 環 → 效果生產者不啟動（render 任務有起嗎？）");
         return ESP_OK;
     }
-    const esp_err_t e = nc_px_producer_bind(nc_px_ring_px(s_prd.q));
+    const esp_err_t e = nc_px_engine_bind(nc_px_ring_px(s_prd.q));
     if (e != ESP_OK) {
         ESP_LOGE(TAG, "綁定 prd 環失敗：%s", esp_err_to_name(e));
         s_prd.q = NULL;
@@ -118,7 +121,7 @@ static esp_err_t prd_start(const nc_task_res_view_t *res, int nres)
     s_prd.started = true;
     ESP_LOGI(TAG, "效果生產者就緒：環 %s、%lu 顆、%u fps",
              nc_px_ring_name(s_prd.q), (unsigned long)nc_px_ring_px(s_prd.q),
-             (unsigned)nc_px_producer_cfg().fps);
+             (unsigned)nc_px_engine_cfg().fps);
     return ESP_OK;
 }
 

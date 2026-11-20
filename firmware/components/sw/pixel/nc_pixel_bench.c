@@ -12,6 +12,8 @@
 #include "esp_timer.h"
 #include "sdkconfig.h"
 
+#if CONFIG_NETCORE_PIXEL
+
 static void *bench_alloc(size_t n, int *is_int)
 {
     void *p = heap_caps_malloc(n, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
@@ -170,3 +172,8 @@ size_t nc_px_bench_json(uint8_t lanes, uint16_t px, uint8_t frames, char *out, s
     if (payload != NULL) { heap_caps_free(payload); }
     return n;
 }
+
+#else   // !CONFIG_NETCORE_PIXEL ── 這塊板冇開 pixel：唔編（main 的 0xF062 亦 depends on NETCORE_PIXEL）
+typedef int nc_px_bench_unused_t;
+
+#endif  // CONFIG_NETCORE_PIXEL

@@ -4926,3 +4926,44 @@ DMA 仍然 17.36 ms（43,400 PCLK ÷ 2.5 MHz）→ 16×600 是 **CPU-bound**，
   （release）＋主機推送。
 - **判準一句**：加一個效果應該係「加一個 JSON／丟一個 `.nce`」；要重燒 C 才出得到，
   就代表擺錯咗平面。
+
+### 7.128 2026-11-20（「效果」拆名：引擎／實作／呼叫方；`sw/pixel/engine/`）
+
+- **背景**：§7.127 定咗「框架住 `sw/pixel`、內容住 `components/effects/`」，但「effects」
+  一個字同時指**工具（engine）**同**實作**，文件同目錄都混住 → 擺位判斷唔到落手。
+- **定案（D11）**：三個名分開 —— **引擎**（工具：契約／registry／program interpreter／
+  波表）住 `firmware/components/sw/pixel/engine/`（`nc_px_engine_*`）；**實作**住
+  `firmware/components/effects/<域>_effects/`（`nc_effect_<name>.c`）；**呼叫方**住
+  `tasks/`·`action/`·`host/`。規則一句：**`sw/` 只放工具**，任何「用工具做出嚟嘅嘢」
+  （效果實作、task、action）都唔准住 `sw/`。
+- **命名**：引擎 `nc_px_engine_*`（契約 `sw/pixel/include/nc_px_engine.h`、
+  `engine/nc_px_engine_core.c`／`nc_px_engine_program.c`）；實作 `nc_effect_<name>.c`
+  （域由 component 名講）。**原本的 `nc_fx_*` 全部唔用**（`fx` 意思唔清楚）。
+- **目錄**：`sw/pixel/` 之下 `ring/`·`encode/`·`dither/`·`engine/`；`effects/` 同
+  `tasks/`·`action/` 同層（唔係 `sw/` 子目錄）。
+- **落地**：[behavior-taxonomy.md](../03_notes/behavior-taxonomy.md)（新增 §2.0 詞彙、
+  D11、§3.3 改「引擎 vs 實作」、§6 命名、§9 M2–M3、§12 加第四條檢查）、`naming.md`、
+  `component-layout.md`、`effects/README`、`modules/README`、`docs/README` 索引。**程式未改**。
+- **下一步**：Q1／Q5／Q9 拍板 → M2 拆 `nc_pixel_producer`（835 行 → 引擎＋實作＋呼叫方）。
+
+### 7.129 2026-11-20（M2 落地：引擎 `sw/pixel/engine/` vs 實作 `components/effects/pixel_effects/`）
+
+- **做咗**：`nc_pixel_producer.c`（835 行：效果＋抖動＋demo＋setter 混在一起）拆成三份 ——
+  **引擎**（`sw/pixel/engine/nc_px_engine_core.c`＋`nc_px_engine_tables.c`；契約
+  `include/nc_px_engine.h`；`nc_px_engine_*`）、**實作**（`components/effects/pixel_effects/`
+  `nc_effect_{zone1,breath,wave,solid,ramp}.c` ＋ `nc_effect_table.c`；`nc_effect_*`）、
+  **呼叫方**（`tasks/pixel_task`：on_start 呼叫 `nc_pixel_effects_register()`）。
+- **契約**：效果收到 `nc_px_engine_in_t { px, w, h, zone, now_us, params }`，只寫
+  `uint16_t rgb[px*3]`（8.8 顯示值畫布）。量化／抖動／W 通道由引擎做 —— 效果唔知道
+  位數、抖動、lane、環、task。
+- **驗收**：新增 `tools/hosttest/fx_test`（15 個案例 × 15 幀，FNV-1a payload hash）。
+  **重構前後 15/15 hash 完全一樣**（`golden.txt` 係重構前影的）。`run_all.sh` 15 支測試中
+  14 OK；`task_test` 3 個失敗係 **HEAD 已經有**（clean worktree 一樣 fail），唔關今次。
+- **建置**：**8 塊板全過**（C3／P4×3／S3×4，另加 `matrix-textkit` project）；新檔案 0 warning
+  （C3／Matrix 各 2 個 `nc4_line_net.c` unused 係舊有）。Mini-Nano 之前**建唔到**
+  （`nc_pixel_bench.c` 冇 guard，`CONFIG_NETCORE_PIXEL_*` 未定義）→ 已加
+  `#if CONFIG_NETCORE_PIXEL`（HEAD 一樣壞，屬順手修）。
+- **未做（M2b／M3）**：demo＋0xF060 參數面仍住引擎（要改狀態通道才搬得去 task）；
+  `ring/`·`encode/` 子目錄化（純分類）；畫布由環 px 決定（取消 8×8／64 px 寫死）。
+- **判準**：加一個效果而家係「`effects/pixel_effects/` 加一個 `.c` ＋ 表加一行」——
+  引擎、task、環、driver 一律唔使改。

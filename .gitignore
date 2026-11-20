@@ -10,6 +10,8 @@ sdkconfig.old
 # 但 sdkconfig.defaults 是**人編輯的輸入**，一定要進 git，所以下面要 negate 回來。
 sdkconfig.*
 !sdkconfig.defaults
+# hosttest 的 sdkconfig stub 是**手寫 header**（測試用），要進 git。
+!tools/hosttest/fx_test/include/sdkconfig.h
 managed_components/
 dependencies.lock
 .devcontainer/
