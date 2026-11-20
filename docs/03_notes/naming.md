@@ -37,9 +37,17 @@ components/sw/pixel/engine/
 前綴會變成 `nc_task_pixel` / `nc_action_pixel`，兩個不同層的東西擠在同一個字首後面，
 掃檔案時反而難分。
 
-> **「效果」有兩個名，唔可以共用**：**引擎**（工具）＝`nc_px_engine_*`，住 `sw/<域>/engine/`；
-> **實作**（內容）＝`nc_effect_<name>.c`，住 `components/effects/<域>_effects/`。
-> 判斷標準見 [behavior-taxonomy.md](behavior-taxonomy.md) §2.0。
+> **「效果」有三個名（＋呼叫方），唔可以共用**：**引擎**（工具）＝`nc_px_engine_*`，住 `sw/<域>/engine/`；
+> **實作**（內容）＝`nc_effect_<name>.c`，住 `components/effects/<域>_effects/`；
+> **資產**（DATA 宣告）＝`nc_px_asset_*`，讀取器住 `sw/<域>/asset/`，檔案在裝置 FAT。
+> 呼叫方（`tasks/`／`action/`／`host/`）用引擎，但唔算「效果」的名。
+> 判斷標準見 [behavior-taxonomy.md](behavior-taxonomy.md) §2.0（四種材料）。
+
+> **`fx`／`nc_fx_*` 已退役**（2026-11-20，`status.md` §7.128）：意思唔清楚，code、文件、
+> 測試目錄、CLI 一律唔再用。舊的 `tools/hosttest/fx_test/` ＋ `fx_api.h` 已改名
+> `pxEngine_test/` ＋ `nc_px_engine_test.h`（§7.131）；連 **`.nce` 的 wasm ABI 匯出名**都由
+> `fx_init`／`fx_render`／`fx_param` 改成 `nce_init`／`nce_render`／`nce_param`
+> （§7.132）。記憶體佈局冇變，舊模組重 build 即可；**冇例外**。
 
 > **角色 → 目錄 → 命名的完整規則**（包括 `effects/` 的契約）見
 > [behavior-taxonomy.md](behavior-taxonomy.md) §2／§6。
@@ -61,6 +69,7 @@ components/sw/pixel/engine/
 | 動作 | 域 | `nc_<域>_action_` | `nc_ota_action.c` / `nc_file_action.c` |
 | 效果內容 | 域 | `nc_effect_` | `effects/<域>_effects/nc_effect_<name>.c` |
 | 效果引擎 | 域 | `nc_px_engine_` | `sw/<域>/include/nc_px_engine.h`、`sw/<域>/engine/nc_px_engine_core.c` |
+| 效果資產（DATA） | 域 | `nc_px_asset_` | `sw/<域>/include/nc_px_asset.h`、`sw/<域>/asset/nc_px_asset_scan.c`（`nc_px_asset_t`／`nc_px_seg_t`／`nc_px_map_t`／`nc_px_mode_t`／`nc_px_show_t`） |
 | 模組 | ncm | `nc_mod_` | `nc_mod.c` / `nc_ncd.c` |
 
 ## 3. 四條規則
@@ -282,7 +291,8 @@ modules/
 
 > **三種交付**：`modules/effects/<name>_effects/` 係 **USER 平面**（`.nce`）；
 > **CORE** 內建效果住 `firmware/components/effects/<域>_effects/`；
-> **DATA** 的畫波 program 住 `/data/pixel/effects/*.json`。
+> **DATA** 的畫波 program 住 `/data/pixel/effects/`（`effects.json` 多效果一檔、`*.json`
+> 一檔一效果，兩者都收）。
 > 三者同一個 canonical frame 契約，只差交付方式 ——
 > 見 [behavior-taxonomy.md](behavior-taxonomy.md) §3。
 

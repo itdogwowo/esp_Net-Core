@@ -9,7 +9,7 @@
 // WAMR。要換引擎（AOT、其他 runtime）就換這支，上層唔動。
 //
 // 支援兩種模組（同一個 .nct／.nce 容器，靠 manifest 的 kind 分）：
-//   effect（.nce）→ 每 tick 叫 fx_render(frame_id, time_us)
+//   effect（.nce）→ 每 tick 叫 nce_render(frame_id, time_us)
 //   task  （.nct）→ 每 tick 叫 task_tick()（節奏 = manifest fps）
 //
 // host imports（白名單，見 nc_mod_abi.h）：nc_print / nc_print_i32 /
@@ -469,7 +469,7 @@ static esp_err_t engine_render(nc_mod_t *ncm, uint32_t frame_id)
     uint32_t argv[2] = {0, 0};
     uint32_t argc = 0;
     if (decl.kind != NC_NCD_KIND_TASK) {
-        // 效果：fx_render(frame_id, time_us)
+        // 效果：nce_render(frame_id, time_us)
         argc = 2;
         argv[0] = frame_id;
         argv[1] = (uint32_t)esp_timer_get_time();

@@ -8,6 +8,10 @@
 //
 // 設計來源：docs/03_notes/effect-language.md §6、ncm-loader.md §5/§10
 // 變更這份 header = 改 ABI；舊模組會因為 abi 不符被拒絕載入（不是靜靜跑錯）。
+//
+// 2026-11-20：效果的 export 由 `fx_init`／`fx_render`／`fx_param` 改名為
+// `nce_init`／`nce_render`／`nce_param`（`fx` 全面退役，status.md §7.132）。
+// **記憶體佈局冇變**；舊 `.nce` 缺新名 export，載入時被拒 —— 重 build 即可，不用改 offset。
 #pragma once
 
 #include <stdint.h>
@@ -57,16 +61,16 @@ typedef struct {
     uint32_t sc_bytes;      // +24  scratch bytes
 } nc_mod_desc_t;             // 28 B
 
-// ── guest 必須 export（缺 fx_render → 拒絕載入）──
-//   fx_init(desc_ptr)            啟動時一次；回 0 = ok
-//   fx_render(frame_id, time_us) 每幀；回 0 = ok，非 0 = 模組自報錯誤
-//   fx_param(i)                  可選；沒宣告 = 不吃參數
-#define NC_MOD_EXPORT_INIT    "fx_init"
-#define NC_MOD_EXPORT_RENDER  "fx_render"
-#define NC_MOD_EXPORT_PARAM   "fx_param"
+// ── guest 必須 export（缺 nce_render → 拒絕載入）──
+//   nce_init(desc_ptr)            啟動時一次；回 0 = ok
+//   nce_render(frame_id, time_us) 每幀；回 0 = ok，非 0 = 模組自報錯誤
+//   nce_param(i)                  可選；沒宣告 = 不吃參數
+#define NC_MOD_EXPORT_INIT    "nce_init"
+#define NC_MOD_EXPORT_RENDER  "nce_render"
+#define NC_MOD_EXPORT_PARAM   "nce_param"
 
 // ── host 提供給 guest 的 import ──
-// 效果（v0）：零個 —— 時間與幀號由 fx_render 的參數給。
+// 效果（v0）：零個 —— 時間與幀號由 nce_render 的參數給。
 //
 // **任務模組（v1，2026-11-17）：白名單 import**。任務要有「落手做嘢」的能力，
 // 所以開五個 host function；仍然係白名單制（不是全部開放），而且全部只經

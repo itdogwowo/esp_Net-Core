@@ -104,18 +104,21 @@ pixel_task（core1）：playlist → mode → generator → array('H') 畫布
 
 ## 2. C 多了什麼：三個平面
 
-### 2.0 詞彙：三個唔同嘅嘢，唔用同一個字
+### 2.0 詞彙：四個唔同嘅嘢，唔用同一個字
 
-「效果」呢兩個字在本專案有三種意思，**落位之前先認清手上係邊一種**：
+「效果」呢兩個字在本專案有**四種**材料，**落位之前先認清手上係邊一種**：
 
 | 名 | 係咩 | 住邊 | 例 | 判準 |
 |---|---|---|---|---|
 | **引擎**（engine／工具） | 提供能力：契約、registry、program interpreter、波表快取、layout | `sw/pixel/engine/` | `include/nc_px_engine.h`、`nc_px_engine_core.c`、`nc_px_engine_program.c` | 拿掉所有實作，它依然可編、可測、可跑 |
 | **實作**（implementation／內容） | 用引擎做出嚟嘅具體效果 | `components/effects/<域>_effects/` | `pixel_effects/nc_effect_breath.c` | 加／刪一個效果，引擎一行都唔使改 |
+| **資產**（asset／DATA） | 一個效果的**宣告**：波形段＋參數（JSON），或一個 `.nce` 指標 | 讀取器 `sw/pixel/asset/`；檔案在裝置 FAT `/data/pixel/` | `nc_px_asset_t`、`nc_px_seg_t` | 刪掉所有資產，引擎照跑（只係冇效果可播） |
 | **呼叫方**（caller） | 用引擎嘅節奏、指令、載入器 | `tasks/`／`action/`／`host/` | `pixel_task`（show runner）、`pixel_action`、`host/ncm` | 有核、有 fps、有生命週期 |
 
 > **一條規則**：`sw/` **只放工具**。任何「用工具做出嚟嘅嘢」（效果實作、task、action）都唔准住 `sw/`。
-> 命名亦分開：引擎 `nc_px_engine_*`（`sw/pixel/engine/`）；實作 `nc_effect_<name>.c`（`effects/`）。見 §6。
+> 命名亦分開：引擎 `nc_px_engine_*`（`sw/pixel/engine/`）；實作 `nc_effect_<name>.c`（`effects/`）；
+> 資產 `nc_px_asset_*`（`sw/pixel/asset/` 讀取器，實際檔案在 FAT）。見 §6。
+> **`fx`／`nc_fx_*` 已退役**，任何時候唔再用（理由見 `status.md` §7.128）。
 
 ### 2.1 三個平面
 
@@ -162,8 +165,8 @@ pixel_task（core1）：playlist → mode → generator → array('H') 畫布
 | **hw**（晶片） | `hw/<chip>/` | ❌ 永遠唔准 | `hardware.json`（值） |
 | **bus** | `bus/*` | ❌ 永遠唔准 | — |
 | **sys** | `sys/*` | ❌ 永遠唔准 | `config/*.json` |
-| **sw**（工具） | `sw/pixel/`（`ring/`·`encode/`·`dither/`·**`engine/`**＝效果引擎 `nc_px_engine_*`） | ❌ 永遠唔准 | — |
-| **effect**（實作） | `effects/<域>_effects/`（內建效果，`nc_effect_*.c`） | `modules/effects/<name>_effects/` → `.nce` | `pixel/effects/*.json`（program）、`pixel/map/`、`pixel/modes/`、`pixel/registry.json` |
+| **sw**（工具） | `sw/pixel/`（`ring/`·`encode/`·`dither/`·**`engine/`**＝效果引擎 `nc_px_engine_*`·**`asset/`**＝資產讀取器 `nc_px_asset_*`） | ❌ 永遠唔准 | — |
+| **effect**（實作／資產） | `effects/<域>_effects/`（內建效果，`nc_effect_*.c`） | `modules/effects/<name>_effects/` → `.nce` | `pixel/effects/{effects.json,*.json,*.nce}`、`pixel/map/`、`pixel/modes/`、`pixel/registry.json` |
 | **task** | `tasks/*_task/` | `modules/tasks/<name>_tasks/` → `.nct` | `config/tasks.json`（開關／核心） |
 | **action** | `action/*_action/` | `modules/actions/<name>_actions/` → `.nct`（`cmds`） | `schema/*.json`（build 時生成，唔入 FAT） |
 | **host** | `host/ncm/`（loader＋WAMR） | ❌ 永遠唔准 | — |
@@ -195,14 +198,20 @@ MP 只有一條路（全部 Python），C 要按「風險 × 成本」分三級�
 
 | 層 | MP | C 平面 | C 位置 | 現況 |
 |---|---|---|---|---|
-| **effect**（怎麼動） | `pixel/effects/effects.json` + `.py` | DATA＋CORE＋USER | `/data/pixel/effects/*.json`；`components/effects/`；`modules/effects/` | 🟡 只有 CORE 內建 C，硬編碼 64 px |
+| **effect**（怎麼動） | `pixel/effects/effects.json` + `.py` | DATA＋CORE＋USER | `/data/pixel/effects/{effects.json,*.json,*.nce}`；`components/effects/`；`modules/effects/` | 🟡 CORE 5 個 `.c` 有；DATA 讀取器＋interpreter 未有 |
 | **mapping**（怎麼排） | `pixel/map/*.json` + `lib/sw/pixel_layout.py` | DATA＋CORE | `/data/pixel/map/*.json`；`sw/pixel/layout` | ❌ 冇（8×8 寫死） |
 | **mode**（點配對） | `pixel/modes/*.json` | DATA＋CORE | `/data/pixel/modes/*.json`；`sw/pixel/mode` | ❌ 冇（一次一個全局效果） |
 | **playlist**（播什麼） | `pixel/registry.json` | DATA＋CORE | `/data/pixel/registry.json`；`tasks/pixel_task`（show runner） | ❌ 冇 |
-| **引擎** | `lib/sw/effect_core.py` | CORE（sw） | `sw/pixel/engine/`（`nc_px_engine_core` / `nc_px_engine_program`） | 🟡 同 producer 混在一起 |
+| **引擎** | `lib/sw/effect_core.py` | CORE（sw） | `sw/pixel/engine/`（`nc_px_engine_core` / `nc_px_engine_program`） | ✅ 已分家（M2）；`program` interpreter 未寫 |
+| **資產** | （MP 無此層：程式與資料混在一起） | CORE（讀取器）＋DATA | `sw/pixel/asset/`（`nc_px_asset_*`）；檔案在 `/data/pixel/` | 🟡 讀取器已實作（`nc_px_asset.c` 解析＋`nc_px_asset_scan.c` 掃目錄，host 測試綠）；interpreter／接線未做 |
 | **計算** | `tasks/pixel_task.py` | CORE | `tasks/pixel_task/` | 🟡 有，但只係「算一格寫環」 |
 | **播送** | `tasks/render.py` | CORE | `tasks/render_task/` | ✅ |
 | **指令** | `action/pixel_actions.py` | CORE | `action/pixel_action/` | 🟡 只在 `test_action`（dev） |
+
+**資產的形狀（定案 2026-11-20）**：`effects/` 同時收三種載體 —— `effects.json`（一個檔多個
+效果，快速改波）、`*.json`（一檔一效果，複雜結構）、`*.nce`（外掛）。三者掃入同一張
+`nc_px_asset_tbl_t`（`nc_px_asset_t`），key = `name`，掃到就算、用不用由 `registry.json` 決定。
+**JSON 只喺載入時讀一次，之後熱路徑只行 struct**（規則見 [config-layers.md](config-layers.md) §5.1）。
 
 **四層的職責一句話**：
 
@@ -349,8 +358,9 @@ DATA（/data/）
 | 效果契約 | `sw/pixel/include/nc_px_engine.h` | `nc_px_engine_desc_t` / `nc_px_engine_in_t` |
 | 效果引擎（工具） | `sw/pixel/engine/nc_px_engine_core.c` / `nc_px_engine_program.c` | registry、波表、interpreter |
 | 效果符號 | 引擎 `nc_px_engine_*`；實作 `nc_effect_<name>` | `nc_px_engine_register()`、`nc_effect_breath` |
+| DATA 資產（結構體） | `nc_px_asset_*`（讀取器住 `sw/pixel/asset/`） | `nc_px_asset_t` / `nc_px_seg_t` / `nc_px_asset_tbl_t` |
 | USER 效果 | `modules/effects/<name>_effects/` → `out/<name>.nce` | `fire_effects` |
-| DATA 效果檔 | `/data/pixel/effects/<name>.json` | `breathing.json` |
+| DATA 效果檔 | `/data/pixel/effects/{effects.json, <name>.json, <name>.nce}`（三種載體同一個目錄，key = `name`） | `effects.json`（多效果一檔）、`breathing.json`、`fire26.nce` |
 | DATA mapping | `/data/pixel/map/<name>.json` | `matrix.json` |
 | DATA mode | `/data/pixel/modes/<name>.json` | `demo_eyes.json` |
 | DATA playlist | `/data/pixel/registry.json` | `{"auto_play":true,"list":[...]}` |
@@ -398,6 +408,7 @@ DATA（/data/）
 | D9 | 計算（pixel_task）與播送（render_task）繼續分開 | 已有、MP 同構；效果節奏唔綁 fps |
 | D10 | 平面之間只傳資料，唔傳指標 | wasm 線性記憶體、C ABI 邊界 |
 | D11 | **引擎／實作／呼叫方三個名分開**：引擎＝`sw/pixel/engine/`（`nc_px_engine_*`）、實作＝`effects/`（`nc_effect_*`）、呼叫方＝`tasks/`／`action/`／`host/` | 「effects」一個字有兩個意思（工具＋實作）；唔分開就永遠擺錯位 |
+| D12 | **DATA 資產係第四個名**：`nc_px_asset_*`（讀取器 `sw/pixel/asset/`）；`fx`／`nc_fx_*` 退役 | 「效果」仲有第三層意思：**宣告**（JSON／`.nce`）。用 `fx` 分唔清，用「資產」同 `config-layers` 的用字一致 |
 
 ### 8.2 待定（實作前要拍板）
 
@@ -421,12 +432,12 @@ DATA（/data/）
 | 步 | 做什麼 | 產出 | 驗收 |
 |---|---|---|---|
 | **M1** | 本文＋三平面規則＋`components/effects/`＋README | 文件、目錄 | 文件連結零 broken；`git grep` 找得到規則 |
-| **M2** ✅（2026-11-20） | 拆引擎／實作：效果數學 → `effects/pixel_effects/`（`nc_effect_*.c`）；引擎 → `sw/pixel/engine/`（`nc_px_engine_*`）。**demo＋參數面暫時仍住引擎**（0xF060 要讀 demo stage；搬去 task 要先改狀態通道）→ 留 M2b | CORE 兩層 | ✅ 8 塊板建置過、新檔 0 warning；✅ `fx_test` 15 個案例 × 15 幀 payload hash 同重構前逐 byte 一致 |
+| **M2** ✅（2026-11-20） | 拆引擎／實作：效果數學 → `effects/pixel_effects/`（`nc_effect_*.c`）；引擎 → `sw/pixel/engine/`（`nc_px_engine_*`）。**demo＋參數面暫時仍住引擎**（0xF060 要讀 demo stage；搬去 task 要先改狀態通道）→ 留 M2b | CORE 兩層 | ✅ 8 塊板建置過、新檔 0 warning；✅ `pxEngine_test` 15 個案例 × 15 幀 payload hash 同重構前逐 byte 一致 |
 | **M3** | 效果契約 `nc_px_engine.h`（含 `nc_px_engine_desc_t`）；畫布由環 px 決定（取消 64 限） | 契約 header＋adapter | 20／64／100 顆鏈都出得畫面 |
 | **M4** | DATA program：`/data/pixel/effects/*.json`＋interpreter＋波表 | 路 A | 加一個 JSON = 多一個效果，唔使重燒 |
 | **M5** | mapping：`/data/pixel/map/*.json`＋layout engine（scatter） | 路 B | 非 8 寬／多鏈／反序都正確 |
 | **M6** | modes＋playlist：配對、`range`、`auto_play` | 路 C | 一個畫面可以兩個效果／兩個區域 |
-| **M7** | `.nce`：`fx_render()` 後把 guest framebuffer 抄成 canonical frame | USER 效果 | 丟一個 `.nce` 就亮 |
+| **M7** | `.nce`：`nce_render()` 後把 guest framebuffer 抄成 canonical frame | USER 效果 | 丟一個 `.nce` 就亮 |
 | **M8** | `action/pixel_action/`（release 可用）＋主機推送（`NC_PX_SRC_HOST`） | 指令面 | release 映像改得到效果 |
 
 > M2–M3 係「結構」；M4–M6 係「MP 的內容層」；M7–M8 係「USER 平面」。可以分開 review、分開上板。
@@ -507,6 +518,7 @@ find ports/*/*/data -name '*.c' -o -name '*.py' -o -name '*.wasm'
 
 > **MP 一個軸：角色。C 兩個軸：角色 × 平面。**
 > 效果係一個角色、三種交付（DATA program／CORE C／USER `.nce`）、四層資料（effect／map／mode／playlist）。
-> **三個名分開**：引擎（工具）住 `sw/pixel/engine/`、實作住 `effects/<域>_effects/`、
-> 呼叫方住 `tasks/`·`action/`·`host/`；設定住 `/data/`。
+> **四個名分開**：引擎（工具）住 `sw/pixel/engine/`、實作住 `effects/<域>_effects/`、
+> 資產（DATA 宣告）用 `nc_px_asset_*`（讀取器 `sw/pixel/asset/`）、呼叫方住 `tasks/`·`action/`·`host/`；
+> 設定住 `/data/`。
 > 加一個效果應該係「加一個 JSON／丟一個檔」，要重燒 C 才出得到，就代表你擺錯咗平面。

@@ -75,6 +75,8 @@ void     nc_px_engine_tables_init(void);
 uint16_t nc_px_engine_gamma(uint16_t lin16);                            // 線性 16-bit → 8.8 顯示
 uint16_t nc_px_engine_lin(const nc_px_engine_params_t *p, uint32_t level255);  // 0..255 × gain → 16-bit
 int32_t  nc_px_engine_sin(uint32_t phase);                              // Q15 sine，phase 0..1023
+uint16_t nc_px_engine_sin_q12(uint32_t phase);                          // 0..4095 sine（多項式，無表）
+uint16_t nc_px_engine_sin_lin(uint32_t phase);                          // 0..4095 sine（錨點表＋線性插值）
 uint16_t nc_px_engine_quant(uint16_t tgt88, uint8_t bits);              // 8.8 → bits 位（8..16）
 
 // ═══════════════════════ 效果註冊表 ═══════════════════════

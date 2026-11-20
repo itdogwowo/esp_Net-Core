@@ -4967,3 +4967,171 @@ DMA 仍然 17.36 ms（43,400 PCLK ÷ 2.5 MHz）→ 16×600 是 **CPU-bound**，
   `ring/`·`encode/` 子目錄化（純分類）；畫布由環 px 決定（取消 8×8／64 px 寫死）。
 - **判準**：加一個效果而家係「`effects/pixel_effects/` 加一個 `.c` ＋ 表加一行」——
   引擎、task、環、driver 一律唔使改。
+
+### 7.130 2026-11-20（DATA 平面命名定案＋`fx` 全面退役；文件先行）
+
+- **背景**：設計「用戶空間 `/data/pixel/` 要放什麼」時，我提議 `nc_px_fx_t`，被 §7.128 的
+  「`nc_fx_*` 全部唔用」擋住 → 一次過把命名、檔案佈局、結構體規則寫入文件。**程式未改**
+  （除新增量測工具）。
+- **命名定案**：
+  - `fx`／`nc_fx_*` **全面退役**：code、文件、測試目錄、CLI 一律唔再用。舊的
+    `tools/hosttest/fx_test/` ＋ `fx_api.h`（M2 遺留）→ 已改名 `pxEngine_test/` ＋
+    `nc_px_engine_test.h`（§7.131）。
+  - **DATA 平面**的結構體：`nc_px_asset_t`（一個效果資產：`name`／`kind`／`prog`｜`nce`）、
+    `nc_px_seg_t`（波形段：`type`／`f`／`l_max`／`l_lim`／`phi`／`end_f`）、
+    `nc_px_asset_tbl_t`（掃描結果）；四層其餘 `nc_px_map_t`／`nc_px_mode_t`／`nc_px_show_t`。
+    讀取器住 `sw/pixel/asset/`（工具），header `include/nc_px_asset.h`。
+  - **三個名唔可以共用**：引擎 `nc_px_engine_*`／實作 `nc_effect_<name>`／資產 `nc_px_asset_*`
+    （＋呼叫方：`tasks`／`action`／`host`）。見 behavior-taxonomy.md §2.0。
+- **佈局定案**：`effects/` 同時收三種載體 —— `effects.json`（一檔多效果，快速改波）、
+  `*.json`（一檔一效果，複雜結構）、`*.nce`（外掛）。三者掃入**同一張資產表**；
+  key = `name`；掃描順序 `effects.json` → `*.json`（檔名排序）→ `*.nce`；撞名先到者勝＋log；
+  `id` 只作 alias。**掃到就算**，用不用由 `registry.json` 的 `list` 決定。
+- **結構體優先**：JSON 只在載入時讀一次（`nc_px_asset_scan()`），熱路徑只行 struct，
+  唔再碰 cJSON／字串；壞檔／缺字段／超上限 = 跳過＋log＋保留 last-good。
+- **出廠空骨架**：`registry.json` = `{"version":1,"auto_play":false,"list":[]}`，其餘目錄空
+  （冇預設內容）；firmware 只讀，`ASSET_RELOAD` 才重掃。
+- **數值域**：program 段保留 MP 的 **12-bit（0..4095）**概念；引擎提供
+  `nc_px_engine_sin_q12()`（多項式，無表）；入 8.8 畫布時 `<<4`。
+- **量測（新工具 `tools/hosttest/sin_bench/`，唔入 `run_all.sh`；host x86-64，MSVC／gcc 皆可）**：
+  10,000 次正弦 = 查表 **0.0020 ms**／多項式 **0.0117 ms**（每幀 192 次 ≈ 0.04／0.22 µs，
+  對比 16.7 ms 幀預算可忽略）。精度（1 LSB of 4095）：1024 點表 max 24.8、4096 點表 5.95、
+  多項式 3.62 → **多項式更準、省 2 KB 表、免 `powf`/`sinf`**（順帶修掉 golden 綁 host libm 的風險）。
+- **未做（程式）**：`nc_px_asset.*`、四層 parser、`nc_px_engine_program`（interpreter）、
+  `.nce` 執行後端（WAMR）。
+- **影響文件**：`naming.md` §1／§2、`behavior-taxonomy.md` §2.0／§3.2、
+  `config-layers.md` §5.1／§6。
+
+### 7.131 2026-11-20（`fx_test` → `pxEngine_test`；`sin_q12` 落地；golden 交叉驗證）
+
+- **改名（§7.130 的收尾）**：`tools/hosttest/fx_test/` → `tools/hosttest/pxEngine_test/`；
+  `fx_test.c` → `pxEngine_test.c`；接縫 header `fx_api.h` → `nc_px_engine_test.h`
+  （巨集 `fx_*` → `nc_px_test_*`、`FX_ZONES` → `NC_PX_TEST_ZONES`）。`git mv` 保留歷史；
+  `run_all.sh`、`sw/pixel/CMakeLists.txt`、`effects/README`、文件全部跟改。**golden 內容未動**。
+- **新增 `run.bat`**（Windows／MSVC，跟 `pixel_test` 的 cl/gcc 慣例）：建置 → 跑 → `fc` 對 golden；
+  `--update` 可重影。
+- **新增 `nc_px_engine_sin_q12()`**（`sw/pixel/engine/nc_px_engine_tables.c`）：0..65535 相位 →
+  0..4095，拋物線＋二次修正，無表無浮點；`nc_px_engine.h` 已宣告，`!CONFIG_NETCORE_PIXEL`
+  分支有 no-op stub。**現有 5 個效果未用它**（所以畫面不變）。
+- **驗證**：
+  - `pxEngine_test` 15 個 case 的 payload hash **同 golden 逐 byte 一樣**。
+  - **MSVC（19.51 / UCRT）與 glibc 得到同一串 hash** → §7.130 提到的「golden 綁 host libm」
+    實測**唔成立**（至少呢 15 個 case）：表值經 `lroundf` 後一致。兩邊都可以做閘門。
+  - `sin_q12` 加咗純整數斷言（15 個取樣點、0..16384 單調、上下半週期對稱）＋ Python 獨立
+    計一次期望值，兩邊一致；斷言成功唔印嘢，所以 golden 不受影響。
+- **新增 `nc_px_asset.h`**（`sw/pixel/include/`）：資產層的 struct 定稿 —— `nc_px_seg_t`
+  （段）、`nc_px_asset_t`（一個效果資產：name／kind／nseg／pixel_hint／seg[]）、
+  `nc_px_asset_tbl_t`（`NC_PX_ASSET_MAX = 32`）；API `nc_px_asset_scan/clear/count/at/find/json`。
+  `map`／`modes`／`registry.json` 三層**未定**（等 resolver 一齊做，Q2–Q4 仍然開）。`/W4` 乾淨。
+- **未做**：`nc_px_asset_scan()` 實作（cJSON＋store FAT）、program interpreter、`.nce` 執行後端。
+
+
+
+### 7.132 2026-11-20（`.nce` ABI 改名：`fx_*` → `nce_*`；PoC 重 build 並實跑）
+
+- **背景**：§7.131 留了 ABI 的 `fx_init`／`fx_render`／`fx_param` 做例外；使用者要求
+  「完全唔想留一點痕跡」→ **連 ABI 一起改**。
+- **改名**：`NC_MOD_EXPORT_INIT/RENDER/PARAM` = `"nce_init"`／`"nce_render"`／
+  `"nce_param"`（`nc_mod_abi.h`）。`nce` = `.nce` 的簡稱 ＝ 效果的**實作**（USER 平面），
+  同 `nc_effect_*`（CORE C 實作）、`nc_px_engine_*`（工具）、`nc_px_asset_*`（DATA）四邊分開。
+  （同日中途試過 `pxEffect_*`，最後定 `nce_*`：`px` 係工具字頭、`Effect` 又同 C 實作撞字。）
+- **影響**：記憶體佈局（desc 28 B、param +32、data +96）**冇變**，不用改 offset；舊 `.nce`
+  會因為缺 `nce_render` 被拒絕載入 —— 重 build 即可。header 已寫明。
+- **PoC 重 build**：用 `wat2wasm`（wabt，臨時 npm 安裝）重建三支：`mod.wasm` 367→370 B、
+  `mod2` 338→341 B、`modbad` 105→108 B；`host.mjs`、PoC `README`、
+  `effect-language.md` §10 的實錄同步更新。
+- **驗證（實跑 `node tools/poc/mod_poc/host.mjs`）**：
+  - 基本：240 幀、`nce_init ok`、checksum `0x137be526`、scratch 240 次。
+  - 熱替換：`--swap mod2.wasm --at 120` → 兩段 phase 各自有 checksum，中途不重啟。
+  - 壞檔：`--bad modbad.wasm` → 拒絕載入、全程用 `mod.wasm`、畫面不中斷。
+  - `wasm-objdump -x`：export 只有 `mod_abi_version`／`nce_init`／`nce_render`。
+- **文件**：`naming.md` 由「例外（唔准改）」改成「冇例外」；`effect-language`／
+  `ncm-contract`／`ncm-loader`／`behavior-taxonomy` M7 全部跟改。
+- **未做**：板上（WAMR）未重驗 —— WAMR 執行後端本身未接，今次只到 PoC／host 層。
+
+### 7.133 2026-11-20（DATA 平面讀取器落地：`nc_px_asset` 解析 ＋ 掃目錄；新 host 測試）
+
+- **做咗**（`firmware/components/sw/pixel/asset/`）：
+  - `nc_px_asset.c`：**純解析核心**（唔碰檔案系統）——JSON 文字 → `nc_px_asset_t`，
+    支援 MP 的批次形式 `{"effects":[...]}` 同單一效果 `{...}`；未知鍵跳過（`step`／
+    `spacing`／`reverse` 暫時唔用）、未知段型別／超範圍 = **整個資產拒絕**（寧願唔畫，
+    好過畫錯）、撞名保留第一個（`dup`）、上限 `NC_PX_ASSET_MAX = 32`／`NC_PX_SEG_MAX = 16`。
+    附 `nc_px_asset_json()` 狀態（`n`／`rej`／`dup`／items）。
+  - `nc_px_asset_scan.c`：**唯一有 I/O 的殼**——掃 `effects.json` → `*.json`（檔名排序）
+    → `*.nce`；`*.json` 冇寫 `name` 就用檔名；`*.nce` 只登記 kind=NCE（manifest 由 ncm 解）；
+    壞檔／讀唔到／大過 16 KB 跳過＋log（計入 `rejected`），唔會令整張表失效；讀檔用臨時
+    `malloc`（掃描係開機／換場才做），唔佔 16 KB BSS。
+  - 手寫迷你 JSON 讀取器（無 cJSON、無 malloc、深度上限 8、食 UTF-8 BOM）：解析係最容易錯的
+    一段，寧願自己控制有界行為，亦令**同一份 code 可以在 PC 上測**。
+- **測試**：新 `tools/hosttest/pxAsset_test/`（`run.sh` ＋ `run.bat`；入 `run_all.sh`）。
+  53 個檢查全綠：批次／單檔／檔名補名／壞 JSON／未知段／`pixel_n` 超範圍／撞名／上限／
+  未知鍵／BOM／狀態 JSON／**掃目錄**（先後次序、檔名 hint、`.nce`、壞檔計數）。Windows 用
+  `include/win/dirent.h` shim（`_findfirst`），POSIX 用真 `dirent.h`。
+- **未做**：`nc_px_engine_program`（用段落表畫畫布）、`pixel_task` 接線（`nc_store_fs_base()`
+  ＋ `/pixel/effects`）、`map`／`modes`／`registry.json` 三層、`.nce` manifest 取真名。
+  全部未經 IDF 建置驗證（本機冇 IDF／板）。
+### 7.134 2026-11-20（正弦算法對照：host 微基準 ＋ ESP32-S3 實機 render_us）
+
+- **背景**：要決定「查表（現時）vs 多項式（MP）」邊個留。之前只有 host 數字；今次補實機。
+- **工具**：`tools/hosttest/sin_bench/sin_bench.c`（5 種算法、min/median/p99、精度、記憶體）、
+  `dev_probe.py`（經 NC4 0xF060 切效果／分區，讀 `render_us`；用完還原）。
+- **Host（x86-64、MSVC /O2；10k 次 = 一幀 192 次的 52 幀）**：
+
+  | 算法 | min ns/call | median | ms/10k | max 誤差（12-bit LSB） | 表 |
+  |---|---|---|---|---|---|
+  | lut_1024（現時） | 0.20 | 0.20 | 0.002 | 24.76 | 2 KB |
+  | lut_4096 | 0.20 | 0.20 | 0.002 | 5.95 | 8 KB |
+  | poly_q12（MP） | 1.13 | 1.20 | 0.011 | **3.62** | 0 |
+  | cordic_q15 | 12.12 | 12.52 | 0.121 | **1.43** | 60 B |
+  | sinf（libm） | 3.35 | 3.40 | 0.033 | — | — |
+
+- **實機（ESP32-S3、fw 0.1.2、IDF 6.1.1、64 px、8-bit、無抖動）**，`render_us`（引擎量的
+  effect＋抖動＋emit），每個效果 30–40 次取 median：
+
+  | 效果 | sine/幀 | min µs | median | p90 |
+  |---|---|---|---|---|
+  | OFF | 0 | 53 | 55 | 59 |
+  | SOLID | 0 | 53 | 56 | 60 |
+  | ZONE1 | 0 | 54 | 56 | 61 |
+  | RAMP | 0 | 56 | 57 | 60 |
+  | BREATH | 8 | 59 | 60 | 63 |
+  | WAVE | 72 | 87 | 87 | 88 |
+
+- **分區掃描（驗線性）**：0／16／32／64 sine → 57／64／72／87 µs，每 8 px 一區 +3.75 µs。
+- **斜率**：`(87 − 55) µs ÷ 72 ≈ 444 ns`／每個「sine ＋ wave 其餘數學」（240 MHz ≈ 107 cycles）。
+  基線 55 µs 係抖動＋emit（64 px × 3 通道），同效果無關。
+- **結論**：
+  - 64 px 之下，兩種算法都係 noise（WAVE 全部 72 次 sine 只佔一幀 0.18%）；
+  - 大畫布（16×600 = 9600 px）就唔同：一樣的 per-pixel 數學 ≈ 4.3 ms/幀（50 fps 預算 20 ms 的 21%），
+    所以「sine 佔幾多」值得量清楚；
+  - 精度同速度係反比：poly 3.62 LSB、cordic 1.43 LSB，但 poly 慢 5.6×、cordic 慢 60×（host）。
+    折衷係 4K 表（5.95 LSB、8 KB、同 1024 一樣快）。
+- **未做**：實機**逐次** sine 成本（要 flash 新固件；今次只量到「sine＋其餘數學」的合成斜率）。
+  建議加一條 `0xF063 SINBENCH`（10k 次 × 4 種算法），一次 flash 就有齊。
+### 7.135 2026-11-20（新方法：錨點表＋線性插值「混合正弦」；`nc_px_engine_sin_lin()`）
+
+- **動機**：§7.134 的對照顯示兩個極端 —— 查表（快、表大、最近點誤差 12.4 LSB）同多項式
+  （無表、慢 5.6×、誤差 3.7 LSB）。混合就係各取一半：**表提供精確錨點，錨點之間用一次式補**。
+- **算法**（`nc_px_engine_sin_lin`，Q15 錨點 → 0..4095）：
+  `i = (phase >> 8) & 255`、`f = phase & 255`、
+  `v = t[i] + ((t[i+1] − t[i]) · f >> 8)`（Q15 有號），最後 `(v >> 4) + 2048`。
+  誤差 ∝ (2π/n)²：n=64 → 2.5 LSB、n=128 → 0.69、n=256 → 0.23。
+- **Host 量測**（同 §7.134 的機器／序列，10 萬次 × 120 批，min ns/call）：
+
+  | 方法 | 表 | min ns | ms/10k | max 誤差（0..4095） |
+  |---|---|---|---|---|
+  | lut_1024 | 2 KB | 0.20 | 0.002 | 12.38 |
+  | lut_4096 | 8 KB | 0.20 | 0.002 | 2.97 |
+  | poly_q12（MP） | 0 | 1.13 | 0.011 | 3.74 |
+  | **hyb64** | **130 B** | **0.49** | **0.005** | **2.53** |
+  | **hyb128** | **258 B** | **0.48** | **0.005** | **0.69** |
+  | **hyb256** | **514 B** | **0.46** | **0.005** | **0.23** |
+  | cordic | 60 B | 12.0 | 0.120 | 0.66 |
+  | sinf | — | 3.34 | 0.033 | — |
+
+  ⇒ 混合（256）**比多項式快 2.4×、準 16×，表只 514 B**（1024 點表的 1/4）。
+- **落地**：`nc_px_engine_sin_lin()` 加咗入引擎（表在 `tables_init` 建，514 B）；
+  MP 多項式保留做 `nc_px_engine_sin_q12()`（對位 MP 用，行為不變）。
+- **驗收**：`pxEngine_test` golden **15/15 逐 byte 不變**（新函式冇人用），另加 10 個取值、
+  0..16384 單調、上下半週期對稱的斷言（成功唔出聲）——全綠。
+- **未做**：板上逐次 ns/call（要 flash；今次只有 host 數字＋§7.134 的實機合成斜率）。

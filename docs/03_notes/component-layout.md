@@ -145,7 +145,7 @@ fatfs_create_partition_image(data ${CMAKE_CURRENT_LIST_DIR}/data FLASH_IN_PROJEC
 | `tasks/` | `components/tasks/` |
 | `ui/` | `components/ui/` |
 | `schema/*.json` | `components/schema/`（build 時轉 C 表） |
-| `pixel/`（程式） | **拆開**：環／編碼 → `sw/pixel/`；效果 → `effects/pixel_effects/`；資料 → FAT `pixel/` |
+| `pixel/`（程式） | **拆開**：環／編碼／引擎 → `sw/pixel/`；效果實作 → `effects/pixel_effects/`；資料 → FAT `pixel/`（`effects/{effects.json,*.json,*.nce}`、`map/`、`modes/`、`registry.json`） |
 | `modules/effects/*.nce` | repo 根 `modules/effects/`（外掛效果；唔入 firmware 樹） |
 | `cores/` | 併入 `tasks/`（core pin 表） |
 | `ports/<chip>/<board>/config/*.json` | `ports/project/<chip>/<board>/data/config/*.json` ＋ `ports/hardware/<chip>/<board>/{board,wiring}.json` |

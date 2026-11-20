@@ -4,7 +4,7 @@
 > **引擎**（契約、registry、program interpreter、波表）住 `components/sw/pixel/engine/`，唔喺呢度。
 > 規則權威：[docs/03_notes/behavior-taxonomy.md](../../../docs/03_notes/behavior-taxonomy.md)。
 > 狀態：**2026-11-20 已落地（M2）**：`pixel_effects/` 有 5 個實作（zone1／breath／wave／solid／ramp）＋登記表；
-> 引擎在 `sw/pixel/engine/`。驗收：`fx_test` payload hash 同重構前逐 byte 一致。
+> 引擎在 `sw/pixel/engine/`。驗收：`pxEngine_test` payload hash 同重構前逐 byte 一致（gcc 與 MSVC 都對得上）。
 
 ---
 

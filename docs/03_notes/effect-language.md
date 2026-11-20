@@ -369,13 +369,13 @@ Tier 1 的 `render` 是「走一遍節點圖」，Tier 2 的 `render` 是「`was
 
 ```wat
 mod_abi_version() -> i32            ; 必須回 0
-fx_init(desc_ptr: i32) -> i32      ; 0 = OK；非 0 = 拒絕載入
-fx_render(frame_id: i32, time_us: i64, span_off: i32, span_len: i32)
+nce_init(desc_ptr: i32) -> i32      ; 0 = OK；非 0 = 拒絕載入
+nce_render(frame_id: i32, time_us: i64, span_off: i32, span_len: i32)
 ```
 
 **為什麼只有三個**：每一次跨邊界呼叫都是 50–100 cycles，而且編譯器不能內聯。把「每像素一次呼叫」設計進去，就注定慢；把介面壓到「每幀一次、載入時一次」，剩下的都在 guest 自己的記憶體裡跑。
 
-沒有 `mod_alloc`：**效果不能配置記憶體**。它要的東西在 `fx_init` 之前就配好了（見 6.3）。
+沒有 `mod_alloc`：**效果不能配置記憶體**。它要的東西在 `nce_init` 之前就配好了（見 6.3）。
 
 ### 6.2 descriptor：host 寫、guest 讀
 
@@ -413,13 +413,13 @@ nc_plan_declare(&(nc_plan_decl_t){
   ① 讀 manifest 的 bufs[]  → 加總 bytes
   ② 在已 commit 的 ncm.arena 裡 bump 出一塊線性記憶體     ← 不會失敗以外的副作用
   ③ 建 WAMR module instance，linear memory 指到那塊
-  ④ 寫 descriptor → fx_init()
+  ④ 寫 descriptor → nce_init()
   ⑤ 成功才 swap 進去；失敗就保留舊效果
 ```
 
 **這樣不變量還在**：OS 層的配置只發生一次（開機），執行期只有「已配置區域內的切分」。效果塞不進去就是**明確拒絕載入**（回 `NC_ERR_NO_MEM` + 原因），不是中途撇除 —— 撇除是開機的決策，不是執行期的。
 
-**換檔時記憶體怎麼辦**：兩個選項 —— 重用同一塊（快，但要靠模組自己清；`fx_init` 的第一件事就是 memset 自己那塊），或換一塊（乾淨，但要付一次 64 KB 的填零）。建議**重用**，因為 64 KB 的 reset 比重新 carve 便宜，而且不會把 arena 弄碎。
+**換檔時記憶體怎麼辦**：兩個選項 —— 重用同一塊（快，但要靠模組自己清；`nce_init` 的第一件事就是 memset 自己那塊），或換一塊（乾淨，但要付一次 64 KB 的填零）。建議**重用**，因為 64 KB 的 reset 比重新 carve 便宜，而且不會把 arena 弄碎。
 
 manifest 長這樣（跟著 `.nct` / `.nce` 走）：
 
@@ -449,7 +449,7 @@ copy 成本：2.7 KB @ PSRAM 約 40 MB/s ≈ **68 µs**，佔 33 ms 的 0.2%。�
 
 ### 6.5 參數（v1）
 
-參數不要每幀傳指標。做法：descriptor 後面接一塊 64 B 的參數區（16 個 f32），host 改參數時寫進去並呼叫 `fx_param(i)`（可選 export）。**沒宣告 `fx_param` 的效果就是不吃參數** —— 缺席即預設。
+參數不要每幀傳指標。做法：descriptor 後面接一塊 64 B 的參數區（16 個 f32），host 改參數時寫進去並呼叫 `nce_param(i)`（可選 export）。**沒宣告 `nce_param` 的效果就是不吃參數** —— 缺席即預設。
 
 ### 6.6 超時、掉幀、卸載
 
@@ -543,14 +543,14 @@ tools/ncm.py push firmware/build/fire26.nce --port /dev/cu.usbmodem...
 
 ## 10. 已經做出來的：ABI 的 host 參考實作
 
-`tools/poc/mod_poc/` 是一個零依賴的 PoC，在 Mac 上把 §6 的 ABI 跑起來（不需要板子）。它做四件事：算佈局 → 寫 descriptor → `fx_init` → 每幀 `fx_render` 並讀回 fb。
+`tools/poc/mod_poc/` 是一個零依賴的 PoC，在 Mac 上把 §6 的 ABI 跑起來（不需要板子）。它做四件事：算佈局 → 寫 descriptor → `nce_init` → 每幀 `nce_render` 並讀回 fb。
 
 ### 10.1 基本：一個模組跑 120 幀
 
 ```text
 $ node tools/poc/mod_poc/host.mjs tools/poc/mod_poc/mod.wasm --frames 120
 layout      px=676 26x26  fb=64+2704  scratch=2784+2704  total=5488 B (memory 65536 B)
-module A    mod.wasm (367 B wasm, abi 0)  fx_init ok
+module A    mod.wasm (370 B wasm, abi 0)  nce_init ok
 phase A     120 幀  avg 3.5 us  checksum 0x143b0b06
 scratch[0]  120 次  (mod.wasm 被呼叫 120 次)
 ```
@@ -560,7 +560,7 @@ scratch[0]  120 次  (mod.wasm 被呼叫 120 次)
 ```text
 $ node tools/poc/mod_poc/host.mjs tools/poc/mod_poc/mod.wasm --frames 240 \
        --swap tools/poc/mod_poc/mod2.wasm --at 120
-swap @120   mod2.wasm → fx_init ok（496 us）；同一個 descriptor、同一組 offset，host 沒有重算佈局
+swap @120   mod2.wasm → nce_init ok（496 us）；同一個 descriptor、同一組 offset，host 沒有重算佈局
 phase A     120 幀  avg 3.4 us  checksum 0x143b0b06
 phase B     120 幀  avg 2.4 us  checksum 0x22cd5444  (mod2.wasm)
 ```
@@ -574,7 +574,7 @@ phase B     120 幀  avg 2.4 us  checksum 0x22cd5444  (mod2.wasm)
 ```text
 $ node tools/poc/mod_poc/host.mjs tools/poc/mod_poc/mod.wasm --frames 240 \
        --bad tools/poc/mod_poc/modbad.wasm --at 120
-swap @120   拒絕載入 modbad.wasm（fx_init 回 1）→ 繼續用 mod.wasm，畫面不中斷
+swap @120   拒絕載入 modbad.wasm（nce_init 回 1）→ 繼續用 mod.wasm，畫面不中斷
 phase B     —（換檔被拒絕，全程都是 mod.wasm，沒有中斷）
 ```
 

@@ -4,7 +4,7 @@
 //     nc_mod_init(arena, len);
 //     nc_mod_set_backend(nc_mod_wamr_backend());
 // 之後 nc_mod_load() 就會把模組實例化；nc_mod_tick() 每 tick 叫一次
-// task_tick()（任務）或 fx_render()（效果）。
+// task_tick()（任務）或 nce_render()（效果）。
 #pragma once
 
 #include "nc_mod.h"

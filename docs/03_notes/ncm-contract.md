@@ -25,7 +25,7 @@
 |---|---|---|
 | **碰得到** | 自己的線性記憶體（1–2 page，64–128 KB）：descriptor、參數區、scratch、framebuffer | wasm 的 linear memory 就是它的全世界 |
 | **碰不到** | `/data`、周邊暫存器、其他模組、host heap、其他 task 的變數 | 結構上做不到：wasm 沒有指標、沒有 syscall、v0 的 import 是 **0 個** |
-| **唯一的門** | `fx_render(frame_id, time_us)` 的參數，與 host 在 render 返回後讀走 fb | host 只在 guest 返回之後才碰那塊記憶體 |
+| **唯一的門** | `nce_render(frame_id, time_us)` 的參數，與 host 在 render 返回後讀走 fb | host 只在 guest 返回之後才碰那塊記憶體 |
 
 這正是 `architecture-flow.md` 那條「effects 不可以直接碰硬體」——從「大家要記得」變成「做不到」。
 
@@ -59,7 +59,7 @@ ncm task（core 1）                                輸出階段（原本就有�
 ┌───────────────────────────────────────────┐   ┌──────────────────────┐
 │ 1. 取 live（原子讀）                        │   │ 4. memcpy fb → DMA 槽 │
 │ 2. 量 t0                                   │   │    （PSRAM → 內部）   │
-│ 3. fx_render(fid, t_us)  ← guest 寫自己 fb  │──▶│ 5. RMT 送出去         │
+│ 3. nce_render(fid, t_us)  ← guest 寫自己 fb  │──▶│ 5. RMT 送出去         │
 │    量 t1，若 (t1-t0) > 預算 → strike++      │   └──────────────────────┘
 └───────────────────────────────────────────┘
 ```
@@ -74,8 +74,8 @@ ncm task（core 1）                                輸出階段（原本就有�
 
 | 項 | 內容 |
 |---|---|
-| **export（guest 必須有）** | `fx_init(desc_ptr)`、`fx_render(frame_id, time_us)` |
-| **export（可選）** | `fx_param(i)` —— 沒宣告 = 不吃參數 |
+| **export（guest 必須有）** | `nce_init(desc_ptr)`、`nce_render(frame_id, time_us)` |
+| **export（可選）** | `nce_param(i)` —— 沒宣告 = 不吃參數 |
 | **import（host 提供）** | **0 個**（v0 刻意） |
 | **回傳值** | 0 = ok；非 0 = 模組自報錯誤（記 log、不 swap） |
 | **trap** | host 收到 false → 標記 `bad`，live 退回上一個或 NULL |
@@ -105,7 +105,7 @@ v0 唔開 import 是刻意的：開了 `log`/`time`/`file` 就等於把核心的
 
 ### 5.2 任務模組 ABI v1（2026-11-17 實裝）
 
-效果（`.nce`）用 `fx_init`／`fx_render`（每幀一次）。**任務模組（`.nct`）**走另一組
+效果（`.nce`）用 `nce_init`／`nce_render`（每幀一次）。**任務模組（`.nct`）**走另一組
 export，節奏由 manifest 的 `fps` 決定：
 
 | 項 | 內容 |
@@ -167,7 +167,7 @@ guest 的寫入範圍由 wasm 邊界夾住，host 只需信任「fb 那一段在
 |---|---|---|
 | **P0** ✅ | 契約文件 + `nc_mod_abi.h` + 骨架（arena / 實例表 / select / 兩幀釋放 / scan / status） | 板上載入 `.nct` / `.nce`、狀態查得到 |
 | **P1** ✅ | **host harness**：`tools/hosttest/mod_test/` —— `cc` 直接編 `nc_mod.c` + 假 backend，在 Mac 上跑狀態機 | ✅ 13 組 case 全過（壞檔×4 / trap / 超支 / 兩幀釋放 / arena 回收 / 掃目錄 / 實例表上限 / wasm·aot 格式） |
-| **P2** | WAMR patch：補 `#include <sys/stat.h>`、`S_ISBLK`；`fx_init`/`fx_render` 接起來 | 一個最小 `.wasm` 在板上跑出正確 fb |
+| **P2** | WAMR patch：補 `#include <sys/stat.h>`、`S_ISBLK`；`nce_init`/`nce_render` 接起來 | 一個最小 `.wasm` 在板上跑出正確 fb |
 | **P3** | 輸出階段：fb → DMA 槽 copy + RMT；量幀預算 | 676 px 穩定 30 fps，render < 8 ms |
 | **P4** | NC4 file API 上傳 `.nce` → staging → validate → rename → 熱載入 | 不重啟換效果，壞檔不會變磚 |
 

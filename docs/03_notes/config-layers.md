@@ -564,21 +564,32 @@ DMA 大小（1600）與環數（16/16）**不在 config**——那是 build-time
 
 ```text
 /data/pixel/
-├─ effects/          效果：*.json（program 波形＋參數）＋ *.nce（外掛效果）
-├─ map/              像素映射：群組 → 有序段選擇（可交叉型別／反序／重疊）
-├─ modes/            模式：效果 × 群組 + write／range + 播放參數
-└─ registry.json     播放清單：auto_play + list
+├─ effects/            效果資產（三種載體同一個目錄）
+│  ├─ effects.json     一個檔多個效果（快速改波；MP 的 effects.json 格式）
+│  ├─ *.json           一檔一效果（複雜效果結構；name 預設 = 檔名）
+│  └─ *.nce            外掛效果（USER 平面，自帶 manifest）
+├─ map/                像素映射：群組 → 有序段選擇（可交叉型別／反序／重疊）
+├─ modes/              模式：效果 × 群組 + write／range + 播放參數
+└─ registry.json       播放清單：auto_play + list
 ```
 
 規則：
 
 - **檔案系統就是註冊表**：`ls pixel/effects/` 就知道有哪些效果，沒有另一張總表。
+- **三種載體掃入同一張資產表**（`nc_px_asset_tbl_t`／`nc_px_asset_t`）；掃描順序：
+  `effects.json` → `*.json`（檔名排序）→ `*.nce`；key = **`name`**；撞名 = 先到者勝 ＋
+  `log` 警告（順序固定，所以結果確定）。`id` 只作 alias（MP 遺留），不作 key。
+- **解析一次，之後只行結構體**：JSON 只在載入時讀一次（`nc_px_asset_scan()`），
+  熱路徑唔碰 cJSON／字串；壞檔、缺字段、超上限 = 跳過 ＋ `log` ＋ 保留 last-good。
+- **掃到就算**：資產存在 ≠ 會播；會不會播由 `registry.json` 的 `list` 決定。
 - 每個 `.nct` / `.nce` 自帶 manifest（kind / core / fps / px / cmds），載入器驗它，不靠外部設定。
-- `.json` 效果由 CORE 的 program interpreter 解釋（有界，冇指標）；壞檔＝跳過＋保留 last-good。
+- `.json` 效果由 CORE 的 program interpreter 解釋（有界，冇指標）；program 段的數值域
+  = **12-bit（0..4095，MP 沿用）**，入 8.8 畫布時 `<<4`。正弦由 `nc_px_engine_sin_lin()`（混合）
+  或 `nc_px_engine_sin_q12()`（MP 多項式）提供；量測與取捨見 `status.md` §7.134／§7.135。
+- **出廠空骨架**：`registry.json` = `{"version":1,"auto_play":false,"list":[]}`，其餘目錄空
+  （冇預設內容）；`/data/pixel/` 由使用者用隨身碟管理，firmware 只讀，`ASSET_RELOAD` 才重掃。
 - `map/`、`modes/` 的 schema 見 behavior-taxonomy.md §8 Q2–Q4（設計階段，未凍結）。
 - **UI 暫時不做**（本來要放 `ui.json`，取消）。
-
->`pixel/` 的檔案由使用者用隨身碟管理；firmware 只讀，`ASSET_RELOAD` 才重新掃描。
 
 > **內建效果唔係呢棵樹**：編譯入固件的效果住 `firmware/components/effects/<domain>_effects/`，
 > **框架**（契約、registry、interpreter、波表）住 `firmware/components/sw/pixel/`。
@@ -594,7 +605,7 @@ DMA 大小（1600）與環數（16/16）**不在 config**——那是 build-time
 | `nc_cfg_open/root/version/close` | `firmware/components/sys/config/` | ✅ 已實作（`nc_cfg_load.c`；缺檔／壞檔回預設） |
 | 各層自己的 parser | 各 component（`sys/config`、`sw/pixel`、`main`） | 🟡 hardware／system／network／tasks 已接；`pixel/` 四層（effects／map／modes／registry）未做 |
 | 出廠預置（每個檔一份） | `ports/project/<chip>/<board>/data/config/*.json` | ❌ 現在只有一個 `config.json`（321 B，只有 System + Network.lan） |
-| 效果樹 | `/data/pixel/`（`effects/`、`map/`、`modes/`） | 🟡 載入器掃 `pixel/effects/`（路徑本輪改） |
+| 效果樹 | `/data/pixel/`（`effects/`、`map/`、`modes/`） | 🟡 讀取器已實作（`sw/pixel/asset/nc_px_asset.c` ＋ `nc_px_asset_scan.c`；host 測試 `pxAsset_test` 綠）；interpreter／task 接線未做 |
 | NVS 覆蓋 | `net/rx_core`、`net/rx_split`、`cid` … | ✅ 已有（優先於 config） |
 
 **優先序**：NVS（執行期指令寫的）> `config/*.json`（使用者編的）> 程式預設。

@@ -170,9 +170,9 @@ esp_err_t nc_mod_load(const char *path, nc_mod_t **out)
                                         mem, h.mem_bytes, &err);
     if (!ncm->inst) return NC_ERR_LOAD;
 
-    /* ⑤ 寫 descriptor → fx_init */
+    /* ⑤ 寫 descriptor → nce_init */
     nc_mod_write_desc(ncm);
-    if (wasm_runtime_call(ncm->inst, "fx_init", &rc) != true || rc != 0)
+    if (wasm_runtime_call(ncm->inst, "nce_init", &rc) != true || rc != 0)
         return NC_ERR_INIT_REJECTED;
 
     *out = ncm;
@@ -180,7 +180,7 @@ esp_err_t nc_mod_load(const char *path, nc_mod_t **out)
 }
 ```
 
-**六步對應六種失敗**，每一種都要有不同的錯誤碼 —— 這樣上傳工具才能告訴你「是格式錯、是 ABI 舊、是記憶體不夠、還是你自己在 `fx_init` 裡回 1」。
+**六步對應六種失敗**，每一種都要有不同的錯誤碼 —— 這樣上傳工具才能告訴你「是格式錯、是 ABI 舊、是記憶體不夠、還是你自己在 `nce_init` 裡回 1」。
 
 ### 4.1 為什麼「讀整塊」而不是串流
 

@@ -28,10 +28,10 @@ node tools/poc/mod_poc/host.mjs tools/poc/mod_poc/mod.wasm --frames 240 \
 
 | 檔案 | 角色 |
 |---|---|
-| `mod.wat` / `mod.wasm` | **測試替身 A**：徑向脈衝（367 B）。不是給人寫燈效用的，只是讓 harness 有東西可載入 |
-| `mod2.wat` / `mod2.wasm` | **測試替身 B**：斜向掃描（338 B）。ABI 相同、算式不同，用來證明「換檔案＝換效果」 |
-| `modbad.wat` / `modbad.wasm` | **壞模組**：`fx_init` 回 1，用來證明壞檔不會把系統帶走 |
-| `host.mjs` | host 端參考實作：算佈局 → 寫 descriptor → `fx_init` → 每幀 `fx_render` → 讀回幀緩衝 |
+| `mod.wat` / `mod.wasm` | **測試替身 A**：徑向脈衝（370 B）。不是給人寫燈效用的，只是讓 harness 有東西可載入 |
+| `mod2.wat` / `mod2.wasm` | **測試替身 B**：斜向掃描（341 B）。ABI 相同、算式不同，用來證明「換檔案＝換效果」 |
+| `modbad.wat` / `modbad.wasm` | **壞模組**：`nce_init` 回 1，用來證明壞檔不會把系統帶走 |
+| `host.mjs` | host 端參考實作：算佈局 → 寫 descriptor → `nce_init` → 每幀 `nce_render` → 讀回幀緩衝 |
 | `frame.png` | 範例輸出（左 A、右 B，26×26 放大 12 倍） |
 
 重編 `.wasm`（只有改了 `.wat` 才需要）：
@@ -46,8 +46,8 @@ npx wat2wasm tools/poc/mod_poc/modbad.wat -o tools/poc/mod_poc/modbad.wasm
 
 ```wat
 mod_abi_version() -> i32                                   ; 必須回 0
-fx_init(desc_ptr: i32) -> i32                             ; 0 = OK；非 0 = 拒絕
-fx_render(frame_id: i32, time_us: i64, span_off: i32, span_len: i32)
+nce_init(desc_ptr: i32) -> i32                             ; 0 = OK；非 0 = 拒絕
+nce_render(frame_id: i32, time_us: i64, span_off: i32, span_len: i32)
 ```
 
 descriptor（host 寫進 guest 線性記憶體，全部 little-endian u32）：

@@ -101,7 +101,7 @@ int nc_px_engine_fx_count(void) { return s_nfx; }
 // ═══════════════════════ 逐區 render ═══════════════════════
 // 8 區純邏輯：第 k 區 = 鏈上第 k*8 .. k*8+7 顆。每區可以獨立揀效果（0xFF = 跟全域），
 // 所以同一條 GPIO14 上面可以「第 0 行呼吸、第 1 行波浪、第 2 行單色……」。
-static void effect_render(const nc_px_engine_params_t *p)
+static void render_zones(const nc_px_engine_params_t *p)
 {
     for (int z = 0; z < NC_PX_CANVAS_ZONES; z++) {
         uint16_t *dst = &s_canvas[z * NC_PX_CANVAS_ZONE_N][0];
@@ -371,7 +371,7 @@ bool nc_px_engine_frame(uint8_t *dst, void *hdr, int64_t now_us)
 
     const int64_t t0 = esp_timer_get_time();
     demo_step();
-    effect_render(&p);
+    render_zones(&p);
     dither();
     emit();
 

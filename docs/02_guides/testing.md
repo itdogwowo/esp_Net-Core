@@ -37,6 +37,20 @@ python3 tools/nc4_log.py --port /dev/cu.usbmodem*
 量測改用 `nc_net_raw` 的 `rawbench`（:5000／:5001）或 `0xF0xx` 指令；測試 host 內部
 （hub／buffer／flash）留 `tools/hosttest/`。
 
+## 0.6 Host 測試（`tools/hosttest/`，唔需要板）
+
+一次跑完：`bash tools/hosttest/run_all.sh`。每支一個目錄、一個 `run.sh`（POSIX）；
+部分另有 `run.bat`（Windows／MSVC，自動揀 `cl` 或 `gcc`）。
+
+| 測試 | 驗什麼 | 備註 |
+|---|---|---|
+| `pxEngine_test` | 效果引擎：15 個 case × 15 幀 payload hash（golden 由 M2 分家前影），另加 `sin_q12`／`sin_lin` 純整數斷言 | 原 `fx_test`；gcc 同 MSVC 都對得上 golden |
+| `pxAsset_test` | DATA 平面資產：JSON → struct（批次／單檔／檔名補名／撞名／上限／壞檔）、掃目錄次序 | 會建／刪 `./pxAsset_tmp/` |
+| `pixel_test` | 環、編碼位元、抖動平均、多 lane 合成 | |
+| `sin_bench` | **唔係** pass/fail：正弦算法量測（host 5 種算法 ＋ `dev_probe.py` 上板量 `render_us`） | 唔入 `run_all.sh`，見 `tools/hosttest/sin_bench/README.md` |
+
+> 量測結果記在 `docs/00_pm/status.md`（§7.134 實機、§7.135 混合算法），唔重複抄在這一頁。
+
 ## 1. 解碼器一致性
 
 ### 方法

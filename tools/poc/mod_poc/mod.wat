@@ -15,8 +15,8 @@
 ;;
 ;; export：
 ;;   mod_abi_version() -> i32                     必須回 0
-;;   fx_init(desc)    -> i32                     0 = OK；非 0 = 拒絕載入
-;;   fx_render(frame_id, time_us, span_off, span_len)
+;;   nce_init(desc)    -> i32                     0 = OK；非 0 = 拒絕載入
+;;   nce_render(frame_id, time_us, span_off, span_len)
 ;;       簽名對齊 architecture-flow.md 的 effects API：render(frame_id, time_us, span)。
 ;;       v0 的 span 一律是 [0, px_count)；參數先留著，之後要局部更新不用改 ABI。
 (module
@@ -31,7 +31,7 @@
   (func (export "mod_abi_version") (result i32)
     (i32.const 0))
 
-  (func (export "fx_init") (param $d i32) (result i32)
+  (func (export "nce_init") (param $d i32) (result i32)
     (global.set $px (i32.load offset=0  (local.get $d)))
     (global.set $w  (i32.load offset=4  (local.get $d)))
     (global.set $h  (i32.load offset=8  (local.get $d)))
@@ -40,7 +40,7 @@
     (i32.store offset=0 (global.get $sc) (i32.const 0))
     (i32.const 0))
 
-  (func (export "fx_render")
+  (func (export "nce_render")
         (param $fid i32) (param $t i64) (param $off i32) (param $len i32)
     (local $i i32) (local $end i32) (local $x i32) (local $y i32)
     (local $dx i32) (local $dy i32) (local $d2 i32) (local $q i32)

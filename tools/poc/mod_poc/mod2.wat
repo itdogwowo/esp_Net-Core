@@ -14,7 +14,7 @@
   (func (export "mod_abi_version") (result i32)
     (i32.const 0))
 
-  (func (export "fx_init") (param $d i32) (result i32)
+  (func (export "nce_init") (param $d i32) (result i32)
     (global.set $px (i32.load offset=0  (local.get $d)))
     (global.set $w  (i32.load offset=4  (local.get $d)))
     (global.set $h  (i32.load offset=8  (local.get $d)))
@@ -23,7 +23,7 @@
     (i32.store offset=0 (global.get $sc) (i32.const 0))
     (i32.const 0))
 
-  (func (export "fx_render")
+  (func (export "nce_render")
         (param $fid i32) (param $t i64) (param $off i32) (param $len i32)
     (local $i i32) (local $end i32) (local $x i32) (local $y i32)
     (local $q i32) (local $u i32) (local $v i32) (local $o i32) (local $phase i32)

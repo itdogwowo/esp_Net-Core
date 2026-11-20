@@ -4,8 +4,8 @@
 // 它模擬 esp_Net-Core 的 compute 這一格：
 //   ① 依 manifest 算佈局（desc / frame / scratch）
 //   ② 把 descriptor 寫進 guest 線性記憶體
-//   ③ 呼叫 fx_init(desc)，失敗就拒絕載入
-//   ④ 每幀呼叫 fx_render(frame_id, time_us, span)，讀回幀緩衝
+//   ③ 呼叫 nce_init(desc)，失敗就拒絕載入
+//   ④ 每幀呼叫 nce_render(frame_id, time_us, span)，讀回幀緩衝
 //
 // 也可以模擬「分離式固件」的熱替換：
 //   --swap <module.wasm>   在第 N 幀換成另一個模組（同一塊記憶體、同一個 descriptor）
@@ -89,14 +89,14 @@ function attach(ncm) {
   dv.setUint32(20, scOff, true);
   dv.setUint32(24, scBytes, true);
 
-  const rc = ncm.ex.fx_init(0);
-  return rc === 0 ? null : `fx_init 回 ${rc}`;
+  const rc = ncm.ex.nce_init(0);
+  return rc === 0 ? null : `nce_init 回 ${rc}`;
 }
 
 // ── 跑幀，模擬 frame clock ──
 function render(ncm, f) {
   const tUs = Math.round((f * 1e6) / MANIFEST.fps);
-  ncm.ex.fx_render(f, BigInt(tUs), 0, px);   // span 全幀；v0 約定
+  ncm.ex.nce_render(f, BigInt(tUs), 0, px);   // span 全幀；v0 約定
 }
 
 function checksum(ncm) {
@@ -115,7 +115,7 @@ if (err) {
 }
 console.log(`layout      px=${px} ${w}x${h}  fb=${fbOff}+${fbBytes}  scratch=${scOff}+${scBytes}  ` +
             `total=${totalBytes} B (memory ${A.mem.length} B)`);
-console.log(`module A    ${A.name} (${A.bytes.length} B wasm, abi ${MANIFEST.abi})  fx_init ok`);
+console.log(`module A    ${A.name} (${A.bytes.length} B wasm, abi ${MANIFEST.abi})  nce_init ok`);
 
 let cur = A;
 let swapped = false;
@@ -136,7 +136,7 @@ for (let f = 0; f < frames; f++) {
       checksumA = checksum(cur);
     } else {
       checksumA = checksum(cur);
-      console.log(`swap @${f}   ${M.name} → fx_init ok（${dtUs.toFixed(0)} us）；` +
+      console.log(`swap @${f}   ${M.name} → nce_init ok（${dtUs.toFixed(0)} us）；` +
                   `同一個 descriptor、同一組 offset，host 沒有重算佈局`);
       cur = M;
     }
