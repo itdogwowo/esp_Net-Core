@@ -10,6 +10,7 @@ idf_component_register(
          "engine/nc_px_engine_program.c"
          "asset/nc_px_asset.c" "asset/nc_px_asset_scan.c" "asset/nc_px_json.c"
          "asset/nc_px_layer.c"
+         "asset/nc_px_show.c"
     INCLUDE_DIRS "include"
     PRIV_REQUIRES esp_timer log heap
 )

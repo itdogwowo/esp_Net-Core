@@ -61,6 +61,12 @@ typedef struct {
     uint8_t     kind;                   // nc_px_asset_kind_t
     uint8_t     nseg;                   // kind=PROGRAM 時有效
     uint16_t    pixel_hint;             // 只作提示：真正 px 由環的事實決定，唔信呢個
+    // 空間／時間分布（同 MP effects.json 同名）：phase = (t/speed)*step + i*spacing + offset
+    uint16_t    step;                   // 每次時間推進幾格（預設 1）
+    uint16_t    spacing;                // 相鄰 pixel 相位差（預設 0）
+    uint16_t    offset;                 // 整體相位偏移
+    uint16_t    speed;                  // 幾幀一步（0 當 1）
+    bool        reverse;                // 反向輸出
     nc_px_seg_t seg[NC_PX_SEG_MAX];
 } nc_px_asset_t;
 

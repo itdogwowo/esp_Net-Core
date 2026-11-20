@@ -255,6 +255,7 @@ static bool parse_object(nc_px_js_t *j, nc_px_asset_t *a, bool *ok, bool *touche
                     nc_px_asset_t item;
                     memset(&item, 0, sizeof(item));
                     item.kind = NC_PX_ASSET_PROGRAM;
+                    item.speed = 1;
                     bool item_ok = true, item_touched = false, dummy = false;
                     if (!parse_object(j, &item, &item_ok, &item_touched, false, &dummy)) {
                         return false;
@@ -284,6 +285,38 @@ static bool parse_object(nc_px_js_t *j, nc_px_asset_t *a, bool *ok, bool *touche
             if (!parse_program(j, a, ok)) {
                 return false;
             }
+        } else if (strcmp(key, "step") == 0) {
+            uint32_t v = 0;
+            if (nc_px_js_num(j, 65535u, &v) == NC_PX_JSN_OK) {
+                a->step = (uint16_t)v;
+            } else if (!nc_px_js_skip(j)) {
+                return false;
+            }
+        } else if (strcmp(key, "spacing") == 0) {
+            uint32_t v = 0;
+            if (nc_px_js_num(j, 65535u, &v) == NC_PX_JSN_OK) {
+                a->spacing = (uint16_t)v;
+            } else if (!nc_px_js_skip(j)) {
+                return false;
+            }
+        } else if (strcmp(key, "offset") == 0) {
+            uint32_t v = 0;
+            if (nc_px_js_num(j, 65535u, &v) == NC_PX_JSN_OK) {
+                a->offset = (uint16_t)v;
+            } else if (!nc_px_js_skip(j)) {
+                return false;
+            }
+        } else if (strcmp(key, "speed") == 0) {
+            uint32_t v = 0;
+            if (nc_px_js_num(j, 65535u, &v) == NC_PX_JSN_OK) {
+                a->speed = (uint16_t)((v == 0) ? 1 : v);
+            } else if (!nc_px_js_skip(j)) {
+                return false;
+            }
+        } else if (strcmp(key, "reverse") == 0) {
+            if (!nc_px_js_bool(j, &a->reverse) && !nc_px_js_skip(j)) {
+                return false;
+            }
         } else if (strcmp(key, "pixel_n") == 0) {
             uint32_t v = 0;
             const nc_px_jnum_t r = nc_px_js_num(j, 65535u, &v);
@@ -296,7 +329,7 @@ static bool parse_object(nc_px_js_t *j, nc_px_asset_t *a, bool *ok, bool *touche
                 *ok = false;
             }
             *touched = true;
-        } else if (!nc_px_js_skip(j)) {             // id／version／step／reverse… 暫時唔用
+        } else if (!nc_px_js_skip(j)) {             // id／version／未知鍵：跳過
             return false;
         }
         if (nc_px_js_eat(j, ',')) {
@@ -335,6 +368,7 @@ esp_err_t nc_px_asset_add_json(const char *json, size_t len, const char *name_hi
     nc_px_asset_t a;
     memset(&a, 0, sizeof(a));
     a.kind = NC_PX_ASSET_PROGRAM;
+    a.speed = 1;
 
     bool touched = false, ok = true, batch = false;
     if (!parse_object(&j, &a, &ok, &touched, true, &batch)) {

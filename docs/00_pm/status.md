@@ -5263,3 +5263,26 @@ DMA 仍然 17.36 ms（43,400 PCLK ÷ 2.5 MHz）→ 16×600 是 **CPU-bound**，
   - **委派執行**：group 引用解析（`matrix.full`／`3.full`／`full`）→ 用實際 controller
     offsets 展開 `offs[]`；mode 播放逐 entry 建 generator、`write` 分派、`range` 子段 scatter。
   - 上板驗 `demo_eyes`（0:16 eyes/rgb ＋ 16:32 wave/g）。
+
+### 7.140 2026-11-20 晚（委派執行：mode plan ＋ group→offsets ＋ 逐幀合成）
+
+- **做咗**：`include/nc_px_show.h` ＋ `asset/nc_px_show.c`
+  - `nc_px_show_plan(mode, map, assets, inventory)`：
+    - group 引用解析：`matrix.full`／`3.full`／`full`（用 mode.mapping 做預設）
+    - 群組 = 各 `sel` 的 slice 展開（`sel` 按硬體型別查 inventory 的 base/px）
+    - mode entry 的 `range` 再套一次 Python slice（`0:16`／`16:`／`::-1` 反向暫不支援）
+    - 每個委派項 → 一個 job（asset＋預編譯 prog＋write＋1–4 段 `[base,count]`）
+  - `nc_px_show_frame(plan, step, dst)`：program interpreter 算 vals（`step/spacing/offset/speed/reverse`）
+    → 按 `write` 分派（r/g/b/w/ww/rgb/rgbw/wwww）→ 寫 4 B/px（R,G,B,W）
+- **資產層補欄位**：`nc_px_asset_t` 加 `step/spacing/offset/speed/reverse`（以前被當未知鍵跳過）；
+  `nc_px_asset.c` 解析；`speed=0` 當 1。
+- **驗證**：新 `tools/hosttest/pxShow_test`（入 `run_all.sh`）
+  - 用 mp 真檔（effects.json＋matrix.json＋demo_eyes.json）＋假 inventory
+    `ws2812 base0 px32`／`uartMotor1 base32 px1`
+  - plan：2 jobs、`.px=33`；`job0 = eyes(rgb) 0..15`、`job1 = wave(g) 16..31`、冇跳過
+  - 逐幀 step 20：job1 只寫 G 通道且有非零；job0 的 RGB 逐顆等於
+    `program_value(ph + k*spacing) >> 4`（同 scatter 語義一致）
+  - `motor_sine`（自訂段型別）→ `ESP_ERR_NOT_FOUND`（等 `.nce`，唔會亂畫）
+  - `bash tools/hosttest/run_all.sh` **18 支全綠**
+- **未做**：掃描器（`/data/pixel/{effects,map,modes}` ＋ registry）同 pixel_task 接線
+  （把 plan 接去 render backend／真 controller offsets）。
