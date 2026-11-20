@@ -12,7 +12,7 @@
 #include "nc_px_engine.h"
 #include "nc_px_program.h"
 
-#define STEPS 10000
+#define STEPS 40000
 #define PIXELS 64
 
 static double now_us(void)
@@ -53,12 +53,23 @@ static const char *type_name(uint8_t t)
     }
 }
 
+// FNV-1a（低 byte 先）：同 mp 的 bench 一字不差，兩邊 checksum 對得上 = 語義一致
+static uint32_t fnv16(uint32_t h, uint32_t v)
+{
+    h ^= v & 0xFFu;
+    h *= 16777619u;
+    h ^= (v >> 8) & 0xFFu;
+    h *= 16777619u;
+    return h;
+}
+
 int main(void)
 {
     nc_px_engine_tables_init();
     printf("=== C program interpreter：%d 步量測（host x86）===\n", STEPS);
-    printf("%-16s%12s%12s%14s\n", "type", "ns/step", "us/step", "us/frame64");
-    printf("------------------------------------------------------\n");
+    printf("%-16s%12s%12s%12s%14s  %s\n", "type", "ns/step", "us/step",
+           "total ms", "us/frame64", "checksum");
+    printf("--------------------------------------------------------------------------\n");
 
     static const uint8_t types[] = {
         NC_PX_SEG_KEEP, NC_PX_SEG_MATH_NOW, NC_PX_SEG_SQUARE_WAVE_NOW,
@@ -72,9 +83,15 @@ int main(void)
             continue;
         }
         volatile uint32_t sink = 0;
+        uint32_t chk = 2166136261u;
+        uint32_t mn = 0xFFFFFFFFu, mx = 0;
         double t0 = now_us();
         for (int i = 0; i < STEPS; i++) {
-            sink += nc_px_engine_program_value(&p, (uint32_t)(i % (int)p.total));
+            const uint32_t v = nc_px_engine_program_value(&p, (uint32_t)(i % (int)p.total));
+            sink += v;
+            chk = fnv16(chk, v);
+            if (v < mn) { mn = v; }
+            if (v > mx) { mx = v; }
         }
         double dt1 = now_us() - t0;
 
@@ -87,8 +104,9 @@ int main(void)
             }
         }
         double dt64 = now_us() - t0;
-        printf("%-16s%12.2f%12.3f%14.2f\n", type_name(types[k]),
-               dt1 * 1000.0 / STEPS, dt1 / STEPS, dt64 / STEPS);
+        printf("%-16s%12.2f%12.3f%12.3f%14.2f  chk=%08X min=%u max=%u\n",
+               type_name(types[k]), dt1 * 1000.0 / STEPS, dt1 / STEPS,
+               dt1 / 1000.0, dt64 / STEPS, chk, mn, mx);
     }
 
     // compile 一次性成本
