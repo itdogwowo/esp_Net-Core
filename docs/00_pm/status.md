@@ -6167,3 +6167,23 @@ pair_us: range=4.895ms, random12=19.968ms, packed12=20.600ms, random8=0.970ms
 - 所以 production 保持 8-bit internal canvas；真要 12-bit，必須令 canvas 留在
   internal（減少並存 buffer／tile／分塊），不是換 store 寫法。
 - Wave table 仍有效：gen 15.614 → **1.996 ms**；full8 random **4.409 ms**。
+
+### 7.166 2026-11-22（固定 buffer 政策：HOT=internal、BULK=PSRAM，取消 fallback）
+
+用家要求：不要「智能」按 free heap 動態選 internal／PSRAM；固定一套使用方法，
+大資料直接 PSRAM。已改成 **build-time 固定政策**：
+
+- `CONFIG_NETCORE_PIPE_CANVAS_PSRAM`（default n）：pair 8-bit canvas
+  - n → 永遠 internal；y → 永遠 PSRAM；**沒有 fallback**。
+- `CONFIG_NETCORE_PIXEL_PACK_PSRAM`（default n）：I80 packed 波形
+  - n → 永遠 internal；y → 永遠 PSRAM；**沒有 fallback**。
+- 64 px Zero：兩個都 n（HOT internal）。
+- 9,600 px project：兩個都 y（BULK PSRAM）；allocation 失敗就 task 失敗／log，
+  不會偷偷改位置。
+- `NETCORE_PIXEL_LEDS` range 由 2048 擴到 16384（9,600 必要）。
+- wave table：固定 internal，plan 時建一次；OOM 才 fallback interpreter（極少數，
+  屬錯誤路徑，不是正常性能路徑）。
+- `nc_buf` 仍是唯一 buffer 工具；policy 只決定 class（S/P/DMA）。
+
+效果：同一份 firmware 的 canvas／packed buffer 位置固定，latency 可預期；
+9,600 要 PSRAM 就在 project sdkconfig 明確寫 y，不再靠 runtime 猜。

@@ -148,11 +148,19 @@ menu "esp_Net-Core"
             內容缺失（/data/pixel 未上傳）時只 log warning 並填黑，
             不會讓開機失敗。量產映像預設關閉。
 
+    config NETCORE_PIPE_CANVAS_PSRAM
+        bool "content/pair canvas 固定放 PSRAM（大資料；不做 internal fallback）"
+        depends on NETCORE_CONTENT
+        default n
+        help
+            固定記憶體政策：關閉 = 8-bit pair canvas 永遠 internal；開啟 = 永遠
+            PSRAM。大畫面（例如 9,600 px）請明確開啟；不要靠 free heap 動態選。
+
     config NETCORE_PIXEL_LEDS
         int "每道 lane 的燈數"
         depends on NETCORE_PIXEL
         default 64
-        range 1 2048
+        range 1 16384
         help
             一條 lane 串幾顆。環的每一格 = 64 B 表頭 + 4 B × 燈數（進位到 64 的倍數）。
 
@@ -317,6 +325,14 @@ menu "esp_Net-Core"
             ⚠ lane 數只影響 CPU（pack 隨 lane 線性、merge 每 8 條一組），
             **不影響 DMA 時間**（那只看 px）；「4 條 600、其他 0」不會更快。
             實測見 docs/03_notes/pixel-renderer.md §13。
+
+    config NETCORE_PIXEL_PACK_PSRAM
+        bool "I80 packed 波形固定放 PSRAM（大資料；不做 internal fallback）"
+        depends on NETCORE_PIXEL_I80
+        default n
+        help
+            固定記憶體政策：關閉 = packed 波形永遠 internal；開啟 = 永遠 PSRAM。
+            不再「internal 失敗才退 PSRAM」；大畫面（例如 9,600 px）請明確開啟。
 
     config NETCORE_PIXEL_SPI
         bool "SPI 後端（WS2801／APA102 之類有時脈線的燈）"

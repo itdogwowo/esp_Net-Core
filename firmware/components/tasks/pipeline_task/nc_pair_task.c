@@ -464,12 +464,18 @@ static esp_err_t content_apply_mode_locked(const nc_px_mode_t *mode)
         return ESP_ERR_NOT_FOUND;
     }
 
-    // canvas：只在第一次配；切 mode 重用同一塊 px*4。
+    // canvas：固定政策；不做「internal 失敗才退 PSRAM」。
+#if CONFIG_NETCORE_PIPE_CANVAS_PSRAM
+    const uint32_t canvas_caps = MALLOC_CAP_SPIRAM;
+#else
+    const uint32_t canvas_caps = MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT;
+#endif
     if (s_content.canvas == NULL) {
         s_content.canvas = (uint8_t *)heap_caps_malloc((size_t)s_content.px * NC_PX_BPP,
-                                                    MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+                                                       canvas_caps);
         if (s_content.canvas == NULL) {
-            ESP_LOGW(TAG, "canvas 配置失敗（%u px）", (unsigned)s_content.px);
+            ESP_LOGW(TAG, "canvas 配置失敗（%u px，固定 %s）", (unsigned)s_content.px,
+                     (canvas_caps & MALLOC_CAP_SPIRAM) ? "PSRAM" : "internal");
             return ESP_ERR_NO_MEM;
         }
     }

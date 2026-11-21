@@ -218,14 +218,18 @@ nc_pixel_backend_t *nc_px_backend_i80(const nc_px_i80_cfg_t *cfg)
     }
     // packed 波形：px × lane_bytes × bit_cells bytes（每條 lane）；8 條一組去轉置。
     d->pack_bytes = d->px * (uint32_t)nc_px_codec_lane_bytes(d->codec[0]) * cc.wave.bit_cells;
+    // 固定政策：NETCORE_PIXEL_PACK_PSRAM 決定 internal 或 PSRAM，不做 runtime fallback。
+#if CONFIG_NETCORE_PIXEL_PACK_PSRAM
+    const uint32_t pack_caps = MALLOC_CAP_SPIRAM;
+#else
+    const uint32_t pack_caps = MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT;
+#endif
     for (int i = 0; i < 8; i++) {
-        d->pack[i] = heap_caps_malloc(d->pack_bytes, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+        d->pack[i] = heap_caps_malloc(d->pack_bytes, pack_caps);
         if (d->pack[i] == NULL) {
-            // internal 放唔落就退 PSRAM（CPU 讀寫，DMA 唔會碰）
-            d->pack[i] = heap_caps_malloc(d->pack_bytes, MALLOC_CAP_SPIRAM);
-        }
-        if (d->pack[i] == NULL) {
-            ESP_LOGE(TAG, "packed 波形緩衝（%u B × 8）配置失敗", (unsigned)d->pack_bytes);
+            ESP_LOGE(TAG, "packed 波形緩衝（%u B × 8）配置失敗（固定 %s）",
+                     (unsigned)d->pack_bytes,
+                     (pack_caps & MALLOC_CAP_SPIRAM) ? "PSRAM" : "internal");
             i80_be_free(d);
             return NULL;
         }
