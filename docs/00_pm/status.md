@@ -6080,8 +6080,11 @@ cap 256 值，唔可以直接跑 28,800 值；因此用 **EffectPerf 0xF069（�
 
 判讀：
 
-1. **最大優化就是 production 已經用的 8-bit canvas**。38.4 KB 的 canvas 放得落
-   cache；76.8 KB 的 12-bit canvas random RMW 會 cache miss，慢 20 倍。
+1. **最大優化就是 production 已經用的 8-bit canvas**。量到 `mem.c12i=1`，即
+   12-bit canvas 其實也在 internal SRAM，不是 PSRAM；差別是 `table_apply12`
+   每顆燈做 **4 次 16-bit 隨機 store**（RGB+W，8 B/px），8-bit 版做 **1 次
+   aligned 32-bit store**（4 B/px），所以 store 數目 4×、匯流排交易數 4×。
+   76.8 KB 也比 38.4 KB 大一倍；隨機位址令每次 store 都係獨立 transaction。
 2. 8-bit random 同 inverse／block 幾乎一樣（0.93–0.97 ms），所以「完全隨機」在
    8-bit 之下已經不是瓶頸；**gen 的 15.6 ms 才是主要成本**。
 3. 9,600 RGB CPU full8 random **16.571 ms**：50 fps 剩 **3.43 ms**，可行但緊；
@@ -6096,3 +6099,48 @@ cap 256 值，唔可以直接跑 28,800 值；因此用 **EffectPerf 0xF069（�
    - **保持 8-bit canvas，不要在中間建 12-bit random canvas**；
    - gen 用 wave table 快取（把 15.6 ms 壓低）才有 50 fps 餘量；
    - 多 lane 輸出。
+
+
+### 7.164 2026-11-22（Wave table 重用：gen 15.6→2.0 ms；9,600 RGB full 4.41 ms）
+
+**為什麼 12-bit／8-bit 差 20×**：
+
+- `mem.c12i=1`：12-bit canvas 也在 internal SRAM，不是 PSRAM；不要再說 cache miss。
+- `table_apply12`：每顆燈 4 次 16-bit 隨機 store（R/G/B/W，8 B/px）；
+  `table_apply8`：每顆燈 1 次 aligned 32-bit store（4 B/px）。
+- 9,600 px：38,400 次 halfword store vs 9,600 次 word store；隨機位址令每次
+  都係獨立匯流排 transaction，沒有 burst／coalescing；所以 4× store 數會放大成
+  約 20× 時間。
+- 如果真的要 12-bit 輸出，應該把每顆燈的 channel **pack 成 32/64-bit** 寫，
+  或 tile（例如 512 px 一塊）令 destination 局部化，而不是逐 channel 16-bit 寫。
+
+**一次預算、之後重用：wave table**：
+
+- effect program 的總長度只有 256（或最多 4096）；把 `nc_px_engine_program_value()`
+  的 0..total-1 結果預先算成 `uint16_t wave[total]`，plan 變更時建一次，
+  之後每幀只做 index。
+- 已實作在 `effect` 任務（`nc_effect_task.c`），64 px 真機：
+  **effect avg 46 → 7 µs**（max 75 → 65 µs），burn 6 µs。
+- 9,600 RGB probe（EffectPerf 加 cached wave / 8-bit full）：
+
+| 項目 | 無 wave table | 有 wave table |
+|---|---:|---:|
+| gen 28,800 值 | 15.603 ms | **1.993 ms** |
+| pair8 random | 0.970–1.010 ms | 0.970–1.010 ms |
+| **full8 random** | **16.572 ms** | **4.408 ms** |
+| 50 fps 預算 | 82.9% | **22.0%** |
+| 60 fps | 99.4% | **26.4%** |
+
+**其他可以一次過預算、重用**：
+
+1. **permutation table／inverse**：9,600 × uint16（19.2 KB）；inverse8 0.931 ms，
+   比 random8 0.970 ms 略快；12-bit 或 PSRAM 時更有價值。
+2. **runs／block schedule**：真實多組別用 16 px block，0.968 ms，和完全 random 差不多。
+3. **destination byte offsets**：`offs[k]<<2` 預先存，省每像素 shift。
+4. **12→8 LUT** 4,096 entries（4 KB），但 8-bit pair 直接 `>>4` 已很便宜。
+5. **wave table** 是最值錢：gen 的 7.8× 改善。
+6. 不可重用／要每次做的：效果參數改變、mode reload、plan rebuild；wave table 要在
+   plan_gen 改變時重建。
+
+限制：這是 **CPU probe**，未計 render；9,600 單 lane 物理仍是 288 ms（3.47 fps）。
+要 50 fps 仍要約 15 條 lane（或降低 FPS）。

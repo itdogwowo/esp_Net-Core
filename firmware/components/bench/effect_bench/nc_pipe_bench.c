@@ -185,6 +185,23 @@ static uint32_t bench_gen(ctx_t *c, uint32_t frames)
     return us_per_frame(t0, frames);
 }
 
+static uint32_t bench_gen_cached(ctx_t *c, uint32_t frames,
+                              const uint16_t *wave, uint16_t total)
+{
+    const int64_t t0 = esp_timer_get_time();
+    const nc_px_asset_t *a = c->job->asset;
+    const uint16_t speed = (a->speed == 0) ? 1 : a->speed;
+    for (uint32_t f = 0; f < frames; f++) {
+        uint32_t ph = ((f * 3u) / speed) * (uint32_t)a->step + (uint32_t)a->offset;
+        ph = ph % total;
+        for (uint16_t i = 0; i < c->nv; i++) {
+            uint32_t p = ph + (uint32_t)i * (uint32_t)a->spacing;
+            s_sink += wave[p % total];
+        }
+    }
+    return us_per_frame(t0, frames);
+}
+
 static uint32_t bench_pair_range(ctx_t *c, uint32_t frames)
 {
     const int64_t t0 = esp_timer_get_time();
@@ -240,6 +257,27 @@ static uint32_t bench_full8(ctx_t *c, uint32_t frames, const uint16_t *table)
     const int64_t t0 = esp_timer_get_time();
     for (uint32_t f = 0; f < frames; f++) {
         s_sink += nc_px_job_vals(c->job, f * 3u, c->vals, c->nv);
+        table_apply8(table, c->vals, c->px, c->c8, c->write);
+    }
+    s_sink += c->c8[0];
+    return us_per_frame(t0, frames);
+}
+
+static uint32_t bench_full8_cached(ctx_t *c, uint32_t frames,
+                                 const uint16_t *wave, uint16_t total,
+                                 const uint16_t *table)
+{
+    const int64_t t0 = esp_timer_get_time();
+    const nc_px_asset_t *a = c->job->asset;
+    const uint16_t speed = (a->speed == 0) ? 1 : a->speed;
+    for (uint32_t f = 0; f < frames; f++) {
+        uint32_t ph = ((f * 3u) / speed) * (uint32_t)a->step + (uint32_t)a->offset;
+        ph = ph % total;
+        for (uint16_t i = 0; i < c->nv; i++) {
+            const uint16_t v = wave[(ph + (uint32_t)i * (uint32_t)a->spacing) % total];
+            c->vals[i] = v;
+            s_sink += v;
+        }
         table_apply8(table, c->vals, c->px, c->c8, c->write);
     }
     s_sink += c->c8[0];
@@ -361,6 +399,11 @@ static void on_pipebench(nc4_ctx_t *ctx, const nc4_frame_t *f)
     fill_asset(&asset, nv);
     fill_job(&job, &asset, px, write);
     c.job = &job;
+    static uint16_t wave[8192];
+    const uint16_t wave_total = (job.prog.total <= 8192) ? (uint16_t)job.prog.total : 0;
+    for (uint16_t p = 0; p < wave_total; p++) {
+        wave[p] = nc_px_engine_program_value(&job.prog, p);
+    }
 
     // 連續 offs（k）與打亂 offs（permutation）：用來分開「表查詢成本」與「隨機寫入成本」。
     for (uint16_t k = 0; k < px; k++) {
@@ -375,6 +418,7 @@ static void on_pipebench(nc4_ctx_t *ctx, const nc4_frame_t *f)
 
     uint32_t gen_us = 0, pair_range = 0, pair_table = 0, pair_rnd = 0, conv_i = 0;
     uint32_t pair8_rnd = 0, pair8_inv = 0, pair8_blk = 0, full8_rnd = 0;
+    uint32_t gen_cached = 0, full8_cached = 0;
     uint32_t full_range = 0, full_table = 0, full_rnd = 0, full_ps = 0;
     const uint8_t reps = (nv > 20000) ? 2 : 3;
     for (uint8_t r = 0; r < reps; r++) {
@@ -442,21 +486,28 @@ static void on_pipebench(nc4_ctx_t *ctx, const nc4_frame_t *f)
         c.table_rnd[k] = (uint16_t)((uint32_t)k * 7919u % px);
     }
     full8_rnd = bench_full8(&c, frames, c.table_rnd);
+    if (wave_total > 0) {
+        gen_cached = bench_gen_cached(&c, frames, wave, wave_total);
+        full8_cached = bench_full8_cached(&c, frames, wave, wave_total, c.table_rnd);
+    }
 
     static char j[1200];
     (void)snprintf(
         j, sizeof(j),
         "{\"px\":%u,\"nv\":%u,\"mode\":%u,\"fr\":%u,\"rep\":%u,"
-        "\"gen_us\":%u,\"pair_us\":{\"range\":%u,\"table\":%u,\"rnd\":%u,"
+        "\"gen_us\":%u,\"gen_cached_us\":%u,"
+        "\"pair_us\":{\"range\":%u,\"table\":%u,\"rnd\":%u,"
         "\"rnd8\":%u,\"inv8\":%u,\"blk8\":%u},"
         "\"conv_us\":%u,\"full_us\":{\"range\":%u,\"table\":%u,\"rnd\":%u,\"ps\":%u,"
-        "\"rnd8\":%u},"
+        "\"rnd8\":%u,\"cached8\":%u},"
         "\"mem\":{\"c12i\":%d,\"c12p\":%d}}",
         (unsigned)px, (unsigned)nv, (unsigned)mode, (unsigned)frames, (unsigned)reps,
-        (unsigned)gen_us, (unsigned)pair_range, (unsigned)pair_table, (unsigned)pair_rnd,
+        (unsigned)gen_us, (unsigned)gen_cached,
+        (unsigned)pair_range, (unsigned)pair_table, (unsigned)pair_rnd,
         (unsigned)pair8_rnd, (unsigned)pair8_inv, (unsigned)pair8_blk,
         (unsigned)conv_i, (unsigned)full_range, (unsigned)full_table, (unsigned)full_rnd,
-        (unsigned)full_ps, (unsigned)full8_rnd, c.c12 ? 1 : 0, c.c12p ? 1 : 0);
+        (unsigned)full_ps, (unsigned)full8_rnd, (unsigned)full8_cached,
+        c.c12 ? 1 : 0, c.c12p ? 1 : 0);
 
     ESP_LOGI(TAG, "px=%u nv=%u mode=%u gen=%u pair=%u/%u conv=%u full=%u/%u/%u/%u us",
              (unsigned)px, (unsigned)nv, (unsigned)mode, (unsigned)gen_us,

@@ -93,7 +93,8 @@ def show(r: dict) -> None:
     nv = max(1, r.get('nv', 1))
     px = max(1, r.get('px', 1))
     gen_ns = r.get('gen_us', 0) * 1000.0 / nv
-    print(f"  gen        {fmt_us(r.get('gen_us'))}   （{gen_ns:.0f} ns/值）")
+    print(f"  gen        {fmt_us(r.get('gen_us'))}   （{gen_ns:.0f} ns/值）"
+          f"   cached {fmt_us(r.get('gen_cached_us'))}")
     p = r.get("pair_us", {})
     print(f"  pair       range {fmt_us(p.get('range'))}   table {fmt_us(p.get('table'))}"
           f"   random12 {fmt_us(p.get('rnd'))}   （range {p.get('range', 0) * 1000.0 / px:.0f} ns/px）")
@@ -103,7 +104,7 @@ def show(r: dict) -> None:
     f = r.get("full_us", {})
     print(f"  full       range {fmt_us(f.get('range'))}   table {fmt_us(f.get('table'))}"
           f"   random {fmt_us(f.get('rnd'))}   random8 {fmt_us(f.get('rnd8'))}"
-          f"   psram12 {fmt_us(f.get('ps'))}")
+          f"   cached8 {fmt_us(f.get('cached8'))}   psram12 {fmt_us(f.get('ps'))}")
     best = f.get("range") or 0
     if best:
         print(f"  → 50 FPS（20 ms）預算：full range {best / 20000 * 100:.1f}%"

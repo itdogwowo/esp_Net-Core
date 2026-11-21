@@ -367,3 +367,11 @@ payload `[px:u16][frames:u16][mode:u8]`；mode 0=1 值/px（wwww）、1=3 值/px
 - 8-bit inverse：0.931 ms；8-bit block16：0.967 ms
 - gen 28,800 values：15.601 ms
 - **full8 random = 16.571 ms**（50 fps 82.9%；60 fps 99.4%，冇餘量）
+
+
+### Wave table 重用（2026-11-22）
+
+- effect program total=256；預算 `uint16_t wave[256]` 一次。
+- 9,600 RGB gen：15.603 ms → **1.993 ms**。
+- full8 random：16.572 ms → **4.408 ms**（50 fps 22.0%）。
+- 64 px production effect：46 µs → **7 µs**。
