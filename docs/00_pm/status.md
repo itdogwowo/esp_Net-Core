@@ -5873,3 +5873,40 @@ LED 太光／受熱（用家反映「LED 甩了」）。production 8×8 不需�
 - sim 的 seed 已加入 Show 四層（breathe、matrix、white80/color、registry），
   `loadTree` 會先 `POST /api/scan` 重建 manifest，無板都可預覽。
 - 限制：sim 的 `0xF06B` 是軟件模型，不是真 LED；Matrix 硬件仍短路未供電。
+
+### 7.158 2026-11-21（新硬件 ESP32-S3-Zero＋Zero-Show project；GPIO1）
+
+**新硬件** `ports/hardware/S3/ESP32-S3-Zero/`（Waveshare ESP32-S3-Zero）：
+
+- ESP32-S3FH4R2：4 MB flash、2 MB PSRAM quad 80 MHz、240 MHz；USB Type-C
+  OTG FS（GPIO19/20）、console none／CDC。
+- **LED 資料腳 = GPIO1**（用家指定，外部燈鏈）。官方板載 WS2812 是 GPIO21，
+  本專案不用它。
+- I80 設定：D0=GPIO1、D1..D7=38,39,40,41,42,47,48、WR=2、DC=4；
+  dummies 會出現在排針，不要接。
+- LED 鏈當 **64 顆（8×8）**；如果只接單顆，firmware 仍送 64 顆，第一顆正常，
+  多出的資料會被鏈尾忽略。格式 ws2812／GRB／無 W。
+- flash 4 MB、2 MB PSRAM 依 ESP32-S3FH4R2 規格；未逐項實測。
+
+**新 project** `ports/project/S3/ESP32-S3-Zero-Show/`：
+
+- `hardware: S3/ESP32-S3-Zero`，`default: true`，aliases `zero-show`／`zero`。
+- 生產者 content_task（`/data/pixel` 四層）→ prd 環；render → I80 → GPIO1；
+  pixel level=-1；不含 effect_bench／NC_ENABLE_TESTS。
+- data/config 由 Matrix-Show 複製（tasks：render/content level4 [0,1]）；
+  data/pixel 低亮度 breathe（F=10／end_Time=256、white=0、0–23/255）。
+- `tools/board.py check`：**0 errors**；Web `/api/build/info` 已列出
+  `ESP32-S3-Zero`／`ESP32-S3-Zero-Show`。
+
+**Build**：
+
+```bash
+python3 make.py build ESP32-S3-Zero --project ESP32-S3-Zero-Show --fresh
+→ ✔ 696.2 KB (0xae0b0)，33 s；artifacts/ESP32-S3-Zero.bin 712,880 B
+→ CONFIG_NETCORE_CONTENT=y、PIXEL_I80_PINS="1,38,39,40,41,42,47,48,2,4"
+→ ELF 有 `_nc_task_reg_content`，冇 effect_bench／0xF065
+```
+
+Web `/api/build` 也成功（14.07 s）。**板上未插 USB（`/api/ports` 冇新板）**，
+所以未 flash、未驗真燈；插上後由 Web Build 卡（board Zero／project Zero-Show）
+或 `tools/ota.py` 上傳。

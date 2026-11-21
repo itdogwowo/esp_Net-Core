@@ -1,0 +1,59 @@
+# ESP32-S3-Zero — 硬體事實（改這裡要重新 build）
+# 對應 board.json；tools/board.py check 會驗證兩者一致。
+
+# ── flash（4 MB 內嵌）──
+CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
+CONFIG_ESPTOOLPY_FLASHFREQ_80M=y
+CONFIG_ESPTOOLPY_FLASHMODE_DIO=y
+
+# ── PSRAM：2 MB（quad，80 MHz）──
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_QUAD=y
+CONFIG_SPIRAM_SPEED_80M=y
+
+# ── CPU ──
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
+
+# ── console：none ──
+# 這塊板改用 TinyUSB OTG（MSC 隨身碟 + CDC log）；S3 的 OTG 與 USJ 共用同一條
+# PHY，所以不能同時用 USJ console。App log 由 CDC（B09 之後）出；bootloader 的
+# 早期訊息不會有。要拿回 USJ console 就把這行改回 USB_SERIAL_JTAG，並把
+# system.json 的 USB link kind 改回 usb_jtag（MSC 會失效）。
+CONFIG_ESP_CONSOLE_NONE=y
+# 不要 USJ secondary：OTG 與 USJ 共用 PHY
+CONFIG_ESP_CONSOLE_SECONDARY_NONE=y
+
+# ── 分區表：全域那份是 16 MB（N16R8），這塊只有 4 MB，用自己一份 ──
+# 路徑相對 firmware/（專案根）。
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="../ports/hardware/S3/ESP32-S3-Zero/partitions.csv"
+
+# ── 像素渲染器（pixel 任務）──
+# Waveshare ESP32-S3-Zero：64 顆 WS2812B（8×8）串成一條鏈，資料腳 GPIO1（用家指定）。
+# 只有 D0 = GPIO1 接燈；其餘 9 支（D1..D7／WR／DC）是 I80 必需的 dummy，
+# 預設揀未用過的腳（會出現在排針上，不要接東西）。
+#
+# 這組值就是「板子的物理事實」：換板子只改這一段，程式不動。
+CONFIG_NETCORE_PIXEL=y
+CONFIG_NETCORE_PIXEL_LEDS=64
+# Demo 用 Adafruit_NeoPixel(64, 14, NEO_RGB + NEO_KHZ800) ⇒ 線材序是 GRB、沒有白通道。
+# 畫面要白色由產生者自己把 R=G=B（canonical 仍然是四位 R,G,B,W）。
+CONFIG_NETCORE_PIXEL_FORMAT="ws2812"
+CONFIG_NETCORE_PIXEL_I80=y
+CONFIG_NETCORE_PIXEL_I80_PINS="1,38,39,40,41,42,47,48,2,4"
+CONFIG_NETCORE_PIXEL_I80_LANES=1
+CONFIG_NETCORE_PIXEL_PCLK_HZ=2500000
+CONFIG_NETCORE_PIXEL_BIT_CELLS=3
+CONFIG_NETCORE_PIXEL_T0H=1
+CONFIG_NETCORE_PIXEL_T1H=2
+# 8 個邏輯區 = 一橫行 8 顆：相鄰的燈不同時閃（同舊 rgbmatrix 的分區抖動）
+CONFIG_NETCORE_PIXEL_ZONE_PX=8
+CONFIG_NETCORE_PIXEL_DITHER_BITS=12
+CONFIG_NETCORE_PIXEL_DITHER=1
+# 送燈 450 fps；內建效果 60 fps 更新 → 渲染器大部分時間在重播同一格（hold）
+CONFIG_NETCORE_PIXEL_SPI=n
+
+# ── Wi-Fi：預設不開（Kconfig NETCORE_WIFI=n，esp_wifi 完全唔 link）──
+# 建置開關在 **project 層**：ports/project/<chip>/<board>/sdkconfig.defaults
+#   加 CONFIG_NETCORE_WIFI=y 才會編入（這塊板的 project 目前冇加 → 關）。
+# 執行期再有一層：project/data/config/network.json 的 wifi.enable。

@@ -1,0 +1,29 @@
+{
+  "_comment": "硬體事實（F.spec）。改這裡 = 要重新 build；runtime 可改的放 project 層的 data/config。能力 profiles 只放硬體能力（eth/wifi），項目能力（ws/udp）在 project.json。",
+  "name": "ESP32-S3-Zero",
+  "chip": "esp32s3",
+  "flash": {
+    "size_mb": 4,
+    "freq_mhz": 80,
+    "mode": "dio"
+  },
+  "psram": {
+    "size_mb": 2,
+    "mode": "quad",
+    "speed_mhz": 80
+  },
+  "cpu_mhz": 240,
+  "console": "none",
+  "profiles": [],
+  "features": {
+    "eth": null,
+    "wifi": true,
+    "usb": true
+  },
+  "verified": "2026-11-21：用家確認新板為 Waveshare ESP32-S3-Zero，LED data = GPIO1；flash/PSRAM 用 ESP32-S3FH4R2 規格，實際 GPIO 只確認 LED。",
+  "notes": "Waveshare ESP32-S3-Zero：ESP32-S3FH4R2（4 MB flash、2 MB PSRAM quad 80 MHz、512 KB SRAM、240 MHz）；USB Type-C 原生 USB OTG FS（GPIO19/20）。本專案把 WS2812 資料接在 GPIO1（用家指定），LED 鏈當 64 顆（8×8；如果只接 1 顆，firmware 送 64 顆資料，第一顆仍正常工作，多出的資料會被鏈尾忽略）。I80 其餘 D1..D7／WR／DC 是 dummy，不要接東西。Zero 沒有板載 IMU；I2C 保持 disabled。 板載 WS2812 在 GPIO21（官方 spec），本專案不用；GPIO1 是外部燈鏈資料。",
+  "aliases": [
+    "S3-Zero",
+    "ESP32S3-Zero"
+  ]
+}
