@@ -312,6 +312,44 @@ static uint32_t bench_full8_cached(ctx_t *c, uint32_t frames,
     return us_per_frame(t0, frames);
 }
 
+static uint32_t bench_full8_inv(ctx_t *c, uint32_t frames,
+                               const uint16_t *wave, uint16_t total,
+                               const uint16_t *inv)
+{
+    const int64_t t0 = esp_timer_get_time();
+    const nc_px_asset_t *a = c->job->asset;
+    const uint16_t speed = (a->speed == 0) ? 1 : a->speed;
+    for (uint32_t f = 0; f < frames; f++) {
+        uint32_t ph = ((f * 3u) / speed) * (uint32_t)a->step + (uint32_t)a->offset;
+        ph = ph % total;
+        for (uint16_t i = 0; i < c->nv; i++) {
+            c->vals[i] = wave[(ph + (uint32_t)i * (uint32_t)a->spacing) % total];
+        }
+        inv_apply8(inv, c->vals, c->px, c->c8, c->write);
+    }
+    s_sink += c->c8[0];
+    return us_per_frame(t0, frames);
+}
+
+static uint32_t bench_full8_blk(ctx_t *c, uint32_t frames,
+                               const uint16_t *wave, uint16_t total,
+                               const uint16_t *block_tab)
+{
+    const int64_t t0 = esp_timer_get_time();
+    const nc_px_asset_t *a = c->job->asset;
+    const uint16_t speed = (a->speed == 0) ? 1 : a->speed;
+    for (uint32_t f = 0; f < frames; f++) {
+        uint32_t ph = ((f * 3u) / speed) * (uint32_t)a->step + (uint32_t)a->offset;
+        ph = ph % total;
+        for (uint16_t i = 0; i < c->nv; i++) {
+            c->vals[i] = wave[(ph + (uint32_t)i * (uint32_t)a->spacing) % total];
+        }
+        table_apply8(block_tab, c->vals, c->px, c->c8, c->write);
+    }
+    s_sink += c->c8[0];
+    return us_per_frame(t0, frames);
+}
+
 static void reply_json(nc4_ctx_t *ctx, const char *json)
 {
     if (ctx == NULL || ctx->send == NULL || ctx->decoder == NULL) {
@@ -353,6 +391,10 @@ static void on_pipebench(nc4_ctx_t *ctx, const nc4_frame_t *f)
     if (f->len >= 5) {
         mode = f->data[4];
     }
+    bool c8_psram = false;
+    if (f->len >= 6) {
+        c8_psram = (f->data[5] != 0);
+    }
     if (px < 8) {
         px = 8;
     }
@@ -386,7 +428,8 @@ static void on_pipebench(nc4_ctx_t *ctx, const nc4_frame_t *f)
     c.mode = mode;
     // 先配 c8（38.4 KB）再做 c12／table，避免 76.8 KB 的 c12 先把 internal 切碎。
     c.vals = (uint16_t *)alloc_buf((size_t)nv * 2u, MALLOC_CAP_INTERNAL);
-    c.c8 = (uint8_t *)alloc_buf((size_t)px * 4u, MALLOC_CAP_INTERNAL);
+    c.c8 = (uint8_t *)alloc_buf((size_t)px * 4u,
+                                c8_psram ? MALLOC_CAP_SPIRAM : MALLOC_CAP_INTERNAL);
     c.table = (uint16_t *)alloc_buf((size_t)px * 2u, MALLOC_CAP_INTERNAL);
     c.table_rnd = (uint16_t *)alloc_buf((size_t)px * 2u, MALLOC_CAP_INTERNAL);
     c.c12 = (uint16_t *)alloc_buf((size_t)px * 8u, MALLOC_CAP_INTERNAL);
@@ -447,7 +490,7 @@ static void on_pipebench(nc4_ctx_t *ctx, const nc4_frame_t *f)
     uint32_t gen_us = 0, pair_range = 0, pair_table = 0, pair_rnd = 0, conv_i = 0;
     uint32_t pair8_rnd = 0, pair8_inv = 0, pair8_blk = 0, full8_rnd = 0;
     uint32_t pair_packed = 0;
-    uint32_t gen_cached = 0, full8_cached = 0;
+    uint32_t gen_cached = 0, full8_cached = 0, full8_inv = 0, full8_blk = 0;
     uint32_t full_range = 0, full_table = 0, full_rnd = 0, full_ps = 0;
     const uint8_t reps = (nv > 20000) ? 2 : 3;
     for (uint8_t r = 0; r < reps; r++) {
@@ -520,6 +563,18 @@ static void on_pipebench(nc4_ctx_t *ctx, const nc4_frame_t *f)
     if (wave_total > 0) {
         gen_cached = bench_gen_cached(&c, frames, wave, wave_total);
         full8_cached = bench_full8_cached(&c, frames, wave, wave_total, c.table_rnd);
+        full8_inv = bench_full8_inv(&c, frames, wave, wave_total, c.table);
+        // 重建 16 px block mapping，量真正的 block8 full。
+        {
+            const uint16_t chunk = 16;
+            const uint16_t nblocks = (uint16_t)(px / chunk);
+            for (uint16_t k = 0; k < px; k++) {
+                const uint16_t b = (uint16_t)(k / chunk);
+                const uint16_t within = (uint16_t)(k % chunk);
+                c.table_rnd[k] = (uint16_t)(((uint32_t)((b * 7u) % nblocks) * chunk) + within);
+            }
+        }
+        full8_blk = bench_full8_blk(&c, frames, wave, wave_total, c.table_rnd);
     }
 
     static char j[1200];
@@ -530,7 +585,7 @@ static void on_pipebench(nc4_ctx_t *ctx, const nc4_frame_t *f)
         "\"pair_us\":{\"range\":%u,\"table\":%u,\"rnd\":%u,\"packed12\":%u,"
         "\"rnd8\":%u,\"inv8\":%u,\"blk8\":%u},"
         "\"conv_us\":%u,\"full_us\":{\"range\":%u,\"table\":%u,\"rnd\":%u,\"ps\":%u,"
-        "\"rnd8\":%u,\"cached8\":%u},"
+        "\"rnd8\":%u,\"cached8\":%u,\"inv8\":%u,\"blk8\":%u},"
         "\"mem\":{\"c12_int\":%d,\"c12_ps\":%d,\"c8_int\":%d,\"c8_ps\":%d}}",
         (unsigned)px, (unsigned)nv, (unsigned)mode, (unsigned)frames, (unsigned)reps,
         (unsigned)gen_us, (unsigned)gen_cached,
@@ -538,6 +593,7 @@ static void on_pipebench(nc4_ctx_t *ctx, const nc4_frame_t *f)
         (unsigned)pair_packed, (unsigned)pair8_rnd, (unsigned)pair8_inv, (unsigned)pair8_blk,
         (unsigned)conv_i, (unsigned)full_range, (unsigned)full_table, (unsigned)full_rnd,
         (unsigned)full_ps, (unsigned)full8_rnd, (unsigned)full8_cached,
+        (unsigned)full8_inv, (unsigned)full8_blk,
         c.c12 ? (esp_ptr_internal(c.c12) ? 1 : 0) : -1,
         c.c12 ? (esp_ptr_external_ram(c.c12) ? 1 : 0) : -1,
         c.c8 ? (esp_ptr_internal(c.c8) ? 1 : 0) : -1,

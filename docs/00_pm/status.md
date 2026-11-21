@@ -6242,3 +6242,29 @@ frame 64 px 正常。
 
 **Build／測試**：Matrix-Show 689.5 KB、EffectPerf 678.6 KB、Zero 705,584 B 全部成功；
 host 20 套全綠、Web 296 passed。
+
+### 7.168 2026-11-22（固定 policy 下 8-bit internal vs PSRAM；inverse/block 是關鍵）
+
+用 `0xF069` 的 `--c8-psram` 明確固定 8-bit canvas 位置（不是 runtime fallback），
+9,600 RGB／28,800 值、random permutation：
+
+| 項目 | c8 internal | c8 PSRAM |
+|---|---:|---:|
+| random8 pair | **0.972 ms** | **10.647 ms** |
+| inverse8 pair | 0.931 ms | **1.872 ms** |
+| block8 pair（16 px） | 0.966 ms | **1.864 ms** |
+| full8 cached（gen wave + random8） | **4.423 ms** | **14.060 ms** |
+| **full8 inverse（gen wave + inverse8）** | **3.648 ms** | **4.586 ms** |
+| full8 block | 3.689 ms | 4.583 ms |
+| mem 診斷 | c8_int=1 | c8_ps=1 |
+
+- 固定 PSRAM 不是世界末日：**唔好 random write**，用 destination 順序的
+  inverse／block，full8 由 14.060 → **4.586 ms**。
+- 64 px steady：effect **6 µs**、pair 49 µs（apply33／commit15）、render enc 361 µs、
+  50.0 fps；burn 2 s：effect **55,866 幀／~18,600 fps**、avg6 µs。
+- 12-bit PSRAM：random19.967、packed20.6（packed 冇用）；c12 固定 PSRAM，
+  8-bit internal/PSRAM 分開量，不再靠 free heap。
+- 9,600 三次 run 穩定：random12 19.967–19.968、random8(internal) 0.971、
+  full cached8(internal) 4.409–4.426；mem 三次一致。
+- 功能：0xF06D color/breathe、0xF06F reload 成功；app `431e1cb5`、image 705,584 B。
+- Web 296 tests、host 20 套全綠。

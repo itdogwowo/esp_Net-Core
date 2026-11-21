@@ -55,12 +55,14 @@ def ask_direct(port: str, px: int, frames: int, mode: int, timeout: float) -> di
         return json.loads(f[1][2:2 + n].decode("utf-8", "replace"))
 
 
-def ask_via(base: str, px: int, frames: int, mode: int, timeout: float) -> dict:
+def ask_via(base: str, px: int, frames: int, mode: int, timeout: float,
+            c8_psram: bool = False) -> dict:
     req = urllib.request.Request(
         base.rstrip("/") + "/api/cmd",
         data=json.dumps({
             "cmd": f"0x{CMD:04X}",
-            "payload_hex": struct.pack("<HHB", px, frames, mode).hex(),
+            "payload_hex": (struct.pack("<HHBB", px, frames, mode,
+                                        1 if c8_psram else 0).hex()),
             "expect": [f"0x{RSP:04X}"],
             "timeout": timeout,
         }).encode(),
@@ -105,7 +107,8 @@ def show(r: dict) -> None:
     f = r.get("full_us", {})
     print(f"  full       range {fmt_us(f.get('range'))}   table {fmt_us(f.get('table'))}"
           f"   random {fmt_us(f.get('rnd'))}   random8 {fmt_us(f.get('rnd8'))}"
-          f"   cached8 {fmt_us(f.get('cached8'))}   psram12 {fmt_us(f.get('ps'))}")
+          f"   cached8 {fmt_us(f.get('cached8'))}   inv8 {fmt_us(f.get('inv8'))}"
+          f"   blk8 {fmt_us(f.get('blk8'))}   psram12 {fmt_us(f.get('ps'))}")
     mem = r.get("mem", {})
     print(f"  mem        c12_int={mem.get('c12_int')} c12_ps={mem.get('c12_ps')}"
           f"  c8_int={mem.get('c8_int')} c8_ps={mem.get('c8_ps')}")
@@ -125,6 +128,8 @@ def main() -> int:
     ap.add_argument("--px", type=int, default=9600)
     ap.add_argument("--frames", type=int, default=5, help="每組幀數（1..8）")
     ap.add_argument("--mode", choices=sorted(MODES), default="wwww")
+    ap.add_argument("--c8-psram", action="store_true",
+                    help="強制 8-bit canvas 放 PSRAM（固定 policy 測試）")
     ap.add_argument("--timeout", type=float, default=120.0)
     ap.add_argument("--json", action="store_true")
     args = ap.parse_args()
@@ -133,7 +138,8 @@ def main() -> int:
     frames = max(1, min(8, args.frames))
     mode = MODES[args.mode]
     r = (ask_direct(args.port, px, frames, mode, args.timeout) if args.port
-         else ask_via(args.via, px, frames, mode, args.timeout))
+         else ask_via(args.via, px, frames, mode, args.timeout,
+                      args.c8_psram))
     if args.json:
         print(json.dumps(r, ensure_ascii=False))
     else:
