@@ -128,7 +128,7 @@ menu "esp_Net-Core"
 
             量產映像預設關閉。
 
-    config NETCORE_SHOW
+    config NETCORE_CONTENT
         bool "檔案驅動 show 任務（/data/pixel 四層：effects／map／modes／registry）"
         depends on NETCORE_PIXEL
         default n

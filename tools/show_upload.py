@@ -498,7 +498,7 @@ def upload_files(via: str, base: str, src: Path, timeout: float) -> int:
                 hinted_dir = True
                 print("        提示：裝置上 /pixel/map、/pixel/modes 目錄可能未存在"
                       "（FILE_BEGIN 唔會 mkdir 父目錄）。新 firmware 的 seed_dirs()／"
-                      "show_task 開機會建；仍失敗就確認燒咗新映像，或先用 MSC 模式手動建目錄。")
+                      "content_task 開機會建；仍失敗就確認燒咗新映像，或先用 MSC 模式手動建目錄。")
             continue
         size = body.get("size")
         sha = str(body.get("sha256") or "")

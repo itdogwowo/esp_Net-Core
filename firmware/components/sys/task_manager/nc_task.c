@@ -464,11 +464,29 @@ static void load_cfg(void)
         if (cfg == NULL) {
             continue;
         }
+        const nc_task_cfg_t *match = NULL;
         for (uint8_t k = 0; k < cfg->n_tasks; k++) {
-            const nc_task_cfg_t *t = &cfg->tasks[k];
-            if (strcmp(t->name, s->name) != 0) {
-                continue;
+            if (strcmp(cfg->tasks[k].name, s->name) == 0) {
+                match = &cfg->tasks[k];
+                break;
             }
+        }
+        // 2026-11-21：舊任務名 show 改名 content（避免同 render 混淆）。
+        // 舊裝置的 tasks.json 仍是 "show"；只在新名冇條目時讀舊名，讓 OTA 後
+        // 不會因為 config 名字對不上而把 content 任務自動關掉。
+        if (match == NULL && strcmp(s->name, "content") == 0) {
+            for (uint8_t k = 0; k < cfg->n_tasks; k++) {
+                if (strcmp(cfg->tasks[k].name, "show") == 0) {
+                    match = &cfg->tasks[k];
+                    break;
+                }
+            }
+        }
+        if (match == NULL) {
+            continue;
+        }
+        {
+            const nc_task_cfg_t *t = match;
             s->cfg_seen = true;
             // config 冇寫 level → 用固件宣告（has_level 就是為此存在；
             // 直接當 0 會把「漏寫」變成「強制 level 0」，行為會靜靜改變）。
@@ -477,7 +495,6 @@ static void load_cfg(void)
             s->cfg_aff[0] = t->aff[0] ? 1 : 0;
             s->cfg_aff[1] = t->aff[1] ? 1 : 0;
             s->cfg_prio = t->has_prio ? (int)t->prio : -1;
-            break;
         }
     }
 

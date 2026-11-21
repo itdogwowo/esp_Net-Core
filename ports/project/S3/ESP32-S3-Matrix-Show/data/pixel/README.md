@@ -30,5 +30,5 @@ python3 tools/show_upload.py --via http://127.0.0.1:8011 --reboot
 python3 tools/show_verify.py --via http://127.0.0.1:8011 --max-led 40
 ```
 
-- 內容改完要重開（`--reboot`）令 `show_task` 重新載入；firmware 不需要重燒。
+- 內容改完要重開（`--reboot`）令 `content_task` 重新載入；firmware 不需要重燒。
 - `0xF06D` payload `01` 切 `breathe`、`02` 切 `color`（兩者現時同 effect）。

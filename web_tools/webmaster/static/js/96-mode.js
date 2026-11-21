@@ -449,6 +449,25 @@ const ModeSim = (function () {
     }
   }
 
+  // 0xF06F：重新掃 /pixel 四層，下一幀邊界 reload（改檔不用重開）。
+  async function reloadDeviceContent() {
+    try {
+      await api("/api/cmd", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          cmd: "0xF06F", payload_hex: "", expect: ["0xF070"], timeout: 5,
+        }),
+      });
+      toast("已排隊重新載入 /pixel（下一幀邊界）", "ok", 4000);
+      setTimeout(() => { loadTree(); readDeviceFrame(true); }, 450);
+      return true;
+    } catch (e) {
+      toast("重新載入失敗：" + e.message + "（firmware 要支援 0xF06F）", "err", 9000);
+      return false;
+    }
+  }
+
   async function readDeviceFrame(quiet) {
     const chip = $("#modeFrameInfo");
     try {
@@ -637,6 +656,8 @@ const ModeSim = (function () {
     }
     const applyBtn = $("#btnModeApply");
     if (applyBtn) { applyBtn.onclick = () => { applyModeToDevice(); }; }
+    const reloadBtn = $("#btnModeReload");
+    if (reloadBtn) { reloadBtn.onclick = () => { reloadDeviceContent(); }; }
     const readBtn = $("#btnModeRead");
     if (readBtn) { readBtn.onclick = () => { readDeviceFrame(); }; }
     // Show 全流程

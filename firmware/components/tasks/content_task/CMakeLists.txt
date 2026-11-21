@@ -1,7 +1,7 @@
-# show_task（tasks 層）：production 的「檔案驅動 show」生產者。
+# content_task（tasks 層）：production 的「檔案驅動 show」生產者。
 #
-# 由 CONFIG_NETCORE_SHOW 開關（Kconfig：depends NETCORE_PIXEL，default n）。
-# 關閉時 nc_show_task.c 內容整段 #if 掉 → component 只是一個空 object，
+# 由 CONFIG_NETCORE_CONTENT 開關（Kconfig：depends NETCORE_PIXEL，default n）。
+# 關閉時 nc_content_task.c 內容整段 #if 掉 → component 只是一個空 object，
 # 唔登記任務、唔登記指令（同 effect_bench 同一個模式）。
 #
 # 職責只有三件：
@@ -12,7 +12,7 @@
 #
 # 送燈仍然係 render 任務（tasks/render_task）的事；兩者只透過環見面。
 idf_component_register(
-    SRCS "nc_show_task.c"
+    SRCS "nc_content_task.c"
     # pixel：環／layer 掃描／show plan／合成。store：/data 掛載點（nc_store_fs_base）。
     # task：任務管理器。nc4：指令表＋ decode context。
     REQUIRES nc4 pixel task store

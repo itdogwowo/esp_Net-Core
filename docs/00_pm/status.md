@@ -5623,17 +5623,17 @@ RGBW→I80 編碼／送燈唔計（render backend 已有）。
 **驗證**：OTA 後 `app 618f7233`；`status cmds` 只有 `0xF065`／`0xF067`／`0xF069`，
 冇其他測試。詳見 [effect-perf.md §10](effect-perf.md#L315)。
 
-### 7.151 2026-11-21 凌晨（production 檔案驅動 Show：show_task ＋ white mix ＋ 0xF06B）
+### 7.151 2026-11-21 凌晨（production 檔案驅動 Show：content_task ＋ white mix ＋ 0xF06B）
 
 **背景**：EffectPerf（§7.148–§7.150）只量效果、唔點燈；production 8×8 Matrix 要的是
 **內容驅動**的 show：`/data/pixel` 四層（`effects`／`map`／`modes`／`registry`）由 Web UI
 上傳，開機載入，逐幀合成後送 64 顆 WS2812B，並且要「80% 白 ＋ 20% 效果」的 white mix；
 Web UI 要用一條高頻指令預覽最近一幀。
 
-**做咗**（只動 `show_task` ＋ layer parser ＋ project ＋ docs，EffectPerf／pixel_task／
+**做咗**（只動 `content_task` ＋ layer parser ＋ project ＋ docs，EffectPerf／pixel_task／
 render／編碼器全部唔改）：
 
-- 新 component `firmware/components/tasks/show_task/nc_show_task.c`（CONFIG 開關、
+- 新 component `firmware/components/tasks/content_task/nc_content_task.c`（CONFIG 開關、
   `WHOLE_ARCHIVE`＋constructor 自己登記，`main.c` 唔使改）：
   - 任務：`show`／loop `show`／NORMAL／level 4／order 21／stack 4096／core 1／
     prio `NC_PRIO_OTHERS_MAX-1`（5，低 render 一級）／layer 5／period 0。
@@ -5655,11 +5655,11 @@ render／編碼器全部唔改）：
 - `nc_px_mode_t` 加 `uint8_t white`；`nc_px_layer.c` parser 收 JSON `"white"` 或
   `"white_mix"`（0..100，缺欄位＝0，>100／負數／字串→0 但唔整份壞）→ 舊 JSON 完全相容。
   white mix 公式（四通道都做，整數）：`out = (out*(100-w) + 255*w) / 100`。
-- 新 Kconfig `CONFIG_NETCORE_SHOW`（depends `NETCORE_PIXEL`，default n）＋
+- 新 Kconfig `CONFIG_NETCORE_CONTENT`（depends `NETCORE_PIXEL`，default n）＋
   `firmware/CMakeLists.txt` 無條件加入 component（關閉時 .c 為空 object）。
 - 新 project `ports/project/S3/ESP32-S3-Matrix-Show/`：`project.json`
   （hardware S3/ESP32-S3-Matrix、aliases show／matrix-show、seed 4 層）、
-  `sdkconfig.defaults`（`NETCORE_SHOW=y`、`PXBENCH=n`、不開 tests）、
+  `sdkconfig.defaults`（`NETCORE_CONTENT=y`、`PXBENCH=n`、不開 tests）、
   `data/config/tasks.json`（render level4 affinity[0,1]、show level4 affinity[0,1]、
   pixel level -1）、`data/config/{system,network,hardware,resources}.json` 抄
   Matrix-LED-Textkit；`data/pixel/`（主機端內容來源，唔 embed）：`colorwave` effect、
@@ -5671,8 +5671,8 @@ render／編碼器全部唔改）：
 
 - `IDF_PATH=~/esp/esp-idf python3 make.py build ESP32-S3-Matrix --project
   ESP32-S3-Matrix-Show --fresh` **成功**：image **694.8 KB**（0xadb50，分區剩 55%）、33–35 s；
-  `CONFIG_NETCORE_SHOW=y`、PXBENCH／EFFECT_BENCH not set；ELF 有
-  `_nc_task_reg_show`／`_nc_action_reg_nc_show_task_table`／`nc_show_task_table`。
+  `CONFIG_NETCORE_CONTENT=y`、PXBENCH／EFFECT_BENCH not set；ELF 有
+  `_nc_task_reg_content`／`_nc_action_reg_nc_content_task_table`／`nc_content_task_table`。
   唯一警告是既有 `bus/bus_net/nc4_line_net.c` unused-function／variable（同本改動無關）。
 - Host（x86，同一份 C 實作）用真 project 內容：`load_all` → effects=1／maps=1／modes=2／
   list=2；`white80`（white=80）→ plan jobs=1 skipped=0 px=64；200 幀後 R/G/B≥204、W=204、
@@ -5714,7 +5714,7 @@ render／編碼器全部唔改）：
 
 **第一次上板失敗（已修）**
 
-- 第一次 OTA 後板子完全冇 USB：根因是 `show_task` 的 `on_start` 由 **main task（3,072 B 棧）**
+- 第一次 OTA 後板子完全冇 USB：根因是 `content_task` 的 `on_start` 由 **main task（3,072 B 棧）**
   呼叫 `nc_px_layer_load_all()`；`nc_px_map_scan()` 的 local `nc_px_map_t` **2,618 B**
   ＋ `nc_px_mode_t` 568 B，直接 stack overflow → boot loop。
 - 修法：
@@ -5762,3 +5762,54 @@ LED 太光／受熱（用家反映「LED 甩了」）。production 8×8 不需�
 
 **注意**：唔好再把 `white` 設 80 同時 `l_max=4095`；要光一點應逐步加 `l_max`
 （128 → 8-bit 8、256 → 16、384 → 24、512 → 32），每次用 `--max-led` 驗。
+
+### 7.154 2026-11-21（任務改名 content_task；effect_bench 只入 EffectPerf；安全內容）
+
+**改名**：`show_task` 嘅語意同 `render_task` 太接近（兩者都似「顯示」），production
+生產者改名 **`content_task`**：
+
+- component：`firmware/components/tasks/content_task/`、`nc_content_task.c`
+- task／loop 名：**`content`**（`tasks.json` 同步；舊 `show` 名由 task_manager
+  讀 config 時做 alias，OTA 舊 `/data/config/tasks.json` 不會令新任務自動關閉）
+- Kconfig：`CONFIG_NETCORE_CONTENT`（原本 `NETCORE_SHOW`）
+- 0xF06B／0xF06D 協議名保留 `SHOWFRAME`／`SHOWMODE`（它們是「顯示 frame／mode」，
+  不是任務名）
+- 真機未重新 OTA（板子短路，暫時不供電）；只做 build／ELF 驗證。
+
+**測試元件隔離**：`effect_bench` 再不是 production component：
+
+- `firmware/CMakeLists.txt` 只在 **`NC_PROJECT` 包含 `EffectPerf`** 時把
+  `components/tasks/effect_bench` 加入 `EXTRA_COMPONENT_DIRS`。
+- Show 映像：`CONFIG_NETCORE_CONTENT=y`、`CONFIG_NETCORE_EFFECT_BENCH` not set；
+  ELF **冇** `nc_effect_bench_table`／`_nc_task_reg_effect_bench`／`_nc_action_reg_nc_effect_bench_table`。
+- EffectPerf 映像：`NC_PROJECT=S3/ESP32-S3-Matrix-EffectPerf` → 仍然有
+  `_nc_task_reg_effect_bench` 同 0xF065；build 676.6 KB 成功。
+- `CONFIG` 未載入前（`project()` 之前）不能可靠讀 Kconfig，所以用 builder 已有的
+  `NC_PROJECT` 環境變數判定；production 連目錄都唔掃。
+
+**Build 驗證**：
+
+- Show：`695.6 KB`（0xade70）、7 s；task symbol 只有 `_nc_task_reg_content`；
+  冇 effect_bench。
+- EffectPerf：`676.6 KB`（0xa9250）、39 s fresh；有 effect_bench。
+- Host tests 20 套、WebMaster pytest 292 仍綠。
+
+**安全內容**：維持 §7.153 的低亮度 `breathe`（`white=0`、`l_max=384`、8-bit 最高約 24）；
+板子確認短路，未再上電、未 OTA、未讀 frame。等硬件修好後再驗改名後映像。
+
+### 7.155 2026-11-21（content_task：auto_play＋0xF06F reload；Web reload；測試隔離完成）
+
+- task 改名已完成：`content`（component `content_task`、`nc_content_task.c`、
+  `CONFIG_NETCORE_CONTENT`）；舊 `/data/config/tasks.json` 的 `show` 由 task_manager
+  alias 遷移（exact `content` 優先，無才讀 `show`）。Show ELF 只有
+  `_nc_task_reg_content`，冇 `_nc_task_reg_show`。
+- `effect_bench` 只喺 `NC_PROJECT` 含 `EffectPerf` 時加入 `EXTRA_COMPONENT_DIRS`；
+  Show ELF 冇 `nc_effect_bench_table`／`_nc_task_reg_effect_bench`／0xF065；
+  EffectPerf fresh build 仍成功（676.7 KB、8 s incremental；fresh 39 s）。
+- **auto_play**：content loop 每 `mode.maxF` 幀（0 → 500）按 registry list 次序換 mode；
+  production list 只有 `breathe`，所以暫時不切。
+- **0xF06F RELOAD → 0xF070**：decode task 排隊，content loop 下一幀邊界
+  `nc_px_layer_load_all()`，按目前 mode 名重建 plan；改 `/pixel` 不用重開。
+  Web UI 加「重新載入 /pixel」按鈕（0xF06F）。
+- Show build 696.5 KB（0xae230）成功；task symbol 正確；未上電（板子短路）。
+- Host tests 20 套全綠；WebMaster pytest 292 passed；docs §3.2/§3.3、commands 已更新。
