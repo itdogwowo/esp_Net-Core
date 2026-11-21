@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
-"""show_verify.py — 讀 Show firmware 的 live frame（0xF06B）並驗 80% 白。
+"""show_verify.py — 讀 Show firmware 的 live frame（0xF06B），驗 white floor／亮度上限。
 
 用法：
     python3 tools/show_verify.py --via http://127.0.0.1:8011
+    python3 tools/show_verify.py --via http://127.0.0.1:8011 --white 0 --max-led 40
     python3 tools/show_verify.py --via http://127.0.0.1:8011 --white 80 --json
+
+`--white` 省略 = 用 frame 自己回報的 white；`--max-led` 可驗「唔太光」。
 """
 from __future__ import annotations
 
@@ -42,7 +45,10 @@ def frame(base: str) -> dict:
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--via", default="http://127.0.0.1:8011")
-    ap.add_argument("--white", type=int, default=80, help="預期白混合百分比")
+    ap.add_argument("--white", type=int, default=None,
+                    help="預期白混合百分比；省略 = 用 frame 回報的 white")
+    ap.add_argument("--max-led", type=int, default=None,
+                    help="可選：所有 R/G/B/W 必須 <= 這個值（防太光）")
     ap.add_argument("--json", action="store_true")
     args = ap.parse_args()
 
@@ -55,7 +61,9 @@ def main() -> int:
     if px <= 0 or len(data) != px * 4:
         raise SystemExit(f"frame 長度錯：px={px} bytes={len(data)} hex={len(hexs)}")
 
-    floor = round(255 * args.white / 100)
+    expected_white = (args.white if args.white is not None
+                      else int(j.get("white", 0) or 0))
+    floor = round(255 * expected_white / 100)
     rows = []
     mins = [255, 255, 255, 255]
     maxs = [0, 0, 0, 0]
@@ -66,26 +74,30 @@ def main() -> int:
             mins[c] = min(mins[c], v)
             maxs[c] = max(maxs[c], v)
     out = {
-        "ok": True, "px": px, "seq": j.get("seq"), "white": args.white,
-        "floor": floor, "min": mins, "max": maxs, "sample": rows[:8],
+        "ok": True, "px": px, "seq": j.get("seq"), "white": expected_white,
+        "floor": floor, "maxLed": args.max_led, "min": mins, "max": maxs, "sample": rows[:8],
     }
     if args.json:
         print(json.dumps(out, ensure_ascii=False))
     else:
         print(f"0xF06B OK：px={px} seq={j.get('seq')} mode={j.get('mode')} "
-              f"white={j.get('white', args.white)}% floor={floor} "
+              f"white={expected_white}% floor={floor} "
               f"apply_us={j.get('apply_us')}")
         print(f"  min RGBA={mins}  max RGBA={maxs}")
         for row in rows[:8]:
             print(f"  px{row['i']:02d}  R={row['r']:3d} G={row['g']:3d} "
                   f"B={row['b']:3d} W={row['w']:3d}")
 
-    # 80% 白：R/G/B 至少 floor（效果只會加 0..(255-floor)）；W 應約 floor。
+    # white floor：R/G/B 至少 floor（效果只會加 0..(255-floor)）；W 應約 floor。
     bad = [r for r in rows if r["w"] < floor - 1 or min(r["r"], r["g"], r["b"]) < floor - 1]
     if bad:
         print(f"  ✘ {len(bad)} 顆低於 {floor}：{bad[:5]}")
         return 1
-    print("  ✔ 全部像素符合 80% 白 floor")
+    if args.max_led is not None and max(maxs) > args.max_led:
+        print(f"  ✘ 最亮 {max(maxs)} 超過上限 {args.max_led}")
+        return 1
+    print(f"  ✔ 全部像素符合 white {expected_white}% floor"
+          + (f"，最亮 {max(maxs)} ≤ {args.max_led}" if args.max_led is not None else ""))
     return 0
 
 

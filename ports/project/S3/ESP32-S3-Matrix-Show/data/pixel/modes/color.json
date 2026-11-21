@@ -8,6 +8,6 @@
   "mapping": "matrix",
   "white": 0,
   "map": [
-    {"group": "matrix.full", "effect": "colorwave", "write": "rgb"}
+    {"group": "matrix.full", "effect": "breathe", "write": "rgb"}
   ]
 }

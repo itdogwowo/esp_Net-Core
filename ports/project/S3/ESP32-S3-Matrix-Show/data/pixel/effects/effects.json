@@ -3,15 +3,14 @@
   "effects": [
     {
       "id": 1,
-      "name": "colorwave",
+      "name": "breathe",
       "pixel_n": 64,
       "program": [
-        {"type": "math_now", "F": 10, "l_max": 4095, "l_lim": 0, "phi": 0, "end_Time": 128},
-        {"type": "square_wave_now", "F": 17, "l_max": 3000, "l_lim": 0, "phi": 700, "end_Time": 256}
+        {"type": "math_now", "F": 16, "l_max": 384, "l_lim": 0, "phi": 0, "end_Time": 4096}
       ],
-      "step": 3,
-      "spacing": 7,
-      "offset": 11,
+      "step": 1,
+      "spacing": 0,
+      "offset": 0,
       "speed": 1,
       "reverse": false
     }

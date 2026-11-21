@@ -5742,3 +5742,23 @@ render／編碼器全部唔改）：
 - 改 `/pixel` 檔案後仍要重開（reload 未做）。
 - `0xF06B` >315 px 會 `err=big`（64 px 冇影響）。
 - white mix 是整幀統一；per-mode fade 未做。
+
+### 7.153 2026-11-21（安全調整：80% 白太光 → 低亮度 breathe）
+
+**現象**：§7.152 的 `white80`（white=80、8-bit 底 204）在 64 顆 WS2812B 上約 3 A，
+LED 太光／受熱（用家反映「LED 甩了」）。production 8×8 不需要這個亮度。
+
+**即時處理（唔重燒 firmware，因為 effect 係 `/pixel` 檔案）**：
+
+- `effects/effects.json`：改成 `breathe`，`math_now`、`F=16`、`l_max=384`
+  （12-bit → 8-bit 最高約 24/255，約 9%）、`end_Time=4096`（256 幀／5.1 s 一循環）。
+- `modes/white80.json`：檔名保留但 mode 改名 `breathe`、**`white=0`**、
+  `matrix.full × breathe × rgb`；`registry.list=["breathe"]`。
+- `tools/show_upload.py --reboot` 上傳＋重開；`show` 任務重新載入，冇 OTA firmware。
+- 真機 `0xF06B`：`mode=breathe`、`white=0`、max RGBA=[16,16,16,0]（連續讀 4 次
+  11–18，呼吸中），遠低於 80% 白的 204。
+- `tools/show_verify.py` 加 `--max-led`（例如 `--max-led 40`）同 `--white` 省略時
+  自動用 frame 回報值，方便日後驗「唔太光」。
+
+**注意**：唔好再把 `white` 設 80 同時 `l_max=4095`；要光一點應逐步加 `l_max`
+（128 → 8-bit 8、256 → 16、384 → 24、512 → 32），每次用 `--max-led` 驗。

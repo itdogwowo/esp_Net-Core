@@ -8,6 +8,9 @@
 流程：先在本機驗 JSON（parse／`end_Time` 嚴格遞增／mode 引用的 group、effect 名存在／
 `white` 0..100），全部 OK 才逐檔 PUT，最後可選 `/api/reboot` 令 firmware 重新載入。
 
+目前 project 內容是**低亮度呼吸**（`breathe`，`math_now l_max=384` → 8-bit 最高約 24，
+`white=0`），避免 80% 白全亮過熱；要改回其他效果只改 data/pixel 再上傳。
+
 用法：
     python3 tools/show_upload.py                       # 預設 --via http://127.0.0.1:8011
     python3 tools/show_upload.py --reboot
@@ -559,7 +562,7 @@ def main() -> int:
         return 2
 
     src = Path(args.src).expanduser().resolve()
-    print("show_upload.py — 8×8 Show /pixel 內容（80% 白 ＋ 20% 效果）")
+    print("show_upload.py — 8×8 Show /pixel 內容（低亮度 breathe／white mix）")
     print(f"來源：{src}")
     reports, errs = check_tree(src)
     print("\n本機 JSON 檢查：")
