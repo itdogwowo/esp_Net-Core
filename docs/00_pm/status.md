@@ -6187,3 +6187,58 @@ pair_us: range=4.895ms, random12=19.968ms, packed12=20.600ms, random8=0.970ms
 
 效果：同一份 firmware 的 canvas／packed buffer 位置固定，latency 可預期；
 9,600 要 PSRAM 就在 project sdkconfig 明確寫 y，不再靠 runtime 猜。
+
+### 7.167 2026-11-22（固定 buffer policy 後全面重測；9,600 RGB 三次穩定）
+
+**受測映像**：Zero-Show 固定 policy，app `431e1cb5`、image 705,584 B；
+`status tasks` 只有 `render`／`pair`／`effect`。64 px `/pixel` breathe、white=0。
+
+**64 px 三任務（0xF071，reset 後 steady）**：
+
+| 段 | avg | max |
+|---|---:|---:|
+| effect | **6 µs** | 25 µs |
+| pair | 49 µs | 79 µs |
+| ├ apply | 33 µs | 45 µs |
+| ├ white | 0 µs | 1 µs |
+| └ commit | 15 µs | 35 µs |
+| latency | 477 µs | 484 µs |
+| render | 361 µs enc / 21 µs tx | — |
+| render fps | 49.9 | frame 19.993 ms |
+
+**64 px burn 2 秒**（0xF073）：
+
+| 段 | 結果 |
+|---|---|
+| effect | **55,866 幀 / ~3 s ≈ 18,600 fps**；avg 6 µs、max 51 µs |
+| pair | 411 幀（ring 限流）；apply 30 µs、commit 11 µs |
+| full | 1,889 |
+| render | 50.0 fps、enc 336 µs、tx 22 µs |
+
+**9,600 RGB、28,800 值、random permutation（0xF069，3 次獨立 run）**：
+
+| 項目 | run 1 | run 2 | run 3 |
+|---|---:|---:|---:|
+| gen（interpreter） | 15.614 ms | 15.6 ms | 15.6 ms |
+| gen（wave table） | 1.996 ms | 1.99 ms | 1.99 ms |
+| pair random12 | 19.968 ms | 19.967 ms | 19.968 ms |
+| pair packed12 | 20.599 ms | 20.601 ms | 20.599 ms |
+| pair random8 | **0.971 ms** | **0.971 ms** | **0.971 ms** |
+| pair inverse8 | 930 µs | 930 µs | 930 µs |
+| pair block8 | 967 µs | 967 µs | 967 µs |
+| full random12 | 37.880 ms | 37.862 ms | 37.862 ms |
+| full random8 | 16.586 ms | 16.595 ms | 16.591 ms |
+| **full cached8** | **4.426 ms** | **4.425 ms** | **4.409 ms** |
+| mem | c12 PSRAM／c8 internal | 同左 | 同左 |
+
+- `c12_int=0, c12_ps=1, c8_int=1` 三次一致 → **固定位置、數據穩定**。
+- full cached8 **4.41–4.43 ms**，50 fps 22%，60 fps 26.5%（CPU probe）。
+- 9,600 單 lane WS2812 物理仍約 288 ms/幀；render 未計。
+- production 未支援 9,600（effect frame cap 256、pair random table 未接）；
+  以上是 EffectPerf fixed-policy probe，不是 production 三任務。
+
+**功能重測**：0xF06D 切 color／breathe、0xF06F reload 成功（apply 225–231 µs），
+frame 64 px 正常。
+
+**Build／測試**：Matrix-Show 689.5 KB、EffectPerf 678.6 KB、Zero 705,584 B 全部成功；
+host 20 套全綠、Web 296 passed。
