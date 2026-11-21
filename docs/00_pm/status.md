@@ -6018,3 +6018,44 @@ CLI：`tools/pipeline_stats.py`。
 
 **Build**：Zero 688.5 KB（app `41d90373` 之前；最新 stats build 705,056 B）、
 Matrix-Show 689.0 KB、EffectPerf 676.8 KB；皆成功。
+
+### 7.162 2026-11-22（極限定義：9,600 RGB、每個 LED 一個波、隨機配對）
+
+用家澄清「極限」＝ **9,600 個 RGB LED，每個都有自己的波，完全混亂／隨機擺放，
+再由配對任務放回 9,600 個輸出的位置**。生產 pipeline 目前 effect frame 每 job
+cap 256 值，唔可以直接跑 28,800 值；因此用 **EffectPerf 0xF069（同一個 S3、
+同一份 nc_px_job_vals／nc_px_pair_apply12）** 做極限 probe，量三階段 CPU：
+
+設定：`px=9600`、`nv=28800`（3 值/LED，write rgb）、`frames=2`、
+`table_rnd[k] = (k*7919) % 9600`（近似隨機 permutation）。
+
+| 階段 | 時間 | 備註 |
+|---|---:|---|
+| gen（28,800 個 12-bit 值） | **15.600 ms** | 542 ns/值 |
+| pair range（連續） | 4.909 ms | 511 ns/px |
+| pair table（連續查表） | 5.301 ms | — |
+| **pair random（隨機 destinations）** | **19.967 ms** | 2.08 µs/px；比 range 慢 4.07× |
+| conv 12→8（捨入） | 3.424 ms | — |
+| **full range** | **24.202 ms** | 121% of 20 ms；剩 −4.20 ms |
+| full table | 23.948 ms | — |
+| **full random** | **37.863 ms** | **189% of 20 ms；剩 −17.86 ms** |
+| PSRAM 12-bit canvas | 量不到（c12p 配置失敗） | — |
+
+判讀：
+
+1. **光是隨機 pair 已經 19.967 ms > 50 fps 的 20 ms 預算**；即係就算
+   effect 免費、render 免費，9,600 RGB 隨機映射都已經貼死 50 fps。
+2. 加 gen 同 conv：**37.863 ms → 26.4 fps**；60 fps 更不可能。
+3. 連續 range 的 full 是 24.202 ms，仍然超 50 fps 4.2 ms；所以「9,600 RGB 全隨機
+   + 50 fps」在目前單核資料路徑上不可行。
+4. 三個 production 任務在 9,600 之前要先改：
+   - effect frame 由 256 值/job 擴到 28,800（或分塊／PSRAM 環）；
+   - pair plan 由「最多 4 連續 ranges」扩展到 random offset table（19.2 KB），
+     或先把 random 排成 runs；
+   - render 9,600 顆 WS2812 單 lane 的物理時間約 **288 ms/幀（3.47 fps）**；
+     要 50 fps 需要約 **15 條 800 kHz lane**（或更低 FPS／更少燈）。
+5. 所以目前 64 px 的三任務數字（effect 46 µs、pair 34 µs、render 349 µs）
+   不能外推到 9,600；極限是 **37.9 ms／26 fps（CPU）**，未計 1-lane 送燈。
+
+**已恢復**：probe 後已 OTA 回 Zero-Show 三任務映像；`status tasks` 仍是
+`render`／`pair`／`effect`，冇 pixel／content／effect_bench。
