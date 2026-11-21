@@ -20,7 +20,7 @@
     "wifi": true,
     "usb": true
   },
-  "verified": "2026-11-21：用家確認新板為 Waveshare ESP32-S3-Zero，LED data = GPIO1；flash/PSRAM 用 ESP32-S3FH4R2 規格，實際 GPIO 只確認 LED。",
+  "verified": "2026-11-21：真板 esptool 確認 ESP32-S3 QFN56 v0.2、4 MB flash（XMC）、2 MB PSRAM，MAC 50:78:7d:18:8f:50；GPIO1 為用家指定的外部燈鏈資料。已 flash Zero-Show 並以 0xF06B 驗 64 px 呼吸。",
   "notes": "Waveshare ESP32-S3-Zero：ESP32-S3FH4R2（4 MB flash、2 MB PSRAM quad 80 MHz、512 KB SRAM、240 MHz）；USB Type-C 原生 USB OTG FS（GPIO19/20）。本專案把 WS2812 資料接在 GPIO1（用家指定），LED 鏈當 64 顆（8×8；如果只接 1 顆，firmware 送 64 顆資料，第一顆仍正常工作，多出的資料會被鏈尾忽略）。I80 其餘 D1..D7／WR／DC 是 dummy，不要接東西。Zero 沒有板載 IMU；I2C 保持 disabled。 板載 WS2812 在 GPIO21（官方 spec），本專案不用；GPIO1 是外部燈鏈資料。",
   "aliases": [
     "S3-Zero",

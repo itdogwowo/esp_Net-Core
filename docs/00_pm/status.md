@@ -5910,3 +5910,28 @@ python3 make.py build ESP32-S3-Zero --project ESP32-S3-Zero-Show --fresh
 Web `/api/build` 也成功（14.07 s）。**板上未插 USB（`/api/ports` 冇新板）**，
 所以未 flash、未驗真燈；插上後由 Web Build 卡（board Zero／project Zero-Show）
 或 `tools/ota.py` 上傳。
+
+### 7.159 2026-11-21（ESP32-S3-Zero 真板上板：GPIO1、64 px 呼吸、Web OTA）
+
+**硬件**：USB 出現 `/dev/cu.usbmodem11201`（USB-Serial/JTAG，MAC `50:78:7d:18:8f:50`）。
+esptool 確認 ESP32-S3 QFN56 v0.2、4 MB flash（XMC）、2 MB PSRAM。全片 flash
+`artifacts/build/S3_ESP32-S3-Zero/flash_args` 成功；重開後 app CDC 變成
+`/dev/cu.usbmodem50787D188F501`，WebMaster 認到 `esp_Net-Core`。
+
+**Firmware**：`ESP32-S3-Zero-Show`、app `d07e166b`、image 712,880 B；
+`CONFIG_NETCORE_CONTENT=y`、`PIXEL_I80_PINS="1,38,39,40,41,42,47,48,2,4"`、
+`PIXEL_LEDS=64`；tasks：render／content level4、pixel -1。
+
+**內容／真機 frame**：
+
+- 第一次上傳遇到 `err_busy`（FAT 由 MSC host 掛住）；用 `0x1103
+  {"System":{"file_mode":1}}` 接管 FAT 後 5 個 `/pixel` 檔全成功。
+- `0xF06B`：`px=64`、`mode=breathe`、`white=0`、`apply_us=195`；
+  連續取樣 max **21→14→0→20→15→0**，真機在呼吸（0–23 級）。
+- 0xF06D 切 `color` → `white=0`、apply 278 µs；切回 breathe；0xF06F reload 成功，
+  frame 仍 64 px／breathe／apply 349 µs。
+- Web API OTA 同一 image：8.42 s、`applied=true`；重連後 app `d07e166b`、frame 正常。
+
+**注意**：LED 鏈按 64 顆（8×8）設定；如實際只接單顆，第一顆仍正常，多出的資料
+會被鏈尾忽略。板載 WS2812 是 GPIO21，本專案用 GPIO1 外部鏈。D1..D7／WR／DC
+dummy 腳不要接東西。
