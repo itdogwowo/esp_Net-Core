@@ -1,0 +1,35 @@
+{
+  "version": 1,
+  "_comment": [
+    "Tasks 層（Matrix-Show）：render 照常、show 取代 pixel。",
+    "",
+    "render：環 → 編碼 → I80 → 64 顆燈，50 fps（system.json 的 frame_interval_ms=20）。",
+    "show  ：/data/pixel 四層 → prd 環（production 的檔案驅動 show 生產者）。",
+    "pixel ：level=-1 —— 這個映像不跑韌體內建六個效果（show 才是生產者）。",
+    "",
+    "affinity [0,1] = 只在 core1（只可以有一個 1）；level 4 = 一般任務層。",
+    "show 缺席會由 nc_task_sync_cfg() 自動補寫成 [0,0]（唔跑）—— 所以一定要列。"
+  ],
+  "tasks": [
+    {
+      "name": "render",
+      "level": 4,
+      "affinity": [
+        0,
+        1
+      ]
+    },
+    {
+      "name": "show",
+      "level": 4,
+      "affinity": [
+        0,
+        1
+      ]
+    },
+    {
+      "name": "pixel",
+      "level": -1
+    }
+  ]
+}

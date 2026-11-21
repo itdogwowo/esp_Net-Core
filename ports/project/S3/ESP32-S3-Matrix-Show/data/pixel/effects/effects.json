@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "effects": [
+    {
+      "id": 1,
+      "name": "colorwave",
+      "pixel_n": 64,
+      "program": [
+        {"type": "math_now", "F": 10, "l_max": 4095, "l_lim": 0, "phi": 0, "end_Time": 128},
+        {"type": "square_wave_now", "F": 17, "l_max": 3000, "l_lim": 0, "phi": 700, "end_Time": 256}
+      ],
+      "step": 3,
+      "spacing": 7,
+      "offset": 11,
+      "speed": 1,
+      "reverse": false
+    }
+  ]
+}

@@ -523,6 +523,17 @@ code { font-family: var(--font-mono); color: var(--bench-100); font-size: 11.5px
 #activity .act-ai { color: #93c5fd; }
 #activity .act-ui { color: var(--bench-200); }
 #activity .act-note { color: var(--amber); }
+
+/* ── Build 卡／8×8 燈泡模擬器 ── */
+.chip.err { color: var(--danger); border-color: rgb(255 90 95 / .45); background: rgb(255 90 95 / .08); }
+.led-matrix {
+  width: min(320px, 100%); height: auto; display: block;
+  background: #05070a; border: 1px solid var(--bench-700); border-radius: 10px;
+}
+.led-matrix-wrap { display: flex; gap: 16px; align-items: flex-start; flex-wrap: wrap; }
+.led-matrix-side { min-width: 220px; flex: 1 1 240px; display: flex; flex-direction: column; gap: 10px; }
+.led-matrix-side input[type="range"] { width: 100%; accent-color: var(--led); }
+.build-log { max-height: 300px; }
 </style>
 </head>
 <body>
@@ -752,11 +763,62 @@ code { font-family: var(--font-mono); color: var(--bench-100); font-size: 11.5px
                   <select id="modeSelect" class="sel" style="max-width:260px"></select>
                   <button id="btnModePlay" class="btn">▶ 播放</button>
                   <button id="btnModeZero" class="btn ghost">step 0</button>
+                  <button id="btnModeApply" class="btn sm" title="POST /api/cmd 0xF06D，把目前選中的 mode 套用到裝置；下一幀邊界 rebuild plan">套用到裝置</button>
                   <label class="muted">燈鏈長度 <input id="modeLeds" type="number" value="64" style="width:70px" class="input"></label>
                 </div>
               </div>
             </div>
             <div class="card"><div class="card-b"><canvas id="modeStrip" width="1200" height="120" class="wave-canvas"></canvas></div></div>
+            <div class="card">
+              <div class="card-h">
+                <span class="label">8×8 LED 燈泡模擬器（64 px RGBW）</span>
+                <span class="grow"></span>
+                <span id="modeFrameInfo" class="chip">未讀取</span>
+                <button id="btnModeRead" class="btn sm primary"
+                        title="POST /api/cmd 0xF06B SHOWFRAME（expect 0xF06C）讀目前裝置的 64 px 實際 frame">讀取裝置 frame</button>
+              </div>
+              <div class="card-b led-matrix-wrap">
+                <canvas id="modeMatrix" width="512" height="512" class="led-matrix"></canvas>
+                <div class="led-matrix-side">
+                  <label class="muted">White mix
+                    <b><span id="modeWhiteVal">80</span>%</b>
+                    <input id="modeWhite" type="range" min="0" max="100" step="1" value="80"
+                           title="0 = 純效果；80 = 80% 白＋20% 效果（同 firmware 一樣）">
+                  </label>
+                  <p class="small muted" style="margin:0">
+                    混白公式 <code>out = out×(100−w)/100 + 255×w/100</code>（R/G/B/W 四通道）；
+                    w=0 睇純效果，w=80 睇接近實機的白。W 通道喺 canvas 併入 RGB 顯示。
+                  </p>
+                  <label class="chip"><input type="checkbox" id="modeGlow" checked> 燈泡 glow（光暈）</label>
+                  <div class="btn-row">
+                    <button id="btnModeMatrixZero" class="btn sm ghost">清空 matrix</button>
+                  </div>
+                  <p class="small muted" style="margin:0">
+                    沒有連板都可以睇合成結果（「載入裝置 pixel 樹」之後）；按「讀取裝置 frame」就畫 firmware 真正送出的 frame。
+                  </p>
+                </div>
+              </div>
+            </div>
+            <div class="card" id="showFlowCard">
+              <div class="card-h">
+                <span class="label">Show 全流程：載入 /pixel → 8×8 預覽 → Build → OTA → 讀 device frame</span>
+                <span class="grow"></span>
+                <span id="flowState" class="chip">待開始</span>
+              </div>
+              <div class="card-b">
+                <div class="btn-row">
+                  <button id="btnFlowLoad" class="btn sm">1 · 載入 /pixel</button>
+                  <button id="btnFlowPreview" class="btn sm">2 · 預覽 8×8</button>
+                  <button id="btnFlowBuild" class="btn sm primary"
+                          title="POST /api/build；用固件頁 Build 卡揀的板／project">3 · Build</button>
+                  <button id="btnFlowOta" class="btn sm" disabled
+                          title="用剛 build 出的 artifact 呼叫 POST /api/firmware">4 · OTA 剛建好的 image</button>
+                  <button id="btnFlowRead" class="btn sm">5 · 讀 device frame</button>
+                  <button id="btnFlowReset" class="btn sm ghost">重置</button>
+                </div>
+                <pre id="flowLog" class="result" style="max-height:180px">—</pre>
+              </div>
+            </div>
             <div class="card"><div class="card-h"><span class="label">組合表（mode.map[]）</span></div>
               <div class="card-b"><pre id="modeEntries" class="result">—</pre></div></div>
             <div class="card"><div class="card-h"><span class="label">播放清單（registry.json）</span></div>
@@ -856,6 +918,38 @@ code { font-family: var(--font-mono); color: var(--bench-100); font-size: 11.5px
           <div class="pad wiz">
             <h1>固件</h1>
             <p class="sub">NC4 OTA（0x22xx）：唔需要 download mode、唔需要按鍵。燒錄期間唔好拔線。</p>
+            <div class="card" id="buildCard">
+              <div class="card-h">
+                <span class="label">0 · 建置 firmware（repo 根 make.py build）</span>
+                <span class="grow"></span>
+                <span id="buildState" class="chip">未載入</span>
+                <button id="btnBuildReload" class="btn sm ghost" title="重新讀 GET /api/build/info">⟳</button>
+              </div>
+              <div class="card-b">
+                <div class="grid2">
+                  <div class="field"><label>板（ports/hardware）</label>
+                    <select id="buildBoard" class="sel"></select></div>
+                  <div class="field"><label>project（空 = default）</label>
+                    <select id="buildProject" class="sel"></select></div>
+                  <div class="field"><label>選項</label>
+                    <div class="btn-row">
+                      <label class="chip"><input type="checkbox" id="buildTests"> --tests（NC_ENABLE_TESTS）</label>
+                      <label class="chip"><input type="checkbox" id="buildFresh"> --fresh（清 build＋sdkconfig）</label>
+                    </div>
+                  </div>
+                  <div class="field"><label>環境</label>
+                    <div class="btn-row"><span id="buildIdf" class="chip">IDF —</span></div>
+                  </div>
+                </div>
+                <div class="btn-row" style="margin-top:12px">
+                  <button id="btnBuild" class="btn primary">Build</button>
+                  <button id="btnBuildOta" class="btn" disabled
+                          title="把剛建好的 .bin 用 NC4 OTA 燒到目前連線的裝置（GET /api/build/artifact → POST /api/firmware）">OTA 剛建好的 image</button>
+                  <span id="buildArtifact" class="chip">—</span>
+                </div>
+                <pre id="buildLog" class="result build-log">未建置。按 Build 開始（最長 600 秒）。</pre>
+              </div>
+            </div>
             <div class="card"><div class="card-h"><span class="label">1 · 揀 .bin</span></div><div class="card-b">
               <div id="fwDrop" class="drop">拖拉 <code>.bin</code> 入嚟，或 <button id="btnPickFw" class="btn sm">揀檔案</button>
                 <input id="fwPicker" type="file" accept=".bin" class="hidden">
@@ -1099,15 +1193,16 @@ code { font-family: var(--font-mono); color: var(--bench-100); font-size: 11.5px
 <script src="/static/js/40-files.js?v=20261120b"></script>
 <script src="/static/js/50-drive.js?v=20261120b"></script>
 <script src="/static/js/60-flash.js?v=20261120b"></script>
+<script src="/static/js/61-build.js?v=20261121b"></script>
 <script src="/static/js/65-browser-flash.js?v=20261120b"></script>
 <script src="/static/js/66-flash-request.js?v=20261120b"></script>
 <script src="/static/js/70-console.js?v=20261120b"></script>
-<script src="/static/js/75-shell.js?v=20261120b"></script>
+<script src="/static/js/75-shell.js?v=20261121b"></script>
 <script src="/static/js/80-ide.js?v=20261120b"></script>
 <script src="/static/js/85-container.js?v=20261120b"></script>
 <script src="/static/js/90-env.js?v=20261120b"></script>
 <script src="/static/js/95-wave.js?v=20261120c"></script>
-<script src="/static/js/96-mode.js?v=20261120c"></script>
+<script src="/static/js/96-mode.js?v=20261121b"></script>
 <script src="/static/js/99-app.js?v=20261120b"></script>
 </body>
 </html>

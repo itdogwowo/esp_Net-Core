@@ -29,6 +29,7 @@ tools/
 ├─ effect_bench.py              ② 純效果量測（0xF065；EffectPerf 映像）
 ├─ psram_bench.py               ② PSRAM 大緩衝／混合讀取量測（0xF067）
 ├─ pipe_bench.py                ② 9,600 值效果生成→配對→12→8（0xF069）
+├─ show_upload.py show_verify.py ② Show 內容上傳／0xF06B live frame 驗證
 ├─ bench/                       ③ 量測（要板子）
 ├─ hosttest/                    ④ 主機端 C 測試（不需要板子）
 └─ poc/                         ⑤ 原型驗證
@@ -157,6 +158,8 @@ python3 tools/sync_hardware_presets.py           # 重寫 project/data/config/ha
 | `ncm.py pack / dump` | ❌ | **打包 `.nct` / `.nce`**（header + manifest + meta + payload + 指令表）與檢視；`--meta meta.json` 嵌入 name/desc/usage/requires/provides。`pack` 會先擋掉裝置端一定會拒的值 |
 | `ncm_build.py [task…] [--device]` | 裝機時 ✅ | **外掛模組獨立編譯工具**：WAT／WASM（C 預留）→ `out/*.nct／*.nce`；讀 `modules/<role>/<name>/build.json`（fps／budget／mem／cmds…）；leaf 名要跟 role（`_tasks`／`_actions`／`_effects`／`_lab`）；中間 `.wasm` 放 `modules/build/`、成品放 `modules/out/`；`--dir` 可指向外部專案；`--list`、`--clean`、`--device`（直接裝到 MSC `tasks/`） |
 | `matrix.py --port … stats\|effect\|dither\|color\|gain\|fps\|zone\|zmask` | ✅ | **8×8 WS2812 矩陣**（`0xF060`）：切效果（第一區／呼吸／波浪／單色／色階）、抖動開關、每區 rate+phase、看實測 fps／late／tx_us。見 [rgb-matrix-dither](../docs/03_notes/rgb-matrix-dither.md) |
+| `show_verify.py --via http://127.0.0.1:8011 [--white 80] [--json]` | ✅ | 讀 `0xF06B` live frame（64 px ×4 B hex），驗每顆 R/G/B/W ≥ 80% 白 floor（預設 204），印 min/max 與前 8 顆；`--json` 回原始資料。見 [show-pipeline.md](../docs/00_pm/show-pipeline.md) |
+| `show_upload.py --via http://127.0.0.1:8011 [--check] [--reboot]` | ✅ | **Show 的 `/pixel` 四層內容**：先在本機驗 effects／map／modes／registry（JSON、`end_Time` 嚴格遞增、mode 引用的 group／effect 名存在、`white` 0..100），再逐檔 PUT `/api/file?path=/pixel/...`（只 5 個檔，不覆蓋其他檔）；`--check` 只檢查、`--base` 改目標目錄、`--reboot` 重開載入。內容見 [data/pixel/README.md](../ports/project/S3/ESP32-S3-Matrix-Show/data/pixel/README.md) |
 | `pipe_bench.py --via http://127.0.0.1:8011 --px 9600 --mode wwww\|rgb\|w` | ✅ | **9,600 值全流程**（`0xF069`）：gen／pair range／pair table／pair random／conv／full；量出 1 值/px 13.5 ms（67.7%）、3 值/px 24.2 ms（120.8%）。見 [effect-perf §10](../docs/00_pm/effect-perf.md#L315) |
 | `psram_bench.py --via http://127.0.0.1:8011 --size-kb 64,256,512,1024` | ✅ | **PSRAM 純搬運量測**（`0xF067`，EffectPerf 映像）：internal／PSRAM 的 memset／read／memcpy、cold read／writeback、internal↔PSRAM 混合、1/4/16/64 KB chunk 讀。見 [effect-perf §9](../docs/00_pm/effect-perf.md#L268) |
 | `effect_bench.py --via http://127.0.0.1:8011 --px 64,960,9600` | ✅ | **純效果管線量測**（`0xF065`，EffectPerf 映像）：program 逐值／逐幀、8／12-bit 配對、12→8 捨入／抖動、internal／PSRAM／混合、分塊、多 job。`--via` 經 WebMaster（UI 同一條 CDC）或 `--port` 直接開。見 [effect-perf](../docs/00_pm/effect-perf.md) |

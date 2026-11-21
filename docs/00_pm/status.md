@@ -1,7 +1,7 @@
 # 專案現況總結（單頁）
 
 > **用途**：所有「已經驗證的事實、已定案的設計、還沒做的事」集中在這一頁；
-> 細節都連到對應文件。**最後更新**：2026-11-20。
+> 細節都連到對應文件。**最後更新**：2026-11-21。
 
 ---
 
@@ -5622,3 +5622,123 @@ RGBW→I80 編碼／送燈唔計（render backend 已有）。
 
 **驗證**：OTA 後 `app 618f7233`；`status cmds` 只有 `0xF065`／`0xF067`／`0xF069`，
 冇其他測試。詳見 [effect-perf.md §10](effect-perf.md#L315)。
+
+### 7.151 2026-11-21 凌晨（production 檔案驅動 Show：show_task ＋ white mix ＋ 0xF06B）
+
+**背景**：EffectPerf（§7.148–§7.150）只量效果、唔點燈；production 8×8 Matrix 要的是
+**內容驅動**的 show：`/data/pixel` 四層（`effects`／`map`／`modes`／`registry`）由 Web UI
+上傳，開機載入，逐幀合成後送 64 顆 WS2812B，並且要「80% 白 ＋ 20% 效果」的 white mix；
+Web UI 要用一條高頻指令預覽最近一幀。
+
+**做咗**（只動 `show_task` ＋ layer parser ＋ project ＋ docs，EffectPerf／pixel_task／
+render／編碼器全部唔改）：
+
+- 新 component `firmware/components/tasks/show_task/nc_show_task.c`（CONFIG 開關、
+  `WHOLE_ARCHIVE`＋constructor 自己登記，`main.c` 唔使改）：
+  - 任務：`show`／loop `show`／NORMAL／level 4／order 21／stack 4096／core 1／
+    prio `NC_PRIO_OTHERS_MAX-1`（5，低 render 一級）／layer 5／period 0。
+  - on_start：找 render 的 prd 環 → `nc_store_fs_base()`＋`/pixel` →
+    **先 mkdir `pixel/map`、`pixel/modes`**（FILE_BEGIN 唔會建父目錄，新機上傳會
+    `err_write_fail`）→ `nc_px_layer_load_all()` → registry `list[0]` → `mode.mapping` →
+    map → 只抄 mode 引用到的 asset → `nc_px_show_plan()`（inventory
+    `{WS2812,0,px}`）→ canvas（internal heap，px×4）→ log 四層數量／mode／map／white／jobs。
+  - 每幀：`memset(canvas,0)` → `nc_px_show_frame(plan, step, canvas)` → white mix →
+    `nc_px_ring_begin_ex()` payload（4 B/px）→ commit → `step++`；環滿 `vTaskDelay(1)`
+    且唔加 step。表頭 `src=BUILTIN`、`ts_us=esp_timer_get_time()`、`drops=環滿次數`。
+  - 失敗 fallback：`/data` 未掛、四層缺失／解析失敗、冇 mode／map、plan 0 job、canvas
+    配置失敗 → log warning 講原因 ＋ 每幀填黑（`NC_PX_F_CLEAR`）入環，**不 crash／不 boot loop**；
+    修好檔案重開即用真 plan。
+  - `0xF06B SHOWFRAME`（回 `0xF06C`，指令表在同一个 component）：最近一幀 4 B/px 以 hex
+    回覆 `{"px":N,"seq":M,"hex":"..."}`（64 px = 512 hex）；`nodata`／`big`（px>512 或
+    hex 塞唔落 2,600 B 回覆 JSON，約 px>315）。hex 直接寫入 decoder 的回覆幀緩衝，
+    decode task 嘅 5 KB 棧唔會開大 buffer；快照 2,048 B static ＋ spinlock。
+- `nc_px_mode_t` 加 `uint8_t white`；`nc_px_layer.c` parser 收 JSON `"white"` 或
+  `"white_mix"`（0..100，缺欄位＝0，>100／負數／字串→0 但唔整份壞）→ 舊 JSON 完全相容。
+  white mix 公式（四通道都做，整數）：`out = (out*(100-w) + 255*w) / 100`。
+- 新 Kconfig `CONFIG_NETCORE_SHOW`（depends `NETCORE_PIXEL`，default n）＋
+  `firmware/CMakeLists.txt` 無條件加入 component（關閉時 .c 為空 object）。
+- 新 project `ports/project/S3/ESP32-S3-Matrix-Show/`：`project.json`
+  （hardware S3/ESP32-S3-Matrix、aliases show／matrix-show、seed 4 層）、
+  `sdkconfig.defaults`（`NETCORE_SHOW=y`、`PXBENCH=n`、不開 tests）、
+  `data/config/tasks.json`（render level4 affinity[0,1]、show level4 affinity[0,1]、
+  pixel level -1）、`data/config/{system,network,hardware,resources}.json` 抄
+  Matrix-LED-Textkit；`data/pixel/`（主機端內容來源，唔 embed）：`colorwave` effect、
+  `matrix` map、`white80`（white=80）／`color`（white=0）兩個 mode、registry
+  `list=["white80","color"]`。
+- 文件：[show-pipeline.md](show-pipeline.md)（資料流、white mix、0xF06B 協議、project、排錯）。
+
+**驗證**
+
+- `IDF_PATH=~/esp/esp-idf python3 make.py build ESP32-S3-Matrix --project
+  ESP32-S3-Matrix-Show --fresh` **成功**：image **694.8 KB**（0xadb50，分區剩 55%）、33–35 s；
+  `CONFIG_NETCORE_SHOW=y`、PXBENCH／EFFECT_BENCH not set；ELF 有
+  `_nc_task_reg_show`／`_nc_action_reg_nc_show_task_table`／`nc_show_task_table`。
+  唯一警告是既有 `bus/bus_net/nc4_line_net.c` unused-function／variable（同本改動無關）。
+- Host（x86，同一份 C 實作）用真 project 內容：`load_all` → effects=1／maps=1／modes=2／
+  list=2；`white80`（white=80）→ plan jobs=1 skipped=0 px=64；200 幀後 R/G/B≥204、W=204、
+  有動畫；`color` W=0。`pxLayer_test`／`pxShow_test`／`pxScan_test` 全綠（white 是新增欄位，
+  舊 fixture 不變）；另驗 `white_mix` 別名、>100／負數／字串→0。
+- **未上真機**：實際送燈、50 fps 節奏、Web UI poll 0xF06B 未驗（OTA 由 lead 做）。
+
+**未做／限制**
+
+1. 只有 registry `list[0]` 一個 mode；`auto_play` 輪播／切 mode 指令未做。
+2. 內容是開機載入；改檔後要重開（reload 指令未做）。
+3. `.nce` 效果未接合成（program interpreter 仍只有六種段型別）。
+4. white mix 整幀統一；per-mode fade／per-frame 動畫未做。
+5. 0xF06B 預覽受回覆 JSON 2,600 B 限制：>315 px 回 `err=big`（production 64 px 冇影響）；
+   若日後要 512 px 預覽要加大 `NC4_REPLY_JSON_MAX` 或分幀。
+
+### 7.152 2026-11-21（Show 真機：80% 白＋0xF06B live frame＋0xF06D 切 mode；Web 全流程）
+
+**背景**：§7.151 的 Show firmware 未上真機；今次補：
+① 真機 8×8 出 80% 白 frame；② `0xF06B` live frame；③ `0xF06D` runtime 切 mode；
+④ WebMaster `/api/build` 一鍵建固件＋8×8 燈泡模擬器；⑤ 修第一次上板的 stack overflow。
+
+**真機結果（ESP32-S3-Matrix、app `ea8475dc`、image 695.5 KB、render＋show 跑住）**
+
+- `status tasks`：`show` level 4、started=1、loop `show` running=1；`render` 同樣 running；
+  `pixel` level=-1（唔跑內建六色）；`status cmds` 只有 `0xF06B`（＋公共指令）。
+- `0xF06B`（white80，white=80）：`px=64`、hex 256 B；min RGBA=[204,204,204,204]、
+  max=[255,255,255,204]；64 顆全部 ≥ floor 204；W 全部 204。即 **80% 白＋20% 效果**
+  真機正確。
+- `0xF06D` payload `02` → `{"ok":1,"queued":2,"mode":"white80","white":80}`；
+  下一幀 `0xF06B`：`mode="color"`、`white=0`、W=0，效果顏色（R/G/B 0..254）；
+  切回 payload `01` → `mode="white80"`、`white=80`、W=204。
+- **plan rebuild（apply_us）真機 226–251 µs**（1 job、64 px）；切 mode 係「plan 重建＋
+  下一幀生成」，唔使重新解析四層檔案。
+- WebMaster `/api/build` 實際建 `ESP32-S3-Matrix-Show`：2.29 s、artifact
+  `artifacts/ESP32-S3-Matrix__ESP32-S3-Matrix-Show.bin`、size 711,440 B；再用
+  `/api/build/artifact` + `/api/firmware` 一鍵 OTA 成功（8.87 s），frame 仍然正確。
+- WebMaster pytest：292 passed；host tests 20 套全綠。
+
+**第一次上板失敗（已修）**
+
+- 第一次 OTA 後板子完全冇 USB：根因是 `show_task` 的 `on_start` 由 **main task（3,072 B 棧）**
+  呼叫 `nc_px_layer_load_all()`；`nc_px_map_scan()` 的 local `nc_px_map_t` **2,618 B**
+  ＋ `nc_px_mode_t` 568 B，直接 stack overflow → boot loop。
+- 修法：
+  1. `nc_px_layer_scan.c` 的 `nc_px_map_t m`／`nc_px_mode_t m` 改 **static**（掃描只在
+     開機／換場做，單執行緒）；
+  2. Show project `sdkconfig.defaults` 加 `CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192`。
+- 修好後用 **ROM download mode ＋ esptool 全片 flash**（bootloader／分割表／app）
+  直接刷入，成功開機；之後 `0xF06B` 正常。**唔再靠 OTA 做未驗證 firmware 的迭代。**
+
+**Web 全流程（已可用）**
+
+- 固件頁 Build 卡：board／project 下拉（8 boards／12 projects，含 Matrix-Show）、
+  `--tests`／`--fresh`、Build 按鈕、輸出 pre、artifact；Build 成功後可一鍵 OTA。
+- `GET /api/build/info` 回 repo／IDF（`~/esp/esp-idf`）／boards／projects／lastBuild。
+- mode 頁：8×8 燈泡 Canvas（圓形、glow）、`modeWhite` 0..100（預設 80）、
+  「讀取裝置 frame」0xF06B、「套用到裝置」0xF06D（用目前 mode id）、
+  Show 全流程 5 步（載入／pixel→預覽→Build→OTA→讀 frame）。
+- 修 `_find_artifact`：之前 build log 內的 `artifacts/build/.../partition-table.bin`
+  會被當成 artifact（size 3,072）；現在只認 `產物 …`／app `.bin`，排除
+  partition-table／bootloader／ota_data。實測回 app 711,440 B。
+
+**限制**
+
+- 開機仍只選 registry `list[0]`；`auto_play` 輪播未做（手動 0xF06D 可以）。
+- 改 `/pixel` 檔案後仍要重開（reload 未做）。
+- `0xF06B` >315 px 會 `err=big`（64 px 冇影響）。
+- white mix 是整幀統一；per-mode fade 未做。

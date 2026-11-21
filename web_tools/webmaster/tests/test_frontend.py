@@ -29,6 +29,7 @@ EXPECTED = [
     "40-files.js",
     "50-drive.js",
     "60-flash.js",
+    "61-build.js",
     "65-browser-flash.js",
     "66-flash-request.js",
     "70-console.js",
@@ -36,6 +37,8 @@ EXPECTED = [
     "80-ide.js",
     "85-container.js",
     "90-env.js",
+    "95-wave.js",
+    "96-mode.js",
     "99-app.js",
 ]
 
@@ -49,13 +52,18 @@ def html():
     return (STATIC / "index.html").read_text(encoding="utf-8")
 
 
+def script_srcs():
+    """index.html 載入的模組次序（`?v=` 版本字串唔計）。"""
+    return re.findall(r'<script src="/static/js/([^"?]+)', html())
+
+
 def test_js_dir_has_exactly_expected_modules():
     actual = sorted(p.name for p in JS_DIR.glob("*.js"))
     assert actual == EXPECTED, f"模組清單唔一致：{actual}"
 
 
 def test_index_html_loads_modules_in_expected_order():
-    srcs = re.findall(r'<script src="/static/js/([^"]+)"', html())
+    srcs = script_srcs()
     assert srcs == EXPECTED, f"index.html 載入次序：{srcs}"
     # 舊的單檔 app.js 唔應該再被引用
     assert "/static/app.js" not in html()
@@ -63,7 +71,7 @@ def test_index_html_loads_modules_in_expected_order():
 
 
 def test_core_is_first_and_app_is_last():
-    srcs = re.findall(r'<script src="/static/js/([^"]+)"', html())
+    srcs = script_srcs()
     assert srcs[0] == "00-core.js"
     assert srcs[-1] == "99-app.js"
 

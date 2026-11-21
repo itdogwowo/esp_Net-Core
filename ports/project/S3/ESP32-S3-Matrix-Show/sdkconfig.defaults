@@ -1,0 +1,15 @@
+# ESP32-S3-Matrix-Show — production 檔案驅動 show 映像。
+#
+# 硬體事實（flash／PSRAM／CPU／console／分區表／燈的腳位與顆數）一律留在
+# ports/hardware/S3/ESP32-S3-Matrix/sdkconfig.defaults；project 只覆寫
+# 「這個映像多編哪個功能」。
+#
+# show_task 是 CONFIG_NETCORE_SHOW 的獨立 component（不是 test_action 的
+# 0xF0xx 測試指令），所以不需要、也不要開 NC_ENABLE_TESTS：
+# 這樣映像不會拉入 network／ncm／量測任務。它自己登記一條 0xF06B（回 0xF06C）。
+CONFIG_NETCORE_SHOW=y
+# 這不是吞吐量映像；PXBENCH 保持關閉（它屬於 test_action，本來就不會進來）。
+CONFIG_NETCORE_PXBENCH=n
+
+# show_task 的 on_start 會解析 map／mode；main task 的 3,072 B 不夠。
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192

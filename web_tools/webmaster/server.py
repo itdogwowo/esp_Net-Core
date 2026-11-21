@@ -12,8 +12,10 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 import shutil
 import struct
+import subprocess
 import sys
 import tempfile
 import threading
@@ -111,6 +113,10 @@ class State:
         # 呢個係瀏覽器安全模型，唔可以（亦唔應該）繞。所以 AI 只能「排隊請求」。
         self.flash_request: dict[str, Any] | None = None
         self.flash_history: list[dict[str, Any]] = []
+        # 最近一次 /api/build 的結果：GET /api/build/info 會帶返去，UI reload 都知。
+        self.last_build: dict[str, Any] | None = None
+        # 同一時間只准一個 build：兩個 idf.py 一齊寫同一個 build dir 一定死。
+        self.build_lock = threading.Lock()
 
     # ── 作用中裝置的 facade（現有 endpoint 不用逐個改）──
     @property
@@ -289,6 +295,295 @@ def _connect(state: State, body: dict) -> dict:
     return {"ok": True, "port": d.port, "sim": d.sim,
             "device": d.key, "active": state.active,
             "devices": state.device_list()}
+
+
+# ── 建置（repo 根 make.py）────────────────────────────────────────────
+# 完整流程 =「改 /pixel → build → OTA → 讀 frame」。build 一定要喺 repo 根跑
+# make.py（板子真相喺 ports/，project 選擇喺 ports/project/），所以由 server 用
+# `sys.executable` 起子進程。**唔用 shell=True**：跨平台之外，board／project
+# 都冇機會變成 shell 語法。
+BUILD_TIMEOUT = 600.0          # 秒；任務要求最長 600s
+BUILD_MAX_LINES = 4000         # 回傳行數上限（IDF build log 可以幾萬行）
+BUILD_ARG_RE = re.compile(r"^[A-Za-z0-9._:/-]{1,160}$")
+_ARTIFACT_TOKEN_RE = re.compile(r"([A-Za-z0-9_./\\-]+\.bin)")
+
+
+def _as_text(value: Any) -> str:
+    """TimeoutExpired.stdout 有時係 bytes（視 Python 版本）；統一轉字串。"""
+    if value is None:
+        return ""
+    if isinstance(value, bytes):
+        return value.decode("utf-8", "replace")
+    return str(value)
+
+
+def _read_json_file(path: Path) -> dict:
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _build_idf_candidates() -> list[tuple[Path, str]]:
+    """跑 make.py 可能要用的 IDF 路徑＋來源（順序＝優先）。
+
+    次序：`IDF_PATH` → settings 的 `env.idf_dir` → `~/esp/esp-idf` →
+    `<repo>/.idf/esp-idf` → WebMaster env.py 的候選（非慣例位置）。
+    呢個 function 只列「想試邊度」，係唔係真 IDF 由 `_looks_like_idf()` 判斷。
+    """
+    out: list[tuple[Path, str]] = []
+    envdir = os.environ.get("IDF_PATH")
+    if envdir:
+        out.append((Path(envdir).expanduser(), "IDF_PATH"))
+    try:
+        conf, _used = settings.load(quiet=True)
+        cfg_dir = (conf.get("env") or {}).get("idf_dir")
+        if cfg_dir:
+            out.append((Path(str(cfg_dir)).expanduser(), "settings.env.idf_dir"))
+    except settings.SettingsError:
+        pass
+    except Exception:                       # 設定檔壞咗都唔應該令 build API 死
+        pass
+    out.append((Path.home() / "esp" / "esp-idf", "~/esp/esp-idf"))
+    out.append((REPO_ROOT / ".idf" / "esp-idf", "<repo>/.idf/esp-idf"))
+    try:
+        for cand in env.idf_dir_candidates():
+            out.append((Path(cand), "env.py 候選"))
+    except Exception:
+        pass
+    seen: set[str] = set()
+    uniq: list[tuple[Path, str]] = []
+    for path, source in out:
+        key = str(path)
+        if key in seen:
+            continue
+        seen.add(key)
+        uniq.append((path, source))
+    return uniq
+
+
+def _looks_like_idf(path: Path) -> bool:
+    try:
+        return path.is_dir() and (
+            (path / "tools" / "idf.py").is_file()
+            or (path / "export.sh").is_file()
+            or (path / "export.ps1").is_file())
+    except OSError:
+        return False
+
+
+def _resolve_build_idf() -> tuple[Path | None, str]:
+    """第一個「似 IDF」的候選；冇就 (None, "")（make.py 自己會再報錯）。"""
+    for path, source in _build_idf_candidates():
+        if _looks_like_idf(path):
+            return path, source
+    return None, ""
+
+
+def _scan_build_targets(repo: Path | None = None) -> dict:
+    """掃 `ports/` 得出可建 boards／projects（唔跑 make.py，快又唔會卡）。
+
+    板子真相：`ports/hardware/<chip>/<board>/board.json`
+    project：`ports/project/<chip>/<project>/project.json`（`hardware` 指回板子）
+    """
+    repo = Path(repo if repo is not None else REPO_ROOT)
+    boards: list[dict[str, Any]] = []
+    hw_root = repo / "ports" / "hardware"
+    try:
+        chip_dirs = sorted(p for p in hw_root.iterdir() if p.is_dir())
+    except OSError:
+        chip_dirs = []
+    for chip_dir in chip_dirs:
+        try:
+            board_dirs = sorted(p for p in chip_dir.iterdir() if p.is_dir())
+        except OSError:
+            continue
+        for bdir in board_dirs:
+            meta = _read_json_file(bdir / "board.json")
+            if not meta:
+                continue
+            boards.append({
+                "name": str(meta.get("name") or bdir.name),
+                "chip": str(meta.get("chip") or chip_dir.name).lower(),
+                "dir": f"{chip_dir.name}/{bdir.name}",
+                "projects": [],
+            })
+    by_dir = {b["dir"]: b for b in boards}
+    by_name = {b["name"]: b for b in boards if b["name"]}
+    projects: list[str] = []
+    proj_root = repo / "ports" / "project"
+    try:
+        p_chip_dirs = sorted(p for p in proj_root.iterdir() if p.is_dir())
+    except OSError:
+        p_chip_dirs = []
+    for chip_dir in p_chip_dirs:
+        try:
+            pdirs = sorted(p for p in chip_dir.iterdir() if p.is_dir())
+        except OSError:
+            continue
+        for pdir in pdirs:
+            meta = _read_json_file(pdir / "project.json")
+            if not meta:
+                continue            # 未寫完／壞的 project 當唔存在（make.py 一樣）
+            name = pdir.name
+            if name not in projects:
+                projects.append(name)
+            hw = str(meta.get("hardware") or "")
+            board = by_dir.get(hw) or by_name.get(hw) or by_name.get(name)
+            if board is None:
+                continue
+            # default 慣例：project.json default:true，或者 project 同硬體板同名
+            default = bool(meta.get("default")) or board["name"] == name
+            board["projects"].append({"name": name, "default": default,
+                                      "seed": meta.get("seed") or []})
+    for board in boards:
+        board["projects"].sort(key=lambda p: (not p["default"], p["name"]))
+    return {"boards": boards, "projects": sorted(projects)}
+
+
+def _clean_build_arg(value: Any, field: str) -> str:
+    """board／project 參數驗證（唔用 shell 都照驗：唔想奇怪輸入走入 make.py）。"""
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    if text.startswith("-") or not BUILD_ARG_RE.match(text):
+        raise HTTPException(
+            status_code=400,
+            detail=f"{field} 格式唔啱：{text!r}（只准英數、._:-/，唔可以 - 開頭）")
+    return text
+
+
+def _artifact_meta(path: Path) -> dict:
+    repo = Path(REPO_ROOT)
+    try:
+        rel = path.resolve().relative_to(repo.resolve()).as_posix()
+    except (OSError, ValueError):
+        rel = str(path)
+    size = 0
+    try:
+        size = path.stat().st_size
+    except OSError:
+        pass
+    return {"path": rel, "size": size, "abs": path}
+
+
+def _find_artifact(lines: list[str], board: str, started: float) -> dict | None:
+    """由 build output／檔案時間找出最新 image（make.py 成功時印「產物 …」）。
+
+    次序＝可靠度：make.py 印的產物路徑 → 任何 artifacts/*.bin → 固定路徑 →
+    artifacts/ 下新過 build 開始時間的最新 .bin（archive 關掉時的兜底）。
+    """
+    repo = Path(REPO_ROOT)
+
+    def _is_app_bin(path: Path) -> bool:
+        """跳過 build 內部的 bootloader／分割表／ota_data，只認 app image。"""
+        low = path.name.lower()
+        return path.is_file() and low.endswith(".bin") and not any(
+            bad in low for bad in ("partition-table", "bootloader", "ota_data", "flash_args"))
+
+    # 最可靠：make.py 成功時自己印的「產物 …」行（只認這一行，避免 build log 內
+    # 的 `/artifacts/build/.../partition-table.bin` 被當成 artifact）。
+    for line in lines:
+        if "產物" not in line:
+            continue
+        match = _ARTIFACT_TOKEN_RE.search(line)
+        if not match:
+            continue
+        token = Path(match.group(1))
+        cand = token if token.is_absolute() else (repo / token)
+        if _is_app_bin(cand):
+            return _artifact_meta(cand)
+    for line in lines:
+        if "artifact" not in line.lower():
+            continue
+        match = _ARTIFACT_TOKEN_RE.search(line)
+        if not match:
+            continue
+        token = Path(match.group(1))
+        cand = token if token.is_absolute() else (repo / token)
+        if _is_app_bin(cand):
+            return _artifact_meta(cand)
+    for line in lines:
+        match = re.search(r"(?:^|[\s(（])(artifacts[/\\][^\s'\"，,]+\.bin)", line)
+        if match:
+            cand = repo / match.group(1).replace("\\", "/")
+            if cand.is_file():
+                return _artifact_meta(cand)
+    for rel in (f"artifacts/build/{board}/esp_net_core.bin",
+                f"artifacts/{board}/esp_net_core.bin",
+                f"artifacts/{board}.bin"):
+        cand = repo / rel
+        if cand.is_file():
+            return _artifact_meta(cand)
+    out_dir = repo / "artifacts"
+    try:
+        bins = [p for p in out_dir.glob("*.bin") if p.is_file()]
+    except OSError:
+        bins = []
+    fresh: list[Path] = []
+    for path in bins:
+        try:
+            if path.stat().st_mtime >= started - 2:
+                fresh.append(path)
+        except OSError:
+            continue
+    if fresh:
+        return _artifact_meta(max(fresh, key=lambda p: p.stat().st_mtime))
+    return None
+
+
+def _artifact_chip(artifact: str | None) -> str:
+    """由 archive 的 sidecar（<name>.bin → <name>.json）讀 chip。"""
+    if not artifact:
+        return ""
+    path = Path(REPO_ROOT) / str(artifact)
+    meta = _read_json_file(path.with_suffix(".json"))
+    chip = str(meta.get("chip") or meta.get("target") or "").strip().lower()
+    return chip
+
+
+def _chip_hint(repo: Path, board: str, project: str = "") -> str:
+    """可由 board／project 參數猜到晶片（artifact sidecar 缺失時用）。"""
+    query = (board or "").strip().lower()
+    proj = (project or "").strip().lower()
+    targets = _scan_build_targets(repo)
+    for item in targets["boards"]:
+        if query in (item["name"].lower(), item["dir"].lower()):
+            return item["chip"]
+    if proj:
+        for item in targets["boards"]:
+            for pj in item["projects"]:
+                name = pj["name"].lower()
+                if name == proj or name.endswith("-" + proj):
+                    return item["chip"]
+    return ""
+
+
+def _safe_artifact_path(path: str) -> Path:
+    """只准讀 `<repo>/artifacts` 入面的 .bin（防止 path traversal／誤讀其他檔）。"""
+    rel = str(path or "").strip()
+    if not rel:
+        raise HTTPException(status_code=400, detail="缺 path")
+    repo = Path(REPO_ROOT)
+    artifacts = (repo / "artifacts").resolve()
+    raw = Path(rel)
+    cand = raw if raw.is_absolute() else (repo / rel)
+    try:
+        resolved = cand.resolve()
+    except OSError:
+        raise HTTPException(status_code=400, detail=f"路徑錯：{rel}")
+    try:
+        resolved.relative_to(artifacts)
+    except ValueError:
+        raise HTTPException(status_code=400,
+                            detail="只准讀 repo/artifacts 入面嘅檔案")
+    if resolved.suffix.lower() != ".bin":
+        raise HTTPException(status_code=400, detail="只准 .bin")
+    if not resolved.is_file():
+        raise HTTPException(status_code=404,
+                            detail=f"冇呢個 artifact：{rel}（先 build）")
+    return resolved
 
 
 def create_app(sim_root: str | Path | None = None,
@@ -584,6 +879,150 @@ def create_app(sim_root: str | Path | None = None,
             raise HTTPException(status_code=504, detail=str(e))
         return {"ok": True, "data": res}
 
+    # ── 建置（repo 根 make.py；完整流程的第一站）────────────────────
+    @app.get("/api/build/info")
+    def api_build_info():
+        """可建咩：repo／make.py／IDF／boards／projects。只讀，唔會跑 build。"""
+        repo = Path(REPO_ROOT)
+        make_py = repo / "make.py"
+        targets = _scan_build_targets(repo)
+        idf, idf_source = _resolve_build_idf()
+        candidates = [{"path": str(path), "source": source,
+                       "exists": _looks_like_idf(path)}
+                      for path, source in _build_idf_candidates()]
+        return {"ok": True, "data": {
+            "repo": str(repo),
+            "makePy": "make.py",
+            "makePyExists": make_py.is_file(),
+            "python": sys.executable,
+            "timeout": BUILD_TIMEOUT,
+            "idfPath": str(idf) if idf is not None else None,
+            "idfSource": idf_source,
+            "idfCandidates": candidates,
+            "boards": targets["boards"],
+            "projects": targets["projects"],
+            "canBuild": bool(make_py.is_file() and idf is not None),
+            "lastBuild": state.last_build,
+        }}
+
+    @app.post("/api/build")
+    def api_build(body: dict | None = Body(None), x_actor: str = Header("")):
+        """跑 `make.py build <board> [--project …] [--tests] [--fresh]`。
+
+        回 `{ok, returncode, lines, artifact, size, elapsed, …}`。build 失敗都係
+        HTTP 200（`lines` 就係證據）；只有參數／make.py 缺失才 4xx。
+        """
+        data = body or {}
+        if not isinstance(data, dict):
+            raise HTTPException(status_code=400, detail="body 要係 JSON object")
+        board = _clean_build_arg(data.get("board_query") or data.get("board"),
+                                 "board")
+        project = _clean_build_arg(data.get("project"), "project")
+        if not board:
+            raise HTTPException(
+                status_code=400,
+                detail="缺 board（板名／project 名／<chip>/<board>）")
+        tests = bool(data.get("tests"))
+        fresh = bool(data.get("fresh"))
+        repo = Path(REPO_ROOT)
+        make_py = repo / "make.py"
+        if not make_py.is_file():
+            raise HTTPException(status_code=400,
+                                detail=f"搵唔到 {make_py}（repo 根要有 make.py）")
+
+        cmd = [sys.executable, str(make_py), "build", board]
+        if project:
+            cmd += ["--project", project]
+        if tests:
+            cmd.append("--tests")
+        if fresh:
+            cmd.append("--fresh")
+
+        # IDF_PATH：由 IDF_PATH 環境變數／settings／慣例目錄揀第一個似 IDF 的。
+        # make.py 內部的 export_prefix 會自己砌 PATH，所以呢度只需要 IDF_PATH。
+        child_env = dict(os.environ)
+        idf, _idf_source = _resolve_build_idf()
+        if idf is not None:
+            child_env["IDF_PATH"] = str(idf)
+        child_env.setdefault("PYTHONIOENCODING", "utf-8")
+        child_env["PYTHONUTF8"] = "1"        # 子進程 output 用 UTF-8（Windows cp950 會爛）
+
+        if not state.build_lock.acquire(blocking=False):
+            raise HTTPException(status_code=409,
+                                detail="已經有 build 喺跑，等佢完先")
+        started = time.time()
+        timed_out = False
+        try:
+            try:
+                proc = subprocess.run(
+                    cmd, cwd=str(repo), env=child_env,
+                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                    text=True, encoding="utf-8", errors="replace",
+                    timeout=BUILD_TIMEOUT,
+                )
+                returncode = int(proc.returncode)
+                output = proc.stdout or ""
+            except subprocess.TimeoutExpired as exc:
+                timed_out = True
+                returncode = -1
+                output = (_as_text(getattr(exc, "stdout", ""))
+                          + _as_text(getattr(exc, "stderr", "")))
+                output += f"\n✘ 建置超過 {BUILD_TIMEOUT:.0f}s，已中止。\n"
+            except OSError as exc:
+                returncode = -2
+                output = f"✘ 執行 make.py 失敗：{exc}\n"
+        finally:
+            state.build_lock.release()
+
+        elapsed = round(time.time() - started, 2)
+        lines = output.splitlines()
+        truncated = False
+        if len(lines) > BUILD_MAX_LINES:
+            lines = lines[-BUILD_MAX_LINES:]
+            truncated = True
+            lines.insert(0, f"（只顯示最後 {BUILD_MAX_LINES} 行）")
+        artifact = _find_artifact(lines, board, started) if returncode == 0 else None
+        chip = _artifact_chip(artifact["path"] if artifact else None)
+        if not chip:
+            chip = _chip_hint(repo, board, project)
+        result = {
+            "ok": returncode == 0,
+            "returncode": returncode,
+            "lines": lines,
+            "truncated": truncated,
+            "artifact": artifact["path"] if artifact else None,
+            "size": int(artifact["size"]) if artifact else 0,
+            "elapsed": elapsed,
+            "timeout": timed_out,
+            "maxLines": BUILD_MAX_LINES,
+            "board": board,
+            "project": project or None,
+            "chip": chip,
+            "repo": str(repo),
+            "idf": str(idf) if idf is not None else None,
+            "cmd": cmd,
+        }
+        state.last_build = {
+            "board": board, "project": project or None, "tests": tests,
+            "fresh": fresh, "ok": result["ok"], "returncode": returncode,
+            "artifact": result["artifact"], "size": result["size"],
+            "chip": chip, "elapsed": elapsed, "timeout": timed_out,
+            "at": time.time(),
+        }
+        state.activity(x_actor or "ui", "build",
+                       board=board, project=project or None, tests=tests,
+                       fresh=fresh, ok=result["ok"], returncode=returncode,
+                       artifact=result["artifact"], elapsed=elapsed)
+        return result
+
+    @app.get("/api/build/artifact")
+    def api_build_artifact(path: str = Query(...)):
+        """把 build 出的 .bin 回給瀏覽器（一鍵 OTA：fetch blob → POST /api/firmware）。"""
+        file_path = _safe_artifact_path(path)
+        return FileResponse(file_path, media_type="application/octet-stream",
+                            filename=file_path.name,
+                            headers={"Cache-Control": "no-store"})
+
     # ── 共享 log／activity（Web UI 與 AI 同一份）──
     def _events_of(device: str):
         if device:
@@ -636,6 +1075,10 @@ def create_app(sim_root: str | Path | None = None,
                 {"method": "POST", "path": "/api/reboot"},
                 {"method": "POST", "path": "/api/cmd", "body": {"cmd": "0x1101", "payload_hex": ""}},
                 {"method": "POST", "path": "/api/firmware?apply=1&expect_chip=esp32s3", "body": "app bin"},
+                {"method": "GET", "path": "/api/build/info"},
+                {"method": "POST", "path": "/api/build", "body": {"board": "ESP32-S3-Matrix", "project": "ESP32-S3-Matrix-Show", "tests": False, "fresh": False}},
+                {"method": "GET", "path": "/api/build/artifact?path=artifacts/ESP32-S3-Matrix.bin"},
+                {"method": "POST", "path": "/api/cmd", "body": {"cmd": "0xF06B", "payload_hex": "", "expect": ["0xF06C"], "timeout": 5}},
                 {"method": "GET", "path": "/api/flash/info?chip=esp32p4&before=usb_reset"},
                 {"method": "POST", "path": "/api/flash/esptool?offset=0x0&baud=460800&chip=esp32p4&before=usb_reset", "body": "bin"},
                 {"method": "GET", "path": "/api/container?path=/tasks/x.nct"},
@@ -658,7 +1101,8 @@ def create_app(sim_root: str | Path | None = None,
             quiet = {"/api/log/tail", "/api/activity", "/api/info", "/api/ports",
                      "/api/commands", "/api/ai", "/api/cmd", "/api/log/note",
                      "/api/format", "/api/scripts/one"}
-            skip_mut = path in {"/api/cmd", "/api/log/note", "/api/flash/esptool"}
+            skip_mut = path in {"/api/cmd", "/api/log/note", "/api/flash/esptool",
+                                "/api/build"}
             watch = (mutating and not skip_mut) or (actor_hdr == "ai" and path not in quiet)
             if path.startswith("/api/") and watch:
                 actor = actor_hdr or ("ui" if request.headers.get("referer") else "api")

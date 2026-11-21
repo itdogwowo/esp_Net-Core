@@ -380,6 +380,23 @@ static bool parse_play_loop(nc_px_js_t *j, int16_t *out)
     return true;
 }
 
+// white／white_mix：0..100。缺欄位 = 0（舊 JSON 相容）；超範圍（>100 或負數）唔令
+// 整份 mode 壞，只係保持 0 —— 白混合係顯示效果，唔應該因為一個數字就打沉個 mode。
+// 注意 nc_px_js_num() 對 RANGE 已經行過 cursor，所以 RANGE 之後唔可以再 skip。
+static bool parse_white(nc_px_js_t *j, uint8_t *out)
+{
+    uint32_t v = 0;
+    const nc_px_jnum_t r = nc_px_js_num(j, 100, &v);
+    if (r == NC_PX_JSN_OK) {
+        *out = (uint8_t)v;
+        return true;
+    }
+    if (r == NC_PX_JSN_RANGE) {
+        return true;                      // 數字但超範圍（>100／負）→ 保持 0
+    }
+    return nc_px_js_skip(j);              // 唔係數字（字串／null…）→ 跳過
+}
+
 esp_err_t nc_px_mode_parse(const char *json, size_t len, nc_px_mode_t *out)
 {
     if (json == NULL || out == NULL) {
@@ -428,6 +445,10 @@ esp_err_t nc_px_mode_parse(const char *json, size_t len, nc_px_mode_t *out)
                 if (nc_px_js_num(&j, 65535, &v) == NC_PX_JSN_OK) {
                     out->maxF = (uint16_t)v;
                 } else if (!nc_px_js_skip(&j)) {
+                    return ESP_ERR_INVALID_ARG;
+                }
+            } else if (strcmp(key, "white") == 0 || strcmp(key, "white_mix") == 0) {
+                if (!parse_white(&j, &out->white)) {
                     return ESP_ERR_INVALID_ARG;
                 }
             } else if (strcmp(key, "map") == 0) {

@@ -19,7 +19,14 @@ function switchView(name) {
     else { renderCrumb(state.cwd); renderFiles(entriesFor(state.cwd)); }
   }
   if (name === "drive" && state.driveRoot) loadDrive(state.drivePath);
-  if (name === "flash") bfRefresh();
+  if (name === "flash") {
+    bfRefresh();
+    // Build 卡：入頁時讀一次 /api/build/info（板／project 清單）
+    if (typeof BuildApi !== "undefined" && BuildApi.loadInfo) BuildApi.loadInfo(true);
+  }
+  if (name === "mode" && typeof ModeSim !== "undefined" && ModeSim.onShow) {
+    ModeSim.onShow();
+  }
   if (name === "env") envLoad();
   if (name === "ide") {
     const cm = ideEnsureCM();

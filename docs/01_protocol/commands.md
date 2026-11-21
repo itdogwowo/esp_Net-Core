@@ -251,6 +251,8 @@ components/action/
 | `0xF065` EFBENCH | `[px:u16 LE][frames:u16 LE]`（frames=0 按 px 自動）→ **`0xF066`** `{px,fr,rep,nv,mem:{c8i,c8p,c12i,c12p,ifree,pfree},eval_ns,vals_ns,pair8,pair12,conv,pipe:{i8,p8,i12,p12,mix},chunk:{64,256,1024},jobs:{j2,j4}}`。**只測效果管線**：program 逐值／逐幀、8／12-bit 配對、12→8 捨入／抖動、internal／PSRAM／混合、分塊、多 job。`CONFIG_NETCORE_EFFECT_BENCH`（不需要 `NC_ENABLE_TESTS`）；見 [effect-perf.md](../00_pm/effect-perf.md) |
 | `0xF067` PSRAMBENCH | `[size_kb:u16 LE][iters:u16 LE]`（預設 256 KB、8 次，夾 16..1024 KB、1..32）→ **`0xF068`** `{size,it,ok,int:{wr,rd,cp},psram:{wr,wr_cold,rd,rd_cold,cp},mix:{i2p,p2i,p2p},chunk:{1k,4k,16k,64k},msync_us:{c2m,m2c},msync_err}`（全部 MiB/s）。大 buffer 留 PSRAM、以 chunk 讀入 internal 的純搬運量測；`CONFIG_NETCORE_EFFECT_BENCH`；見 [effect-perf.md §9](../00_pm/effect-perf.md#L268) |
 | `0xF069` PIPEBENCH | `[px:u16 LE][frames:u16 LE][mode:u8]`（mode 0=1 值/px wwww、1=3 值/px rgb、2=1 值/px w）→ **`0xF06A`** `{px,nv,mode,fr,rep,gen_us,pair_us:{range,table,rnd},conv_us,full_us:{range,table,rnd,ps},mem}`（µs）。9,600 個效果值→配對→12→8 的全流程；RGBW→I80 不在內。`CONFIG_NETCORE_EFFECT_BENCH`；見 [effect-perf.md §10](../00_pm/effect-perf.md#L315) |
+| `0xF06B` SHOWFRAME | 無參數 → **`0xF06C`** `{px,seq,mode,white,apply_us,hex}`（0xF06B 最近一幀 4 B/px hex；`nodata`／`big`）。production Show 的 live frame；`show` 指令表。見 [show-pipeline.md](../00_pm/show-pipeline.md) |
+| `0xF06D` SHOWMODE | `[mode_id:u8]` → **`0xF06E`** `{ok,queued,mode,white}`；排隊切換 mode，show loop 喺下一幀邊界 rebuild plan（唔會同 decode task 同時改 plan）。見 [show-pipeline.md](../00_pm/show-pipeline.md) |
 
 > ⚠️ 新增測試指令之前先查号：**指令碼重複時只會保留先登記的那一個**（`nc_action_init()`
 > 會在開機 `ESP_LOGE` 並丟棄後來者）。登記次序是 core →（測試的 bench／SD）→ test_action

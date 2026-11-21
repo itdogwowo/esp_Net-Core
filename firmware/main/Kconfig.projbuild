@@ -128,6 +128,25 @@ menu "esp_Net-Core"
 
             量產映像預設關閉。
 
+    config NETCORE_SHOW
+        bool "檔案驅動 show 任務（/data/pixel 四層：effects／map／modes／registry）"
+        depends on NETCORE_PIXEL
+        default n
+        help
+            加入 production 的「檔案驅動 show」生產者任務（任務名 `show`）：
+            開機由 `nc_px_layer_load_all(<fs_base>/pixel)` 載入四層資料 →
+            registry list 第一個 mode → mode.mapping → map → plan；
+            每幀 `nc_px_show_frame()` 合成 → white mix（mode 的 white 0..100）→
+            寫入 render 任務的 prd 環。另加一條 0xF06B SHOWFRAME（回 0xF06C）
+            把最近一幀 4 B/px 以 hex 回覆，給 Web UI 預覽。
+
+            這一支唔屬於 NC_ENABLE_TESTS，也不會取代 pixel_task：
+            哪一個當生產者由 project 的 `data/config/tasks.json` 決定
+            （例如 `ESP32-S3-Matrix-Show`：render＋show 開、pixel 關）。
+
+            內容缺失（/data/pixel 未上傳）時只 log warning 並填黑，
+            不會讓開機失敗。量產映像預設關閉。
+
     config NETCORE_PIXEL_LEDS
         int "每道 lane 的燈數"
         depends on NETCORE_PIXEL

@@ -199,14 +199,16 @@ UI 用同一套判斷（`/api/ports` 的 `board`／`suggested`）：真板有 **
 | ⚙ 設備 | sys / storage / log；接管／交還 FAT、重建 FAT、除錯 log、重啟 |
 | **⌨ IDE** | **檔案頁已併入這裡**：樹狀總管＋多 tab＋CodeMirror（JSON/C/Python/XML/Markdown/Shell）＋JSON lint／格式化／主題；開檔／新檔／拖拉上載／下載／刪除／確認／復原／FILE_SCAN |
 | 💾 隨身碟 | 可選（有 USB 的板）：交還 FAT → 揀電腦上嘅碟 → 直接拖拉／編輯 → 接管 FAT |
-| 🔥 固件 | **三條燒錄路徑**：① NC4 OTA ② server 側 ESPTOOL（ROM／USJ）③ **頁面燒錄（esptool-js／Web Serial）**；晶片探測、offset／baud／erase／flashMode／flashFreq／flashSize |
+| 🔥 固件 | **建置＋三條燒錄路徑**：第 0 卡 **Build**（repo 根 `make.py build`：板／project／`--tests`／`--fresh`，輸出即時睇，成功一鍵 OTA）；① NC4 OTA ② server 側 ESPTOOL（ROM／USJ）③ **頁面燒錄（esptool-js／Web Serial）**；晶片探測、offset／baud／erase／flashMode／flashFreq／flashSize |
+| 🧩 模式 | **四層合成預覽**（registry→mode→map→effect）＋**8×8 燈泡模擬器**（64 px RGBW＋white mix）＋**Show 全流程**（載入 `/pixel`→預覽→Build→OTA→讀 device frame） |
+| 🌊 波形 | 六工具波形模擬器：即時預覽 `effects.json` program／段編輯／存回裝置 |
 | ⌨ 指令 | 任意 NC4 cmd + hex payload + expect；底部 `>>>` 快速指令 |
 | ⚙ **環境** | **doctor＋一鍵補齊**：開機自動檢查一次；列出 11 項工具（缺咗有咩後果、點補）、5 種「能力」（開 server／NC4 OTA／server esptool／頁面燒錄／建置 firmware）；可一鍵跑官方安裝（`deps`／`esptool`／`ESP-IDF`），輸出即時串流。 |
 | 📦 容器 | 在 IDE 檔案樹打開 `.nct`／`.nce`／`.nca` 會顯示**容器檢視器**（唔開二進位編輯器）：檔頭／manifest（kind、target、core、layer、prio、fps、px、mem、stack、budget）／meta（name、desc、usage、requires、provides）／宣告指令／payload CRC／原始位元組。 |
 
 ## 前端結構（`static/js/`，零 build step）
 
-UI 拆成 15 個模組，用傳統 `<script>` 按次序載入（唔用 ES module、唔需要打包）。
+UI 拆成 18 個模組，用傳統 `<script>` 按次序載入（唔用 ES module、唔需要打包）。
 **載入次序＝檔案名數字**：`00-core` 一定第一，`99-app` 最後。
 
 ```text
@@ -221,6 +223,7 @@ static/
    ├─ 40-files.js       manifest、上傳／下載／刪除（CDC FAT）
    ├─ 50-drive.js       隨身碟（MSC 捷徑）
    ├─ 60-flash.js       NC4 OTA ＋ server 側 ESPTOOL
+   ├─ 61-build.js       Build API（make.py build）＋一鍵 OTA（BuildApi）
    ├─ 65-browser-flash.js 頁面燒錄（esptool-js／Web Serial）＋序列埠交接
    ├─ 66-flash-request.js  AI 請求燒錄：橫幅、claim、執行、回報
    ├─ 70-console.js     NC4 console、快速指令、parseStatusAck／statusSet
@@ -228,6 +231,8 @@ static/
    ├─ 80-ide.js         IDE：檔案樹、多 tab、CodeMirror、lint、格式化
    ├─ 85-container.js   NCM 容器檢視器（.nct／.nce／.nca）
    ├─ 90-env.js         環境頁（doctor＋安裝進度）
+   ├─ 95-wave.js        波形模擬器（六工具合成）
+   ├─ 96-mode.js        模式預覽＋8×8 燈泡模擬器＋讀 device frame（0xF06B）
    └─ 99-app.js         init、deep link、鍵盤快捷鍵
 ```
 
@@ -252,6 +257,47 @@ curl -s http://127.0.0.1:8011/api/scripts | python -m json.tool | head -30
 # → 分類（webmaster/build/device/ai）× 平台 × 摘要 × 指令
 ```
 
+## 建置固件（Build API，`#flash` 第 0 卡）
+
+完整流程係「改 `/pixel` → build → OTA → 睇燈」。build 一定要喺 repo 根跑
+`make.py`（板子真相喺 `ports/`、project 喺 `ports/project/`），所以由 server
+開子進程：**唔用 `shell=True`**，Windows／macOS／Linux 都係
+`sys.executable make.py build …`，cwd＝repo 根、timeout 600s。
+
+| API | 作用 |
+|---|---|
+| `GET /api/build/info` | repo／make.py 存在／IDF 路徑＋候選／boards／projects／上次 build |
+| `POST /api/build` | body `{board, project?, tests?, fresh?, board_query?}` → `{ok, returncode, lines, artifact, size, elapsed, timeout, chip, cmd}` |
+| `GET /api/build/artifact?path=…` | 讀 `repo/artifacts/*.bin`（一鍵 OTA 用；只准 artifacts 內 `.bin`，擋 path traversal） |
+
+```bash
+# 可建咩（唔會 build，快）
+curl -s http://127.0.0.1:8011/api/build/info | python -m json.tool
+
+# build：S3 Matrix 的 Show project（最長 600s；artifact 係 repo 相對路徑）
+curl -s -X POST http://127.0.0.1:8011/api/build \
+  -H 'Content-Type: application/json' -H 'X-Actor: ai' \
+  -d '{"board":"ESP32-S3-Matrix","project":"ESP32-S3-Matrix-Show","fresh":false}' \
+  | python -c "import json,sys; d=json.load(sys.stdin); print(d['ok'], d['returncode'], d['artifact'], d['size'], d['elapsed'])"
+
+# 一鍵 OTA：拿 artifact → POST 現有 /api/firmware（binary body）
+curl -s "http://127.0.0.1:8011/api/build/artifact?path=artifacts/ESP32-S3-Matrix-Show.bin" -o /tmp/fw.bin
+curl -s -X POST "http://127.0.0.1:8011/api/firmware?apply=1&expect_chip=esp32s3" \
+  -H 'Content-Type: application/octet-stream' -H 'X-Actor: ai' --data-binary @/tmp/fw.bin
+```
+
+- `IDF_PATH` 解析次序：`IDF_PATH` 環境變數 → `settings.local.json` 的
+  `env.idf_dir` → `~/esp/esp-idf` → `<repo>/.idf/esp-idf`。子進程 env 會帶住；
+  另外加 `PYTHONUTF8=1`（Windows cp950 唔會爛輸出）。
+- 輸出：`stdout`＋`stderr` 合併（保留次序），`lines` 上限 4000 行（超過會截前面）。
+- build **失敗唔係 HTTP error**：照回 200 + `ok:false` + `lines`（同 make.py 一樣，
+  UI 直接顯示）；只有參數錯／make.py 缺失／已有 build 喺跑才 4xx。
+- 同一時間只准一個 build（第二個 → 409）。結果記入 `state.last_build`，
+  `/api/build/info` 會帶返出嚟，UI refresh 都知上次 build 咩事。
+- UI「OTA 剛建好的 image」＝ `GET /api/build/artifact` 拿 blob →
+  `POST /api/firmware`（`apply` 跟固件頁 checkbox；`expect_chip` 用 sidecar 的 chip）。
+- **唔會改 firmware／唔會跑喺瀏覽器**：所有檔案系統／子進程都係 server 側。
+
 ## 模式預覽（四層合成，`#mode`）
 
 pixel 子系統係**四層**，唔好混：
@@ -273,6 +319,39 @@ pixel 子系統係**四層**，唔好混：
 
 > **限制**：離線預覽假設「群組 = 整條鏈、順序排列」（硬件 controller 數量在板上面）。
 > 多 controller／跳線的實際 offsets 要連板用 `pixel_layout` 的 controller 表才知。
+
+### 8×8 燈泡模擬器＋white mix
+
+同一頁再落有 **8×8 圓形燈泡**（canvas `#modeMatrix`，64 px＝8×8）：
+
+- 用上面 `composeFrame()` 的 64 px RGBW 畫；黑底＋燈座＋可選 glow（`#modeGlow`）。
+- `White mix` 滑桿 `#modeWhite` 0..100（**預設 80**）：
+  `out = out*(100-w)/100 + 255*w/100`，**R/G/B/W 四通道都做**（同 firmware）。
+  w=0 = 純效果；w=80 = 80% 白＋20% 效果（接近實機睇到的白）。
+- 顯示係 RGBW→RGB（W 併入三色）；1D strip（`#modeStrip`）保留、用同一份 frame。
+- **讀取裝置 frame**（`#btnModeRead`）：`POST /api/cmd`
+  `{"cmd":"0xF06B","payload_hex":"","expect":["0xF06C"],"timeout":5}`，回覆 JSON
+  `{"px":64,"seq":N,"hex":"…512 hex…"}` → 每 4 B 一顆（R,G,B,W）畫**實際** frame。
+  firmware 未支援就只出 toast＋`modeFrameInfo` 顯示失敗，唔會 crash。
+
+```bash
+# 讀 firmware 最近一幀（64 px × 4 B = 512 hex）
+curl -s -X POST http://127.0.0.1:8011/api/cmd -H 'Content-Type: application/json' \
+  -d '{"cmd":"0xF06B","payload_hex":"","expect":["0xF06C"],"timeout":5}'
+```
+
+### Show 全流程卡（`#mode`）
+
+「載入 `/pixel` → 8×8 預覽 → Build → OTA → 讀 device frame」一卡走完：
+
+1. **載入 /pixel**：同「載入裝置 pixel 樹」（manifest → modes／map／effects／registry）
+2. **預覽 8×8**：即時用合成 frame（white mix 跟滑桿）
+3. **Build**：`POST /api/build`（板／project 用固件頁 Build 卡揀的）——唔使跳頁
+4. **OTA**：`GET /api/build/artifact` → `POST /api/firmware`（需要已連線）
+5. **讀 device frame**：`0xF06B` 讀 firmware 實際送出的 64 px
+
+`flowLog` 會逐步寫低每一步（成功／失敗都唔會斷）。只想手動做，固件頁第 0 卡
+一樣有齊 Build／OTA；兩邊共用同一份 `BuildApi`（`61-build.js`）。
 
 ## 波形模擬器（六工具合成，`#wave`）
 

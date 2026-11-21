@@ -117,7 +117,9 @@ esp_err_t nc_px_map_scan(const char *dir)
             s_maps.rejected++;
             continue;
         }
-        nc_px_map_t m;
+        // map 結構 2.6 KB、mode 0.6 KB；on_start 由 main task（3–8 KB 棧）呼叫，
+        // 放棧會爆。掃描只在開機／換場做，單執行緒 → static 安全。
+        static nc_px_map_t m;
         const esp_err_t r = nc_px_map_parse(txt, len, &m);
         free(txt);
         if (r != ESP_OK) {
@@ -191,7 +193,7 @@ esp_err_t nc_px_mode_scan(const char *dir)
             s_modes.rejected++;
             continue;
         }
-        nc_px_mode_t m;
+        static nc_px_mode_t m;
         const esp_err_t r = nc_px_mode_parse(txt, len, &m);
         free(txt);
         if (r != ESP_OK) {

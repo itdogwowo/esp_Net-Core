@@ -44,9 +44,16 @@ def test_report_never_installs(monkeypatch):
     assert not called
 
 
-def test_build_ready_requires_idf(monkeypatch):
-    """冇 IDF → build_firmware=False；但燒錄能力唔受影響。"""
+def test_build_ready_requires_idf(workdir, monkeypatch):
+    """冇 IDF → build_firmware=False；但燒錄能力唔受影響。
+
+    注意：`_check_idf()` 仲會 fallback 去 `default_idf_dir()`（例如這台機真的
+    裝了 ~/esp/esp-idf）。測試要 hermetic，所以連佢都指去一個唔存在的位置，
+    否則「有 IDF 的機器」會 fail、「冇 IDF 的 CI」pass。
+    """
+    no_idf = workdir / "no-idf"
     monkeypatch.setattr(env, "_idf_candidates", lambda: [])
+    monkeypatch.setattr(env, "default_idf_dir", lambda: no_idf)
     monkeypatch.setattr(env, "_check_toolchain",
                         lambda: {"id": "idf_toolchain", "status": "missing"})
     r = env.report()

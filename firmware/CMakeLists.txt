@@ -122,7 +122,10 @@ set(_nc_extra_dirs
     # effect_bench：純效果效能（0xF065）。**不是** test_* 測試元件 ——
     # 由 CONFIG_NETCORE_EFFECT_BENCH 開關，release 映像也可以有；
     # CONFIG 關閉時 .c 內容為空、不登記任何指令／任務。
-    "${CMAKE_CURRENT_LIST_DIR}/components/tasks/effect_bench")
+    "${CMAKE_CURRENT_LIST_DIR}/components/tasks/effect_bench"
+    # show_task：production 的「檔案驅動 show」生產者（/data/pixel 四層 + 0xF06B）。
+    # 同樣由 CONFIG_NETCORE_SHOW 開關，CONFIG 關閉時 .c 內容為空、不登記任何東西。
+    "${CMAKE_CURRENT_LIST_DIR}/components/tasks/show_task")
 # 外部任務宿主（ncm）。NC_ENABLE_NCM=OFF 時連 component 都唔加入 →
 # 唔編譯、唔 link、唔 fetch WAMR 依賴（components/host/ncm/idf_component.yml）。
 # 注意：一定要放喺 components 之下第二層（components/*/ncm）—— IDF 會自動把

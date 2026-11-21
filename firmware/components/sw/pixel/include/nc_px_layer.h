@@ -88,6 +88,11 @@ typedef struct {
     char               mapping[NC_PX_LAYER_NAME_MAX];  // mode 預設 mapping（可空）
     int16_t            play_loop;            // -1 = 無限
     uint16_t           maxF;                 // 0 = 唔限
+    // 白混合（production Show 用）：0..100；JSON `"white"` 或 `"white_mix"`。
+    // 缺欄位 = 0（舊 JSON 完全相容）。逐幀對四個通道做
+    //   out = (out*(100-w) + 255*w) / 100
+    // 即 w=80 → 「80% 白 ＋ 20% 效果」。由生產任務（show_task）套用，唔關渲染器事。
+    uint8_t            white;
     uint8_t            nentry;
     nc_px_mode_entry_t entry[NC_PX_MODE_ENTRY_MAX];
 } nc_px_mode_t;
