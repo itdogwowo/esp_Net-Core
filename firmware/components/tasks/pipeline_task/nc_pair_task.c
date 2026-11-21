@@ -74,7 +74,7 @@ typedef struct {
     bool           fallback;    // 載入／plan 失敗 → 每幀填黑
     nc_pixel_q_t  *q;           // render 建立的 prd 環（NULL = render 未起）
     uint32_t       px;          // 環的 px（= inventory 的 px）
-    uint8_t       *canvas;      // px × 4（internal heap）；fallback/未 ready 時可為 NULL
+    uint8_t       *canvas;      // px × 4（固定 PSRAM）；fallback/未 ready 時可為 NULL
     uint32_t       step;        // 逐幀遞增的全域步數（動畫時間）
     uint8_t        white;       // 0..100；mode JSON 的 white／white_mix
     uint32_t       commits;     // 成功提交的幀數（= 0xF06B 的 seq）
@@ -464,12 +464,9 @@ static esp_err_t content_apply_mode_locked(const nc_px_mode_t *mode)
         return ESP_ERR_NOT_FOUND;
     }
 
-    // canvas：固定政策；不做「internal 失敗才退 PSRAM」。
-#if CONFIG_NETCORE_PIPE_CANVAS_PSRAM
+    // 單一服務流程：content/pair canvas 永遠 PSRAM，無論 LED 數。
+    // 不是 size-based 分支，也不做 internal fallback；所有 project 走同一條。
     const uint32_t canvas_caps = MALLOC_CAP_SPIRAM;
-#else
-    const uint32_t canvas_caps = MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT;
-#endif
     if (s_content.canvas == NULL) {
         s_content.canvas = (uint8_t *)heap_caps_malloc((size_t)s_content.px * NC_PX_BPP,
                                                        canvas_caps);

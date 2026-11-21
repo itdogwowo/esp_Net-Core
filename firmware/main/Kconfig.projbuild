@@ -148,14 +148,6 @@ menu "esp_Net-Core"
             內容缺失（/data/pixel 未上傳）時只 log warning 並填黑，
             不會讓開機失敗。量產映像預設關閉。
 
-    config NETCORE_PIPE_CANVAS_PSRAM
-        bool "content/pair canvas 固定放 PSRAM（大資料；不做 internal fallback）"
-        depends on NETCORE_CONTENT
-        default n
-        help
-            固定記憶體政策：關閉 = 8-bit pair canvas 永遠 internal；開啟 = 永遠
-            PSRAM。大畫面（例如 9,600 px）請明確開啟；不要靠 free heap 動態選。
-
     config NETCORE_PIXEL_LEDS
         int "每道 lane 的燈數"
         depends on NETCORE_PIXEL

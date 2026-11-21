@@ -672,21 +672,22 @@ per-source queue／MPSC（記憶體換鎖）；今次只量、未改。
 
 | 類別 | 位置 | 例子 | 規則 |
 |---|---|---|---|
-| HOT | internal SRAM | plan、asset、wave table、offset table、8-bit 64 px canvas | 永遠 internal；失敗就報錯，不 fallback |
-| BULK | PSRAM | 9,600 px canvas、12-bit canvas、大 packed 波形、JSON 大檔 | 永遠 PSRAM；失敗就報錯，不 fallback |
+| HOT | internal SRAM | plan、asset、wave table、offset table | 永遠 internal；失敗就報錯，不 fallback |
+| BULK | PSRAM | **content/pair canvas（任何 LED 數）**、I80 packed 波形、12-bit canvas、大 JSON | 永遠 PSRAM；失敗就報錯，不 fallback |
 | DMA | internal／DMA-capable | I80 真正 DMA 讀的 buffer | 由 DMA 能力決定，不做 heap 妥協 |
 
 實作開關（**build-time，不是 runtime**）：
 
 ```ini
-# 大畫面（9,600 px）
-CONFIG_NETCORE_PIPE_CANVAS_PSRAM=y
+# Show 的所有 LED 數都走同一條 PSRAM 服務路徑
 CONFIG_NETCORE_PIXEL_PACK_PSRAM=y
 ```
 
-- `CONFIG_NETCORE_PIPE_CANVAS_PSRAM=n`：pair canvas 永遠 internal（64 px 用）。
-- `=y`：pair canvas 永遠 PSRAM（9,600 px 用），沒有「internal 失敗才退 PSRAM」。
-- `CONFIG_NETCORE_PIXEL_PACK_PSRAM` 同理，管 I80 packed 波形。
+- **content/pair canvas 已硬編碼永遠 PSRAM**，不再有 `NETCORE_PIPE_CANVAS_PSRAM`
+  的 internal/PSRAM 分支；64 px、9,600 px 都走同一條。
+- `CONFIG_NETCORE_PIXEL_PACK_PSRAM` 管 I80 packed 波形；Show project 固定 `y`，
+  所有 LED 數一致。
+- 沒有「大畫面才 PSRAM、細畫面 internal」這種 size-based policy。
 - `nc_buf` 的 `where=S/P/DMA` 仍然是唯一 buffer 工具；本政策只決定**每個 buffer
   屬於哪一類**，不是每次 allocation 重新猜。
 

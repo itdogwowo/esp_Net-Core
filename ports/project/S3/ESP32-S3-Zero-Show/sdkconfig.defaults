@@ -13,3 +13,6 @@ CONFIG_NETCORE_PXBENCH=n
 
 # pair 的 on_start 會解析 map／mode；main task 的 3,072 B 不夠。
 CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
+
+# 單一流程：Show 的 I80 packed 波形固定 PSRAM（所有 LED 數一致）。
+CONFIG_NETCORE_PIXEL_PACK_PSRAM=y

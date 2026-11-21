@@ -6173,13 +6173,11 @@ pair_us: range=4.895ms, random12=19.968ms, packed12=20.600ms, random8=0.970ms
 用家要求：不要「智能」按 free heap 動態選 internal／PSRAM；固定一套使用方法，
 大資料直接 PSRAM。已改成 **build-time 固定政策**：
 
-- `CONFIG_NETCORE_PIPE_CANVAS_PSRAM`（default n）：pair 8-bit canvas
-  - n → 永遠 internal；y → 永遠 PSRAM；**沒有 fallback**。
-- `CONFIG_NETCORE_PIXEL_PACK_PSRAM`（default n）：I80 packed 波形
-  - n → 永遠 internal；y → 永遠 PSRAM；**沒有 fallback**。
-- 64 px Zero：兩個都 n（HOT internal）。
-- 9,600 px project：兩個都 y（BULK PSRAM）；allocation 失敗就 task 失敗／log，
-  不會偷偷改位置。
+- **content/pair canvas 已硬編碼永遠 PSRAM**（任何 LED 數都同一條路徑），
+  沒有 `NETCORE_PIPE_CANVAS_PSRAM` 分支。
+- `CONFIG_NETCORE_PIXEL_PACK_PSRAM`：Show project 固定 `y`，I80 packed 波形
+  所有 LED 數都用 PSRAM。
+- 64 px Zero 也走 PSRAM；allocation 失敗就 task 失敗／log，不會偷偷改位置。
 - `NETCORE_PIXEL_LEDS` range 由 2048 擴到 16384（9,600 必要）。
 - wave table：固定 internal，plan 時建一次；OOM 才 fallback interpreter（極少數，
   屬錯誤路徑，不是正常性能路徑）。
@@ -6268,3 +6266,48 @@ host 20 套全綠、Web 296 passed。
   full cached8(internal) 4.409–4.426；mem 三次一致。
 - 功能：0xF06D color/breathe、0xF06F reload 成功；app `431e1cb5`、image 705,584 B。
 - Web 296 tests、host 20 套全綠。
+
+
+### 7.169 2026-11-22（單一服務流程：任何 LED 數都經 PSRAM）
+
+依用家要求改為**一條固定流程**，不再按 LED 數／free heap 選 internal 或 PSRAM：
+
+- `content/pair` canvas：**永遠 PSRAM**（hardcode，無 Kconfig 分支）。
+- Show 的 I80 `packed` 波形：**永遠 PSRAM**（Show project 固定
+  `CONFIG_NETCORE_PIXEL_PACK_PSRAM=y`）。
+- HOT internal 只保留 plan／asset／wave table／offset table，不再包括 64 px canvas。
+- 64 px 與 9,600 px 走同一條 `effect → pair(PSRAM canvas) → render(PSRAM packed)`
+  流程，只有 buffer 大小不同。
+
+**64 px 全 PSRAM 真機重測**（app `d6837876`、image 705,568 B）：
+
+| 段 | avg | max |
+|---|---:|---:|
+| effect | **8 µs** | 23 µs |
+| pair | **35 µs** | 86 µs |
+| ├ apply | 25 µs | 47 µs |
+| ├ white | 1 µs | 3 µs |
+| └ commit | 9 µs | 36 µs |
+| render encode | 363 µs | — |
+| render tx | 24 µs | — |
+| render fps | 50.0 | — |
+
+Burn 2 s：effect 55,656 幀（~18,500 fps）、avg6 µs；pair 257 幀（ring 限流）；
+render 50 fps、enc362 µs。0xF06D/0xF06F 功能正常。
+
+**9,600 RGB 同一 PSRAM 路徑**（EffectPerf probe，c8 PSRAM 固定）：
+
+| 項目 | 時間 |
+|---|---:|
+| pair random8 | 10.647 ms |
+| **pair inverse8** | **1.872 ms** |
+| pair block8 | 1.864 ms |
+| full cached random8 | 14.060 ms |
+| **full cached inverse8** | **4.586 ms** |
+| full cached block8 | 4.583 ms |
+| 12-bit random12 | 19.967 ms |
+| 12-bit packed12 | 20.599 ms |
+
+結論：固定 PSRAM 之後，pair **必須用 destination 順序的 inverse／block**，不要
+random write；9,600 的 CPU full 可由 14.06 ms 降到 **4.59 ms**，50 fps 仍可行。
+12-bit packed 冇用，12-bit 要 tile／留在 PSRAM 但避免 random RMW。
