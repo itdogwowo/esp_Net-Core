@@ -156,6 +156,16 @@ def test_mode_module_blank_state_gain_and_white_from_file():
     assert "0xF06F" in text and "0xF070" in text
 
 
+def test_pipeline_stats_card_and_commands():
+    page = html()
+    mode = page.split('<section class="view" data-view="mode">', 1)[1]
+    for token in ("pipeStatsCard", "btnPipeStats", "btnPipeBurn", "pipeStats"):
+        assert token in mode, f"三任務計時卡缺 {token}"
+    js_text = js("96-mode.js")
+    for token in ("0xF071", "0xF072", "0xF073", "0xF074", "0xF075", "0xF076"):
+        assert token in js_text, f"96-mode.js 缺 {token}"
+
+
 def test_shell_hooks_build_and_mode_views():
     text = js("75-shell.js")
     assert "BuildApi.loadInfo" in text
