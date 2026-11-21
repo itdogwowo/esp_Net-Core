@@ -119,7 +119,7 @@ set(_nc_extra_dirs
     # pixel_task：效果／Map 生產者；render_task：渲染（LED 現在，LCD 將來）
     "${CMAKE_CURRENT_LIST_DIR}/components/tasks/pixel_task"
     "${CMAKE_CURRENT_LIST_DIR}/components/tasks/render_task"
-    # content_task：production 的「檔案驅動 show」生產者（/data/pixel 四層 + 0xF06B）。
+    # content_task：production 三任務（effect＋pair）＋/data/pixel 四層；render 不變。
     # 由 CONFIG_NETCORE_CONTENT 開關，CONFIG 關閉時 .c 內容為空、不登記任何東西。
     "${CMAKE_CURRENT_LIST_DIR}/components/tasks/content_task")
 # effect_bench：純效果效能（0xF065），**測試／量測專用**。

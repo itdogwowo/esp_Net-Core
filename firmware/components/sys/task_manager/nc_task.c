@@ -474,11 +474,22 @@ static void load_cfg(void)
         // 2026-11-21：舊任務名 show 改名 content（避免同 render 混淆）。
         // 舊裝置的 tasks.json 仍是 "show"；只在新名冇條目時讀舊名，讓 OTA 後
         // 不會因為 config 名字對不上而把 content 任務自動關掉。
-        if (match == NULL && strcmp(s->name, "content") == 0) {
-            for (uint8_t k = 0; k < cfg->n_tasks; k++) {
-                if (strcmp(cfg->tasks[k].name, "show") == 0) {
-                    match = &cfg->tasks[k];
-                    break;
+        if (match == NULL) {
+            // 2026-11-21：content 再拆成 pair／effect（三任務）。
+            // 舊 config 只有 content：pair／effect 都讀它，OTA 後不會兩個都自動關掉。
+            const char *alias = NULL;
+            if (strcmp(s->name, "content") == 0) {
+                alias = "show";
+            } else if (strcmp(s->name, "pair") == 0 ||
+                       strcmp(s->name, "effect") == 0) {
+                alias = "content";
+            }
+            if (alias != NULL) {
+                for (uint8_t k = 0; k < cfg->n_tasks; k++) {
+                    if (strcmp(cfg->tasks[k].name, alias) == 0) {
+                        match = &cfg->tasks[k];
+                        break;
+                    }
                 }
             }
         }

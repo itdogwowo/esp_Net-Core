@@ -1,8 +1,8 @@
-// nc_content_task.c — production 的「檔案驅動 show」生產者（8×8 Matrix）。
+// nc_content_task.c — production 三任務的 pair 段（effect → pair → render）。
 //
 // 跟 pixel_task（內建六個效果）的分工：
 //   · pixel_task：內建效果 → 環（CONFIG_NETCORE_PIXEL 的一部分，所有 project 共用）；
-//   · content_task ：/data/pixel 的四層 DATA 平面（effects／map／modes／registry）→ 環。
+//   · pair  ：/data/pixel 四層 → 配對 → white mix → 環；effect 只算波形值。
 // 兩者都是「prd 環的生產者」，同一個 project 只可以開其中一個（tasks.json 決定）。
 //
 // 為什麼要這一支而不是把四層塞入 pixel_task：
@@ -51,6 +51,7 @@
 #include "nc_px_layer.h"
 #include "nc_px_layer_scan.h"
 #include "nc_px_show.h"
+#include "nc_pipeline.h"
 #include "nc_store.h"
 #include "nc_task.h"
 
@@ -88,7 +89,7 @@ typedef struct {
     uint32_t          mode_limit;         // 幾幀後換下一個（maxF，0=500）
 
     // 0xF06B 快照：最近一次 commit 的 4 B/px 畫面（最多 SHOWFRAME_PX_MAX 顆）。
-    // 由 content loop 寫、nc4 decode task 讀 → 用 spinlock 護住。
+    // 由 pair loop 寫、nc4 decode task 讀 → 用 spinlock 護住。
     portMUX_TYPE  lock;
     uint8_t       last[SHOWFRAME_PX_MAX * NC_PX_BPP];
     uint32_t      last_px;
@@ -100,11 +101,17 @@ static show_state_t s_content = {
     .lock = portMUX_INITIALIZER_UNLOCKED,
 };
 
-// 0xF06D：decode task 只排隊，真正 rebuild plan 由 content loop 喺幀邊界做
+// 0xF06D：decode task 只排隊，真正 rebuild plan 由 pair loop 喺幀邊界做
 // （plan／asset table 係 content task 擁有，唔可以同 decode task 同時改）。
 static volatile uint8_t s_pending_mode = 0xFF;
 static volatile bool    s_pending_reload;
 static uint32_t s_last_apply_us;
+
+// pair 擁有的 plan；effect 只經 nc_pipe_plan_snapshot() 讀一份 copy。
+static SemaphoreHandle_t s_plan_mtx;
+static volatile uint32_t s_plan_gen;
+static uint32_t s_last_eff_seq;
+static nc_pipe_effect_frame_t s_eff_frame;
 
 // 找回「效果用」的環：名字含 "prd"（render 的預設 lane 叫 i80.prd）。
 static nc_pixel_q_t *find_prd_ring(void)
@@ -135,7 +142,7 @@ static void white_mix(uint8_t *canvas, uint32_t px, uint8_t w)
     }
 }
 
-// 最新一幀的快照：content loop 寫、0xF06B handler 讀。
+// 最新一幀的快照：pair loop 寫、0xF06B handler 讀。
 // rgbw = NULL 代表「黑幀」（fallback 時用），會把快照內的有效像素清 0。
 static void snapshot_publish(const uint8_t *rgbw, uint32_t px, uint32_t seq)
 {
@@ -188,13 +195,27 @@ static bool content_frame_once(void)
         return false;
     }
     if (s_content.ready && s_content.canvas != NULL) {
+        // pair 只讀 effect 的最新 fixed frame；effect 不會直接碰 canvas/ring。
+        if (!nc_pipe_effect_copy(&s_eff_frame)) {
+            return false;                 // effect 未出第一幀
+        }
+        if (s_eff_frame.plan_gen != s_plan_gen ||
+            s_eff_frame.njobs != s_content.plan.njobs) {
+            return false;                 // plan 剛換，effect 未趕上
+        }
+        if (s_eff_frame.seq == s_last_eff_seq) {
+            return false;                 // 未有新 frame
+        }
         memset(s_content.canvas, 0, (size_t)s_content.px * NC_PX_BPP);
-        nc_px_show_frame(&s_content.plan, s_content.step, s_content.canvas);
+        for (uint8_t j = 0; j < s_content.plan.njobs; j++) {
+            nc_px_pair_apply(&s_content.plan.job[j], s_eff_frame.vals[j],
+                             s_eff_frame.nv[j], s_content.canvas);
+        }
         white_mix(s_content.canvas, s_content.px, s_content.white);
         if (!commit_canvas(s_content.canvas)) {
-            return false;                 // 環滿：唔算一幀、step 唔前進
+            return false;                 // 環滿：下 tick 再試
         }
-        s_content.step++;
+        s_last_eff_seq = s_eff_frame.seq;
         snapshot_publish(s_content.canvas, s_content.px, s_content.commits);
         return true;
     }
@@ -219,7 +240,7 @@ static bool content_frame_once(void)
     return true;
 }
 
-static esp_err_t content_apply_mode(const nc_px_mode_t *mode);
+static esp_err_t content_apply_mode(const nc_px_mode_t *mode);static esp_err_t content_apply_mode(const nc_px_mode_t *mode);
 static esp_err_t content_reload(void);
 static void content_auto_advance(void);
 static void content_set_fallback(const char *why);
@@ -299,6 +320,8 @@ static void content_state_reset(void)
     s_content.mode_name[0] = '\0';
     s_content.map_name[0] = '\0';
     s_content.pixel_dir[0] = '\0';
+    s_plan_gen = 0;
+    s_last_eff_seq = 0;
     s_content.auto_play = false;
     s_content.mode_frames = 0;
     s_content.mode_limit = 500;
@@ -397,8 +420,8 @@ static void ensure_pixel_dirs(const char *pixel_dir)
     }
 }
 
-// 由 mode 建 plan（切換 mode 同開機共用）。只在 content loop／on_start 呼叫。
-static esp_err_t content_apply_mode(const nc_px_mode_t *mode)
+// 由 mode 建 plan（切換 mode 同開機共用）。只在 pair loop／on_start 呼叫。
+static esp_err_t content_apply_mode_locked(const nc_px_mode_t *mode)
 {
     if (mode == NULL) {
         return ESP_ERR_INVALID_ARG;
@@ -448,6 +471,8 @@ static esp_err_t content_apply_mode(const nc_px_mode_t *mode)
     s_content.mode_limit = (mode->maxF > 0) ? mode->maxF : 500;
     s_content.ready = true;
     s_content.fallback = false;
+    s_last_eff_seq = 0;
+    s_plan_gen++;
     s_last_apply_us = (uint32_t)(esp_timer_get_time() - t0);
 
     ESP_LOGI(TAG, "選中 mode：%s（id=%u）mapping=%s white=%u%%；map=%s（%u groups）",
@@ -464,14 +489,19 @@ static esp_err_t content_apply_mode(const nc_px_mode_t *mode)
 // 0xF06F：重新掃四層，按目前 mode 名重建 plan（名唔存在 → registry list[0]）。
 static esp_err_t content_reload(void)
 {
-    if (s_content.pixel_dir[0] == '\0') {
-        content_set_fallback("reload：未有 pixel_dir");
+    if (s_content.pixel_dir[0] == '\0' || s_plan_mtx == NULL) {
+        content_set_fallback("reload：未有 pixel_dir／plan mutex");
         return ESP_ERR_INVALID_STATE;
+    }
+    // parse + plan rebuild 全程持 plan mutex；effect 只會在 swap 前／後拿到完整 plan。
+    if (xSemaphoreTake(s_plan_mtx, portMAX_DELAY) != pdTRUE) {
+        return ESP_ERR_TIMEOUT;
     }
     const esp_err_t le = nc_px_layer_load_all(s_content.pixel_dir);
     log_tree(s_content.pixel_dir);
     if (le != ESP_OK) {
         content_set_fallback("reload：四層載入失敗");
+        xSemaphoreGive(s_plan_mtx);
         return le;
     }
     const nc_px_show_t *reg = nc_px_show();
@@ -492,9 +522,11 @@ static esp_err_t content_reload(void)
     }
     if (mode == NULL) {
         content_set_fallback("reload：冇 mode");
+        xSemaphoreGive(s_plan_mtx);
         return ESP_ERR_NOT_FOUND;
     }
-    const esp_err_t ae = content_apply_mode(mode);
+    const esp_err_t ae = content_apply_mode_locked(mode);
+    xSemaphoreGive(s_plan_mtx);
     if (ae != ESP_OK) {
         content_set_fallback("reload：plan 失敗");
         return ae;
@@ -541,6 +573,45 @@ static void content_auto_advance(void)
             }
         }
     }
+}
+
+static esp_err_t content_apply_mode(const nc_px_mode_t *mode)
+{
+    if (s_plan_mtx == NULL) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    if (xSemaphoreTake(s_plan_mtx, portMAX_DELAY) != pdTRUE) {
+        return ESP_ERR_TIMEOUT;
+    }
+    const esp_err_t e = content_apply_mode_locked(mode);
+    xSemaphoreGive(s_plan_mtx);
+    return e;
+}
+
+// effect 經這個 function copy plan；asset 副本 repoint，effect 之後唔再讀 pair 的表。
+bool nc_pipe_plan_snapshot(nc_px_plan_t *out, nc_px_asset_t *assets,
+                           uint8_t cap, uint32_t *gen)
+{
+    if (out == NULL || assets == NULL || gen == NULL || s_plan_mtx == NULL) {
+        return false;
+    }
+    if (xSemaphoreTake(s_plan_mtx, portMAX_DELAY) != pdTRUE) {
+        return false;
+    }
+    bool ok = false;
+    if (s_content.ready && s_content.plan.njobs > 0 && cap >= s_content.plan.njobs) {
+        *out = s_content.plan;
+        for (uint8_t j = 0; j < out->njobs; j++) {
+            if (out->job[j].asset != NULL) {
+                assets[j] = *out->job[j].asset;
+                out->job[j].asset = &assets[j];
+            }
+        }
+        *gen = s_plan_gen;
+        ok = true;
+    }
+    xSemaphoreGive(s_plan_mtx);
+    return ok;
 }
 
 static void content_start_pipeline(void)
@@ -601,7 +672,7 @@ static void content_start_pipeline(void)
         content_set_fallback("plan 冇有效 job（effect／group 名對唔上？）");
         return;
     }
-    ESP_LOGI(TAG, "content 就緒：%u px、prd 環 %s", (unsigned)s_content.px,
+    ESP_LOGI(TAG, "pair 就緒：%u px、prd 環 %s", (unsigned)s_content.px,
              nc_px_ring_name(s_content.q));
 }
 
@@ -609,6 +680,12 @@ static esp_err_t content_start(const nc_task_res_view_t *res, int nres)
 {
     (void)res;
     (void)nres;
+    if (s_plan_mtx == NULL) {
+        s_plan_mtx = xSemaphoreCreateMutex();
+    }
+    if (s_plan_mtx == NULL) {
+        return ESP_ERR_NO_MEM;
+    }
     content_state_reset();
     content_start_pipeline();
     // 永遠回 ESP_OK：載入失敗已經 fallback（填黑），唔好因為內容問題令 boot 失敗。
@@ -645,7 +722,7 @@ static void on_showframe(nc4_ctx_t *ctx, const nc4_frame_t *f)
     const size_t cap = NC4_REPLY_JSON_MAX + 1;   // + NUL；回覆幀另有 4 B CRC 餘量
     int n = 0;
 
-    // 快照由 content loop 更新（另一個任務、可能另一核）→ 短臨界區。
+    // 快照由 pair loop 更新（另一個任務、可能另一核）→ 短臨界區。
     // hex 直接寫入 decoder 的回覆緩衝，唔喺 decode task 的棧上開大 buffer。
     taskENTER_CRITICAL(&s_content.lock);
     if (!s_content.last_valid) {
@@ -697,7 +774,7 @@ static void on_showframe(nc4_ctx_t *ctx, const nc4_frame_t *f)
 static const nc_task_loop_t s_loops[] = {
     {
         // 生產者：檔案樹 → 環。優先級低 render 一級（同 pixel_task 的 prd 一樣）。
-        .name = "content",
+        .name = "pair",
         .fn = content_loop,
         .stack = 4096,
         .prio = NC_PRIO_OTHERS_MAX - 1,
@@ -708,7 +785,7 @@ static const nc_task_loop_t s_loops[] = {
 };
 
 static const nc_task_t s_task = {
-    .name = "content",
+    .name = "pair",
     .kind = NC_TASK_NORMAL,
     .level = 4,
     .order = 21,
@@ -718,7 +795,7 @@ static const nc_task_t s_task = {
     .nloops = 1,
 };
 
-NC_TASK_AUTO_REG(content, &s_task);
+NC_TASK_AUTO_REG(pair, &s_task);
 
 #define NC4_CMD_SHOWMODE     0xF06D
 #define NC4_CMD_SHOWMODE_RSP 0xF06E
@@ -750,7 +827,7 @@ static void reply_json(nc4_ctx_t *ctx, uint16_t cmd, const char *json)
     }
 }
 
-// payload [mode_id:u8]；只排隊，content loop 喺下一幀邊界 rebuild plan。
+// payload [mode_id:u8]；只排隊，pair loop 喺下一幀邊界 rebuild plan。
 // 回覆即刻回目前 mode（未切換）；主機用 0xF06B 確認新 frame。
 static void on_showmode(nc4_ctx_t *ctx, const nc4_frame_t *f)
 {
@@ -797,6 +874,6 @@ static const nc_action_t s_actions[] = {
     { NC4_CMD_SHOWMODE, on_showmode, "content" },
 };
 
-NC_ACTION_TABLE_DEF(nc_content_task_table, "content", s_actions);
+NC_ACTION_TABLE_DEF(nc_content_task_table, "pair", s_actions);
 
 #endif  // CONFIG_NETCORE_CONTENT

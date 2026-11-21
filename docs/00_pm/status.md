@@ -5935,3 +5935,37 @@ esptool 確認 ESP32-S3 QFN56 v0.2、4 MB flash（XMC）、2 MB PSRAM。全片 f
 **注意**：LED 鏈按 64 顆（8×8）設定；如實際只接單顆，第一顆仍正常，多出的資料
 會被鏈尾忽略。板載 WS2812 是 GPIO21，本專案用 GPIO1 外部鏈。D1..D7／WR／DC
 dummy 腳不要接東西。
+
+### 7.160 2026-11-21（三任務：effect → pair → render；Zero 真機驗證）
+
+用家要求把 producer 拆成三個任務；已完成並在 Zero 真機跑住：
+
+| 任務 | 核心 | 職責 |
+|---|---|---|
+| **effect** | core0 | 只 evaluate program 波形值；`nc_pipe_plan_snapshot()` 取 plan 副本；輸出 fixed `nc_pipe_effect_frame_t`（8 job × 256 value、seq、plan_gen），50 fps |
+| **pair** | core1 | 載 `/data/pixel`、建 plan、按 group/range/write 配對、white mix、寫 prd 環；0xF06B/0xF06D/0xF06F；auto_play |
+| **render** | core1 | 現有 encode→I80→WS2812；只認 canvas |
+
+介面 `firmware/components/tasks/content_task/include/nc_pipeline.h`：
+
+- `nc_pipe_plan_snapshot(plan, assets, cap, &gen)`：pair → effect；copy plan，asset 逐個
+  copy 並 repoint，effect 不再持有 pair 的 asset 表 pointer。
+- `nc_pipe_effect_copy(frame)`：effect → pair；mutex 保護的 fixed frame copy。
+- plan mutex：pair 的 mode rebuild/reload 同 effect snapshot 互斥；effect frame 有
+  `plan_gen`，pair 會丟棄換 plan 期間的舊 frame。
+- pair 每幀用 `nc_px_pair_apply()`，**不再**呼叫 `nc_px_show_frame()`（後者仍是 host／
+  舊 API 的合成入口）。
+
+**建置／真機**：
+
+- Zero image **714,192 B**、app **`25966230`**；`status tasks` 見到
+  `render`／`pair`／`effect` 三條（pair level4 core1；effect level4 core0），pixel -1。
+- `0xF06B`：64 px、breathe、white=0、apply_us **233**；連續 max
+  **23→17→5→0→5**，呼吸正常。
+- 0xF06D 切 color／切回、0xF06F reload 仍正常（pair 處理；effect snapshot 自動跟
+  plan_gen）。
+- Matrix-Show build 697.9 KB、EffectPerf build 676.7 KB 都成功；Show ELF 冇
+  effect_bench／0xF065。
+- Web UI `status` 會直接見到這三條任務；Build 卡仍可建 Zero-Show。
+- 限制：effect frame 每 job cap 256 values（同舊 `nc_px_show_frame` 一致）；9,600 px
+  的高密度值仍要之後放大 frame／分塊。white mix 仍是整幀。

@@ -5,8 +5,9 @@
 > 20% 效果」的 white mix；另加 `0xF06B SHOWFRAME`（回 `0xF06C`）給 Web UI 預覽。
 >
 > 同 EffectPerf 的分別：EffectPerf 只量效果管線、唔點燈；Show 是**真的出畫面**的 production
-> 映像。同 LED-Textkit 的分別：生產者由 `pixel_task`（內建六個效果）換成 `content_task`
-> （檔案四層）。`pixel_task`／render／編碼器／環全部唔改。
+> 映像。生產者由 `pixel_task`（內建六個效果）換成三任務管線：
+> **effect（波形值）→ pair（配對／white mix／寫環）→ render（編碼／I80）**。
+> `pixel_task`／render／編碼器／環全部唔改（render 仍然只認 canvas）。
 
 ---
 
@@ -27,12 +28,14 @@ sw/pixel 的四層表（nc_px_layer_scan）
   │  選 mode（list[0]）→ mode.mapping → map → nc_px_show_plan(mode, map, assets, inv)
   ▼
 nc_px_plan_t（jobs：asset + 預編譯 prog + write + 連續 ranges）
-  │  每幀（show loop）：
-  │    memset(canvas, 0, px*4)
-  │    nc_px_show_frame(plan, step, canvas)          # 12-bit 波形 → write → 4 B/px
-  │    white_mix(canvas, px, mode.white)             # 四通道都做
-  │    nc_px_ring_begin_ex(prd ring) → memcpy payload → nc_px_ring_commit()
-  │    step++（環滿就 delay 1 tick，唔前進 step）
+  │
+  ├─ effect 任務（core0，50 fps）：只 evaluate program →
+  │    nc_pipe_effect_frame_t {seq, plan_gen, njobs, nv[], vals[8][256]}（fixed frame）
+  │
+  ├─ pair 任務（core1）：copy latest effect frame → 按 plan 的 group/range/write
+  │    nc_px_pair_apply() 寫 canvas → white_mix → prd 環；plan 由 pair 擁有
+  │    （effect 用 nc_pipe_plan_snapshot() 拿 asset 副本，唔共享 pointer）
+  │
   ▼
 prd 環（4 B/px = R,G,B,W；render 任務建立／登記）
   ▼
@@ -45,10 +48,11 @@ render 任務（nc_render_task）：取最新一格 → 編碼（ws2812 GRB）�
 |---|---|---|
 | 檔案 → struct | `sw/pixel`（`nc_px_layer*`／`nc_px_asset*`） | 掃目錄、解析 JSON、建表（PC 可測） |
 | mode → plan | `sw/pixel`（`nc_px_show.c`） | group 引用展開、range slice、預編譯 program |
-| 動畫時間軸 | `tasks/content_task`（**新**） | 步驟／white mix／寫環／fallback／`0xF06B` |
+| 波形值 | `effect` 任務（content_task component） | 只 evaluate program；fixed value frame；50 fps |
+| 配對／white mix | `pair` 任務（content_task component） | 載四層、建 plan、range/write、white mix、寫環、`0xF06B` |
 | 環 → 燈 | `tasks/render_task` | 編碼、DMA、送燈（完全唔知四層） |
 
-## 2. `content_task`（`firmware/components/tasks/content_task/`）
+## 2. `pair`＋`effect` 任務（`firmware/components/tasks/content_task/`）
 
 由 **`CONFIG_NETCORE_CONTENT`**（`depends on NETCORE_PIXEL`，default n）開關；`CONFIG` 關閉時
 `.c` 整段 `#if` 掉、component 是空 object（同 `effect_bench` 同一模式）。component 用
@@ -58,10 +62,9 @@ render 任務（nc_render_task）：取最新一格 → 編碼（ws2812 GRB）�
 
 | 欄位 | 值 | 說明 |
 |---|---|---|
-| name／loop name | `content`／`content` | tasks.json 用 `content`（舊 `show` 有 alias 遷移） |
-| kind／level／order | NORMAL／4／21 | render（order 10）先起，環已登記 |
-| stack／prio／core | 4096／`NC_PRIO_OTHERS_MAX-1`（5）／1 | 低 render 一級；同 pixel 的 prd 一樣 |
-| layer／period | 5／0 | 環滿自己 `vTaskDelay(1)`，有空間就填 |
+| pair | `pair`／`pair`；NORMAL／4／order 21；stack 4096／core1；`0xF06B` 在此 |
+| effect | `effect`／`effect`；NORMAL／4／order 22；stack 4096／core0；50 fps |
+| render | 既有 `render`；core1；只讀 prd 環 |
 
 **on_start（開機一次）**：
 
@@ -70,7 +73,7 @@ render 任務（nc_render_task）：取最新一格 → 編碼（ws2812 GRB）�
    **確保 `<base>/pixel/map`、`<base>/pixel/modes` 存在**（`mkdir(…, 0777)`，`EEXIST` 當
    成功，失敗只 warn）：FILE_BEGIN 直接 `fopen("<path>.part","wb")`、唔會建父目錄，
    所以新機第一次上傳 map／modes 會 `err_write_fail`。`main.c` 的 `seed_dirs()` 現在
-   也有這兩個目錄，content_task 再確保一次（唔存在時仍然可以上傳）→
+   也有這兩個目錄，pair 再確保一次（唔存在時仍然可以上傳）→
    `nc_px_layer_load_all()` 掃 effects／map／modes／registry，log 四層數量。
 3. 選 mode：registry `list[0]`；冇 registry／搵唔到 → mode 表第一個。
 4. 選 map：`mode.mapping` → 第一條 entry 的 `group` 前綴（`matrix.full`→`matrix`）→ map 表第一個。
@@ -127,7 +130,7 @@ out = (out * (100 - w) + 255 * w) / 100       # 整數除法；R/G/B/W 四通道
 - `{"err":"big","px":N}`：`px > 512`，或 hex 塞唔落 decoder 的回覆 JSON 上限
   `NC4_REPLY_JSON_MAX`（2,600 B；約 px ≤ 315）。production 64 px 永遠在限內。
 - 指令表：`firmware/components/tasks/content_task/nc_content_task.c` 的
-  `NC_ACTION_TABLE_DEF(nc_content_task_table, "content", …)`；`0xF06B` 喺 `status cmds` 見到
+  `NC_ACTION_TABLE_DEF(nc_content_task_table, "pair", …)`；`0xF06B` 喺 `status cmds` 見到
   主人是 `content`。
 
 Web UI 只需高頻 poll `0xF06B`，把 `hex` 解成 8×8 RGB（第三、四通道是 W 與白底）就有即時
@@ -137,20 +140,20 @@ Web UI 只需高頻 poll `0xF06B`，把 `hex` 解成 8×8 RGB（第三、四通�
 
 payload `[mode_id:u8]`；decode task 只驗 id 存在、寫入 `s_pending_mode` 並立即回
 `{"ok":1,"queued":2,"mode":"white80","white":80}`。真正 plan rebuild 由 `content` loop
-喺下一個幀邊界做，避免 decode task 同 content task 同時改 `s_content.plan`／`assets`。
+喺下一個幀邊界做，避免 decode task 同 pair task 同時改 `s_content.plan`／`assets`。
 切換後 `step=0`、canvas 重用、`0xF06B` 的 `apply_us` 會更新。真機 8×8 量到
 **226–251 µs**（plan 1 job、64 px）；9,600 px 會隨 plan jobs 增加，但仍遠低於一幀。
 
 ## 3.2 指令 `0xF06F RELOAD`（回 `0xF070`）
 
-無參數；decode task 只設 `s_pending_reload`，content loop 喺下一幀邊界
+無參數；decode task 只設 `s_pending_reload`，pair loop 喺下一幀邊界
 `nc_px_layer_load_all(pixel_dir)` 重新掃四層，再按**目前 mode 名**重建 plan
 （名唔存在 → registry list[0] → mode 表第一個）。改 `/pixel` 檔案不用重開。
 回覆 `{"ok":1,"queued":"reload"}`；真正完成後 `0xF06B` 的 `mode`／`white` 會反映新內容。
 
 ## 3.3 auto_play
 
-`registry.json` 的 `auto_play=true` 且 `list` 多過一個 mode 時，content loop 每
+`registry.json` 的 `auto_play=true` 且 `list` 多過一個 mode 時，pair loop 每
 `mode.maxF` 幀（`maxF=0` 用 500 幀）按 list 次序換下一個；`maxF` 是 mode JSON 欄位。
 手動 `0xF06D` 不會關閉 auto_play，下一次仍由目前 mode 在 list 的位置往下走。
 production 目前的 `list=["breathe"]` 只有一個，所以不會切。
@@ -171,7 +174,7 @@ data/pixel/             **主機端內容來源**（唔 embed 進 firmware）：
 ```
 
 `/data/pixel` 唔會由 firmware seed（main 只 embed `data/config/*.json`）；主機用
-`tools/show_upload.py`（Web UI）上傳。上傳之前的第一次開機：content_task log warning、
+`tools/show_upload.py`（Web UI）上傳。上傳之前的第一次開機：pair log warning、
 顯示黑，屬預期。
 
 **建置**：
@@ -191,7 +194,7 @@ IDF_PATH=~/esp/esp-idf python3 make.py build ESP32-S3-Matrix \
 - `IDF_PATH=~/esp/esp-idf python3 make.py build ESP32-S3-Matrix --project
   ESP32-S3-Matrix-Show --fresh`：**成功**，image 694.8 KB（0xadb50，分區剩 55%），33–35 s；
   `CONFIG_NETCORE_CONTENT=y`、`CONFIG_NETCORE_PXBENCH`／`EFFECT_BENCH` 均 not set；
-  `_nc_task_reg_content`、`_nc_action_reg_nc_content_task_table`、`nc_content_task_table`
+  `_nc_task_reg_pair`、`_nc_task_reg_effect`、`_nc_action_reg_nc_content_task_table`、`nc_content_task_table`
   三個 symbol 已入 ELF（任務＋指令表會由 constructor 自動登記）。唯一警告是既有的
   `bus/bus_net/nc4_line_net.c` unused-function／variable，同本改動無關。
 - Host（x86，同一份 C 實作）用 Show project 的真實 `data/pixel` 內容跑完整管線：
@@ -200,7 +203,7 @@ IDF_PATH=~/esp/esp-idf python3 make.py build ESP32-S3-Matrix \
   R/G/B ≥ 204、W=204、step 之間有動畫；`color`（white=0）W 保持 0。全部 PASS。
 - 既有 host 測試 `pxLayer_test`／`pxShow_test`／`pxScan_test` 全綠（white 欄位是純新增，
   舊 fixture 行為不變）；另加驗 `"white_mix"` 別名、>100／負數／字串 → 當 0、舊 JSON → 0。
-- **已上真機**（2026-11-21）：`content`／render 跑住、`0xF06B` 回 64 px frame、
+- **已上真機**（2026-11-21）：`pair`／`effect`／render 跑住、`0xF06B` 回 64 px frame、
   min RGBA=[204,204,204,204]、max=[255,255,255,204]，80% 白 floor 全中；
   `0xF06D` 切 `color`（white=0）後 frame W=0，切回 `white80` 後 W=204；
   plan rebuild `apply_us` 226–251 µs。
@@ -211,7 +214,7 @@ IDF_PATH=~/esp/esp-idf python3 make.py build ESP32-S3-Matrix \
 content: pixel 樹：/data/pixel → effects=1 maps=1 modes=2 list=2
 content: 選中 mode：white80（id=1）mapping=matrix white=80%；map=matrix（1 groups）
 content: plan：px=64 jobs=1 skipped=0；寫入環 i80.prd（slots=3、4 B/px）
-content: content 就緒：64 px、prd 環 i80.prd
+content: pair 就緒：64 px、prd 環 i80.prd
 ```
 
 常見情況：
@@ -223,7 +226,7 @@ content: content 就緒：64 px、prd 環 i80.prd
 | `四層載入失敗` | `/data/pixel` 未上傳／effects 全壞 | 上傳內容後重開 |
 | `plan 冇有效 job` | mode 的 group／effect 名對唔上 | 檢查 map／effects 名；log 有 skipped |
 | 燈全黑但 `plan 就緒` | white=0 且效果值此刻全 0 | 正常（波形的低點）；或換 mode |
-| 0xF06B 回 `nodata` | content loop 未提交過 | 等 render 起／檢查 fallback log |
+| 0xF06B 回 `nodata` | pair loop 未提交過 | 等 render 起／檢查 fallback log |
 
 ## 6. 未做／限制
 

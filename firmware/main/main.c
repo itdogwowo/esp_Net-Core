@@ -362,7 +362,7 @@ static void seed_dirs(void)
         PRESET_DIR,
         MSC_MOUNT_POINT "/pixel",
         MSC_MOUNT_POINT "/pixel/effects",
-        // content_task 的四層資料：map／modes 的目錄要先存在（FILE_BEGIN 不會 mkdir 父目錄）
+        // pair 任務的四層資料：map／modes 的目錄要先存在（FILE_BEGIN 不會 mkdir 父目錄）
         MSC_MOUNT_POINT "/pixel/map",
         MSC_MOUNT_POINT "/pixel/modes",
         // 外部任務（.nct）放這裡；ncm 開機掃描 /data/pixel/effects + /data/tasks。

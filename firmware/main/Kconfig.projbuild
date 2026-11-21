@@ -133,12 +133,13 @@ menu "esp_Net-Core"
         depends on NETCORE_PIXEL
         default n
         help
-            加入 production 的「檔案驅動 show」生產者任務（任務名 `show`）：
-            開機由 `nc_px_layer_load_all(<fs_base>/pixel)` 載入四層資料 →
-            registry list 第一個 mode → mode.mapping → map → plan；
-            每幀 `nc_px_show_frame()` 合成 → white mix（mode 的 white 0..100）→
-            寫入 render 任務的 prd 環。另加一條 0xF06B SHOWFRAME（回 0xF06C）
-            把最近一幀 4 B/px 以 hex 回覆，給 Web UI 預覽。
+            加入 production 的三任務管線（effect → pair → render）：
+            · effect：只 evaluate program 波形值（50 fps）；
+            · pair  ：載入 `/data/pixel` 四層、建 plan、按 group/range/write 配對、
+              white mix（0..100），寫入 render 的 prd 環；0xF06B/0xF06D/0xF06F 也在這裡；
+            · render：現有的 encode／I80，不變。
+            三任務由 project 的 tasks.json 各自設 level／affinity；effect 預設 core0，
+            pair／render core1。
 
             這一支唔屬於 NC_ENABLE_TESTS，也不會取代 pixel_task：
             哪一個當生產者由 project 的 `data/config/tasks.json` 決定
