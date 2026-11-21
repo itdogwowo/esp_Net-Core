@@ -33,6 +33,7 @@
 
 #include "esp_heap_caps.h"
 #include "esp_log.h"
+#include "esp_memory_utils.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -162,6 +163,23 @@ static void inv_apply8(const uint16_t *inv, const uint16_t *vals, uint16_t px,
     }
 }
 
+// 12-bit packed：R/G 一個 32-bit、B/W 一個 32-bit（仍然 8 B/px，但 2 次 store）。
+static void table_apply12_packed(const uint16_t *offs, const uint16_t *vals,
+                                 uint16_t px, uint16_t *dst, uint8_t write)
+{
+    for (uint16_t k = 0; k < px; k++) {
+        uint16_t *o = dst + ((uint32_t)offs[k] << 2);
+        uint32_t *w = (uint32_t *)o;
+        if (write == NC_PX_WRITE_W) {
+            w[0] = 0;
+            w[1] = (uint32_t)vals[k] << 16;
+        } else { // RGB probe
+            w[0] = (uint32_t)vals[3u * k] | ((uint32_t)vals[3u * k + 1u] << 16);
+            w[1] = (uint32_t)vals[3u * k + 2u];
+        }
+    }
+}
+
 typedef struct {
     nc_px_job_t *job;
     uint16_t *vals;
@@ -217,6 +235,16 @@ static uint32_t bench_pair_table(ctx_t *c, uint32_t frames, const uint16_t *tabl
     const int64_t t0 = esp_timer_get_time();
     for (uint32_t f = 0; f < frames; f++) {
         table_apply12(table, c->vals, c->px, c->c12, c->write);
+    }
+    s_sink += c->c12[0];
+    return us_per_frame(t0, frames);
+}
+
+static uint32_t bench_pair_packed(ctx_t *c, uint32_t frames)
+{
+    const int64_t t0 = esp_timer_get_time();
+    for (uint32_t f = 0; f < frames; f++) {
+        table_apply12_packed(c->table_rnd, c->vals, c->px, c->c12, c->write);
     }
     s_sink += c->c12[0];
     return us_per_frame(t0, frames);
@@ -418,6 +446,7 @@ static void on_pipebench(nc4_ctx_t *ctx, const nc4_frame_t *f)
 
     uint32_t gen_us = 0, pair_range = 0, pair_table = 0, pair_rnd = 0, conv_i = 0;
     uint32_t pair8_rnd = 0, pair8_inv = 0, pair8_blk = 0, full8_rnd = 0;
+    uint32_t pair_packed = 0;
     uint32_t gen_cached = 0, full8_cached = 0;
     uint32_t full_range = 0, full_table = 0, full_rnd = 0, full_ps = 0;
     const uint8_t reps = (nv > 20000) ? 2 : 3;
@@ -431,6 +460,8 @@ static void on_pipebench(nc4_ctx_t *ctx, const nc4_frame_t *f)
         if (r == 0 || v < pair_table) pair_table = v;
         v = bench_pair_table(&c, frames, c.table_rnd);
         if (r == 0 || v < pair_rnd) pair_rnd = v;
+        v = bench_pair_packed(&c, frames);
+        if (r == 0 || v < pair_packed) pair_packed = v;
         v = bench_conv(&c, frames, c.c12);
         if (r == 0 || v < conv_i) conv_i = v;
         v = bench_full(&c, frames, NULL, c.c12);
@@ -496,18 +527,21 @@ static void on_pipebench(nc4_ctx_t *ctx, const nc4_frame_t *f)
         j, sizeof(j),
         "{\"px\":%u,\"nv\":%u,\"mode\":%u,\"fr\":%u,\"rep\":%u,"
         "\"gen_us\":%u,\"gen_cached_us\":%u,"
-        "\"pair_us\":{\"range\":%u,\"table\":%u,\"rnd\":%u,"
+        "\"pair_us\":{\"range\":%u,\"table\":%u,\"rnd\":%u,\"packed12\":%u,"
         "\"rnd8\":%u,\"inv8\":%u,\"blk8\":%u},"
         "\"conv_us\":%u,\"full_us\":{\"range\":%u,\"table\":%u,\"rnd\":%u,\"ps\":%u,"
         "\"rnd8\":%u,\"cached8\":%u},"
-        "\"mem\":{\"c12i\":%d,\"c12p\":%d}}",
+        "\"mem\":{\"c12_int\":%d,\"c12_ps\":%d,\"c8_int\":%d,\"c8_ps\":%d}}",
         (unsigned)px, (unsigned)nv, (unsigned)mode, (unsigned)frames, (unsigned)reps,
         (unsigned)gen_us, (unsigned)gen_cached,
         (unsigned)pair_range, (unsigned)pair_table, (unsigned)pair_rnd,
-        (unsigned)pair8_rnd, (unsigned)pair8_inv, (unsigned)pair8_blk,
+        (unsigned)pair_packed, (unsigned)pair8_rnd, (unsigned)pair8_inv, (unsigned)pair8_blk,
         (unsigned)conv_i, (unsigned)full_range, (unsigned)full_table, (unsigned)full_rnd,
         (unsigned)full_ps, (unsigned)full8_rnd, (unsigned)full8_cached,
-        c.c12 ? 1 : 0, c.c12p ? 1 : 0);
+        c.c12 ? (esp_ptr_internal(c.c12) ? 1 : 0) : -1,
+        c.c12 ? (esp_ptr_external_ram(c.c12) ? 1 : 0) : -1,
+        c.c8 ? (esp_ptr_internal(c.c8) ? 1 : 0) : -1,
+        c.c8 ? (esp_ptr_external_ram(c.c8) ? 1 : 0) : -1);
 
     ESP_LOGI(TAG, "px=%u nv=%u mode=%u gen=%u pair=%u/%u conv=%u full=%u/%u/%u/%u us",
              (unsigned)px, (unsigned)nv, (unsigned)mode, (unsigned)gen_us,

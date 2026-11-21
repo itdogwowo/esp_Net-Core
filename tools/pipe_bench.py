@@ -97,7 +97,8 @@ def show(r: dict) -> None:
           f"   cached {fmt_us(r.get('gen_cached_us'))}")
     p = r.get("pair_us", {})
     print(f"  pair       range {fmt_us(p.get('range'))}   table {fmt_us(p.get('table'))}"
-          f"   random12 {fmt_us(p.get('rnd'))}   （range {p.get('range', 0) * 1000.0 / px:.0f} ns/px）")
+          f"   random12 {fmt_us(p.get('rnd'))}   packed12 {fmt_us(p.get('packed12'))}"
+          f"   （range {p.get('range', 0) * 1000.0 / px:.0f} ns/px）")
     print(f"             random8 {fmt_us(p.get('rnd8'))}   inverse8 {fmt_us(p.get('inv8'))}"
           f"   block8 {fmt_us(p.get('blk8'))}")
     print(f"  conv       {fmt_us(r.get('conv_us'))}")
@@ -105,6 +106,9 @@ def show(r: dict) -> None:
     print(f"  full       range {fmt_us(f.get('range'))}   table {fmt_us(f.get('table'))}"
           f"   random {fmt_us(f.get('rnd'))}   random8 {fmt_us(f.get('rnd8'))}"
           f"   cached8 {fmt_us(f.get('cached8'))}   psram12 {fmt_us(f.get('ps'))}")
+    mem = r.get("mem", {})
+    print(f"  mem        c12_int={mem.get('c12_int')} c12_ps={mem.get('c12_ps')}"
+          f"  c8_int={mem.get('c8_int')} c8_ps={mem.get('c8_ps')}")
     best = f.get("range") or 0
     if best:
         print(f"  → 50 FPS（20 ms）預算：full range {best / 20000 * 100:.1f}%"

@@ -375,3 +375,11 @@ payload `[px:u16][frames:u16][mode:u8]`；mode 0=1 值/px（wwww）、1=3 值/px
 - 9,600 RGB gen：15.603 ms → **1.993 ms**。
 - full8 random：16.572 ms → **4.408 ms**（50 fps 22.0%）。
 - 64 px production effect：46 µs → **7 µs**。
+
+
+### 2026-11-22 修正：12-bit random 慢的主因
+
+- `mem: c12_int=0, c12_ps=1, c8_int=1` → **12-bit canvas 在 PSRAM**。
+- packed12（2×32-bit store/px）仍是 20.600 ms；不是 store 數目。
+- 8-bit internal random 0.970 ms；12-bit PSRAM random 19.967 ms。
+- 9,600 要 12-bit 時，必須把 canvas 留在 internal（tile／減少並存 buffer）。

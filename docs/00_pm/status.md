@@ -6080,11 +6080,10 @@ cap 256 值，唔可以直接跑 28,800 值；因此用 **EffectPerf 0xF069（�
 
 判讀：
 
-1. **最大優化就是 production 已經用的 8-bit canvas**。量到 `mem.c12i=1`，即
-   12-bit canvas 其實也在 internal SRAM，不是 PSRAM；差別是 `table_apply12`
-   每顆燈做 **4 次 16-bit 隨機 store**（RGB+W，8 B/px），8-bit 版做 **1 次
-   aligned 32-bit store**（4 B/px），所以 store 數目 4×、匯流排交易數 4×。
-   76.8 KB 也比 38.4 KB 大一倍；隨機位址令每次 store 都係獨立 transaction。
+1. **最大優化就是 production 已經用的 8-bit canvas**。後續用 `esp_ptr_internal()`／
+   `esp_ptr_external_ram()` 證實：**12-bit canvas 落在 PSRAM**（`c12_int=0,
+   c12_ps=1`），8-bit canvas 在 internal SRAM（`c8_int=1`）。20× 主要是
+   **PSRAM 隨機寫入**，不是單純 4 次 16-bit store。詳見 §7.165。
 2. 8-bit random 同 inverse／block 幾乎一樣（0.93–0.97 ms），所以「完全隨機」在
    8-bit 之下已經不是瓶頸；**gen 的 15.6 ms 才是主要成本**。
 3. 9,600 RGB CPU full8 random **16.571 ms**：50 fps 剩 **3.43 ms**，可行但緊；
@@ -6103,16 +6102,20 @@ cap 256 值，唔可以直接跑 28,800 值；因此用 **EffectPerf 0xF069（�
 
 ### 7.164 2026-11-22（Wave table 重用：gen 15.6→2.0 ms；9,600 RGB full 4.41 ms）
 
-**為什麼 12-bit／8-bit 差 20×**：
+**為什麼 12-bit／8-bit 差 20×**（2026-11-22 最終修正）：
 
-- `mem.c12i=1`：12-bit canvas 也在 internal SRAM，不是 PSRAM；不要再說 cache miss。
-- `table_apply12`：每顆燈 4 次 16-bit 隨機 store（R/G/B/W，8 B/px）；
-  `table_apply8`：每顆燈 1 次 aligned 32-bit store（4 B/px）。
-- 9,600 px：38,400 次 halfword store vs 9,600 次 word store；隨機位址令每次
-  都係獨立匯流排 transaction，沒有 burst／coalescing；所以 4× store 數會放大成
-  約 20× 時間。
-- 如果真的要 12-bit 輸出，應該把每顆燈的 channel **pack 成 32/64-bit** 寫，
-  或 tile（例如 512 px 一塊）令 destination 局部化，而不是逐 channel 16-bit 寫。
+- 用 `esp_ptr_internal()`／`esp_ptr_external_ram()` 量到：
+  **12-bit canvas 在 PSRAM**（`c12_int=0, c12_ps=1`），8-bit canvas 在
+  internal SRAM（`c8_int=1`）。
+- 原因：9,600 RGB 的 vals（57.6 KB）＋ 8-bit canvas（38.4 KB）＋兩個 table
+  （38.4 KB）已經佔用 internal；再要 76.8 KB 的 12-bit canvas 時 internal
+  不足，fallback 去 PSRAM。
+- **不是**「四個 channel 連續但分成四次 store」造成 20×；用 packed12
+  （每顆燈兩個 32-bit store）量到 **20.600 ms**，幾乎一樣，證明 store 數不是主因。
+- 真正主因：**PSRAM 的隨機寫入**。Sequential range 在 PSRAM 是 4.9 ms；
+  完全 random 變成 19.97 ms；internal 的 8-bit random 只需 0.97 ms。
+- 如果真的要 12-bit：保持 canvas 在 internal（減少同時配置／用 tile），
+  或先做 partial 12-bit chunk；**不要**把整個 76.8 KB random canvas 放 PSRAM。
 
 **一次預算、之後重用：wave table**：
 
@@ -6144,3 +6147,23 @@ cap 256 值，唔可以直接跑 28,800 值；因此用 **EffectPerf 0xF069（�
 
 限制：這是 **CPU probe**，未計 render；9,600 單 lane 物理仍是 288 ms（3.47 fps）。
 要 50 fps 仍要約 15 條 lane（或降低 FPS）。
+
+
+### 7.165 2026-11-22（實測 c12 在 PSRAM；packed12 20.6 ms；修正 20× 解釋）
+
+`0xF069` 新增 `esp_ptr_internal()`／`esp_ptr_external_ram()` 診斷，9,600 RGB：
+
+```text
+mem: c12_int=0, c12_ps=1, c8_int=1, c8_ps=0
+pair_us: range=4.895ms, random12=19.968ms, packed12=20.600ms, random8=0.970ms
+```
+
+- **12-bit canvas 在 PSRAM**：76.8 KB 放不落 internal（vals 57.6 + c8 38.4 +
+  tables 38.4 已佔用）；fallback PSRAM。
+- **packed12 沒有改善**（20.600 ms）：每顆燈雖然由 4 次 16-bit 變 2 次 32-bit，
+  但仍然是 PSRAM random write；證明「四個連續 channel 分四次 store」不是主因。
+- 8-bit canvas 在 internal（38.4 KB），random8 0.970 ms；差距 ~20× 主要是
+  **PSRAM vs internal**。
+- 所以 production 保持 8-bit internal canvas；真要 12-bit，必須令 canvas 留在
+  internal（減少並存 buffer／tile／分塊），不是換 store 寫法。
+- Wave table 仍有效：gen 15.614 → **1.996 ms**；full8 random **4.409 ms**。
