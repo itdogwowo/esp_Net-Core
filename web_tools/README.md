@@ -147,7 +147,7 @@ web_tools/
 
 ```bash
 cd web_tools/webmaster
-python run.py --sim
+python run.py --port 8012 --sim   # 第二個 sim server（唔碰 8011 真板連線）
 python run.py --serial COM13 --port 8011 --open
 python run.py --print-config        # 睇實際設定（唔會起 server）
 ```
@@ -325,14 +325,19 @@ pixel 子系統係**四層**，唔好混：
 同一頁再落有 **8×8 圓形燈泡**（canvas `#modeMatrix`，64 px＝8×8）：
 
 - 用上面 `composeFrame()` 的 64 px RGBW 畫；黑底＋燈座＋可選 glow（`#modeGlow`）。
-- `White mix` 滑桿 `#modeWhite` 0..100（**預設 80**）：
-  `out = out*(100-w)/100 + 255*w/100`，**R/G/B/W 四通道都做**（同 firmware）。
-  w=0 = 純效果；w=80 = 80% 白＋20% 效果（接近實機睇到的白）。
+- `White mix` 滑桿 `#modeWhite` 0..100（HTML 初始 80；**載入 mode 後跟該 mode 的
+  `white`**，例如 `breathe` = 0）：`out = out*(100-w)/100 + 255*w/100`，
+  **R/G/B/W 四通道都做**（同 firmware）。w=0 = 純效果；w=80 = 80% 白＋20% 效果。
+- `顯示 ×8`（`#modeGain`，預設開）只放大預覽，唔改 firmware；chip 會標明「顯示×8」。
+  低亮度 `breathe` 實際只有 0–23/255，開增益才容易睇到呼吸。
 - 顯示係 RGBW→RGB（W 併入三色）；1D strip（`#modeStrip`）保留、用同一份 frame。
+- **重新載入 /pixel**（`#btnModeReload`）：`0xF06F`，改檔不用重開。
 - **讀取裝置 frame**（`#btnModeRead`）：`POST /api/cmd`
   `{"cmd":"0xF06B","payload_hex":"","expect":["0xF06C"],"timeout":5}`，回覆 JSON
   `{"px":64,"seq":N,"hex":"…512 hex…"}` → 每 4 B 一顆（R,G,B,W）畫**實際** frame。
   firmware 未支援就只出 toast＋`modeFrameInfo` 顯示失敗，唔會 crash。
+- **模擬模式**（`--sim`）也支援 `0xF06B`／`0xF06D`／`0xF06F`，所以無板都可以把
+  「載入 → 預覽 → 讀 frame → 切 mode → reload → Build → OTA」整條 UI 跑一次。
 
 ```bash
 # 讀 firmware 最近一幀（64 px × 4 B = 512 hex）

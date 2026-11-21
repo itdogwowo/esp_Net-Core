@@ -5849,3 +5849,27 @@ LED 太光／受熱（用家反映「LED 甩了」）。production 8×8 不需�
   layout，CRC）；載入時 stat 比對，變更才 parse＋重建，寫入用 `.part` rename。
 - 對 64 px production，現時 plan rebuild 200 µs 不是瓶頸，暫不加入 cache；先保持
   「JSON → RAM → plan」單一路徑，減少 ABI 風險。
+
+### 7.157 2026-11-21（Web 全流程實測：無板 sim、Build UI、OTA UI、白色跟 mode）
+
+**目的**：確認「完全透過網頁控制」不再靠人手 curl。用 headless Chrome（CDP）在
+`http://127.0.0.1:8012/`（`--sim`，無 Matrix 硬件）操作真實前端：
+
+- `#mode`：按「載入裝置 pixel 樹」→ 1 effect／2 modes／2 mappings；
+  選 `breathe` 後 slider 跟 mode 的 `white=0`（之前錯誤地停在 HTML 預設 80）。
+- 8×8 預覽：未載入時是黑，不再用 white mix 把黑畫成白；低亮度顯示加
+  `#modeGain`（×8，只影響預覽，chip 明示）。
+- 按「播放」：6 次取樣 step 40→242，亮度 168→184→112→24→0→56，**真的在呼吸**。
+- 按「讀取裝置 frame」：`0xF06B` → `0xF06C`，chip 顯示
+  `seq 2 · 64 px · breathe · white 0% · apply 199 µs`；sim 回 512 hex。
+- 按「套用到裝置」`0xF06D`、按「重新載入 /pixel」`0xF06F` 都成功。
+- `#flash` Build 卡：board `ESP32-S3-Matrix` + project `ESP32-S3-Matrix-Show`，
+  真的由 UI 建置成功（2.6–14.9 s），artifact 696.6 KiB；`BuildApi.ota()` 再
+  成功 OTA 到 sim。`window.confirm` 需在 headless 測試中 override；正常桌面
+  瀏覽器會出確認對話框。
+- `python -m pytest`：**295 passed**（新增 `test_sim_show.py`＋前端 blank/gain/white/reload
+  檢查）。Headless Chrome 截圖：`/tmp/webmaster-mode-gain.png`、
+  `/tmp/webmaster-build-done.png`、`/tmp/webmaster-live-sim.png`（本機，不入 repo）。
+- sim 的 seed 已加入 Show 四層（breathe、matrix、white80/color、registry），
+  `loadTree` 會先 `POST /api/scan` 重建 manifest，無板都可預覽。
+- 限制：sim 的 `0xF06B` 是軟件模型，不是真 LED；Matrix 硬件仍短路未供電。

@@ -144,6 +144,18 @@ def test_mode_module_has_matrix_white_and_device_frame():
     assert "BuildApi.ota" in text
 
 
+def test_mode_module_blank_state_gain_and_white_from_file():
+    text = js("96-mode.js")
+    # 未載入 mode 時必須畫黑，不能把 white mix 後的黑畫成白。
+    assert "blankFrame" in text and "if (!S.cur) { return blankFrame(); }" in text
+    # mode 的 white 要同步 slider（breathe=0），不要沿用上一個 mode／HTML 預設 80。
+    assert "S.cur.white" in text and "whiteEl.value" in text
+    # 低亮度預覽增益，且 UI 有清楚標示。
+    assert "modeGain" in text and "顯示×8" in text
+    # reload 指令
+    assert "0xF06F" in text and "0xF070" in text
+
+
 def test_shell_hooks_build_and_mode_views():
     text = js("75-shell.js")
     assert "BuildApi.loadInfo" in text

@@ -177,19 +177,29 @@ const ModeSim = (function () {
   }
 
   // 顯示用：RGBW → RGB（W 併入三色，同 1D strip 一致；實機係 RGBW LED）。
+  // 低亮度 breathe 只有 0–23/255，預覽可開 ×8 顯示增益；chip 會標明，不改變 firmware。
   function displayRGB(px) {
     const p = px || [0, 0, 0, 0];
+    const gain = ($("#modeGain") && $("#modeGain").checked) ? 8 : 1;
     return [
-      Math.min(255, p[0] + p[3]),
-      Math.min(255, p[1] + p[3]),
-      Math.min(255, p[2] + p[3]),
+      Math.min(255, (p[0] + p[3]) * gain),
+      Math.min(255, (p[1] + p[3]) * gain),
+      Math.min(255, (p[2] + p[3]) * gain),
     ];
   }
 
   // 目前要畫的 frame：有裝置實際 frame 就畫佢（firmware 已混白，唔再混一次），
   // 否則畫模擬合成＋white mix。
+  function blankFrame() {
+    const out = [];
+    for (let i = 0; i < S.leds; i++) { out.push([0, 0, 0, 0]); }
+    return out;
+  }
+
   function displayFrame() {
     if (S.override) { return S.override.frame; }
+    // 未載入 mode 時畫黑，不要用 white mix 把黑畫成白（會誤導成「已出 80% 白」）。
+    if (!S.cur) { return blankFrame(); }
     return applyWhite(composeFrame(S.step), S.white);
   }
 
@@ -265,7 +275,8 @@ const ModeSim = (function () {
     drawMatrix(frame);
     const chip = $("#modeFrameInfo");
     if (chip && !S.override) {
-      chip.textContent = "模擬合成 · white " + S.white + "%";
+      const gain = ($("#modeGain") && $("#modeGain").checked) ? " · 顯示×8" : "";
+      chip.textContent = S.cur ? ("模擬合成 · white " + S.white + "%" + gain) : "未載入";
     }
   }
 
@@ -304,12 +315,21 @@ const ModeSim = (function () {
     }
     S.totalF = totalFrames(S.cur);
     S.entries.forEach((en) => { en.indices = sliceIndices(en.range, S.leds); });
+    // 跟 mode JSON 的 white（firmware 也是這樣）；缺欄位 = 0，不要沿用上一個 mode 的 slider。
+    const mw = (S.cur && S.cur.white !== undefined) ? Number(S.cur.white) : 0;
+    S.white = Math.max(0, Math.min(100, Number.isFinite(mw) ? mw : 0));
+    const whiteEl = $("#modeWhite");
+    if (whiteEl) { whiteEl.value = String(S.white); }
+    const whiteVal = $("#modeWhiteVal");
+    if (whiteVal) { whiteVal.textContent = String(S.white); }
     renderInfo(); draw();
   }
 
   async function loadTree() {
     const base = ($("#modeBase") && $("#modeBase").value || "/pixel").replace(/\/+$/, "");
     try {
+      // 先重建 manifest，確保新上傳／seed 的檔案出現在預覽（0x200B FILE_SCAN）。
+      try { await fetch("/api/scan", { method: "POST" }); } catch (_) { /* 冇連線都照試 manifest */ }
       const mf = await (await fetch("/api/manifest")).json();
       const paths = Object.keys(mf.data || {});
       if (!paths.length) { throw new Error("manifest 空：先按『重建索引』"); }
@@ -643,6 +663,8 @@ const ModeSim = (function () {
     }
     const glow = $("#modeGlow");
     if (glow) { glow.onchange = draw; }
+    const gain = $("#modeGain");
+    if (gain) { gain.onchange = draw; }
     const matrixZero = $("#btnModeMatrixZero");
     if (matrixZero) {
       matrixZero.onclick = () => {
@@ -685,5 +707,6 @@ const ModeSim = (function () {
 
   document.addEventListener("DOMContentLoaded", () => setTimeout(bind, 0));
 
+  window.__ModeSimState = S;
   return { loadTree: loadTree, play: play, onShow: onShow, draw: draw };
 })();

@@ -55,6 +55,14 @@ CMD_OTA_STATE_RSP = 0x221B
 CMD_OTA_ERROR_RSP = 0x221C
 CMD_OTA_APPLY = 0x2220
 
+# production Show（content_task）指令；sim 用同一條 JSON 契約，方便無板驗證 UI。
+CMD_SHOWFRAME = 0xF06B
+CMD_SHOWFRAME_RSP = 0xF06C
+CMD_SHOWMODE = 0xF06D
+CMD_SHOWMODE_RSP = 0xF06E
+CMD_RELOAD = 0xF06F
+CMD_RELOAD_RSP = 0xF070
+
 ERR_FIELDS = [
     "err_no_space", "err_write_fail", "err_offset_mismatch", "err_id_mismatch",
     "err_sha_mismatch", "err_not_active", "err_busy",
@@ -80,6 +88,33 @@ SEED = {
     "pixel/effects/demo.json": json.dumps({
         "name": "demo", "fps": 30, "zones": [0, 1, 2],
     }, ensure_ascii=False, indent=2),
+    "pixel/effects/effects.json": json.dumps({
+        "version": 1,
+        "effects": [{
+            "id": 1, "name": "breathe", "pixel_n": 64,
+            "program": [{"type": "math_now", "F": 10, "l_max": 384,
+                         "l_lim": 0, "phi": 0, "end_Time": 256}],
+            "step": 1, "spacing": 0, "offset": 0, "speed": 1, "reverse": False,
+        }],
+    }, ensure_ascii=False, indent=2),
+    "pixel/map/matrix.json": json.dumps({
+        "version": 1, "id": 1, "name": "matrix",
+        "groups": [{"id": 1, "name": "full",
+                    "sel": [{"type": "ws2812", "sel": ":"}]}],
+    }, ensure_ascii=False, indent=2),
+    "pixel/modes/white80.json": json.dumps({
+        "version": 1, "id": 1, "name": "breathe", "index": 1,
+        "play_loop": -1, "maxF": 0, "mapping": "matrix", "white": 0,
+        "map": [{"group": "matrix.full", "effect": "breathe", "write": "rgb"}],
+    }, ensure_ascii=False, indent=2),
+    "pixel/modes/color.json": json.dumps({
+        "version": 1, "id": 2, "name": "color", "index": 2,
+        "play_loop": -1, "maxF": 0, "mapping": "matrix", "white": 0,
+        "map": [{"group": "matrix.full", "effect": "breathe", "write": "rgb"}],
+    }, ensure_ascii=False, indent=2),
+    "pixel/registry.json": json.dumps({
+        "version": 1, "auto_play": True, "list": ["breathe"],
+    }, ensure_ascii=False, indent=2),
     "README.txt": "ESP WebMaster 模擬裝置\n可以直接拖拉檔案上來試。\n",
 }
 
@@ -100,6 +135,7 @@ class SimDevice:
         self._session: dict | None = None
         self._ota: dict | None = None
         self._log_seq = 0
+        self._show_seq = 0
         self._seed_if_empty()
 
     # ── 基本 ──
@@ -258,7 +294,49 @@ class SimDevice:
         if cmd == CMD_OTA_APPLY:
             return [self._line("I", "OTA APPLY（模擬：寫入 firmware.bin）"),
                     self._frame(CMD_OTA_STATE_RSP, b"\x01\x00\x00\x00" + _str16("sim"))]
+        if cmd == CMD_SHOWFRAME:
+            return [self._showframe()]
+        if cmd == CMD_SHOWMODE:
+            return [self._showmode(payload)]
+        if cmd == CMD_RELOAD:
+            return [self._frame(CMD_RELOAD_RSP,
+                                _json16('{"ok":1,"queued":"reload"}'))]
         return [self._line("W", f"未知指令 0x{cmd:04X}（{len(payload)} B）")]
+
+    # ── Show（content_task）──
+    @staticmethod
+    def _sin_q12(phase: int) -> int:
+        p = phase & 0xFFFF
+        if p < 32768:
+            x, sgn = p, 1
+        else:
+            x, sgn = p - 32768, -1
+        s = (x * (32768 - x)) >> 16
+        s2 = (s * s) >> 12
+        s += (922 * (s2 - s)) >> 12
+        if sgn < 0:
+            s = -s
+        return min(4095, max(0, (s + 4096) >> 1))
+
+    def _showframe(self) -> tuple:
+        """回 64 px RGBW；模擬 content_task 的 breathe（F=10、end_Time=256）。"""
+        self._show_seq += 1
+        ph = ((self._show_seq % 256) * 256) & 0xFFFF
+        w = self._sin_q12(ph)
+        v8 = ((w * 384) >> 12) >> 4
+        raw = bytes([v8, v8, v8, 0]) * 64
+        obj = {"px": 64, "seq": self._show_seq, "mode": "breathe", "white": 0,
+               "apply_us": 199, "hex": raw.hex()}
+        return self._frame(CMD_SHOWFRAME_RSP,
+                           _json16(json.dumps(obj, ensure_ascii=False, separators=(",", ":"))))
+
+    def _showmode(self, payload: bytes) -> tuple:
+        mid = payload[0] if payload else 1
+        name = "breathe" if mid == 1 else ("color" if mid == 2 else "?")
+        obj = {"ok": 1 if mid in (1, 2) else 0, "queued": mid,
+               "mode": name, "white": 0}
+        return self._frame(CMD_SHOWMODE_RSP,
+                           _json16(json.dumps(obj, ensure_ascii=False, separators=(",", ":"))))
 
     # ── STATUS ──
     def _status(self, payload: bytes) -> list[tuple]:
