@@ -5813,3 +5813,39 @@ LED 太光／受熱（用家反映「LED 甩了」）。production 8×8 不需�
   Web UI 加「重新載入 /pixel」按鈕（0xF06F）。
 - Show build 696.5 KB（0xae230）成功；task symbol 正確；未上電（板子短路）。
 - Host tests 20 套全綠；WebMaster pytest 292 passed；docs §3.2/§3.3、commands 已更新。
+
+
+### 7.156 2026-11-21（呼吸修正＋hash cache 評估）
+
+**「到底有沒有呼吸？」** 之前板上的 `breathe` 是 **F=16、end_Time=4096**：
+`step_phase = 65536*16/10/4096 = 25`，4096 幀內相位會超過 65536，波形在
+4096 幀結尾跳回；短時間取樣只見 **11–16/255**，所以「有動但唔似完整呼吸」。
+用家嘅懷疑正確。
+
+已修正 `effects.json`：
+
+```json
+{"type":"math_now","F":10,"l_max":384,"l_lim":0,"phi":0,"end_Time":256}
+```
+
+- `step_phase = 65536*10/10/256 = 256`；256 幀 = 一個完整 0 → 23 → 0 循環。
+- 50 fps 約 **5.12 s** 一次呼吸；8-bit 最亮 **23/255**（約 9%），安全。
+- 因為板子短路，**未上傳到裝置**；只在本機／模擬器驗證。修好後
+  `show_upload.py --reboot` 再上傳。
+- 軟件模擬 GIF：`artifacts/breathe_preview.gif`（256 幀、20 ms/frame）；
+  對應數值 `artifacts/breathe_frames.json`（min 0、max 23）。不是硬件輸出。
+
+**Hash／cache 提案評估**
+
+- 目前 mode 切換**不讀 JSON**：`content_apply_mode()` 只用 RAM 內的 mode／map／asset
+  重建 plan；真機量到 **199–251 µs**（64 px）。所以 hash sidecar 對「切換 mode」
+  幾乎冇幫助。
+- Hash cache 真正有幫助的是 **開機／0xF06F reload**：可跳過 JSON parse。但
+  ① 仍要讀檔算 hash（5 個小 JSON 很快）；② 仍要建 plan；③ 要處理 ABI／
+  struct layout／endianness／px 格式／原子寫入／CRC。
+- 若日後 9,600 px／大量 mode 令 boot/reload 變慢，建議做**binary cache**（不是
+  只存 hash）：`pixel/.cache/manifest.json`（ABI、檔案 size/mtime/sha256、blob
+  offset）＋ `pixel/.cache/show.bin`（maps／modes／assets／prebuilt plans 的固定
+  layout，CRC）；載入時 stat 比對，變更才 parse＋重建，寫入用 `.part` rename。
+- 對 64 px production，現時 plan rebuild 200 µs 不是瓶頸，暫不加入 cache；先保持
+  「JSON → RAM → plan」單一路徑，減少 ABI 風險。

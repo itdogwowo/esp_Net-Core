@@ -6,7 +6,7 @@
       "name": "breathe",
       "pixel_n": 64,
       "program": [
-        {"type": "math_now", "F": 16, "l_max": 384, "l_lim": 0, "phi": 0, "end_Time": 4096}
+        {"type": "math_now", "F": 10, "l_max": 384, "l_lim": 0, "phi": 0, "end_Time": 256}
       ],
       "step": 1,
       "spacing": 0,
