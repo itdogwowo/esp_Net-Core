@@ -121,6 +121,47 @@ static void table_apply12(const uint16_t *offs, const uint16_t *vals, uint16_t p
     }
 }
 
+// 8-bit 版查表（production pair 的寫法）：RGB 一次 32-bit store，W 只寫 1 B。
+static void table_apply8(const uint16_t *offs, const uint16_t *vals, uint16_t px,
+                         uint8_t *dst, uint8_t write)
+{
+    for (uint16_t k = 0; k < px; k++) {
+        uint8_t *o = dst + ((uint32_t)offs[k] << 2);
+        if (write == NC_PX_WRITE_W) {
+            o[3] = (uint8_t)(vals[k] >> 4);
+        } else if (write == NC_PX_WRITE_RGB) {
+            const uint32_t w = (uint32_t)(vals[3u * k] >> 4) |
+                               ((uint32_t)(vals[3u * k + 1u] >> 4) << 8) |
+                               ((uint32_t)(vals[3u * k + 2u] >> 4) << 16);
+            *(uint32_t *)o = w;
+        } else {
+            const uint8_t v = (uint8_t)(vals[k] >> 4);
+            *(uint32_t *)o = (uint32_t)v * 0x01010101u;
+        }
+    }
+}
+
+// inverse：destination 順序寫，source 隨機讀（改善 cache／write combining）。
+static void inv_apply8(const uint16_t *inv, const uint16_t *vals, uint16_t px,
+                       uint8_t *dst, uint8_t write)
+{
+    for (uint16_t d = 0; d < px; d++) {
+        const uint16_t k = inv[d];
+        uint8_t *o = dst + ((uint32_t)d << 2);
+        if (write == NC_PX_WRITE_W) {
+            o[3] = (uint8_t)(vals[k] >> 4);
+        } else if (write == NC_PX_WRITE_RGB) {
+            const uint32_t w = (uint32_t)(vals[3u * k] >> 4) |
+                               ((uint32_t)(vals[3u * k + 1u] >> 4) << 8) |
+                               ((uint32_t)(vals[3u * k + 2u] >> 4) << 16);
+            *(uint32_t *)o = w;
+        } else {
+            const uint8_t v = (uint8_t)(vals[k] >> 4);
+            *(uint32_t *)o = (uint32_t)v * 0x01010101u;
+        }
+    }
+}
+
 typedef struct {
     nc_px_job_t *job;
     uint16_t *vals;
@@ -189,6 +230,17 @@ static uint32_t bench_full(ctx_t *c, uint32_t frames, const uint16_t *table, uin
             nc_px_pair_apply12(c->job, c->vals, c->nv, c12);
         }
         nc_px_canvas12_to_8(c12, c->c8, nch, false, err);
+    }
+    s_sink += c->c8[0];
+    return us_per_frame(t0, frames);
+}
+
+static uint32_t bench_full8(ctx_t *c, uint32_t frames, const uint16_t *table)
+{
+    const int64_t t0 = esp_timer_get_time();
+    for (uint32_t f = 0; f < frames; f++) {
+        s_sink += nc_px_job_vals(c->job, f * 3u, c->vals, c->nv);
+        table_apply8(table, c->vals, c->px, c->c8, c->write);
     }
     s_sink += c->c8[0];
     return us_per_frame(t0, frames);
@@ -322,6 +374,7 @@ static void on_pipebench(nc4_ctx_t *ctx, const nc4_frame_t *f)
     vTaskDelay(2);
 
     uint32_t gen_us = 0, pair_range = 0, pair_table = 0, pair_rnd = 0, conv_i = 0;
+    uint32_t pair8_rnd = 0, pair8_inv = 0, pair8_blk = 0, full8_rnd = 0;
     uint32_t full_range = 0, full_table = 0, full_rnd = 0, full_ps = 0;
     const uint8_t reps = (nv > 20000) ? 2 : 3;
     for (uint8_t r = 0; r < reps; r++) {
@@ -349,17 +402,61 @@ static void on_pipebench(nc4_ctx_t *ctx, const nc4_frame_t *f)
         vTaskDelay(2);
     }
 
+    // 8-bit random / inverse / 16-px block；table 共用，避免多 38 KB 配置。
+    for (uint16_t k = 0; k < px; k++) {
+        c.table[c.table_rnd[k]] = k;
+    }
+    {
+        const int64_t t0 = esp_timer_get_time();
+        for (uint8_t r = 0; r < reps; r++) {
+            table_apply8(c.table_rnd, c.vals, px, c.c8, c.write);
+        }
+        pair8_rnd = us_per_frame(t0, reps);
+        s_sink += c.c8[0];
+    }
+    {
+        const int64_t t0 = esp_timer_get_time();
+        for (uint8_t r = 0; r < reps; r++) {
+            inv_apply8(c.table, c.vals, px, c.c8, c.write);
+        }
+        pair8_inv = us_per_frame(t0, reps);
+        s_sink += c.c8[0];
+    }
+    {
+        const uint16_t chunk = 16;
+        const uint16_t nblocks = (uint16_t)(px / chunk);
+        for (uint16_t k = 0; k < px; k++) {
+            const uint16_t b = (uint16_t)(k / chunk);
+            const uint16_t within = (uint16_t)(k % chunk);
+            c.table_rnd[k] = (uint16_t)(((uint32_t)((b * 7u) % nblocks) * chunk) + within);
+        }
+        const int64_t t0 = esp_timer_get_time();
+        for (uint8_t r = 0; r < reps; r++) {
+            table_apply8(c.table_rnd, c.vals, px, c.c8, c.write);
+        }
+        pair8_blk = us_per_frame(t0, reps);
+        s_sink += c.c8[0];
+    }
+
+    for (uint16_t k = 0; k < px; k++) {
+        c.table_rnd[k] = (uint16_t)((uint32_t)k * 7919u % px);
+    }
+    full8_rnd = bench_full8(&c, frames, c.table_rnd);
+
     static char j[1200];
     (void)snprintf(
         j, sizeof(j),
         "{\"px\":%u,\"nv\":%u,\"mode\":%u,\"fr\":%u,\"rep\":%u,"
-        "\"gen_us\":%u,\"pair_us\":{\"range\":%u,\"table\":%u,\"rnd\":%u},"
-        "\"conv_us\":%u,\"full_us\":{\"range\":%u,\"table\":%u,\"rnd\":%u,\"ps\":%u},"
+        "\"gen_us\":%u,\"pair_us\":{\"range\":%u,\"table\":%u,\"rnd\":%u,"
+        "\"rnd8\":%u,\"inv8\":%u,\"blk8\":%u},"
+        "\"conv_us\":%u,\"full_us\":{\"range\":%u,\"table\":%u,\"rnd\":%u,\"ps\":%u,"
+        "\"rnd8\":%u},"
         "\"mem\":{\"c12i\":%d,\"c12p\":%d}}",
         (unsigned)px, (unsigned)nv, (unsigned)mode, (unsigned)frames, (unsigned)reps,
         (unsigned)gen_us, (unsigned)pair_range, (unsigned)pair_table, (unsigned)pair_rnd,
+        (unsigned)pair8_rnd, (unsigned)pair8_inv, (unsigned)pair8_blk,
         (unsigned)conv_i, (unsigned)full_range, (unsigned)full_table, (unsigned)full_rnd,
-        (unsigned)full_ps, c.c12 ? 1 : 0, c.c12p ? 1 : 0);
+        (unsigned)full_ps, (unsigned)full8_rnd, c.c12 ? 1 : 0, c.c12p ? 1 : 0);
 
     ESP_LOGI(TAG, "px=%u nv=%u mode=%u gen=%u pair=%u/%u conv=%u full=%u/%u/%u/%u us",
              (unsigned)px, (unsigned)nv, (unsigned)mode, (unsigned)gen_us,

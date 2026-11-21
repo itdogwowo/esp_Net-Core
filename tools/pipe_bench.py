@@ -5,7 +5,10 @@
   gen        效果生成器（nc_px_job_vals）產生 nv 個 12-bit 值
   pair_range 現行 range 配對（nc_px_pair_apply12）
   pair_table 連續 offs 查表配對
-  pair_rnd   打亂 offs 查表配對（模擬非連續 mapping）
+  pair_rnd   打亂 offs 查表配對（12-bit canvas，模擬非連續 mapping）
+  pair_rnd8  同上但 8-bit canvas（production pair 寫法）
+  pair_inv8  destination 順序寫、source 隨機讀
+  pair_blk8  16 px 一段的 block-random（真實多組別近似）
   conv       12-bit → 8-bit（捨入）
   full_range gen + pair_range + conv
   full_table gen + pair_table + conv
@@ -93,11 +96,14 @@ def show(r: dict) -> None:
     print(f"  gen        {fmt_us(r.get('gen_us'))}   （{gen_ns:.0f} ns/值）")
     p = r.get("pair_us", {})
     print(f"  pair       range {fmt_us(p.get('range'))}   table {fmt_us(p.get('table'))}"
-          f"   random {fmt_us(p.get('rnd'))}   （range {p.get('range', 0) * 1000.0 / px:.0f} ns/px）")
+          f"   random12 {fmt_us(p.get('rnd'))}   （range {p.get('range', 0) * 1000.0 / px:.0f} ns/px）")
+    print(f"             random8 {fmt_us(p.get('rnd8'))}   inverse8 {fmt_us(p.get('inv8'))}"
+          f"   block8 {fmt_us(p.get('blk8'))}")
     print(f"  conv       {fmt_us(r.get('conv_us'))}")
     f = r.get("full_us", {})
     print(f"  full       range {fmt_us(f.get('range'))}   table {fmt_us(f.get('table'))}"
-          f"   random {fmt_us(f.get('rnd'))}   psram12 {fmt_us(f.get('ps'))}")
+          f"   random {fmt_us(f.get('rnd'))}   random8 {fmt_us(f.get('rnd8'))}"
+          f"   psram12 {fmt_us(f.get('ps'))}")
     best = f.get("range") or 0
     if best:
         print(f"  → 50 FPS（20 ms）預算：full range {best / 20000 * 100:.1f}%"

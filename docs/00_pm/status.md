@@ -6059,3 +6059,40 @@ cap 256 值，唔可以直接跑 28,800 值；因此用 **EffectPerf 0xF069（�
 
 **已恢復**：probe 後已 OTA 回 Zero-Show 三任務映像；`status tasks` 仍是
 `render`／`pair`／`effect`，冇 pixel／content／effect_bench。
+
+> **重要修正（見 §7.163）**：19.967 ms 是 **12-bit canvas** 的 random scatter；
+> production pair 用 **8-bit canvas**，同一 9,600 RGB random 只需 **0.970 ms**；
+> gen+pair8 = **16.571 ms**，仍可在 50 fps CPU 預算內。
+
+
+### 7.163 2026-11-22（9,600 RGB random 優化：8-bit canvas 快 20×）
+
+同一 EffectPerf probe 加了三種 8-bit 寫法（production pair 本身是 8-bit；
+之前的 19.967 ms 是 **12-bit 76.8 KB canvas** 的 random RMW）：
+
+| 寫法 | 時間（9,600 px RGB） | 相對 12-bit random |
+|---|---:|---:|
+| 12-bit random table | 19.967 ms | 1.00× |
+| **8-bit random table** | **0.970 ms** | **20.6× 快** |
+| 8-bit inverse（dest 順序寫、source 隨機讀） | 0.931 ms | 21.4× |
+| 8-bit block-random（16 px 一段，近似多組別） | 0.967 ms | 20.7× |
+| **gen + pair8 random（full8）** | **16.571 ms** | 50 fps 的 **82.9%** |
+
+判讀：
+
+1. **最大優化就是 production 已經用的 8-bit canvas**。38.4 KB 的 canvas 放得落
+   cache；76.8 KB 的 12-bit canvas random RMW 會 cache miss，慢 20 倍。
+2. 8-bit random 同 inverse／block 幾乎一樣（0.93–0.97 ms），所以「完全隨機」在
+   8-bit 之下已經不是瓶頸；**gen 的 15.6 ms 才是主要成本**。
+3. 9,600 RGB CPU full8 random **16.571 ms**：50 fps 剩 **3.43 ms**，可行但緊；
+   60 fps（16.67 ms）只剩 ~0.1 ms，不可靠。
+4. 真實「很多組別」用 block8（16 px/段）0.967 ms，與完全 random 差不多；group
+   數量本身不是 8-bit 的主要問題。
+5. 仍未計 render：9,600 顆 WS2812 單 lane 約 **288 ms/幀（3.47 fps）**；要 50 fps
+   需要約 15 條 800 kHz lane。render encode CPU 亦要另量。
+6. 下一步若要 production 9,600：
+   - effect frame 由 256 值/job 擴到 28,800（PSRAM／分塊）；
+   - pair plan 加 random offset table（19.2 KB）或 runs；
+   - **保持 8-bit canvas，不要在中間建 12-bit random canvas**；
+   - gen 用 wave table 快取（把 15.6 ms 壓低）才有 50 fps 餘量；
+   - 多 lane 輸出。

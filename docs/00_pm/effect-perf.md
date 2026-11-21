@@ -358,3 +358,12 @@ payload `[px:u16][frames:u16][mode:u8]`；mode 0=1 值/px（wwww）、1=3 值/px
 
 > `full_ps`（canvas 在 PSRAM）今次沒有數字：`c12p` 在這次配置下配不到
 > （回覆 `psram12:—`）；之前 0xF065 的 `p12=11.1 ms`、`mix=8.7 ms` 仍然有效。
+
+
+### 9,600 RGB random：8-bit vs 12-bit（2026-11-22）
+
+- 12-bit random table：19.967 ms（76.8 KB canvas，cache miss）
+- **8-bit random table：0.970 ms**（38.4 KB canvas，production pair 寫法）
+- 8-bit inverse：0.931 ms；8-bit block16：0.967 ms
+- gen 28,800 values：15.601 ms
+- **full8 random = 16.571 ms**（50 fps 82.9%；60 fps 99.4%，冇餘量）
