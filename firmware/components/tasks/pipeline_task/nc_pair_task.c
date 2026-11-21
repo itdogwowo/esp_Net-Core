@@ -1,4 +1,4 @@
-// nc_content_task.c — production 三任務的 pair 段（effect → pair → render）。
+// nc_pair_task.c — production 三任務的 pair 段（effect → pair → render）。
 //
 // 跟 pixel_task（內建六個效果）的分工：
 //   · pixel_task：內建效果 → 環（CONFIG_NETCORE_PIXEL 的一部分，所有 project 共用）；
@@ -51,6 +51,7 @@
 #include "nc_px_layer.h"
 #include "nc_px_layer_scan.h"
 #include "nc_px_show.h"
+#include "nc_render.h"
 #include "nc_pipeline.h"
 #include "nc_store.h"
 #include "nc_task.h"
@@ -206,15 +207,24 @@ static bool content_frame_once(void)
         if (s_eff_frame.seq == s_last_eff_seq) {
             return false;                 // 未有新 frame
         }
+        const uint32_t lat_us = ((uint32_t)esp_timer_get_time() > s_eff_frame.t_pub_us)
+                                ? (uint32_t)esp_timer_get_time() - s_eff_frame.t_pub_us : 0;
+        const int64_t a0 = esp_timer_get_time();
         memset(s_content.canvas, 0, (size_t)s_content.px * NC_PX_BPP);
         for (uint8_t j = 0; j < s_content.plan.njobs; j++) {
             nc_px_pair_apply(&s_content.plan.job[j], s_eff_frame.vals[j],
                              s_eff_frame.nv[j], s_content.canvas);
         }
+        const int64_t a1 = esp_timer_get_time();
         white_mix(s_content.canvas, s_content.px, s_content.white);
+        const int64_t w1 = esp_timer_get_time();
         if (!commit_canvas(s_content.canvas)) {
+            nc_pipe_stats_full();
             return false;                 // 環滿：下 tick 再試
         }
+        const int64_t c1 = esp_timer_get_time();
+        nc_pipe_stats_pair((uint32_t)(a1 - a0), (uint32_t)(w1 - a1),
+                           (uint32_t)(c1 - w1), lat_us);
         s_last_eff_seq = s_eff_frame.seq;
         snapshot_publish(s_content.canvas, s_content.px, s_content.commits);
         return true;
@@ -868,12 +878,75 @@ static void on_reload(nc4_ctx_t *ctx, const nc4_frame_t *f)
     reply_json(ctx, NC4_CMD_RELOAD_RSP, "{\"ok\":1,\"queued\":\"reload\"}");
 }
 
+#define NC4_CMD_PIPESTATS 0xF071
+#define NC4_CMD_PIPESTATS_RSP 0xF072
+#define NC4_CMD_PIPEBURN 0xF073
+#define NC4_CMD_PIPEBURN_RSP 0xF074
+#define NC4_CMD_PIPERESET 0xF075
+#define NC4_CMD_PIPERESET_RSP 0xF076
+
+static void on_pipestats(nc4_ctx_t *ctx, const nc4_frame_t *f)
+{
+    (void)f;
+    nc_pipe_stats_t st = {0};
+    nc_px_stat_t st_render = {0};
+    nc_pipe_stats_get(&st);
+    nc_render_get_stats(&st_render);
+    char j[900];
+    (void)snprintf(j, sizeof(j),
+        "{\"eff\":{\"n\":%u,\"avg_us\":%u,\"max_us\":%u,\"last_us\":%u},"
+        "\"pair\":{\"n\":%u,\"avg_us\":%u,\"max_us\":%u,\"last_us\":%u},"
+        "\"apply\":{\"avg_us\":%u,\"max_us\":%u},"
+        "\"white\":{\"avg_us\":%u,\"max_us\":%u},"
+        "\"commit\":{\"avg_us\":%u,\"max_us\":%u},"
+        "\"lat\":{\"avg_us\":%u,\"max_us\":%u},"
+        "\"render\":{\"frames\":%u,\"fresh\":%u,\"starved\":%u,\"late\":%u,"
+        "\"frame_us\":%u,\"frame_max_us\":%u,\"enc_us\":%u,\"tx_us\":%u,\"fps_x10\":%u},"
+        "\"full\":%u}",
+        (unsigned)st.eff_n, (unsigned)st.eff_avg_us,
+        (unsigned)st.eff_max_us, (unsigned)st.eff_last_us,
+        (unsigned)st.pair_n, (unsigned)st.pair_avg_us,
+        (unsigned)st.pair_max_us, (unsigned)st.pair_last_us,
+        (unsigned)st.apply_avg_us, (unsigned)st.apply_max_us,
+        (unsigned)st.white_avg_us, (unsigned)st.white_max_us,
+        (unsigned)st.commit_avg_us, (unsigned)st.commit_max_us,
+        (unsigned)st.lat_avg_us, (unsigned)st.lat_max_us,
+        (unsigned)st_render.frames, (unsigned)st_render.fresh,
+        (unsigned)st_render.starved, (unsigned)st_render.late,
+        (unsigned)st_render.frame_us, (unsigned)st_render.frame_max_us,
+        (unsigned)st_render.enc_us, (unsigned)st_render.tx_us,
+        (unsigned)st_render.fps_x10, (unsigned)st.full);
+    reply_json(ctx, NC4_CMD_PIPESTATS_RSP, j);
+}
+
+static void on_pipeburn(nc4_ctx_t *ctx, const nc4_frame_t *f)
+{
+    uint32_t sec = 10;
+    if (f->len >= 1) {
+        sec = f->data[0];
+    }
+    nc_pipe_stats_burn(sec);
+    char j[96];
+    (void)snprintf(j, sizeof(j), "{\"ok\":1,\"burn_s\":%u}", (unsigned)sec);
+    reply_json(ctx, NC4_CMD_PIPEBURN_RSP, j);
+}
+
+static void on_pipereset(nc4_ctx_t *ctx, const nc4_frame_t *f)
+{
+    (void)f;
+    nc_pipe_stats_reset();
+    reply_json(ctx, NC4_CMD_PIPERESET_RSP, "{\"ok\":1,\"reset\":1}");
+}
+
 static const nc_action_t s_actions[] = {
-    { NC4_CMD_SHOWFRAME, on_showframe, "content" },
-    { NC4_CMD_RELOAD, on_reload, "content" },
-    { NC4_CMD_SHOWMODE, on_showmode, "content" },
+    { NC4_CMD_SHOWFRAME, on_showframe, "pair" },
+    { NC4_CMD_RELOAD, on_reload, "pair" },
+    { NC4_CMD_SHOWMODE, on_showmode, "pair" },
+    { NC4_CMD_PIPESTATS, on_pipestats, "pair" },
+    { NC4_CMD_PIPEBURN, on_pipeburn, "pair" },
+    { NC4_CMD_PIPERESET, on_pipereset, "pair" },
 };
 
-NC_ACTION_TABLE_DEF(nc_content_task_table, "pair", s_actions);
+NC_ACTION_TABLE_DEF(nc_pair_task_table, "pair", s_actions);
 
 #endif  // CONFIG_NETCORE_CONTENT

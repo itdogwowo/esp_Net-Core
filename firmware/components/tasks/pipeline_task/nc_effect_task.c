@@ -13,6 +13,8 @@
 #include "freertos/semphr.h"
 #include "freertos/task.h"
 
+#include "esp_timer.h"
+
 #include "nc_pipeline.h"
 #include "nc_prio.h"
 #include "nc_task.h"
@@ -74,13 +76,17 @@ static void effect_loop(void *arg)
 
         const uint8_t slot = s_pub ^ 1u;
         nc_pipe_effect_frame_t *f = &s_frames[slot];
+        const int64_t t0 = esp_timer_get_time();
         f->plan_gen = s_local_gen;
         f->njobs = s_local_plan.njobs;
         for (uint8_t j = 0; j < s_local_plan.njobs; j++) {
             f->nv[j] = nc_px_job_vals(&s_local_plan.job[j], s_step,
                                       f->vals[j], NC_PIPE_VAL_MAX);
         }
+        const int64_t t1 = esp_timer_get_time();
+        nc_pipe_stats_effect((uint32_t)(t1 - t0));
         s_step++;
+        f->t_pub_us = (uint32_t)t1;
         f->seq = ++s_seq;
 
         if (xSemaphoreTake(s_mtx, portMAX_DELAY) == pdTRUE) {
@@ -88,7 +94,11 @@ static void effect_loop(void *arg)
             xSemaphoreGive(s_mtx);
         }
         nc_task_beat();
-        vTaskDelayUntil(&last, period);
+        if (nc_pipe_stats_burn_active()) {
+            taskYIELD();                  // 極限：唔等 50 fps，effect 全速跑
+        } else {
+            vTaskDelayUntil(&last, period);
+        }
     }
 }
 

@@ -21,7 +21,7 @@
 #include "nc_prio.h"
 #include "sdkconfig.h"
 
-#if CONFIG_NETCORE_PIXEL
+#if CONFIG_NETCORE_PIXEL && !CONFIG_NETCORE_CONTENT
 
 static const char *TAG = "pixel";
 
@@ -162,11 +162,11 @@ const nc_task_t *nc_pixel_task(void)
     return &s_task;
 }
 
-#else   // !CONFIG_NETCORE_PIXEL
+#else   // !CONFIG_NETCORE_PIXEL || CONFIG_NETCORE_CONTENT
 
 const nc_task_t *nc_pixel_task(void)
 {
     return NULL;
 }
 
-#endif  // CONFIG_NETCORE_PIXEL
+#endif  // CONFIG_NETCORE_PIXEL && !CONFIG_NETCORE_CONTENT

@@ -22,10 +22,21 @@ extern "C" {
 typedef struct {
     uint32_t seq;
     uint32_t plan_gen;
+    uint32_t t_pub_us;       // effect 完成時間（pair 算 latency）
     uint8_t  njobs;
     uint16_t nv[NC_PX_JOB_MAX];
     uint16_t vals[NC_PX_JOB_MAX][NC_PIPE_VAL_MAX];
 } nc_pipe_effect_frame_t;
+
+typedef struct {
+    uint32_t eff_n, eff_avg_us, eff_max_us, eff_last_us;
+    uint32_t pair_n, pair_avg_us, pair_max_us, pair_last_us;
+    uint32_t apply_avg_us, apply_max_us, apply_last_us;
+    uint32_t white_avg_us, white_max_us, white_last_us;
+    uint32_t commit_avg_us, commit_max_us, commit_last_us;
+    uint32_t lat_avg_us, lat_max_us, lat_last_us;
+    uint32_t full;
+} nc_pipe_stats_t;
 
 // pair → effect：copy 一份 plan；assets 係 caller 的 array（最少 njobs 個），
 // 會把每個 job.asset 指去 assets[i] 的副本，effect 之後唔再碰 pair 的 asset 表。
@@ -34,6 +45,16 @@ bool nc_pipe_plan_snapshot(nc_px_plan_t *out, nc_px_asset_t *assets,
 
 // effect → pair：copy 最新完整 frame；未有 frame 回 false。
 bool nc_pipe_effect_copy(nc_pipe_effect_frame_t *out);
+
+// 分段計時／極限 burn。
+void nc_pipe_stats_reset(void);
+void nc_pipe_stats_get(nc_pipe_stats_t *out);
+void nc_pipe_stats_effect(uint32_t us);
+void nc_pipe_stats_pair(uint32_t apply_us, uint32_t white_us,
+                        uint32_t commit_us, uint32_t lat_us);
+void nc_pipe_stats_full(void);
+void nc_pipe_stats_burn(uint32_t seconds);
+bool nc_pipe_stats_burn_active(void);
 
 #ifdef __cplusplus
 }

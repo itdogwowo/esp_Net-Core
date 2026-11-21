@@ -48,11 +48,11 @@ render 任務（nc_render_task）：取最新一格 → 編碼（ws2812 GRB）�
 |---|---|---|
 | 檔案 → struct | `sw/pixel`（`nc_px_layer*`／`nc_px_asset*`） | 掃目錄、解析 JSON、建表（PC 可測） |
 | mode → plan | `sw/pixel`（`nc_px_show.c`） | group 引用展開、range slice、預編譯 program |
-| 波形值 | `effect` 任務（content_task component） | 只 evaluate program；fixed value frame；50 fps |
-| 配對／white mix | `pair` 任務（content_task component） | 載四層、建 plan、range/write、white mix、寫環、`0xF06B` |
+| 波形值 | `effect` 任務（pipeline_task component） | 只 evaluate program；fixed value frame；50 fps |
+| 配對／white mix | `pair` 任務（pipeline_task component） | 載四層、建 plan、range/write、white mix、寫環、`0xF06B` |
 | 環 → 燈 | `tasks/render_task` | 編碼、DMA、送燈（完全唔知四層） |
 
-## 2. `pair`＋`effect` 任務（`firmware/components/tasks/content_task/`）
+## 2. `pair`＋`effect` 任務（`firmware/components/tasks/pipeline_task/`）
 
 由 **`CONFIG_NETCORE_CONTENT`**（`depends on NETCORE_PIXEL`，default n）開關；`CONFIG` 關閉時
 `.c` 整段 `#if` 掉、component 是空 object（同 `effect_bench` 同一模式）。component 用
@@ -129,8 +129,8 @@ out = (out * (100 - w) + 255 * w) / 100       # 整數除法；R/G/B/W 四通道
 - `{"err":"nodata"}`：show 未開始／未有快照（例如 render 未起）。
 - `{"err":"big","px":N}`：`px > 512`，或 hex 塞唔落 decoder 的回覆 JSON 上限
   `NC4_REPLY_JSON_MAX`（2,600 B；約 px ≤ 315）。production 64 px 永遠在限內。
-- 指令表：`firmware/components/tasks/content_task/nc_content_task.c` 的
-  `NC_ACTION_TABLE_DEF(nc_content_task_table, "pair", …)`；`0xF06B` 喺 `status cmds` 見到
+- 指令表：`firmware/components/tasks/pipeline_task/nc_pair_task.c` 的
+  `NC_ACTION_TABLE_DEF(nc_pair_task_table, "pair", …)`；`0xF06B` 喺 `status cmds` 見到
   主人是 `content`。
 
 Web UI 只需高頻 poll `0xF06B`，把 `hex` 解成 8×8 RGB（第三、四通道是 W 與白底）就有即時
@@ -194,7 +194,7 @@ IDF_PATH=~/esp/esp-idf python3 make.py build ESP32-S3-Matrix \
 - `IDF_PATH=~/esp/esp-idf python3 make.py build ESP32-S3-Matrix --project
   ESP32-S3-Matrix-Show --fresh`：**成功**，image 694.8 KB（0xadb50，分區剩 55%），33–35 s；
   `CONFIG_NETCORE_CONTENT=y`、`CONFIG_NETCORE_PXBENCH`／`EFFECT_BENCH` 均 not set；
-  `_nc_task_reg_pair`、`_nc_task_reg_effect`、`_nc_action_reg_nc_content_task_table`、`nc_content_task_table`
+  `_nc_task_reg_pair`、`_nc_task_reg_effect`、`_nc_action_reg_nc_pair_task_table`、`nc_pair_task_table`
   三個 symbol 已入 ELF（任務＋指令表會由 constructor 自動登記）。唯一警告是既有的
   `bus/bus_net/nc4_line_net.c` unused-function／variable，同本改動無關。
 - Host（x86，同一份 C 實作）用 Show project 的真實 `data/pixel` 內容跑完整管線：

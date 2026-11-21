@@ -801,6 +801,16 @@ code { font-family: var(--font-mono); color: var(--bench-100); font-size: 11.5px
                 </div>
               </div>
             </div>
+            <div class="card" id="pipeStatsCard">
+              <div class="card-h">
+                <span class="label">三任務計時（effect → pair → render）</span>
+                <span class="grow"></span>
+                <button id="btnPipeStats" class="btn sm primary">讀 stats</button>
+                <button id="btnPipeBurn" class="btn sm" title="0xF073 3 秒 effect 極限 burn；LED 仍由 render 50 fps 控制">3s 極限 burn</button>
+                <button id="btnPipeReset" class="btn sm ghost">reset</button>
+              </div>
+              <div class="card-b"><pre id="pipeStats" class="result">按「讀 stats」（0xF071）。</pre></div>
+            </div>
             <div class="card" id="showFlowCard">
               <div class="card-h">
                 <span class="label">Show 全流程：載入 /pixel → 8×8 預覽 → Build → OTA → 讀 device frame</span>
@@ -1195,16 +1205,16 @@ code { font-family: var(--font-mono); color: var(--bench-100); font-size: 11.5px
 <script src="/static/js/40-files.js?v=20261120b"></script>
 <script src="/static/js/50-drive.js?v=20261120b"></script>
 <script src="/static/js/60-flash.js?v=20261120b"></script>
-<script src="/static/js/61-build.js?v=20261121g"></script>
+<script src="/static/js/61-build.js?v=20261122a"></script>
 <script src="/static/js/65-browser-flash.js?v=20261120b"></script>
 <script src="/static/js/66-flash-request.js?v=20261120b"></script>
 <script src="/static/js/70-console.js?v=20261120b"></script>
-<script src="/static/js/75-shell.js?v=20261121g"></script>
+<script src="/static/js/75-shell.js?v=20261122a"></script>
 <script src="/static/js/80-ide.js?v=20261120b"></script>
 <script src="/static/js/85-container.js?v=20261120b"></script>
 <script src="/static/js/90-env.js?v=20261120b"></script>
 <script src="/static/js/95-wave.js?v=20261120c"></script>
-<script src="/static/js/96-mode.js?v=20261121g"></script>
+<script src="/static/js/96-mode.js?v=20261122a"></script>
 <script src="/static/js/99-app.js?v=20261120b"></script>
 </body>
 </html>

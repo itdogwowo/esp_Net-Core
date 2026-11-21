@@ -1,7 +1,7 @@
-# content_task（tasks 層）：三任務管線的 pair＋effect。
+# pipeline_task（tasks 層）：三任務管線的 pair＋effect。
 #
 # 由 CONFIG_NETCORE_CONTENT 開關（Kconfig：depends NETCORE_PIXEL，default n）。
-# 關閉時 nc_content_task.c 內容整段 #if 掉 → component 只是一個空 object，
+# 關閉時 nc_pair_task.c 內容整段 #if 掉 → component 只是一個空 object，
 # 唔登記任務、唔登記指令（同 effect_bench 同一個模式）。
 #
 # 職責：
@@ -12,10 +12,10 @@
 #
 # 送燈仍然係 render 任務（tasks/render_task）的事；兩者只透過環見面。
 idf_component_register(
-    SRCS "nc_content_task.c" "nc_effect_task.c"
+    SRCS "nc_pair_task.c" "nc_effect_task.c" "nc_pipe_stats.c"
     # pixel：環／layer 掃描／show plan／合成。store：/data 掛載點（nc_store_fs_base）。
     # task：任務管理器。nc4：指令表＋ decode context。
-    REQUIRES nc4 pixel task store
+    REQUIRES nc4 pixel task store render_task
     INCLUDE_DIRS "include"
     PRIV_REQUIRES freertos esp_timer heap log
     # 指令表同任務都係 constructor 自己登記；冇任何 symbol 被 main 引用，

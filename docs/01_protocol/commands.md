@@ -252,6 +252,9 @@ components/action/
 | `0xF067` PSRAMBENCH | `[size_kb:u16 LE][iters:u16 LE]`（預設 256 KB、8 次，夾 16..1024 KB、1..32）→ **`0xF068`** `{size,it,ok,int:{wr,rd,cp},psram:{wr,wr_cold,rd,rd_cold,cp},mix:{i2p,p2i,p2p},chunk:{1k,4k,16k,64k},msync_us:{c2m,m2c},msync_err}`（全部 MiB/s）。大 buffer 留 PSRAM、以 chunk 讀入 internal 的純搬運量測；`CONFIG_NETCORE_EFFECT_BENCH`；見 [effect-perf.md §9](../00_pm/effect-perf.md#L268) |
 | `0xF069` PIPEBENCH | `[px:u16 LE][frames:u16 LE][mode:u8]`（mode 0=1 值/px wwww、1=3 值/px rgb、2=1 值/px w）→ **`0xF06A`** `{px,nv,mode,fr,rep,gen_us,pair_us:{range,table,rnd},conv_us,full_us:{range,table,rnd,ps},mem}`（µs）。9,600 個效果值→配對→12→8 的全流程；RGBW→I80 不在內。`CONFIG_NETCORE_EFFECT_BENCH`；見 [effect-perf.md §10](../00_pm/effect-perf.md#L315) |
 | `0xF06B` SHOWFRAME | 無參數 → **`0xF06C`** `{px,seq,mode,white,apply_us,hex}`（0xF06B 最近一幀 4 B/px hex；`nodata`／`big`）。production Show 的 live frame；`show` 指令表。見 [show-pipeline.md](../00_pm/show-pipeline.md) |
+| `0xF071` PIPESTATS | 無參數 → **`0xF072`** JSON：`eff{pair}` 分段（avg/max/last）、`apply`／`white`／`commit`／`lat`、`render`（frame/enc/tx/fps）、`full`。三任務計時。 |
+| `0xF073` PIPEBURN | `[seconds:u8]`（0=停）→ **`0xF074`** `{ok,burn_s}`；effect 暫時全速跑（pair/render 仍受環／50 fps 限制）。 |
+| `0xF075` PIPERESET | 無參數 → **`0xF076`** `{ok,reset}`；清零分段統計。 |
 | `0xF06F` RELOAD | 無參數 → **`0xF070`** `{"ok":1,"queued":"reload"}`；叫 content 任務下一幀邊界重新掃 `/pixel` 四層（改檔不重開）。見 [show-pipeline.md](../00_pm/show-pipeline.md) |
 | `0xF06D` SHOWMODE | `[mode_id:u8]` → **`0xF06E`** `{ok,queued,mode,white}`；排隊切換 mode，show loop 喺下一幀邊界 rebuild plan（唔會同 decode task 同時改 plan）。見 [show-pipeline.md](../00_pm/show-pipeline.md) |
 

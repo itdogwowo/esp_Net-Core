@@ -55,7 +55,7 @@ CMD_OTA_STATE_RSP = 0x221B
 CMD_OTA_ERROR_RSP = 0x221C
 CMD_OTA_APPLY = 0x2220
 
-# production Show（content_task）指令；sim 用同一條 JSON 契約，方便無板驗證 UI。
+# production Show（pipeline_task）指令；sim 用同一條 JSON 契約，方便無板驗證 UI。
 CMD_SHOWFRAME = 0xF06B
 CMD_SHOWFRAME_RSP = 0xF06C
 CMD_SHOWMODE = 0xF06D
@@ -303,7 +303,7 @@ class SimDevice:
                                 _json16('{"ok":1,"queued":"reload"}'))]
         return [self._line("W", f"未知指令 0x{cmd:04X}（{len(payload)} B）")]
 
-    # ── Show（content_task）──
+    # ── Show（pipeline_task）──
     @staticmethod
     def _sin_q12(phase: int) -> int:
         p = phase & 0xFFFF
@@ -319,7 +319,7 @@ class SimDevice:
         return min(4095, max(0, (s + 4096) >> 1))
 
     def _showframe(self) -> tuple:
-        """回 64 px RGBW；模擬 content_task 的 breathe（F=10、end_Time=256）。"""
+        """回 64 px RGBW；模擬 pipeline_task 的 breathe（F=10、end_Time=256）。"""
         self._show_seq += 1
         ph = ((self._show_seq % 256) * 256) & 0xFFFF
         w = self._sin_q12(ph)

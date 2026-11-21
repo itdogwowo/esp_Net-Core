@@ -5633,7 +5633,7 @@ Web UI 要用一條高頻指令預覽最近一幀。
 **做咗**（只動 `content_task` ＋ layer parser ＋ project ＋ docs，EffectPerf／pixel_task／
 render／編碼器全部唔改）：
 
-- 新 component `firmware/components/tasks/content_task/nc_content_task.c`（CONFIG 開關、
+- 新 component `firmware/components/tasks/pipeline_task/nc_pair_task.c`（CONFIG 開關、
   `WHOLE_ARCHIVE`＋constructor 自己登記，`main.c` 唔使改）：
   - 任務：`show`／loop `show`／NORMAL／level 4／order 21／stack 4096／core 1／
     prio `NC_PRIO_OTHERS_MAX-1`（5，低 render 一級）／layer 5／period 0。
@@ -5672,7 +5672,7 @@ render／編碼器全部唔改）：
 - `IDF_PATH=~/esp/esp-idf python3 make.py build ESP32-S3-Matrix --project
   ESP32-S3-Matrix-Show --fresh` **成功**：image **694.8 KB**（0xadb50，分區剩 55%）、33–35 s；
   `CONFIG_NETCORE_CONTENT=y`、PXBENCH／EFFECT_BENCH not set；ELF 有
-  `_nc_task_reg_content`／`_nc_action_reg_nc_content_task_table`／`nc_content_task_table`。
+  `_nc_task_reg_content`／`_nc_action_reg_nc_pair_task_table`／`nc_pair_task_table`。
   唯一警告是既有 `bus/bus_net/nc4_line_net.c` unused-function／variable（同本改動無關）。
 - Host（x86，同一份 C 實作）用真 project 內容：`load_all` → effects=1／maps=1／modes=2／
   list=2；`white80`（white=80）→ plan jobs=1 skipped=0 px=64；200 幀後 R/G/B≥204、W=204、
@@ -5768,7 +5768,7 @@ LED 太光／受熱（用家反映「LED 甩了」）。production 8×8 不需�
 **改名**：`show_task` 嘅語意同 `render_task` 太接近（兩者都似「顯示」），production
 生產者改名 **`content_task`**：
 
-- component：`firmware/components/tasks/content_task/`、`nc_content_task.c`
+- component：`firmware/components/tasks/pipeline_task/`、`nc_pair_task.c`
 - task／loop 名：**`content`**（`tasks.json` 同步；舊 `show` 名由 task_manager
   讀 config 時做 alias，OTA 舊 `/data/config/tasks.json` 不會令新任務自動關閉）
 - Kconfig：`CONFIG_NETCORE_CONTENT`（原本 `NETCORE_SHOW`）
@@ -5799,7 +5799,7 @@ LED 太光／受熱（用家反映「LED 甩了」）。production 8×8 不需�
 
 ### 7.155 2026-11-21（content_task：auto_play＋0xF06F reload；Web reload；測試隔離完成）
 
-- task 改名已完成：`content`（component `content_task`、`nc_content_task.c`、
+- task 改名已完成：`content`（component `content_task`、`nc_pair_task.c`、
   `CONFIG_NETCORE_CONTENT`）；舊 `/data/config/tasks.json` 的 `show` 由 task_manager
   alias 遷移（exact `content` 優先，無才讀 `show`）。Show ELF 只有
   `_nc_task_reg_content`，冇 `_nc_task_reg_show`。
@@ -5946,7 +5946,7 @@ dummy 腳不要接東西。
 | **pair** | core1 | 載 `/data/pixel`、建 plan、按 group/range/write 配對、white mix、寫 prd 環；0xF06B/0xF06D/0xF06F；auto_play |
 | **render** | core1 | 現有 encode→I80→WS2812；只認 canvas |
 
-介面 `firmware/components/tasks/content_task/include/nc_pipeline.h`：
+介面 `firmware/components/tasks/pipeline_task/include/nc_pipeline.h`：
 
 - `nc_pipe_plan_snapshot(plan, assets, cap, &gen)`：pair → effect；copy plan，asset 逐個
   copy 並 repoint，effect 不再持有 pair 的 asset 表 pointer。
@@ -5969,3 +5969,52 @@ dummy 腳不要接東西。
 - Web UI `status` 會直接見到這三條任務；Build 卡仍可建 Zero-Show。
 - 限制：effect frame 每 job cap 256 values（同舊 `nc_px_show_frame` 一致）；9,600 px
   的高密度值仍要之後放大 frame／分塊。white mix 仍是整幀。
+
+### 7.161 2026-11-22（任務名清理＋三任務分段計時＋effect 極限 burn）
+
+**任務清單**：Show 映像現在只有三個 production 任務，無 `pixel`／`content`／
+`effect_bench`：
+
+```text
+render  level4 core1
+pair    level4 core1
+effect  level4 core0
+```
+
+- component 由 `content_task` 改名 **`pipeline_task`**；`pixel_task` 在
+  `CONFIG_NETCORE_CONTENT` 之下不再登記（`#if PIXEL && !CONTENT`）；`effect_bench`
+  移到 `firmware/components/bench/effect_bench`，只有 EffectPerf build 加入。
+- `tasks.json`：`render`／`pair`〔core1〕＋`effect`〔core0〕。
+
+**分段計時**（0xF071，Zero 真機、64 px、1 job、白 0）：
+
+| 段 | avg | max | 說明 |
+|---|---:|---:|---|
+| effect evaluate | **46 µs** | 76 µs | 1 job × 64 值 |
+| pair total | **34 µs** | 75 µs | apply＋white＋commit |
+| ├ apply | 25 µs | 45 µs | `nc_px_pair_apply` |
+| ├ white | 0 µs | 1 µs | white=0 快路 |
+| └ commit | 8 µs | 31 µs | 寫 prd 環 |
+| effect→pair latency | 434 µs | 443 µs | 50 fps 排程 |
+| render encode | **372 µs** | — | 64 px WS2812 |
+| render tx | 17 µs | — | I80 |
+| render fps | 49.9 | — | frame 20.024 ms |
+
+**極限 burn**（0xF073，3 秒；effect 不等 50 fps，pair/render 仍受環／50 fps 限制）：
+
+| 段 | 結果 |
+|---|---|
+| effect | **45,646 幀 / ~4 s ≈ 11,400 fps**；avg **36 µs**、max 108 µs |
+| pair | 354 幀（ring/render 限流）；apply avg26、commit avg5 |
+| ring full | 2,933 |
+| render | 1,236 幀、50.0 fps、enc 363 µs、tx 15 µs |
+
+結論：64 px 的 effect/pair 只佔幾十 µs，**render 50 fps 才是主節拍**；effect 有
+大量 headroom（burn 11k fps）。9,600 px 仍需另量，不能直接把這個比例外推。
+
+**指令**：`0xF071` PIPESTATS→`0xF072`、`0xF073` PIPEBURN→`0xF074`、
+`0xF075` PIPERESET→`0xF076`；Web 模式頁加「三任務計時」卡（讀 stats／3s burn／reset）。
+CLI：`tools/pipeline_stats.py`。
+
+**Build**：Zero 688.5 KB（app `41d90373` 之前；最新 stats build 705,056 B）、
+Matrix-Show 689.0 KB、EffectPerf 676.8 KB；皆成功。

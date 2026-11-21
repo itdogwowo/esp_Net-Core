@@ -119,16 +119,16 @@ set(_nc_extra_dirs
     # pixel_task：效果／Map 生產者；render_task：渲染（LED 現在，LCD 將來）
     "${CMAKE_CURRENT_LIST_DIR}/components/tasks/pixel_task"
     "${CMAKE_CURRENT_LIST_DIR}/components/tasks/render_task"
-    # content_task：production 三任務（effect＋pair）＋/data/pixel 四層；render 不變。
+    # pipeline_task：production 三任務（effect＋pair）＋/data/pixel 四層；render 不變。
     # 由 CONFIG_NETCORE_CONTENT 開關，CONFIG 關閉時 .c 內容為空、不登記任何東西。
-    "${CMAKE_CURRENT_LIST_DIR}/components/tasks/content_task")
+    "${CMAKE_CURRENT_LIST_DIR}/components/tasks/pipeline_task")
 # effect_bench：純效果效能（0xF065），**測試／量測專用**。
 # 只有建置 EffectPerf project 才加入 component；production／Show 映像連目錄都唔掃。
 # 用 NC_PROJECT 環境變數（builder 每次 idf.py 都會帶）判定，避免 CONFIG_* 未載入
 # 前（project() 之前）就讀 Kconfig 的時序問題。
 if(DEFINED ENV{NC_PROJECT} AND "$ENV{NC_PROJECT}" MATCHES "EffectPerf")
     list(APPEND _nc_extra_dirs
-         "${CMAKE_CURRENT_LIST_DIR}/components/tasks/effect_bench")
+         "${CMAKE_CURRENT_LIST_DIR}/components/bench/effect_bench")
 endif()
 # 外部任務宿主（ncm）。NC_ENABLE_NCM=OFF 時連 component 都唔加入 →
 # 唔編譯、唔 link、唔 fetch WAMR 依賴（components/host/ncm/idf_component.yml）。

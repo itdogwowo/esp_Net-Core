@@ -469,6 +469,65 @@ const ModeSim = (function () {
     }
   }
 
+  // 三任務分段計時：0xF071（read）／0xF073 burn／0xF075 reset。
+  async function pipeStatsCommand(cmd, payloadHex, expect, timeout) {
+    return api("/api/cmd", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ cmd, payload_hex: payloadHex || "",
+                             expect: expect, timeout: timeout || 8 }),
+    });
+  }
+
+  function renderPipeStats(d) {
+    const pre = $("#pipeStats");
+    if (!pre) { return; }
+    if (!d || typeof d !== "object") {
+      pre.textContent = "沒有 stats（firmware 未支援 0xF071？）";
+      return;
+    }
+    const e = d.eff || {}, p = d.pair || {}, a = d.apply || {};
+    const w = d.white || {}, c = d.commit || {}, l = d.lat || {}, r = d.render || {};
+    pre.textContent =
+      "effect  n=" + e.n + "  avg=" + e.avg_us + "us  max=" + e.max_us + "us  last=" + e.last_us + "us\n" +
+      "pair    n=" + p.n + "  avg=" + p.avg_us + "us  max=" + p.max_us + "us\n" +
+      "  apply=" + a.avg_us + "/" + a.max_us + "us  white=" + w.avg_us + "/" + w.max_us +
+      "us  commit=" + c.avg_us + "/" + c.max_us + "us  lat=" + l.avg_us + "/" + l.max_us + "us\n" +
+      "render  frames=" + r.frames + "  fps=" + ((r.fps_x10 || 0) / 10).toFixed(1) +
+      "  frame=" + r.frame_us + "us  enc=" + r.enc_us + "us  tx=" + r.tx_us + "us\n" +
+      "full=" + d.full;
+  }
+
+  async function readPipeStats() {
+    try {
+      const reply = await pipeStatsCommand("0xF071", "", ["0xF072"]);
+      renderPipeStats(reply.json);
+      toast("已讀三任務 stats", "ok", 3000);
+    } catch (e) {
+      toast("讀 stats 失敗：" + e.message + "（firmware 要支援 0xF071）", "err", 9000);
+    }
+  }
+
+  async function burnPipeStats() {
+    try {
+      await pipeStatsCommand("0xF073", "03", ["0xF074"]);
+      toast("effect 極限 burn 3 秒…", "ok", 3000);
+      setTimeout(readPipeStats, 4200);
+    } catch (e) {
+      toast("burn 失敗：" + e.message + "（firmware 要支援 0xF073）", "err", 9000);
+    }
+  }
+
+  async function resetPipeStats() {
+    try {
+      await pipeStatsCommand("0xF075", "", ["0xF076"]);
+      toast("已 reset stats", "ok", 3000);
+      readPipeStats();
+    } catch (e) {
+      toast("reset 失敗：" + e.message, "err", 9000);
+    }
+  }
+
   // 0xF06F：重新掃 /pixel 四層，下一幀邊界 reload（改檔不用重開）。
   async function reloadDeviceContent() {
     try {
@@ -680,6 +739,12 @@ const ModeSim = (function () {
     if (applyBtn) { applyBtn.onclick = () => { applyModeToDevice(); }; }
     const reloadBtn = $("#btnModeReload");
     if (reloadBtn) { reloadBtn.onclick = () => { reloadDeviceContent(); }; }
+    const statsBtn = $("#btnPipeStats");
+    if (statsBtn) { statsBtn.onclick = () => { readPipeStats(); }; }
+    const burnBtn = $("#btnPipeBurn");
+    if (burnBtn) { burnBtn.onclick = () => { burnPipeStats(); }; }
+    const resetStatsBtn = $("#btnPipeReset");
+    if (resetStatsBtn) { resetStatsBtn.onclick = () => { resetPipeStats(); }; }
     const readBtn = $("#btnModeRead");
     if (readBtn) { readBtn.onclick = () => { readDeviceFrame(); }; }
     // Show 全流程

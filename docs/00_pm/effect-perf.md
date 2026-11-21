@@ -65,7 +65,7 @@ log 直接出在 WebMaster 終端；要更穩的數字用 `0xF065` 指定 frames
 ### 2.1 為什麼不是 `test_*`
 
 `effect_bench` 是 `CONFIG_NETCORE_EFFECT_BENCH` 的獨立 component
-（`firmware/components/tasks/effect_bench/`），**不是** `components/*/test_*`。
+（`firmware/components/bench/effect_bench/`），**不是** `components/*/test_*`。
 `NC_ENABLE_TESTS=OFF` 時它仍然可以編進來；`CONFIG` 關閉時整段 `.c` 是空的，
 不登記任務／指令。這滿足「不需要其他測試參與」。
 
