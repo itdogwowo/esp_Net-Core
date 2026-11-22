@@ -326,6 +326,16 @@ menu "esp_Net-Core"
             固定記憶體政策：關閉 = packed 波形永遠 internal；開啟 = 永遠 PSRAM。
             不再「internal 失敗才退 PSRAM」；大畫面（例如 9,600 px）請明確開啟。
 
+    config NETCORE_PIXEL_RING_PSRAM
+        bool "環（prd）固定放 PSRAM（大畫面；不做 internal fallback）"
+        depends on NETCORE_PIXEL && SPIRAM
+        default n
+        help
+            production 的 prd 環是 px × 4 × 3 格。9,600 px 就要 115 KB：
+            internal 冇咁多（實測剩 ~98 KB）→ render 啟動會 NO_MEM。
+            開啟 = 環永遠 PSRAM；關閉 = 永遠 internal（小畫面，預設）。
+            同 PACK_PSRAM 一樣是 **build-time 固定政策**，不是 runtime 按 free heap 選。
+
     config NETCORE_PIXEL_SPI
         bool "SPI 後端（WS2801／APA102 之類有時脈線的燈）"
         depends on NETCORE_PIXEL && SOC_SPI_SUPPORTED
