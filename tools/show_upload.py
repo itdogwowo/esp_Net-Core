@@ -46,6 +46,24 @@ FILES = (
     "registry.json",
 )
 
+
+def file_list(src: Path) -> list[str]:
+    """實際要上傳的檔：effects／map／registry ＋ 全部 modes/*.json。
+
+    以前寫死 white80／color；16×600 的 project 會有 3 條以上 mode，
+    寫死會令上傳失敗（2026-11-22）。
+    """
+    out: list[str] = []
+    for rel in ("effects/effects.json", "map/matrix.json"):
+        if (src / rel).is_file():
+            out.append(rel)
+    mdir = src / "modes"
+    if mdir.is_dir():
+        out.extend(str(p.relative_to(src)) for p in sorted(mdir.glob("*.json")))
+    if (src / "registry.json").is_file():
+        out.append("registry.json")
+    return out
+
 SEG_TYPES = {"keep", "math_now", "square_wave_now", "pulse_wave", "pulse", "starter"}
 HW_TYPES = {"ws2812", "apa102", "pca9685", "pwm", "uartMotor1"}
 WRITE_TYPES = {"r", "g", "b", "w", "ww", "rgb", "rgbw", "wwww"}
@@ -224,8 +242,8 @@ def _validate_map(doc, rel: str, errs: list[str]):
     if not isinstance(groups, list) or not groups:
         errs.append(f"{rel}: groups 要非空陣列")
         return None
-    if len(groups) > 16:
-        errs.append(f"{rel}: groups 超過 16 個（firmware 只收 16 個）")
+    if len(groups) > 65535:
+        errs.append(f"{rel}: groups 超過 65,535 個")
     out_groups = []
     seen_names: set[str] = set()
     seen_ids: set[int] = set()
@@ -234,7 +252,7 @@ def _validate_map(doc, rel: str, errs: list[str]):
         if not isinstance(g, dict):
             errs.append(f"{ctx}: 要 object")
             continue
-        gid = _int_field(g, "id", ctx, errs, 1, 255)
+        gid = _int_field(g, "id", ctx, errs, 1, 65535)
         gname = _str_field(g, "name", ctx, errs, max_len=23)
         if gname:
             if gname in seen_names:
@@ -317,8 +335,8 @@ def _validate_mode(doc, rel: str, effect_names: dict, maps: list[dict], errs: li
     if not isinstance(entries, list) or not entries:
         errs.append(f"{rel}: map 要非空陣列")
         return None
-    if len(entries) > 8:
-        errs.append(f"{rel}: map 超過 8 項（firmware 只收 8 項）")
+    if len(entries) > 65535:
+        errs.append(f"{rel}: map 超過 65,535 項")
     descr = []
     for i, en in enumerate(entries):
         ctx = f"{rel}: map[{i}]"
@@ -366,7 +384,7 @@ def _validate_registry(doc, rel: str, modes: list[dict], errs: list[str]):
     return True
 
 
-def check_tree(src: Path) -> tuple[list[tuple[str, str]], list[str]]:
+def check_tree(src: Path, files: list[str] | None = None) -> tuple[list[tuple[str, str]], list[str]]:
     """驗 --src 之下 FILES 的內容；回 [(rel, 摘要)]、[錯誤]。"""
     errs: list[str] = []
     reports: list[tuple[str, str]] = []
@@ -400,11 +418,12 @@ def check_tree(src: Path) -> tuple[list[tuple[str, str]], list[str]]:
         reports.append((rel, f"id={mp['id']} name={mp['name']}，"
                              f"{len(mp['groups'])} 個 group：" + gs))
 
-    # 3. modes（white80、color）
+    # 3. modes（全部 modes/*.json；唔再寫死 white80／color）
     modes: list[dict] = []
-    for rel in ("modes/white80.json", "modes/color.json"):
+    for path in sorted((src / "modes").glob("*.json")):
+        rel = str(path.relative_to(src))
         before = len(errs)
-        doc = _load_json(src / rel, rel, errs)
+        doc = _load_json(path, rel, errs)
         if doc is None:
             continue
         m = _validate_mode(doc, rel, effects, maps, errs)
@@ -414,7 +433,8 @@ def check_tree(src: Path) -> tuple[list[tuple[str, str]], list[str]]:
         if len(errs) == before:
             reports.append((rel, f"id={m['id']} name={m['name']} white={m['white']}% "
                                  f"mapping={m['mapping']}，{len(m['descr'])} 項："
-                                 + "；".join(m["descr"])))
+                                 + "；".join(m["descr"][:8])
+                                 + ("…（共 %d 項）" % len(m["descr"]) if len(m["descr"]) > 8 else "")))
     if len(modes) > 1 and modes[0]["name"] == modes[1]["name"]:
         errs.append("modes: mode 名重複（firmware 保留第一個）")
     ids = [m["id"] for m in modes]
@@ -441,7 +461,7 @@ def _print_checks(reports, errs) -> bool:
     if errs:
         print(f"檢查結果：有錯（{len(errs)} 個問題）")
         return False
-    print(f"檢查結果：全部 OK（{len(FILES)} 個檔）")
+    print(f"檢查結果：全部 OK（{len(reports)} 個檔）")
     return True
 
 
@@ -477,7 +497,7 @@ def upload_files(via: str, base: str, src: Path, timeout: float) -> int:
     print(f"\n上傳到 {via}（base={base or '/'}）")
     failed = 0
     hinted_dir = False
-    for rel in FILES:
+    for rel in file_list(src):
         target = _target(base, rel)
         local = (src / rel).read_bytes()
         try:
@@ -509,7 +529,7 @@ def upload_files(via: str, base: str, src: Path, timeout: float) -> int:
             failed += 1
         print(f"  ok   {target:<36} {size_txt}"
               f"{'  sha256=' + sha[:12] + '…' if sha else ''}{note}")
-    print(f"上傳完成：{len(FILES) - failed}/{len(FILES)} 個檔 OK")
+    print(f"上傳完成：{len(file_list(src)) - failed}/{len(file_list(src))} 個檔 OK")
     return failed
 
 

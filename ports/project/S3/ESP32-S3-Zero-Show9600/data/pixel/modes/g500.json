@@ -1,0 +1,2512 @@
+{
+  "version": 1,
+  "id": 2,
+  "name": "g500",
+  "index": 2,
+  "play_loop": -1,
+  "maxF": 0,
+  "mapping": "matrix",
+  "white": 0,
+  "map": [
+    {
+      "group": "g0",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g1",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g2",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g3",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g4",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g5",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g6",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g7",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g8",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g9",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g10",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g11",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g12",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g13",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g14",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g15",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g16",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g17",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g18",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g19",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g20",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g21",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g22",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g23",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g24",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g25",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g26",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g27",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g28",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g29",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g30",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g31",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g32",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g33",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g34",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g35",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g36",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g37",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g38",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g39",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g40",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g41",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g42",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g43",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g44",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g45",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g46",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g47",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g48",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g49",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g50",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g51",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g52",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g53",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g54",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g55",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g56",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g57",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g58",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g59",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g60",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g61",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g62",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g63",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g64",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g65",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g66",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g67",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g68",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g69",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g70",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g71",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g72",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g73",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g74",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g75",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g76",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g77",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g78",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g79",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g80",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g81",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g82",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g83",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g84",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g85",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g86",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g87",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g88",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g89",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g90",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g91",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g92",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g93",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g94",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g95",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g96",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g97",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g98",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g99",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g100",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g101",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g102",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g103",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g104",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g105",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g106",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g107",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g108",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g109",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g110",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g111",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g112",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g113",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g114",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g115",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g116",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g117",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g118",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g119",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g120",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g121",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g122",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g123",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g124",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g125",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g126",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g127",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g128",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g129",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g130",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g131",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g132",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g133",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g134",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g135",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g136",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g137",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g138",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g139",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g140",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g141",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g142",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g143",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g144",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g145",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g146",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g147",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g148",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g149",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g150",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g151",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g152",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g153",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g154",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g155",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g156",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g157",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g158",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g159",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g160",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g161",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g162",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g163",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g164",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g165",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g166",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g167",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g168",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g169",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g170",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g171",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g172",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g173",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g174",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g175",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g176",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g177",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g178",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g179",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g180",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g181",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g182",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g183",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g184",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g185",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g186",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g187",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g188",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g189",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g190",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g191",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g192",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g193",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g194",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g195",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g196",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g197",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g198",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g199",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g200",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g201",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g202",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g203",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g204",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g205",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g206",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g207",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g208",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g209",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g210",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g211",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g212",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g213",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g214",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g215",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g216",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g217",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g218",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g219",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g220",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g221",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g222",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g223",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g224",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g225",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g226",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g227",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g228",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g229",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g230",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g231",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g232",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g233",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g234",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g235",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g236",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g237",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g238",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g239",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g240",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g241",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g242",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g243",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g244",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g245",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g246",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g247",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g248",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g249",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g250",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g251",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g252",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g253",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g254",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g255",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g256",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g257",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g258",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g259",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g260",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g261",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g262",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g263",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g264",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g265",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g266",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g267",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g268",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g269",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g270",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g271",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g272",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g273",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g274",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g275",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g276",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g277",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g278",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g279",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g280",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g281",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g282",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g283",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g284",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g285",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g286",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g287",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g288",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g289",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g290",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g291",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g292",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g293",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g294",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g295",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g296",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g297",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g298",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g299",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g300",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g301",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g302",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g303",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g304",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g305",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g306",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g307",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g308",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g309",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g310",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g311",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g312",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g313",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g314",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g315",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g316",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g317",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g318",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g319",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g320",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g321",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g322",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g323",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g324",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g325",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g326",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g327",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g328",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g329",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g330",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g331",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g332",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g333",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g334",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g335",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g336",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g337",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g338",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g339",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g340",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g341",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g342",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g343",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g344",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g345",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g346",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g347",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g348",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g349",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g350",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g351",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g352",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g353",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g354",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g355",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g356",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g357",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g358",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g359",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g360",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g361",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g362",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g363",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g364",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g365",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g366",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g367",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g368",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g369",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g370",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g371",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g372",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g373",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g374",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g375",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g376",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g377",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g378",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g379",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g380",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g381",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g382",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g383",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g384",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g385",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g386",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g387",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g388",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g389",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g390",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g391",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g392",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g393",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g394",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g395",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g396",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g397",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g398",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g399",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g400",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g401",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g402",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g403",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g404",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g405",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g406",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g407",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g408",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g409",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g410",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g411",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g412",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g413",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g414",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g415",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g416",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g417",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g418",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g419",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g420",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g421",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g422",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g423",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g424",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g425",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g426",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g427",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g428",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g429",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g430",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g431",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g432",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g433",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g434",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g435",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g436",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g437",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g438",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g439",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g440",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g441",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g442",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g443",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g444",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g445",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g446",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g447",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g448",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g449",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g450",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g451",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g452",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g453",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g454",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g455",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g456",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g457",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g458",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g459",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g460",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g461",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g462",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g463",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g464",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g465",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g466",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g467",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g468",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g469",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g470",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g471",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g472",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g473",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g474",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g475",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g476",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g477",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g478",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g479",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g480",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g481",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g482",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g483",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g484",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g485",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g486",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g487",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g488",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g489",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g490",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g491",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g492",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g493",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g494",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g495",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g496",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g497",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g498",
+      "effect": "wave256",
+      "write": "rgb"
+    },
+    {
+      "group": "g499",
+      "effect": "wave256",
+      "write": "rgb"
+    }
+  ]
+}

@@ -27,8 +27,8 @@ extern "C" {
 
 typedef struct {
     uint8_t  hw;        // nc_px_hw_t
-    uint16_t base;      // 合成鏈起點
-    uint16_t px;        // 幾顆
+    uint32_t base;      // 合成鏈起點（32-bit：唔再 65,535 上限）
+    uint32_t px;        // 幾顆
 } nc_px_hw_inv_t;
 
 typedef struct {

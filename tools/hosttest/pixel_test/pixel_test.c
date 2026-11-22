@@ -116,9 +116,10 @@ static void test_ring(void)
     CHECK(nc_px_ring_init(&bad, &(nc_px_ring_cfg_t){
               .name = "x", .region = region, .region_bytes = sizeof(region), .px = px,
               .slots = 1 }) == NULL);
+    // 冇固定 px 上限：太大 = 環放唔落配置的 region → 由大小檢查拒絕
     CHECK(nc_px_ring_init(&bad, &(nc_px_ring_cfg_t){
               .name = "x", .region = region, .region_bytes = sizeof(region),
-              .px = NC_PX_MAX_LEDS + 1, .slots = 2 }) == NULL);
+              .px = (uint32_t)(sizeof(region) / NC_PX_BPP) + 1, .slots = 2 }) == NULL);
 }
 
 // ── ② 編碼位元 ─────────────────────────────────────────────────────
@@ -229,7 +230,7 @@ static void test_encode_lane(void)
     // 一顆燈 = 3 B = 24 bit = 72 單元（T0H 1 / T1H 2 / bit 3），再加 80 µs reset = 200 單元
     // 註：8463 > 80 × 2.5 MHz 是四捨五入後的值，所以直接比 200 更清楚。
     const uint8_t px[4] = { 0xFF, 0xFF, 0xFF, 0x00 };
-    static uint8_t units[64 * NC_PX_UNITS_MAX];
+    static uint8_t units[8192];
     const uint32_t total = nc_px_codec_total_units(cd);
     CHECK_EQ(total, 72 + 200);
     // 抖動狀態會逐幀推進（bits = 8 例外：直接四捨五入），所以只驗最後一幀
@@ -355,14 +356,16 @@ static void test_multilane(void)
     cc.bits = 8;
     cc.px = 2;
     nc_px_wave_default(cc.fmt, &cc.wave);
-    static uint8_t a[NC_PX_UNITS_MAX], b[NC_PX_UNITS_MAX];
+    // 上限由實際 codec 回答，不再用全域常數（NC_PX_UNITS_MAX 已移除）。
+    const uint32_t cap = 4096;
+    static uint8_t a[4096], b[4096];
     nc_pixel_codec_t *ca = nc_px_codec_init(nc_px_codec_new(), &cc);
     nc_pixel_codec_t *cb = nc_px_codec_init(nc_px_codec_new(), &cc);
     // lane0 全亮、lane1 全暗
     const uint8_t on[8] = { 0xFF, 0xFF, 0xFF, 0, 0xFF, 0xFF, 0xFF, 0 };
     const uint8_t off[8] = { 0 };
-    const uint32_t n = nc_px_codec_wave_frame(ca, on, 2, a, sizeof(a));
-    CHECK_EQ(n, nc_px_codec_wave_frame(cb, off, 2, b, sizeof(b)));
+    const uint32_t n = nc_px_codec_wave_frame(ca, on, 2, a, cap);
+    CHECK_EQ(n, nc_px_codec_wave_frame(cb, off, 2, b, cap));
     for (uint32_t i = 0; i < n; i++) {
         const uint8_t mix = (uint8_t)(a[i] | (uint8_t)(b[i] << 1));
         // 合成規則：lane0 只有 bit0、lane1 只有 bit1

@@ -32,7 +32,6 @@ size_t nc_px_bench_json(uint8_t lanes, uint16_t px, uint8_t frames, char *out, s
     if (lanes == 0) { lanes = 1; }
     if (lanes > 16) { lanes = 16; }
     if (px == 0) { px = 1; }
-    if (px > NC_PX_MAX_LEDS) { px = NC_PX_MAX_LEDS; }
     if (frames == 0) { frames = 1; }
     if (frames > 50) { frames = 50; }
 

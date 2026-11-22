@@ -27,19 +27,22 @@
   ▼
 sw/pixel 的四層表（nc_px_layer_scan）
   effects  → nc_px_asset_tbl_t   （program 波形；12-bit）
-  map/*.json → nc_px_map_tbl_t   （group = 硬體型別 + Python slice）
-  modes/*.json → nc_px_mode_tbl_t（mode.map[] = group × effect × write × range；white 0..100）
+  map/*.json → nc_px_map_tbl_t   （group = 硬體型別 + Python slice；group／sel 數由檔案決定）
+  modes/*.json → nc_px_mode_tbl_t（mode.map[] = group × effect × write × range；條目數由檔案決定）
   registry.json → nc_px_show_t   （auto_play + list[]）
-  │  選 mode（list[0]）→ mode.mapping → map → nc_px_show_plan(mode, map, assets, inv)
+  │  選 mode（list[0]）→ mode.mapping → map → nc_px_layout_build(mode, map, assets, inv)
   ▼
-nc_px_plan_t（jobs：asset + 預編譯 prog + write + 連續 ranges）
+nc_px_layout_t（aprog[] 值流 ＋ job[] ＋ dst 升序 runs[]）
+  │   ← group.sel → index → counting bucket → run 合併（見 pixel-layout-pairing.md）
   │
-  ├─ effect 任務（core0，50 fps）：只 evaluate program →
-  │    nc_pipe_effect_frame_t {seq, plan_gen, njobs, nv[], vals[8][256]}（fixed frame）
+  ├─ pair 發佈 aprog[]（nc_pipe_aprog_publish）；effect 拿副本
   │
-  ├─ pair 任務（core1）：copy latest effect frame → 按 plan 的 group/range/write
-  │    nc_px_pair_apply() 寫 canvas → white_mix → prd 環；plan 由 pair 擁有
-  │    （effect 用 nc_pipe_plan_snapshot() 拿 asset 副本，唔共享 pointer）
+  ├─ effect 任務（core0，50 fps）：每條值流一個 wave table／pool（×2 雙緩衝）→
+  │    nc_pipe_effect_frame_t {seq, plan_gen, naprog, nv[], vals*[]}（只發指標）
+  │    pair 處理完一幀才 ack(seq)，effect 之後才重用該 slot
+  │
+  ├─ pair 任務（core1）：copy latest frame → nc_px_layout_apply() 順序掃 runs
+  │    寫 canvas → white_mix → prd 環；layout 由 pair 擁有
   │
   ▼
 prd 環（4 B/px = R,G,B,W；render 任務建立／登記）
@@ -52,9 +55,9 @@ render 任務（nc_render_task）：取最新一格 → 編碼（ws2812 GRB）�
 | 層 | component | 負責 |
 |---|---|---|
 | 檔案 → struct | `sw/pixel`（`nc_px_layer*`／`nc_px_asset*`） | 掃目錄、解析 JSON、建表（PC 可測） |
-| mode → plan | `sw/pixel`（`nc_px_show.c`） | group 引用展開、range slice、預編譯 program |
-| 波形值 | `effect` 任務（pipeline_task component） | 只 evaluate program；fixed value frame；50 fps |
-| 配對／white mix | `pair` 任務（pipeline_task component） | 載四層、建 plan、range/write、white mix、寫環、`0xF06B` |
+| mode → layout | `sw/pixel`（`nc_px_layout.c`） | group.sel 展開、range、dst 排序 run 表、預編譯 program |
+| 波形值 | `effect` 任務（pipeline_task component） | 每條值流 evaluate program；雙 pool＋ack；50 fps |
+| 配對／white mix | `pair` 任務（pipeline_task component） | 載四層、建 layout、run 寫入、white mix、寫環、`0xF06B` |
 | 環 → 燈 | `tasks/render_task` | 編碼、DMA、送燈（完全唔知四層） |
 
 ## 2. `pair`＋`effect` 任務（`firmware/components/tasks/pipeline_task/`）

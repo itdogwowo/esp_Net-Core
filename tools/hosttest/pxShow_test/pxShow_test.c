@@ -66,8 +66,19 @@ int main(void)
     }
     nc_px_map_t map;
     nc_px_mode_t mode;
-    check(nc_px_map_parse(map_txt, strlen(map_txt), &map) == ESP_OK, "map 解析");
-    check(nc_px_mode_parse(mode_txt, strlen(mode_txt), &mode) == ESP_OK, "mode 解析");
+    uint32_t ng = 0;
+    uint32_t ns = 0;
+    check(nc_px_map_count(map_txt, strlen(map_txt), &ng, &ns) == ESP_OK, "map count");
+    static nc_px_group_t grp[8];
+    static nc_px_group_sel_t sel[8];
+    nc_px_map_pool_t pool = {
+        .group = grp, .cap_group = 8,
+        .sel = sel, .cap_sel = 8,
+    };
+    check(nc_px_map_parse(map_txt, strlen(map_txt), &pool, &map) == ESP_OK, "map 解析");
+    static nc_px_mode_entry_t mode_pool[16];
+    check(nc_px_mode_parse(mode_txt, strlen(mode_txt), mode_pool, 16, &mode) == ESP_OK,
+          "mode 解析");
 
     nc_px_asset_tbl_t tbl;
     memset(&tbl, 0, sizeof(tbl));
@@ -136,7 +147,8 @@ int main(void)
     char *motor = read_file("tools/hosttest/pxLayer_test/fixtures/motor_sine.json", &n);
     if (motor != NULL) {
         nc_px_mode_t m2;
-        check(nc_px_mode_parse(motor, strlen(motor), &m2) == ESP_OK, "motor_sine 解析");
+        check(nc_px_mode_parse(motor, strlen(motor), mode_pool, 16, &m2) == ESP_OK,
+              "motor_sine 解析");
         // uart_motor_sine 用自訂段型別（唔係六工具）→ 唔會入 program 資產表；
         // 呢個 mode 要等 .nce 後端，plan 應該「搵唔到有效 job」而唔係亂畫。
         check(nc_px_show_plan(&m2, &map, &tbl, inv, 2, &plan) == ESP_ERR_NOT_FOUND,

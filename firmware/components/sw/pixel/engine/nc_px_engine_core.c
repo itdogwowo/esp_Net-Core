@@ -313,7 +313,7 @@ static void manual(void)
 // ═══════════════════════ 生命週期 ═══════════════════════
 esp_err_t nc_px_engine_bind(uint32_t px)
 {
-    if (px == 0 || px > NC_PX_MAX_LEDS) {
+    if (px == 0) {
         return ESP_ERR_INVALID_ARG;
     }
     s_px = px;

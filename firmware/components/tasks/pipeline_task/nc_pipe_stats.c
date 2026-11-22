@@ -13,6 +13,7 @@
 static portMUX_TYPE s_lock = portMUX_INITIALIZER_UNLOCKED;
 static nc_pipe_stats_t s_st;
 static uint64_t s_eff_total, s_pair_total, s_apply_total;
+static uint64_t s_clear_total;
 static uint64_t s_white_total, s_commit_total, s_lat_total;
 static uint32_t s_full;
 static volatile bool s_burn;
@@ -28,7 +29,7 @@ void nc_pipe_stats_reset(void)
     taskENTER_CRITICAL(&s_lock);
     memset(&s_st, 0, sizeof(s_st));
     s_eff_total = s_pair_total = s_apply_total = 0;
-    s_white_total = s_commit_total = s_lat_total = 0;
+    s_clear_total = s_white_total = s_commit_total = s_lat_total = 0;
     s_full = 0;
     taskEXIT_CRITICAL(&s_lock);
 }
@@ -42,6 +43,7 @@ void nc_pipe_stats_get(nc_pipe_stats_t *out)
     *out = s_st;
     out->eff_avg_us = avg(s_eff_total, s_st.eff_n);
     out->pair_avg_us = avg(s_pair_total, s_st.pair_n);
+    out->clear_avg_us = avg(s_clear_total, s_st.pair_n);
     out->apply_avg_us = avg(s_apply_total, s_st.pair_n);
     out->white_avg_us = avg(s_white_total, s_st.pair_n);
     out->commit_avg_us = avg(s_commit_total, s_st.pair_n);
@@ -62,21 +64,24 @@ void nc_pipe_stats_effect(uint32_t us)
     taskEXIT_CRITICAL(&s_lock);
 }
 
-void nc_pipe_stats_pair(uint32_t apply_us, uint32_t white_us,
+void nc_pipe_stats_pair(uint32_t clear_us, uint32_t apply_us, uint32_t white_us,
                         uint32_t commit_us, uint32_t lat_us)
 {
     taskENTER_CRITICAL(&s_lock);
     s_st.pair_n++;
+    s_st.clear_last_us = clear_us;
     s_st.apply_last_us = apply_us;
     s_st.white_last_us = white_us;
     s_st.commit_last_us = commit_us;
     s_st.lat_last_us = lat_us;
-    s_st.pair_last_us = apply_us + white_us + commit_us;
+    s_st.pair_last_us = clear_us + apply_us + white_us + commit_us;
+    if (clear_us > s_st.clear_max_us) s_st.clear_max_us = clear_us;
     if (apply_us > s_st.apply_max_us) s_st.apply_max_us = apply_us;
     if (white_us > s_st.white_max_us) s_st.white_max_us = white_us;
     if (commit_us > s_st.commit_max_us) s_st.commit_max_us = commit_us;
     if (lat_us > s_st.lat_max_us) s_st.lat_max_us = lat_us;
     if (s_st.pair_last_us > s_st.pair_max_us) s_st.pair_max_us = s_st.pair_last_us;
+    s_clear_total += clear_us;
     s_pair_total += s_st.pair_last_us;
     s_apply_total += apply_us;
     s_white_total += white_us;

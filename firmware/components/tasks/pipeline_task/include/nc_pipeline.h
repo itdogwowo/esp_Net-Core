@@ -1,36 +1,49 @@
-// nc_pipeline.h — effect → pair 的窄介面。
+// nc_pipeline.h — effect → pair 的窄介面（layout 版）。
 //
-// 三任務：effect（只算波形值）→ pair（map/range/write/white）→ render（I2C/I80）。
-// 這個 header 只放兩個方向：
-//   · pair 擁有的 plan → effect 要一份 snapshot（effect 不讀 pair 的 static）；
-//   · effect 的最新值 frame → pair 要一份 copy（pair 不讀 effect 的 static）。
-// 兩邊都用 mutex；frame 內容 fixed layout，唔帶 pointer（asset 已 repoint 到 snapshot 的副本）。
+// 三任務：effect（只算波形值）→ pair（排版配對／white mix／寫環）→ render。
+//
+// 這一版配合 `nc_px_layout`（data-driven 排版）：pair 把編譯好的 `aprog[]`
+// （每個效果一條值流）發佈出去，effect 只負責定時把值流算好；pair 拿最新一幀
+// 的**指標**（唔複製 57 KB 的值流），順序掃 runs 寫 canvas。
+//
+// 值流的雙緩衝：effect 有兩個 pool，交替寫；pair 處理完一幀後 ack(seq)，
+// effect 只會寫「pair 已經消化咗」的 slot（pair 慢就等一下，唔會撕裂）。
 #pragma once
 
 #include <stdbool.h>
 #include <stdint.h>
 
 #include "nc_px_asset.h"
-#include "nc_px_show.h"
+#include "nc_px_layout.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-#define NC_PIPE_VAL_MAX 256
+#define NC_PIPE_APROG_MAX NC_PX_LAYOUT_ASSET_MAX
 
+// 一幀：naprog 條值流（vals[i] 指向 effect 的 pool；長度 nv[i]）
 typedef struct {
     uint32_t seq;
     uint32_t plan_gen;
     uint32_t t_pub_us;       // effect 完成時間（pair 算 latency）
-    uint8_t  njobs;
-    uint16_t nv[NC_PX_JOB_MAX];
-    uint16_t vals[NC_PX_JOB_MAX][NC_PIPE_VAL_MAX];
+    uint32_t naprog;
+    uint32_t nv[NC_PIPE_APROG_MAX];
+    uint16_t *vals[NC_PIPE_APROG_MAX];
 } nc_pipe_effect_frame_t;
+
+// pair → effect：plan 換了，effect 要重建 wave table／pool
+typedef struct {
+    uint32_t plan_gen;
+    uint32_t naprog;
+    uint32_t nv[NC_PIPE_APROG_MAX];
+    nc_px_aprog_t aprog[NC_PIPE_APROG_MAX];
+} nc_pipe_aprog_set_t;
 
 typedef struct {
     uint32_t eff_n, eff_avg_us, eff_max_us, eff_last_us;
     uint32_t pair_n, pair_avg_us, pair_max_us, pair_last_us;
+    uint32_t clear_avg_us, clear_max_us, clear_last_us;   // canvas memset（px×4）
     uint32_t apply_avg_us, apply_max_us, apply_last_us;
     uint32_t white_avg_us, white_max_us, white_last_us;
     uint32_t commit_avg_us, commit_max_us, commit_last_us;
@@ -38,19 +51,20 @@ typedef struct {
     uint32_t full;
 } nc_pipe_stats_t;
 
-// pair → effect：copy 一份 plan；assets 係 caller 的 array（最少 njobs 個），
-// 會把每個 job.asset 指去 assets[i] 的副本，effect 之後唔再碰 pair 的 asset 表。
-bool nc_pipe_plan_snapshot(nc_px_plan_t *out, nc_px_asset_t *assets,
-                           uint8_t cap, uint32_t *gen);
-
-// effect → pair：copy 最新完整 frame；未有 frame 回 false。
+// pair：plan 重建後發佈 aprog（gen 由 pair 遞增）
+void nc_pipe_aprog_publish(const nc_px_aprog_t *aprog, uint32_t naprog, uint32_t gen);
+// effect：拿一份 aprog 副本；未有 → false
+bool nc_pipe_aprog_snapshot(nc_pipe_aprog_set_t *out);
+// effect → pair：copy 最新一幀（只複製指標）；未有 → false
 bool nc_pipe_effect_copy(nc_pipe_effect_frame_t *out);
+// pair：處理完 seq 這一幀（effect 可以重用該 slot）
+void nc_pipe_effect_ack(uint32_t seq);
 
 // 分段計時／極限 burn。
 void nc_pipe_stats_reset(void);
 void nc_pipe_stats_get(nc_pipe_stats_t *out);
 void nc_pipe_stats_effect(uint32_t us);
-void nc_pipe_stats_pair(uint32_t apply_us, uint32_t white_us,
+void nc_pipe_stats_pair(uint32_t clear_us, uint32_t apply_us, uint32_t white_us,
                         uint32_t commit_us, uint32_t lat_us);
 void nc_pipe_stats_full(void);
 void nc_pipe_stats_burn(uint32_t seconds);

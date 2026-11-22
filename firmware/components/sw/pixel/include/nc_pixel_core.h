@@ -20,7 +20,8 @@ extern "C" {
 #define NC_PX_BPP          4        // R,G,B,W（每像素 4 B）
 #define NC_PX_HDR_BYTES    24       // 每格表頭
 #define NC_PX_PAGE_BYTES   64       // 一格放大到 64 的倍數（payload 起點 = 64）
-#define NC_PX_MAX_LEDS     2048     // 一格最多幾顆
+// 一格幾顆由設定（CONFIG_NETCORE_PIXEL_LEDS）決定，唔再用固定上限；
+// 記憶體夠唔夠由實際配置（nc_buf／heap）回答，唔係由常數擋。
 #define NC_PX_MAX_SLOTS    6        // 一條環最多幾格
 #define NC_PX_NAME_MAX     24       // 環名上限（plan 資源名一律 16 字內，這裡寬鬆一點）
 
@@ -94,7 +95,7 @@ typedef struct {
     const char *name;
     void       *region;      // 管理器交付的連續區域
     uint32_t    region_bytes;
-    uint32_t    px;          // 每格幾顆（1..NC_PX_MAX_LEDS）
+    uint32_t    px;          // 每格幾顆（由設定決定）
     uint32_t    slots;       // 幾格（2..NC_PX_MAX_SLOTS）
 } nc_px_ring_cfg_t;
 
@@ -198,7 +199,7 @@ typedef struct nc_pixel_codec nc_pixel_codec_t;
 
 #define NC_PX_CODEC_ZONES_MAX   16
 #define NC_PX_UNITS_PER_CELL    8
-#define NC_PX_UNITS_MAX         (NC_PX_MAX_LEDS * 8 * 8)
+// 一幀 bytes 的上限 = 實際配置出來的槽大小（見 i80 的 slot_bytes），唔再設常數。
 
 nc_pixel_codec_t *nc_px_codec_new(void);      // 配置（firmware 後端用；大小對呼叫端不透明）
 nc_pixel_codec_t *nc_px_codec_init(nc_pixel_codec_t *c, const nc_px_codec_cfg_t *cfg);

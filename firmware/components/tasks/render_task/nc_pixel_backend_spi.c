@@ -158,7 +158,7 @@ nc_pixel_backend_t *nc_px_backend_spi(const nc_px_spi_cfg_t *cfg)
     spi_be_t *d = &s_be;
     spi_be_free(d);
     memset(d, 0, sizeof(*d));
-    d->px = (cfg->px > NC_PX_MAX_LEDS) ? NC_PX_MAX_LEDS : cfg->px;
+    d->px = cfg->px;
     d->slots = (uint8_t)((cfg->slots < 2) ? 2u : cfg->slots);
     if (d->slots > SPI_SLOTS_MAX) {
         d->slots = SPI_SLOTS_MAX;

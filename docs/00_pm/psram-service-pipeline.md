@@ -43,6 +43,14 @@
 | Probe command | `0xF069`（EffectPerf） |
 | Stats command | `0xF071`；burn `0xF073`；reset `0xF075` |
 
+**設計基準（2026-11-22 明確定下）**：
+
+| 基準 | 數字 | 用途 |
+|---|---|---|
+| **16 lane × 600 px** | **9,600 px** | 所有排測／配對量測的上限 |
+| 真 show `tools/PC/show_test.pxld` | 37 slaves、**15,808 px**、12,444 幀、40 fps | 不規則切割的真實驗證 |
+| 一個 map 的 group 數 | 目標 500 個組合（任意 `sel`） | 排版配對要表達的規模 |
+
 **重要區分**：
 
 - 64 px 是 production 真機輸出。
@@ -167,32 +175,43 @@ c8_int=1   c8_ps=0    → 8-bit canvas 在 internal（當時）
 
 ---
 
-## 6. 真實情況：500 個可變長度連續 group
+## 6. 真實情況：一個 map 有 500 個 group（組合）
+
+> **2026-11-22 修正**：之前這節把「500 個組合」寫成「500 條 run」，是誤讀。
+> 500 是 **map 裏面 500 個 group**（組合），每個 group 係一段**有序的 `sel` 列表**
+> （可以反序、隔顆、重疊、跨型別），展開就是每顆的全域 pixel index。完整推導見
+> [pixel-layout-pairing.md](pixel-layout-pairing.md)。
 
 用家澄清：
 
 > 500 個隨機連續的組合，長度可能是 2–3 px、幾百 px、十幾 px；group 內連續，group 之間任意跳。
+> 16×600 是測試基準；所有測試都基於這個設計上限。
 
-即係 **500 條 run**，總共 9,600 px，平均 19.2 px/run。
+即係 **16 lane × 600 px = 9,600 px**，由 500 個 group 任意組合而成，平均 19.2 px/group。
+成本由「`sel` 段數」決定（編譯成 destination 順序的 runs 之後），唔係由 px 數或隨機程度決定。
 
-### 6.1 用 run table，不是 per-pixel table
+### 6.1 內部用 destination 順序的 run 表
 
 ```c
 typedef struct {
-    uint16_t src_start;
-    uint16_t dst_start;
-    uint16_t count;      // 2、3、十幾、幾百
-} run_t;
-
-run_t runs[500];         // 500 × 6 B = 3 KB
+    uint32_t dst;        // 全域輸出位置（32-bit；唔再 65,535 上限）
+    uint16_t src;        // 值流 index k（group 像素列表的第 k 顆）
+    uint16_t count;      // 連續幾顆
+    uint8_t  job;        // 邊個 mode 條目（asset／write）
+} px_run_t;
 ```
 
-- 建立一次（mode／map 載入），之後每幀重用。
-- group 長度只是 `count`，不需要為 2 px 或幾百 px 寫特別路徑。
-- 建議按 `dst_start` 排序：canvas 寫入順序化，只有 500 次 source 跳轉。
-- 總寫入仍然 9,600 px；group 跳轉只有 500 次（完全 random 是 9,600 次）。
+- 由 group 的有序 pixel index 列表編譯出來：counting bucket 按 `dst` 分組，掃一次合併連續段
+  （O(px+n)，唔用 qsort）；重疊寫保持 entry 次序。
+- **run 數 ≈ 所有 group 的 `sel` 段數**（500 組 × 1–3 段 ≈ 500–1,500），唔係 px 數。
+- 建立一次（mode／map 載入），之後每幀重用；pair 只順序掃 runs。
+- 寫入次序跟 `dst` 嚴格遞增 → PSRAM 順序寫；`src` 跳只係讀值流（小 buffer）。
 
 ### 6.2 用 600 組 ×16 px 做保守 proxy
+
+> 這是 **proxy**：600 個連續 16 px 段、段次序隨機，代表「多組、每組連續」的形狀。
+> 真正的 500 個 group（任意 `sel`）要等編譯器落地後再量（見
+> [pixel-layout-pairing.md](pixel-layout-pairing.md) §7）。
 
 600 組比 500 組更多跳轉，所以量出嚟偏慢、保守：
 
@@ -202,7 +221,7 @@ run_t runs[500];         // 500 × 6 B = 3 KB
 | 600×16，8-bit PSRAM | 1.864 ms | ~3.9 ms |
 | 完全 random，8-bit PSRAM | 10.647 ms | 14.060 ms |
 
-500 條、平均 19.2 px 的估算：
+500 個 group（平均 19.2 px、1–3 段）的估算：
 
 | 路線 | pair（估） | full CPU（估） | 50 fps 佔用 |
 |---|---:|---:|---:|
@@ -210,8 +229,9 @@ run_t runs[500];         // 500 × 6 B = 3 KB
 | **12-bit canvas + conv（PSRAM）** | **5.0–5.3 ms** | **10.4–10.7 ms** | **52–54%** |
 | 12-bit values → 直接 8-bit canvas | 1.5–1.9 ms | 3.5–3.9 ms | 18–20% |
 
-12-bit canvas 的 5.0–5.3 ms 是從 12-bit sequential range 4.9 ms + 500 run overhead 推算；
-exact 500 可變長度 probe 尚未接入，這是 estimate，不是正式量測。
+12-bit canvas 的 5.0–5.3 ms 是從 12-bit sequential range 4.9 ms + run overhead 推算；
+500 個 group 的真實編譯尚未接入，這是 estimate，不是正式量測（見
+[pixel-layout-pairing.md](pixel-layout-pairing.md) §7 階段 2、6）。
 
 ### 6.3 為什麼 12-bit canvas 不值得
 
@@ -228,9 +248,9 @@ WS2812 只有 8-bit PWM。12-bit canvas 只是中間暫存：
 
 | table | 大小 | 用途 |
 |---|---:|---|
-| **run table** | 500 × 6 B ≈ 3 KB | 500 個可變長度連續 group；首選 |
-| per-pixel dest table | 9,600 × 2 B = 19.2 KB | 完全 random；worst-case |
-| per-pixel inverse table | 9,600 × 2 B = 19.2 KB | destination 順序寫、source 隨機讀 |
+| **run table（編譯結果）** | ≈段數 × 12 B（500–1,500 → 6–18 KB） | destination 升序寫入；首選 |
+| 編譯暫存（bucket／entries） | 9,600 × 6 B ≈ 57.6 KB | 換場時用，之後可重用 |
+| per-pixel dest table | 9,600 × 2 B = 19.2 KB | group 原始 index 列表；編譯輸入 |
 | wave table | 256 × 2 B = 512 B | 效果波形，不變 |
 
 ---
@@ -243,10 +263,11 @@ WS2812 只有 8-bit PWM。12-bit canvas 只是中間暫存：
 9,600 × 24 bit / 800,000 = 288 ms/幀 = 3.47 fps
 ```
 
-- 要 50 fps：需要約 **15 條並行 800 kHz lane**。
+- **16 lane × 600 px（設計基準）**：每 lane 600 × 24 bit / 800 kHz = **18 ms/幀 ≈ 55 fps**，
+  16 條並行 → 9,600 px 可以 50 fps。
 - 這是物理輸出限制，不是 CPU pair。
 - 9,600 要 50 fps 的資料率：9,600×24×50 = 11.52 Mbit/s。
-- 現時 Zero 只接一條 GPIO1 lane。
+- 現時 Zero 只接一條 GPIO1 lane；16 lane 的 render 合併（next-steps §13）仍未做。
 
 ---
 
@@ -254,10 +275,11 @@ WS2812 只有 8-bit PWM。12-bit canvas 只是中間暫存：
 
 | 限制 | 現況 | 影響 |
 |---|---|---|
-| effect frame | 每 job cap **256 值** | 9,600 RGB 要 28,800 值，未支援 |
-| pair plan | 最多 **8 mode entry／16 map group** | 500 組未支援，要改 run table |
+| ~~effect frame 256 值~~ | **已解除**（§7.173：值流按 asset、`nv = pixel_n` 無上限） | — |
+| ~~pair plan 8 entry／16 group／8 sel／4 range~~ | **已解除**（data-driven map／mode ＋ dst 順序 runs） | — |
+| 由 group 次序直接散落寫 | 只在舊 `nc_px_pair_apply`（A/B）；production 走 runs | PSRAM random write 10.647 ms（舊路徑） |
 | 9,600 random table | 只在 probe | production 未接 |
-| render | 單 lane | 9,600 只有 3.47 fps |
+| render | 單 lane | 9,600 只有 3.47 fps（16 lane 才 ≈55 fps） |
 | 64 px | 已全 PSRAM production | 50 fps 正常 |
 
 **所以：**
@@ -265,6 +287,9 @@ WS2812 只有 8-bit PWM。12-bit canvas 只是中間暫存：
 - 64 px：production，effect 8 µs、pair 35 µs、render 363 µs、50 fps。
 - 9,600：CPU probe；8-bit 500-run 估算 pair 1.5–1.9 ms、full 3.5–3.9 ms；
   但 production 接線（frame／run table／多 lane）未完成。
+- 500 個組合（16×600）已在 **2026-11-22** 落地：data-driven map／mode ＋
+  `nc_px_layout` 的 dst 順序 run 表，見 **[pixel-layout-pairing.md](pixel-layout-pairing.md)**
+  §7、status §7.173。真機 probe 仍未做。
 
 ---
 
@@ -312,6 +337,7 @@ python3 tools/pipe_bench.py --via http://127.0.0.1:8011 --px 9600 --frames 2 --m
 
 > 所有 LED 數都走同一條 PSRAM 服務路徑：effect wave table → pair 8-bit PSRAM canvas → render PSRAM packed。  
 > 64 px 實測仍然 50 fps（effect 8 µs、pair 35 µs、render 363 µs）。  
-> 500 個可變長度 run 的 9,600 px，用 3 KB run table、12→8 直接寫，估 pair 1.5–1.9 ms、full 3.5–3.9 ms。  
+> 500 個 group（16×600 = 9,600 px）要的是一個 data-driven 的 plan ＋ destination 順序的 run 表：
+> 估 pair ≈1.9 ms、full ≈3.9 ms（見 [pixel-layout-pairing.md](pixel-layout-pairing.md)）。  
 > 12-bit canvas 版本約 10.4–10.7 ms，對 8-bit WS2812 沒有好處；完全 random 的 19.97 ms 只是 worst-case。  
-> 9,600 真正的瓶頸是單 lane 288 ms/幀（3.47 fps），要 15 lane 才能 50 fps。
+> 9,600 真正的瓶頸是單 lane 288 ms/幀（3.47 fps），要 16 lane（每 lane 600 px、≈55 fps）才談得上 50 fps。

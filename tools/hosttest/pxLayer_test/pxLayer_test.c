@@ -10,6 +10,12 @@
 
 static int g_fail;
 
+// mode 條目現在由檔案決定數量：測試用一塊固定 pool（parse 會檢查 cap）。
+static nc_px_mode_entry_t g_mode_pool[64];
+#define MODE_PARSE(txt, len, out) \
+    nc_px_mode_parse((txt), (len), g_mode_pool, \
+                     (uint32_t)(sizeof(g_mode_pool) / sizeof(g_mode_pool[0])), (out))
+
 static void check(bool cond, const char *name)
 {
     printf("  %s %s\n", cond ? "PASS" : "FAIL", name);
@@ -49,8 +55,19 @@ static void test_map(void)
     if (txt == NULL) {
         return;
     }
+    // 兩步解析：先數、再配 pool（group／sel 由檔案決定，唔再係固定陣列）
+    uint32_t ng = 0;
+    uint32_t ns = 0;
+    check(nc_px_map_count(txt, n, &ng, &ns) == ESP_OK, "count 成功");
+    check(ng == 2 && ns == 2, "count：2 組／2 段");
+    nc_px_group_t *grp = calloc(ng, sizeof(*grp));
+    nc_px_group_sel_t *sel = calloc(ns ? ns : 1, sizeof(*sel));
+    nc_px_map_pool_t pool = {
+        .group = grp, .cap_group = ng,
+        .sel = sel, .cap_sel = ns ? ns : 1,
+    };
     nc_px_map_t m;
-    const esp_err_t e = nc_px_map_parse(txt, n, &m);
+    const esp_err_t e = nc_px_map_parse(txt, n, &pool, &m);
     free(txt);
     check(e == ESP_OK, "解析成功");
     check(m.id == 3, "id = 3");
@@ -63,6 +80,8 @@ static void test_map(void)
     check(m.group[1].id == 2 && strcmp(m.group[1].name, "motors") == 0,
           "group[1] = 2/motors");
     check(m.group[1].sel[0].hw == NC_PX_HW_UARTMOTOR1, "motors.sel[0] = uartMotor1");
+    free(grp);
+    free(sel);
 }
 
 static void test_mode_demo_eyes(void)
@@ -74,7 +93,7 @@ static void test_mode_demo_eyes(void)
         return;
     }
     nc_px_mode_t m;
-    const esp_err_t e = nc_px_mode_parse(txt, n, &m);
+    const esp_err_t e = MODE_PARSE(txt, n, &m);
     free(txt);
     check(e == ESP_OK, "解析成功");
     check(m.id == 1 && strcmp(m.name, "demo_eyes") == 0, "id/name");
@@ -103,7 +122,7 @@ static void test_mode_motor(void)
         return;
     }
     nc_px_mode_t m;
-    const esp_err_t e = nc_px_mode_parse(txt, n, &m);
+    const esp_err_t e = MODE_PARSE(txt, n, &m);
     free(txt);
     check(e == ESP_OK, "解析成功");
     check(m.nentry == 1, "1 個委派項");
@@ -140,19 +159,19 @@ static void test_negative(void)
     printf("[5] 拒絕／跳過\n");
     nc_px_mode_t m;
     const char *bad = "{\"name\":";
-    check(nc_px_mode_parse(bad, strlen(bad), &m) == ESP_ERR_INVALID_ARG, "壞 JSON → INVALID_ARG");
+    check(MODE_PARSE(bad, strlen(bad), &m) == ESP_ERR_INVALID_ARG, "壞 JSON → INVALID_ARG");
 
     const char *w = "{\"name\":\"x\",\"map\":[{\"group\":\"g\",\"effect\":\"e\",\"write\":\"xyz\"}]}";
-    check(nc_px_mode_parse(w, strlen(w), &m) == ESP_OK, "未知 write：整體仍 OK");
+    check(MODE_PARSE(w, strlen(w), &m) == ESP_OK, "未知 write：整體仍 OK");
     check(m.nentry == 0, "未知 write → 該項跳過");
 
     const char *r = "{\"map\":[{\"group\":\"g\",\"effect\":\"e\",\"write\":\"rgb\",\"range\":\"a:b\"}]}";
-    check(nc_px_mode_parse(r, strlen(r), &m) == ESP_OK, "壞 range：整體仍 OK");
+    check(MODE_PARSE(r, strlen(r), &m) == ESP_OK, "壞 range：整體仍 OK");
     check(m.nentry == 1 && !m.entry[0].has_range, "壞 range → 該項當冇 range");
 
     const char *ok2 = "{\"map\":[{\"group\":\"g\",\"effect\":\"e\",\"write\":\"w\"},"
                       "{\"effect\":\"e2\",\"write\":\"w\"}]}";
-    check(nc_px_mode_parse(ok2, strlen(ok2), &m) == ESP_OK, "缺欄位：整體仍 OK");
+    check(MODE_PARSE(ok2, strlen(ok2), &m) == ESP_OK, "缺欄位：整體仍 OK");
     check(m.nentry == 1, "缺 group 的項跳過");
 
     int16_t a, b, c;

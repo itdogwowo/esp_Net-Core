@@ -16,9 +16,13 @@
 
 #include "esp_log.h"
 
+#if defined(ESP_PLATFORM)
+#include "esp_heap_caps.h"
+#endif
+
 static const char *TAG = "px_layer";
 
-#define SCAN_FILE_MAX 8192
+#define SCAN_FILE_MAX (256*1024)   // 500 組 map 就 ~58 KB；8 KB 會失敗
 #define SCAN_ENTRIES  32
 #define SCAN_NAME_LEN 32
 #define SCAN_PATH_LEN 192
@@ -26,6 +30,53 @@ static const char *TAG = "px_layer";
 static nc_px_map_tbl_t  s_maps;
 static nc_px_mode_tbl_t s_modes;
 static nc_px_show_t     s_show;
+
+// map 的 group／sel 由檔案決定（可能 500 組 × 幾段），所以用一個 bump pool：
+// 開機先數總數、一次過配，解析時只向前推。pool 是 BULK（讀一次、之後由 plan 編譯），
+// 唔係熱路徑，所以放 PSRAM；HOT 的只有編譯後的 runs。
+static nc_px_map_pool_t s_map_pool;
+static nc_px_mode_entry_t *s_mode_pool;
+static uint32_t            s_mode_pool_cap;
+
+static void *map_pool_alloc_bytes(size_t n)
+{
+#if defined(ESP_PLATFORM)
+    void *p = heap_caps_malloc(n, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (p != NULL) {
+        return p;
+    }
+#endif
+    return malloc(n);
+}
+
+static void map_pool_free(void)
+{
+    free(s_map_pool.group);
+    free(s_map_pool.sel);
+    memset(&s_map_pool, 0, sizeof(s_map_pool));
+}
+
+static bool map_pool_alloc(uint32_t ngroups, uint32_t nsels)
+{
+    map_pool_free();
+    if (ngroups == 0) {
+        return true;
+    }
+    if (nsels == 0) {
+        nsels = 1;                     // parse 要求非 NULL（0 段都用不到）
+    }
+    s_map_pool.group = (nc_px_group_t *)map_pool_alloc_bytes(
+        (size_t)ngroups * sizeof(nc_px_group_t));
+    s_map_pool.sel = (nc_px_group_sel_t *)map_pool_alloc_bytes(
+        (size_t)nsels * sizeof(nc_px_group_sel_t));
+    if (s_map_pool.group == NULL || s_map_pool.sel == NULL) {
+        map_pool_free();
+        return false;
+    }
+    s_map_pool.cap_group = ngroups;
+    s_map_pool.cap_sel = nsels;
+    return true;
+}
 
 static bool ends_with(const char *s, const char *suffix)
 {
@@ -48,25 +99,34 @@ static int cmp_mode_index(const void *a, const void *b)
     return (ix < iy) ? -1 : (ix > iy) ? 1 : 0;
 }
 
-// 讀檔入 malloc 緩衝；超過 SCAN_FILE_MAX 回 NULL
+// 讀檔入 malloc 緩衝：先問檔案大小，再配剛好（唔再固定 8 KB）。
+// 上限 SCAN_FILE_MAX 只係擋壞檔；16×600 的 map／mode 可以幾十 KB。
 static char *read_all(const char *path, size_t *len)
 {
     FILE *f = fopen(path, "rb");
     if (f == NULL) {
         return NULL;
     }
-    char *buf = (char *)malloc(SCAN_FILE_MAX);
+    if (fseek(f, 0, SEEK_END) != 0) {
+        fclose(f);
+        return NULL;
+    }
+    const long end = ftell(f);
+    if (end <= 0 || (size_t)end > SCAN_FILE_MAX) {
+        fclose(f);
+        return NULL;
+    }
+    if (fseek(f, 0, SEEK_SET) != 0) {
+        fclose(f);
+        return NULL;
+    }
+    char *buf = (char *)malloc((size_t)end);
     if (buf == NULL) {
         fclose(f);
         return NULL;
     }
-    const size_t got = fread(buf, 1, SCAN_FILE_MAX, f);
-    const bool too_big = (got == SCAN_FILE_MAX) && (fgetc(f) != EOF);
+    const size_t got = fread(buf, 1, (size_t)end, f);
     fclose(f);
-    if (too_big) {
-        free(buf);
-        return NULL;
-    }
     *len = got;
     return buf;
 }
@@ -76,6 +136,10 @@ void nc_px_layer_clear(void)
     memset(&s_maps, 0, sizeof(s_maps));
     memset(&s_modes, 0, sizeof(s_modes));
     memset(&s_show, 0, sizeof(s_show));
+    map_pool_free();
+    free(s_mode_pool);
+    s_mode_pool = NULL;
+    s_mode_pool_cap = 0;
 }
 
 esp_err_t nc_px_map_scan(const char *dir)
@@ -103,6 +167,36 @@ esp_err_t nc_px_map_scan(const char *dir)
     closedir(d);
     qsort(names, (size_t)n, sizeof(names[0]), cmp_name);
 
+    // ── pass 1：數容量（group／sel 由檔案決定，唔用固定陣列）──
+    uint32_t need_group = 0;
+    uint32_t need_sel = 0;
+    for (int i = 0; i < n; i++) {
+        char path[SCAN_PATH_LEN];
+        const int w = snprintf(path, sizeof(path), "%s/%s", dir, names[i]);
+        if (w < 0 || (size_t)w >= sizeof(path)) {
+            continue;                       // pass 2 會記 rejected
+        }
+        size_t len = 0;
+        char *txt = read_all(path, &len);
+        if (txt == NULL) {
+            continue;
+        }
+        uint32_t g = 0;
+        uint32_t sl = 0;
+        if (nc_px_map_count(txt, len, &g, &sl) == ESP_OK) {
+            need_group += g;
+            need_sel += sl;
+        }
+        free(txt);
+    }
+    if (need_group > 0 && !map_pool_alloc(need_group, need_sel)) {
+        ESP_LOGW(TAG, "map pool 配置失敗（groups=%u sels=%u）→ 冇 mapping",
+                 (unsigned)need_group, (unsigned)need_sel);
+        s_maps.rejected++;
+        return ESP_ERR_NO_MEM;
+    }
+
+    // ── pass 2：解析＋登記 ──
     for (int i = 0; i < n; i++) {
         char path[SCAN_PATH_LEN];
         const int w = snprintf(path, sizeof(path), "%s/%s", dir, names[i]);
@@ -117,10 +211,9 @@ esp_err_t nc_px_map_scan(const char *dir)
             s_maps.rejected++;
             continue;
         }
-        // map 結構 2.6 KB、mode 0.6 KB；on_start 由 main task（3–8 KB 棧）呼叫，
-        // 放棧會爆。掃描只在開機／換場做，單執行緒 → static 安全。
-        static nc_px_map_t m;
-        const esp_err_t r = nc_px_map_parse(txt, len, &m);
+        // 解析結果 m 只係小 header（groups／sels 指入 s_map_pool），放棧安全。
+        nc_px_map_t m;
+        const esp_err_t r = nc_px_map_parse(txt, len, &s_map_pool, &m);
         free(txt);
         if (r != ESP_OK) {
             ESP_LOGW(TAG, "%s：解析失敗（%s）", path, esp_err_to_name(r));
@@ -179,6 +272,39 @@ esp_err_t nc_px_mode_scan(const char *dir)
     closedir(d);
     qsort(names, (size_t)n, sizeof(names[0]), cmp_name);
 
+    // ── pass 1：數 mode 條目（容量由檔案決定）──
+    uint32_t need = 0;
+    for (int i = 0; i < n; i++) {
+        char path[SCAN_PATH_LEN];
+        const int w = snprintf(path, sizeof(path), "%s/%s", dir, names[i]);
+        if (w < 0 || (size_t)w >= SCAN_PATH_LEN) {
+            continue;
+        }
+        size_t len = 0;
+        char *txt = read_all(path, &len);
+        if (txt == NULL) {
+            continue;
+        }
+        uint32_t ne = 0;
+        if (nc_px_mode_count(txt, len, &ne) == ESP_OK) {
+            need += ne;
+        }
+        free(txt);
+    }
+    if (need > s_mode_pool_cap) {
+        free(s_mode_pool);
+        s_mode_pool = (nc_px_mode_entry_t *)map_pool_alloc_bytes(
+            (size_t)need * sizeof(nc_px_mode_entry_t));
+        if (s_mode_pool == NULL) {
+            ESP_LOGW(TAG, "mode pool 配置失敗（%u 條目）", (unsigned)need);
+            s_modes.rejected++;
+            return ESP_ERR_NO_MEM;
+        }
+        s_mode_pool_cap = need;
+    }
+    uint32_t used = 0;
+
+    // ── pass 2：解析＋登記（每個 mode 用 pool 的一段）──
     for (int i = 0; i < n; i++) {
         char path[SCAN_PATH_LEN];
         const int w = snprintf(path, sizeof(path), "%s/%s", dir, names[i]);
@@ -193,8 +319,9 @@ esp_err_t nc_px_mode_scan(const char *dir)
             s_modes.rejected++;
             continue;
         }
-        static nc_px_mode_t m;
-        const esp_err_t r = nc_px_mode_parse(txt, len, &m);
+        nc_px_mode_t m;
+        const esp_err_t r = nc_px_mode_parse(txt, len, s_mode_pool + used,
+                                             s_mode_pool_cap - used, &m);
         free(txt);
         if (r != ESP_OK) {
             ESP_LOGW(TAG, "%s：解析失敗（%s）", path, esp_err_to_name(r));
@@ -222,6 +349,7 @@ esp_err_t nc_px_mode_scan(const char *dir)
             continue;
         }
         s_modes.item[s_modes.n++] = m;
+        used += m.nentry;
         ESP_LOGI(TAG, "mode %u（%s）：%u 項", (unsigned)m.id, m.name, (unsigned)m.nentry);
     }
     qsort(s_modes.item, s_modes.n, sizeof(s_modes.item[0]), cmp_mode_index);

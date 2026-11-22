@@ -50,6 +50,7 @@
 #include "nc_px_asset.h"
 #include "nc_px_layer.h"
 #include "nc_px_layer_scan.h"
+#include "nc_px_layout.h"
 #include "nc_px_show.h"
 #include "nc_render.h"
 #include "nc_pipeline.h"
@@ -72,6 +73,7 @@ static const char *TAG = "content";
 typedef struct {
     bool           ready;       // plan 建好、可以逐幀合成
     bool           fallback;    // 載入／plan 失敗 → 每幀填黑
+    char           fallback_why[56];  // 0xF06B 用：點解 fallback（維運用）
     nc_pixel_q_t  *q;           // render 建立的 prd 環（NULL = render 未起）
     uint32_t       px;          // 環的 px（= inventory 的 px）
     uint8_t       *canvas;      // px × 4（固定 PSRAM）；fallback/未 ready 時可為 NULL
@@ -80,8 +82,8 @@ typedef struct {
     uint32_t       commits;     // 成功提交的幀數（= 0xF06B 的 seq）
     uint32_t       busy;        // 環滿而跳過的次數（自報 drops）
 
-    nc_px_plan_t      plan;
-    nc_px_asset_tbl_t assets;   // plan 用：只收 mode 引用到的 asset（最多 8 個）
+    nc_px_layout_t    layout;   // 排版編譯結果（dst 順序 runs；由 nc_px_layout 擁有）
+    nc_px_asset_tbl_t *assets;  // PSRAM：只收 mode 引用到的 asset（~8.4 KB，唔佔 internal）
     char              mode_name[NC_PX_LAYER_NAME_MAX];
     char              map_name[NC_PX_LAYER_NAME_MAX];
     char              pixel_dir[64];      // /data/pixel（reload 用）
@@ -92,7 +94,7 @@ typedef struct {
     // 0xF06B 快照：最近一次 commit 的 4 B/px 畫面（最多 SHOWFRAME_PX_MAX 顆）。
     // 由 pair loop 寫、nc4 decode task 讀 → 用 spinlock 護住。
     portMUX_TYPE  lock;
-    uint8_t       last[SHOWFRAME_PX_MAX * NC_PX_BPP];
+    uint8_t      *last;         // PSRAM：0xF06B 快照（SHOWFRAME_PX_MAX × 4 B）
     uint32_t      last_px;
     uint32_t      last_seq;
     bool          last_valid;
@@ -108,15 +110,26 @@ static volatile uint8_t s_pending_mode = 0xFF;
 static volatile bool    s_pending_reload;
 static uint32_t s_last_apply_us;
 
-// pair 擁有的 plan；effect 只經 nc_pipe_plan_snapshot() 讀一份 copy。
+// pair 擁有的 layout；effect 只經 nc_pipe_aprog_publish()／snapshot 拿 aprog 副本。
 static SemaphoreHandle_t s_plan_mtx;
 static volatile uint32_t s_plan_gen;
 static uint32_t s_last_eff_seq;
 static nc_pipe_effect_frame_t s_eff_frame;
 
-// 找回「效果用」的環：名字含 "prd"（render 的預設 lane 叫 i80.prd）。
+// 找回「效果用」的環：先問 render 實際綁到邊條（i80 後端起唔到時會係 mock.prd），
+// 問唔到才退回「名入面有 prd」的舊規則。
 static nc_pixel_q_t *find_prd_ring(void)
 {
+    const char *want = nc_render_first_ring();
+    if (want != NULL) {
+        for (int i = 0; i < nc_px_ring_count(); i++) {
+            nc_pixel_q_t *q = nc_px_ring_at(i);
+            const char *nm = nc_px_ring_name(q);
+            if (nm != NULL && strcmp(nm, want) == 0) {
+                return q;
+            }
+        }
+    }
     for (int i = 0; i < nc_px_ring_count(); i++) {
         nc_pixel_q_t *q = nc_px_ring_at(i);
         const char *nm = nc_px_ring_name(q);
@@ -149,7 +162,7 @@ static void snapshot_publish(const uint8_t *rgbw, uint32_t px, uint32_t seq)
 {
     const uint32_t n = (px > SHOWFRAME_PX_MAX) ? SHOWFRAME_PX_MAX : px;
     taskENTER_CRITICAL(&s_content.lock);
-    if (n > 0) {
+    if (n > 0 && s_content.last != NULL) {
         if (rgbw != NULL) {
             memcpy(s_content.last, rgbw, (size_t)n * NC_PX_BPP);
         } else {
@@ -200,8 +213,7 @@ static bool content_frame_once(void)
         if (!nc_pipe_effect_copy(&s_eff_frame)) {
             return false;                 // effect 未出第一幀
         }
-        if (s_eff_frame.plan_gen != s_plan_gen ||
-            s_eff_frame.njobs != s_content.plan.njobs) {
+        if (s_eff_frame.plan_gen != s_plan_gen) {
             return false;                 // plan 剛換，effect 未趕上
         }
         if (s_eff_frame.seq == s_last_eff_seq) {
@@ -209,12 +221,10 @@ static bool content_frame_once(void)
         }
         const uint32_t lat_us = ((uint32_t)esp_timer_get_time() > s_eff_frame.t_pub_us)
                                 ? (uint32_t)esp_timer_get_time() - s_eff_frame.t_pub_us : 0;
-        const int64_t a0 = esp_timer_get_time();
+        const int64_t c0 = esp_timer_get_time();
         memset(s_content.canvas, 0, (size_t)s_content.px * NC_PX_BPP);
-        for (uint8_t j = 0; j < s_content.plan.njobs; j++) {
-            nc_px_pair_apply(&s_content.plan.job[j], s_eff_frame.vals[j],
-                             s_eff_frame.nv[j], s_content.canvas);
-        }
+        const int64_t a0 = esp_timer_get_time();
+        nc_px_layout_apply(&s_content.layout, s_eff_frame.vals, s_content.canvas);
         const int64_t a1 = esp_timer_get_time();
         white_mix(s_content.canvas, s_content.px, s_content.white);
         const int64_t w1 = esp_timer_get_time();
@@ -223,9 +233,10 @@ static bool content_frame_once(void)
             return false;                 // 環滿：下 tick 再試
         }
         const int64_t c1 = esp_timer_get_time();
-        nc_pipe_stats_pair((uint32_t)(a1 - a0), (uint32_t)(w1 - a1),
-                           (uint32_t)(c1 - w1), lat_us);
+        nc_pipe_stats_pair((uint32_t)(a0 - c0), (uint32_t)(a1 - a0),
+                           (uint32_t)(w1 - a1), (uint32_t)(c1 - w1), lat_us);
         s_last_eff_seq = s_eff_frame.seq;
+        nc_pipe_effect_ack(s_eff_frame.seq);   // effect 可以重用該 slot
         snapshot_publish(s_content.canvas, s_content.px, s_content.commits);
         return true;
     }
@@ -308,6 +319,8 @@ static void content_set_fallback(const char *why)
 {
     s_content.ready = false;
     s_content.fallback = true;
+    snprintf(s_content.fallback_why, sizeof(s_content.fallback_why), "%s",
+             (why != NULL) ? why : "?");
     ESP_LOGW(TAG, "%s → fallback：每幀填黑（render 會顯示黑；開機照常）", why);
 }
 
@@ -325,8 +338,10 @@ static void content_state_reset(void)
     s_content.white = 0;
     s_content.commits = 0;
     s_content.busy = 0;
-    memset(&s_content.plan, 0, sizeof(s_content.plan));
-    memset(&s_content.assets, 0, sizeof(s_content.assets));
+    nc_px_layout_free(&s_content.layout);
+    if (s_content.assets != NULL) {
+        memset(s_content.assets, 0, sizeof(*s_content.assets));
+    }
     s_content.mode_name[0] = '\0';
     s_content.map_name[0] = '\0';
     s_content.pixel_dir[0] = '\0';
@@ -338,6 +353,7 @@ static void content_state_reset(void)
     s_content.last_valid = false;
     s_content.last_px = 0;
     s_content.last_seq = 0;
+    s_content.fallback_why[0] = '\0';
 }
 
 // mode 的 mapping 欄 → map；空／搵唔到 → 用第一條 entry 的 group 前綴；
@@ -376,25 +392,25 @@ static const nc_px_map_t *select_map(const nc_px_mode_t *mode)
 
 // plan 只需要 mode 引用到的 asset（最多 NC_PX_MODE_ENTRY_MAX 個）；
 // asset 表本身係 sw/pixel 的私有表，只公開 find/at，所以在這裡建一份小表。
-static void build_asset_tbl(const nc_px_mode_t *mode)
+static void build_asset_tbl_into(nc_px_asset_tbl_t *dst, const nc_px_mode_t *mode)
 {
-    memset(&s_content.assets, 0, sizeof(s_content.assets));
-    for (uint8_t i = 0; i < mode->nentry; i++) {
+    memset(dst, 0, sizeof(*dst));
+    for (uint32_t i = 0; i < mode->nentry; i++) {
         const nc_px_asset_t *a = nc_px_asset_find(mode->entry[i].effect);
         if (a == NULL) {
             continue;                     // 未知 effect：plan 會記入 skipped
         }
         bool dup = false;
-        for (uint8_t k = 0; k < s_content.assets.n; k++) {
-            if (strcmp(s_content.assets.item[k].name, a->name) == 0) {
+        for (uint8_t k = 0; k < dst->n; k++) {
+            if (strcmp(dst->item[k].name, a->name) == 0) {
                 dup = true;
                 break;
             }
         }
-        if (dup || s_content.assets.n >= NC_PX_ASSET_MAX) {
+        if (dup || dst->n >= NC_PX_ASSET_MAX) {
             continue;
         }
-        s_content.assets.item[s_content.assets.n++] = *a;
+        dst->item[dst->n++] = *a;
     }
 }
 
@@ -454,13 +470,65 @@ static esp_err_t content_apply_mode_locked(const nc_px_mode_t *mode)
     const nc_px_hw_inv_t inv = {
         .hw = NC_PX_HW_WS2812,
         .base = 0,
-        .px = (uint16_t)s_content.px,
+        .px = s_content.px,
     };
-    const esp_err_t pe = nc_px_show_plan(mode, map, &s_content.assets, &inv, 1, &s_content.plan);
-    if (pe != ESP_OK || s_content.plan.njobs == 0) {
-        ESP_LOGW(TAG, "plan 失敗：mode=%s map=%s jobs=%u skipped=%u（%s）",
-                 mode->name, map->name, (unsigned)s_content.plan.njobs,
-                 (unsigned)s_content.plan.skipped, esp_err_to_name(pe));
+    nc_px_layout_free(&s_content.layout);
+
+    // 組合的快取：同一份 mode／map＋同一個 px → 直接讀已編譯結果（固定時間，唔使再計）。
+    // 內容一改（hash 變）或 px 改，key 就唔夾 → 當失效，重建並覆寫。
+    // 每個組合一個檔案（key 由 mode／map 內容＋px 決定）：切返之前用過的組合可以即刻讀。
+    const uint32_t ckey = nc_px_layout_cache_key(mode->hash, map->hash, s_content.px);
+    char cpath[96];
+    (void)snprintf(cpath, sizeof(cpath), "%s/cache/%08lx.pxlt", s_content.pixel_dir,
+                   (unsigned long)ckey);
+    const int64_t t_load0 = esp_timer_get_time();
+    esp_err_t pe = nc_px_layout_load(&s_content.layout, cpath, ckey, s_content.assets);
+    const uint32_t load_us = (uint32_t)(esp_timer_get_time() - t_load0);
+    if (pe == ESP_OK && s_content.layout.njobs > 0) {
+        ESP_LOGI(TAG, "組合由快取讀取：%s（%u 條目、%u 段、%u us）", cpath,
+                 (unsigned)s_content.layout.njobs, (unsigned)s_content.layout.nruns,
+                 (unsigned)load_us);
+    } else {
+        if (pe == ESP_OK) {
+            nc_px_layout_free(&s_content.layout);
+        }
+        const int64_t tb0 = esp_timer_get_time();
+        pe = nc_px_layout_build(mode, map, s_content.assets, &inv, 1, &s_content.layout);
+        const uint32_t build_us = (uint32_t)(esp_timer_get_time() - tb0);
+        if (pe == ESP_OK && s_content.layout.njobs > 0) {
+            // 快取只對「表細」的組合有意義：表大（例如完全隨機 ~230 KB）時，
+            // FAT 讀取同重建差不多，存表反而多一次寫入。門檻 32 KB。
+            const size_t cache_bytes = nc_px_layout_cache_bytes(&s_content.layout);
+            if (cache_bytes <= 32768u) {
+                char cdir[96];
+                (void)snprintf(cdir, sizeof(cdir), "%s/cache", s_content.pixel_dir);
+                (void)mkdir(cdir, 0777);      // EEXIST 當成功
+                const int64_t ts0 = esp_timer_get_time();
+                const esp_err_t se = nc_px_layout_save(&s_content.layout, cpath, ckey);
+                const uint32_t save_us = (uint32_t)(esp_timer_get_time() - ts0);
+                ESP_LOGI(TAG, "組合重建：build %u us、快取 %u B、寫入 %u us（%s）",
+                         build_us, (unsigned)cache_bytes, save_us,
+                         (se == ESP_OK) ? "ok" : esp_err_to_name(se));
+            } else {
+                ESP_LOGW(TAG, "組合重建：build %u us、快取表 %u B 太大（>32 KB）→ 唔存"
+                              "（讀表同重建差不多）", build_us, (unsigned)cache_bytes);
+            }
+        }
+    }
+    if (pe != ESP_OK || s_content.layout.njobs == 0) {
+        ESP_LOGW(TAG, "layout 失敗：mode=%s map=%s jobs=%u runs=%u skipped=%u"
+                      "（effect 唔存在 %u、group 唔存在 %u、write 唔識 %u、空 %u、"
+                      "效果超上限 %u、program 壞 %u、記憶體 %u）（%s）",
+                 mode->name, map->name, (unsigned)s_content.layout.njobs,
+                 (unsigned)s_content.layout.nruns, (unsigned)s_content.layout.skipped,
+                 (unsigned)s_content.layout.skip_no_asset,
+                 (unsigned)s_content.layout.skip_no_group,
+                 (unsigned)s_content.layout.skip_bad_write,
+                 (unsigned)s_content.layout.skip_empty,
+                 (unsigned)s_content.layout.skip_asset_full,
+                 (unsigned)s_content.layout.skip_prog,
+                 (unsigned)s_content.layout.skip_oom,
+                 esp_err_to_name(pe));
         return ESP_ERR_NOT_FOUND;
     }
 
@@ -486,15 +554,36 @@ static esp_err_t content_apply_mode_locked(const nc_px_mode_t *mode)
     s_content.fallback = false;
     s_last_eff_seq = 0;
     s_plan_gen++;
+    nc_pipe_aprog_publish(s_content.layout.aprog, s_content.layout.naprog, s_plan_gen);
     s_last_apply_us = (uint32_t)(esp_timer_get_time() - t0);
 
     ESP_LOGI(TAG, "選中 mode：%s（id=%u）mapping=%s white=%u%%；map=%s（%u groups）",
              mode->name, (unsigned)mode->id,
              (mode->mapping[0] != '\0') ? mode->mapping : "-",
              (unsigned)s_content.white, map->name, (unsigned)map->ngroups);
-    ESP_LOGI(TAG, "plan：px=%u jobs=%u skipped=%u；rebuild %u us；環 %s",
-             (unsigned)s_content.plan.px, (unsigned)s_content.plan.njobs,
-             (unsigned)s_content.plan.skipped, (unsigned)s_last_apply_us,
+    // 記憶體預算（由實際 plan 計，唔用固定上限）：呢四個數加起來就是 pair 的 steady-state。
+    ESP_LOGI(TAG, "pair 記憶體：canvas %u B、值流 %u B（×2）、runs %u × 16 B、"
+                  "jobs %u × 8 B、aprog %u × %u B（全部 PSRAM）",
+             (unsigned)(s_content.layout.px * NC_PX_BPP),
+             (unsigned)(s_content.layout.nvals * 2u),
+             (unsigned)s_content.layout.nruns, (unsigned)s_content.layout.njobs,
+             (unsigned)s_content.layout.naprog, (unsigned)sizeof(nc_px_aprog_t));
+    if (s_content.layout.skipped > 0) {
+        ESP_LOGW(TAG, "layout 有 %u 條目被跳過：effect 唔存在 %u、group 唔存在 %u、"
+                      "write 唔識 %u、空 %u、效果超上限 %u、program 壞 %u、記憶體 %u",
+                 (unsigned)s_content.layout.skipped,
+                 (unsigned)s_content.layout.skip_no_asset,
+                 (unsigned)s_content.layout.skip_no_group,
+                 (unsigned)s_content.layout.skip_bad_write,
+                 (unsigned)s_content.layout.skip_empty,
+                 (unsigned)s_content.layout.skip_asset_full,
+                 (unsigned)s_content.layout.skip_prog,
+                 (unsigned)s_content.layout.skip_oom);
+    }
+    ESP_LOGI(TAG, "layout：px=%u jobs=%u runs=%u aprog=%u skipped=%u；rebuild %u us；環 %s",
+             (unsigned)s_content.layout.px, (unsigned)s_content.layout.njobs,
+             (unsigned)s_content.layout.nruns, (unsigned)s_content.layout.naprog,
+             (unsigned)s_content.layout.skipped, (unsigned)s_last_apply_us,
              nc_px_ring_name(s_content.q));
     return ESP_OK;
 }
@@ -601,32 +690,6 @@ static esp_err_t content_apply_mode(const nc_px_mode_t *mode)
     return e;
 }
 
-// effect 經這個 function copy plan；asset 副本 repoint，effect 之後唔再讀 pair 的表。
-bool nc_pipe_plan_snapshot(nc_px_plan_t *out, nc_px_asset_t *assets,
-                           uint8_t cap, uint32_t *gen)
-{
-    if (out == NULL || assets == NULL || gen == NULL || s_plan_mtx == NULL) {
-        return false;
-    }
-    if (xSemaphoreTake(s_plan_mtx, portMAX_DELAY) != pdTRUE) {
-        return false;
-    }
-    bool ok = false;
-    if (s_content.ready && s_content.plan.njobs > 0 && cap >= s_content.plan.njobs) {
-        *out = s_content.plan;
-        for (uint8_t j = 0; j < out->njobs; j++) {
-            if (out->job[j].asset != NULL) {
-                assets[j] = *out->job[j].asset;
-                out->job[j].asset = &assets[j];
-            }
-        }
-        *gen = s_plan_gen;
-        ok = true;
-    }
-    xSemaphoreGive(s_plan_mtx);
-    return ok;
-}
-
 static void content_start_pipeline(void)
 {
     // ① 環：render 先起（同 level、order 10），所以這裡應該搵到。
@@ -639,6 +702,27 @@ static void content_start_pipeline(void)
     if (s_content.px == 0) {
         content_set_fallback("prd 環 px=0");
         return;
+    }
+
+    // ①b 兩塊「大但唔熱」的表放 PSRAM，避免佔 internal BSS：
+    //     asset 表（32 × 262 B ≈ 8.4 KB）只在換場讀；0xF06B 快照 2 KB 只在主機 poll 時讀。
+    if (s_content.assets == NULL) {
+        s_content.assets = (nc_px_asset_tbl_t *)heap_caps_malloc(
+            sizeof(nc_px_asset_tbl_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        if (s_content.assets == NULL) {
+            content_set_fallback("asset 表配置失敗（PSRAM）");
+            return;
+        }
+        memset(s_content.assets, 0, sizeof(*s_content.assets));
+    }
+    if (s_content.last == NULL) {
+        s_content.last = (uint8_t *)heap_caps_malloc(SHOWFRAME_PX_MAX * NC_PX_BPP,
+                                                     MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        if (s_content.last == NULL) {
+            content_set_fallback("0xF06B 快照配置失敗（PSRAM）");
+            return;
+        }
+        memset(s_content.last, 0, SHOWFRAME_PX_MAX * NC_PX_BPP);
     }
 
     // ② 檔案樹：/data 由 store 掛載（B02 在任務啟動之前）。
@@ -711,6 +795,14 @@ static void content_stop(void)
         heap_caps_free(s_content.canvas);
         s_content.canvas = NULL;
     }
+    if (s_content.assets != NULL) {
+        heap_caps_free(s_content.assets);
+        s_content.assets = NULL;
+    }
+    if (s_content.last != NULL) {
+        heap_caps_free(s_content.last);
+        s_content.last = NULL;
+    }
     s_content.ready = false;
     s_content.q = NULL;
 }
@@ -738,7 +830,7 @@ static void on_showframe(nc4_ctx_t *ctx, const nc4_frame_t *f)
     // 快照由 pair loop 更新（另一個任務、可能另一核）→ 短臨界區。
     // hex 直接寫入 decoder 的回覆緩衝，唔喺 decode task 的棧上開大 buffer。
     taskENTER_CRITICAL(&s_content.lock);
-    if (!s_content.last_valid) {
+    if (!s_content.last_valid || s_content.last == NULL) {
         n = snprintf(js, cap, "{\"err\":\"nodata\"}");
     } else if (s_content.last_px > SHOWFRAME_PX_MAX) {
         n = snprintf(js, cap, "{\"err\":\"big\",\"px\":%u}", (unsigned)s_content.last_px);
@@ -750,9 +842,10 @@ static void on_showframe(nc4_ctx_t *ctx, const nc4_frame_t *f)
         } else {
             static const char hexd[] = "0123456789abcdef";
             n = snprintf(js, cap, "{\"px\":%u,\"seq\":%u,\"mode\":\"%s\","
-                         "\"white\":%u,\"apply_us\":%u,\"hex\":\"",
+                         "\"white\":%u,\"apply_us\":%u,\"fallback\":\"%s\",\"hex\":\"",
                          (unsigned)px, (unsigned)s_content.last_seq, s_content.mode_name,
-                         (unsigned)s_content.white, (unsigned)s_last_apply_us);
+                         (unsigned)s_content.white, (unsigned)s_last_apply_us,
+                         s_content.fallback_why);
             if (n > 0) {
                 for (uint32_t i = 0; i < px * NC_PX_BPP; i++) {
                     const uint8_t b = s_content.last[i];
@@ -887,6 +980,8 @@ static void on_reload(nc4_ctx_t *ctx, const nc4_frame_t *f)
 #define NC4_CMD_PIPEBURN_RSP 0xF074
 #define NC4_CMD_PIPERESET 0xF075
 #define NC4_CMD_PIPERESET_RSP 0xF076
+#define NC4_CMD_PIXDIAG   0xF079
+#define NC4_CMD_PIXDIAG_RSP 0xF07A
 
 static void on_pipestats(nc4_ctx_t *ctx, const nc4_frame_t *f)
 {
@@ -895,21 +990,30 @@ static void on_pipestats(nc4_ctx_t *ctx, const nc4_frame_t *f)
     nc_px_stat_t st_render = {0};
     nc_pipe_stats_get(&st);
     nc_render_get_stats(&st_render);
-    char j[900];
+    nc_px_q_stat_t qs = {0};
+    const char *ring_name = (s_content.q != NULL) ? nc_px_ring_name(s_content.q) : "-";
+    const uint32_t fill = (s_content.q != NULL) ? nc_px_ring_fill(s_content.q) : 0;
+    if (s_content.q != NULL) {
+        nc_px_ring_stats(s_content.q, &qs);
+    }
+    char j[1024];
     (void)snprintf(j, sizeof(j),
         "{\"eff\":{\"n\":%u,\"avg_us\":%u,\"max_us\":%u,\"last_us\":%u},"
         "\"pair\":{\"n\":%u,\"avg_us\":%u,\"max_us\":%u,\"last_us\":%u},"
+        "\"clear\":{\"avg_us\":%u,\"max_us\":%u},"
         "\"apply\":{\"avg_us\":%u,\"max_us\":%u},"
         "\"white\":{\"avg_us\":%u,\"max_us\":%u},"
         "\"commit\":{\"avg_us\":%u,\"max_us\":%u},"
         "\"lat\":{\"avg_us\":%u,\"max_us\":%u},"
         "\"render\":{\"frames\":%u,\"fresh\":%u,\"starved\":%u,\"late\":%u,"
         "\"frame_us\":%u,\"frame_max_us\":%u,\"enc_us\":%u,\"tx_us\":%u,\"fps_x10\":%u},"
+        "\"ring\":\"%s\",\"fill\":%u,\"puts\":%u,\"drops\":%u,"
         "\"full\":%u}",
         (unsigned)st.eff_n, (unsigned)st.eff_avg_us,
         (unsigned)st.eff_max_us, (unsigned)st.eff_last_us,
         (unsigned)st.pair_n, (unsigned)st.pair_avg_us,
         (unsigned)st.pair_max_us, (unsigned)st.pair_last_us,
+        (unsigned)st.clear_avg_us, (unsigned)st.clear_max_us,
         (unsigned)st.apply_avg_us, (unsigned)st.apply_max_us,
         (unsigned)st.white_avg_us, (unsigned)st.white_max_us,
         (unsigned)st.commit_avg_us, (unsigned)st.commit_max_us,
@@ -918,8 +1022,44 @@ static void on_pipestats(nc4_ctx_t *ctx, const nc4_frame_t *f)
         (unsigned)st_render.starved, (unsigned)st_render.late,
         (unsigned)st_render.frame_us, (unsigned)st_render.frame_max_us,
         (unsigned)st_render.enc_us, (unsigned)st_render.tx_us,
-        (unsigned)st_render.fps_x10, (unsigned)st.full);
+        (unsigned)st_render.fps_x10, ring_name, (unsigned)fill,
+        (unsigned)qs.puts, (unsigned)qs.drops, (unsigned)st.full);
     reply_json(ctx, NC4_CMD_PIPESTATS_RSP, j);
+}
+
+// 0xF079：一個指令回答「呢個配置要幾多記憶體、有幾多、唔夠嘅話爭幾多」。
+// 用戶可以按自己想法設 px／lane；超出能力時，這裡直接講清楚，唔會有隱藏上限。
+static void on_pixdiag(nc4_ctx_t *ctx, const nc4_frame_t *f)
+{
+    (void)f;
+    char rj[384] = {0};
+    (void)nc_render_json(rj, sizeof(rj));
+    const uint32_t px = s_content.px;
+    const uint32_t slots = 3;                       // render 的 prc 環固定 3 格
+    const uint32_t ring_b = px * NC_PX_BPP * slots; // px×4×slots
+    const uint32_t canvas_b = px * NC_PX_BPP;
+    const uint32_t vals_b = (s_content.ready) ? (s_content.layout.nvals * 2u) : 0u;
+    const uint32_t runs_b = (s_content.ready) ? (s_content.layout.nruns * 16u) : 0u;
+    char j[900];
+    (void)snprintf(j, sizeof(j),
+        "{\"px\":%u,\"slots\":%u,\"ring_b\":%u,\"canvas_b\":%u,"
+        "\"vals_b\":%u,\"runs_b\":%u,"
+        "\"jobs\":%u,\"runs\":%u,\"naprog\":%u,\"skipped\":%u,"
+        "\"skip\":{\"no_asset\":%u,\"no_group\":%u,\"bad_write\":%u,"
+        "\"empty\":%u,\"asset_full\":%u,\"prog\":%u,\"oom\":%u},"
+        "\"free_int\":%u,\"free_ps\":%u,\"render\":%s}",
+        (unsigned)px, (unsigned)slots, (unsigned)ring_b, (unsigned)canvas_b,
+        (unsigned)vals_b, (unsigned)runs_b,
+        (unsigned)s_content.layout.njobs, (unsigned)s_content.layout.nruns,
+        (unsigned)s_content.layout.naprog, (unsigned)s_content.layout.skipped,
+        (unsigned)s_content.layout.skip_no_asset, (unsigned)s_content.layout.skip_no_group,
+        (unsigned)s_content.layout.skip_bad_write, (unsigned)s_content.layout.skip_empty,
+        (unsigned)s_content.layout.skip_asset_full, (unsigned)s_content.layout.skip_prog,
+        (unsigned)s_content.layout.skip_oom,
+        (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+        (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM),
+        rj[0] ? rj : "{}");
+    reply_json(ctx, NC4_CMD_PIXDIAG_RSP, j);
 }
 
 static void on_pipeburn(nc4_ctx_t *ctx, const nc4_frame_t *f)
@@ -948,6 +1088,7 @@ static const nc_action_t s_actions[] = {
     { NC4_CMD_PIPESTATS, on_pipestats, "pair" },
     { NC4_CMD_PIPEBURN, on_pipeburn, "pair" },
     { NC4_CMD_PIPERESET, on_pipereset, "pair" },
+    { NC4_CMD_PIXDIAG, on_pixdiag, "pair" },
 };
 
 NC_ACTION_TABLE_DEF(nc_pair_task_table, "pair", s_actions);

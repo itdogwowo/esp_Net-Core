@@ -139,6 +139,10 @@ size_t nc_render_json(char *out, size_t cap);     // 0xF061 與 STATUS 用
 // 任務宣告（main.c 在 CONFIG_NETCORE_PIXEL 之下登記；未開回 NULL）
 const nc_task_t *nc_render_task(void);
 
+// 第一條真正綁到後端嘅環名（例如 i80 後端起唔到時會係 "mock.prd"）。
+// 生產者（pair／pixel）唔應該靠「名入面有 prd」去猜自己餵邊條環。
+const char *nc_render_first_ring(void);
+
 #ifdef __cplusplus
 }
 #endif

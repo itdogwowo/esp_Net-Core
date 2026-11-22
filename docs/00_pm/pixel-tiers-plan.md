@@ -1,0 +1,513 @@
+# 像素三層（效果 → 抖動 → 配對）落地實作計劃
+
+> **For agentic workers:** 本專案沒有 superpowers 子技能；照 Task 順序逐個做，每步勾 `- [ ]`。
+> 每個 Task 做完都要 `bash tools/hosttest/run_all.sh` 全綠才進下一個。
+
+**Goal:** 把「效果層 12-bit → 抖動層（1 或 4 子幀）→ 配對層（直接寫硬件讀取的緩衝區）」落成生產程式碼，做到零拷貝、無清畫布、無隱藏行為，並在 9,600 px（16×600、8-bit）與 2,400 px（16×150、10-bit 抖動）兩種配置上驗收。
+
+**Architecture:** 配對層用 `nc_px_ring_begin()` 取得硬件即將讀取的槽，`nc_px_layout_apply()` 直接寫入該槽，`nc_px_ring_commit()` 交棒——沒有畫布、沒有複製、沒有 memset。抖動層把 12-bit 值換成 8-bit：`subframes=1` 時四捨五入，`subframes=4` 時一次掃描同時寫 4 個槽（時間抖動，等效 10-bit）。組合編譯結果以 `/pixel/cache/<key>.pxlt` 永久保存，開機補建缺的（表 ≤32 KB 才存）。
+
+**Tech Stack:** ESP-IDF 6.0.3、C17、`nc_px_layout`（組合編譯）、`nc_pixel_q`（環）、`nc4` 命令（0xF06B/0xF071/0xF077）、host 測試 `tools/hosttest/`。
+
+> **API 名稱政策：** 名稱隨時可能改（有些名字用家未滿意）。本計劃以**角色**描述行為，
+> 括號內是「今日名稱」；改名屬機械替換，照下面的 SOP 做，計劃內容不變。
+
+---
+
+## API 角色 ↔ 今日名稱（名稱可改）
+
+| 角色（計劃用語） | 今日名稱（可能改） | 改名的話要同步 |
+|---|---|---|
+| 環取槽 | `nc_px_ring_begin` / `nc_px_ring_begin_ex` | `nc_pair_task.c`（Task 1）、render 端 |
+| 環交棒 | `nc_px_ring_commit` | 同上 |
+| 組合編譯 | `nc_px_layout_build` | `nc_pair_task.c`、`nc_layout_bench.c`、host 測試 |
+| 配對寫入（8-bit） | `nc_px_layout_apply` | 同上 |
+| 抖動寫入（4 子幀） | `nc_px_layout_apply4`（新增） | `nc_pair_task.c`、`pxLayout_test.c` |
+| 12-bit → 8-bit | `nc_px_canvas12_to_8` | 只在改用獨立抖動層時 |
+| 資產表建構 | `build_asset_tbl_into`（static） | `nc_pair_task.c` |
+| 快取 key／大小／存／讀 | `nc_px_layout_cache_key` / `_cache_bytes` / `_save` / `_load` | `nc_pair_task.c`、host 測試 |
+| 環（型別／查詢） | `nc_pixel_q_t`、`nc_px_ring_slots`、`nc_px_ring_slot_bytes` | 全 pixel 路徑 |
+
+**改名 SOP（每次改名照做）**
+
+1. `grep -rn "<舊名>" firmware tools docs` —— 確認所有呼叫點
+2. 用編輯器重新命名（唔好只改 header，會漏 .c）
+3. `bash tools/hosttest/run_all.sh` 全綠
+4. 建置受影響 project：
+   `IDF_PATH=$HOME/esp/esp-idf python3 make.py build ESP32-S3-Zero --project ESP32-S3-Zero-Show`
+5. 更新本表的「今日名稱」欄（一行）
+
+> 如果改名係在 Task 進行中發生：先完成當前 Task 的測試，再統一改名，唔好一邊改名一邊加功能。
+
+## 已定案（唔再討論）
+
+| 項目 | 決定 |
+|---|---|
+| 分層順序 | 效果層（12-bit 值）→ 抖動層（12→8，1 或 4 子幀）→ 配對層（落點） |
+| 清畫布 | **唔做**（每幀覆蓋；用戶寫什麼就顯示什麼） |
+| 補黑／自動黑畫面 | **唔做** |
+| 開機 | 緩衝寫黑一次（只係初始化） |
+| 硬件溝通 | 硬件直接讀同一緩衝區；**零拷貝**，冇「交」這一步 |
+| 組合快取 | 每組合一個檔；表 ≤32 KB 才存；開機補建缺的 |
+| 實測基準（9,600 px） | 500 組：寫 1.36 ms；完全隨機：12.29 ms |
+| 實測基準（2,400 px、4 子幀） | 500 組：0.95 ms；完全隨機：4.63 ms |
+
+## 檔案結構（會改／新增）
+
+| 檔案 | 責任 |
+|---|---|
+| `firmware/components/tasks/pipeline_task/nc_pair_task.c` | 零拷貝、開機補建、抖動子幀排程 |
+| `firmware/components/sw/pixel/asset/nc_px_layout.c` | `nc_px_layout_apply4()`（一次掃表寫 4 份） |
+| `firmware/components/sw/pixel/include/nc_px_layout.h` | `apply4` 宣告、覆蓋率欄位 |
+| `firmware/main/Kconfig.projbuild` | `NETCORE_PIXEL_SUBFRAMES`、`NETCORE_PIXEL_RING_SLOTS` |
+| `tools/hosttest/pxLayout_test/pxLayout_test.c` | `apply4` 平均值／覆蓋測試 |
+| `ports/project/S3/ESP32-S3-Zero-Show2400/` | 2,400 px（16×150）測試工程 |
+| `docs/00_pm/status.md` | 每完成一個 Task 記一節 |
+
+---
+
+### Task 0（可選）：名稱定稿
+
+若用家想改 API 名，開工前先做這一步，之後 5 個 Task 就唔使中途改名。
+
+- [ ] **Step 1：列出想改的名稱**
+
+照上面「API 角色 ↔ 今日名稱」表，逐個問用家：保留／改名（新名）。**冇回應就當保留。**
+
+- [ ] **Step 2：改名（照 SOP）**
+
+每改一個名：`grep` → 改 → `run_all.sh` → 建置 → 更新對照表。
+
+- [ ] **Step 3：Commit**
+
+```bash
+git add -A
+git commit -m "refactor: 依用家命名調整 pixel API（行為不變）"
+```
+
+---
+
+### Task 1：配對層零拷貝（直接寫環槽）
+
+**Files:**
+- Modify: `firmware/components/tasks/pipeline_task/nc_pair_task.c:206-262`
+- Test: `tools/hosttest/pxShow_test/pxShow_test.c`（既有 apply 測試；新增「寫入任意 dst 等於寫畫布」）
+
+- [ ] **Step 1：寫失敗測試**
+
+在 `pxShow_test.c` 加：
+
+```c
+// 配對寫入任意緩衝區（零拷貝的前提）：結果同寫畫布後複製一模一樣
+static void test_apply_into_any_buffer(void)
+{
+    uint8_t canvas[8 * 4] = { 0 };
+    uint8_t direct[8 * 4] = { 0 };
+    uint16_t vals[4] = { 4095, 2048, 0, 1234 };
+    nc_px_job_t j = { 0 };
+    j.write = NC_PX_WRITE_RGB;
+    j.nranges = 1;
+    j.rng[0].base = 0;
+    j.rng[0].count = 8;
+    j.nled = 8;
+    nc_px_pair_apply(&j, vals, 4, canvas);
+    nc_px_pair_apply(&j, vals, 4, direct);
+    check(memcmp(canvas, direct, sizeof(canvas)) == 0, "任意緩衝區結果一致");
+}
+```
+
+- [ ] **Step 2：跑測試確認失敗**
+
+Run: `bash tools/hosttest/pxShow_test/run.sh`
+Expected: 編譯失敗（`test_apply_into_any_buffer` 未定義或未呼叫）
+
+- [ ] **Step 3：接上測試並確認通過（此 API 本來就支援任意 dst）**
+
+在 `main()` 呼叫 `test_apply_into_any_buffer();`，重跑：Expected: PASS
+
+- [ ] **Step 4：改 `content_frame_once` 為零拷貝**
+
+```c
+        const int64_t a0 = esp_timer_get_time();
+        uint8_t *p = nc_px_ring_begin(s_content.q);
+        if (p == NULL) {
+            nc_pipe_stats_full();
+            return false;                 // 環滿：下 tick 再試
+        }
+        nc_px_layout_apply(&s_content.layout, s_eff_frame.vals, p);
+        const int64_t a1 = esp_timer_get_time();
+        white_mix(p, s_content.px, s_content.white);
+        const int64_t w1 = esp_timer_get_time();
+        nc_px_ring_commit(s_content.q);
+        const int64_t c1 = esp_timer_get_time();
+        nc_pipe_stats_pair(0, (uint32_t)(a1 - a0), (uint32_t)(w1 - a1),
+                           (uint32_t)(c1 - w1), lat_us);
+```
+
+同時：`s_content.canvas` 只在 0xF06B 要求預覽時才複製（`s_snapshot_wanted` 旗標），唔要求就唔複製。
+
+- [ ] **Step 5：開機初始化緩衝為黑（一次）**
+
+在 `content_start()` 環建立後：
+
+```c
+    uint8_t *p0 = nc_px_ring_begin(s_content.q);   // 開機一次，令第一幀係黑
+    if (p0 != NULL) {
+        memset(p0, 0, (size_t)s_content.px * NC_PX_BPP);
+        nc_px_ring_commit(s_content.q);
+    }
+```
+
+- [ ] **Step 6：建置＋上板驗證**
+
+Run: `IDF_PATH=$HOME/esp/esp-idf python3 make.py build ESP32-S3-Zero --project ESP32-S3-Zero-Show`
+Expected: 建置成功；`0xF071` 的 `clear` 應為 0、`apply` 為寫入時間、`commit` 接近 0。
+
+- [ ] **Step 7：Commit**
+
+```bash
+git add firmware/components/tasks/pipeline_task/nc_pair_task.c tools/hosttest/pxShow_test/pxShow_test.c
+git commit -m "pair: 零拷貝寫環（唔經畫布、唔清畫布）"
+```
+
+---
+
+### Task 2：開機補建缺少的組合表
+
+**Files:**
+- Modify: `firmware/components/tasks/pipeline_task/nc_pair_task.c`（新增 `cache_prebuild_missing()`；`build_asset_tbl_into()` 已存在）
+- Test: 真機：刪快取 → 重開 → log
+
+- [ ] **Step 1：加函式（放在 `content_start()` 之前）**
+
+```c
+static void cache_prebuild_missing(void)
+{
+    const nc_px_mode_tbl_t *modes = nc_px_mode_table();
+    if (modes == NULL || modes->n == 0 || s_content.px == 0) {
+        return;
+    }
+    nc_px_asset_tbl_t *tmp = heap_caps_malloc(sizeof(*tmp),
+                                              MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (tmp == NULL) {
+        return;
+    }
+    uint32_t present = 0, built = 0, too_big = 0, failed = 0;
+    const int64_t t0 = esp_timer_get_time();
+    const nc_px_hw_inv_t inv = { .hw = NC_PX_HW_WS2812, .base = 0, .px = s_content.px };
+    for (uint8_t i = 0; i < modes->n; i++) {
+        const nc_px_mode_t *m = &modes->item[i];
+        const nc_px_map_t *map = select_map(m);
+        if (map == NULL) { failed++; continue; }
+        build_asset_tbl_into(tmp, m);
+        const uint32_t key = nc_px_layout_cache_key(m->hash, map->hash, s_content.px);
+        char path[96];
+        (void)snprintf(path, sizeof(path), "%s/cache/%08lx.pxlt",
+                       s_content.pixel_dir, (unsigned long)key);
+        nc_px_layout_t probe;
+        if (nc_px_layout_load(&probe, path, key, tmp) == ESP_OK) {
+            nc_px_layout_free(&probe); present++; continue;
+        }
+        nc_px_layout_t lay;
+        if (nc_px_layout_build(m, map, tmp, &inv, 1, &lay) != ESP_OK || lay.njobs == 0) {
+            nc_px_layout_free(&lay); failed++; continue;
+        }
+        if (nc_px_layout_cache_bytes(&lay) > 32768u) {
+            too_big++;
+        } else if (nc_px_layout_save(&lay, path, key) == ESP_OK) {
+            built++;
+        } else {
+            failed++;
+        }
+        nc_px_layout_free(&lay);
+    }
+    heap_caps_free(tmp);
+    ESP_LOGI(TAG, "開機預建組合表：已有 %u、新建 %u、太大跳過 %u、失敗 %u（%u ms）",
+             (unsigned)present, (unsigned)built, (unsigned)too_big, (unsigned)failed,
+             (unsigned)((esp_timer_get_time() - t0) / 1000));
+}
+```
+
+- [ ] **Step 2：在 `content_start()` 第一次 mode 就緒後呼叫**
+
+```c
+    cache_prebuild_missing();
+```
+
+- [ ] **Step 3：真機驗證**
+
+1. 刪 `ports` 專案的 `/pixel/cache/*.pxlt`（WebMaster `POST /api/file/delete`）
+2. 重開板子，看 log：Expected `開機預建組合表：已有 0、新建 N、太大跳過 0、失敗 0（N×~300 ms）`
+3. 再重開一次：Expected `已有 N、新建 0`
+
+- [ ] **Step 4：Commit**
+
+```bash
+git add firmware/components/tasks/pipeline_task/nc_pair_task.c
+git commit -m "pair: 開機補建缺少的組合表（≤32 KB 才存）"
+```
+
+---
+
+### Task 3：抖動層（4 子幀、一次掃表寫 4 份）
+
+**Files:**
+- Modify: `firmware/components/sw/pixel/include/nc_px_layout.h`、`firmware/components/sw/pixel/asset/nc_px_layout.c`
+- Test: `tools/hosttest/pxLayout_test/pxLayout_test.c`（新增 `test_apply4`）
+
+- [ ] **Step 1：寫失敗測試**
+
+```c
+// 4 子幀抖動：平均值要等於四捨五入的 8-bit 值（誤差 ≤1）
+static void test_apply4(void)
+{
+    printf("[8] 4 子幀抖動：平均值 ≈ 12-bit>>4\n");
+    nc_px_asset_t asset;
+    make_asset(&asset, "breathe", 4);
+    nc_px_asset_tbl_t assets = { .n = 1 };
+    assets.item[0] = asset;
+    const nc_px_hw_inv_t inv[] = { { .hw = NC_PX_HW_WS2812, .base = 0, .px = 4 } };
+    nc_px_group_sel_t sel[] = { { .hw = NC_PX_HW_WS2812, .slice = ":" } };
+    nc_px_group_t group = { .id = 1, .name = "full", .sel = sel, .nsel = 1 };
+    nc_px_map_t map = { .id = 1, .name = "m", .group = &group, .ngroups = 1 };
+    nc_px_mode_entry_t entry = { .group = "full", .effect = "breathe",
+                                 .write = NC_PX_WRITE_RGB };
+    nc_px_mode_t mode = { .id = 1, .name = "m", .nentry = 1, .entry = &entry };
+    nc_px_layout_t lay;
+    check(nc_px_layout_build(&mode, &map, &assets, inv, 1, &lay) == ESP_OK, "建立");
+    uint16_t vals[4] = { 4095, 2048, 17, 1234 };
+    uint16_t *vp[1] = { vals };
+    uint8_t o[4][16];
+    uint8_t *outs[4] = { o[0], o[1], o[2], o[3] };
+    memset(o, 0, sizeof(o));
+    nc_px_layout_apply4(&lay, (const uint16_t *const *)vp, outs, 4, 0);
+    for (int px = 0; px < 4; px++) {
+        const uint32_t want = ((uint32_t)vals[px % 4] + 8u) >> 4;
+        uint32_t sum = 0;
+        for (int s = 0; s < 4; s++) {
+            sum += o[s][px * 4 + 0];
+        }
+        const uint32_t avg = (sum + 2u) >> 2;
+        check(avg + 1 >= want && avg <= want + 1, "子幀平均 ≈ 8-bit 值");
+    }
+    nc_px_layout_free(&lay);
+}
+```
+
+- [ ] **Step 2：跑測試確認失敗**
+
+Run: `bash tools/hosttest/pxLayout_test/run.sh`
+Expected: 編譯失敗（`nc_px_layout_apply4` 未宣告）
+
+- [ ] **Step 3：實作（header）**
+
+```c
+// 時間抖動：一次掃描 runs，同時寫 subframes 份 8-bit 輸出。
+// 每份 = base 或 base+1，令 subframes 份平均 = 12-bit>>4（±1）。
+// phase 每幀 +1，令 +1 的位分散在不同子幀，避免閃爍。
+void nc_px_layout_apply4(const nc_px_layout_t *l, const uint16_t *const vals[],
+                         uint8_t *const dst[], uint8_t subframes, uint32_t phase);
+```
+
+- [ ] **Step 4：實作（layout.c）**
+
+```c
+void nc_px_layout_apply4(const nc_px_layout_t *l, const uint16_t *const vals[],
+                         uint8_t *const dst[], uint8_t subframes, uint32_t phase)
+{
+    if (l == NULL || vals == NULL || dst == NULL || subframes == 0) {
+        return;
+    }
+    for (uint32_t r = 0; r < l->nruns; r++) {
+        const nc_px_lrun_t *run = &l->run[r];
+        const nc_px_ljob_t *job = &l->job[run->job];
+        const nc_px_aprog_t *ap = &l->aprog[job->aprog];
+        const uint16_t *v = vals[job->aprog];
+        const uint32_t nv = ap->nv;
+        const uint32_t nch = (job->write == NC_PX_WRITE_RGBW) ? 4u : 3u;
+        uint32_t c[4] = { 0, 0, 0, 0 };
+        for (uint32_t ch = 0; ch < nch && nv > 0; ch++) {
+            c[ch] = (nch * run->src + ch) % nv;
+        }
+        for (uint32_t x = 0; x < run->count; x++) {
+            const size_t o = (size_t)(run->dst + x) << 2;
+            for (uint32_t ch = 0; ch < nch; ch++) {
+                const uint32_t v12 = (v != NULL) ? v[c[ch]] : 0u;
+                const uint32_t base = v12 >> 4;
+                const uint32_t n1 = (((v12 & 15u) * subframes) + 8u) >> 4;
+                for (uint8_t sf = 0; sf < subframes; sf++) {
+                    const uint8_t pos = (uint8_t)((sf + phase) % subframes);
+                    dst[sf][o + ch] = (uint8_t)(base + ((pos < n1) ? 1u : 0u));
+                }
+            }
+            if (nch == 3) {
+                for (uint8_t sf = 0; sf < subframes; sf++) {
+                    dst[sf][o + 3] = 0;
+                }
+            }
+            if (nv > 0) {
+                for (uint32_t ch = 0; ch < nch; ch++) {
+                    if (++c[ch] == nv) {
+                        c[ch] = 0;
+                    }
+                }
+            }
+        }
+    }
+}
+```
+
+- [ ] **Step 5：跑測試確認通過**
+
+Run: `bash tools/hosttest/pxLayout_test/run.sh`
+Expected: `ALL PASS`
+
+- [ ] **Step 6：Commit**
+
+```bash
+git add firmware/components/sw/pixel tools/hosttest/pxLayout_test/pxLayout_test.c
+git commit -m "layout: apply4 一次掃表寫 4 個抖動子幀"
+```
+
+---
+
+### Task 4：生產路徑接上子幀（Kconfig + pair）
+
+**Files:**
+- Modify: `firmware/main/Kconfig.projbuild`、`nc_pair_task.c`、`firmware/components/tasks/render_task/nc_render_task.c`
+- Test: 真機 `0xF071`＋`0xF06B`
+
+- [ ] **Step 1：Kconfig 加兩個選項**
+
+```kconfig
+config NETCORE_PIXEL_SUBFRAMES
+    int "每個視覺幀的抖動子幀數（1=8-bit，4=10-bit）"
+    range 1 8
+    default 1
+
+config NETCORE_PIXEL_RING_SLOTS
+    int "prd 環格數（要 ≥ 子幀數 + 1）"
+    range 3 16
+    default 3
+```
+
+- [ ] **Step 2：pair 每視覺幀寫 N 個槽**
+
+```c
+#if CONFIG_NETCORE_PIXEL_SUBFRAMES > 1
+    uint8_t *slots[CONFIG_NETCORE_PIXEL_SUBFRAMES];
+    for (int s = 0; s < CONFIG_NETCORE_PIXEL_SUBFRAMES; s++) {
+        slots[s] = nc_px_ring_begin(s_content.q);
+        if (slots[s] == NULL) {
+            nc_pipe_stats_full();
+            return false;
+        }
+    }
+    nc_px_layout_apply4(&s_content.layout, (const uint16_t *const *)s_eff_frame.vals,
+                        slots, CONFIG_NETCORE_PIXEL_SUBFRAMES, s_content.commits);
+    for (int s = 0; s < CONFIG_NETCORE_PIXEL_SUBFRAMES; s++) {
+        nc_px_ring_commit(s_content.q);
+    }
+#else
+    /* Task 1 的單幀零拷貝路徑 */
+#endif
+```
+
+- [ ] **Step 3：render 的 lane plan 用新 Kconfig 設格數**
+
+在 `nc_render_task.c` 建立 lane plan 的地方（`px_declare()`／預設 lane cfg）把 `slots` 改成：
+
+```c
+    lc.slots = (uint8_t)CONFIG_NETCORE_PIXEL_RING_SLOTS;
+```
+
+- [ ] **Step 4：建置**
+
+Run: `IDF_PATH=$HOME/esp/esp-idf python3 make.py build ESP32-S3-Zero --project ESP32-S3-Zero-Show9600`
+Expected: 成功；`RING_SLOTS=5` 時環 5 × 38.4 = 192 KB（PSRAM）。
+
+- [ ] **Step 5：真機驗證子幀數**
+
+```bash
+python3 tools/nc4.py --port /dev/cu.usbmodemB43A45AD52E41 raw 0xF071
+```
+
+Expected：`render.fps` = 200（子幀率）；每 4 個子幀為一個視覺幀（可用 `frames` 對 `pair_n` 觀察 4:1）。
+
+- [ ] **Step 6：Commit**
+
+```bash
+git add firmware/main/Kconfig.projbuild firmware/components/tasks/pipeline_task/nc_pair_task.c \
+        firmware/components/tasks/render_task/nc_render_task.c
+git commit -m "pair/render: 每視覺幀寫 N 個抖動子幀（Kconfig）"
+```
+
+---
+
+### Task 5：2,400 px（16×150）測試工程＋驗收量測
+
+**Files:**
+- Create: `ports/project/S3/ESP32-S3-Zero-Show2400/`（project.json、sdkconfig.defaults、data/pixel/*）
+- Modify: `docs/00_pm/status.md`
+
+- [ ] **Step 1：建工程**
+
+```json
+// ports/project/S3/ESP32-S3-Zero-Show2400/project.json
+{ "name": "ESP32-S3-Zero-Show2400", "chip": "ESP32-S3", "board": "zero", "dir": "ESP32-S3-Zero-Show2400" }
+```
+
+```ini
+# sdkconfig.defaults
+CONFIG_NETCORE_PIXEL_LEDS=2400
+CONFIG_NETCORE_PIXEL_SUBFRAMES=4
+CONFIG_NETCORE_PIXEL_RING_SLOTS=5
+CONFIG_NETCORE_PIXEL_RING_PSRAM=y
+CONFIG_NETCORE_PIXEL_I80_LANES=1     # 測試板只有 1 條線；16×150 的硬件層已另行驗證
+CONFIG_NETCORE_PIXEL_FPS=200          # 子幀率 200 Hz → 視覺 50 fps
+```
+
+- [ ] **Step 2：複製 `ESP32-S3-Zero-Show9600/data/pixel` 並改 mode/map 為 2,400 px（150 × 16）**
+
+- [ ] **Step 3：建置上板，量三項**
+
+```bash
+python3 tools/layout_bench.py --port /dev/cu.usbmodemB43A45AD52E41 --all
+python3 tools/nc4.py --port /dev/cu.usbmodemB43A45AD52E41 raw 0xF071
+python3 tools/nc4.py --port /dev/cu.usbmodemB43A45AD52E41 raw 0xF079
+```
+
+Expected（對照 §7.188／§7.190）：
+- 2,400 px、500 組：apply 0.42 ms、4 子幀 0.95 ms
+- 2,400 px、完全隨機：4 子幀 4.63 ms
+- 送燈 4 × 4.5 = 18 ms、視覺 50 fps
+
+- [ ] **Step 4：把數字寫入 `docs/00_pm/status.md` 新一節（§7.193）**
+
+- [ ] **Step 5：Commit**
+
+```bash
+git add ports/project/S3/ESP32-S3-Zero-Show2400 docs/00_pm/status.md
+git commit -m "project: 2,400 px（16×150）抖動驗收工程與數據"
+```
+
+---
+
+## 驗收條件（全部要過）
+
+1. `bash tools/hosttest/run_all.sh` 全綠（含新的 apply4 測試）。
+2. 9,600 px、500 組：`0xF071` 的 `clear=0`、`apply ≤ 2 ms`、`commit ≤ 0.5 ms`。
+3. 9,600 px、完全隨機：`apply ≤ 13 ms`。
+4. 2,400 px、4 子幀：`apply4 ≤ 1.2 ms`（500 組）、`≤ 5 ms`（完全隨機）。
+5. 開機預建：第二次開機 `已有 N、新建 0`；切換 < 20 ms。
+6. 冇清畫布、冇補黑：程式碼搜尋 `memset(s_content.canvas` 應該 0 筆。
+
+## 風險與回退
+
+| 風險 | 對策 |
+|---|---|
+| 環滿（4 子幀 × 200 Hz） | `RING_SLOTS=5`；pair 滿了回 false，下 tick 再試（已有機制） |
+| 零拷貝後 0xF06B 預覽變慢 | 預覽改成「要求才複製」（Task 1 Step 4） |
+| 抖動閃爍 | `phase = commits` 令 +1 位輪流 |
+| 快取檔寫入 265 ms／個 | 只在開機補建；表 > 32 KB 唔存 |
+| 完全隨機 9,600 px 8-bit 94% | 零拷貝後降到 61%（12.29 ms） |

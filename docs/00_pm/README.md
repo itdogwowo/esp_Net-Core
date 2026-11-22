@@ -28,6 +28,7 @@
 | [roadmap.md](roadmap.md) | **計劃**：Phase 0–5 現況（0／1 已完成）、非目標、開放決策 | 改變優先順序時 |
 | [test-register.md](test-register.md) | **測試冊**：每個功能／測試的收納層級（L0–L3）、驗證證據、性能數字 | 每次驗證／收納時追加 |
 | [goal-hardware-acceleration.md](goal-hardware-acceleration.md) | **終極目標**：L3 硬件加速的定義、S3/P4 能力表、里程碑 M1–M5、量測方法 | 里程碑推進時 |
+| [briefing-2026-11-22-sdio-nc4.html](briefing-2026-11-22-sdio-nc4.html) | **對外彙報（17 頁，單檔可離線）**：SDIO 1-bit／4-bit、chunk、buffer 三組實測＋判讀；NC4 四個機制、域↔零件對照、兩條控制路徑、易錯點。← → 換頁、F 全螢幕、可印 PDF | 有新量測或新零件時 |
 
 ### 圖（由 `tools/*_diagram.py` 產生，唔好手改）
 

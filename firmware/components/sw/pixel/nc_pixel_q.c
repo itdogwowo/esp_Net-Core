@@ -60,9 +60,7 @@ nc_pixel_q_t *nc_px_ring_init(nc_pixel_q_t *q, const nc_px_ring_cfg_t *cfg)
     if (q == NULL || cfg == NULL || cfg->region == NULL || cfg->name == NULL) {
         return NULL;
     }
-    if (cfg->px == 0 || cfg->px > NC_PX_MAX_LEDS) {
-        ESP_LOGE(TAG, "[%s] px=%u 超出 1..%u", cfg->name, (unsigned)cfg->px,
-                 (unsigned)NC_PX_MAX_LEDS);
+    if (cfg->px == 0) {
         return NULL;
     }
     if (cfg->slots < 2 || cfg->slots > NC_PX_MAX_SLOTS) {

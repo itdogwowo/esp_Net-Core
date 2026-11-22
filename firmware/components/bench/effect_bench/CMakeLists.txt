@@ -9,7 +9,7 @@
 # CONFIG 關閉時 nc_effect_bench.c 內容整段 #if 掉，component 只是一個空 object，
 # 不會登記指令表／任務。
 idf_component_register(
-    SRCS "nc_effect_bench.c" "nc_psram_bench.c" "nc_pipe_bench.c"
+    SRCS "nc_effect_bench.c" "nc_psram_bench.c" "nc_pipe_bench.c" "nc_layout_bench.c"
     REQUIRES nc4 pixel task
     PRIV_REQUIRES freertos esp_timer heap log esp_mm
     WHOLE_ARCHIVE

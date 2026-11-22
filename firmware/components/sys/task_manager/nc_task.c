@@ -54,6 +54,7 @@ typedef struct {
     // tasks.json 的覆寫（開機讀一次）
     bool cfg_seen;             // config 有這個名字
     int  cfg_level;            // -1 = 不啟動
+    int  start_err;            // 啟動失敗的原因（ESP 錯誤碼；0 = 冇失敗）
     int  cfg_aff[2];           // [core0, core1]；-1 = 沒寫
     int  cfg_prio;             // prio 覆寫；-1 = 沒寫（用 loop 宣告）
 } tm_slot_t;
@@ -680,12 +681,14 @@ static esp_err_t start_slot(tm_slot_t *s, bool start_now)
         return ESP_OK;
     }
     if (!gather_resources(s)) {
+        s->start_err = ESP_ERR_NO_MEM;
         return ESP_ERR_NO_MEM;
     }
 
     if (s->def->on_start != NULL) {
         const esp_err_t e = s->def->on_start(s->view, s->nreq);
         if (e != ESP_OK) {
+            s->start_err = e;
             ESP_LOGE(TAG, "[%s] on_start 失敗 %s", s->name, esp_err_to_name(e));
             return e;
         }
@@ -737,6 +740,13 @@ int nc_task_boot(void)
                     started++;
                 }
             }
+        }
+    }
+    for (int i = 0; i < s_count; i++) {
+        const tm_slot_t *s = &s_slots[i];
+        if (s->used && !s->started) {
+            ESP_LOGW(TAG, "[%s] 未啟動（start_err=%d, level=%d aff=%d,%d）", s->name,
+                     s->start_err, s->cfg_level, s->cfg_aff[0], s->cfg_aff[1]);
         }
     }
     ESP_LOGI(TAG, "loop 啟動：%d 個", started);

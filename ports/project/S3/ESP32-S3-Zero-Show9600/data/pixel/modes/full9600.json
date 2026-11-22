@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "id": 3,
+  "name": "full9600",
+  "index": 3,
+  "play_loop": -1,
+  "maxF": 0,
+  "mapping": "matrix",
+  "white": 0,
+  "map": [
+    {
+      "group": "matrix.full",
+      "effect": "wave9600",
+      "write": "rgb"
+    }
+  ]
+}

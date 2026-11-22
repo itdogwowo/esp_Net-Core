@@ -674,7 +674,9 @@ uint32_t nc_px_codec_spi_frame(nc_pixel_codec_t *c, const uint8_t *rgbw, uint32_
         px = c->px;
     }
     // 先寫「位元組緩衝」（頭部 + 每顆燈 + 尾巴），再展開成位。
-    static uint8_t bytes[NC_PX_MAX_LEDS * 4 + 16];
+    // SPI codec 的暫存：唔跟 NC_PX_MAX_LEDS（16,384 × 4 = 65 KB BSS 太重）。
+    // SPI 只服務小鏈；超過就回 0（I80 走另一條路，唔受影響）。
+    static uint8_t bytes[2048 * 4 + 16];
     const uint32_t head = c->spec->head_bytes;
     const uint32_t tail = c->spec->tail_bytes;
     const uint32_t lb = c->spec->lane_bytes;

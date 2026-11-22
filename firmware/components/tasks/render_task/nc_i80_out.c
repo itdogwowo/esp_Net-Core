@@ -186,7 +186,7 @@ nc_pixel_backend_t *nc_px_backend_i80(const nc_px_i80_cfg_t *cfg)
     if (d->lanes > d->bus_width) {
         d->lanes = d->bus_width;               // 8-bit 最多 8 lane、16-bit 最多 16
     }
-    d->px = (cfg->px > NC_PX_MAX_LEDS) ? NC_PX_MAX_LEDS : cfg->px;
+    d->px = cfg->px;
 
     nc_px_codec_cfg_t cc = {
         .fmt = cfg->fmt,
@@ -211,13 +211,27 @@ nc_pixel_backend_t *nc_px_backend_i80(const nc_px_i80_cfg_t *cfg)
         }
     }
     d->units = nc_px_codec_total_units(d->codec[0]);
-    if (d->units == 0 || d->units > NC_PX_UNITS_MAX) {
-        ESP_LOGE(TAG, "一幀 %u B 超出上限 %u", (unsigned)d->units, (unsigned)NC_PX_UNITS_MAX);
+    if (d->units == 0) {
+        ESP_LOGE(TAG, "一幀 0 B（px=%u）", (unsigned)d->px);
         i80_be_free(d);
         return NULL;
     }
     // packed 波形：px × lane_bytes × bit_cells bytes（每條 lane）；8 條一組去轉置。
     d->pack_bytes = d->px * (uint32_t)nc_px_codec_lane_bytes(d->codec[0]) * cc.wave.bit_cells;
+    // 先計數（唔猜）：呢一行就係「16×600 到底要幾多記憶體」的答案。
+    ESP_LOGI(TAG, "預算：px=%u lanes=%u bus=%u-bit → packed %u B × 8（%s）、"
+                  "DMA 槽 %u B × %u（%s）",
+             (unsigned)d->px, (unsigned)d->lanes, (unsigned)d->bus_width,
+             (unsigned)d->pack_bytes,
+#if CONFIG_NETCORE_PIXEL_PACK_PSRAM
+             "PSRAM",
+#else
+             "internal",
+#endif
+             (unsigned)(d->units * (uint32_t)(d->bus_width / 8)), (unsigned)d->slots,
+             "internal");
+
+
     // 固定政策：NETCORE_PIXEL_PACK_PSRAM 決定 internal 或 PSRAM，不做 runtime fallback。
 #if CONFIG_NETCORE_PIXEL_PACK_PSRAM
     const uint32_t pack_caps = MALLOC_CAP_SPIRAM;
@@ -227,9 +241,12 @@ nc_pixel_backend_t *nc_px_backend_i80(const nc_px_i80_cfg_t *cfg)
     for (int i = 0; i < 8; i++) {
         d->pack[i] = heap_caps_malloc(d->pack_bytes, pack_caps);
         if (d->pack[i] == NULL) {
-            ESP_LOGE(TAG, "packed 波形緩衝（%u B × 8）配置失敗（固定 %s）",
-                     (unsigned)d->pack_bytes,
-                     (pack_caps & MALLOC_CAP_SPIRAM) ? "PSRAM" : "internal");
+            ESP_LOGE(TAG, "packed 波形緩衝（%u B × 8 = %u B）配置失敗（固定 %s；"
+                          "free internal %u B、free PSRAM %u B）",
+                     (unsigned)d->pack_bytes, (unsigned)(d->pack_bytes * 8u),
+                     (pack_caps & MALLOC_CAP_SPIRAM) ? "PSRAM" : "internal",
+                     (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+                     (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
             i80_be_free(d);
             return NULL;
         }

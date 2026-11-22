@@ -4147,7 +4147,6 @@ static void on_pxbench(nc4_ctx_t *ctx, const nc4_frame_t *f)
     if (lanes > 16) { lanes = 16; }
     uint16_t px = (uint16_t)(f->data[1] | ((uint16_t)f->data[2] << 8));
     if (px == 0) { px = 1; }
-    if (px > NC_PX_MAX_LEDS) { px = NC_PX_MAX_LEDS; }
     uint8_t frames = f->data[3];
     if (frames == 0) { frames = 1; }
     if (frames > 50) { frames = 50; }

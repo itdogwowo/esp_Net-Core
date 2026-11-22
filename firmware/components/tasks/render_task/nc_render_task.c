@@ -97,7 +97,7 @@ static nc_pixel_cfg_t s_cfg = {
     .nlane = 2,
     .lane = {
         { .be = "i80", .ring = "i80.prd" },
-        { .be = "mock", .ring = "" },
+        { .be = "mock", .ring = "mock.prd" },   // 冇 I80 的組態：效果管線仍然有環可餵
     },
 };
 
@@ -125,7 +125,7 @@ static uint32_t stage_px(const char *be)
     }
     const uint32_t px = (CONFIG_NETCORE_PIXEL_LEDS > 0) ? (uint32_t)CONFIG_NETCORE_PIXEL_LEDS
                                                         : 0u;
-    if (px == 0 || px > NC_PX_MAX_LEDS) {
+    if (px == 0) {
         return 0;
     }
 #if CONFIG_NETCORE_PIXEL_I80
@@ -336,9 +336,16 @@ static esp_err_t bind_lanes(void)
         nc_pixel_backend_t *be = nc_px_backend_find(s_plan[i].be);
         nc_pixel_q_t *q = nc_px_ring_find(s_plan[i].ring);
         if (be == NULL || q == NULL) {
-            continue;                // 後端沒建起來／環沒有登記 → 這道 lane 停用
+            ESP_LOGW(TAG, "lane %d 停用：後端 %s %s、環 %s %s", i, s_plan[i].be,
+                     (be != NULL) ? "有" : "**起唔到**", s_plan[i].ring,
+                     (q != NULL) ? "有登記" : "**未登記**");
+            continue;
         }
         be->ring = q;                // 後端要知道讀哪條環（i80／spi 的 acquire 用）
+        // mock 後端有自己的 q 指標（它不經 be->ring）；唔 bind 就永遠 acquire 失敗。
+        if (strcmp(be->name, "mock") == 0) {
+            nc_px_backend_mock_bind(be, q);
+        }
         s_px.lane[s_px.nlane].be = be;
         s_px.lane[s_px.nlane].q = q;
         s_px.lane[s_px.nlane].last_seq = 0;
@@ -385,6 +392,14 @@ static void lane_tick(px_lane_t *ln)
     }
     s_px.st.tx_us = (uint32_t)(esp_timer_get_time() - t1);
     s_px.st.frames++;
+}
+
+const char *nc_render_first_ring(void)
+{
+    if (s_px.nlane <= 0 || s_px.lane[0].q == NULL) {
+        return NULL;
+    }
+    return nc_px_ring_name(s_px.lane[0].q);
 }
 
 // ── 渲染 loop：只做「取最新一格 → 編碼 → 交給後端」，不跑效果。
@@ -492,7 +507,12 @@ static int px_declare(nc_task_res_t *out, int max)
             .name = s_plan[i].ring,
             .bytes = nc_px_ring_bytes(s_plan[i].px, s_plan[i].slots),
             // 環由 CPU 寫、CPU 讀；DMA 讀的是後端自己的 internal 槽，不是環。
+            // 大畫面（9,600 px × 4 × 3 = 115 KB）internal 放唔落 → build-time 政策選 PSRAM。
+#if CONFIG_NETCORE_PIXEL_RING_PSRAM
+            .cls = NC_PLAN_PSRAM,
+#else
             .cls = NC_PLAN_INTERNAL,
+#endif
             .align = 64,
             .slot_bytes = nc_px_slot_bytes(s_plan[i].px),
             .n = (uint16_t)s_plan[i].slots,

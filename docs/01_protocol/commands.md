@@ -41,7 +41,8 @@ components/action/
 | `0x1800–0x18FF` | bench 域 | main.c（暫） |
 | `0x2000–0x20FF` | file 域 | `action/file_action` |
 | `0x2200–0x22FF` | OTA 域 | `action/ota_action` |
-| **`0x3000–0x3FFF`** | **外掛私有指令（保留）**：模組喺 `build.json` 的 `cmds` 宣告，由 ncm 註冊／路由；核心區唔可以由外掛佔用 | `components/host/ncm`（路由，未實作） |
+| **`0x3000–0x33FF`** | **核心功能域**（跟舊專案編號）：`0x30` stream／`0x31` pixel／`0x32` audio／**`0x33` motor（新增）** | 舊專案：前三個已實作；`0x33` 見 §1.1.2 |
+| **`0x3400–0x3FFF`** | **外掛私有指令（保留）**：模組喺 `build.json` 的 `cmds` 宣告，由 ncm 註冊／路由；核心區唔可以由外掛佔用 | `components/host/ncm`（路由，未實作） |
 | `0xF000–0xF0FF` | 測試／量測（唔係產品功能） | `components/action/test_action`（＋main.c 少量 bench） |
 
 ### 1.1.1 指令表由 component 自己登記（2026-11-19）
@@ -62,6 +63,51 @@ components/action/
 > 對照舊專案 `mp_Net-Core/slave/action/registry.py`：那邊是「每個 module 自己
 > `register(app)`，`app.py` 只叫 `register_all(app)`」。C 版把 registry 也拿走，
 > 由 linker／constructor 做，所以連 registry 清單都唔需要。
+
+### 1.1.2 `0x33xx` 電機域（Motor，新增 2026-11-22）
+
+跟 `0x30` stream／`0x31` pixel／`0x32` audio 同一個風格：**`0x33xx` = 電機**。
+呢個係**核心域**，唔係外掛私有區；由我方定義，對方（棕樹叔叔的 UART 裝置）照住實作。
+
+**設計原則：目標 ＋ 時間（set-and-follow）** —— 匯流排上只有「意圖」，波形喺本地產生。
+一次移動一幀（`9 + payload + 4`），移動完線上是 0；唔可以逐格／逐角度餵。
+
+| CMD | 名稱 | 方向 | Payload | 說明 |
+|---|---|---|---|---|
+| `0x3301` | MOTOR_SET | M→S | `axis u8` `target u16` `ms u16` `flags u8` | 目標位置 ＋ 到位時間。`ms=0` = 用預設速度 |
+| `0x3302` | MOTOR_STOP | M→S | `axis u8` `mode u8` | `0`=減速停、`1`=急停、`0xFF`=全部 |
+| `0x3303` | MOTOR_QUERY | M→S | `axis u8` | 查即時狀態（回 `0x3304`） |
+| `0x3304` | MOTOR_STATE | S→M | `axis u8` `pos u16` `target u16` `state u8` `ms_left u16` `flags u8` | `flags.bit0` = `pos` 係開環估算（唔好假裝準） |
+| `0x3305` | MOTOR_HOME | M→S | `axis u8` `timeout_ms u16` | 找限位／回零（推桿上電用） |
+
+**位置單位**：`0..4095`（`u16`，12-bit），跟舊專案 `slave/lib/hw/uart_motor.py` 一致 ——
+`0` = 全收、`4095` = 全伸、`2048` = 半程。
+Servo 由 LV2 映射成脈寬（`500 + pos × 2000/4095` µs、50 Hz）；工具層再顯示角度，**wire 上唔用度數**。
+
+**`flags`（`0x3301`）**
+
+| bit | 意思 |
+|---|---|
+| 0 | 相對位置（1）／絕對位置（0） |
+| 1 | 到位主動回 `0x3304`（事件），唔使 poll |
+| 2–7 | 保留，送 0 |
+
+**落地分工**
+
+| 角色 | 要做什麼 |
+|---|---|
+| 我方 LV2 | 收 `0x3301` → 自己內插（servo）或餵 `uart_motor.move_to()`（推桿）；到位／邊界 → 停 |
+| 棕樹叔叔的 UART 裝置 | 最少實作 `0x3301`／`0x3302`；有 `0x3303/04` 更好（面板顯示得到位置） |
+| 若他晶片跑不動 NC4 | 由我方 LV2 翻譯成他的私有 frame（`FF addr value FE` 之類），他一行都唔使改 |
+
+**同其他域的邊界**
+
+- `0x3105 MODE_SET`（`mode_type=2` SERVO 組）＝ 播一段**編排**；`0x3301` ＝ **直接定位**。
+  關係同 LED 一樣：`0x3105`（模式）對 `0x3003`（逐幀直推）。
+- `0x1401 HW_CTL`（PIN／PWM）＝ 手動佔空比，用來測試／逃生，**唔好做正式電機接口**（冇時間、冇限位、冇回授）。
+
+> 現況：新韌體未實作 `0x33xx`（收到只會 `ESP_LOGD 未註冊的 cmd`）；舊專案 `schema/` 亦未有 `motor.json`。
+> 兩邊都未落地之前，對外只可以講「號碼已分配、定義已定」，唔可以講「已經通」。
 
 ### 1.2 `action` 到底是什麼：表格＋handler，唔係可載入檔案
 

@@ -28,7 +28,7 @@ static const nc_px_asset_t *find_asset(const nc_px_asset_tbl_t *tbl, const char 
     return NULL;
 }
 
-static bool ref_is(const char *ref, const char *name, uint8_t id)
+static bool ref_is(const char *ref, const char *name, uint16_t id)
 {
     if (ref == NULL || ref[0] == '\0') {
         return false;
@@ -67,7 +67,7 @@ static const nc_px_group_t *find_group(const nc_px_map_t *map, const char *ref, 
             return NULL;                     // 引用其他 mapping：呼叫端要揀啱 map
         }
     }
-    for (uint8_t i = 0; i < map->ngroups; i++) {
+    for (uint32_t i = 0; i < map->ngroups; i++) {
         if (ref_is(g, map->group[i].name, map->group[i].id)) {
             return &map->group[i];
         }
@@ -207,7 +207,7 @@ esp_err_t nc_px_show_plan(const nc_px_mode_t *mode, const nc_px_map_t *map,
     }
     out->px = px;
 
-    for (uint8_t e = 0; e < mode->nentry && out->njobs < NC_PX_JOB_MAX; e++) {
+    for (uint32_t e = 0; e < mode->nentry && out->njobs < NC_PX_JOB_MAX; e++) {
         const nc_px_mode_entry_t *en = &mode->entry[e];
         const nc_px_asset_t *asset = find_asset(assets, en->effect);
         char mapref[NC_PX_LAYER_NAME_MAX];
@@ -225,7 +225,7 @@ esp_err_t nc_px_show_plan(const nc_px_mode_t *mode, const nc_px_map_t *map,
             continue;
         }
         // 群組 → ranges（各 sel 依次）
-        for (uint8_t s = 0; s < group->nsel && job.nranges < NC_PX_JOB_RANGE_MAX; s++) {
+        for (uint32_t s = 0; s < group->nsel && job.nranges < NC_PX_JOB_RANGE_MAX; s++) {
             const nc_px_group_sel_t *sel = &group->sel[s];
             const nc_px_hw_inv_t *slot = find_inv(inv, ninv, sel->hw);
             if (slot == NULL) {

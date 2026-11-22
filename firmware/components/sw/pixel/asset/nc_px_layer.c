@@ -177,7 +177,31 @@ static bool parse_sel(nc_px_js_t *j, nc_px_group_sel_t *sel)
     return true;
 }
 
-static bool parse_group(nc_px_js_t *j, nc_px_group_t *g)
+// ── 容量掃描（count pass）的遞歸小幫手：只行 JSON，唔建立 struct ──
+static bool count_sel_arr(nc_px_js_t *j, uint32_t *nsels)
+{
+    if (!nc_px_js_eat(j, '[')) {
+        return false;
+    }
+    if (nc_px_js_eat(j, ']')) {
+        return true;
+    }
+    for (;;) {
+        if (!nc_px_js_skip(j)) {
+            return false;
+        }
+        (*nsels)++;
+        if (nc_px_js_eat(j, ',')) {
+            continue;
+        }
+        if (nc_px_js_eat(j, ']')) {
+            return true;
+        }
+        return false;
+    }
+}
+
+static bool count_group_obj(nc_px_js_t *j, uint32_t *ngroups, uint32_t *nsels)
 {
     if (!nc_px_js_eat(j, '{')) {
         return false;
@@ -188,41 +212,9 @@ static bool parse_group(nc_px_js_t *j, nc_px_group_t *g)
             if (!nc_px_js_key(j, key, sizeof(key))) {
                 return false;
             }
-            if (strcmp(key, "id") == 0) {
-                uint32_t v = 0;
-                if (nc_px_js_num(j, 255, &v) == NC_PX_JSN_OK) {
-                    g->id = (uint8_t)v;
-                } else if (!nc_px_js_skip(j)) {
+            if (strcmp(key, "sel") == 0) {
+                if (!count_sel_arr(j, nsels)) {
                     return false;
-                }
-            } else if (strcmp(key, "name") == 0) {
-                char nm[NC_PX_LAYER_NAME_MAX];
-                if (!nc_px_js_str(j, nm, sizeof(nm))) {
-                    return false;
-                }
-                copy_str(g->name, sizeof(g->name), nm);
-            } else if (strcmp(key, "sel") == 0) {
-                if (!nc_px_js_eat(j, '[')) {
-                    return false;
-                }
-                if (!nc_px_js_eat(j, ']')) {
-                    for (;;) {
-                        nc_px_group_sel_t sel;
-                        memset(&sel, 0, sizeof(sel));
-                        if (!parse_sel(j, &sel)) {
-                            return false;
-                        }
-                        if (g->nsel < NC_PX_GROUP_SEL_MAX) {
-                            g->sel[g->nsel++] = sel;
-                        }
-                        if (nc_px_js_eat(j, ',')) {
-                            continue;
-                        }
-                        if (nc_px_js_eat(j, ']')) {
-                            break;
-                        }
-                        return false;
-                    }
                 }
             } else if (!nc_px_js_skip(j)) {
                 return false;
@@ -236,18 +228,170 @@ static bool parse_group(nc_px_js_t *j, nc_px_group_t *g)
             return false;
         }
     }
+    (*ngroups)++;
     return true;
 }
 
-esp_err_t nc_px_map_parse(const char *json, size_t len, nc_px_map_t *out)
+// 內容 hash（FNV-1a）：快取 key 用；同一份 JSON 永遠同一個值。
+static uint32_t json_hash(const char *s, size_t n)
 {
-    if (json == NULL || out == NULL) {
+    uint32_t h = 2166136261u;
+    for (size_t i = 0; i < n; i++) {
+        h ^= (uint8_t)s[i];
+        h *= 16777619u;
+    }
+    return h;
+}
+
+// ── 兩步解析：先數容量，再由呼叫端配 pool ──
+// 為什麼要兩步：group／sel 數目係檔案決定（可能 500 組 × 幾段），唔可以用固定陣列；
+// 而嵌入式唔想 realloc，所以先數一次、一次過配足，再解析。
+esp_err_t nc_px_map_count(const char *json, size_t len, uint32_t *ngroups, uint32_t *nsels)
+{
+    if (json == NULL || ngroups == NULL || nsels == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    *ngroups = 0;
+    *nsels = 0;
+    const char *const end = json + len;
+    const char *const start = skip_bom(json, end);
+    nc_px_js_t j;
+    nc_px_js_open(&j, start, (size_t)(end - start));
+    if (!nc_px_js_eat(&j, '{')) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (nc_px_js_eat(&j, '}')) {
+        return ESP_OK;                       // 空物件：0 組
+    }
+    for (;;) {
+        char key[24];
+        if (!nc_px_js_key(&j, key, sizeof(key))) {
+            return ESP_ERR_INVALID_ARG;
+        }
+        if (strcmp(key, "groups") == 0) {
+            if (!nc_px_js_eat(&j, '[')) {
+                return ESP_ERR_INVALID_ARG;
+            }
+            if (!nc_px_js_eat(&j, ']')) {
+                for (;;) {
+                    if (!count_group_obj(&j, ngroups, nsels)) {
+                        return ESP_ERR_INVALID_ARG;
+                    }
+                    // 健全性檢查：擋壞檔／離譜大細（唔係正常截斷）
+                    if (*ngroups > NC_PX_GROUP_MAX || *nsels > NC_PX_GROUP_SEL_MAX) {
+                        return ESP_ERR_INVALID_ARG;
+                    }
+                    if (nc_px_js_eat(&j, ',')) {
+                        continue;
+                    }
+                    if (nc_px_js_eat(&j, ']')) {
+                        break;
+                    }
+                    return ESP_ERR_INVALID_ARG;
+                }
+            }
+        } else if (!nc_px_js_skip(&j)) {
+            return ESP_ERR_INVALID_ARG;
+        }
+        if (nc_px_js_eat(&j, ',')) {
+            continue;
+        }
+        if (nc_px_js_eat(&j, '}')) {
+            break;
+        }
+        return ESP_ERR_INVALID_ARG;
+    }
+    return ESP_OK;
+}
+
+void nc_px_map_pool_reset(nc_px_map_pool_t *pool)
+{
+    if (pool != NULL) {
+        pool->used_group = 0;
+        pool->used_sel = 0;
+    }
+}
+
+// 一個 group：id／name／sel[]；sel 段直接寫入 pool（cap 不足 → NO_MEM，唔截斷）
+static esp_err_t parse_group(nc_px_js_t *j, nc_px_map_pool_t *pool, nc_px_group_t *g)
+{
+    if (!nc_px_js_eat(j, '{')) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (nc_px_js_eat(j, '}')) {
+        return ESP_OK;
+    }
+    for (;;) {
+        char key[24];
+        if (!nc_px_js_key(j, key, sizeof(key))) {
+            return ESP_ERR_INVALID_ARG;
+        }
+        if (strcmp(key, "id") == 0) {
+            uint32_t v = 0;
+            if (nc_px_js_num(j, 65535, &v) == NC_PX_JSN_OK) {
+                g->id = (uint16_t)v;
+            } else if (!nc_px_js_skip(j)) {
+                return ESP_ERR_INVALID_ARG;
+            }
+        } else if (strcmp(key, "name") == 0) {
+            char nm[NC_PX_LAYER_NAME_MAX];
+            if (!nc_px_js_str(j, nm, sizeof(nm))) {
+                return ESP_ERR_INVALID_ARG;
+            }
+            copy_str(g->name, sizeof(g->name), nm);
+        } else if (strcmp(key, "sel") == 0) {
+            if (!nc_px_js_eat(j, '[')) {
+                return ESP_ERR_INVALID_ARG;
+            }
+            const uint32_t first = pool->used_sel;
+            if (!nc_px_js_eat(j, ']')) {
+                for (;;) {
+                    if (pool->used_sel >= pool->cap_sel) {
+                        return ESP_ERR_NO_MEM;
+                    }
+                    nc_px_group_sel_t *sel = &pool->sel[pool->used_sel];
+                    if (!parse_sel(j, sel)) {
+                        return ESP_ERR_INVALID_ARG;
+                    }
+                    pool->used_sel++;
+                    if (nc_px_js_eat(j, ',')) {
+                        continue;
+                    }
+                    if (nc_px_js_eat(j, ']')) {
+                        break;
+                    }
+                    return ESP_ERR_INVALID_ARG;
+                }
+            }
+            g->sel = &pool->sel[first];
+            g->nsel = pool->used_sel - first;
+        } else if (!nc_px_js_skip(j)) {
+            return ESP_ERR_INVALID_ARG;
+        }
+        if (nc_px_js_eat(j, ',')) {
+            continue;
+        }
+        if (nc_px_js_eat(j, '}')) {
+            break;
+        }
+        return ESP_ERR_INVALID_ARG;
+    }
+    return ESP_OK;
+}
+
+esp_err_t nc_px_map_parse(const char *json, size_t len, nc_px_map_pool_t *pool,
+                          nc_px_map_t *out)
+{
+    if (json == NULL || pool == NULL || out == NULL ||
+        pool->group == NULL || pool->sel == NULL) {
         return ESP_ERR_INVALID_ARG;
     }
     memset(out, 0, sizeof(*out));
+    const uint32_t g0 = pool->used_group;
     const char *const end = json + len;
+    const char *const start = skip_bom(json, end);
     nc_px_js_t j;
-    nc_px_js_open(&j, skip_bom(json, end), (size_t)(end - skip_bom(json, end)));
+    nc_px_js_open(&j, start, (size_t)(end - start));
     if (!nc_px_js_eat(&j, '{')) {
         return ESP_ERR_INVALID_ARG;
     }
@@ -276,14 +420,16 @@ esp_err_t nc_px_map_parse(const char *json, size_t len, nc_px_map_t *out)
                 }
                 if (!nc_px_js_eat(&j, ']')) {
                     for (;;) {
-                        nc_px_group_t g;
-                        memset(&g, 0, sizeof(g));
-                        if (!parse_group(&j, &g)) {
-                            return ESP_ERR_INVALID_ARG;
+                        if (pool->used_group >= pool->cap_group) {
+                            return ESP_ERR_NO_MEM;
                         }
-                        if (out->ngroups < NC_PX_GROUP_MAX) {
-                            out->group[out->ngroups++] = g;
+                        nc_px_group_t *g = &pool->group[pool->used_group];
+                        memset(g, 0, sizeof(*g));
+                        const esp_err_t r = parse_group(&j, pool, g);
+                        if (r != ESP_OK) {
+                            return r;
                         }
+                        pool->used_group++;
                         if (nc_px_js_eat(&j, ',')) {
                             continue;
                         }
@@ -305,6 +451,9 @@ esp_err_t nc_px_map_parse(const char *json, size_t len, nc_px_map_t *out)
             return ESP_ERR_INVALID_ARG;
         }
     }
+    out->group = (pool->used_group > g0) ? &pool->group[g0] : NULL;
+    out->ngroups = pool->used_group - g0;
+    out->hash = json_hash(json, len);
     return ESP_OK;
 }
 
@@ -397,9 +546,64 @@ static bool parse_white(nc_px_js_t *j, uint8_t *out)
     return nc_px_js_skip(j);              // 唔係數字（字串／null…）→ 跳過
 }
 
-esp_err_t nc_px_mode_parse(const char *json, size_t len, nc_px_mode_t *out)
+esp_err_t nc_px_mode_count(const char *json, size_t len, uint32_t *nentry)
 {
-    if (json == NULL || out == NULL) {
+    if (json == NULL || nentry == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    *nentry = 0;
+    const char *const end = json + len;
+    const char *const body = skip_bom(json, end);
+    nc_px_js_t j;
+    nc_px_js_open(&j, body, (size_t)(end - body));
+    if (!nc_px_js_eat(&j, '{')) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (nc_px_js_eat(&j, '}')) {
+        return ESP_OK;
+    }
+    for (;;) {
+        char key[24];
+        if (!nc_px_js_key(&j, key, sizeof(key))) {
+            return ESP_ERR_INVALID_ARG;
+        }
+        if (strcmp(key, "map") == 0) {
+            if (!nc_px_js_eat(&j, '[')) {
+                return ESP_ERR_INVALID_ARG;
+            }
+            if (!nc_px_js_eat(&j, ']')) {
+                for (;;) {
+                    if (!nc_px_js_skip(&j)) {
+                        return ESP_ERR_INVALID_ARG;
+                    }
+                    (*nentry)++;
+                    if (nc_px_js_eat(&j, ',')) {
+                        continue;
+                    }
+                    if (nc_px_js_eat(&j, ']')) {
+                        break;
+                    }
+                    return ESP_ERR_INVALID_ARG;
+                }
+            }
+        } else if (!nc_px_js_skip(&j)) {
+            return ESP_ERR_INVALID_ARG;
+        }
+        if (nc_px_js_eat(&j, ',')) {
+            continue;
+        }
+        if (nc_px_js_eat(&j, '}')) {
+            break;
+        }
+        return ESP_ERR_INVALID_ARG;
+    }
+    return ESP_OK;
+}
+
+esp_err_t nc_px_mode_parse(const char *json, size_t len, nc_px_mode_entry_t *pool,
+                           uint32_t cap, nc_px_mode_t *out)
+{
+    if (json == NULL || out == NULL || (pool == NULL && cap > 0)) {
         return ESP_ERR_INVALID_ARG;
     }
     memset(out, 0, sizeof(*out));
@@ -457,14 +661,17 @@ esp_err_t nc_px_mode_parse(const char *json, size_t len, nc_px_mode_t *out)
                 }
                 if (!nc_px_js_eat(&j, ']')) {
                     for (;;) {
-                        nc_px_mode_entry_t e;
+                        if (out->nentry >= cap) {
+                            return ESP_ERR_NO_MEM;
+                        }
+                        nc_px_mode_entry_t *e = &pool[out->nentry];
                         bool valid = false;
-                        memset(&e, 0, sizeof(e));
-                        if (!parse_entry(&j, &e, &valid)) {
+                        memset(e, 0, sizeof(*e));
+                        if (!parse_entry(&j, e, &valid)) {
                             return ESP_ERR_INVALID_ARG;
                         }
-                        if (valid && out->nentry < NC_PX_MODE_ENTRY_MAX) {
-                            out->entry[out->nentry++] = e;
+                        if (valid) {
+                            out->nentry++;
                         }
                         if (nc_px_js_eat(&j, ',')) {
                             continue;
@@ -487,6 +694,8 @@ esp_err_t nc_px_mode_parse(const char *json, size_t len, nc_px_mode_t *out)
             return ESP_ERR_INVALID_ARG;
         }
     }
+    out->entry = pool;                 // 指入呼叫端 pool（nentry = 有效條目數）
+    out->hash = json_hash(json, len);
     return ESP_OK;
 }
 

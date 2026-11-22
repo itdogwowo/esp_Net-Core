@@ -1,7 +1,10 @@
-// nc_effect_task.c — 三任務管線的第一段：只生產波形值。
+// nc_effect_task.c — 三任務管線的第一段：只生產波形值（layout 版）。
 //
-// 唔讀 /data、唔碰 map／write／ring；plan 由 pair 經 nc_pipe_plan_snapshot() 提供。
-// 每幀把 NC_PX_JOB_MAX 個 job 的 value 寫入 fixed frame，pair 再配對。
+// 唔讀 /data、唔碰 map／write／ring；plan（aprog 清單）由 pair 經
+// nc_pipe_aprog_publish() 發佈，這裡 copy 一份再自己建 wave table。
+//
+// 值流按 **asset 去重**：500 個 group 共用 20 個效果 → 只有 20 條值流。
+// 兩塊 pool 交替寫、pair 用 ack(seq) 交還，所以 pair 唔會讀到寫到一半的值流。
 #include "sdkconfig.h"
 
 #if CONFIG_NETCORE_CONTENT
@@ -22,18 +25,182 @@
 
 static const char *TAG = "effect";
 
-static nc_pipe_effect_frame_t s_frames[2];
-static volatile uint8_t s_pub;
-static volatile uint32_t s_seq;
 static SemaphoreHandle_t s_mtx;
+static uint32_t s_gen;                     // 目前生效的 plan gen（0 = 未取過）
 
-static nc_px_plan_t s_local_plan;
-static nc_px_asset_t s_local_assets[NC_PX_JOB_MAX];
-static uint32_t s_local_gen;
+// aprog 副本（含 32 段編譯 program，每份 ~17 KB）**放 PSRAM**，唔佔 internal BSS。
+// 只有 wave table／值流指標留在 internal。
+static nc_pipe_aprog_set_t *s_set;         // 目前生效的 aprog 副本（PSRAM）
+static portMUX_TYPE s_set_lock = portMUX_INITIALIZER_UNLOCKED;
+static bool s_sets_ok;
+
+// 值流 pool（兩塊交替）；pool[slot] 長度 = Σ nv
+static uint16_t *s_pool[2];
+static uint32_t s_pool_n[2];
+static uint32_t s_slot_len;                // 每塊 pool 的 uint16 數目
+static volatile uint32_t s_slot_seq[2];    // 每個 slot 最新寫入的 seq
+static volatile uint32_t s_ack;            // pair 已消化的 seq
+static uint8_t s_next_slot;
+static uint32_t s_seq;
 static uint32_t s_step;
-// 一次過預算好每個 job 的 wave table；之後每幀只做 index，不再逐值跑 interpreter。
-static uint16_t *s_wave[NC_PX_JOB_MAX];
-static uint16_t s_wave_len[NC_PX_JOB_MAX];
+
+static nc_pipe_effect_frame_t s_pub_frame;
+
+// wave table（每條值流一塊；plan 變更時重建）
+static uint16_t *s_wave[NC_PIPE_APROG_MAX];
+static uint32_t s_wave_len[NC_PIPE_APROG_MAX];
+
+// aprog 集：pair 是唯一寫者、effect 是唯一讀者。
+// 雙緩衝＋一個 volatile 索引，publish 只係換索引（唔使鎖、唔會同效果 loop 爭）。
+static nc_pipe_aprog_set_t *s_sets;        // [2]，PSRAM
+static volatile uint32_t   s_set_idx;
+static volatile uint32_t   s_set_seq;        // 每次 publish +1
+static uint32_t            s_set_seen;       // effect 已取到第幾個
+
+// 配置 3 份 aprog set（2 份發佈緩衝 ＋ 1 份工作副本）到 PSRAM。
+// 兩邊（pair publish／effect loop）都可能先到；用 claim flag 保證只配一次。
+static bool sets_ready(void)
+{
+    bool ok;
+    taskENTER_CRITICAL(&s_set_lock);
+    ok = s_sets_ok;
+    taskEXIT_CRITICAL(&s_set_lock);
+    if (ok) {
+        return true;
+    }
+    const size_t one = sizeof(nc_pipe_aprog_set_t);
+    nc_pipe_aprog_set_t *p = (nc_pipe_aprog_set_t *)heap_caps_malloc(
+        one * 3u, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (p == NULL) {
+        p = (nc_pipe_aprog_set_t *)heap_caps_malloc(one * 3u, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    }
+    if (p == NULL) {
+        return false;
+    }
+    memset(p, 0, one * 3u);
+    taskENTER_CRITICAL(&s_set_lock);
+    if (s_sets_ok) {
+        taskEXIT_CRITICAL(&s_set_lock);
+        heap_caps_free(p);                 // 另一邊贏了
+        return true;
+    }
+    s_sets = p;
+    s_set = &p[2];
+    s_sets_ok = true;
+    taskEXIT_CRITICAL(&s_set_lock);
+    return true;
+}
+
+void nc_pipe_aprog_publish(const nc_px_aprog_t *aprog, uint32_t naprog, uint32_t gen)
+{
+    if (aprog == NULL || naprog > NC_PIPE_APROG_MAX || !sets_ready()) {
+        return;
+    }
+    const uint32_t slot = (s_set_idx == 0u) ? 1u : 0u;
+    s_sets[slot].plan_gen = gen;
+    s_sets[slot].naprog = naprog;
+    for (uint32_t i = 0; i < naprog; i++) {
+        s_sets[slot].aprog[i] = aprog[i];
+        s_sets[slot].nv[i] = aprog[i].nv;
+    }
+    s_set_idx = slot;
+    s_set_seq++;
+}
+
+bool nc_pipe_aprog_snapshot(nc_pipe_aprog_set_t *out)
+{
+    if (out == NULL) {
+        return false;
+    }
+    if (!s_sets_ok) {
+        return false;
+    }
+    const uint32_t seq = s_set_seq;
+    if (seq == 0 || seq == s_set_seen) {
+        return false;
+    }
+    const uint32_t idx = s_set_idx;
+    *out = s_sets[idx];
+    s_set_seen = seq;
+    return true;
+}
+
+static void waves_free(void)
+{
+    for (int i = 0; i < NC_PIPE_APROG_MAX; i++) {
+        if (s_wave[i] != NULL) {
+            heap_caps_free(s_wave[i]);
+            s_wave[i] = NULL;
+        }
+        s_wave_len[i] = 0;
+    }
+}
+
+static bool waves_build(void)
+{
+    waves_free();
+    for (uint32_t i = 0; i < s_set->naprog; i++) {
+        const uint32_t total = s_set->aprog[i].prog.total;
+        if (total == 0 || total > 8192) {
+            continue;
+        }
+        uint16_t *w = (uint16_t *)heap_caps_malloc(total * sizeof(uint16_t),
+                                                   MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+        if (w == NULL) {
+            ESP_LOGW(TAG, "wave table OOM（aprog %u, total %u）→ fallback interpreter",
+                     (unsigned)i, (unsigned)total);
+            continue;
+        }
+        for (uint32_t p = 0; p < total; p++) {
+            w[p] = nc_px_engine_program_value(&s_set->aprog[i].prog, p);
+        }
+        s_wave[i] = w;
+        s_wave_len[i] = total;
+    }
+    return true;
+}
+
+static void pools_free(void)
+{
+    for (int i = 0; i < 2; i++) {
+        if (s_pool[i] != NULL) {
+            heap_caps_free(s_pool[i]);
+            s_pool[i] = NULL;
+        }
+        s_pool_n[i] = 0;
+        s_slot_seq[i] = 0;
+    }
+    s_slot_len = 0;
+}
+
+static bool pools_alloc(uint32_t total)
+{
+    pools_free();
+    if (total == 0) {
+        return false;
+    }
+    for (int i = 0; i < 2; i++) {
+        // 固定政策：有 PSRAM 就 PSRAM（BULK）；冇 PSRAM 的板（例如 Matrix）退 internal。
+        // 呢個係「板子能力」分支，唔係按 free heap／buffer 大細的智能選擇。
+        s_pool[i] = (uint16_t *)heap_caps_malloc((size_t)total * sizeof(uint16_t),
+                                                 MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        if (s_pool[i] == NULL) {
+            s_pool[i] = (uint16_t *)heap_caps_malloc((size_t)total * sizeof(uint16_t),
+                                                     MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+        }
+        if (s_pool[i] == NULL) {
+            pools_free();
+            return false;
+        }
+        s_pool_n[i] = total;
+    }
+    s_slot_len = total;
+    s_next_slot = 0;
+    s_slot_seq[0] = 0;
+    s_slot_seq[1] = 0;
+    s_ack = 0;
+    return true;
+}
 
 bool nc_pipe_effect_copy(nc_pipe_effect_frame_t *out)
 {
@@ -45,71 +212,52 @@ bool nc_pipe_effect_copy(nc_pipe_effect_frame_t *out)
     }
     const bool ok = (s_seq != 0);
     if (ok) {
-        *out = s_frames[s_pub];
+        *out = s_pub_frame;
     }
     xSemaphoreGive(s_mtx);
     return ok;
 }
 
-static void waves_free(void)
+void nc_pipe_effect_ack(uint32_t seq)
 {
-    for (int i = 0; i < NC_PX_JOB_MAX; i++) {
-        if (s_wave[i] != NULL) {
-            heap_caps_free(s_wave[i]);
-            s_wave[i] = NULL;
-        }
-        s_wave_len[i] = 0;
+    if (seq > s_ack) {
+        s_ack = seq;
     }
 }
 
-static bool waves_build(const nc_px_plan_t *plan)
+// 等一個「pair 已消化」的 slot（pair 慢就等，唔會撕裂值流）
+static bool wait_slot(uint8_t slot)
 {
-    waves_free();
-    for (uint8_t j = 0; j < plan->njobs; j++) {
-        const uint32_t total = plan->job[j].prog.total;
-        if (total == 0 || total > 8192) {
-            continue;
-        }
-        uint16_t *w = (uint16_t *)heap_caps_malloc(total * sizeof(uint16_t),
-                                                   MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-        if (w == NULL) {
-            ESP_LOGW(TAG, "wave table OOM（job %u, total %u）→ fallback interpreter",
-                     (unsigned)j, (unsigned)total);
-            continue;
-        }
-        for (uint32_t p = 0; p < total; p++) {
-            w[p] = nc_px_engine_program_value(&plan->job[j].prog, p);
-        }
-        s_wave[j] = w;
-        s_wave_len[j] = (uint16_t)total;
+    if (s_slot_seq[slot] == 0 || s_slot_seq[slot] <= s_ack) {
+        return true;
     }
-    return true;
+    return false;
 }
 
-// 等價 nc_px_job_vals()，但用預算好的 wave table（total 相同；spacing/step/reverse 照舊）。
-static uint16_t cached_job_vals(const nc_px_job_t *job, uint32_t step,
-                                uint16_t *out, uint16_t cap, uint8_t idx)
+// 用預算好的 wave table 算一條值流（同 nc_px_aprog_vals 等價）
+static uint32_t cached_vals(uint32_t i, uint32_t step, uint16_t *out, uint32_t cap)
 {
-    if (job == NULL || job->asset == NULL || out == NULL || cap == 0) {
+    const nc_px_aprog_t *ap = &s_set->aprog[i];
+    const nc_px_asset_t *a = ap->asset;
+    if (a == NULL || out == NULL) {
         return 0;
     }
-    if (idx >= NC_PX_JOB_MAX || s_wave[idx] == NULL) {
-        return nc_px_job_vals(job, step, out, cap);   // OOM／無 table：安全 fallback
-    }
-    const nc_px_asset_t *a = job->asset;
-    uint16_t n = a->pixel_hint ? a->pixel_hint : 1;
+    uint32_t n = ap->nv;
     if (n > cap) {
         n = cap;
     }
-    const uint16_t speed = (a->speed == 0) ? 1 : a->speed;
+    if (s_wave[i] == NULL) {
+        return nc_px_aprog_vals(ap, step, out, n);
+    }
+    const uint32_t speed = (a->speed == 0) ? 1 : a->speed;
     uint32_t ph = ((step / speed) * (uint32_t)a->step + (uint32_t)a->offset);
-    const uint16_t total = s_wave_len[idx];
+    const uint32_t total = s_wave_len[i];
     ph = total ? (ph % total) : 0;
-    for (uint16_t i = 0; i < n; i++) {
-        const uint16_t k = a->reverse ? (uint16_t)(n - 1u - i) : i;
-        uint32_t p = ph + (uint32_t)k * (uint32_t)a->spacing;
+    for (uint32_t k = 0; k < n; k++) {
+        const uint32_t idx = a->reverse ? (n - 1u - k) : k;
+        uint32_t p = ph + idx * (uint32_t)a->spacing;
         p = total ? (p % total) : 0;
-        out[i] = s_wave[idx][p];
+        out[k] = s_wave[i][p];
     }
     return n;
 }
@@ -125,49 +273,72 @@ static void effect_loop(void *arg)
         s_mtx = xSemaphoreCreateMutex();
     }
     while (!nc_task_exit_requested()) {
-        uint32_t gen = 0;
-        if (s_mtx == NULL ||
-            !nc_pipe_plan_snapshot(&s_local_plan, s_local_assets,
-                                   NC_PX_JOB_MAX, &gen)) {
+        // snapshot 直接寫入工作副本（PSRAM；唔喺棧上開 17 KB）
+        if (sets_ready() && nc_pipe_aprog_snapshot(s_set)) {
+            s_gen = s_set->plan_gen;
+            s_step = 0;
+            waves_build();
+            uint32_t total = 0;
+            for (uint32_t i = 0; i < s_set->naprog; i++) {
+                total += s_set->nv[i];
+            }
+            if (!pools_alloc(total)) {
+                ESP_LOGE(TAG, "值流 pool 配置失敗（%u 個 uint16）", (unsigned)total);
+                vTaskDelay(pdMS_TO_TICKS(100));
+                continue;
+            }
+            ESP_LOGI(TAG, "plan gen=%u：%u 條值流（%u 值、pool ×2）",
+                     (unsigned)s_gen, (unsigned)s_set->naprog, (unsigned)total);
+        } else if (s_gen == 0) {
             nc_task_beat();
-            vTaskDelay(pdMS_TO_TICKS(10));
+            vTaskDelay(pdMS_TO_TICKS(10));      // pair 未發佈 aprog
             last = xTaskGetTickCount();
             continue;
         }
-        if (gen != s_local_gen) {
-            s_local_gen = gen;
-            s_step = 0;
-            waves_build(&s_local_plan);
-            ESP_LOGI(TAG, "plan snapshot gen=%u jobs=%u（wave table）", (unsigned)gen,
-                     (unsigned)s_local_plan.njobs);
+
+        // 揀一個 pair 已消化的 slot（另一塊正在被讀）
+        const uint8_t slot = s_next_slot;
+        if (!wait_slot(slot)) {
+            nc_task_beat();
+            vTaskDelay(pdMS_TO_TICKS(1));
+            continue;
         }
 
-        const uint8_t slot = s_pub ^ 1u;
-        nc_pipe_effect_frame_t *f = &s_frames[slot];
         const int64_t t0 = esp_timer_get_time();
-        f->plan_gen = s_local_gen;
-        f->njobs = s_local_plan.njobs;
-        for (uint8_t j = 0; j < s_local_plan.njobs; j++) {
-            f->nv[j] = cached_job_vals(&s_local_plan.job[j], s_step,
-                                       f->vals[j], NC_PIPE_VAL_MAX, j);
+        uint32_t off = 0;
+        for (uint32_t i = 0; i < s_set->naprog; i++) {
+            const uint32_t nv = s_set->nv[i];
+            cached_vals(i, s_step, s_pool[slot] + off, nv);
+            off += nv;
         }
         const int64_t t1 = esp_timer_get_time();
         nc_pipe_stats_effect((uint32_t)(t1 - t0));
         s_step++;
-        f->t_pub_us = (uint32_t)t1;
-        f->seq = ++s_seq;
 
         if (xSemaphoreTake(s_mtx, portMAX_DELAY) == pdTRUE) {
-            s_pub = slot;
+            uint32_t o = 0;
+            s_pub_frame.seq = ++s_seq;
+            s_pub_frame.plan_gen = s_gen;
+            s_pub_frame.t_pub_us = (uint32_t)t1;
+            s_pub_frame.naprog = s_set->naprog;
+            for (uint32_t i = 0; i < s_set->naprog; i++) {
+                s_pub_frame.nv[i] = s_set->nv[i];
+                s_pub_frame.vals[i] = s_pool[slot] + o;
+                o += s_set->nv[i];
+            }
+            s_slot_seq[slot] = s_pub_frame.seq;
+            s_next_slot = (uint8_t)(slot ^ 1u);
             xSemaphoreGive(s_mtx);
         }
         nc_task_beat();
         if (nc_pipe_stats_burn_active()) {
-            taskYIELD();                  // 極限：唔等 50 fps，effect 全速跑
+            taskYIELD();                  // 極限：唔等 50 fps
         } else {
             vTaskDelayUntil(&last, period);
         }
     }
+    pools_free();
+    waves_free();
 }
 
 static const nc_task_loop_t s_loops[] = {
