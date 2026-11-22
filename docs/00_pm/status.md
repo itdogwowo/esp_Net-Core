@@ -6311,3 +6311,27 @@ render 50 fps、enc362 µs。0xF06D/0xF06F 功能正常。
 結論：固定 PSRAM 之後，pair **必須用 destination 順序的 inverse／block**，不要
 random write；9,600 的 CPU full 可由 14.06 ms 降到 **4.59 ms**，50 fps 仍可行。
 12-bit packed 冇用，12-bit 要 tile／留在 PSRAM 但避免 random RMW。
+
+### 7.170 2026-11-22（真實分組：500 組任意順序 ≈ 19 px/組）
+
+用家澄清：真實排列通常分組，完全 random 只是極端。以 9,600 px／500 組計算，
+每組約 **19.2 px**；組內連續、只有 500 個 group 的順序隨機。
+
+用現有 `block8`（16 px 一組、600 組、group 順序 random）做保守 proxy：
+
+| 配對 | c8 internal | c8 PSRAM |
+|---|---:|---:|
+| 16 px block（600 組） | **0.966 ms** | **1.864 ms** |
+| 完全 random（9,600 destinations） | 0.972 ms | 10.647 ms |
+
+- 500 組 ≈19 px，寫入次數同 16 px block 一樣係 9,600 次，但只有 **500 次 group
+  跳轉**，不是 9,600 次 random jump；所以 pair 應該接近 block8 的 **0.97／1.86 ms**。
+- full8（wave gen 1.99 ms + group pair）估 **3.0–4.6 ms**，50 fps 有空間。
+- 如果用 per-pixel table：19.2 KB；用 runs table：500 × 6 B ≈ **3 KB**，而且
+  每個 run 連續寫，PSRAM 友善。
+- 所以 realistic 流程應該係 **runs table**，不是 9,600-entry random table；
+  random table 只留作 worst-case probe。
+- 現時 plan 仍限 8 mode entry／16 map group；500 組 production **未支援**，要先把
+  plan 改成 run table（start/count/src）才能承接。
+- 12-bit 不需要先建 12-bit canvas：pair 時 12→8 直接寫 8-bit；group 寫入順序化後，
+  四次 16-bit 寫的影響遠小於 PSRAM random write。
