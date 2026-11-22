@@ -6335,3 +6335,20 @@ random write；9,600 的 CPU full 可由 14.06 ms 降到 **4.59 ms**，50 fps �
   plan 改成 run table（start/count/src）才能承接。
 - 12-bit 不需要先建 12-bit canvas：pair 時 12→8 直接寫 8-bit；group 寫入順序化後，
   四次 16-bit 寫的影響遠小於 PSRAM random write。
+
+### 7.171 2026-11-22（PSRAM 單一服務管線完整紀錄）
+
+所有決策、實測、500 組可變長度 run 的 8-bit／12-bit 計算、table 設計、
+render 物理限制、production 未完成項目，已整理成獨立頁：
+
+→ **[psram-service-pipeline.md](psram-service-pipeline.md)**
+
+重點：
+
+- 所有 LED 數同一條 PSRAM 流程（canvas／packed 固定 PSRAM，無 runtime fallback）。
+- 64 px production：effect 8 µs、pair 35 µs、render 363 µs、50 fps。
+- 9,600 probe：8-bit full cached internal 4.4 ms、PSRAM inverse 4.59 ms；
+  12-bit random 19.97 ms、packed 20.6 ms。
+- 500 個可變長度連續 group：用 3 KB run table；估 8-bit pair 1.5–1.9 ms、
+  full 3.5–3.9 ms；12-bit canvas full 10.4–10.7 ms（不建議）。
+- 單 lane 9,600 物理 288 ms/幀；要約 15 lane 才 50 fps。

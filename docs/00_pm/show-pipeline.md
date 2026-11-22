@@ -8,6 +8,11 @@
 > 映像。生產者由 `pixel_task`（內建六個效果）換成三任務管線：
 > **effect（波形值）→ pair（配對／white mix／寫環）→ render（編碼／I80）**。
 > `pixel_task`／render／編碼器／環全部唔改（render 仍然只認 canvas）。
+>
+> **2026-11-22 更新**：production canvas 及 Show I80 packed 波形已固定 PSRAM；
+> 所有 LED 數走同一條服務路徑，沒有 internal/PSRAM runtime 分支。完整量測、
+> 500 組可變長度 run 的 8-bit／12-bit 成本見
+> [psram-service-pipeline.md](psram-service-pipeline.md)。
 
 ---
 
