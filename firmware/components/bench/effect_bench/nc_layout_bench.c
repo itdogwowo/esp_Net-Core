@@ -25,6 +25,7 @@
 #include "esp_log.h"
 #include "esp_memory_utils.h"
 #include "esp_timer.h"
+#include "nc_pixel_core.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
@@ -160,6 +161,18 @@ static void apply4_one_pass(const nc_px_layout_t *l, const uint16_t *vals,
     }
 }
 
+
+// 8×8 bit-matrix transpose（Hacker's Delight §7-3）：x 的 byte k = lane k 的 8 個 tick，
+// 轉置後 byte i 的 bit k = lane k 的 bit i。即係 merge8 做的事。
+static inline uint64_t swar_t8(uint64_t x)
+{
+    uint64_t t;
+    t = (x ^ (x >> 7)) & 0x00AA00AA00AA00AAULL; x = x ^ t ^ (t << 7);
+    t = (x ^ (x >> 14)) & 0x0000CCCC0000CCCCULL; x = x ^ t ^ (t << 14);
+    t = (x ^ (x >> 28)) & 0x00000000F0F0F0F0ULL; x = x ^ t ^ (t << 28);
+    return x;
+}
+
 static void on_layoutbench(nc4_ctx_t *ctx, const nc4_frame_t *f)
 {
     const uint8_t *p = (f != NULL) ? f->data : NULL;
@@ -208,7 +221,7 @@ static void on_layoutbench(nc4_ctx_t *ctx, const nc4_frame_t *f)
     if (variant == 5 && groups_in > 0) {
         ngroups = (groups_in > LB_GROUP_MAX) ? LB_GROUP_MAX : groups_in;
     }
-    if (variant == 2 || ((variant == 5 || variant == 6 || variant == 7 || variant == 8) && groups_in == 0)) {
+    if (variant == 2 || ((variant == 5 || variant == 6 || variant == 7 || variant == 8 || variant == 9 || variant == 11 || variant == 12 || variant == 13 || variant == 15) && groups_in == 0)) {
         // 完全隨機：每個像素一條單顆 run（9,600 條）。用「每組 9 個單顆 sel」
         // 打包成 ~px/9 個 group，效果一樣（dst 隨機、run 全部 1 顆），但記憶體可控。
         ngroups = (px + 8u) / 9u;
@@ -244,7 +257,7 @@ static void on_layoutbench(nc4_ctx_t *ctx, const nc4_frame_t *f)
         return;
     }
 
-    if (variant == 2 || ((variant == 5 || variant == 6 || variant == 7 || variant == 8) && groups_in == 0)) {
+    if (variant == 2 || ((variant == 5 || variant == 6 || variant == 7 || variant == 8 || variant == 9 || variant == 11 || variant == 12 || variant == 13 || variant == 15) && groups_in == 0)) {
         // 9,600 個像素的固定種子 permutation，再每 9 個塞入一個 group
         uint32_t *perm = heap_caps_malloc((size_t)px * sizeof(uint32_t), alloc_caps);
         if (perm == NULL) {
@@ -338,6 +351,199 @@ static void on_layoutbench(nc4_ctx_t *ctx, const nc4_frame_t *f)
         vals[i] = (uint16_t)((i * 71u + 13u) & 0xFFFu);
     }
     uint16_t *vptrs[NC_PX_LAYOUT_ASSET_MAX] = { vals };
+
+    uint32_t merge8_us = 0, swar_us = 0, swar_ok = 0;
+    if (variant == 10) {
+        const uint32_t lane_px = (px >= 16u) ? (px / 16u) : px;   // 16 條線，每條 600 px
+        const uint32_t lb = lane_px * 3u * 3u;   // packed bytes / lane（600 px → 5,400）
+        uint8_t *lanes[16] = { NULL };
+        uint8_t *o1 = (uint8_t *)heap_caps_malloc((size_t)lb * 16u, alloc_caps);
+        uint8_t *o2 = (uint8_t *)heap_caps_malloc((size_t)lb * 16u, alloc_caps);
+        bool ok = (o1 != NULL && o2 != NULL);
+        for (int k = 0; k < 16 && ok; k++) {
+            lanes[k] = (uint8_t *)heap_caps_malloc(lb, alloc_caps);
+            ok = ok && (lanes[k] != NULL);
+            for (uint32_t j = 0; ok && j < lb; j++) {
+                lanes[k][j] = (uint8_t)((j * 31u + (uint32_t)k * 17u) & 0xFFu);
+            }
+        }
+        if (ok) {
+            // (a) 現況：兩組 merge8（store + OR）
+            const int64_t a0 = esp_timer_get_time();
+            memset(o1, 0, (size_t)lb * 16u);
+            nc_px_codec_pack_merge8_store((const uint8_t **)&lanes[0], lb, o1, 2, 0);
+            nc_px_codec_pack_merge8((const uint8_t **)&lanes[8], lb, o1, 2, 1);
+            merge8_us = (uint32_t)(esp_timer_get_time() - a0);
+            // (b) SWAR：每個 byte index 做兩次 8×8 轉置，組成 16-bit 字
+            const int64_t b0 = esp_timer_get_time();
+            for (uint32_t j = 0; j < lb; j++) {
+                uint64_t xl = 0, xh = 0;
+                for (int k = 0; k < 8; k++) {
+                    xl |= (uint64_t)lanes[k][j] << (8 * k);
+                    xh |= (uint64_t)lanes[8 + k][j] << (8 * k);
+                }
+                xl = swar_t8(xl);
+                xh = swar_t8(xh);
+                uint8_t *dst = o2 + (size_t)j * 16u;
+                for (int i = 0; i < 8; i++) {
+                    dst[2 * i + 0] = (uint8_t)(xl >> (8 * i));
+                    dst[2 * i + 1] = (uint8_t)(xh >> (8 * i));
+                }
+            }
+            swar_us = (uint32_t)(esp_timer_get_time() - b0);
+            swar_ok = (memcmp(o1, o2, (size_t)lb * 16u) == 0) ? 1u : 0u;
+            s_sink += o2[0];
+        }
+        for (int k = 0; k < 16; k++) {
+            if (lanes[k] != NULL) heap_caps_free(lanes[k]);
+        }
+        if (o1 != NULL) heap_caps_free(o1);
+        if (o2 != NULL) heap_caps_free(o2);
+    }
+
+    uint32_t flat_build_us = 0, flat_apply_us = 0;
+    if (variant == 9 || variant == 11 || variant == 12 || variant == 13 || variant == 15) {
+        // 原型：先把每一顆的落點＋三個通道起點算成 8 B（dst16, c0, c1, c2），
+        // 再跑「讀 8 B、寫 4 B」的最小白迴圈。呢個就係計劃 Task 7 的形狀。
+        uint16_t *flat = (uint16_t *)heap_caps_malloc((size_t)px * 8u, alloc_caps);
+        uint8_t *dst = (uint8_t *)heap_caps_malloc((size_t)px * 4u, alloc_caps);
+        if (flat != NULL && dst != NULL) {
+            const int64_t f0 = esp_timer_get_time();
+            uint32_t k = 0;
+            for (uint32_t r = 0; r < lay.nruns && k < px; r++) {
+                const nc_px_lrun_t *run = &lay.run[r];
+                const nc_px_ljob_t *job = &lay.job[run->job];
+                const nc_px_aprog_t *ap = &lay.aprog[job->aprog];
+                const uint32_t n = (run->count < (px - k)) ? run->count : (px - k);
+                uint32_t c0 = (ap->nv > 0) ? ((3u * run->src) % ap->nv) : 0;
+                uint32_t c1 = (ap->nv > 0) ? ((3u * run->src + 1u) % ap->nv) : 0;
+                uint32_t c2 = (ap->nv > 0) ? ((3u * run->src + 2u) % ap->nv) : 0;
+                for (uint32_t x = 0; x < n; x++, k++) {
+                    flat[k * 4 + 0] = (uint16_t)(run->dst + x);
+                    flat[k * 4 + 1] = (uint16_t)c0;
+                    flat[k * 4 + 2] = (uint16_t)c1;
+                    flat[k * 4 + 3] = (uint16_t)c2;
+                    if (ap->nv > 0) {
+                        if (++c0 == ap->nv) c0 = 0;
+                        if (++c1 == ap->nv) c1 = 0;
+                        if (++c2 == ap->nv) c2 = 0;
+                    }
+                }
+            }
+            flat_build_us = (uint32_t)(esp_timer_get_time() - f0);
+            memset(dst, 0, (size_t)px * 4u);
+            const int64_t a0 = esp_timer_get_time();
+            if (variant == 11) {
+                uint32_t acc = 0;                 // 只讀表＋算值，唔寫入
+                for (uint32_t i = 0; i < k; i++) {
+                    const uint16_t *e = &flat[i * 4];
+                    acc += e[0] + vals[e[1]] + vals[e[2]] + vals[e[3]];
+                }
+                s_sink += acc;
+            } else {
+                for (uint32_t i = 0; i < k; i++) {
+                    const uint16_t *e = &flat[i * 4];
+                    uint8_t *o = dst + ((size_t)e[0] << 2);
+                    o[0] = (uint8_t)(vals[e[1]] >> 4);
+                    o[1] = (uint8_t)(vals[e[2]] >> 4);
+                    o[2] = (uint8_t)(vals[e[3]] >> 4);
+                    o[3] = 0;
+                }
+            }
+            flat_apply_us = (uint32_t)(esp_timer_get_time() - a0);
+
+            if (variant == 15) {
+                // 6 B 單表：dst2 + src2 + write1 + aprog1；一次掃完，冇分表
+                uint8_t *flat6 = (uint8_t *)heap_caps_malloc((size_t)k * 6u, alloc_caps);
+                if (flat6 != NULL) {
+                    const uint32_t nv = lay.aprog[0].nv ? lay.aprog[0].nv : 1;
+                    for (uint32_t i = 0; i < k; i++) {
+                        const uint16_t *e = &flat[i * 4];
+                        uint8_t *p6 = flat6 + (size_t)i * 6u;
+                        p6[0] = (uint8_t)e[0];
+                        p6[1] = (uint8_t)(e[0] >> 8);
+                        p6[2] = (uint8_t)e[1];
+                        p6[3] = (uint8_t)(e[1] >> 8);
+                        p6[4] = NC_PX_WRITE_RGB;
+                        p6[5] = 0;
+                    }
+                    memset(dst, 0, (size_t)px * 4u);
+                    const int64_t t0 = esp_timer_get_time();
+                    for (uint32_t i = 0; i < k; i++) {
+                        const uint8_t *p6 = flat6 + (size_t)i * 6u;
+                        const uint32_t d = (uint32_t)p6[0] | ((uint32_t)p6[1] << 8);
+                        const uint32_t src = (uint32_t)p6[2] | ((uint32_t)p6[3] << 8);
+                        const uint32_t c0 = (3u * src) % nv;
+                        uint8_t *o = dst + ((size_t)d << 2);
+                        o[0] = (uint8_t)(vals[c0] >> 4);
+                        o[1] = (uint8_t)(vals[(c0 + 1u) % nv] >> 4);
+                        o[2] = (uint8_t)(vals[(c0 + 2u) % nv] >> 4);
+                        o[3] = 0;
+                    }
+                    flat_apply_us = (uint32_t)(esp_timer_get_time() - t0);
+                    s_sink += dst[0];
+                    heap_caps_free(flat6);
+                }
+            } else if (variant == 13) {
+                // 兩張表：前半 rgb、後半 rgbw；每張表用專用緊迴圈（唔用內層 ch 迴圈）
+                const uint32_t half = k / 2u;
+                memset(dst, 0, (size_t)px * 4u);
+                const int64_t s0 = esp_timer_get_time();
+                for (uint32_t i = 0; i < half; i++) {          // rgb 表
+                    const uint16_t *e = &flat[i * 4];
+                    uint8_t *o = dst + ((size_t)e[0] << 2);
+                    o[0] = (uint8_t)(vals[e[1]] >> 4);
+                    o[1] = (uint8_t)(vals[e[2]] >> 4);
+                    o[2] = (uint8_t)(vals[e[3]] >> 4);
+                    o[3] = 0;
+                }
+                for (uint32_t i = half; i < k; i++) {          // rgbw 表
+                    const uint16_t *e = &flat[i * 4];
+                    uint8_t *o = dst + ((size_t)e[0] << 2);
+                    o[0] = (uint8_t)(vals[e[1]] >> 4);
+                    o[1] = (uint8_t)(vals[e[2]] >> 4);
+                    o[2] = (uint8_t)(vals[e[3]] >> 4);
+                    o[3] = 0;
+                }
+                flat_apply_us = (uint32_t)(esp_timer_get_time() - s0);
+                s_sink += dst[0];
+            } else if (variant == 12) {
+                // 再用 4 B/顆（dst, src）試一次：表細一半，但每顆要多 3 次 %
+                uint16_t *flat4 = (uint16_t *)heap_caps_malloc((size_t)px * 4u, alloc_caps);
+                if (flat4 != NULL) {
+                    const int64_t g0 = esp_timer_get_time();
+                    uint32_t n4 = 0;
+                    for (uint32_t i = 0; i < k; i++) {
+                        const uint16_t *e = &flat[i * 4];
+                        flat4[n4 * 2 + 0] = e[0];
+                        flat4[n4 * 2 + 1] = (uint16_t)((e[1] * 64u) / (lay.aprog[0].nv ? lay.aprog[0].nv : 1));
+                        n4++;
+                    }
+                    const uint32_t build4 = (uint32_t)(esp_timer_get_time() - g0);
+                    memset(dst, 0, (size_t)px * 4u);
+                    const int64_t h0 = esp_timer_get_time();
+                    const uint32_t nv = lay.aprog[0].nv ? lay.aprog[0].nv : 1;
+                    for (uint32_t i = 0; i < n4; i++) {
+                        const uint32_t d = flat4[i * 2 + 0];
+                        const uint32_t src = flat4[i * 2 + 1];
+                        const uint32_t c0 = (3u * src) % nv;
+                        uint8_t *o = dst + ((size_t)d << 2);
+                        o[0] = (uint8_t)(vals[c0] >> 4);
+                        o[1] = (uint8_t)(vals[(c0 + 1u) % nv] >> 4);
+                        o[2] = (uint8_t)(vals[(c0 + 2u) % nv] >> 4);
+                        o[3] = 0;
+                    }
+                    flat_build_us += build4;
+                    flat_apply_us = (uint32_t)(esp_timer_get_time() - h0);
+                    s_sink += dst[0];
+                    heap_caps_free(flat4);
+                }
+            }
+            s_sink += dst[0];
+        }
+        if (flat != NULL) heap_caps_free(flat);
+        if (dst != NULL) heap_caps_free(dst);
+    }
 
     uint32_t direct_us = 0, canvas_us = 0, direct4_us = 0, direct_noclear_us = 0;
     uint32_t batch4_us = 0, batch4_1pass_us = 0, batch4_1pass_noclear_us = 0;
@@ -504,12 +710,14 @@ static void on_layoutbench(nc4_ctx_t *ctx, const nc4_frame_t *f)
         s_sink += c12[r & 3u];
     }
 
-    char j[420];
+    char j[640];
     snprintf(j, sizeof(j),
              "{\"px\":%u,\"groups\":%u,\"variant\":%u,\"jobs\":%u,\"runs\":%u,"
              "\"nv\":%u,\"build_us\":%u,\"apply_us\":%u,\"apply12_us\":%u,"
              "\"sub_us\":[%u,%u,%u,%u],\"sub_total_us\":%u,"
              "\"save_us\":%u,\"load_us\":%u,\"cache_bytes\":%ld,\"load_rc\":%d,"
+             "\"merge8_us\":%u,\"swar_us\":%u,\"swar_ok\":%u,"
+             "\"flat_build_us\":%u,\"flat_apply_us\":%u,"
              "\"canvas_path_us\":%u,\"direct_us\":%u,\"direct_noclear_us\":%u,"
              "\"direct4_us\":%u,\"batch4_us\":%u,\"batch4_1pass_us\":%u,"
              "\"batch4_1pass_noclear_us\":%u,"
@@ -521,6 +729,8 @@ static void on_layoutbench(nc4_ctx_t *ctx, const nc4_frame_t *f)
              (unsigned)sub_us[2], (unsigned)sub_us[3],
              (unsigned)(sub_us[0] + sub_us[1] + sub_us[2] + sub_us[3]),
              (unsigned)save_us, (unsigned)load_us, cache_bytes, (int)load_rc,
+             (unsigned)merge8_us, (unsigned)swar_us, (unsigned)swar_ok,
+             (unsigned)flat_build_us, (unsigned)flat_apply_us,
              (unsigned)canvas_us, (unsigned)direct_us, (unsigned)direct_noclear_us,
              (unsigned)direct4_us,
              (unsigned)batch4_us, (unsigned)batch4_1pass_us,

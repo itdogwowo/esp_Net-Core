@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "id": 1,
+  "name": "full256",
+  "index": 1,
+  "play_loop": -1,
+  "maxF": 0,
+  "mapping": "matrix",
+  "white": 0,
+  "map": [
+    {
+      "group": "matrix.full",
+      "effect": "wave256",
+      "write": "rgb"
+    }
+  ]
+}

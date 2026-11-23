@@ -104,6 +104,10 @@ uint32_t nc_px_layout_apply(const nc_px_layout_t *l, uint16_t *const *vals, uint
 void nc_px_layout_apply4(const nc_px_layout_t *l, uint16_t *const vals[],
                          uint8_t *const dst[], uint8_t subframes, uint32_t phase);
 
+// 只寫其中一個子幀（環一次只可以 begin 一格，所以逐子幀寫）。
+void nc_px_layout_apply_dither(const nc_px_layout_t *l, uint16_t *const vals[],
+                               uint8_t *dst, uint8_t subframes, uint8_t sf, uint32_t phase);
+
 // 12-bit 版（canvas = px × 4 個 uint16；唔做 >>4）。
 uint32_t nc_px_layout_apply12(const nc_px_layout_t *l, uint16_t *const *vals, uint16_t *dst);
 

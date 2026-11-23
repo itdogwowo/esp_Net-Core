@@ -158,6 +158,11 @@ static void white_mix(uint8_t *canvas, uint32_t px, uint8_t w)
 
 // 最新一幀的快照：pair loop 寫、0xF06B handler 讀。
 // rgbw = NULL 代表「黑幀」（fallback 時用），會把快照內的有效像素清 0。
+static struct {
+    uint32_t present, built, too_big, failed, ms;
+} s_prebuild;
+static void cache_prebuild_missing(void);
+
 static volatile bool s_snap_wanted;   // 0xF06B 要求預覽時才由環複製一份
 
 static void snapshot_publish(const uint8_t *rgbw, uint32_t px, uint32_t seq)
@@ -219,6 +224,40 @@ static bool content_frame_once(void)
                                 ? (uint32_t)esp_timer_get_time() - s_eff_frame.t_pub_us : 0;
         nc_px_hdr_t *hdr = NULL;
         const int64_t a0 = esp_timer_get_time();
+#if CONFIG_NETCORE_PIXEL_SUBFRAMES > 1
+        const uint32_t ns = (uint32_t)CONFIG_NETCORE_PIXEL_SUBFRAMES;
+        uint32_t apply_us = 0, white_us = 0, commit_us = 0;
+        const int64_t t_all0 = esp_timer_get_time();
+        for (uint32_t sf = 0; sf < ns; sf++) {
+            nc_px_hdr_t *hp = NULL;
+            uint8_t *sp = nc_px_ring_begin_ex(s_content.q, &hp);
+            if (sp == NULL) {
+                nc_pipe_stats_full();
+                return false;             // 環滿：已 commit 的子幀照用，下一輪再試
+            }
+            const int64_t t0 = esp_timer_get_time();
+            nc_px_layout_apply_dither(&s_content.layout,
+                                      (uint16_t *const *)s_eff_frame.vals,
+                                      sp, (uint8_t)ns, (uint8_t)sf, s_content.commits);
+            const int64_t t1 = esp_timer_get_time();
+            white_mix(sp, s_content.px, s_content.white);
+            const int64_t t2 = esp_timer_get_time();
+            if (!ring_commit_slot(hp)) {
+                nc_pipe_stats_full();
+                return false;
+            }
+            const int64_t t3 = esp_timer_get_time();
+            apply_us += (uint32_t)(t1 - t0);
+            white_us += (uint32_t)(t2 - t1);
+            commit_us += (uint32_t)(t3 - t2);
+            if (sf == 0 && s_snap_wanted) {
+                snapshot_publish(sp, s_content.px, s_content.commits);
+                s_snap_wanted = false;
+            }
+        }
+        (void)t_all0;
+        nc_pipe_stats_pair(0, apply_us, white_us, commit_us, lat_us);
+#else
         uint8_t *p = nc_px_ring_begin_ex(s_content.q, &hdr);
         if (p == NULL) {
             nc_pipe_stats_full();
@@ -235,12 +274,13 @@ static bool content_frame_once(void)
         const int64_t c1 = esp_timer_get_time();
         nc_pipe_stats_pair(0, (uint32_t)(a1 - a0), (uint32_t)(w1 - a1),
                            (uint32_t)(c1 - w1), lat_us);
-        s_last_eff_seq = s_eff_frame.seq;
-        nc_pipe_effect_ack(s_eff_frame.seq);   // effect 可以重用該 slot
         if (s_snap_wanted) {
             snapshot_publish(p, s_content.px, s_content.commits);
             s_snap_wanted = false;
         }
+#endif
+        s_last_eff_seq = s_eff_frame.seq;
+        nc_pipe_effect_ack(s_eff_frame.seq);   // effect 可以重用該 slot
         return true;
     }
     // fallback：填黑。直接寫環的 payload（唔需要 canvas）。
@@ -766,6 +806,72 @@ static void content_start_pipeline(void)
     }
     ESP_LOGI(TAG, "pair 就緒：%u px、prd 環 %s", (unsigned)s_content.px,
              nc_px_ring_name(s_content.q));
+    cache_prebuild_missing();          // 開機檢查一次，缺的組合表補建
+}
+
+// 開機檢查一次：把所有 mode 的組合表裡缺的補建（已有就跳過）。
+// 用臨時 asset 表，唔會影響正在播的那個組合的 pointer。
+static void cache_prebuild_missing(void)
+{
+    const nc_px_mode_tbl_t *modes = nc_px_mode_table();
+    if (modes == NULL || modes->n == 0 || s_content.px == 0) {
+        return;
+    }
+    nc_px_asset_tbl_t *tmp = heap_caps_malloc(sizeof(*tmp),
+                                              MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (tmp == NULL) {
+        ESP_LOGW(TAG, "開機預建：臨時 asset 表配置失敗 → 略過");
+        return;
+    }
+    char cdir[96];
+    (void)snprintf(cdir, sizeof(cdir), "%s/cache", s_content.pixel_dir);
+    (void)mkdir(cdir, 0777);
+
+    uint32_t present = 0, built = 0, too_big = 0, failed = 0;
+    const int64_t t0 = esp_timer_get_time();
+    const nc_px_hw_inv_t inv = { .hw = NC_PX_HW_WS2812, .base = 0, .px = s_content.px };
+    for (uint8_t i = 0; i < modes->n; i++) {
+        const nc_px_mode_t *m = &modes->item[i];
+        const nc_px_map_t *map = select_map(m);
+        if (map == NULL) {
+            failed++;
+            continue;
+        }
+        build_asset_tbl_into(tmp, m);
+        const uint32_t key = nc_px_layout_cache_key(m->hash, map->hash, s_content.px);
+        char path[96];
+        (void)snprintf(path, sizeof(path), "%s/cache/%08lx.pxlt", s_content.pixel_dir,
+                       (unsigned long)key);
+        nc_px_layout_t probe;
+        if (nc_px_layout_load(&probe, path, key, tmp) == ESP_OK) {
+            nc_px_layout_free(&probe);
+            present++;
+            continue;
+        }
+        nc_px_layout_t lay;
+        if (nc_px_layout_build(m, map, tmp, &inv, 1, &lay) != ESP_OK || lay.njobs == 0) {
+            nc_px_layout_free(&lay);
+            failed++;
+            continue;
+        }
+        if (nc_px_layout_cache_bytes(&lay) > 32768u) {
+            too_big++;
+        } else if (nc_px_layout_save(&lay, path, key) == ESP_OK) {
+            built++;
+        } else {
+            failed++;
+        }
+        nc_px_layout_free(&lay);
+    }
+    heap_caps_free(tmp);
+    s_prebuild.present = present;
+    s_prebuild.built = built;
+    s_prebuild.too_big = too_big;
+    s_prebuild.failed = failed;
+    s_prebuild.ms = (uint32_t)((esp_timer_get_time() - t0) / 1000);
+    ESP_LOGI(TAG, "開機預建組合表：已有 %u、新建 %u、太大跳過 %u、失敗 %u（%u ms）",
+             (unsigned)present, (unsigned)built, (unsigned)too_big, (unsigned)failed,
+             (unsigned)((esp_timer_get_time() - t0) / 1000));
 }
 
 static esp_err_t content_start(const nc_task_res_view_t *res, int nres)
@@ -1043,7 +1149,9 @@ static void on_pixdiag(nc4_ctx_t *ctx, const nc4_frame_t *f)
         "\"jobs\":%u,\"runs\":%u,\"naprog\":%u,\"skipped\":%u,"
         "\"skip\":{\"no_asset\":%u,\"no_group\":%u,\"bad_write\":%u,"
         "\"empty\":%u,\"asset_full\":%u,\"prog\":%u,\"oom\":%u},"
-        "\"free_int\":%u,\"free_ps\":%u,\"render\":%s}",
+        "\"free_int\":%u,\"free_ps\":%u,"
+        "\"prebuild\":{\"present\":%u,\"built\":%u,\"too_big\":%u,"
+        "\"failed\":%u,\"ms\":%u},\"render\":%s}",
         (unsigned)px, (unsigned)slots, (unsigned)ring_b, (unsigned)canvas_b,
         (unsigned)vals_b, (unsigned)runs_b,
         (unsigned)s_content.layout.njobs, (unsigned)s_content.layout.nruns,
@@ -1054,6 +1162,9 @@ static void on_pixdiag(nc4_ctx_t *ctx, const nc4_frame_t *f)
         (unsigned)s_content.layout.skip_oom,
         (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
         (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM),
+        (unsigned)s_prebuild.present, (unsigned)s_prebuild.built,
+        (unsigned)s_prebuild.too_big, (unsigned)s_prebuild.failed,
+        (unsigned)s_prebuild.ms,
         rj[0] ? rj : "{}");
     reply_json(ctx, NC4_CMD_PIXDIAG_RSP, j);
 }

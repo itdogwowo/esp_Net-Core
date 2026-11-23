@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "id": 4,
+  "name": "full38400",
+  "index": 4,
+  "play_loop": -1,
+  "maxF": 0,
+  "mapping": "matrix",
+  "white": 0,
+  "map": [
+    {
+      "group": "matrix.full",
+      "effect": "wave38400",
+      "write": "rgb"
+    }
+  ]
+}

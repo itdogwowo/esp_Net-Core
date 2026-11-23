@@ -94,11 +94,18 @@ static nc_pixel_q_t s_rings[NC_PX_MAX_LANES];
 static nc_pixel_cfg_t s_cfg = {
     // 後備節拍：實際以 system.json 的 frame_interval_ms 為準（見 px_start）。
     .fps = CONFIG_NETCORE_PIXEL_FPS,
+#if CONFIG_NETCORE_PIXEL_MOCK_ONLY
+    .nlane = 1,
+    .lane = {
+        { .be = "mock", .ring = "mock.prd" },   // 量 CPU：唔受線路時間限制
+    },
+#else
     .nlane = 2,
     .lane = {
         { .be = "i80", .ring = "i80.prd" },
         { .be = "mock", .ring = "mock.prd" },   // 冇 I80 的組態：效果管線仍然有環可餵
     },
+#endif
 };
 
 void nc_render_set_cfg(const nc_pixel_cfg_t *cfg)
@@ -165,7 +172,7 @@ static int plan_lanes(void)
         }
         pl->px = px;
         // 3 格：DMA 送第 N 格時，生產者可以填 N+1、N+2（P6 的三緩衝）。
-        pl->slots = 3;
+        pl->slots = (uint32_t)CONFIG_NETCORE_PIXEL_RING_SLOTS;
     }
     return s_nplan;
 }

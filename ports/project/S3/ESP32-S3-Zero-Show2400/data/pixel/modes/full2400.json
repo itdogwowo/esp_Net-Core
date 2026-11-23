@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "id": 2,
+  "name": "full2400",
+  "index": 2,
+  "play_loop": -1,
+  "maxF": 0,
+  "mapping": "matrix",
+  "white": 0,
+  "map": [
+    {
+      "group": "matrix.full",
+      "effect": "wave2400",
+      "write": "rgb"
+    }
+  ]
+}

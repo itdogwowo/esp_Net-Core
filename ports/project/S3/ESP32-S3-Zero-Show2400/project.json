@@ -1,0 +1,12 @@
+{
+  "_comment": [
+    "10-bit 抖動量測 project：16 條線 × 150 顆 = 2,400 px。",
+    "每個視覺幀 4 個子幀（200 Hz 子幀率、50 視覺 fps）；環 5 格。",
+    "Zero 只有 1 條 data pin，render 用 mock 量 effect／pair 的 CPU 成本。"
+  ],
+  "version": 1,
+  "name": "ESP32-S3-Zero-Show2400",
+  "hardware": "S3/ESP32-S3-Zero",
+  "aliases": ["zero2400", "s3-zero-2400"],
+  "seed": ["hardware", "system", "network", "tasks"]
+}

@@ -51,6 +51,7 @@
 | 組合快取 | 每組合一個檔；表 ≤32 KB 才存；開機補建缺的 |
 | 實測基準（9,600 px） | 500 組：寫 1.36 ms；完全隨機：12.29 ms |
 | 實測基準（2,400 px、4 子幀） | 500 組：0.95 ms；完全隨機：4.63 ms |
+| 抖動與刷新 | 4 子幀只在子幀率 ≥200 Hz 時用 → 每條線 px ÷4（16×150＝2,400）；**緩衝總數不變** |
 
 ## 檔案結構（會改／新增）
 
@@ -492,6 +493,226 @@ git commit -m "project: 2,400 px（16×150）抖動驗收工程與數據"
 ```
 
 ---
+
+### Task 6（可選，先量再決定）：I80 波形合成 chunked streaming
+
+> ⚠️ 更正：現行 `nc_i80_drv` 已經是 async（3 槽 + 完成回呼），打包與送燈**本來就重疊**；
+> §7.123 的 37.9 ms 是 async 之前的舊量測。先做 Step 0 重測，再決定要唔要做 chunked。
+
+**Files:**
+- Modify: `firmware/components/tasks/render_task/nc_i80_out.c`
+
+- [ ] **Step 0：在 16-lane 板用現行固件重測** `frame_us / enc_us / tx_us / inflight`，
+      確認 frame ≈ max(enc, 18 ms)（預期 19–21 ms）。如果已經係，Task 6 可以唔做。
+- [ ] **Step 1：（如需要）量基線**確認 `enc_us ≈ 18.4–20.1 ms`、`tx_us ≈ 1.16 ms`
+- [ ] **Step 2：把 packed 改成 3 槽環 + 每槽 30 顆／lane 的 chunk**
+
+```c
+// 每個 chunk：30 顆 × 3 byte = 90 byte/lane → 90 × 48 = 4,320 B（16 lane、wave3）
+#define NC_I80_CHUNK_PX 30
+// esp_lcd_panel_io_tx_color() 逐 chunk 提交；on_color_trans_done 內準備下一個 chunk
+```
+
+- [ ] **Step 3：轉置用 nibble LUT（16 × u16）＋ 16 lane 一次轉 u16**
+
+```c
+static const uint16_t s_wave3_nib[16];   // 4 bit → 12 tick
+// 每個 tick：把 16 條 lane 的同一個 bit 併成一個 u16 字
+```
+
+- [ ] **Step 4：量重疊後 frame_us**：Expected 由 37.9–39.6 ms 降到 **≤ 21 ms**（≈48–50 fps）
+- [ ] **Step 5：Commit**
+
+### Task 7：配對改 6 B 單表（定案）
+
+> 2026-11-24 定案：統一 6 B（dst2／src2／write1／aprog1），唔做 4 B／分表。
+> 實測（完全隨機）：6 B 5.34 ms、4 B 4.50 ms、分表 6.23 ms、run 12.29 ms。
+> 4 B 的數據只作文件備查（status §7.208–§7.209）。
+
+**Files:**
+- Modify: `firmware/components/sw/pixel/include/nc_px_layout.h`、`asset/nc_px_layout.c`
+- Test: `tools/hosttest/pxLayout_test/pxLayout_test.c`
+
+- [ ] **Step 1：加 6 B 表結構（由既有 layout 展開）**
+
+```c
+typedef struct {
+    uint16_t dst;      // 落點
+    uint16_t src;      // 值流起點
+    uint8_t  write;    // NC_PX_WRITE_*
+    uint8_t  aprog;    // 效果編號
+} nc_px_flat6_t;       // 6 B／顆
+```
+
+- [ ] **Step 2：建立組合時展開（一次性）**
+
+```c
+// 由 runs 展開：每段的 count 顆，逐顆寫 dst/src/write/aprog
+uint32_t k = 0;
+for (r = 0; r < lay->nruns && k < px; r++) {
+    const nc_px_lrun_t *run = &lay->run[r];
+    const nc_px_ljob_t *job = &lay->job[run->job];
+    for (uint32_t x = 0; x < run->count && k < px; x++, k++) {
+        f[k].dst = (uint16_t)(run->dst + x);
+        f[k].src = (uint16_t)(run->src + x);
+        f[k].write = job->write;
+        f[k].aprog = job->aprog;
+    }
+}
+```
+
+- [ ] **Step 3：套用時按 write 分組，避免每顆 switch**
+
+```c
+// ① 數每個 write 有幾顆（NC_PX_WRITE_COUNT 個桶）
+uint32_t cnt[NC_PX_WRITE_COUNT + 1] = { 0 };
+for (uint32_t i = 0; i < px; i++) {
+    cnt[f[i].write]++;
+}
+// ② 前綴和 → 每組在輸出表的起點
+uint32_t off[NC_PX_WRITE_COUNT + 1] = { 0 };
+for (int w = 0; w < NC_PX_WRITE_COUNT; w++) {
+    off[w + 1] = off[w] + cnt[w];
+}
+// ③ 逐組用專用迴圈（rgb／rgbw 各自一個；唔使每顆判斷 write）
+for (int w = 0; w < NC_PX_WRITE_COUNT; w++) {
+    for (uint32_t i = 0; i < px; i++) {
+        if (f[i].write != (uint8_t)w) {
+            continue;                 // 正式版用 sort/bucket 一次排好，唔用這個 O(n×W) 掃描
+        }
+        const uint32_t c0 = ((w == NC_PX_WRITE_RGBW) ? 4u : 3u) * f[i].src
+                            % nv[f[i].aprog];
+        uint8_t *o = dst + ((size_t)f[i].dst << 2);
+        o[0] = (uint8_t)(vals[f[i].aprog][c0] >> 4);
+        o[1] = (uint8_t)(vals[f[i].aprog][(c0 + 1u) % nv[f[i].aprog]] >> 4);
+        o[2] = (uint8_t)(vals[f[i].aprog][(c0 + 2u) % nv[f[i].aprog]] >> 4);
+        o[3] = 0;
+    }
+}
+```
+
+> 正式版唔用上面 O(n×W) 掃描：用 bucket 一次重排 `f[]`（或建表時已分組），
+> 令每個 write 的 range 連續，然後每個 range 一個專用迴圈。
+
+- [ ] **Step 4：host 測試（重疊、stride、aprog 各異）**
+
+```c
+// 兩個 entry：A 寫 R、B 寫 G，同一批燈 → 兩個通道都要保留
+// 兩個 entry 都寫 RGB，重疊 px2/3 → 後面的贏（見 pxLayout_test [9]）
+```
+
+Run: `bash tools/hosttest/pxLayout_test/run.sh` → Expected: ALL PASS
+
+- [ ] **Step 5：上板量**
+
+```bash
+python3 tools/layout_bench.py --port /dev/cu.usbmodemB43A45AD52E41 --all
+```
+
+Expected（9,600 px）：500 組 ≤ 2.5 ms、完全隨機 ≤ 5.5 ms（6 B 實測 5.34）。
+
+- [ ] **Step 6：Commit**
+
+### Task 8：掃描後精確配置（去魔法數字）
+
+> 開機流程：**掃描（數）→ 配置（精確數量）→ 初始化**。
+> 掃描結果就是唯一的數量來源；唔再有任何 `item[32]`／`job[8]`。
+
+**Files:**
+- Modify: `firmware/components/sw/pixel/include/nc_px_asset.h`、`asset/nc_px_asset.c`
+- Modify: `firmware/components/sw/pixel/asset/nc_px_layout.c`
+- Modify: `firmware/components/tasks/pipeline_task/nc_pair_task.c`
+- Test: `tools/hosttest/pxLayer_test/pxLayout_test.c`（大量效果）、`pxShow_test`
+
+- [ ] **Step 1：把資產表改成 flexible array**
+
+```c
+typedef struct {
+    uint16_t      n;
+    nc_px_asset_t item[];      // 實際數量由掃描決定
+} nc_px_asset_tbl_t;
+```
+
+- [ ] **Step 2：掃描先數、再配置、再解析**
+
+```c
+// nc_px_asset_scan() 內部：
+const uint16_t count = count_effects_json(json, len);   // 只數 "name" 出現次數
+nc_px_asset_tbl_t *t = lalloc(sizeof(*t) + (size_t)count * sizeof(t->item[0]));
+t->n = 0;
+parse_effects_into(t, json, len);                       // 填入，最多 count 個
+```
+
+- [ ] **Step 3：pair 的 per-mode 資產表按 entry 數配置**
+
+```c
+const size_t bytes = sizeof(nc_px_asset_tbl_t) +
+                     (size_t)mode->nentry * sizeof(nc_px_asset_t);
+s_content.assets = heap_caps_malloc(bytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+```
+
+- [ ] **Step 4：aprog 先數 distinct 效果，再精確配置**
+
+```c
+uint32_t ndistinct = 0;
+for (uint32_t i = 0; i < mode->nentry; i++) {
+    if (find_asset_previously_seen(mode->entry[i].effect) == false) {
+        ndistinct++;
+    }
+}
+out->aprog = lalloc((size_t)ndistinct * sizeof(nc_px_aprog_t));
+```
+
+- [ ] **Step 5：刪除舊 `nc_px_plan_t` 的 8 條上限**（production 冇用；host 測試改用 layout）
+
+- [ ] **Step 6：host 測試（40 個效果 > 舊上限 32）**
+
+```c
+static void test_many_effects(void)
+{
+    printf("[10] 40 個效果（超過舊上限 32）\n");
+    const uint16_t n = 40;
+    nc_px_asset_tbl_t *t = malloc(sizeof(*t) + (size_t)n * sizeof(t->item[0]));
+    t->n = n;
+    for (uint16_t i = 0; i < n; i++) {
+        char name[16];
+        snprintf(name, sizeof(name), "e%u", (unsigned)i);
+        make_asset(&t->item[i], name, 4);
+    }
+    nc_px_mode_entry_t *en = calloc(n, sizeof(*en));
+    for (uint16_t i = 0; i < n; i++) {
+        snprintf(en[i].group, sizeof(en[i].group), "full");
+        snprintf(en[i].effect, sizeof(en[i].effect), "e%u", (unsigned)i);
+        en[i].write = NC_PX_WRITE_RGB;
+    }
+    nc_px_group_sel_t sel[] = { { .hw = NC_PX_HW_WS2812, .slice = ":" } };
+    nc_px_group_t g = { .id = 1, .name = "full", .sel = sel, .nsel = 1 };
+    nc_px_map_t map = { .id = 1, .name = "m", .group = &g, .ngroups = 1 };
+    nc_px_mode_t mode = { .id = 1, .name = "m", .nentry = n, .entry = en };
+    const nc_px_hw_inv_t inv[] = { { .hw = NC_PX_HW_WS2812, .base = 0, .px = 4 } };
+    nc_px_layout_t lay;
+    check(nc_px_layout_build(&mode, &map, t, inv, 1, &lay) == ESP_OK, "建立");
+    check(lay.naprog == n, "aprog 數 = 40");
+    check(lay.skipped == 0, "冇 skip");
+    nc_px_layout_free(&lay);
+    free(en);
+    free(t);
+}
+```
+
+Run: `bash tools/hosttest/pxLayer_test/run.sh` → Expected: `aprog 數 = 40`、`冇 skip`
+
+- [ ] **Step 7：上板量開機記憶體與時間**
+
+```bash
+python3 tools/nc4.py --port /dev/cu.usbmodemB43A45AD52E41 status sys
+```
+
+Expected：`h_int` 會**減少**（資產表 BSS 由 8,386 B 變成 N × 262 B，N = 實際效果數）；
+`h_ps` 亦會減少（pair assets 與 aprog 都按實際數量配置）。
+把 `status sys` 的數字寫入 status 文件。
+
+- [ ] **Step 8：Commit**
 
 ## 驗收條件（全部要過）
 

@@ -244,6 +244,33 @@ menu "esp_Net-Core"
             相鄰的燈不要同時閃，所以把燈鏈切成若干區、每區一個誤差累加器。
             0 = 整條一區。上限 16 區（NC_PX_CODEC_ZONES_MAX）。
 
+    config NETCORE_PIXEL_MOCK_ONLY
+        bool "只規劃 mock lane（量 CPU；唔點燈）"
+        depends on NETCORE_PIXEL
+        default n
+        help
+            硬件層已另行驗證時用：render 只建 mock lane，按 fps 消費環，
+            咁 effect／pair 就可以量到真實 CPU 成本（唔受線路時間限制）。
+
+    config NETCORE_PIXEL_SUBFRAMES
+        int "每個視覺幀的抖動子幀數（1=8-bit、4=10-bit）"
+        depends on NETCORE_PIXEL
+        default 1
+        range 1 8
+        help
+            1 = 每個視覺幀送一次（8-bit）。
+            4 = 時間抖動：每個視覺幀送 4 個子幀（等效 10-bit）。
+            子幀率 = 視覺 fps × 子幀數；每條線的像素要相應減少（例如 600 → 150）。
+
+    config NETCORE_PIXEL_RING_SLOTS
+        int "prd 環格數（要 ≥ 子幀數 + 1）"
+        depends on NETCORE_PIXEL
+        default 3
+        range 3 16
+        help
+            環是 px × 4 × 格數；9,600 px 3 格 = 115 KB（PSRAM）。
+            用 4 子幀抖動時建議 5 格（4 格在飛 + 1 格緩衝）。
+
     config NETCORE_PIXEL_FPS
         int "後備幀率（實際以 system.json 的 frame_interval_ms 為準）"
         depends on NETCORE_PIXEL
