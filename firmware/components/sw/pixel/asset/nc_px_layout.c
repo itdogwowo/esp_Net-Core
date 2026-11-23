@@ -358,6 +358,29 @@ esp_err_t nc_px_layout_build(const nc_px_mode_t *mode, const nc_px_map_t *map,
         return ESP_ERR_NOT_FOUND;
     }
 
+    // ── 1b. 數實際 distinct 效果（aprog 只配真正用到的數量）──
+    uint32_t ndistinct = 0;
+    for (uint32_t e = 0; e < nent; e++) {
+        bool seen = false;
+        for (uint32_t k = 0; k < e; k++) {
+            if (src[k].asset == src[e].asset) {
+                seen = true;
+                break;
+            }
+        }
+        if (!seen) {
+            ndistinct++;
+        }
+    }
+    if (ndistinct > 65535u) {          // job.aprog 是 uint16：欄位上限
+        lfree(src);
+        lfree(ht);
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (ndistinct == 0) {
+        ndistinct = 1;
+    }
+
     // ── 2. 配記憶體 ──
     uint32_t *pool = (uint32_t *)lalloc((size_t)total_need * sizeof(uint32_t));
     uint32_t *tmp = (uint32_t *)lalloc((size_t)total_need * sizeof(uint32_t));
@@ -365,8 +388,7 @@ esp_err_t nc_px_layout_build(const nc_px_mode_t *mode, const nc_px_map_t *map,
     uint32_t *cursor = (uint32_t *)lalloc((size_t)px * sizeof(uint32_t));
     uint16_t *e_job = (uint16_t *)lalloc((size_t)total_need * sizeof(uint16_t));
     uint32_t *e_src = (uint32_t *)lalloc((size_t)total_need * sizeof(uint32_t));
-    out->aprog = (nc_px_aprog_t *)lalloc((size_t)NC_PX_LAYOUT_ASSET_MAX *
-                                         sizeof(nc_px_aprog_t));
+    out->aprog = (nc_px_aprog_t *)lalloc((size_t)ndistinct * sizeof(nc_px_aprog_t));
     out->job = (nc_px_ljob_t *)lalloc((size_t)nent * sizeof(nc_px_ljob_t));
     out->run = (nc_px_lrun_t *)lalloc((size_t)total_need * sizeof(nc_px_lrun_t));
     if (pool == NULL || tmp == NULL || counts == NULL || cursor == NULL || e_job == NULL ||
@@ -383,7 +405,7 @@ esp_err_t nc_px_layout_build(const nc_px_mode_t *mode, const nc_px_map_t *map,
         return ESP_ERR_NO_MEM;
     }
     memset(counts, 0, (size_t)px * sizeof(uint32_t));
-    memset(out->aprog, 0, (size_t)NC_PX_LAYOUT_ASSET_MAX * sizeof(nc_px_aprog_t));
+    memset(out->aprog, 0, (size_t)ndistinct * sizeof(nc_px_aprog_t));
 
     // ── 3. 展開全部 entry（保留書寫次序）＋ 編譯 aprog ＋ 數 bucket ──
     uint32_t naprog = 0;
@@ -400,7 +422,8 @@ esp_err_t nc_px_layout_build(const nc_px_mode_t *mode, const nc_px_map_t *map,
             }
         }
         if (ai == UINT32_MAX) {
-            if (naprog >= NC_PX_LAYOUT_ASSET_MAX) {
+            if (naprog >= ndistinct) {           // 正常唔會發生（已按實際數量配置）
+
                 out->skipped++;
                 out->skip_asset_full++;
                 continue;
