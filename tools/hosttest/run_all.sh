@@ -11,6 +11,7 @@ TESTS="cfg_test cfgstruct_test ncd_test task_test router_test link_test mod_test
 fail=0
 for t in $TESTS; do
     printf '%-12s ' "$t"
+    rm -rf "$ROOT/tools/hosttest/$t/build"   # 強制重建：避免舊 binary 遮住 header 改動
     log="${TMPDIR:-/tmp}/hosttest_$t.log"
     if bash "$ROOT/tools/hosttest/$t/run.sh" >"$log" 2>&1; then
         echo OK

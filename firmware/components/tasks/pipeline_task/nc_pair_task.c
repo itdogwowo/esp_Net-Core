@@ -158,6 +158,8 @@ static void white_mix(uint8_t *canvas, uint32_t px, uint8_t w)
 
 // 最新一幀的快照：pair loop 寫、0xF06B handler 讀。
 // rgbw = NULL 代表「黑幀」（fallback 時用），會把快照內的有效像素清 0。
+static volatile bool s_snap_wanted;   // 0xF06B 要求預覽時才由環複製一份
+
 static void snapshot_publish(const uint8_t *rgbw, uint32_t px, uint32_t seq)
 {
     const uint32_t n = (px > SHOWFRAME_PX_MAX) ? SHOWFRAME_PX_MAX : px;
@@ -178,18 +180,12 @@ static void snapshot_publish(const uint8_t *rgbw, uint32_t px, uint32_t seq)
 // 把 canvas 交入環。回 false = 環滿（renderer 未還格）。
 // 表頭：src = BUILTIN（畫面由韌體算，唔係主機 push）、ts = 算完的時間、
 // drops = 自己因為環滿跳過的幀數（環的帳面會顯示）。
-static bool commit_canvas(const uint8_t *rgbw)
+// 交棒：槽內容已經寫好，只補表頭＋commit（零拷貝）。
+static bool ring_commit_slot(nc_px_hdr_t *hdr)
 {
-    if (s_content.q == NULL || rgbw == NULL) {
+    if (s_content.q == NULL) {
         return false;
     }
-    nc_px_hdr_t *hdr = NULL;
-    uint8_t *p = nc_px_ring_begin_ex(s_content.q, &hdr);
-    if (p == NULL) {
-        s_content.busy++;
-        return false;                     // 環滿：下一輪再試
-    }
-    memcpy(p, rgbw, (size_t)s_content.px * NC_PX_BPP);
     if (hdr != NULL) {
         hdr->ts_us = (uint32_t)esp_timer_get_time();
         hdr->gen = 0;
@@ -208,7 +204,7 @@ static bool content_frame_once(void)
     if (s_content.q == NULL) {
         return false;
     }
-    if (s_content.ready && s_content.canvas != NULL) {
+    if (s_content.ready && s_content.layout.njobs > 0) {
         // pair 只讀 effect 的最新 fixed frame；effect 不會直接碰 canvas/ring。
         if (!nc_pipe_effect_copy(&s_eff_frame)) {
             return false;                 // effect 未出第一幀
@@ -221,23 +217,30 @@ static bool content_frame_once(void)
         }
         const uint32_t lat_us = ((uint32_t)esp_timer_get_time() > s_eff_frame.t_pub_us)
                                 ? (uint32_t)esp_timer_get_time() - s_eff_frame.t_pub_us : 0;
-        const int64_t c0 = esp_timer_get_time();
-        memset(s_content.canvas, 0, (size_t)s_content.px * NC_PX_BPP);
+        nc_px_hdr_t *hdr = NULL;
         const int64_t a0 = esp_timer_get_time();
-        nc_px_layout_apply(&s_content.layout, s_eff_frame.vals, s_content.canvas);
-        const int64_t a1 = esp_timer_get_time();
-        white_mix(s_content.canvas, s_content.px, s_content.white);
-        const int64_t w1 = esp_timer_get_time();
-        if (!commit_canvas(s_content.canvas)) {
+        uint8_t *p = nc_px_ring_begin_ex(s_content.q, &hdr);
+        if (p == NULL) {
             nc_pipe_stats_full();
             return false;                 // 環滿：下 tick 再試
         }
+        nc_px_layout_apply(&s_content.layout, s_eff_frame.vals, p);
+        const int64_t a1 = esp_timer_get_time();
+        white_mix(p, s_content.px, s_content.white);
+        const int64_t w1 = esp_timer_get_time();
+        if (!ring_commit_slot(hdr)) {
+            nc_pipe_stats_full();
+            return false;
+        }
         const int64_t c1 = esp_timer_get_time();
-        nc_pipe_stats_pair((uint32_t)(a0 - c0), (uint32_t)(a1 - a0),
-                           (uint32_t)(w1 - a1), (uint32_t)(c1 - w1), lat_us);
+        nc_pipe_stats_pair(0, (uint32_t)(a1 - a0), (uint32_t)(w1 - a1),
+                           (uint32_t)(c1 - w1), lat_us);
         s_last_eff_seq = s_eff_frame.seq;
         nc_pipe_effect_ack(s_eff_frame.seq);   // effect 可以重用該 slot
-        snapshot_publish(s_content.canvas, s_content.px, s_content.commits);
+        if (s_snap_wanted) {
+            snapshot_publish(p, s_content.px, s_content.commits);
+            s_snap_wanted = false;
+        }
         return true;
     }
     // fallback：填黑。直接寫環的 payload（唔需要 canvas）。
@@ -414,6 +417,12 @@ static void build_asset_tbl_into(nc_px_asset_tbl_t *dst, const nc_px_mode_t *mod
     }
 }
 
+// 給目前的 mode 建表（s_content.assets 是這個 mode 專用的）
+static void build_asset_tbl(const nc_px_mode_t *mode)
+{
+    build_asset_tbl_into(s_content.assets, mode);
+}
+
 static void log_tree(const char *pixel_dir)
 {
     const nc_px_map_tbl_t *maps = nc_px_map_table();
@@ -531,20 +540,6 @@ static esp_err_t content_apply_mode_locked(const nc_px_mode_t *mode)
                  esp_err_to_name(pe));
         return ESP_ERR_NOT_FOUND;
     }
-
-    // 單一服務流程：content/pair canvas 永遠 PSRAM，無論 LED 數。
-    // 不是 size-based 分支，也不做 internal fallback；所有 project 走同一條。
-    const uint32_t canvas_caps = MALLOC_CAP_SPIRAM;
-    if (s_content.canvas == NULL) {
-        s_content.canvas = (uint8_t *)heap_caps_malloc((size_t)s_content.px * NC_PX_BPP,
-                                                       canvas_caps);
-        if (s_content.canvas == NULL) {
-            ESP_LOGW(TAG, "canvas 配置失敗（%u px，固定 %s）", (unsigned)s_content.px,
-                     (canvas_caps & MALLOC_CAP_SPIRAM) ? "PSRAM" : "internal");
-            return ESP_ERR_NO_MEM;
-        }
-    }
-    memset(s_content.canvas, 0, (size_t)s_content.px * NC_PX_BPP);
 
     snprintf(s_content.mode_name, sizeof(s_content.mode_name), "%s", mode->name);
     s_content.step = 0;
@@ -818,6 +813,7 @@ static void on_showframe(nc4_ctx_t *ctx, const nc4_frame_t *f)
     if (ctx == NULL || ctx->send == NULL || ctx->decoder == NULL) {
         return;
     }
+    s_snap_wanted = true;          // 由下一幀的環槽複製（零拷貝路徑唔再寫 canvas）
     uint8_t *fb = nc4_decoder_reply_buf(ctx->decoder);
     if (fb == NULL) {
         return;
