@@ -4,6 +4,11 @@
 // （mp_Net-Core/slave：lib/sw/PixelMathMethod.py 的 compile／value_at、
 //  lib/sw/effect_core.py 的 Effect.frame），C 這邊唔可以自己解釋一次。
 //
+// ⚠️ 2026-11-23：正弦收斂成單一 `nc_px_engine_sin_lin()`（status §7.194），
+// 所以 MATH_NOW／SQUARE_WAVE_NOW／PULSE_WAVE 的值唔再同 MicroPython（多項式）位元級一致。
+// 下面所有「有 sine 的期望值」同 `fnv16()` 指紋要重影一次（有 host 編譯器的機器跑
+// `run.bat`，佢會逐項印出 got vs want）。純段邏輯的期望值（start／end／gap／width）不受影響。
+//
 // 若 golden 失敗：先問「這個改動應該改變波形嗎？」——
 // 應該變 → 重跑 Python 更新期望值；唔應該變 → 修 C。
 #include <stdio.h>

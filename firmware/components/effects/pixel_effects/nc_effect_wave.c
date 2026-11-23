@@ -13,10 +13,12 @@ static void render_wave(void *st, const nc_px_engine_in_t *in, uint16_t *dst)
     const uint32_t seg_us = (uint32_t)p->breath_ms * 1000u;
     const int seg = seg_us ? (int)(((uint64_t)in->now_us / seg_us) % 3u) : 0;
     const uint32_t ph = seg_us ? (uint32_t)(((uint64_t)(in->now_us % seg_us) * 512u) / seg_us) : 0;
-    const int32_t env = 8192 + (nc_px_engine_sin(ph & 1023u) >> 2);   // 0.25 .. 1.0
+    // 引擎只有一個正弦（nc_px_engine_sin_lin，0..4095、phase 0..65535）。
+    // 這裡要 Q15 有號值：phase 由 1/1024 圈換成 1/65536 圈（<<6），值 -2048..2047 再 <<4。
+    const int32_t env = 8192 + ((((int32_t)nc_px_engine_sin_lin((ph & 1023u) << 6)) - 2048) << 2);   // 0.25 .. 1.0
     for (uint32_t x = 0; x < in->w; x++) {
         const uint32_t wph = (uint32_t)((int32_t)(x * 128u) + (int32_t)in->zone * 96 - spat) & 1023u;
-        int32_t w = 16384 + (nc_px_engine_sin(wph) >> 1);              // 0..32767
+        int32_t w = 16384 + ((((int32_t)nc_px_engine_sin_lin(wph << 6)) - 2048) << 3);              // 0..32767
         w = (w * w) >> 15;                                             // 暗部佔多數
         w = (int32_t)(((uint32_t)w * (uint32_t)env) >> 15);            // × 呼吸包絡
         const uint16_t lin = (uint16_t)(((uint32_t)w * 2u * p->gain) / 255u);

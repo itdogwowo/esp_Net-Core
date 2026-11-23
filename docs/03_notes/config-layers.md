@@ -585,8 +585,9 @@ DMA 大小（1600）與環數（16/16）**不在 config**——那是 build-time
 - 每個 `.nct` / `.nce` 自帶 manifest（kind / core / fps / px / cmds），載入器驗它，不靠外部設定。
 - `.json` 效果由 CORE 的 program interpreter 解釋（有界，冇指標）；program 段的數值域
   = **12-bit（0..4095，MP 沿用）**；入 8.8 畫布時先 `>>4` 轉 0..255，再行引擎既有的 gain／gamma
-  （`nc_px_engine_program_canvas()`，同內建效果同一條亮度曲線）。正弦由 `nc_px_engine_sin_lin()`（混合）
-  或 `nc_px_engine_sin_q12()`（MP 多項式）提供；量測與取捨見 `status.md` §7.134／§7.135。
+  （`nc_px_engine_program_canvas()`，同內建效果同一條亮度曲線）。正弦**只有一個實作**
+  `nc_px_engine_sin_lin()`（256 錨點混合，514 B；2026-11-23 起舊的 1024 點查表與 MP 多項式已刪除）；
+  量測與取捨見 `status.md` §7.135／§7.138。
 - **出廠空骨架**：`registry.json` = `{"version":1,"auto_play":false,"list":[]}`，其餘目錄空
   （冇預設內容）；`/data/pixel/` 由使用者用隨身碟管理，firmware 只讀，`ASSET_RELOAD` 才重掃。
 - `map/`、`modes/` 的 schema 見 behavior-taxonomy.md §8 Q2–Q4（設計階段，未凍結）。

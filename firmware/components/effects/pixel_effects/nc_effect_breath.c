@@ -13,7 +13,8 @@ static void render_breath(void *st, const nc_px_engine_in_t *in, uint16_t *dst)
     const int seg = (int)(t / seg_us);
     // 8.8 相位：一段 = 0..511（半個 sine 週期）；64-bit 因為 12 s 一段 × 512 會爆 32-bit
     const uint32_t ph = (uint32_t)(((uint64_t)(t % seg_us) * 512u) / seg_us);
-    const int32_t s = nc_px_engine_sin(ph & 1023u);
+    // 引擎只有一個正弦（sin_lin，0..4095）。這裡要 Q15 有號值 → 自己做單位換算。
+    const int32_t s = ((int32_t)nc_px_engine_sin_lin((ph & 1023u) << 6) - 2048) << 4;
     const uint16_t lin = (uint16_t)(((uint32_t)s * 2u * p->gain) / 255u);
     const uint16_t v = nc_px_engine_gamma(lin);
     for (uint32_t i = 0; i < in->px; i++) {

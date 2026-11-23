@@ -3,9 +3,7 @@
 // 目的：比較幾種「12-bit 正弦」做法在**同一台機器、同一個相位序列**下的真實差別。
 //
 //   ★ 三個「出貨中」的函數（直接 link firmware 的 nc_px_engine_tables.c，唔係另寫一份）：
-//     eng_sin      1024 點 Q15 查表（nc_px_engine_sin，內建效果用）
-//     eng_sin_lin  256 錨點＋線性插值（nc_px_engine_sin_lin，514 B）
-//     eng_sin_q12  MP 多項式（nc_px_engine_sin_q12，0 表）
+//     eng_sin_lin  256 錨點＋線性插值（nc_px_engine_sin_lin，514 B）—— 出貨唯一正弦
 //
 //   ☆ 對照組（只在這個檔案，方便研究表大小／算法取捨）：
 //     lut_4096     4096 點 Q15 查表（8 KB）
@@ -78,35 +76,16 @@ static inline uint32_t q15_to_w(int32_t v)
     return (uint32_t)w;
 }
 
-// ── ★ 出貨中的三個（link nc_px_engine_tables.c）────────────────────────
-// 回傳值統一換到 0..4095 域，量測嘅係同一個「工作」量。
-// 注意：nc_px_engine_sin 的相位單位係 1/1024 圈（唔係 65536），要 >>6。
-static uint32_t run_eng_sin(void)
-{
-    uint32_t acc = 0;
-    NO_VECTOR
-    for (int i = 0; i < N; i++) {
-        acc += q15_to_w(nc_px_engine_sin(s_ph[i] >> 6));
-    }
-    return acc;
-}
-
+// ── ★ 出貨中的那一個（link nc_px_engine_tables.c）──────────────────────
+// 引擎只有一個正弦：nc_px_engine_sin_lin（256 錨點＋線性插值）。
+// 舊的 1024 點 Q15 查表與 MP 多項式已刪除，所以 ★ 只剩一個 case；
+// 下面 lut／hyb／cordic／sinf 係本檔自己實作的「對照」，唔會入固件。
 static uint32_t run_eng_sin_lin(void)
 {
     uint32_t acc = 0;
     NO_VECTOR
     for (int i = 0; i < N; i++) {
         acc += nc_px_engine_sin_lin(s_ph[i]);
-    }
-    return acc;
-}
-
-static uint32_t run_eng_sin_q12(void)
-{
-    uint32_t acc = 0;
-    NO_VECTOR
-    for (int i = 0; i < N; i++) {
-        acc += nc_px_engine_sin_q12(s_ph[i]);
     }
     return acc;
 }
@@ -219,9 +198,7 @@ typedef struct {
     double   (*eval)(uint32_t phase);      // 0..4095 域
 } case_t;
 
-static double ev_eng_sin(uint32_t p)      { return (double)q15_to_w(nc_px_engine_sin(p >> 6)); }
 static double ev_eng_sin_lin(uint32_t p)  { return (double)nc_px_engine_sin_lin(p); }
-static double ev_eng_sin_q12(uint32_t p)  { return (double)nc_px_engine_sin_q12(p); }
 static double ev_lut4k(uint32_t p)        { return (double)q15_to_w(s_lut4k[(p >> 4) & 4095u]); }
 static double ev_hyb64(uint32_t p)
 {
@@ -325,9 +302,7 @@ int main(int argc, char **argv)
     }
 
     static const case_t cases[] = {
-        { "eng_sin",      run_eng_sin,      2048, ev_eng_sin },
-        { "eng_sin_lin",  run_eng_sin_lin,   514, ev_eng_sin_lin },
-        { "eng_sin_q12",  run_eng_sin_q12,     0, ev_eng_sin_q12 },
+        { "eng_sin_lin",  run_eng_sin_lin,   514, ev_eng_sin_lin },   // ★ 出貨唯一正弦
         { "lut_4096",     run_lut4k,        8192, ev_lut4k },
         { "hyb64_lin",    run_hyb64,         130, ev_hyb64 },
         { "hyb128_lin",   run_hyb128,        258, ev_hyb128 },

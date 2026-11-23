@@ -44,7 +44,7 @@ python3 tools/nc4_log.py --port /dev/cu.usbmodem*
 
 | 測試 | 驗什麼 | 備註 |
 |---|---|---|
-| `pxEngine_test` | 效果引擎：15 個 case × 15 幀 payload hash（golden 由 M2 分家前影）；另加 `sin_q12`／`sin_lin` 純整數斷言 ＋ **三個正弦函數的精度閘門**（對 double 全相位最大誤差） | 原 `fx_test`；gcc 同 MSVC 都對得上 golden |
+| `pxEngine_test` | 效果引擎：15 個 case × 15 幀 payload hash（golden 由 M2 分家前影）；另加 `sin_lin` 純整數斷言 ＋ **正弦的精度閘門**（對 double 全相位最大誤差 ≤1.0 LSB；2026-11-23 起引擎只有一個正弦） | 原 `fx_test`；gcc 同 MSVC 都對得上 golden |
 | `pxAsset_test` | DATA 平面資產：JSON → struct（批次／單檔／檔名補名／撞名／上限／壞檔／`pulse` 缺省／`end_Time` 遞增）、掃目錄次序 | 會建／刪 `./pxAsset_tmp/` |
 | `pxProgram_test` | program interpreter：compile 欄位、整張波表指紋（FNV-1a）、段邊界／pulse／繞回、frame（speed×reverse）、canvas（gain／gamma／顏色）、拒絕路徑 | **期望值由 MicroPython 版跑出來**（`mp_Net-Core/slave`），見 `run.sh` 頂註解 |
 | `pixel_test` | 環、編碼位元、抖動平均、多 lane 合成 | |

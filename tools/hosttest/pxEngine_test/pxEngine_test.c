@@ -75,34 +75,10 @@ static void base(nc_px_test_cfg_t *c)
     *c = nc_px_test_cfg();
 }
 
-// ── sin_q12：純整數，期望值可以手算；成功唔出聲（golden 不變）────────────────
-static void check_sin_q12(void)
+// ── 正弦（引擎只有一個實作：sin_lin）────────────────────────────────────
+// 純整數，期望值由 Python 精算；成功唔出聲（golden 不變）。
+static void check_sin_lin(void)
 {
-    static const struct { uint16_t ph; uint16_t want; } k[] = {
-        {     0, 2048 }, {  4096, 2830 }, {  8192, 3497 }, { 12288, 3940 },
-        { 16384, 4095 }, { 20480, 3940 }, { 24576, 3497 }, { 28672, 2830 },
-        { 32768, 2048 }, { 40960,  598 }, { 45056,  155 }, { 49152,    0 },
-        { 53248,  155 }, { 57344,  598 }, { 61440, 1265 },
-    };
-    for (size_t i = 0; i < sizeof(k) / sizeof(k[0]); i++) {
-        const uint16_t got = nc_px_engine_sin_q12(k[i].ph);
-        if (got != k[i].want) {
-            printf("sin_q12(%u) = %u，期望 %u\n", (unsigned)k[i].ph, (unsigned)got, (unsigned)k[i].want);
-            g_fail++;
-        }
-    }
-    // 0..16384 必須單調上升（拋物線分支的性質；插件／改常數時會即刻撞到）
-    uint16_t prev = 0;
-    for (uint32_t p = 0; p <= 16384u; p++) {
-        const uint16_t v = nc_px_engine_sin_q12(p);
-        if (v < prev) {
-            printf("sin_q12 在 %u 唔單調：%u < %u\n", (unsigned)p, (unsigned)v, (unsigned)prev);
-            g_fail++;
-            break;
-        }
-        prev = v;
-    }
-    // 混合（錨點表＋線性插值）的取值：同樣係純整數，期望值由 Python 精算
     static const struct { uint16_t ph; uint16_t want; } k2[] = {
         {     0, 2048 }, {  2048, 2448 }, {  4096, 2832 }, {  8192, 3496 },
         { 16384, 4095 }, { 24576, 3496 }, { 32768, 2048 }, { 40960,  600 },
@@ -134,28 +110,17 @@ static void check_sin_q12(void)
             }
         }
     }
-
-    // 上下半週期對稱：w(p) == w(32768 - p)
-    for (uint32_t p = 0; p < 32768u; p += 97u) {
-        if (nc_px_engine_sin_q12(p) != nc_px_engine_sin_q12(32768u - p)) {
-            printf("sin_q12 唔對稱：p=%u\n", (unsigned)p);
-            g_fail++;
-            break;
-        }
-    }
 }
 
-// ── 三個出貨函數的**精度閘門**：對 double sin() 的最大誤差（0..4095 域）──
+// ── 正弦的**精度閘門**：對 double sin() 的最大誤差（0..4095 域）──
 // 數字來自 sin_bench 的全相位掃描（host）；界限放寬少少，避免 libm 差異造成假紅。
 // 成功唔出聲（golden 不變）；失敗印出係邊個算法、差幾多。
 static void check_sin_accuracy(void)
 {
     static const struct { const char *name; double limit; } lim[] = {
-        { "nc_px_engine_sin",      14.5 },   // 1024 點 Q15 表（最近點取樣 ~13.3）
         { "nc_px_engine_sin_lin",   1.0 },   // 256 錨點混合（四捨五入後 0.72；截斷版係 1.23）
-        { "nc_px_engine_sin_q12",   4.0 },   // MP 多項式
     };
-    for (size_t k = 0; k < 3; k++) {
+    for (size_t k = 0; k < sizeof(lim) / sizeof(lim[0]); k++) {
         double mx = 0.0;
         uint32_t worst = 0;
         for (uint32_t p = 0; p < 65536u; p += 16u) {
@@ -166,14 +131,7 @@ static void check_sin_accuracy(void)
             } else if (ideal < 0.0) {
                 ideal = 0.0;
             }
-            double got;
-            if (k == 0) {
-                got = (double)((nc_px_engine_sin(p >> 6) >> 4) + 2048);
-            } else if (k == 1) {
-                got = (double)nc_px_engine_sin_lin(p);
-            } else {
-                got = (double)nc_px_engine_sin_q12(p);
-            }
+            const double got = (double)nc_px_engine_sin_lin(p);
             const double e = fabs(got - ideal);
             if (e > mx) {
                 mx = e;
@@ -254,8 +212,8 @@ int main(void)
     base(&c); c.effect = NC_PX_EFF_RAMP;
     run("px100", &c, 100);
 
-    check_sin_q12();                  // 純整數斷言；成功唔印嘢（golden 不變）
-    check_sin_accuracy();             // 三個出貨函數對 double 的精度閘門
+    check_sin_lin();                  // 純整數斷言；成功唔印嘢（golden 不變）
+    check_sin_accuracy();             // 正弦對 double 的精度閘門
 
     printf("%s\n", g_fail ? "FAIL" : "OK");
     return g_fail ? 1 : 0;

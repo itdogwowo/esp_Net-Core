@@ -5,7 +5,7 @@
 
   ① 逐次 sine（推薦；需要含 0xF063 SINBENCH 的 build）
      python tools/hosttest/sin_bench/dev_probe.py --port COM24 --sin
-     直接量固件那三個函數（q12／lin／sin）的 ns/call ＋ 對 double 的最大誤差；
+     直接量固件那個正弦（lin = nc_px_engine_sin_lin，唯一實作）的 ns/call ＋ 對 double 的最大誤差；
      唔使切效果、唔使回歸、唔使還原，一次 flash 就有齊 status §7.134「未做」的數字。
 
   ② 合成斜率（舊模式；只有 0xF060 的 build 都可以）
@@ -35,10 +35,9 @@ import nc4  # noqa: E402  （同 repo 的 NC4 工具共用 framing）
 EFF = {0: "OFF", 1: "ZONE1", 2: "BREATH", 3: "WAVE", 4: "SOLID", 5: "RAMP"}
 SINE_PER_FRAME = {0: 0, 1: 0, 2: 8, 3: 72, 4: 0, 5: 0}   # 64 px 的近似正弦呼叫數
 
-# 0xF063 回覆的三個算法（名稱 → 表大小；同 host sin_bench 對得上）
-SIN_ALGOS = (("q12", "多項式（MP）", "0 B"),
-             ("lin", "256 錨點混合", "514 B"),
-             ("sin", "1024 點 Q15 表", "2 KB"))
+# 0xF063 回覆的算法（名稱 → 表大小）。引擎只有一個正弦（sin_lin），
+# 舊的 q12（MP 多項式）與 sin（1024 點 Q15 表）已從固件刪除。
+SIN_ALGOS = (("lin", "256 錨點混合（唯一正弦）", "514 B"),)
 
 
 def send(s, cmd: int, payload: bytes, wait: float = 0.3):

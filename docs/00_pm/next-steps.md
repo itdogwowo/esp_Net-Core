@@ -314,5 +314,5 @@ pixel 只是其中一個使用者。**2026-11-19：已更名為 `nc_i80_out.c`�
 | 14.5 | `registry.json`／`map`／`modes` 三層 | ⏸ | Q2–Q4 仍開（見 behavior-taxonomy §4） |
 | 14.6 | IDF 建置＋上板 | ✅ **完成（2026-11-20，SuperMini-LED-Textkit）** | macOS `~/esp/esp-idf` v6.0.3 build；tests／release 兩次 OTA 驗證；`0xF063` 實機 sine 數字已入 status §7.138。仍然未做：P4 板、program 效果上畫布（14.3） |
 
-**風險**：14.3 之前，interpreter 係「已驗證但冇人用」的部件（同 `sin_q12` 一樣）。
+**風險**：14.3 之前，interpreter 係「已驗證但冇人用」的部件（正弦已於 2026-11-23 收斂成單一 `sin_lin`，見 status §7.194）。
 決定 cfg 形狀時要順便想「換效果時 gen 要唔要 +1」（現時換 effect id 會 +1）。

@@ -74,9 +74,12 @@ typedef struct {
 void     nc_px_engine_tables_init(void);
 uint16_t nc_px_engine_gamma(uint16_t lin16);                            // 線性 16-bit → 8.8 顯示
 uint16_t nc_px_engine_lin(const nc_px_engine_params_t *p, uint32_t level255);  // 0..255 × gain → 16-bit
-int32_t  nc_px_engine_sin(uint32_t phase);                              // Q15 sine，phase 0..1023
-uint16_t nc_px_engine_sin_q12(uint32_t phase);                          // 0..4095 sine（多項式，無表）
-uint16_t nc_px_engine_sin_lin(uint32_t phase);                          // 0..4095 sine（錨點表＋線性插值）
+// **正弦只有一個實作**：nc_px_engine_sin_lin()（256 錨點＋線性插值，514 B 表）。
+// 舊的兩個方法（1024 點 Q15 查表 `nc_px_engine_sin`、MP 多項式 `nc_px_engine_sin_q12`）
+// 已經移除 —— 三個並存會令人每次都要問「而家用邊個」。實測（sin_bench）：
+// sin_lin 誤差 0.72 LSB、比多項式（3.74）準 5.2×、比 1024 點查表（13.31）準 18×。
+// 需要 Q15 有號正弦的地方自己換算：q15 = ((int32_t)sin_lin(phase1024 << 6) - 2048) << 4。
+uint16_t nc_px_engine_sin_lin(uint32_t phase);                          // 0..4095 sine（phase 0..65535）
 uint16_t nc_px_engine_quant(uint16_t tgt88, uint8_t bits);              // 8.8 → bits 位（8..16）
 
 // ═══════════════════════ 效果註冊表 ═══════════════════════

@@ -4351,46 +4351,32 @@ static void on_pxbench(nc4_ctx_t *ctx, const nc4_frame_t *f)
     reply_json(ctx, NC4_CMD_HUB_RSP, j);
 }
 
-// ── 0xF063 SINBENCH：三種正弦算法的**實機**成本＋最大誤差（唔需要燈板）──
+// ── 0xF063 SINBENCH：正弦的**實機**成本＋最大誤差（唔需要燈板）──
 // payload [iters:u16 LE]（可省；預設 50000，夾到 100..500000）
-//   量的是固件真正用嘅三個函數（`nc_px_engine_tables.c`），唔係另寫一份：
-//     q12 = nc_px_engine_sin_q12（MP 多項式，0 表）—— DATA program 用
-//     lin = nc_px_engine_sin_lin（256 錨點混合，514 B）
-//     sin = nc_px_engine_sin（1024 點 Q15 表，2 KB）—— 內建效果用
+//   引擎**只有一個正弦**：nc_px_engine_sin_lin（256 錨點混合＋線性插值，514 B 表）。
+//   舊的 1024 點 Q15 查表同 MP 多項式已刪除（見 nc_px_engine.h 的說明）。
 //   相位序列 = LCG 高位（唔會被常數折疊，亦唔會同一個相位重複命中 cache）。
 //   誤差 = 對 double `sin()` 的最大差（**65536 個相位全掃**、0..4095 域、milli-LSB = ×100）。
-//   為什麼要這條：host 的 ns 只代表相對成本；板上 cache／in-order 會拉高絕對值
-//   （status §7.134 一直未量到逐次 sine 成本）。
 #define NC4_CMD_SINBENCH 0xF063
 
 static volatile uint32_t s_sinbench_sink;      // 讀走累加值，防止整個 loop 被優化掉
 
-static uint32_t sinbench_loop(uint32_t iters, uint8_t algo)
+static uint32_t sinbench_loop(uint32_t iters)
 {
     uint32_t acc = 0;
-    if (algo == 0) {
-        for (uint32_t i = 0; i < iters; i++) {
-            acc += nc_px_engine_sin_q12((i * 2654435761u) >> 16);
-        }
-    } else if (algo == 1) {
-        for (uint32_t i = 0; i < iters; i++) {
-            acc += nc_px_engine_sin_lin((i * 2654435761u) >> 16);
-        }
-    } else {
-        for (uint32_t i = 0; i < iters; i++) {
-            acc += (uint32_t)((nc_px_engine_sin((i * 2654435761u) >> 22) >> 4) + 2048);
-        }
+    for (uint32_t i = 0; i < iters; i++) {
+        acc += nc_px_engine_sin_lin((i * 2654435761u) >> 16);
     }
     return acc;
 }
 
 // 3 次取最小（單次量容易被中斷／tick 拉高；ns 解析度 1 µs ÷ iters）。
-static uint32_t sinbench_ns(uint32_t iters, uint8_t algo)
+static uint32_t sinbench_ns(uint32_t iters)
 {
     uint32_t best = 0xFFFFFFFFu;
     for (int r = 0; r < 3; r++) {
         const int64_t t0 = esp_timer_get_time();
-        const uint32_t acc = sinbench_loop(iters, algo);
+        const uint32_t acc = sinbench_loop(iters);
         const int64_t dt = esp_timer_get_time() - t0;
         s_sinbench_sink += acc;
         const uint32_t ns = (uint32_t)(((dt > 0) ? dt : 1) * 1000 / (int64_t)iters);
@@ -4401,12 +4387,11 @@ static uint32_t sinbench_ns(uint32_t iters, uint8_t algo)
     return best;
 }
 
-// 全相位掃描（65536 點）一次算齊三個算法的誤差。
-// **必須逐相位**：實測 step=16 會漏掉峰值（sin 報 10.37，實際 13.31）。
-// 參考值 = double `sin()`（每個相位只算一次，三個算法共用）。
-static void sinbench_err(uint32_t out[3])
+// 全相位掃描（65536 點）。**必須逐相位**：實測 step=16 會漏掉峰值。
+// 參考值 = double `sin()`。回傳 milli-LSB（×100）。
+static uint32_t sinbench_err(void)
 {
-    double m0 = 0.0, m1 = 0.0, m2 = 0.0;
+    double m = 0.0;
     for (uint32_t p = 0; p < 65536u; p++) {
         double ideal = 2048.0 + 2048.0 *
             sin(2.0 * 3.141592653589793 * (double)p / 65536.0);
@@ -4415,30 +4400,17 @@ static void sinbench_err(uint32_t out[3])
         } else if (ideal < 0.0) {
             ideal = 0.0;
         }
-        const double q = (double)nc_px_engine_sin_q12(p);
-        const double l = (double)nc_px_engine_sin_lin(p);
-        const double s = (double)((nc_px_engine_sin(p >> 6) >> 4) + 2048);
-        double e = fabs(q - ideal);
-        if (e > m0) {
-            m0 = e;
-        }
-        e = fabs(l - ideal);
-        if (e > m1) {
-            m1 = e;
-        }
-        e = fabs(s - ideal);
-        if (e > m2) {
-            m2 = e;
+        const double e = fabs((double)nc_px_engine_sin_lin(p) - ideal);
+        if (e > m) {
+            m = e;
         }
     }
-    out[0] = (uint32_t)(m0 * 100.0 + 0.5);    // milli-LSB
-    out[1] = (uint32_t)(m1 * 100.0 + 0.5);
-    out[2] = (uint32_t)(m2 * 100.0 + 0.5);
+    return (uint32_t)(m * 100.0 + 0.5);
 }
 
 static void on_sinbench(nc4_ctx_t *ctx, const nc4_frame_t *f)
 {
-    static char j[256];
+    static char j[160];
     uint32_t iters = 50000;
     if (f->len >= 2) {
         iters = (uint32_t)f->data[0] | ((uint32_t)f->data[1] << 8);
@@ -4449,23 +4421,14 @@ static void on_sinbench(nc4_ctx_t *ctx, const nc4_frame_t *f)
     if (iters > 500000u) {
         iters = 500000u;
     }
-    const uint32_t q12_ns = sinbench_ns(iters, 0);
-    const uint32_t lin_ns = sinbench_ns(iters, 1);
-    const uint32_t sin_ns = sinbench_ns(iters, 2);
-    uint32_t err[3];
-    sinbench_err(err);
-    const uint32_t q12_err = err[0];
-    const uint32_t lin_err = err[1];
-    const uint32_t sin_err = err[2];
+    // 表係 lazily 建（tables_init）。呢個映像可能冇開 pixel 任務，所以自己確保建好，
+    // 否則 sin_lin 讀到全 0 錨點 → 永遠回 2048（誤差 2048 LSB）。
+    nc_px_engine_tables_init();
+    const uint32_t lin_ns = sinbench_ns(iters);
+    const uint32_t lin_err = sinbench_err();
     (void)snprintf(j, sizeof(j),
-                   "{\"n\":%u,\"smp\":65536,"
-                   "\"q12\":{\"ns\":%u,\"err\":%u},"
-                   "\"lin\":{\"ns\":%u,\"err\":%u},"
-                   "\"sin\":{\"ns\":%u,\"err\":%u}}",
-                   (unsigned)iters,
-                   (unsigned)q12_ns, (unsigned)q12_err,
-                   (unsigned)lin_ns, (unsigned)lin_err,
-                   (unsigned)sin_ns, (unsigned)sin_err);
+                   "{\"n\":%u,\"smp\":65536,\"lin\":{\"ns\":%u,\"err\":%u}}",
+                   (unsigned)iters, (unsigned)lin_ns, (unsigned)lin_err);
     reply_json(ctx, NC4_CMD_HUB_RSP, j);
 }
 

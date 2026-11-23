@@ -62,13 +62,28 @@ static const char *TAG = "ebench";
 #define EFBENCH_CHUNK_MAX    1024    // 分塊量測的最大一塊（px）
 #define EFBENCH_JOB_MAX      4
 
+// 效果層的「真的算幾個值」：px × 每顆幾個值（1=單色、3=rgb、4=rgbw）。
+// 舊版把 nv 封在 64，所以 px=9,600 的「效果」其實只算 64 個值再外推；
+// 這一節改成量多少算多少（ev = px × vpp，上限 65,535 個值）。
+#define EB_WAVE_TOTAL        256     // 單段波表的長度（同 JSON program 的 end_Time）
+
 // ═══════════════════════ 量測結果 ═══════════════════════
 
 typedef struct {
     uint16_t px;
     uint16_t frames;
     uint8_t  reps;
-    uint16_t nv;                    // 每幀算幾個值（= min(px, 64)）
+    uint16_t nv;                    // 舊節：每幀算幾個值（= min(px, 64)，畫布類量測用）
+
+    // ── 效果層（真的算 ev 個值）──
+    uint8_t  vpp;                   // 每顆幾個值（1..4）
+    uint32_t ev;                    // 每幀算幾個值 = px × vpp
+    uint32_t eff_vals_ns;           // 每幀 ev 個值（interpreter：nc_px_job_vals）
+    uint32_t eff_stream_ns;         // 每幀 ev 個值（生產正常路徑：由波表取，每值一次 % total）
+    uint32_t eff_fast_ns;           // 每幀 ev 個值（波表＋spacing=1 快路徑：if (++p==total) p=0）
+    bool     eff_psram;             // 值流緩衝是否落在 PSRAM（影響上面三個數字）
+    uint32_t wave_build_us[4];      // 一次性：每種波建 EB_WAVE_TOTAL 個值（µs）
+    uint32_t wave_eval_ns[4];       // 每種波的逐值成本（ns）
 
     bool c8_int_ok;                 // 8-bit 畫布在 internal
     bool c8_ps_ok;                  // 8-bit 畫布在 PSRAM
@@ -76,7 +91,7 @@ typedef struct {
     bool c12_ps_ok;                 // 12-bit 畫布在 PSRAM
 
     uint32_t eval_ns;               // 每個 program_value
-    uint32_t vals_ns;               // 每幀 64 個值
+    uint32_t vals_ns;               // 每幀 nv 個值（nv = min(px, 64)，舊節語義不變）
     uint32_t pair8_i, pair8_p;
     uint32_t pair12_i, pair12_p;
     uint32_t conv_i, conv_p;
@@ -97,6 +112,28 @@ static nc_px_job_t   s_job;
 static nc_px_job_t   s_jobs[EFBENCH_JOB_MAX];
 static uint16_t      s_vals[EFBENCH_VALS_MAX];
 static volatile uint32_t s_sink;
+
+// ── 效果層用的第二組狀態（pixel_hint = ev，唔封頂）──
+static nc_px_asset_t s_easset;      // 四段 program（正弦／方波／脈衝／保持）
+static nc_px_job_t   s_ejob;
+static uint16_t     *s_evals;       // ev 個值的暫存（internal 優先，唔夠落 PSRAM）
+static uint16_t      s_evals_cap;
+static uint32_t      s_ev;          // 每幀要算幾個值（px × vpp）
+
+// 每種波單獨一段（量「建立這個波」本身，唔混其他段）
+static nc_px_asset_t s_wasset;
+static nc_px_prog_t  s_wprog;
+static uint16_t      s_wtbl[EB_WAVE_TOTAL];
+
+static const struct {
+    uint8_t     type;
+    const char *name;
+} s_waves[4] = {
+    { NC_PX_SEG_MATH_NOW,        "math"   },   // 正弦
+    { NC_PX_SEG_SQUARE_WAVE_NOW, "square" },   // 方波
+    { NC_PX_SEG_PULSE_WAVE,      "pulse"  },   // 脈衝串
+    { NC_PX_SEG_KEEP,            "keep"   },   // 保持
+};
 
 typedef struct {
     uint16_t  px;
@@ -132,12 +169,14 @@ static uint32_t ns_per_frame(int64_t t0, uint32_t frames)
                       ((dt % (int64_t)frames) * 1000) / (int64_t)frames);
 }
 
-static void fill_asset(nc_px_asset_t *a, uint16_t px)
+// nv = 每幀要幾個值。舊版固定封在 64（8×8 的用法）；效果層量測傳 px×vpp 進來，
+// 因為 pixel_hint 就是「這條效果每幀算幾個值」。
+static void fill_asset(nc_px_asset_t *a, uint16_t nv)
 {
     memset(a, 0, sizeof(*a));
     strcpy(a->name, "ebench");
     a->kind = NC_PX_ASSET_PROGRAM;
-    a->pixel_hint = (px < 64) ? px : 64;   // 8×8 的實際用法：效果只算 64 個值
+    a->pixel_hint = nv;
     a->step = 3;
     a->spacing = 7;
     a->offset = 11;
@@ -199,9 +238,11 @@ static void b_eval(void *arg, uint32_t frames)
     uint32_t acc = 0;
     const uint16_t nv = s_ctx.nv;
     for (uint32_t f = 0; f < frames; f++) {
+        // 連續索引：生產路徑建波表時就是 for p = 0..total-1（nc_effect_task waves_build）。
+        // 舊版跳 i*7 量到的是「隨機命中」的 cache 代價，唔係真正建立波的成本。
         uint32_t g = (f * 2654435761u) >> 8;
         for (uint16_t i = 0; i < nv; i++) {
-            acc += nc_px_engine_program_value(&s_job.prog, g + i * 7u);
+            acc += nc_px_engine_program_value(&s_job.prog, g + i);
         }
     }
     s_sink += acc;
@@ -359,9 +400,180 @@ static uint32_t bench_best(void (*fn)(void *, uint32_t), void *arg,
     return best;
 }
 
+// ═══════════════════════ 效果層：真的算 ev 個值 ═══════════════════════
+// 舊節的 nv 封在 64，所以「px=9,600 的效果層」是 64 個值外推出來的。
+// 這一節真的跑 ev = px × vpp 個值，分開兩條生產路徑：
+//   vals_ns   interpreter（nc_px_aprog_vals）：每幀逐值 program_value（冇波表）
+//   stream_ns 正常路徑（nc_effect_task cached_vals）：波表建一次，每幀由表取值
+// 另外逐一量四種波建立 EB_WAVE_TOTAL 個值的成本（一次性）。
+
+static void evals_free(void)
+{
+    if (s_evals != NULL) {
+        heap_caps_free(s_evals);
+        s_evals = NULL;
+    }
+    s_evals_cap = 0;
+}
+
+static bool evals_alloc(uint32_t n)
+{
+    evals_free();
+    if (n == 0 || n > 0xFFFFu) {
+        return false;
+    }
+    const size_t bytes = (size_t)n * sizeof(uint16_t);
+    s_evals = (uint16_t *)alloc_caps(bytes, MALLOC_CAP_INTERNAL);
+    if (s_evals == NULL) {
+        s_evals = (uint16_t *)alloc_caps(bytes, MALLOC_CAP_SPIRAM);
+    }
+    if (s_evals == NULL) {
+        return false;
+    }
+    s_evals_cap = (uint16_t)n;
+    memset(s_evals, 0, bytes);
+    return true;
+}
+
+// 每種波單獨一段：pixel_hint 與 end_f 都是 EB_WAVE_TOTAL，量「建立這條波」本身。
+static void fill_wave_asset(nc_px_asset_t *a, uint8_t type)
+{
+    memset(a, 0, sizeof(*a));
+    strcpy(a->name, "wave");
+    a->kind = NC_PX_ASSET_PROGRAM;
+    a->pixel_hint = EB_WAVE_TOTAL;
+    a->step = 1;
+    a->spacing = 0;
+    a->offset = 0;
+    a->speed = 1;
+    a->nseg = 1;
+    a->seg[0].type = type;
+    a->seg[0].f = 10;
+    a->seg[0].l_max = 4095;
+    a->seg[0].l_lim = 100;
+    a->seg[0].phi = 0;
+    a->seg[0].end_f = EB_WAVE_TOTAL;
+    a->seg[0].pulse = 2047;
+}
+
+// 一次性：建立整條波（EB_WAVE_TOTAL 個值），同 nc_effect_task 的 waves_build 一樣。
+static void b_wave_build(void *arg, uint32_t frames)
+{
+    const nc_px_prog_t *p = (const nc_px_prog_t *)arg;
+    uint32_t acc = 0;
+    for (uint32_t f = 0; f < frames; f++) {
+        for (uint32_t k = 0; k < EB_WAVE_TOTAL; k++) {
+            acc += nc_px_engine_program_value(p, k);
+        }
+    }
+    s_sink += acc;
+}
+
+// 每幀：interpreter 逐值（無波表）
+static void b_evals(void *arg, uint32_t frames)
+{
+    (void)arg;
+    uint32_t acc = 0;
+    for (uint32_t f = 0; f < frames; f++) {
+        acc += nc_px_job_vals(&s_ejob, f * 3u, s_evals, s_evals_cap);
+    }
+    s_sink += acc;
+}
+
+// 每幀：正常路徑（波表已建好，逐值取表＋寫入值流）
+static void b_estream(void *arg, uint32_t frames)
+{
+    (void)arg;
+    const uint32_t total = (s_ejob.prog.total != 0 && s_ejob.prog.total <= EB_WAVE_TOTAL)
+                               ? s_ejob.prog.total
+                               : EB_WAVE_TOTAL;
+    const uint32_t speed = s_easset.speed ? s_easset.speed : 1u;
+    const uint32_t step = s_easset.step;
+    const uint32_t spacing = s_easset.spacing;
+    const uint32_t offset = s_easset.offset;
+    const uint32_t n = s_ev;
+    for (uint32_t f = 0; f < frames; f++) {
+        uint32_t ph = ((f / speed) * step + offset) % total;
+        for (uint32_t k = 0; k < n; k++) {
+            uint32_t p = (ph + k * spacing) % total;
+            s_evals[k] = s_wtbl[p];
+        }
+    }
+    s_sink += s_evals[0];
+}
+
+// 每幀：波表 + spacing==1 的快路徑（一條線一直落去，只有 compare＋wrap，冇除法）。
+// 這就是「十二位波生成器」本身的成本：建一次表，之後逐幀只是索引。
+static void b_estream1(void *arg, uint32_t frames)
+{
+    (void)arg;
+    const uint32_t total = (s_ejob.prog.total != 0 && s_ejob.prog.total <= EB_WAVE_TOTAL)
+                               ? s_ejob.prog.total
+                               : EB_WAVE_TOTAL;
+    const uint32_t speed = s_easset.speed ? s_easset.speed : 1u;
+    const uint32_t step = s_easset.step;
+    const uint32_t offset = s_easset.offset;
+    const uint32_t n = s_ev;
+    for (uint32_t f = 0; f < frames; f++) {
+        uint32_t p = ((f / speed) * step + offset) % total;
+        for (uint32_t k = 0; k < n; k++) {
+            s_evals[k] = s_wtbl[p];
+            if (++p == total) {
+                p = 0;
+            }
+        }
+    }
+    s_sink += s_evals[0];
+}
+
+static void effect_layer_bench(uint16_t px, uint8_t vpp, uint32_t frames, ebench_t *out)
+{
+    const uint8_t n = (vpp == 0) ? 1 : vpp;
+    uint32_t ev = (uint32_t)px * (uint32_t)n;
+    if (ev > 0xFFFFu) {
+        ev = 0xFFFFu;
+    }
+    out->vpp = n;
+    out->ev = ev;
+    s_ev = ev;
+    if (!evals_alloc(ev)) {
+        return;
+    }
+    out->eff_psram = esp_ptr_external_ram(s_evals);
+
+    fill_asset(&s_easset, (uint16_t)ev);
+    fill_job(&s_ejob, &s_easset, 0, px);
+
+    // 生產正常路徑用的波表（建一次）
+    const uint32_t total = (s_ejob.prog.total != 0 && s_ejob.prog.total <= EB_WAVE_TOTAL)
+                               ? s_ejob.prog.total
+                               : EB_WAVE_TOTAL;
+    for (uint32_t p = 0; p < total; p++) {
+        s_wtbl[p] = nc_px_engine_program_value(&s_ejob.prog, p);
+    }
+
+    const uint32_t f = (frames == 0) ? 1 : frames;
+    out->eff_vals_ns = bench_best(b_evals, NULL, f, 3);
+    out->eff_stream_ns = bench_best(b_estream, NULL, f, 3);
+    out->eff_fast_ns = bench_best(b_estream1, NULL, f, 3);
+
+    // 四種波：一次性建立整條波的成本
+    for (int t = 0; t < 4; t++) {
+        fill_wave_asset(&s_wasset, s_waves[t].type);
+        if (nc_px_engine_program_compile(&s_wasset, &s_wprog) != ESP_OK) {
+            continue;
+        }
+        const uint32_t ns = bench_best(b_wave_build, &s_wprog, 1, 5);
+        out->wave_build_us[t] = ns / 1000u;
+        out->wave_eval_ns[t] = ns / EB_WAVE_TOTAL;
+    }
+
+    evals_free();
+}
+
 // ═══════════════════════ 主量測 ═══════════════════════
 
-static void run_bench(uint16_t px, uint16_t frames_in, ebench_t *out)
+static void run_bench(uint16_t px, uint16_t frames_in, uint8_t vpp, ebench_t *out)
 {
     memset(out, 0, sizeof(*out));
     if (px < 8) {
@@ -509,6 +721,8 @@ static void run_bench(uint16_t px, uint16_t frames_in, ebench_t *out)
     }
 
     // 收工：把量測結果的 live 值讀一次（防優化），再釋放。
+    // **先釋放畫布再做效果層**：畫布（38.4＋76.8＋76.8＋8 KB）佔滿 internal 之後，
+    // 效果層的值流緩衝就會被擠落 PSRAM，量到的是 PSRAM 頻寬而唔係波生成器本身。
     s_sink += (uint32_t)(uintptr_t)s_ctx.c8_i;
     if (s_ctx.c8_i != NULL) {
         heap_caps_free(s_ctx.c8_i);
@@ -527,6 +741,9 @@ static void run_bench(uint16_t px, uint16_t frames_in, ebench_t *out)
     }
     memset(&s_ctx, 0, sizeof(s_ctx));
 
+    // ── 效果層：真的算 ev = px × vpp 個值（畫布類量測照舊用 nv=min(px,64)）──
+    effect_layer_bench(px, vpp, out->frames, out);
+
     // 還原 job 的 range（下一次量測會重新 fill_job，這裡只是保持整潔）。
     (void)nc_px_job_vals(&s_job, 0, s_vals, EFBENCH_VALS_MAX);
 }
@@ -538,6 +755,8 @@ static size_t result_json(const ebench_t *r, char *out, size_t cap)
     const int n = snprintf(
         out, cap,
         "{\"px\":%u,\"fr\":%u,\"rep\":%u,\"nv\":%u,"
+        "\"eff\":{\"vpp\":%u,\"ev\":%u,\"vals_ns\":%u,\"stream_ns\":%u,\"fast_ns\":%u,\"psram\":%d,"
+        "\"build_us\":[%u,%u,%u,%u],\"per_val_ns\":[%u,%u,%u,%u]},"
         "\"mem\":{\"c8i\":%d,\"c8p\":%d,\"c12i\":%d,\"c12p\":%d,\"ifree\":%u,\"pfree\":%u},"
         "\"eval_ns\":%u,\"vals_ns\":%u,"
         "\"pair8\":{\"i\":%u,\"p\":%u},\"pair12\":{\"i\":%u,\"p\":%u},"
@@ -546,6 +765,13 @@ static size_t result_json(const ebench_t *r, char *out, size_t cap)
         "\"chunk\":{\"64\":%u,\"256\":%u,\"1024\":%u},"
         "\"jobs\":{\"j2\":%u,\"j4\":%u}}",
         (unsigned)r->px, (unsigned)r->frames, (unsigned)r->reps, (unsigned)r->nv,
+        (unsigned)r->vpp, (unsigned)r->ev,
+        (unsigned)r->eff_vals_ns, (unsigned)r->eff_stream_ns, (unsigned)r->eff_fast_ns,
+        r->eff_psram ? 1 : 0,
+        (unsigned)r->wave_build_us[0], (unsigned)r->wave_build_us[1],
+        (unsigned)r->wave_build_us[2], (unsigned)r->wave_build_us[3],
+        (unsigned)r->wave_eval_ns[0], (unsigned)r->wave_eval_ns[1],
+        (unsigned)r->wave_eval_ns[2], (unsigned)r->wave_eval_ns[3],
         r->c8_int_ok ? 1 : 0, r->c8_ps_ok ? 1 : 0,
         r->c12_int_ok ? 1 : 0, r->c12_ps_ok ? 1 : 0,
         (unsigned)i_free, (unsigned)p_free,
@@ -568,6 +794,14 @@ static void log_result(const ebench_t *r)
 {
     ESP_LOGI(TAG, "px=%u fr=%u rep=%u nv=%u", (unsigned)r->px, (unsigned)r->frames,
              (unsigned)r->reps, (unsigned)r->nv);
+    ESP_LOGI(TAG, "效果層：vpp=%u ev=%u｜每幀 ev 個值 interpreter=%u ns、波表(%%) =%u ns、波表(快)=%u ns",
+             (unsigned)r->vpp, (unsigned)r->ev,
+             (unsigned)r->eff_vals_ns, (unsigned)r->eff_stream_ns,
+             (unsigned)r->eff_fast_ns);
+    ESP_LOGI(TAG, "波（一次建 %d 個值）正弦=%u µs 方波=%u µs 脈衝=%u µs 保持=%u µs",
+             EB_WAVE_TOTAL,
+             (unsigned)r->wave_build_us[0], (unsigned)r->wave_build_us[1],
+             (unsigned)r->wave_build_us[2], (unsigned)r->wave_build_us[3]);
     ESP_LOGI(TAG, "eval=%u ns/val  vals=%u ns/frame", (unsigned)r->eval_ns,
              (unsigned)r->vals_ns);
     ESP_LOGI(TAG, "pair8 i/p=%u/%u  pair12 i/p=%u/%u ns",
@@ -619,11 +853,19 @@ static void on_efbench(nc4_ctx_t *ctx, const nc4_frame_t *f)
 {
     uint16_t px = 64;
     uint16_t frames = 0;
+    uint8_t vpp = 1;
     if (f->len >= 2) {
         px = (uint16_t)(f->data[0] | ((uint16_t)f->data[1] << 8));
     }
     if (f->len >= 4) {
         frames = (uint16_t)(f->data[2] | ((uint16_t)f->data[3] << 8));
+    }
+    if (f->len >= 6) {
+        // 每顆幾個值：1 = 單色（每顆一個波）、3 = rgb、4 = rgbw（每顆四個獨立波）
+        vpp = (uint8_t)(f->data[4] | ((uint16_t)f->data[5] << 8));
+        if (vpp == 0 || vpp > 4) {
+            vpp = 1;
+        }
     }
     if (frames > 20000) {
         frames = 20000;
@@ -634,8 +876,10 @@ static void on_efbench(nc4_ctx_t *ctx, const nc4_frame_t *f)
         return;
     }
     ebench_t r;
-    run_bench(px, frames, &r);
-    char j[1400];
+    run_bench(px, frames, vpp, &r);
+    // 回覆 JSON 放 static：handler 跑在 decode0 任務上，1,400 B 放 stack 會爆
+    // （實測：加咗效果層那一段之後 decode0 stack overflow）。
+    static char j[1400];
     result_json(&r, j, sizeof(j));
     __atomic_store_n(&s_busy, 0u, __ATOMIC_RELEASE);
     log_result(&r);
@@ -655,7 +899,7 @@ static void ebench_task(void *arg)
     ebench_t r;
     // 開機只跑 2,000 幀：完整 suite（10000 幀）要 ~29 秒，會拖慢 OTA 後第一次監看。
     // 要更穩的數字由 0xF065 指定 frames（例如 10000）。
-    run_bench(64, 2000, &r);
+    run_bench(64, 2000, 1, &r);
     log_result(&r);
     __atomic_store_n(&s_busy, 0u, __ATOMIC_RELEASE);
 }

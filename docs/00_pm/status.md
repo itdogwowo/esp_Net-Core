@@ -7064,3 +7064,51 @@ free_ps=1,519,256、lanes=[mock]` —— **i80 唔喺 lanes 入面**，即係「
 3. 所以 16×600 要 50 fps，下一步不是優化配對，而是**砍波形合成**：
    pack（8.2 ms，逐 lane 位元組轉置）與 merge（11.3 ms，8 lane 合併）都要重做
    （例如 LUT/byte-shuffle、per-lane group 分開打包、減少合併次數）。
+
+### 7.194 2026-11-23（正弦收斂：引擎只剩一個 `nc_px_engine_sin_lin()`）
+
+用家指示：**唔要再留幾個「伏人」的方法，次次都要重新解釋** —— 直接只留一個（混合正弦）。
+
+**刪除**（`sw/pixel/engine/nc_px_engine_tables.c`）：
+
+| 刪除的函數 | 表 | 之前誰用 |
+|---|---|---|
+| `nc_px_engine_sin()` | 1024 點 Q15 查表，2 KB | 內建效果（BREATH／WAVE） |
+| `nc_px_engine_sin_q12()` | 0（MP 多項式） | DATA program（MATH_NOW／SQUARE／PULSE_WAVE） |
+
+**保留**：`nc_px_engine_sin_lin()`（256 錨點＋線性插值，514 B）＝ **唯一**正弦。
+
+**改咗嘅 call site**
+
+| 位置 | 之前 | 之後 |
+|---|---|---|
+| `nc_px_engine_program.c`（12-bit 波） | `sin_q12(ph)` | `sin_lin(ph)` |
+| `nc_effect_breath.c` | `sin(ph & 1023)`（Q15） | `((int32_t)sin_lin((ph & 1023) << 6) - 2048) << 4` |
+| `nc_effect_wave.c`（×2） | 同上 | 同上，再 `<<2`／`<<3`（等價縮放，保持原 Q15 單位） |
+
+**代價（要知）**：DATA program **唔再同 MicroPython 位元級一致**（MP 用多項式）。這是刻意的取捨：
+精度 0.72 LSB（sin_lin）vs 3.74 LSB（多項式）。副作用：`pxProgram_test` 的波表指紋／取樣期望值、
+以及 `pxEngine_test` 的 golden（WAVE／BREATH 的 sine 變了）都要重影 —— **本機冇 host 編譯器**
+（`gcc` 缺 `cc1`、無 MSVC），所以今次未跑、未重影；有編譯器的機器跑一次 `--update` 即可。
+
+**量測（板上，2026-11-23，S3 240 MHz、SuperMini）**
+
+| 項目 | 舊（sin_q12） | 新（sin_lin） |
+|---|---:|---:|
+| 正弦 ns/call（`0xF063`，50k×3 取最小） | 157 | **142** |
+| 正弦 max 誤差（全相位 65536 掃） | 3.74 LSB | **0.72 LSB** |
+| program `per_val_ns`（`0xF065`） | 464–468 ns/值 | **437–445 ns/值** |
+| 建波表 256 個值（四段波全建） | ≈119 µs | **≈113 µs** |
+
+每幀值流（波表快路徑，`0xF065`、值流在 internal）：**29.4 ns/值**，64／960／9,600 值都一樣 →
+64 px 2.0 µs、960 px 28.3 µs、9,600 px 0.282 ms、9,600×4（38,400 值）**1.13 ms**（5.6% of 20 ms）。
+值流落 PSRAM 變 138 ns/值（5.30 ms，26.5%）；無波表的 interpreter 21.05 ms（>20 ms）。
+
+**工具／測試同步**
+
+- `0xF063 SINBENCH` 只回 `{"n","smp","lin":{"ns","err"}}`。
+- **順手修真 bug**：`on_sinbench` 冇確保 `nc_px_engine_tables_init()`。EffectPerf 映像冇開 pixel 任務時
+  表係全 0 → `sin_lin` 永遠回 2048、誤差報 **2048 LSB**（今次上板第一次量就踩到）。已加自行初始化。
+- `sin_bench`（host）只剩 ★ `eng_sin_lin`；`pxEngine_test` 的 sine 斷言與精度閘門只留一個；
+  `dev_probe.py`、`commands.md`、`wave-performance.md`、`config-layers.md`、`testing.md` 同步。
+- 驗證：bench 映像、tests 映像、tests+bench 映像三個建置 rc=0；上板 `0xF063` 回 142 ns／0.72 LSB。

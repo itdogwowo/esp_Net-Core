@@ -29,7 +29,7 @@ extern "C" {
 // 對應 MP effects.json 的 program[]：{"type","F","l_max","l_lim","phi","end_Time"}。
 typedef enum {
     NC_PX_SEG_KEEP = 0,          // 保持上一段的值
-    NC_PX_SEG_MATH_NOW,          // 正弦（nc_px_engine_sin_q12）
+    NC_PX_SEG_MATH_NOW,          // 正弦（nc_px_engine_sin_lin，0..4095）
     NC_PX_SEG_SQUARE_WAVE_NOW,   // 方波
     NC_PX_SEG_PULSE_WAVE,        // 脈衝串
     NC_PX_SEG_PULSE,             // 單脈衝

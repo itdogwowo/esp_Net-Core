@@ -93,7 +93,7 @@ uint16_t nc_px_engine_program_value(const nc_px_prog_t *p, uint32_t g)
             // 相位只取低 16 位；乘積用 64-bit 避免 step_phase × rel 溢出（MP 是大整數）。
             const uint32_t ph = (uint32_t)(((uint64_t)s->phi4 +
                                             (uint64_t)s->step_phase * rel) & 65535u);
-            const uint16_t w = nc_px_engine_sin_q12(ph);
+            const uint16_t w = nc_px_engine_sin_lin(ph);
             uint32_t v;
             if (s->kind == NC_PX_SEG_MATH_NOW) {
                 v = ((uint32_t)w * s->l_range) >> 12;

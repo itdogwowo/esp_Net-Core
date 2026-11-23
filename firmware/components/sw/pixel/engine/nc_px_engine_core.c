@@ -655,7 +655,6 @@ int nc_px_engine_fx_count(void) { return 0; }
 void nc_px_engine_tables_init(void) { }
 uint16_t nc_px_engine_gamma(uint16_t lin16) { (void)lin16; return 0; }
 uint16_t nc_px_engine_lin(const nc_px_engine_params_t *p, uint32_t level255) { (void)p; (void)level255; return 0; }
-int32_t nc_px_engine_sin(uint32_t phase) { (void)phase; return 0; }
 uint16_t nc_px_engine_quant(uint16_t tgt88, uint8_t bits) { (void)tgt88; (void)bits; return 0; }
 
 esp_err_t nc_px_engine_bind(uint32_t px)
