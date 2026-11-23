@@ -715,6 +715,57 @@ uint32_t nc_px_layout_apply(const nc_px_layout_t *l, uint16_t *const *vals, uint
     return l->nruns;
 }
 
+// ═══════════════════════ apply4（抖動）═══════════════════════
+void nc_px_layout_apply4(const nc_px_layout_t *l, uint16_t *const vals[],
+                         uint8_t *const dst[], uint8_t subframes, uint32_t phase)
+{
+    if (l == NULL || vals == NULL || dst == NULL || subframes == 0) {
+        return;
+    }
+    for (uint32_t r = 0; r < l->nruns; r++) {
+        const nc_px_lrun_t *run = &l->run[r];
+        const nc_px_ljob_t *job = &l->job[run->job];
+        const nc_px_aprog_t *ap = &l->aprog[job->aprog];
+        const uint16_t *v = vals[job->aprog];
+        const uint32_t nv = ap->nv;
+        if (job->write != NC_PX_WRITE_RGB && job->write != NC_PX_WRITE_RGBW) {
+            continue;                     // 其他寫入型別唔做抖動（保持原位）
+        }
+        const uint32_t nch = (job->write == NC_PX_WRITE_RGBW) ? 4u : 3u;
+        uint32_t c[4] = { 0, 0, 0, 0 };
+        if (nv > 0) {
+            for (uint32_t ch = 0; ch < nch; ch++) {
+                c[ch] = (nch * run->src + ch) % nv;
+            }
+        }
+        for (uint32_t x = 0; x < run->count; x++) {
+            const size_t o = (size_t)(run->dst + x) << 2;
+            for (uint32_t ch = 0; ch < nch; ch++) {
+                const uint32_t v12 = (nv > 0) ? v[c[ch]] : 0u;
+                const uint32_t base = v12 >> 4;
+                const uint32_t n1 = (((v12 & 15u) * subframes) + 8u) >> 4;
+                for (uint8_t sf = 0; sf < subframes; sf++) {
+                    const uint8_t pos = (uint8_t)((sf + phase) % subframes);
+                    dst[sf][o + ch] = (uint8_t)(base + ((base < 255u && pos < n1) ? 1u : 0u));
+                }
+            }
+            if (nch == 3) {
+                for (uint8_t sf = 0; sf < subframes; sf++) {
+                    dst[sf][o + 3] = 0;
+                }
+            }
+            if (nv > 0) {
+                for (uint32_t ch = 0; ch < nch; ch++) {
+                    c[ch] += nch;
+                    while (c[ch] >= nv) {
+                        c[ch] -= nv;
+                    }
+                }
+            }
+        }
+    }
+}
+
 uint32_t nc_px_layout_apply12(const nc_px_layout_t *l, uint16_t *const *vals, uint16_t *dst)
 {
     if (l == NULL || vals == NULL || dst == NULL) {

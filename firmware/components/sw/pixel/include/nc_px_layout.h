@@ -98,6 +98,12 @@ esp_err_t nc_px_layout_load(nc_px_layout_t *out, const char *path, uint32_t key,
 // 語義逐條照 mp `pixel_layout._SCATTER`；回傳寫入的 run 數。
 uint32_t nc_px_layout_apply(const nc_px_layout_t *l, uint16_t *const *vals, uint8_t *dst);
 
+// 時間抖動：一次掃描 runs，同時寫 subframes 份 8-bit 輸出。
+// 每份 = base 或 base+1，令 subframes 份平均 = 12-bit>>4（±1）。
+// phase 每幀 +1，令 +1 的子幀輪流，避免閃爍。只支援 rgb／rgbw。
+void nc_px_layout_apply4(const nc_px_layout_t *l, uint16_t *const vals[],
+                         uint8_t *const dst[], uint8_t subframes, uint32_t phase);
+
 // 12-bit 版（canvas = px × 4 個 uint16；唔做 >>4）。
 uint32_t nc_px_layout_apply12(const nc_px_layout_t *l, uint16_t *const *vals, uint16_t *dst);
 

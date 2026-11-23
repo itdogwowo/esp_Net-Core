@@ -492,15 +492,98 @@ static void test_cache_roundtrip(void)
     nc_px_layout_free(&b);
 }
 
+
+// ── [9] 群組重疊：同一顆被兩個 entry 寫到，現在是疊加還是最後贏？ ──
+static void test_overlap_same_channel(void)
+{
+    printf("[9] 群組重疊（A=0:4、B=2:5，重疊 2、3）\n");
+    nc_px_asset_t assetA, assetB;
+    make_asset(&assetA, "A", 4);
+    make_asset(&assetB, "B", 4);
+    nc_px_asset_tbl_t assets = { .n = 2 };
+    assets.item[0] = assetA;
+    assets.item[1] = assetB;
+    const nc_px_hw_inv_t inv[] = { { .hw = NC_PX_HW_WS2812, .base = 0, .px = 5 } };
+
+    nc_px_group_sel_t selA[] = { { .hw = NC_PX_HW_WS2812, .slice = "0:4" } };
+    nc_px_group_sel_t selB[] = { { .hw = NC_PX_HW_WS2812, .slice = "2:5" } };
+    nc_px_group_t groups[2] = {
+        { .id = 1, .name = "A", .sel = selA, .nsel = 1 },
+        { .id = 2, .name = "B", .sel = selB, .nsel = 1 },
+    };
+    nc_px_map_t map = { .id = 1, .name = "m", .group = groups, .ngroups = 2 };
+    nc_px_mode_entry_t entries[2] = {
+        { .group = "A", .effect = "A", .write = NC_PX_WRITE_RGB },
+        { .group = "B", .effect = "B", .write = NC_PX_WRITE_RGB },
+    };
+    nc_px_mode_t mode = { .id = 1, .name = "m", .nentry = 2, .entry = entries };
+    nc_px_layout_t lay;
+    check(nc_px_layout_build(&mode, &map, &assets, inv, 1, &lay) == ESP_OK, "建立");
+    printf("  jobs=%u runs=%u\n", (unsigned)lay.njobs, (unsigned)lay.nruns);
+
+    // A 全部 0x100、B 全部 0x200
+    uint16_t va[8], vb[8];
+    for (int i = 0; i < 8; i++) { va[i] = 0x100; vb[i] = 0x200; }
+    uint16_t *vp[2] = { va, vb };
+    uint8_t out[5 * 4] = { 0 };
+    nc_px_layout_apply(&lay, vp, out);
+    for (int px = 0; px < 5; px++) {
+        printf("  px%d: R=%u G=%u B=%u\n", px, out[px * 4 + 0], out[px * 4 + 1], out[px * 4 + 2]);
+    }
+    nc_px_layout_free(&lay);
+}
+
+
+// ── [11] apply4 抖動：4 子幀平均 ≈ 12-bit>>4 ──
+static void test_apply4(void)
+{
+    printf("[11] apply4 抖動（4 子幀）\n");
+    nc_px_asset_t a;
+    make_asset(&a, "w", 4);
+    nc_px_asset_tbl_t assets = { .n = 1 };
+    assets.item[0] = a;
+    const nc_px_hw_inv_t inv[] = { { .hw = NC_PX_HW_WS2812, .base = 0, .px = 4 } };
+    nc_px_group_sel_t sel[] = { { .hw = NC_PX_HW_WS2812, .slice = ":" } };
+    nc_px_group_t g = { .id = 1, .name = "full", .sel = sel, .nsel = 1 };
+    nc_px_map_t map = { .id = 1, .name = "m", .group = &g, .ngroups = 1 };
+    nc_px_mode_entry_t en = { .group = "full", .effect = "w", .write = NC_PX_WRITE_RGB };
+    nc_px_mode_t mode = { .id = 1, .name = "m", .nentry = 1, .entry = &en };
+    nc_px_layout_t lay;
+    check(nc_px_layout_build(&mode, &map, &assets, inv, 1, &lay) == ESP_OK, "建立");
+    uint16_t v[4] = { 4095, 2048, 17, 1234 };
+    uint16_t *vp[1] = { v };
+    uint8_t o[4][16];
+    uint8_t *outs[4] = { o[0], o[1], o[2], o[3] };
+    memset(o, 0, sizeof(o));
+    nc_px_layout_apply4(&lay, vp, outs, 4, 0);
+    bool ok = true;
+    for (int px = 0; px < 4; px++) {
+        const uint32_t idx = (3u * (uint32_t)px) % 4u;   // rgb stride = 3，nv = 4
+        const uint32_t want = ((uint32_t)v[idx] + 8u) >> 4;
+        uint32_t sum = 0;
+        for (int sf = 0; sf < 4; sf++) {
+            sum += o[sf][px * 4 + 0];
+        }
+        const uint32_t avg = (sum + 2u) >> 2;
+        if (avg + 1 < want || avg > want + 1) {
+            ok = false;
+        }
+    }
+    check(ok, "4 子幀平均 = 12-bit>>4（±1）");
+    nc_px_layout_free(&lay);
+}
+
 int main(void)
 {
     test_single_chain();
     test_reverse();
     test_step();
-    test_overlap();
+    test_overlap_same_channel();
+    test_apply4();
     test_500_groups();
     test_json_500();
     test_cache_roundtrip();
+    test_overlap();
     printf("\n%s（%d 個失敗）\n", g_fail ? "FAIL" : "ALL PASS", g_fail);
     return g_fail ? 1 : 0;
 }
