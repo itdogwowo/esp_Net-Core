@@ -64,8 +64,8 @@
 
 | 項目 | 狀態 | 原因／下一步 |
 |---|---|---|
-| Task 4 render 子幀接線 | 部分 | mock-only lane **未生效**（板仍列出 i80 lane），要查 static `s_cfg` 是否被別的初始化覆蓋，或 OTA 後未真正套用 |
-| Task 5 2,400 px × 200 Hz 量測 | 部分 | fps 被單 lane 線路限制（72 ms）；要 mock lane 生效才量到 50 視覺 fps |
+| Task 4 render 子幀接線 | ✅ 完成 | mock-only lane 生效（之前係 OTA 失敗、板跑舊映像） |
+| Task 5 2,400 px × 200 Hz 量測 | ✅ 完成 | 見下面「mock lane 實測」 |
 | Task 7 6 B 單表 | 未做 | 已定案（6 B），但需要改 layout 表結構＋apply 分組，屬較大重構 |
 | Task 8 assets 動態配置 | 部分 | 只做了 aprog；`nc_px_asset_tbl_t` 仍是 `item[32]`（8.4 KB BSS），要改 flexible array＋5 個檔的配置 |
 | Task 6 chunked DMA | 未做（可選） | 先量 async 現況再決定 |
@@ -96,12 +96,14 @@
 - 目前板上 `/pixel` 內容仍是 2400 測試集（mode `full256`），
   重插後請重新上傳 `ports/project/S3/ESP32-S3-Zero-Show/data/pixel`。
 
-### 3. mock-only lane 未生效
+### 3. mock-only lane：其實正常（之前係 OTA 失敗）
 
-- 建置設定 `CONFIG_NETCORE_PIXEL_MOCK_ONLY=y`、`sdkconfig.h` 亦有定義，
-  但 0xF079 顯示仍有 `i80` lane；懷疑 OTA 套用的是舊映像（多次 OTA 曾
-  `Device not configured` 失敗），或 `s_cfg` 被別的初始化覆蓋。
-- 影響：2,400 px 的 render 仍走 i80（72 ms/幀），量不到 50 視覺 fps。
+- 重新 OTA 一次（乾淨映像）之後，0xF079 顯示 `lanes = [mock]`，證實設定有效。
+- **mock lane 實測（2,400 px、4 子幀、200 Hz）**：
+  - render `fps = 199.9`（子幀率 200 Hz，視覺 50 fps）
+  - `apply = 6.03 ms`／視覺幀（4 個子幀合計）、`commit 12 µs`
+  - `pair_n` 2 秒 +340（約 170 次提交／秒）、`full 533`（環 5 格偶爾滿）
+  - CPU 每視覺幀 ≈ 6.3 ms ＝ **20 ms 的 31.5%**
 
 ---
 

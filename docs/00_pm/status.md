@@ -418,3 +418,7 @@ assets 動態（仍 32）；6 B 單表；render 子幀接線完整驗證；chunk
   之前被舊 binary 遮住；`run_all.sh` 已改成每次強制重建。
 - 裝置 FAT 寫入被鎖（`err_busy`），OTA 正常；要**斷電重插**，
   之後重新上傳 Zero-Show 的 `/pixel` 內容（目前板上係 2400 測試集）。
+
+**補測（mock lane 生效後，2,400 px × 4 子幀）**：render **199.9 fps**（200 Hz 子幀、
+視覺 50 fps）、apply **6.03 ms**／視覺幀、commit 12 µs、CPU ≈6.3 ms（31.5%）。
+之前「mock lane 未生效」係 OTA 失敗、板跑舊映像，非程式問題。
