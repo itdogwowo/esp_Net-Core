@@ -416,6 +416,12 @@ static void evals_free(void)
     s_evals_cap = 0;
 }
 
+// 效果層的值流緩衝：**一律 PSRAM**（同生產的 nc_effect_task 同一個政策）。
+// 為什麼唔「內部有空間就放內部」：效果層緩衝本身大（9,600×4 值 = 76.8 KB），
+// 按情況搬來搬去只會令同一支 bench 量到兩個唔同世界；而 internal 要留給其他應用
+// （DMA 槽、parser、任務堆疊）。小量的表（正弦 514 B、波表 256 值）仍然留 internal
+// —— 呢啲係「加速用」的例外，唔係按 px 大小分情況。
+// 冇 PSRAM 的板（例如 C3）才退 internal，呢個係「板子能力」分支，唔係量測模式。
 static bool evals_alloc(uint32_t n)
 {
     evals_free();
@@ -423,9 +429,9 @@ static bool evals_alloc(uint32_t n)
         return false;
     }
     const size_t bytes = (size_t)n * sizeof(uint16_t);
-    s_evals = (uint16_t *)alloc_caps(bytes, MALLOC_CAP_INTERNAL);
+    s_evals = (uint16_t *)alloc_caps(bytes, MALLOC_CAP_SPIRAM);
     if (s_evals == NULL) {
-        s_evals = (uint16_t *)alloc_caps(bytes, MALLOC_CAP_SPIRAM);
+        s_evals = (uint16_t *)alloc_caps(bytes, MALLOC_CAP_INTERNAL);
     }
     if (s_evals == NULL) {
         return false;
