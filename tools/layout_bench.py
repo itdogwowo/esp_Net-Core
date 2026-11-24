@@ -36,8 +36,9 @@ def main():
     ap.add_argument("--port", required=True)
     ap.add_argument("--px", type=int, default=9600)
     ap.add_argument("--groups", type=int, default=500)
-    ap.add_argument("--variant", type=int, default=1, choices=(0, 1, 2),
-                    help="0=每組一段連續、1=每組兩段、2=完全隨機（每顆一條單顆 run）")
+    ap.add_argument("--variant", type=int, default=1, choices=(0, 1, 2, 3),
+                    help="0=每組一段連續、1=每組兩段、2=完全隨機（每顆一條單顆 run）、"
+                         "3=每粒燈自己一個 group（9,600 個 job，最徹底）")
     ap.add_argument("--reps", type=int, default=8)
     ap.add_argument("--all", action="store_true",
                     help="掃 100／500／1000 組 × variant 0／1 ＋ 完全隨機（variant 2）")
@@ -51,6 +52,7 @@ def main():
             for g in (100, 500, 1000):
                 cases.append((args.px, g, v))
         cases.append((args.px, 0, 2))     # 上限：每顆一條單顆 run
+        cases.append((args.px, 0, 3))     # 上限＋每粒燈自己一個 group
     else:
         cases.append((args.px, args.groups, args.variant))
 

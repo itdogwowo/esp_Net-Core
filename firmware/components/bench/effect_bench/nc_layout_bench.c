@@ -221,10 +221,16 @@ static void on_layoutbench(nc4_ctx_t *ctx, const nc4_frame_t *f)
     if (variant == 5 && groups_in > 0) {
         ngroups = (groups_in > LB_GROUP_MAX) ? LB_GROUP_MAX : groups_in;
     }
-    if (variant == 2 || ((variant == 5 || variant == 6 || variant == 7 || variant == 8 || variant == 9 || variant == 11 || variant == 12 || variant == 13 || variant == 15) && groups_in == 0)) {
-        // 完全隨機：每個像素一條單顆 run（9,600 條）。用「每組 9 個單顆 sel」
-        // 打包成 ~px/9 個 group，效果一樣（dst 隨機、run 全部 1 顆），但記憶體可控。
-        ngroups = (px + 8u) / 9u;
+    // 完全隨機佈局：每個像素一條單顆 run（9,600 條）。
+    //   variant 3 = **每一粒燈都係自己一個 group／entry**（9,600 個 job），最徹底的
+    //               「每粒燈單獨隨機」；table 形狀同 variant 2 一樣，但 bookkeeping 最多。
+    //   variant 2 = 用「每組 9 個單顆 sel」打包成 ~px/9 個 group（記憶體可控，run 形狀一樣）。
+    const uint32_t per_grp = (variant == 3) ? 1u : 9u;
+    const bool perm_layout = (variant == 2 || variant == 3 ||
+        ((variant == 5 || variant == 6 || variant == 7 || variant == 8 || variant == 9 ||
+          variant == 11 || variant == 12 || variant == 13 || variant == 15) && groups_in == 0));
+    if (perm_layout) {
+        ngroups = (uint16_t)((px + per_grp - 1u) / per_grp);
         if (ngroups < 1) {
             ngroups = 1;
         }
@@ -235,7 +241,12 @@ static void on_layoutbench(nc4_ctx_t *ctx, const nc4_frame_t *f)
 
     const uint32_t alloc_caps = MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT;
     nc_px_group_t *groups = heap_caps_malloc((size_t)ngroups * sizeof(*groups), alloc_caps);
-    nc_px_group_sel_t *sels = heap_caps_malloc((size_t)LB_SEL_MAX * sizeof(*sels), alloc_caps);
+    // sel 數按實際需要（唔再固定 16,384 個 ＝ 278 KB）：隨機佈局要 px 個單顆 sel，
+    // 其餘佈局每組最多 2 段。
+    const uint32_t nsel_cap = perm_layout ? ((px < LB_SEL_MAX) ? px : LB_SEL_MAX)
+                                          : ((uint32_t)ngroups * 2u);
+    nc_px_group_sel_t *sels = heap_caps_malloc(((size_t)(nsel_cap ? nsel_cap : 1u)) *
+                                               sizeof(*sels), alloc_caps);
     nc_px_mode_entry_t *entries = heap_caps_malloc((size_t)ngroups * sizeof(*entries),
                                                    alloc_caps);
     // 表頭 ＋ 1 個效果一齊配置（舊版表係內建 32 個 item 的固定陣列）
@@ -259,8 +270,8 @@ static void on_layoutbench(nc4_ctx_t *ctx, const nc4_frame_t *f)
         return;
     }
 
-    if (variant == 2 || ((variant == 5 || variant == 6 || variant == 7 || variant == 8 || variant == 9 || variant == 11 || variant == 12 || variant == 13 || variant == 15) && groups_in == 0)) {
-        // 9,600 個像素的固定種子 permutation，再每 9 個塞入一個 group
+    if (perm_layout) {
+        // 9,600 個像素的固定種子 permutation：每個像素一條單顆 sel（每組 9 個 或 1 個）
         uint32_t *perm = heap_caps_malloc((size_t)px * sizeof(uint32_t), alloc_caps);
         if (perm == NULL) {
             heap_caps_free(groups);
@@ -293,7 +304,7 @@ static void on_layoutbench(nc4_ctx_t *ctx, const nc4_frame_t *f)
             snprintf(g->name, sizeof(g->name), "g%u", (unsigned)i);
             g->sel = &sels[k];
             g->nsel = 0;
-            for (int j = 0; j < 9 && k < px && k < LB_SEL_MAX; j++, k++) {
+            for (uint32_t j = 0; j < per_grp && k < px && k < nsel_cap; j++, k++) {
                 sels[k].hw = NC_PX_HW_WS2812;
                 snprintf(sels[k].slice, sizeof(sels[k].slice), "%u:%u",
                          (unsigned)(uint16_t)perm[k], (unsigned)(uint16_t)(perm[k] + 1u));
