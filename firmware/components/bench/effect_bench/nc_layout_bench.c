@@ -227,6 +227,13 @@ static void on_layoutbench(nc4_ctx_t *ctx, const nc4_frame_t *f)
     //   variant 2 = 用「每組 9 個單顆 sel」打包成 ~px/9 個 group（記憶體可控，run 形狀一樣）。
     //   variant 4 = **每個通道一條 entry**（4 × px 個 group，write 依次 R／G／B／W）：
     //               同一粒燈的四個通道由四個唔同 entry 寫（重疊寫），最散的 channel 級佈局。
+    // variant 16 = 最極端的「總成本」量測：**全尺寸值流**（RGB ＝ 3 × px 個值，同
+    // production 一樣放 PSRAM），所以 apply 要讀一個真實大小的值流，同時量效果層
+    // 每幀生成值流的時間。佈局形狀沿用 variant 0（每組一段），`--groups` 控制組數。
+    // 註：試過「全尺寸值流（28,800 個值）＋9,600 條 entry」一次過量——9,600 px 會
+    // OOM／重開（entries 64 B × 9,600 ＋ groups／sels ＋ build 暫存 ≈ 2.4 MB PSRAM，
+    // 超過 2 MB）。所以總成本改為分兩段量再相加：值流（效果層）＋ apply（配對層）。
+    const bool full_nv = false;
     const uint32_t per_grp = (variant == 3) ? 1u : 9u;
     const bool chan_layout = (variant == 4);
     const bool perm_layout = (variant == 2 || variant == 3 || chan_layout ||
@@ -267,8 +274,13 @@ static void on_layoutbench(nc4_ctx_t *ctx, const nc4_frame_t *f)
                                                  sizeof(nc_px_asset_t), alloc_caps);
     uint8_t *c8 = heap_caps_malloc((size_t)px * 4u, alloc_caps);
     uint16_t *c12 = heap_caps_malloc((size_t)px * 8u, alloc_caps);
-    uint16_t *vals = heap_caps_malloc((size_t)LB_VALS_MAX * sizeof(uint16_t),
-                                      MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    const uint32_t nv_need = full_nv ? ((px > 21845u) ? 65535u : (uint32_t)px * 3u)
+                                     : (uint32_t)LB_VALS_MAX;
+    // 全尺寸值流（9,600 px → 28,800 個值 ＝ 57.6 KB）同 production 一樣放 PSRAM；
+    // 細值流（64）就 internal。
+    uint16_t *vals = heap_caps_malloc((size_t)nv_need * sizeof(uint16_t),
+                                      full_nv ? alloc_caps
+                                              : (MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
     if (groups == NULL || sels == NULL || entries == NULL || assets == NULL ||
         c8 == NULL || c12 == NULL || vals == NULL) {
         heap_caps_free(groups);
@@ -365,7 +377,7 @@ static void on_layoutbench(nc4_ctx_t *ctx, const nc4_frame_t *f)
         }
         heap_caps_free(perm);
     } else {
-        const uint8_t shape = (variant == 5) ? 1 : variant;
+        const uint8_t shape = (variant == 5) ? 1 : ((variant == 16) ? 0 : variant);
         build_groups(groups, sels, ngroups, px, shape);
     }
     for (uint32_t i = 0; i < ngroups; i++) {
@@ -379,7 +391,7 @@ static void on_layoutbench(nc4_ctx_t *ctx, const nc4_frame_t *f)
     }
 
     nc_px_asset_t asset;
-    fill_asset(&asset, 64);
+    fill_asset(&asset, full_nv ? (uint16_t)nv_need : 64u);
     nc_px_asset_tbl_use(assets, (nc_px_asset_t *)(assets + 1), 1);
     assets->n = 1;
     assets->item[0] = asset;
@@ -418,6 +430,17 @@ static void on_layoutbench(nc4_ctx_t *ctx, const nc4_frame_t *f)
         vals[i] = (uint16_t)((i * 71u + 13u) & 0xFFFu);
     }
     uint16_t *vptrs[NC_PX_LAYOUT_ASSET_MAX] = { vals };
+
+    // 效果層每幀的成本：生成一條值流（production 由 effect task 做）。
+    uint32_t vals_us = 0xFFFFFFFFu;
+    for (uint8_t r = 1; r <= reps; r++) {
+        const int64_t v0 = esp_timer_get_time();
+        (void)nc_px_aprog_vals(&lay.aprog[0], (uint32_t)r * 7u, vals, lay.aprog[0].nv);
+        const uint32_t us = (uint32_t)(esp_timer_get_time() - v0);
+        if (us < vals_us) {
+            vals_us = us;
+        }
+    }
 
     uint32_t merge8_us = 0, swar_us = 0, swar_ok = 0;
     if (variant == 10) {
@@ -827,7 +850,7 @@ static void on_layoutbench(nc4_ctx_t *ctx, const nc4_frame_t *f)
     char j[800];
     snprintf(j, sizeof(j),
              "{\"px\":%u,\"groups\":%u,\"variant\":%u,\"jobs\":%u,\"runs\":%u,"
-             "\"nv\":%u,\"build_us\":%u,\"apply_us\":%u,\"apply12_us\":%u,"
+             "\"nv\":%u,\"vals_us\":%u,\"build_us\":%u,\"apply_us\":%u,\"apply12_us\":%u,"
              "\"dither_us\":%u,\"dither_runs_us\":%u,"
              "\"flat_n\":%u,\"apply_runs_us\":%u,\"flat_int\":%d,"
              "\"sub_us\":[%u,%u,%u,%u],\"sub_total_us\":%u,"
@@ -839,7 +862,8 @@ static void on_layoutbench(nc4_ctx_t *ctx, const nc4_frame_t *f)
              "\"batch4_1pass_noclear_us\":%u,"
              "\"runs_psram\":%d,\"c8_psram\":%d,\"c12_psram\":%d}",
              (unsigned)px, (unsigned)ngroups, (unsigned)variant,
-             (unsigned)lay.njobs, (unsigned)lay.nruns, 64u,
+             (unsigned)lay.njobs, (unsigned)lay.nruns, (unsigned)lay.aprog[0].nv,
+             (unsigned)vals_us,
              (unsigned)(t1 - t0), (unsigned)apply_us, (unsigned)apply12_us,
              (unsigned)dither_us, (unsigned)dither_runs_us,
              (unsigned)lay.nflat, (unsigned)apply_runs_us,

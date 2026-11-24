@@ -87,6 +87,12 @@ def main():
                 ratio = (runs_us / d['apply_us']) if d.get('apply_us') else 0.0
                 print(f"    6 B 表 {flat_n} 顆：apply={d.get('apply_us')}µs  vs  "
                       f"runs={runs_us}µs（{ratio:.2f}×）{note}")
+            # 一幀的「總成本」＝ 效果層生成值流 ＋ 配對層寫入（單子幀）
+            vu = d.get('vals_us')
+            if vu is not None and d.get('apply_us') is not None:
+                tot = vu + d['apply_us']
+                print(f"    一幀總成本：值流 {vu}µs ＋ apply {d['apply_us']}µs "
+                      f"＝ {tot}µs（nv={d.get('nv')}）")
             # production 的抖動層：4 子幀 ＝ 4 次掃表
             du, dru = d.get('dither_us'), d.get('dither_runs_us')
             if du is not None and dru is not None:
