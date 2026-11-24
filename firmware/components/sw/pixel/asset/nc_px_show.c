@@ -191,12 +191,14 @@ static void apply_range(nc_px_job_t *job, int16_t s, int16_t st, int16_t step)
 esp_err_t nc_px_show_plan(const nc_px_mode_t *mode, const nc_px_map_t *map,
                           const nc_px_asset_tbl_t *assets,
                           const nc_px_hw_inv_t *inv, uint8_t ninv,
-                          nc_px_plan_t *out)
+                          nc_px_plan_t *out, nc_px_job_t *jobs, uint16_t jobcap)
 {
     if (mode == NULL || out == NULL || assets == NULL) {
         return ESP_ERR_INVALID_ARG;
     }
     memset(out, 0, sizeof(*out));
+    out->job = jobs;                 // 容量由呼叫端決定（唔再固定 8 條）
+    out->jobcap = (jobs != NULL) ? jobcap : 0;
 
     uint16_t px = 0;
     for (uint8_t i = 0; i < ninv; i++) {
@@ -207,7 +209,11 @@ esp_err_t nc_px_show_plan(const nc_px_mode_t *mode, const nc_px_map_t *map,
     }
     out->px = px;
 
-    for (uint32_t e = 0; e < mode->nentry && out->njobs < NC_PX_JOB_MAX; e++) {
+    for (uint32_t e = 0; e < mode->nentry; e++) {
+        if (out->njobs >= out->jobcap) {
+            out->skipped++;          // 容量唔夠：明示跳過，唔會靜靜 drop
+            continue;
+        }
         const nc_px_mode_entry_t *en = &mode->entry[e];
         const nc_px_asset_t *asset = find_asset(assets, en->effect);
         char mapref[NC_PX_LAYER_NAME_MAX];

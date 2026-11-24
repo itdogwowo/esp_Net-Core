@@ -45,11 +45,15 @@ typedef struct {
     uint16_t            nled;           // 這個 job 幾顆燈（= ranges 總和）
 } nc_px_job_t;
 
+// 舊 plan（A/B 對拍＋板上自測用；production 走 nc_px_layout）。
+// **唔再有 `job[8]` 固定上限**：job 陣列由呼叫端提供（容量 = mode->nentry 就夠），
+// 超容量會計入 skipped，唔會靜靜 drop。
 typedef struct {
-    uint8_t    njobs;
-    uint8_t    skipped;                 // 解析唔到而跳過的 entry 數
-    uint16_t   px;                      // 合成鏈總長（由 inventory 推）
-    nc_px_job_t job[NC_PX_JOB_MAX];
+    uint8_t     njobs;
+    uint8_t     skipped;                // 解析唔到／容量唔夠而跳過的 entry 數
+    uint16_t    px;                     // 合成鏈總長（由 inventory 推）
+    uint16_t    jobcap;                 // 呼叫端給的 job 容量
+    nc_px_job_t *job;                   // jobcap 個（呼叫端配置，生命週期由呼叫端管）
 } nc_px_plan_t;
 
 // mode ＋ map ＋ assets ＋ inventory → plan。
@@ -58,7 +62,7 @@ typedef struct {
 esp_err_t nc_px_show_plan(const nc_px_mode_t *mode, const nc_px_map_t *map,
                           const nc_px_asset_tbl_t *assets,
                           const nc_px_hw_inv_t *inv, uint8_t ninv,
-                          nc_px_plan_t *out);
+                          nc_px_plan_t *out, nc_px_job_t *jobs, uint16_t jobcap);
 
 // ── 配對層（generic）：效果交「值緩衝」，唔理佢係六工具／.nce／未來效果器 ──
 // 語義逐條照 mp `pixel_layout._SCATTER`：

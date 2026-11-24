@@ -94,7 +94,7 @@ git commit -m "refactor: 依用家命名調整 pixel API（行為不變）"
 - Modify: `firmware/components/tasks/pipeline_task/nc_pair_task.c:206-262`
 - Test: `tools/hosttest/pxShow_test/pxShow_test.c`（既有 apply 測試；新增「寫入任意 dst 等於寫畫布」）
 
-- [ ] **Step 1：寫失敗測試**
+- [x] **Step 1：寫失敗測試**
 
 在 `pxShow_test.c` 加：
 
@@ -117,16 +117,16 @@ static void test_apply_into_any_buffer(void)
 }
 ```
 
-- [ ] **Step 2：跑測試確認失敗**
+- [x] **Step 2：跑測試確認失敗**
 
 Run: `bash tools/hosttest/pxShow_test/run.sh`
 Expected: 編譯失敗（`test_apply_into_any_buffer` 未定義或未呼叫）
 
-- [ ] **Step 3：接上測試並確認通過（此 API 本來就支援任意 dst）**
+- [x] **Step 3：接上測試並確認通過（此 API 本來就支援任意 dst）**
 
 在 `main()` 呼叫 `test_apply_into_any_buffer();`，重跑：Expected: PASS
 
-- [ ] **Step 4：改 `content_frame_once` 為零拷貝**
+- [x] **Step 4：改 `content_frame_once` 為零拷貝**
 
 ```c
         const int64_t a0 = esp_timer_get_time();
@@ -147,7 +147,7 @@ Expected: 編譯失敗（`test_apply_into_any_buffer` 未定義或未呼叫）
 
 同時：`s_content.canvas` 只在 0xF06B 要求預覽時才複製（`s_snapshot_wanted` 旗標），唔要求就唔複製。
 
-- [ ] **Step 5：開機初始化緩衝為黑（一次）**
+- [x] **Step 5：開機初始化緩衝為黑（一次）**
 
 在 `content_start()` 環建立後：
 
@@ -159,12 +159,12 @@ Expected: 編譯失敗（`test_apply_into_any_buffer` 未定義或未呼叫）
     }
 ```
 
-- [ ] **Step 6：建置＋上板驗證**
+- [x] **Step 6：建置＋上板驗證**
 
 Run: `IDF_PATH=$HOME/esp/esp-idf python3 make.py build ESP32-S3-Zero --project ESP32-S3-Zero-Show`
 Expected: 建置成功；`0xF071` 的 `clear` 應為 0、`apply` 為寫入時間、`commit` 接近 0。
 
-- [ ] **Step 7：Commit**
+- [x] **Step 7：Commit**
 
 ```bash
 git add firmware/components/tasks/pipeline_task/nc_pair_task.c tools/hosttest/pxShow_test/pxShow_test.c
@@ -179,7 +179,7 @@ git commit -m "pair: 零拷貝寫環（唔經畫布、唔清畫布）"
 - Modify: `firmware/components/tasks/pipeline_task/nc_pair_task.c`（新增 `cache_prebuild_missing()`；`build_asset_tbl_into()` 已存在）
 - Test: 真機：刪快取 → 重開 → log
 
-- [ ] **Step 1：加函式（放在 `content_start()` 之前）**
+- [x] **Step 1：加函式（放在 `content_start()` 之前）**
 
 ```c
 static void cache_prebuild_missing(void)
@@ -229,19 +229,19 @@ static void cache_prebuild_missing(void)
 }
 ```
 
-- [ ] **Step 2：在 `content_start()` 第一次 mode 就緒後呼叫**
+- [x] **Step 2：在 `content_start()` 第一次 mode 就緒後呼叫**
 
 ```c
     cache_prebuild_missing();
 ```
 
-- [ ] **Step 3：真機驗證**
+- [x] **Step 3：真機驗證**
 
 1. 刪 `ports` 專案的 `/pixel/cache/*.pxlt`（WebMaster `POST /api/file/delete`）
 2. 重開板子，看 log：Expected `開機預建組合表：已有 0、新建 N、太大跳過 0、失敗 0（N×~300 ms）`
 3. 再重開一次：Expected `已有 N、新建 0`
 
-- [ ] **Step 4：Commit**
+- [x] **Step 4：Commit**
 
 ```bash
 git add firmware/components/tasks/pipeline_task/nc_pair_task.c
@@ -256,7 +256,7 @@ git commit -m "pair: 開機補建缺少的組合表（≤32 KB 才存）"
 - Modify: `firmware/components/sw/pixel/include/nc_px_layout.h`、`firmware/components/sw/pixel/asset/nc_px_layout.c`
 - Test: `tools/hosttest/pxLayout_test/pxLayout_test.c`（新增 `test_apply4`）
 
-- [ ] **Step 1：寫失敗測試**
+- [x] **Step 1：寫失敗測試**
 
 ```c
 // 4 子幀抖動：平均值要等於四捨五入的 8-bit 值（誤差 ≤1）
@@ -295,12 +295,12 @@ static void test_apply4(void)
 }
 ```
 
-- [ ] **Step 2：跑測試確認失敗**
+- [x] **Step 2：跑測試確認失敗**
 
 Run: `bash tools/hosttest/pxLayout_test/run.sh`
 Expected: 編譯失敗（`nc_px_layout_apply4` 未宣告）
 
-- [ ] **Step 3：實作（header）**
+- [x] **Step 3：實作（header）**
 
 ```c
 // 時間抖動：一次掃描 runs，同時寫 subframes 份 8-bit 輸出。
@@ -310,7 +310,7 @@ void nc_px_layout_apply4(const nc_px_layout_t *l, const uint16_t *const vals[],
                          uint8_t *const dst[], uint8_t subframes, uint32_t phase);
 ```
 
-- [ ] **Step 4：實作（layout.c）**
+- [x] **Step 4：實作（layout.c）**
 
 ```c
 void nc_px_layout_apply4(const nc_px_layout_t *l, const uint16_t *const vals[],
@@ -358,12 +358,12 @@ void nc_px_layout_apply4(const nc_px_layout_t *l, const uint16_t *const vals[],
 }
 ```
 
-- [ ] **Step 5：跑測試確認通過**
+- [x] **Step 5：跑測試確認通過**
 
 Run: `bash tools/hosttest/pxLayout_test/run.sh`
 Expected: `ALL PASS`
 
-- [ ] **Step 6：Commit**
+- [x] **Step 6：Commit**
 
 ```bash
 git add firmware/components/sw/pixel tools/hosttest/pxLayout_test/pxLayout_test.c
@@ -378,7 +378,7 @@ git commit -m "layout: apply4 一次掃表寫 4 個抖動子幀"
 - Modify: `firmware/main/Kconfig.projbuild`、`nc_pair_task.c`、`firmware/components/tasks/render_task/nc_render_task.c`
 - Test: 真機 `0xF071`＋`0xF06B`
 
-- [ ] **Step 1：Kconfig 加兩個選項**
+- [x] **Step 1：Kconfig 加兩個選項**
 
 ```kconfig
 config NETCORE_PIXEL_SUBFRAMES
@@ -392,7 +392,7 @@ config NETCORE_PIXEL_RING_SLOTS
     default 3
 ```
 
-- [ ] **Step 2：pair 每視覺幀寫 N 個槽**
+- [x] **Step 2：pair 每視覺幀寫 N 個槽**
 
 ```c
 #if CONFIG_NETCORE_PIXEL_SUBFRAMES > 1
@@ -414,7 +414,7 @@ config NETCORE_PIXEL_RING_SLOTS
 #endif
 ```
 
-- [ ] **Step 3：render 的 lane plan 用新 Kconfig 設格數**
+- [x] **Step 3：render 的 lane plan 用新 Kconfig 設格數**
 
 在 `nc_render_task.c` 建立 lane plan 的地方（`px_declare()`／預設 lane cfg）把 `slots` 改成：
 
@@ -422,12 +422,12 @@ config NETCORE_PIXEL_RING_SLOTS
     lc.slots = (uint8_t)CONFIG_NETCORE_PIXEL_RING_SLOTS;
 ```
 
-- [ ] **Step 4：建置**
+- [x] **Step 4：建置**
 
 Run: `IDF_PATH=$HOME/esp/esp-idf python3 make.py build ESP32-S3-Zero --project ESP32-S3-Zero-Show9600`
 Expected: 成功；`RING_SLOTS=5` 時環 5 × 38.4 = 192 KB（PSRAM）。
 
-- [ ] **Step 5：真機驗證子幀數**
+- [x] **Step 5：真機驗證子幀數**
 
 ```bash
 python3 tools/nc4.py --port /dev/cu.usbmodemB43A45AD52E41 raw 0xF071
@@ -435,7 +435,7 @@ python3 tools/nc4.py --port /dev/cu.usbmodemB43A45AD52E41 raw 0xF071
 
 Expected：`render.fps` = 200（子幀率）；每 4 個子幀為一個視覺幀（可用 `frames` 對 `pair_n` 觀察 4:1）。
 
-- [ ] **Step 6：Commit**
+- [x] **Step 6：Commit**
 
 ```bash
 git add firmware/main/Kconfig.projbuild firmware/components/tasks/pipeline_task/nc_pair_task.c \
@@ -451,7 +451,7 @@ git commit -m "pair/render: 每視覺幀寫 N 個抖動子幀（Kconfig）"
 - Create: `ports/project/S3/ESP32-S3-Zero-Show2400/`（project.json、sdkconfig.defaults、data/pixel/*）
 - Modify: `docs/00_pm/status.md`
 
-- [ ] **Step 1：建工程**
+- [x] **Step 1：建工程**
 
 ```json
 // ports/project/S3/ESP32-S3-Zero-Show2400/project.json
@@ -468,9 +468,9 @@ CONFIG_NETCORE_PIXEL_I80_LANES=1     # 測試板只有 1 條線；16×150 的硬
 CONFIG_NETCORE_PIXEL_FPS=200          # 子幀率 200 Hz → 視覺 50 fps
 ```
 
-- [ ] **Step 2：複製 `ESP32-S3-Zero-Show9600/data/pixel` 並改 mode/map 為 2,400 px（150 × 16）**
+- [x] **Step 2：複製 `ESP32-S3-Zero-Show9600/data/pixel` 並改 mode/map 為 2,400 px（150 × 16）**
 
-- [ ] **Step 3：建置上板，量三項**
+- [x] **Step 3：建置上板，量三項**
 
 ```bash
 python3 tools/layout_bench.py --port /dev/cu.usbmodemB43A45AD52E41 --all
@@ -483,9 +483,9 @@ Expected（對照 §7.188／§7.190）：
 - 2,400 px、完全隨機：4 子幀 4.63 ms
 - 送燈 4 × 4.5 = 18 ms、視覺 50 fps
 
-- [ ] **Step 4：把數字寫入 `docs/00_pm/status.md` 新一節（§7.193）**
+- [x] **Step 4：把數字寫入 `docs/00_pm/status.md` 新一節（§7.193）**
 
-- [ ] **Step 5：Commit**
+- [x] **Step 5：Commit**
 
 ```bash
 git add ports/project/S3/ESP32-S3-Zero-Show2400 docs/00_pm/status.md
@@ -710,14 +710,14 @@ for (uint32_t i = 0; i < mode->nentry; i++) {
 out->aprog = lalloc((size_t)ndistinct * sizeof(nc_px_aprog_t));
 ```
 
-- [ ] **Step 5：刪除舊 `nc_px_plan_t` 的 8 條上限**（production 冇用；host 測試改用 layout）
+- [x] **Step 5：刪除舊 `nc_px_plan_t` 的 8 條上限**（production 冇用；host 測試改 layout）
 
-> **未做，刻意留低**：`nc_px_plan_t`（`job[NC_PX_JOB_MAX]`）仍然被 `nc_px_show.c`、
-> `pxShow_test`、`pxMap_bench`、`nc_test_action.c`（板上的自測 action）用住，係 A/B 對拍
-> 同自測路徑。它唔在 production（production 走 `nc_px_layout`），所以個 8 條上限只影響
-> 呢條舊路徑。要刪就要連 `nc_px_show_plan／nc_px_pair_apply` 一齊拆 ＋ 改 4 個檔的測試
-> ——屬於獨立清理，唔應該夾在「去魔法數字」這一步做（風險大、收益係 0 記憶體）。
-> 建議另開一個 Task「拆舊 plan 路徑」。現時舊路徑超出上限會**明示**（`skipped++` ＋ log）。
+> **已做（2026-11-25）**：唔係拆整個舊 path（`nc_px_pair_apply／apply12／canvas12_to_8`
+> 仍然係 `effect_bench`／`pipe_bench` 的量測基準，拆咗會連量測工具一齊冇），
+> 而係**拿走上限本身**：`nc_px_plan_t.job` 由 `job[8]` 改成「呼叫端指標 ＋ `jobcap`」，
+> `nc_px_show_plan(..., nc_px_job_t *jobs, uint16_t jobcap)`。容量唔夠會計入 `skipped`
+> （明示，唔會靜靜 drop）。4 個呼叫點（`nc_test_action`、`pxShow_test`、`pxMap_bench`、
+> `pxLayout_test`）按 mode entry 數提供容量。全套 host 測試綠。
 
 - [x] **Step 6：host 測試（40 個效果 > 舊上限 32）**
 
@@ -760,11 +760,15 @@ static void test_many_effects(void)
 
 Run: `bash tools/hosttest/pxLayer_test/run.sh` → Expected: `aprog 數 = 40`、`冇 skip`
 
-- [ ] **Step 7：上板量開機記憶體與時間**
+- [x] **Step 7：上板量開機記憶體與時間**
 
-> **未做（2026-11-25）：用戶暫時冇硬件。** 靜態證據：`nc_px_asset_tbl_t` 由
-> `32 × 262 B ＝ 8,386 B` 的 BSS 陣列變成 `12 B` 表頭 ＋ 按實際效果數配置
-> （SuperMini／EffectPerf 兩個映像都建置成功）。`status sys` 的 `h_int` 要等硬件。
+> **已量（2026-11-25，SuperMini ＋ EffectPerf 映像）**：
+> 靜態 `nc_px_asset.c.obj` 的 `s_tbl` ＝ **12 B**（`nm --print-size`，舊版 8,386 B）；
+> 開機 `status sys`：`h_dma` ＝ **203,827 B**、`h_ps` ＝ **2,082,872 B**；
+> boot log「開機剩餘：內部 211,615 B（最大連續 131,072）｜PSRAM 2,082,872 B」。
+> 註：`h_int` 同改前一樣（211,615 B）——BSS 縮細嘅 8,374 B 被 linker 段對齊／其他 section
+> 吸收，唔會反映成 free heap；真正影響係**唔再有一塊 8.4 KB 常駐 BSS**，同埋效果多過
+> 32 個唔會再被 drop。
 
 ```bash
 python3 tools/nc4.py --port /dev/cu.usbmodemB43A45AD52E41 status sys

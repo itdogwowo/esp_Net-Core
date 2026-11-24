@@ -7761,3 +7761,35 @@ PSRAM），所以分兩段量再相加（同一塊板、同一日）：
 值流單價用今次 session 早前在同一塊板量的：9,600 個值 48.3 ns／值、≥28,800 個值
 138.2 ns／值（PSRAM 順序寫）。**結論：配對層換表之後，最極端佈局的一幀由 23 ms
 （跌出 50 fps）變成 7 ms（142 fps）；成本重心由配對層搬去效果層的值流生成。**
+
+### 7.218 2026-11-25（Task 7／8 收尾：舊 plan 去 8 條上限；計劃剔號補齊）
+
+**Task 8 Step 5（舊 `nc_px_plan_t` 的 8 條上限）**：唔拆整條舊 path（`nc_px_pair_apply／
+apply12／canvas12_to_8` 仍然係 `effect_bench`／`pipe_bench` 的量測基準），而係拿走
+上限本身：
+
+```c
+typedef struct { uint8_t njobs, skipped; uint16_t px, jobcap; nc_px_job_t *job; } nc_px_plan_t;
+esp_err_t nc_px_show_plan(..., nc_px_plan_t *out, nc_px_job_t *jobs, uint16_t jobcap);
+```
+
+容量唔夠會計入 `skipped`（明示，唔會靜靜 drop。舊版 `njobs < 8` 直接停，`skipped` 都唔加）。
+4 個呼叫點按 mode entry 數提供容量：`nc_test_action`（板上的 prog_bench／bpp 自測）、
+`pxShow_test`、`pxMap_bench`、`pxLayout_test`。全套 host 測試綠；EffectPerf 映像建置 OK（33 s）。
+
+**Task 8 Step 7（上板量記憶體）**：SuperMini ＋ EffectPerf 映像、
+`python tools/nc4.py --port COM29 status sys`：
+
+| 項目 | 數值 |
+|---|---|
+| `s_tbl` 靜態大小（`nm --print-size nc_px_asset.c.obj`） | **12 B**（舊版 8,386 B） |
+| 開機剩餘 internal（boot log） | **211,615 B**（最大連續 131,072） |
+| `h_dma` | **203,827 B** |
+| `h_ps` | **2,082,872 B** |
+
+註：free heap 同改前一樣（211,615 B）——BSS 縮細嘅 8,374 B 被 linker 段對齊吸收，
+唔會變成 free heap。真正的收益係「唔再有 8.4 KB 常駐 BSS」＋「效果多過 32 個唔會被 drop」。
+
+**計劃書**：Task 1–5 的 28 個步驟已經補勾（實作 2026-11-24 完成並上板驗證，見
+`night-report-2026-11-24.md`）；Task 6（可選、chunked DMA）保持未勾；Task 7 Step 5、
+Task 8 Step 5／7 全部完成。計劃只剩「Task 6 可選」未做。

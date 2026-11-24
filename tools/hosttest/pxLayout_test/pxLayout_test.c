@@ -102,7 +102,9 @@ static void test_single_chain(void)
 
     // 舊 path：plan＋pair_apply
     static nc_px_plan_t plan;
-    check(nc_px_show_plan(&mode, &map, &assets, inv, 1, &plan) == ESP_OK, "舊 plan 建立");
+    static nc_px_job_t plan_jobs[1];
+    check(nc_px_show_plan(&mode, &map, &assets, inv, 1, &plan, plan_jobs, 1) == ESP_OK,
+          "舊 plan 建立");
     uint8_t old_canvas[32 * 4];
     memset(old_canvas, 0, sizeof(old_canvas));
     nc_px_pair_apply(&plan.job[0], vals, 64, old_canvas);
