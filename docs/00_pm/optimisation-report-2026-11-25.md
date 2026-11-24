@@ -52,11 +52,40 @@
 
 ---
 
-## 3. 下一個值得試的優化（未做）
+## 3. 4 B 表（已量 bench，production 接線後回退）
+
+uniform RGB、單 aprog 的 4 B 表（dst16＋src16；write/aprog 由 layout 統一）：
+
+| 佈局 | 6 B（direct PSRAM） | 4 B | 比例 |
+|---|---:|---:|---:|
+| 500 組（4,500 顆） | 1,602 µs | **777 µs** | 2.06× |
+| 1 條 run（4,800 顆） | 5,027 µs | **923 µs** | 5.45× |
+
+→ 方向正確、值得做；但**production 接線後板上 USB 完全消失**（見 §3.1），
+已回退 production 改動，只保留 bench variant。恢復後應先喺 EffectPerf 驗證
+完整 boot，再入 production。
+
+### 3.1 事故：板 USB 消失（2026-11-25 01:24）
+
+- 上板 9600／full256（4 B 表 production）後，`/dev/cu.usbmodem*` 同 OS USB tree
+  都冇 device。
+- 懷疑 app 喺 USB 初始化前 panic／卡住，所以冇 CDC → 冇 OTA。
+- **Recovery**：斷電重插；如果仍然冇 port → 按住 BOOT 插電入 download mode：
+  ```bash
+  IDF_PATH=$HOME/esp/esp-idf python3 make.py flash ESP32-S3-Zero \
+      --project ESP32-S3-Zero-Show --port /dev/cu.usbmodemXXXX --full
+  ```
+- 安全映像已備：`artifacts/ESP32-S3-Zero.bin`（Zero-Show、64 px）。
+- 板上 `/pixel` 仍係 9600 測試集；恢復後要重新上傳 Zero-Show 內容。
+
+**教訓**：新表格式／新 boot 路徑一定要先喺 lab 映像（EffectPerf）行完整 boot，
+唔好直接上 production；同時要保留 BOOT recovery 路徑。
+
+## 4. 下一個值得試的優化（未做）
 
 | 方向 | 預期 | 成本 |
 |---|---|---|
-| **uniform RGB 用 4 B 表**（dst16＋src16；write/aprog 由 layout 統一） | flat 讀取 57.6 → 38.4 KB（−33%） | 中（多一種表格式＋測試） |
+| **4 B 表入 production**（先 lab 驗證 boot） | apply 5.4 → 可能 2–3 ms | 中 |
 | 量 cache miss／PSRAM 頻寬（ETM/perf） | 找出 0.56 µs/px 的真正瓶頸 | 中 |
 | apply 時 **32-bit store** 落環（取代 4 個 byte store） | 未知（之前 500 組量到更慢） | 低（再量一次） |
 | 值流 + flat 一齊 chunk（pipe 已試 flat 單獨） | 未知 | 中 |
@@ -65,7 +94,7 @@
 
 ---
 
-## 4. 其他已量好的數據（可直接用）
+## 5. 其他已量好的數據（可直接用）
 
 | 項目 | 數字 |
 |---|---:|
@@ -82,7 +111,7 @@
 
 ---
 
-## 5. 點用呢啲數據
+## 6. 點用呢啲數據
 
 1. **切換體驗**：用 playlist 預建 ＋ swap（246 µs）；唔需要再為切換做 cache。
 2. **記憶體規劃**：flat 一律 PSRAM（current＋next ≈115 KB）；internal 留畀功能緩衝
@@ -93,9 +122,10 @@
 
 ---
 
-## 6. Commit（本機，未 push）
+## 7. Commit（本機，未 push）
 
 ```
+325511e test(bench): 4 B 表潛力（2.1×/5.4×）；production 接線後板 USB 消失，已回退
 5f324bc test(apply): RGB 專用／pipe core／值流 internal 三項實驗（全部無增益）
 8b02c59 docs: pipe 量測、flat_err、AGENTS 更新
 49a788c feat(apply): flat chunk 預取（預設關）＋ flat_err
