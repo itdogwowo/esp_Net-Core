@@ -36,9 +36,11 @@ def main():
     ap.add_argument("--port", required=True)
     ap.add_argument("--px", type=int, default=9600)
     ap.add_argument("--groups", type=int, default=500)
-    ap.add_argument("--variant", type=int, default=1, choices=(0, 1))
+    ap.add_argument("--variant", type=int, default=1, choices=(0, 1, 2),
+                    help="0=每組一段連續、1=每組兩段、2=完全隨機（每顆一條單顆 run）")
     ap.add_argument("--reps", type=int, default=8)
-    ap.add_argument("--all", action="store_true", help="掃 100／500／1000 組 × variant 0／1")
+    ap.add_argument("--all", action="store_true",
+                    help="掃 100／500／1000 組 × variant 0／1 ＋ 完全隨機（variant 2）")
     ap.add_argument("--json", action="store_true")
     ap.add_argument("--timeout", type=float, default=20.0)
     args = ap.parse_args()
@@ -48,6 +50,7 @@ def main():
         for v in (0, 1):
             for g in (100, 500, 1000):
                 cases.append((args.px, g, v))
+        cases.append((args.px, 0, 2))     # 上限：每顆一條單顆 run
     else:
         cases.append((args.px, args.groups, args.variant))
 
@@ -81,6 +84,11 @@ def main():
                 ratio = (runs_us / d['apply_us']) if d.get('apply_us') else 0.0
                 print(f"    6 B 表 {flat_n} 顆：apply={d.get('apply_us')}µs  vs  "
                       f"runs={runs_us}µs（{ratio:.2f}×）{note}")
+            # production 的抖動層：4 子幀 ＝ 4 次掃表
+            du, dru = d.get('dither_us'), d.get('dither_runs_us')
+            if du is not None and dru is not None:
+                r2 = (dru / du) if du else 0.0
+                print(f"    抖動 4 子幀：{du}µs  vs  {dru}µs（{r2:.2f}×）")
     finally:
         s.close()
     return 0

@@ -731,10 +731,39 @@ static void on_layoutbench(nc4_ctx_t *ctx, const nc4_frame_t *f)
         }
     }
 
-    char j[760];
+    // production 真正行的係「抖動層逐子幀寫」：4 個子幀 ＝ 4 次掃表。同一份 layout
+    // 兩種表各量一次，先知換表對實際 output 有幾多幫助。
+    uint32_t dither_us = 0xFFFFFFFFu;
+    uint32_t dither_runs_us = 0xFFFFFFFFu;
+    for (int round = 0; round < 2; round++) {
+        nc_px_layout_t lr = lay;
+        lr.flat = NULL;
+        lr.nflat = 0;
+        const int64_t f0 = esp_timer_get_time();
+        for (uint8_t sf = 0; sf < 4; sf++) {
+            nc_px_layout_apply_dither(&lay, vptrs, c8, 4, sf, (uint32_t)sf);
+        }
+        const int64_t f1 = esp_timer_get_time();
+        for (uint8_t sf = 0; sf < 4; sf++) {
+            nc_px_layout_apply_dither(&lr, vptrs, c8, 4, sf, (uint32_t)sf);
+        }
+        const int64_t f2 = esp_timer_get_time();
+        const uint32_t a = (uint32_t)(f1 - f0);
+        const uint32_t b = (uint32_t)(f2 - f1);
+        if (a < dither_us) {
+            dither_us = a;
+        }
+        if (b < dither_runs_us) {
+            dither_runs_us = b;
+        }
+        s_sink += c8[round];
+    }
+
+    char j[800];
     snprintf(j, sizeof(j),
              "{\"px\":%u,\"groups\":%u,\"variant\":%u,\"jobs\":%u,\"runs\":%u,"
              "\"nv\":%u,\"build_us\":%u,\"apply_us\":%u,\"apply12_us\":%u,"
+             "\"dither_us\":%u,\"dither_runs_us\":%u,"
              "\"flat_n\":%u,\"apply_runs_us\":%u,\"flat_int\":%d,"
              "\"sub_us\":[%u,%u,%u,%u],\"sub_total_us\":%u,"
              "\"save_us\":%u,\"load_us\":%u,\"cache_bytes\":%ld,\"load_rc\":%d,"
@@ -747,6 +776,7 @@ static void on_layoutbench(nc4_ctx_t *ctx, const nc4_frame_t *f)
              (unsigned)px, (unsigned)ngroups, (unsigned)variant,
              (unsigned)lay.njobs, (unsigned)lay.nruns, 64u,
              (unsigned)(t1 - t0), (unsigned)apply_us, (unsigned)apply12_us,
+             (unsigned)dither_us, (unsigned)dither_runs_us,
              (unsigned)lay.nflat, (unsigned)apply_runs_us,
              lay.flat ? (esp_ptr_internal(lay.flat) ? 1 : 0) : -1,
              (unsigned)sub_us[0], (unsigned)sub_us[1],
