@@ -7994,3 +7994,37 @@ WSL 寫 v6.1／v6.1.1，唔再寫 v6.1.0。若用家想把 macOS 升到 v6.1.x�
 - 更好嘅做法係 **專用 raw partition ＋ `esp_partition_mmap`**：免 FAT、免 CPU 解檔，
   換場 memcpy 2.1 ms（或直接 XIP 用，但每幀讀 flash 會慢）。
 - 真實 500 組 layout 的 flatify 只 0.375 ms，預讀只對「完全隨機 ＋ 頻繁切換」有明顯價值。
+
+### 7.225 2026-11-25（可以放幾多張 flat 表？PSRAM／Flash 實測預算）
+
+**實測基準（S3 Zero、9,600 px、1 lane）**：`free_ps = 1,763,092 B`（≈1.68 MB）、
+`free_int = 189,767 B`（≈185 KB）、FAT `free = 667,648 B`（≈652 KB，總 852 KB）。
+
+**每張表（6 B／顆）**：
+
+| px | 一張 flat 表 |
+|---:|---:|
+| 64 | 384 B |
+| 2,400 | 14,400 B（14.1 KB） |
+| 9,600 | 57,600 B（56.3 KB） |
+
+**可放張數（9,600 px）**：
+
+| 位置 | 預算 | 張數 |
+|---|---:|---:|
+| PSRAM（保留 256 KB 給其他） | 256 KB | **4** |
+| PSRAM（保留 512 KB） | 512 KB | **9** |
+| PSRAM（用盡） | 1.68 MB | **30** |
+| FAT（全部 free） | 652 KB | **11**（4 KB cluster → 實際約 10） |
+| FAT（只用一半） | 326 KB | **5** |
+| 專用 raw partition（要重分割） | 1 MB | **18** |
+
+**2,400 px 版本**（14.4 KB／張）：PSRAM 512 KB → **36 張**；FAT 652 KB → **45 張**。
+
+**實務結論**：
+- 真正需要「同時存在」的只有 **當前 ＋ 下一張**：2 × 57.6 KB ＝ **115 KB PSRAM**，
+  對 1.68 MB 的 free 係 6.5%，完全夠。
+- 「所有 mode 都預先放好」：9,600 px 最多 FAT 約 10 張／PSRAM 30 張；
+  但每張仍要 46 ms 讀（FAT）或 2.1 ms memcpy，所以張數唔係主要限制，**讀取時間才是**。
+- 建議：**雙緩衝（current＋next）放 PSRAM**，切換時 memcpy 入 internal（2.1 ms）；
+  要免 FAT 就開 1 MB raw partition（18 張）。
