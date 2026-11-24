@@ -8185,3 +8185,26 @@ worst case；**真實配對地圖係一張大表慢慢建立**，run 少而長�
 
 **下一個值得試**（未做）：uniform RGB 用 **4 B 表**（dst16＋src16，write/aprog 由 layout
 統一）→ 讀取 57.6 → 38.4 KB；或量 cache miss／PSRAM 頻寬再決定。
+
+### 7.233 2026-11-25（4 B 表 bench 潛力大；production 接線後板 USB 消失 → 已回退）
+
+**bench（EffectPerf variant 24）**：uniform RGB、單 aprog 的 4 B 表（dst16＋src16）：
+
+| 佈局 | 6 B（direct PSRAM） | 4 B | 比例 |
+|---|---:|---:|---:|
+| 500 組（4,500 顆） | 1,602 µs | **777 µs** | 2.06× |
+| 1 條 run（4,800 顆） | 5,027 µs | **923 µs** | 5.45× |
+
+→ 4 B 表值得做，但**production 接線後出事**：上板（9600、full256）後
+`/dev/cu.usbmodem*` 完全消失（OS 層都冇 USB device），懷疑 app 喺 USB 初始化前
+panic／卡住。因為冇 CDC 就冇 OTA，**要斷電重插；如果仍然冇 port，就要 BOOT＋插電
+入 download mode，再用安全映像 flash**。
+
+**處理**：
+- 已把 production 的 4 B 表改動 **回退**（`nc_px_layout`／header／host test），
+  repo 回到已驗證狀態；只保留 bench variant 24（EffectPerf 用）。
+- 已重建安全映像：`artifacts/ESP32-S3-Zero.bin`（Zero-Show，64 px）。
+- 板上前一次上傳的內容係 9600 測試集；恢復後要重新上傳 Zero-Show 內容。
+
+**教訓**：新增表格式一定要先喺 EffectPerf／lab 驗證完整 boot，再入 production；
+今次係直接上 9600 production，出事後冇遠端 recovery。

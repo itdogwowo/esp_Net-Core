@@ -625,6 +625,47 @@ static void on_layoutbench(nc4_ctx_t *ctx, const nc4_frame_t *f)
     }
 
     uint32_t pipe4_us = 0, pipe8_us = 0, pipe16_us = 0;
+    uint32_t flat4_us = 0;
+    if (variant == 24 && lay.nflat > 0 && lay.naprog == 1) {
+        // uniform RGB 的 4 B 表：dst16 + src16；write/aprog 由 layout 統一。
+        bool rgb = true;
+        for (uint32_t i = 0; i < lay.nflat; i++) {
+            if (lay.flat[i].write != NC_PX_WRITE_RGB || lay.flat[i].aprog != 0) {
+                rgb = false;
+                break;
+            }
+        }
+        if (rgb) {
+            uint16_t *f4 = (uint16_t *)heap_caps_malloc((size_t)lay.nflat * 4u,
+                                                        MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+            if (f4 != NULL) {
+                for (uint32_t i = 0; i < lay.nflat; i++) {
+                    f4[i * 2u] = lay.flat[i].dst;
+                    f4[i * 2u + 1u] = lay.flat[i].src;
+                }
+                const uint16_t *v0 = vptrs[0];
+                const uint32_t nv = lay.aprog[0].nv;
+                uint32_t best = 0xFFFFFFFFu;
+                for (int r = 0; r < 5; r++) {
+                    const int64_t t = esp_timer_get_time();
+                    for (uint32_t i = 0; i < lay.nflat; i++) {
+                        const uint32_t c = f4[i * 2u + 1u];
+                        const uint32_t c1 = (c + 1u < nv) ? (c + 1u) : (c + 1u - nv);
+                        const uint32_t c2 = (c + 2u < nv) ? (c + 2u) : (c + 2u - nv);
+                        uint8_t *o = c8 + ((size_t)f4[i * 2u] << 2);
+                        o[0] = (uint8_t)(v0[c] >> 4);
+                        o[1] = (uint8_t)(v0[c1] >> 4);
+                        o[2] = (uint8_t)(v0[c2] >> 4);
+                        o[3] = 0;
+                    }
+                    const uint32_t us = (uint32_t)(esp_timer_get_time() - t);
+                    if (us < best) best = us;
+                }
+                flat4_us = best;
+                heap_caps_free(f4);
+            }
+        }
+    }
     if (variant == 23) {
         pipe4_us = run_pipe(&lay, vptrs, c8, 4);
         pipe8_us = run_pipe(&lay, vptrs, c8, 8);
@@ -1142,7 +1183,7 @@ static void on_layoutbench(nc4_ctx_t *ctx, const nc4_frame_t *f)
              "\"apply_flat_int_us\":%u,\"apply_flat_ps_us\":%u,"
              "\"flat_write_us\":%u,\"flat_read_us\":%u,"
              "\"memcpy_ps_int_us\":%u,\"memcpy_int_int_us\":%u,"
-             "\"pipe4_us\":%u,\"pipe8_us\":%u,\"pipe16_us\":%u,"
+             "\"pipe4_us\":%u,\"pipe8_us\":%u,\"pipe16_us\":%u,\"flat4_us\":%u,"
              "\"bus_old_us\":%u,\"bus_new_us\":%u,\"bus_ok\":%u,"
              "\"canvas_path_us\":%u,\"direct_us\":%u,\"direct_noclear_us\":%u,"
              "\"direct4_us\":%u,\"batch4_us\":%u,\"batch4_1pass_us\":%u,"
@@ -1166,6 +1207,7 @@ static void on_layoutbench(nc4_ctx_t *ctx, const nc4_frame_t *f)
              (unsigned)flat_write_us, (unsigned)flat_read_us,
              (unsigned)memcpy_ps_int_us, (unsigned)memcpy_int_int_us,
              (unsigned)pipe4_us, (unsigned)pipe8_us, (unsigned)pipe16_us,
+             (unsigned)flat4_us,
              (unsigned)bus_old_us, (unsigned)bus_new_us, (unsigned)bus_ok,
              (unsigned)canvas_us, (unsigned)direct_us, (unsigned)direct_noclear_us,
              (unsigned)direct4_us,
