@@ -8141,3 +8141,21 @@ worst case；**真實配對地圖係一張大表慢慢建立**，run 少而長�
 | 切換 full9600 | swap（jobs=1、next 已預建） |
 
 之前 >32 會 `publish` 靜默 return（唔出 frame）；現在 40 個正常。
+
+### 7.231 2026-11-25（flat chunk 預取：lab 有效、production 未見增益；Kconfig 預設關）
+
+- 新增 `nc_px_layout_apply_range()`（6 B 表分段套用）＋ host 測試 [13] 逐 byte 對拍。
+- pair 加 `NETCORE_PIXEL_APPLY_PIPE`（3 × 8 KB internal chunk、core0 worker memcpy，
+  pair 只讀 internal；預設 **n**）。
+- **bench（EffectPerf variant 23，9,600 px）**：
+
+| 佈局 | direct PSRAM | internal | pipe 4 KB | pipe 8 KB | pipe 16 KB |
+|---|---:|---:|---:|---:|---:|
+| 500 組（4,500 顆） | 1,602 µs | 1,057 µs | 1,528 | 2,388 | **1,455** |
+| 1 條 run（4,800 顆） | 5,027 µs | 2,653 µs | **1,587** | 2,526 | 1,638 |
+
+- **production（9600、mode full256、9,600 px）**：`pipe=1、pipe_ok 540、pipe_fail 0`，
+  但 apply 仍然 **4.99 ms**（同 direct 5.37 差不多），未達 bench 的 1.6 ms。
+  懷疑 worker（core0）同 effect 爭 core／PSRAM 頻寬，或 chunk 邊界效應；
+  已保留 Kconfig（預設關），未有 production 收益前不啟用。
+- `flat_err`（layout + 0xF079）已加：6 B 表建唔到會 log 原因，唔再靜默降級。

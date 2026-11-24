@@ -746,6 +746,44 @@ static void test_many_effects(void)
     free(en);
 }
 
+
+// ── [13] apply_range 分段 == 一次過 apply ──
+static void test_apply_range(void)
+{
+    printf("[13] apply_range 分段\n");
+    nc_px_asset_t a, b;
+    make_asset(&a, "A", 24);
+    make_asset(&b, "B", 8);
+    nc_px_asset_tbl_t assets = { .n = 2, .cap = 2,
+                                 .item = (nc_px_asset_t[]){ a, b } };
+    const nc_px_hw_inv_t inv[] = { { .hw = NC_PX_HW_WS2812, .base = 0, .px = 8 } };
+    nc_px_group_sel_t s0[] = { { .hw = NC_PX_HW_WS2812, .slice = ":" } };
+    nc_px_group_t g = { .id = 1, .name = "g0", .sel = s0, .nsel = 1 };
+    nc_px_map_t map = { .id = 1, .name = "m", .group = &g, .ngroups = 1 };
+    nc_px_mode_entry_t en = { .group = "g0", .effect = "A", .write = NC_PX_WRITE_RGB };
+    nc_px_mode_t mode = { .id = 1, .name = "m", .nentry = 1, .entry = &en };
+    nc_px_layout_t lay;
+    check(nc_px_layout_build(&mode, &map, &assets, inv, 1, &lay) == ESP_OK, "建立");
+    check(lay.nflat > 0, "有 flat 表");
+    uint16_t va[24];
+    for (int i = 0; i < 24; i++) {
+        va[i] = (uint16_t)(0x300 + i * 5);
+    }
+    uint16_t *vp[1] = { va };
+    uint8_t whole[8 * 4], parts[8 * 4];
+    memset(whole, 0x11, sizeof(whole));
+    memset(parts, 0x22, sizeof(parts));
+    (void)nc_px_layout_apply(&lay, vp, whole);
+    uint32_t off = 0;
+    for (uint32_t k = 0; k < 5; k++) {
+        const uint32_t n = (lay.nflat + 4u) / 5u;
+        (void)nc_px_layout_apply_range(&lay, vp, parts, off, n);
+        off += n;
+    }
+    check(memcmp(whole, parts, sizeof(whole)) == 0, "分段 == 一次過（逐 byte）");
+    nc_px_layout_free(&lay);
+}
+
 int main(void)
 {
     test_single_chain();
@@ -753,6 +791,7 @@ int main(void)
     test_step();
     test_overlap_same_channel();
     test_apply4();
+    test_apply_range();
     test_flat6_matches_runs();
     test_many_effects();
     test_500_groups();

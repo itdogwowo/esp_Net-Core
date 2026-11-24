@@ -607,6 +607,11 @@ python3 tools/ota.py --port /dev/cu.usbmodemXXXX \
 - 實測（ESP32-S3、EffectPerf）：9,600 px 24,018 → **6,365 µs（3.77×）**；
   2,400 px 4,765 → **1,166 µs（4.09×）**；`bus_ok=1`。
 - 16-lane × 16-bit 實機仍未做（冇板）；bench 係同一份 C 在板上跑。
+- **pipeline 冇固定 32 上限**：aprog／frame 按 naprog 動態配置（40 個效果真機驗證）。
+- **playlist 預建**：`registry.list` 次序預測下一個 mode，播放時預建 layout＋flat；
+  切換 swap 實測 **246 µs**（原本 rebuild 40–150 ms）。
+- **MSC 預設 0**：`nc4.links[].msc=1` 會把 FAT 交畀 USB host，之後上傳／刪檔全部
+  `err_busy`。recovery：`CONFIG_NETCORE_USB_MSC_FORCE_OFF=y` 臨時唔交碟。
 - 16-bit 高位 byte 用 store（唔用 OR），否則 lane 變暗會殘留。
 
 ### 10.5 抖動
@@ -651,6 +656,9 @@ python3 tools/ota.py --port /dev/cu.usbmodemXXXX \
 - 不要靜默 fallback；policy 寫在 Kconfig／project defaults。
 - `status sys` 的 `h_int`／`h_dma`／`h_ps` 看剩餘；`status mem` 看 buffer 帳。
 - 9,600 px 的環 3 槽 ≈ 115 KB；16×600 I80 一槽 86.8 KB。
+- **flat 表（6 B/px）一律 PSRAM**（`nc_px_layout_flatify()` 預設）；current＋next 兩張
+  ≈115 KB。internal 只做功能緩衝（chunk 預取，Kconfig 預設關）。
+- 開機 scan 入 RAM 的是 **map 定義**（共用、~30 KB），唔係每個 mode 的 flat 表。
 
 ### 11.3 常見 OOM／爆棧
 

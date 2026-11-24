@@ -1480,7 +1480,7 @@ static void on_pixdiag(nc4_ctx_t *ctx, const nc4_frame_t *f)
 #if CONFIG_NETCORE_PIXEL_APPLY_PIPE
         s_pipe.ready ? 1 : 0, (unsigned)s_pipe_ok, (unsigned)s_pipe_fail,
 #else
-        0,
+        0, 0u, 0u,
 #endif
         s_content.next_mode_name, s_content.next_ready ? 1 : 0,
         (unsigned)s_content.next_us, (unsigned)s_content.next_why,
