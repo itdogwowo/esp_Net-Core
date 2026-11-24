@@ -513,6 +513,31 @@ static void on_layoutbench(nc4_ctx_t *ctx, const nc4_frame_t *f)
         }
     }
 
+    uint32_t memcpy_ps_int_us = 0, memcpy_int_int_us = 0;
+    if (variant == 22) {
+        // 57.6 KB（9,600 px × 6 B）由 PSRAM 搬去 internal：評估「背景預讀 +
+        // 切換時 memcpy」能唔能夠代替 14.5 ms 的 flatify。
+        const size_t bytes = 9600u * 6u;
+        uint8_t *src_ps = (uint8_t *)heap_caps_malloc(bytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        uint8_t *dst_int = (uint8_t *)heap_caps_malloc(bytes, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+        if (src_ps != NULL && dst_int != NULL) {
+            memset(src_ps, 0x5A, bytes);
+            uint32_t best = 0xFFFFFFFFu;
+            for (int r = 0; r < 20; r++) {
+                const int64_t t = esp_timer_get_time();
+                memcpy(dst_int, src_ps, bytes);
+                const uint32_t us = (uint32_t)(esp_timer_get_time() - t);
+                if (us < best) best = us;
+            }
+            memcpy_ps_int_us = best;
+        }
+        if (src_ps == NULL || dst_int == NULL) {
+            memcpy_ps_int_us = 0xFFFFFFFFu;   // 配置失敗（distinguish from 0）
+        }
+        heap_caps_free(src_ps);
+        heap_caps_free(dst_int);
+    }
+
     uint32_t merge8_us = 0, swar_us = 0, swar_ok = 0;
     if (variant == 10) {
         const uint32_t lane_px = (px >= 16u) ? (px / 16u) : px;   // 16 條線，每條 600 px
@@ -1024,6 +1049,7 @@ static void on_layoutbench(nc4_ctx_t *ctx, const nc4_frame_t *f)
              "\"flat_int_us\":%u,\"flat_ps_us\":%u,"
              "\"apply_flat_int_us\":%u,\"apply_flat_ps_us\":%u,"
              "\"flat_write_us\":%u,\"flat_read_us\":%u,"
+             "\"memcpy_ps_int_us\":%u,\"memcpy_int_int_us\":%u,"
              "\"bus_old_us\":%u,\"bus_new_us\":%u,\"bus_ok\":%u,"
              "\"canvas_path_us\":%u,\"direct_us\":%u,\"direct_noclear_us\":%u,"
              "\"direct4_us\":%u,\"batch4_us\":%u,\"batch4_1pass_us\":%u,"
@@ -1045,6 +1071,7 @@ static void on_layoutbench(nc4_ctx_t *ctx, const nc4_frame_t *f)
              (unsigned)flat_int_us, (unsigned)flat_ps_us,
              (unsigned)apply_flat_int_us, (unsigned)apply_flat_ps_us,
              (unsigned)flat_write_us, (unsigned)flat_read_us,
+             (unsigned)memcpy_ps_int_us, (unsigned)memcpy_int_int_us,
              (unsigned)bus_old_us, (unsigned)bus_new_us, (unsigned)bus_ok,
              (unsigned)canvas_us, (unsigned)direct_us, (unsigned)direct_noclear_us,
              (unsigned)direct4_us,

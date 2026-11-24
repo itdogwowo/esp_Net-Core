@@ -7974,3 +7974,23 @@ WSL 寫 v6.1／v6.1.1，唔再寫 v6.1.0。若用家想把 macOS 升到 v6.1.x�
 - 另外：FAT 讀取走 SPI flash／cache，唔係「DMA 繞過 flash」；播放時大量讀檔會同
   XIP 爭 flash 頻寬，pair 任務亦會被阻塞（50 fps 下 46 ms ≈ 2–3 幀）。
 - **結論（待解鎖後覆核）**：預讀仍然慢過重建，維持「換場時 flatify」。
+
+### 7.224 2026-11-25（預讀可行性：57.6 KB 由 PSRAM 搬去 internal = 2.10 ms）
+
+用家指出：預先讀取可以用背景時間，換場時就唔佔 CPU；現場 flatify 會佔 CPU。
+呢個角度正確，所以量了「搬表」成本（EffectPerf、0xF077 variant 22）：
+
+| 動作 | 時間 |
+|---|---:|
+| flatify（隨機、internal） | **14.5 ms**（換場時 CPU） |
+| flatify（500 組） | **0.375 ms** |
+| **memcpy 57.6 KB PSRAM → internal** | **2.10 ms**（≈27 MB/s） |
+
+即係：如果表已經喺 PSRAM／flash-mmap，換場只需 **memcpy 2.1 ms**，比 flatify 隨機快 7×。
+
+**但要先有「預讀」**：
+- FAT 讀取係 CPU＋SPI flash，冇 async DMA 直入 RAM；背景讀 57.6 KB 約 46 ms（推算），
+  會同 XIP／effect 爭 flash。
+- 更好嘅做法係 **專用 raw partition ＋ `esp_partition_mmap`**：免 FAT、免 CPU 解檔，
+  換場 memcpy 2.1 ms（或直接 XIP 用，但每幀讀 flash 會慢）。
+- 真實 500 組 layout 的 flatify 只 0.375 ms，預讀只對「完全隨機 ＋ 頻繁切換」有明顯價值。
