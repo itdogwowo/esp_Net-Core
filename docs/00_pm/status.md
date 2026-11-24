@@ -8122,3 +8122,22 @@ worst case；**真實配對地圖係一張大表慢慢建立**，run 少而長�
 
 **注意**：device 上殘留舊 mode（id 撞）會令 playlist 的下一格載入失敗；已清走並重上
 9600 內容；正式 Zero-Show 只有 1 個 mode，所以 next 為空（正常）。
+
+### 7.230 2026-11-25（pipeline 去固定 32：40 個效果 mode 真機驗證）
+
+`nc_pipeline.h` 的固定陣列（`nv[32]`／`aprog[32]`，3 份 ≈52 KB）改成
+**按 naprog 配置／倍增**（PSRAM），frame 只傳 view 指標；effect 的 wave 指標陣列同樣動態。
+冇再引用 `NC_PIPE_APROG_MAX`。
+
+真機（9,600 px、43 個效果、mode `many40` 用 40 個不同效果）：
+
+| 指標 | 值 |
+|---|---:|
+| jobs／runs／naprog | 40／40／**40** |
+| effect frames | 627（有出幀） |
+| fps | 49.9 |
+| pair apply | 4.36 ms |
+| 預建下一張 full9600 | 12.2–13.4 ms |
+| 切換 full9600 | swap（jobs=1、next 已預建） |
+
+之前 >32 會 `publish` 靜默 return（唔出 frame）；現在 40 個正常。

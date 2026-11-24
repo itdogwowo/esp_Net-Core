@@ -1,0 +1,212 @@
+{
+  "version": 1,
+  "id": 9,
+  "name": "many40",
+  "index": 9,
+  "play_loop": -1,
+  "maxF": 0,
+  "mapping": "matrix",
+  "white": 0,
+  "map": [
+    {
+      "group": "matrix.g0",
+      "effect": "w0",
+      "write": "rgb"
+    },
+    {
+      "group": "matrix.g1",
+      "effect": "w1",
+      "write": "rgb"
+    },
+    {
+      "group": "matrix.g2",
+      "effect": "w2",
+      "write": "rgb"
+    },
+    {
+      "group": "matrix.g3",
+      "effect": "w3",
+      "write": "rgb"
+    },
+    {
+      "group": "matrix.g4",
+      "effect": "w4",
+      "write": "rgb"
+    },
+    {
+      "group": "matrix.g5",
+      "effect": "w5",
+      "write": "rgb"
+    },
+    {
+      "group": "matrix.g6",
+      "effect": "w6",
+      "write": "rgb"
+    },
+    {
+      "group": "matrix.g7",
+      "effect": "w7",
+      "write": "rgb"
+    },
+    {
+      "group": "matrix.g8",
+      "effect": "w8",
+      "write": "rgb"
+    },
+    {
+      "group": "matrix.g9",
+      "effect": "w9",
+      "write": "rgb"
+    },
+    {
+      "group": "matrix.g10",
+      "effect": "w10",
+      "write": "rgb"
+    },
+    {
+      "group": "matrix.g11",
+      "effect": "w11",
+      "write": "rgb"
+    },
+    {
+      "group": "matrix.g12",
+      "effect": "w12",
+      "write": "rgb"
+    },
+    {
+      "group": "matrix.g13",
+      "effect": "w13",
+      "write": "rgb"
+    },
+    {
+      "group": "matrix.g14",
+      "effect": "w14",
+      "write": "rgb"
+    },
+    {
+      "group": "matrix.g15",
+      "effect": "w15",
+      "write": "rgb"
+    },
+    {
+      "group": "matrix.g16",
+      "effect": "w16",
+      "write": "rgb"
+    },
+    {
+      "group": "matrix.g17",
+      "effect": "w17",
+      "write": "rgb"
+    },
+    {
+      "group": "matrix.g18",
+      "effect": "w18",
+      "write": "rgb"
+    },
+    {
+      "group": "matrix.g19",
+      "effect": "w19",
+      "write": "rgb"
+    },
+    {
+      "group": "matrix.g20",
+      "effect": "w20",
+      "write": "rgb"
+    },
+    {
+      "group": "matrix.g21",
+      "effect": "w21",
+      "write": "rgb"
+    },
+    {
+      "group": "matrix.g22",
+      "effect": "w22",
+      "write": "rgb"
+    },
+    {
+      "group": "matrix.g23",
+      "effect": "w23",
+      "write": "rgb"
+    },
+    {
+      "group": "matrix.g24",
+      "effect": "w24",
+      "write": "rgb"
+    },
+    {
+      "group": "matrix.g25",
+      "effect": "w25",
+      "write": "rgb"
+    },
+    {
+      "group": "matrix.g26",
+      "effect": "w26",
+      "write": "rgb"
+    },
+    {
+      "group": "matrix.g27",
+      "effect": "w27",
+      "write": "rgb"
+    },
+    {
+      "group": "matrix.g28",
+      "effect": "w28",
+      "write": "rgb"
+    },
+    {
+      "group": "matrix.g29",
+      "effect": "w29",
+      "write": "rgb"
+    },
+    {
+      "group": "matrix.g30",
+      "effect": "w30",
+      "write": "rgb"
+    },
+    {
+      "group": "matrix.g31",
+      "effect": "w31",
+      "write": "rgb"
+    },
+    {
+      "group": "matrix.g32",
+      "effect": "w32",
+      "write": "rgb"
+    },
+    {
+      "group": "matrix.g33",
+      "effect": "w33",
+      "write": "rgb"
+    },
+    {
+      "group": "matrix.g34",
+      "effect": "w34",
+      "write": "rgb"
+    },
+    {
+      "group": "matrix.g35",
+      "effect": "w35",
+      "write": "rgb"
+    },
+    {
+      "group": "matrix.g36",
+      "effect": "w36",
+      "write": "rgb"
+    },
+    {
+      "group": "matrix.g37",
+      "effect": "w37",
+      "write": "rgb"
+    },
+    {
+      "group": "matrix.g38",
+      "effect": "w38",
+      "write": "rgb"
+    },
+    {
+      "group": "matrix.g39",
+      "effect": "w39",
+      "write": "rgb"
+    }
+  ]
+}

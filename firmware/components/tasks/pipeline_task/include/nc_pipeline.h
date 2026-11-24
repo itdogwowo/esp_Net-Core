@@ -20,24 +20,24 @@
 extern "C" {
 #endif
 
-#define NC_PIPE_APROG_MAX NC_PX_LAYOUT_ASSET_MAX
-
+// 冇固定上限：陣列由 effect 按 naprog 配置（PSRAM），下面只係 view。
 // 一幀：naprog 條值流（vals[i] 指向 effect 的 pool；長度 nv[i]）
 typedef struct {
     uint32_t seq;
     uint32_t plan_gen;
-    uint32_t t_pub_us;       // effect 完成時間（pair 算 latency）
+    uint32_t t_pub_us;         // effect 完成時間（pair 算 latency）
     uint32_t naprog;
-    uint32_t nv[NC_PIPE_APROG_MAX];
-    uint16_t *vals[NC_PIPE_APROG_MAX];
+    const uint32_t *nv;        // [naprog]（effect 擁有；plan 唔變就穩定）
+    uint16_t *const *vals;     // [naprog]（effect 擁有）
 } nc_pipe_effect_frame_t;
 
 // pair → effect：plan 換了，effect 要重建 wave table／pool
 typedef struct {
     uint32_t plan_gen;
     uint32_t naprog;
-    uint32_t nv[NC_PIPE_APROG_MAX];
-    nc_px_aprog_t aprog[NC_PIPE_APROG_MAX];
+    uint32_t cap;              // nv／aprog 容量（effect 管理）
+    uint32_t *nv;              // [cap]
+    nc_px_aprog_t *aprog;      // [cap]
 } nc_pipe_aprog_set_t;
 
 typedef struct {

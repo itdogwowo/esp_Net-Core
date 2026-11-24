@@ -60,6 +60,806 @@
       "offset": 0,
       "speed": 1,
       "reverse": false
+    },
+    {
+      "id": 100,
+      "name": "w0",
+      "pixel_n": 256,
+      "program": [
+        {
+          "type": "math_now",
+          "F": 8,
+          "l_max": 384,
+          "l_lim": 0,
+          "phi": 0,
+          "end_Time": 256
+        }
+      ],
+      "step": 1,
+      "spacing": 0,
+      "offset": 0,
+      "speed": 1,
+      "reverse": false
+    },
+    {
+      "id": 101,
+      "name": "w1",
+      "pixel_n": 256,
+      "program": [
+        {
+          "type": "math_now",
+          "F": 8,
+          "l_max": 384,
+          "l_lim": 0,
+          "phi": 0,
+          "end_Time": 256
+        }
+      ],
+      "step": 1,
+      "spacing": 0,
+      "offset": 3,
+      "speed": 1,
+      "reverse": false
+    },
+    {
+      "id": 102,
+      "name": "w2",
+      "pixel_n": 256,
+      "program": [
+        {
+          "type": "math_now",
+          "F": 8,
+          "l_max": 384,
+          "l_lim": 0,
+          "phi": 0,
+          "end_Time": 256
+        }
+      ],
+      "step": 1,
+      "spacing": 0,
+      "offset": 6,
+      "speed": 1,
+      "reverse": false
+    },
+    {
+      "id": 103,
+      "name": "w3",
+      "pixel_n": 256,
+      "program": [
+        {
+          "type": "math_now",
+          "F": 8,
+          "l_max": 384,
+          "l_lim": 0,
+          "phi": 0,
+          "end_Time": 256
+        }
+      ],
+      "step": 1,
+      "spacing": 0,
+      "offset": 9,
+      "speed": 1,
+      "reverse": false
+    },
+    {
+      "id": 104,
+      "name": "w4",
+      "pixel_n": 256,
+      "program": [
+        {
+          "type": "math_now",
+          "F": 8,
+          "l_max": 384,
+          "l_lim": 0,
+          "phi": 0,
+          "end_Time": 256
+        }
+      ],
+      "step": 1,
+      "spacing": 0,
+      "offset": 12,
+      "speed": 1,
+      "reverse": false
+    },
+    {
+      "id": 105,
+      "name": "w5",
+      "pixel_n": 256,
+      "program": [
+        {
+          "type": "math_now",
+          "F": 8,
+          "l_max": 384,
+          "l_lim": 0,
+          "phi": 0,
+          "end_Time": 256
+        }
+      ],
+      "step": 1,
+      "spacing": 0,
+      "offset": 15,
+      "speed": 1,
+      "reverse": false
+    },
+    {
+      "id": 106,
+      "name": "w6",
+      "pixel_n": 256,
+      "program": [
+        {
+          "type": "math_now",
+          "F": 8,
+          "l_max": 384,
+          "l_lim": 0,
+          "phi": 0,
+          "end_Time": 256
+        }
+      ],
+      "step": 1,
+      "spacing": 0,
+      "offset": 18,
+      "speed": 1,
+      "reverse": false
+    },
+    {
+      "id": 107,
+      "name": "w7",
+      "pixel_n": 256,
+      "program": [
+        {
+          "type": "math_now",
+          "F": 8,
+          "l_max": 384,
+          "l_lim": 0,
+          "phi": 0,
+          "end_Time": 256
+        }
+      ],
+      "step": 1,
+      "spacing": 0,
+      "offset": 21,
+      "speed": 1,
+      "reverse": false
+    },
+    {
+      "id": 108,
+      "name": "w8",
+      "pixel_n": 256,
+      "program": [
+        {
+          "type": "math_now",
+          "F": 8,
+          "l_max": 384,
+          "l_lim": 0,
+          "phi": 0,
+          "end_Time": 256
+        }
+      ],
+      "step": 1,
+      "spacing": 0,
+      "offset": 24,
+      "speed": 1,
+      "reverse": false
+    },
+    {
+      "id": 109,
+      "name": "w9",
+      "pixel_n": 256,
+      "program": [
+        {
+          "type": "math_now",
+          "F": 8,
+          "l_max": 384,
+          "l_lim": 0,
+          "phi": 0,
+          "end_Time": 256
+        }
+      ],
+      "step": 1,
+      "spacing": 0,
+      "offset": 27,
+      "speed": 1,
+      "reverse": false
+    },
+    {
+      "id": 110,
+      "name": "w10",
+      "pixel_n": 256,
+      "program": [
+        {
+          "type": "math_now",
+          "F": 8,
+          "l_max": 384,
+          "l_lim": 0,
+          "phi": 0,
+          "end_Time": 256
+        }
+      ],
+      "step": 1,
+      "spacing": 0,
+      "offset": 30,
+      "speed": 1,
+      "reverse": false
+    },
+    {
+      "id": 111,
+      "name": "w11",
+      "pixel_n": 256,
+      "program": [
+        {
+          "type": "math_now",
+          "F": 8,
+          "l_max": 384,
+          "l_lim": 0,
+          "phi": 0,
+          "end_Time": 256
+        }
+      ],
+      "step": 1,
+      "spacing": 0,
+      "offset": 33,
+      "speed": 1,
+      "reverse": false
+    },
+    {
+      "id": 112,
+      "name": "w12",
+      "pixel_n": 256,
+      "program": [
+        {
+          "type": "math_now",
+          "F": 8,
+          "l_max": 384,
+          "l_lim": 0,
+          "phi": 0,
+          "end_Time": 256
+        }
+      ],
+      "step": 1,
+      "spacing": 0,
+      "offset": 36,
+      "speed": 1,
+      "reverse": false
+    },
+    {
+      "id": 113,
+      "name": "w13",
+      "pixel_n": 256,
+      "program": [
+        {
+          "type": "math_now",
+          "F": 8,
+          "l_max": 384,
+          "l_lim": 0,
+          "phi": 0,
+          "end_Time": 256
+        }
+      ],
+      "step": 1,
+      "spacing": 0,
+      "offset": 39,
+      "speed": 1,
+      "reverse": false
+    },
+    {
+      "id": 114,
+      "name": "w14",
+      "pixel_n": 256,
+      "program": [
+        {
+          "type": "math_now",
+          "F": 8,
+          "l_max": 384,
+          "l_lim": 0,
+          "phi": 0,
+          "end_Time": 256
+        }
+      ],
+      "step": 1,
+      "spacing": 0,
+      "offset": 42,
+      "speed": 1,
+      "reverse": false
+    },
+    {
+      "id": 115,
+      "name": "w15",
+      "pixel_n": 256,
+      "program": [
+        {
+          "type": "math_now",
+          "F": 8,
+          "l_max": 384,
+          "l_lim": 0,
+          "phi": 0,
+          "end_Time": 256
+        }
+      ],
+      "step": 1,
+      "spacing": 0,
+      "offset": 45,
+      "speed": 1,
+      "reverse": false
+    },
+    {
+      "id": 116,
+      "name": "w16",
+      "pixel_n": 256,
+      "program": [
+        {
+          "type": "math_now",
+          "F": 8,
+          "l_max": 384,
+          "l_lim": 0,
+          "phi": 0,
+          "end_Time": 256
+        }
+      ],
+      "step": 1,
+      "spacing": 0,
+      "offset": 48,
+      "speed": 1,
+      "reverse": false
+    },
+    {
+      "id": 117,
+      "name": "w17",
+      "pixel_n": 256,
+      "program": [
+        {
+          "type": "math_now",
+          "F": 8,
+          "l_max": 384,
+          "l_lim": 0,
+          "phi": 0,
+          "end_Time": 256
+        }
+      ],
+      "step": 1,
+      "spacing": 0,
+      "offset": 51,
+      "speed": 1,
+      "reverse": false
+    },
+    {
+      "id": 118,
+      "name": "w18",
+      "pixel_n": 256,
+      "program": [
+        {
+          "type": "math_now",
+          "F": 8,
+          "l_max": 384,
+          "l_lim": 0,
+          "phi": 0,
+          "end_Time": 256
+        }
+      ],
+      "step": 1,
+      "spacing": 0,
+      "offset": 54,
+      "speed": 1,
+      "reverse": false
+    },
+    {
+      "id": 119,
+      "name": "w19",
+      "pixel_n": 256,
+      "program": [
+        {
+          "type": "math_now",
+          "F": 8,
+          "l_max": 384,
+          "l_lim": 0,
+          "phi": 0,
+          "end_Time": 256
+        }
+      ],
+      "step": 1,
+      "spacing": 0,
+      "offset": 57,
+      "speed": 1,
+      "reverse": false
+    },
+    {
+      "id": 120,
+      "name": "w20",
+      "pixel_n": 256,
+      "program": [
+        {
+          "type": "math_now",
+          "F": 8,
+          "l_max": 384,
+          "l_lim": 0,
+          "phi": 0,
+          "end_Time": 256
+        }
+      ],
+      "step": 1,
+      "spacing": 0,
+      "offset": 60,
+      "speed": 1,
+      "reverse": false
+    },
+    {
+      "id": 121,
+      "name": "w21",
+      "pixel_n": 256,
+      "program": [
+        {
+          "type": "math_now",
+          "F": 8,
+          "l_max": 384,
+          "l_lim": 0,
+          "phi": 0,
+          "end_Time": 256
+        }
+      ],
+      "step": 1,
+      "spacing": 0,
+      "offset": 63,
+      "speed": 1,
+      "reverse": false
+    },
+    {
+      "id": 122,
+      "name": "w22",
+      "pixel_n": 256,
+      "program": [
+        {
+          "type": "math_now",
+          "F": 8,
+          "l_max": 384,
+          "l_lim": 0,
+          "phi": 0,
+          "end_Time": 256
+        }
+      ],
+      "step": 1,
+      "spacing": 0,
+      "offset": 66,
+      "speed": 1,
+      "reverse": false
+    },
+    {
+      "id": 123,
+      "name": "w23",
+      "pixel_n": 256,
+      "program": [
+        {
+          "type": "math_now",
+          "F": 8,
+          "l_max": 384,
+          "l_lim": 0,
+          "phi": 0,
+          "end_Time": 256
+        }
+      ],
+      "step": 1,
+      "spacing": 0,
+      "offset": 69,
+      "speed": 1,
+      "reverse": false
+    },
+    {
+      "id": 124,
+      "name": "w24",
+      "pixel_n": 256,
+      "program": [
+        {
+          "type": "math_now",
+          "F": 8,
+          "l_max": 384,
+          "l_lim": 0,
+          "phi": 0,
+          "end_Time": 256
+        }
+      ],
+      "step": 1,
+      "spacing": 0,
+      "offset": 72,
+      "speed": 1,
+      "reverse": false
+    },
+    {
+      "id": 125,
+      "name": "w25",
+      "pixel_n": 256,
+      "program": [
+        {
+          "type": "math_now",
+          "F": 8,
+          "l_max": 384,
+          "l_lim": 0,
+          "phi": 0,
+          "end_Time": 256
+        }
+      ],
+      "step": 1,
+      "spacing": 0,
+      "offset": 75,
+      "speed": 1,
+      "reverse": false
+    },
+    {
+      "id": 126,
+      "name": "w26",
+      "pixel_n": 256,
+      "program": [
+        {
+          "type": "math_now",
+          "F": 8,
+          "l_max": 384,
+          "l_lim": 0,
+          "phi": 0,
+          "end_Time": 256
+        }
+      ],
+      "step": 1,
+      "spacing": 0,
+      "offset": 78,
+      "speed": 1,
+      "reverse": false
+    },
+    {
+      "id": 127,
+      "name": "w27",
+      "pixel_n": 256,
+      "program": [
+        {
+          "type": "math_now",
+          "F": 8,
+          "l_max": 384,
+          "l_lim": 0,
+          "phi": 0,
+          "end_Time": 256
+        }
+      ],
+      "step": 1,
+      "spacing": 0,
+      "offset": 81,
+      "speed": 1,
+      "reverse": false
+    },
+    {
+      "id": 128,
+      "name": "w28",
+      "pixel_n": 256,
+      "program": [
+        {
+          "type": "math_now",
+          "F": 8,
+          "l_max": 384,
+          "l_lim": 0,
+          "phi": 0,
+          "end_Time": 256
+        }
+      ],
+      "step": 1,
+      "spacing": 0,
+      "offset": 84,
+      "speed": 1,
+      "reverse": false
+    },
+    {
+      "id": 129,
+      "name": "w29",
+      "pixel_n": 256,
+      "program": [
+        {
+          "type": "math_now",
+          "F": 8,
+          "l_max": 384,
+          "l_lim": 0,
+          "phi": 0,
+          "end_Time": 256
+        }
+      ],
+      "step": 1,
+      "spacing": 0,
+      "offset": 87,
+      "speed": 1,
+      "reverse": false
+    },
+    {
+      "id": 130,
+      "name": "w30",
+      "pixel_n": 256,
+      "program": [
+        {
+          "type": "math_now",
+          "F": 8,
+          "l_max": 384,
+          "l_lim": 0,
+          "phi": 0,
+          "end_Time": 256
+        }
+      ],
+      "step": 1,
+      "spacing": 0,
+      "offset": 90,
+      "speed": 1,
+      "reverse": false
+    },
+    {
+      "id": 131,
+      "name": "w31",
+      "pixel_n": 256,
+      "program": [
+        {
+          "type": "math_now",
+          "F": 8,
+          "l_max": 384,
+          "l_lim": 0,
+          "phi": 0,
+          "end_Time": 256
+        }
+      ],
+      "step": 1,
+      "spacing": 0,
+      "offset": 93,
+      "speed": 1,
+      "reverse": false
+    },
+    {
+      "id": 132,
+      "name": "w32",
+      "pixel_n": 256,
+      "program": [
+        {
+          "type": "math_now",
+          "F": 8,
+          "l_max": 384,
+          "l_lim": 0,
+          "phi": 0,
+          "end_Time": 256
+        }
+      ],
+      "step": 1,
+      "spacing": 0,
+      "offset": 96,
+      "speed": 1,
+      "reverse": false
+    },
+    {
+      "id": 133,
+      "name": "w33",
+      "pixel_n": 256,
+      "program": [
+        {
+          "type": "math_now",
+          "F": 8,
+          "l_max": 384,
+          "l_lim": 0,
+          "phi": 0,
+          "end_Time": 256
+        }
+      ],
+      "step": 1,
+      "spacing": 0,
+      "offset": 99,
+      "speed": 1,
+      "reverse": false
+    },
+    {
+      "id": 134,
+      "name": "w34",
+      "pixel_n": 256,
+      "program": [
+        {
+          "type": "math_now",
+          "F": 8,
+          "l_max": 384,
+          "l_lim": 0,
+          "phi": 0,
+          "end_Time": 256
+        }
+      ],
+      "step": 1,
+      "spacing": 0,
+      "offset": 102,
+      "speed": 1,
+      "reverse": false
+    },
+    {
+      "id": 135,
+      "name": "w35",
+      "pixel_n": 256,
+      "program": [
+        {
+          "type": "math_now",
+          "F": 8,
+          "l_max": 384,
+          "l_lim": 0,
+          "phi": 0,
+          "end_Time": 256
+        }
+      ],
+      "step": 1,
+      "spacing": 0,
+      "offset": 105,
+      "speed": 1,
+      "reverse": false
+    },
+    {
+      "id": 136,
+      "name": "w36",
+      "pixel_n": 256,
+      "program": [
+        {
+          "type": "math_now",
+          "F": 8,
+          "l_max": 384,
+          "l_lim": 0,
+          "phi": 0,
+          "end_Time": 256
+        }
+      ],
+      "step": 1,
+      "spacing": 0,
+      "offset": 108,
+      "speed": 1,
+      "reverse": false
+    },
+    {
+      "id": 137,
+      "name": "w37",
+      "pixel_n": 256,
+      "program": [
+        {
+          "type": "math_now",
+          "F": 8,
+          "l_max": 384,
+          "l_lim": 0,
+          "phi": 0,
+          "end_Time": 256
+        }
+      ],
+      "step": 1,
+      "spacing": 0,
+      "offset": 111,
+      "speed": 1,
+      "reverse": false
+    },
+    {
+      "id": 138,
+      "name": "w38",
+      "pixel_n": 256,
+      "program": [
+        {
+          "type": "math_now",
+          "F": 8,
+          "l_max": 384,
+          "l_lim": 0,
+          "phi": 0,
+          "end_Time": 256
+        }
+      ],
+      "step": 1,
+      "spacing": 0,
+      "offset": 114,
+      "speed": 1,
+      "reverse": false
+    },
+    {
+      "id": 139,
+      "name": "w39",
+      "pixel_n": 256,
+      "program": [
+        {
+          "type": "math_now",
+          "F": 8,
+          "l_max": 384,
+          "l_lim": 0,
+          "phi": 0,
+          "end_Time": 256
+        }
+      ],
+      "step": 1,
+      "spacing": 0,
+      "offset": 117,
+      "speed": 1,
+      "reverse": false
     }
   ]
 }
