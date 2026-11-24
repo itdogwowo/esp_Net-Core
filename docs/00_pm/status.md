@@ -7944,6 +7944,9 @@ WSL 寫 v6.1／v6.1.1，唔再寫 v6.1.0。若用家想把 macOS 升到 v6.1.x�
 | 500 組（nflat 4,500） | **0.375 ms** | **1.225 ms** | 2.077 ms | 1.746 ms |
 | 完全隨機（nflat 9,600） | **14.538 ms** | **3.006 ms** | 19.820 ms | 5.079 ms |
 
+**用語（避免誤會）**：下表 `flatify` 係**建表速度**——**換場時一次性**，唔係每幀；
+每幀只用 `apply` 那欄。同一個 mode 播放期間唔會再建表。
+
 **結論**：
 1. **flat 表放 internal 才快**：PSRAM 版 apply 慢 42%（500 組）／69%（隨機）；
    同之前的實作量測一致。**唔應該改放 PSRAM**。
@@ -7957,3 +7960,17 @@ WSL 寫 v6.1／v6.1.1，唔再寫 v6.1.0。若用家想把 macOS 升到 v6.1.x�
 **pipeline 的 32 條值流**（同場確認）：係**每個 mode** 的**不同效果數**（值流條數），
 唔係 mode 數；一個 mode 有 >32 個不同效果時 `nc_pipe_aprog_publish()` 會靜默 return。
 最後一個固定上限，待改動態。
+
+### 7.223 2026-11-24（Flash 持久化量測受阻：FAT 被 MSC 鎖住）
+
+用家提出：flat 表可否半永久化存 Flash，換場前用 DMA／預讀取回，避免 14.5 ms 建表？
+
+- 新增量測指令 **0xF07B FLATREAD**（讀 `map/matrix.json` 或 `/flat_bench.bin`，回 `{ok,bytes,us}`）。
+- 上板後**讀取回 `err=open`**：`/data` 的 FAT 被 MSC 佔住（上傳／讀取都 `err_busy`），
+  連讀都開唔到檔。這是之前已記錄的裝置狀態問題（要斷電重插，或把 `system.json` 的
+  `links[].msc` 設 0）。
+- **在解鎖之前量唔到真數字**；現有推算：快取 12.5 KB → 10 ms（≈1.25 MB/s），
+  57.6 KB ≈ **46 ms**，比重新 flatify 的 14.5 ms 更慢。
+- 另外：FAT 讀取走 SPI flash／cache，唔係「DMA 繞過 flash」；播放時大量讀檔會同
+  XIP 爭 flash 頻寬，pair 任務亦會被阻塞（50 fps 下 46 ms ≈ 2–3 幀）。
+- **結論（待解鎖後覆核）**：預讀仍然慢過重建，維持「換場時 flatify」。

@@ -1098,6 +1098,8 @@ static void on_reload(nc4_ctx_t *ctx, const nc4_frame_t *f)
 #define NC4_CMD_PIPERESET_RSP 0xF076
 #define NC4_CMD_PIXDIAG   0xF079
 #define NC4_CMD_PIXDIAG_RSP 0xF07A
+#define NC4_CMD_FLATREAD  0xF07B
+#define NC4_CMD_FLATREAD_RSP 0xF07C
 
 static void on_pipestats(nc4_ctx_t *ctx, const nc4_frame_t *f)
 {
@@ -1187,6 +1189,61 @@ static void on_pixdiag(nc4_ctx_t *ctx, const nc4_frame_t *f)
     reply_json(ctx, NC4_CMD_PIXDIAG_RSP, j);
 }
 
+// 0xF07B：量 FAT 讀一張平坦表（預設 57,600 B）。payload = size(u32 LE)。
+// 用途：評估「flat 表存 Flash、換場前預讀」值唔值得；會佔用 pair 任務（播放會停一下）。
+static void on_flatread(nc4_ctx_t *ctx, const nc4_frame_t *f)
+{
+    uint32_t size = 57600;
+    if (f != NULL && f->len >= 4) {
+        memcpy(&size, f->data, 4);
+    }
+    if (size == 0 || size > (256u * 1024u)) {
+        reply_json(ctx, NC4_CMD_FLATREAD_RSP, "{\"err\":\"size\"}");
+        return;
+    }
+    const char *base = nc_store_fs_base();
+    char path[96];
+    if (f != NULL && f->len >= 4) {
+        (void)snprintf(path, sizeof(path), "%s/flat_bench.bin",
+                       (base != NULL) ? base : "/data");
+    } else {
+        // 冇 payload：讀板上已有嘅大檔（501 組 map ≈58 KB），量同一個 FAT 的讀速
+        (void)snprintf(path, sizeof(path), "%s/map/matrix.json", s_content.pixel_dir);
+        size = 0;                     // 由檔案大小決定
+    }
+    uint8_t *buf = heap_caps_malloc(size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (buf == NULL) {
+        reply_json(ctx, NC4_CMD_FLATREAD_RSP, "{\"err\":\"oom\"}");
+        return;
+    }
+    FILE *fp = fopen(path, "rb");
+    if (fp == NULL) {
+        heap_caps_free(buf);
+        reply_json(ctx, NC4_CMD_FLATREAD_RSP, "{\"err\":\"open\"}");
+        return;
+    }
+    if (size == 0) {
+        (void)fseek(fp, 0, SEEK_END);
+        size = (uint32_t)ftell(fp);
+        (void)fseek(fp, 0, SEEK_SET);
+        if (size == 0 || size > (256u * 1024u)) {
+            (void)fclose(fp);
+            heap_caps_free(buf);
+            reply_json(ctx, NC4_CMD_FLATREAD_RSP, "{\"err\":\"filesize\"}");
+            return;
+        }
+    }
+    const int64_t t0 = esp_timer_get_time();
+    const size_t got = fread(buf, 1, size, fp);
+    const int64_t t1 = esp_timer_get_time();
+    (void)fclose(fp);
+    heap_caps_free(buf);
+    char j[160];
+    (void)snprintf(j, sizeof(j), "{\"ok\":%d,\"bytes\":%u,\"us\":%u}",
+                   (got == size) ? 1 : 0, (unsigned)got, (unsigned)(t1 - t0));
+    reply_json(ctx, NC4_CMD_FLATREAD_RSP, j);
+}
+
 static void on_pipeburn(nc4_ctx_t *ctx, const nc4_frame_t *f)
 {
     uint32_t sec = 10;
@@ -1214,6 +1271,7 @@ static const nc_action_t s_actions[] = {
     { NC4_CMD_PIPEBURN, on_pipeburn, "pair" },
     { NC4_CMD_PIPERESET, on_pipereset, "pair" },
     { NC4_CMD_PIXDIAG, on_pixdiag, "pair" },
+    { NC4_CMD_FLATREAD, on_flatread, "pair" },
 };
 
 NC_ACTION_TABLE_DEF(nc_pair_task_table, "pair", s_actions);
