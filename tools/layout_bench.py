@@ -53,7 +53,8 @@ def main():
                 cases.append((args.px, g, v))
         cases.append((args.px, 0, 2))     # 上限：每顆一條單顆 run
         cases.append((args.px, 0, 3))     # 上限＋每粒燈自己一個 group
-        cases.append((args.px, 0, 4))     # 上限＋每個通道一條 entry（4×px）
+        # 通道級：4×px 條 entry，px 大過 ~4,000 就爆 entry 記憶體，所以固定 2,400 px
+        cases.append((2400, 0, 4))
     else:
         cases.append((args.px, args.groups, args.variant))
 
