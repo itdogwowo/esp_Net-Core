@@ -8219,3 +8219,16 @@ panic／卡住。因為冇 CDC 就冇 OTA，**要斷電重插；如果仍然冇 
 - 工具 `tools/fps_trace.py`：輪詢 0xF081，印 target／avg／sd／max／bad／hist top，
   判 STABLE／BORDERLINE／UNSTABLE；可出 CSV 同 PNG（histogram＋fps 時間線）。
 - **未上板驗證**：板嘅 USB 仍未返（見 §7.233），tool 只做過語法／編譯檢查。
+
+### 7.235 2026-11-25（時間銀行：deadline 時鐘＋slack，吸收臨時尖峰）
+
+用家要求：「空閒時儲起多餘時間（有上限），尖峰時釋放，之後再補回；平時要追得準」。
+
+- 新模組 `nc_fps_clock`（純 C，可 host 測試）：deadline 固定在 grid；早完成 → 存
+  `slack`（上限 Kconfig `NETCORE_PIXEL_SLACK_MS`，預設 50 ms）；遲到 → 先花 slack，
+  deadline 留 grid（下一輪縮短等待追返）；存款不足 → `overrun`，deadline 重設
+  `now + period`（唔爆追）。
+- render 節拍由「固定週期 timer」改成「一次性 timer ＋ deadline 時鐘」。
+- 0xF081 新增 `slack_us／catchup／overrun`；`fps_trace.py` 會顯示。
+- Host 測試 `fpsclock_test`（5 組情境）＋全套測試 **全部通過**。
+- **未上板**：板 USB 仍未返（§7.233）。

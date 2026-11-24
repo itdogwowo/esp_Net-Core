@@ -11,6 +11,7 @@
 //   tasks/render_task          這個檔＋後端轉接（i80／spi／direct／mock）
 //   driver/drv_i80、drv_spi_led 硬件（PCLK／DMA／完成）
 #include "nc_render.h"
+#include "nc_fps_clock.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -320,6 +321,7 @@ static struct {
     SemaphoreHandle_t tick;      // 節拍：esp_timer 週期性給（唔 busy-wait）
     esp_timer_handle_t timer;
 } s_px;
+static nc_fps_clock_t s_clock;
 
 // esp_timer 回呼（esp_timer 任務 context，不是 ISR）→ 給一次節拍。
 static void render_tick(void *arg)
@@ -468,11 +470,14 @@ size_t nc_render_fps_json(char *out, size_t cap)
     int k = snprintf(out, cap,
                      "{\"target_us\":%u,\"n\":%u,\"avg_us\":%u,\"sd_us\":%u,"
                      "\"min_us\":%u,\"max_us\":%u,\"bad\":%u,"
-                     "\"starved\":%lu,\"late\":%lu,\"frames\":%lu,\"hist\":[",
+                     "\"starved\":%lu,\"late\":%lu,\"frames\":%lu,"
+                     "\"slack_us\":%lld,\"catchup\":%lu,\"overrun\":%lu,\"hist\":[",
                      (unsigned)s_px.period_us, (unsigned)n, (unsigned)avg, (unsigned)sd,
                      (unsigned)s_jit.min_us, (unsigned)s_jit.max_us, (unsigned)s_jit.bad,
                      (unsigned long)s_px.st.starved, (unsigned long)s_px.st.late,
-                     (unsigned long)s_px.st.frames);
+                     (unsigned long)s_px.st.frames,
+                     (long long)s_clock.slack_us, (unsigned long)s_clock.catchup_n,
+                     (unsigned long)s_clock.overrun_n);
     if (k < 0 || (size_t)k >= cap) {
         return 0;
     }
@@ -496,15 +501,17 @@ static void px_render_loop(void *arg)
     s_px.mark_us = prev;
     s_px.mark_frames = 0;
     while (!nc_task_exit_requested()) {
-        // 節拍由 esp_timer 給（period = system.json frame_interval_ms），
-        // 唔靠 vTaskDelay 的 1 ms 粒度，亦唔 busy-wait：fps 同 frame_interval_ms 一致。
-        if (s_px.tick != NULL) {
+        // deadline 時鐘：未到就 arm 一次性 timer 等；已過（catch-up）就即刻做。
+        const int64_t wait_us = nc_fps_clock_wait(&s_clock, esp_timer_get_time());
+        if (wait_us > 0 && s_px.timer != NULL && s_px.tick != NULL) {
+            (void)esp_timer_start_once(s_px.timer, (uint64_t)wait_us);
             (void)xSemaphoreTake(s_px.tick, pdMS_TO_TICKS(1000));
         }
         for (int i = 0; i < s_px.nlane; i++) {
             lane_tick(&s_px.lane[i]);
         }
         const int64_t after = esp_timer_get_time();
+        nc_fps_clock_done(&s_clock, after);
         const uint32_t dt = (uint32_t)(after - prev);
         s_px.st.frame_us = dt;
         jit_record(dt, s_px.period_us);
@@ -661,7 +668,7 @@ static esp_err_t px_start(const nc_task_res_view_t *res, int nres)
             nc_px_ring_release(s_px.lane[i].q, seq);
         }
     }
-    // 節拍：esp_timer 週期性給（period = frame_interval_ms）。
+    // 節拍：esp_timer **一次性**，每輪按 deadline 時鐘重新 arm（可追趕）。
     s_px.tick = xSemaphoreCreateBinary();
     const esp_timer_create_args_t targs = {
         .callback = render_tick,
@@ -669,11 +676,12 @@ static esp_err_t px_start(const nc_task_res_view_t *res, int nres)
         .dispatch_method = ESP_TIMER_TASK,
         .name = "render_tick",
     };
-    if (s_px.tick == NULL || esp_timer_create(&targs, &s_px.timer) != ESP_OK ||
-        esp_timer_start_periodic(s_px.timer, s_px.period_us) != ESP_OK) {
+    if (s_px.tick == NULL || esp_timer_create(&targs, &s_px.timer) != ESP_OK) {
         ESP_LOGE(TAG, "節拍 timer 建立失敗（%u µs）", (unsigned)s_px.period_us);
         return ESP_FAIL;
     }
+    nc_fps_clock_init(&s_clock, esp_timer_get_time(), (int64_t)s_px.period_us,
+                      (int64_t)CONFIG_NETCORE_PIXEL_SLACK_MS * 1000);
     s_px.started = true;
     ESP_LOGI(TAG, "渲染器就緒：%d 道 lane、%u fps（frame_interval_ms=%u）；lane0 = %s（環 %s）",
              s_px.nlane, (unsigned)s_px.fps, (unsigned)interval_ms, s_px.lane[0].be->name,

@@ -21,6 +21,9 @@
 | `starved` | render 想取新格但環冇（生產者唔夠快） |
 | `late` | 這一輪做超過一個 period |
 | `frames` | 累計送出的幀 |
+| `slack_us` | **時間銀行**目前存了幾久（上限＝Kconfig `NETCORE_PIXEL_SLACK_MS`） |
+| `catchup` | 用存下的時間頂住尖峰的次數 |
+| `overrun` | 尖峰超過存款、被迫重排的次數 |
 
 ---
 
@@ -58,6 +61,21 @@ verdict     STABLE
 | `UNSTABLE` | sd > 2% 或 max deviation > 25% | 要修 |
 
 ---
+
+## 2.5 時間銀行（deadline 時鐘）
+
+Render 唔再用固定週期 timer，而係 **deadline ＋ slack**（`nc_fps_clock.c`）：
+
+```
+每輪：wait = deadline - now（>0 就等）；做完：
+  早完成 → slack += 多餘時間（cap = NETCORE_PIXEL_SLACK_MS，預設 50 ms）
+  遲到   → 先花 slack；deadline 留在原本 grid → 下一輪等短啲，追返
+  遲到超過存款 → overrun，deadline = now + period（唔爆追）
+```
+
+好處：平均 fps 準（唔漂移）；臨時尖峰可以吸收；尖峰過後自動補回存款。
+Kconfig：`NETCORE_PIXEL_SLACK_MS`（0 = 關閉，等於固定節拍；範圍 0–2000）。
+Host 測試：`tools/hosttest/fpsclock_test`（準時／存錢／花錢／爆額／wait 邊界）。
 
 ## 3. 不穩時查什麼（按 histogram 形狀）
 
