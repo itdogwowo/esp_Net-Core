@@ -11,7 +11,7 @@
 - 另加一個**時間緩衝（slack）**吸收臨時波幅；**唔改週期、唔追趕**；
 - 用 `0xF081` 逐幀統計＋`fps_trace.py`／`fps_drift.py`／`fps_longrun.py` 做小時級驗證。
 
-![零件時間](assets/pixel-pairing/parts-time.png)
+![零件時間](../assets/pixel-pairing/parts-time.png)
 
 ---
 
@@ -127,7 +127,7 @@ OTA 安全映像再跑 4 小時，輸出 `artifacts/fps_longrun.csv`。
 環 38.4 KB 寫」合成；switch／chunk／值流位置都唔係瓶頸。
 4 B 表（dst16＋src16，write/aprog 由 layout 統一）值得做，但要先喺 lab 驗證完整 boot。
 
-![apply 實驗](assets/pixel-pairing/apply-experiments.png)
+![apply 實驗](../assets/pixel-pairing/apply-experiments.png)
 
 ---
 

@@ -4,7 +4,7 @@
 > 全部數字係 **真機**（NC4 OTA）；host 只用嚟做正確性對拍。
 > 程式碼＋量測：`firmware/`、`docs/00_pm/status.md` §7.222–7.232。
 
-![apply 優化實驗](assets/pixel-pairing/apply-experiments.png)
+![apply 優化實驗](../assets/pixel-pairing/apply-experiments.png)
 
 ---
 
