@@ -62,9 +62,10 @@ verdict     STABLE
 
 ---
 
-## 2.5 時間銀行（deadline 時鐘）
+## 2.5 時間銀行（固定週期 timer ＋ slack）
 
-Render 唔再用固定週期 timer，而係 **deadline ＋ slack**（`nc_fps_clock.c`）：
+Render **仍然用固定週期 timer**（`esp_timer_start_periodic`，按 `frame_interval_ms`）；
+另外用 `nc_fps_clock` 做 **slack 緩衝／判定**（唔改週期、唔追趕）：
 
 **週期 timer 仍然係主人**：節拍完全由 `system.json` 的 `frame_interval_ms` 控制
 （`esp_timer_start_periodic`），緩衝**唔會改週期、唔會追趕**。
