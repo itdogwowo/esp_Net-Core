@@ -225,11 +225,23 @@ static void on_layoutbench(nc4_ctx_t *ctx, const nc4_frame_t *f)
     //   variant 3 = **每一粒燈都係自己一個 group／entry**（9,600 個 job），最徹底的
     //               「每粒燈單獨隨機」；table 形狀同 variant 2 一樣，但 bookkeeping 最多。
     //   variant 2 = 用「每組 9 個單顆 sel」打包成 ~px/9 個 group（記憶體可控，run 形狀一樣）。
+    //   variant 4 = **每個通道一條 entry**（4 × px 個 group，write 依次 R／G／B／W）：
+    //               同一粒燈的四個通道由四個唔同 entry 寫（重疊寫），最散的 channel 級佈局。
     const uint32_t per_grp = (variant == 3) ? 1u : 9u;
-    const bool perm_layout = (variant == 2 || variant == 3 ||
+    const bool chan_layout = (variant == 4);
+    const bool perm_layout = (variant == 2 || variant == 3 || chan_layout ||
         ((variant == 5 || variant == 6 || variant == 7 || variant == 8 || variant == 9 ||
           variant == 11 || variant == 12 || variant == 13 || variant == 15) && groups_in == 0));
-    if (perm_layout) {
+    if (chan_layout) {
+        // ngroups 係 uint16：4 × px 要 ≤ 65535 → px ≤ 16383。再受 entry 記憶體限制
+        // （每個 entry 64 B），所以 px 會自動封頂。
+        uint32_t want = (uint32_t)px * 4u;
+        if (want > LB_GROUP_MAX) {
+            want = LB_GROUP_MAX;
+            px = (uint16_t)(LB_GROUP_MAX / 4u);
+        }
+        ngroups = (uint16_t)want;
+    } else if (perm_layout) {
         ngroups = (uint16_t)((px + per_grp - 1u) / per_grp);
         if (ngroups < 1) {
             ngroups = 1;
@@ -243,7 +255,8 @@ static void on_layoutbench(nc4_ctx_t *ctx, const nc4_frame_t *f)
     nc_px_group_t *groups = heap_caps_malloc((size_t)ngroups * sizeof(*groups), alloc_caps);
     // sel 數按實際需要（唔再固定 16,384 個 ＝ 278 KB）：隨機佈局要 px 個單顆 sel，
     // 其餘佈局每組最多 2 段。
-    const uint32_t nsel_cap = perm_layout ? ((px < LB_SEL_MAX) ? px : LB_SEL_MAX)
+    const uint32_t nsel_cap = chan_layout ? ngroups
+                            : perm_layout ? ((px < LB_SEL_MAX) ? px : LB_SEL_MAX)
                                           : ((uint32_t)ngroups * 2u);
     nc_px_group_sel_t *sels = heap_caps_malloc(((size_t)(nsel_cap ? nsel_cap : 1u)) *
                                                sizeof(*sels), alloc_caps);
@@ -270,7 +283,46 @@ static void on_layoutbench(nc4_ctx_t *ctx, const nc4_frame_t *f)
         return;
     }
 
-    if (perm_layout) {
+    if (chan_layout) {
+        // 4 × px 條單顆 sel：entry i 寫 LED perm[i/4] 的第 (i&3) 個通道（R／G／B／W）。
+        uint32_t *perm = heap_caps_malloc((size_t)px * sizeof(uint32_t), alloc_caps);
+        if (perm == NULL) {
+            heap_caps_free(groups);
+            heap_caps_free(sels);
+            heap_caps_free(entries);
+            heap_caps_free(assets);
+            heap_caps_free(c8);
+            heap_caps_free(c12);
+            heap_caps_free(vals);
+            s_busy = false;
+            reply_json(ctx, "{\"err\":\"oom\"}");
+            return;
+        }
+        for (uint32_t i = 0; i < px; i++) {
+            perm[i] = i;
+        }
+        uint32_t seed = 24680u;
+        for (uint32_t i = px; i > 1; i--) {
+            seed = seed * 1103515245u + 12345u;
+            const uint32_t j = (seed >> 8) % i;
+            const uint32_t t = perm[i - 1];
+            perm[i - 1] = perm[j];
+            perm[j] = t;
+        }
+        for (uint32_t i = 0; i < ngroups; i++) {
+            nc_px_group_t *g = &groups[i];
+            memset(g, 0, sizeof(*g));
+            g->id = (uint16_t)(i + 1);
+            snprintf(g->name, sizeof(g->name), "g%u", (unsigned)i);
+            g->sel = &sels[i];
+            g->nsel = 1;
+            sels[i].hw = NC_PX_HW_WS2812;
+            const uint32_t led = perm[(i / 4u) % px];
+            snprintf(sels[i].slice, sizeof(sels[i].slice), "%u:%u",
+                     (unsigned)(uint16_t)led, (unsigned)(uint16_t)(led + 1u));
+        }
+        heap_caps_free(perm);
+    } else if (perm_layout) {
         // 9,600 個像素的固定種子 permutation：每個像素一條單顆 sel（每組 9 個 或 1 個）
         uint32_t *perm = heap_caps_malloc((size_t)px * sizeof(uint32_t), alloc_caps);
         if (perm == NULL) {
@@ -313,14 +365,16 @@ static void on_layoutbench(nc4_ctx_t *ctx, const nc4_frame_t *f)
         }
         heap_caps_free(perm);
     } else {
-        const uint8_t shape = (variant == 4 || variant == 5) ? 1 : variant;
+        const uint8_t shape = (variant == 5) ? 1 : variant;
         build_groups(groups, sels, ngroups, px, shape);
     }
     for (uint32_t i = 0; i < ngroups; i++) {
         memset(&entries[i], 0, sizeof(entries[i]));
         snprintf(entries[i].group, sizeof(entries[i].group), "g%u", (unsigned)i);
         snprintf(entries[i].effect, sizeof(entries[i].effect), "lbench");
-        entries[i].write = NC_PX_WRITE_RGB;
+        // 通道級隨機：entry i 只寫一個通道（R／G／B／W 輪住），同一粒燈的四個通道
+        // 由四個唔同 entry 寫（重疊寫，後寫覆蓋 → 同 run 路徑一樣的語義）。
+        entries[i].write = chan_layout ? (uint8_t)(i & 3u) : NC_PX_WRITE_RGB;
         entries[i].has_range = false;
     }
 
