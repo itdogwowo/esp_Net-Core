@@ -84,6 +84,15 @@ typedef struct {
 
     nc_px_layout_t    layout;   // 排版編譯結果（dst 順序 runs；由 nc_px_layout 擁有）
     nc_px_asset_tbl_t *assets;  // PSRAM：只收 mode 引用到的 asset（~8.4 KB，唔佔 internal）
+
+    // 下一張（playlist 預測）：layout＋flat 預建好，切換時 swap（0 ms）
+    nc_px_layout_t     next_layout;
+    nc_px_asset_tbl_t *next_assets;
+    char               next_mode_name[NC_PX_LAYER_NAME_MAX];
+    char               next_map_name[NC_PX_LAYER_NAME_MAX];
+    bool               next_ready;
+    uint32_t           next_us;
+    uint8_t            next_why;      // 診斷：0=未試、1=ok、2=冇下一個、3=asset、4=map、5=build、6=no_ready
     char              mode_name[NC_PX_LAYER_NAME_MAX];
     char              map_name[NC_PX_LAYER_NAME_MAX];
     char              pixel_dir[64];      // /data/pixel（reload 用）
@@ -305,6 +314,8 @@ static bool content_frame_once(void)
 }
 
 static esp_err_t content_apply_mode(const nc_px_mode_t *mode);static esp_err_t content_apply_mode(const nc_px_mode_t *mode);
+static void content_prepare_next(void);
+static esp_err_t content_swap_next(const nc_px_mode_t *mode);
 static esp_err_t content_reload(void);
 static void content_auto_advance(void);
 static void content_set_fallback(const char *why);
@@ -352,6 +363,7 @@ static void content_loop(void *arg)
             continue;
         }
         content_auto_advance();                   // registry auto_play（如果 list>1）
+        content_prepare_next();                   // 播放時預建下一張（playlist 次序）
         taskYIELD();                              // render（prio 更高）先跑
     }
 }
@@ -382,6 +394,9 @@ static void content_state_reset(void)
     s_content.commits = 0;
     s_content.busy = 0;
     nc_px_layout_free(&s_content.layout);
+    nc_px_layout_free(&s_content.next_layout);
+    s_content.next_ready = false;
+    s_content.next_mode_name[0] = '\0';
     if (s_content.assets != NULL) {
         s_content.assets->n = 0;          // 保留已配置的 item 緩衝，下次換場重用
     }
@@ -502,10 +517,137 @@ static void ensure_pixel_dirs(const char *pixel_dir)
 }
 
 // 由 mode 建 plan（切換 mode 同開機共用）。只在 pair loop／on_start 呼叫。
+// playlist 的下一個：registry list 次序（同 auto_play 一致），跳過唔存在／同一個 mode。
+static const nc_px_mode_t *playlist_next_mode(void)
+{
+    const nc_px_show_t *reg = nc_px_show();
+    if (reg == NULL || reg->nlist < 2 || s_content.mode_name[0] == '\0') {
+        return NULL;
+    }
+    int cur = -1;
+    for (uint8_t i = 0; i < reg->nlist; i++) {
+        if (strcmp(reg->list[i], s_content.mode_name) == 0) {
+            cur = (int)i;
+            break;
+        }
+    }
+    const int start = (cur >= 0) ? (cur + 1) : 0;
+    for (uint8_t n = 0; n < reg->nlist; n++) {
+        const int idx = (start + n) % reg->nlist;
+        const nc_px_mode_t *m = nc_px_mode_find(reg->list[idx]);
+        if (m != NULL && strcmp(m->name, s_content.mode_name) != 0) {
+            return m;
+        }
+    }
+    return NULL;
+}
+
+// 播放期間預建下一個 mode 的 layout＋flat（PSRAM）。成功後 next_ready = true，
+// 切換嗰下只係 swap，唔使再 build／讀檔。
+static void content_prepare_next(void)
+{
+    if (s_content.next_ready) {
+        return;                        // 已預建好：唔好覆寫 why
+    }
+    if (!s_content.ready || s_content.px == 0) {
+        s_content.next_why = 6;
+        return;
+    }
+    const nc_px_mode_t *m = playlist_next_mode();
+    if (m == NULL) {
+        s_content.next_why = 2;
+        return;
+    }
+    if (s_content.next_assets == NULL) {
+        s_content.next_assets = (nc_px_asset_tbl_t *)heap_caps_malloc(
+            sizeof(nc_px_asset_tbl_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        if (s_content.next_assets == NULL) {
+            return;
+        }
+        memset(s_content.next_assets, 0, sizeof(*s_content.next_assets));
+    }
+    if (build_asset_tbl_into(s_content.next_assets, m) != ESP_OK) {
+        s_content.next_why = 3;
+        ESP_LOGW(TAG, "預建下一張：%s 效果表失敗", m->name);
+        return;
+    }
+    const nc_px_map_t *map = select_map(m);
+    if (map == NULL) {
+        s_content.next_why = 4;
+        ESP_LOGW(TAG, "預建下一張：%s 冇 map", m->name);
+        return;
+    }
+    const int64_t t0 = esp_timer_get_time();
+    nc_px_layout_free(&s_content.next_layout);
+    const uint32_t ckey = nc_px_layout_cache_key(m->hash, map->hash, s_content.px);
+    char cpath[96];
+    (void)snprintf(cpath, sizeof(cpath), "%s/cache/%08lx.pxlt", s_content.pixel_dir,
+                   (unsigned long)ckey);
+    esp_err_t e = nc_px_layout_load(&s_content.next_layout, cpath, ckey,
+                                    s_content.next_assets);
+    if (e != ESP_OK || s_content.next_layout.njobs == 0) {
+        if (e == ESP_OK) {
+            nc_px_layout_free(&s_content.next_layout);
+        }
+        const nc_px_hw_inv_t inv = { .hw = NC_PX_HW_WS2812, .base = 0, .px = s_content.px };
+        e = nc_px_layout_build(m, map, s_content.next_assets, &inv, 1,
+                               &s_content.next_layout);
+    }
+    if (e != ESP_OK || s_content.next_layout.njobs == 0) {
+        nc_px_layout_free(&s_content.next_layout);
+        s_content.next_why = 5;
+        ESP_LOGW(TAG, "預建下一張：%s 建表失敗（%s、jobs=%u）", m->name,
+                 esp_err_to_name(e), (unsigned)s_content.next_layout.njobs);
+        return;
+    }
+    (void)nc_px_layout_flatify(&s_content.next_layout);   // 默認 PSRAM
+    snprintf(s_content.next_mode_name, sizeof(s_content.next_mode_name), "%s", m->name);
+    snprintf(s_content.next_map_name, sizeof(s_content.next_map_name), "%s", map->name);
+    s_content.next_ready = true;
+    s_content.next_why = 1;
+    s_content.next_us = (uint32_t)(esp_timer_get_time() - t0);
+    ESP_LOGI(TAG, "預建下一張：mode=%s、runs=%u、flat=%u B、%u us",
+             m->name, (unsigned)s_content.next_layout.nruns,
+             (unsigned)nc_px_layout_flat_bytes(&s_content.next_layout),
+             (unsigned)s_content.next_us);
+}
+
+// 切換到已預建的下一張：swap layout／assets，唔重建。
+static esp_err_t content_swap_next(const nc_px_mode_t *mode)
+{
+    const int64_t t0 = esp_timer_get_time();
+    nc_px_layout_free(&s_content.layout);
+    s_content.layout = s_content.next_layout;
+    memset(&s_content.next_layout, 0, sizeof(s_content.next_layout));
+    nc_px_asset_tbl_t *tmp = s_content.assets;
+    s_content.assets = s_content.next_assets;
+    s_content.next_assets = tmp;
+    snprintf(s_content.map_name, sizeof(s_content.map_name), "%s", s_content.next_map_name);
+    snprintf(s_content.mode_name, sizeof(s_content.mode_name), "%s", mode->name);
+    s_content.white = (mode->white > 100) ? 100 : mode->white;
+    s_content.step = 0;
+    s_content.mode_frames = 0;
+    s_content.mode_limit = (mode->maxF > 0) ? mode->maxF : 500;
+    s_content.ready = true;
+    s_content.fallback = false;
+    s_content.next_ready = false;
+    s_content.next_mode_name[0] = '\0';
+    s_last_eff_seq = 0;
+    s_plan_gen++;
+    nc_pipe_aprog_publish(s_content.layout.aprog, s_content.layout.naprog, s_plan_gen);
+    s_last_apply_us = (uint32_t)(esp_timer_get_time() - t0);
+    ESP_LOGI(TAG, "換場（預建 swap）：%s、%u us、runs=%u", mode->name,
+             (unsigned)s_last_apply_us, (unsigned)s_content.layout.nruns);
+    return ESP_OK;
+}
+
 static esp_err_t content_apply_mode_locked(const nc_px_mode_t *mode)
 {
     if (mode == NULL) {
         return ESP_ERR_INVALID_ARG;
+    }
+    if (s_content.next_ready && strcmp(mode->name, s_content.next_mode_name) == 0) {
+        return content_swap_next(mode);
     }
     const int64_t t0 = esp_timer_get_time();
 
@@ -914,6 +1056,12 @@ static void content_stop(void)
         nc_px_asset_tbl_free(s_content.assets);   // 連 item 一齊放（owned）
         s_content.assets = NULL;
     }
+    nc_px_layout_free(&s_content.next_layout);
+    s_content.next_ready = false;
+    if (s_content.next_assets != NULL) {
+        nc_px_asset_tbl_free(s_content.next_assets);
+        s_content.next_assets = NULL;
+    }
     if (s_content.last != NULL) {
         heap_caps_free(s_content.last);
         s_content.last = NULL;
@@ -1175,7 +1323,10 @@ static void on_pixdiag(nc4_ctx_t *ctx, const nc4_frame_t *f)
         "\"empty\":%u,\"asset_full\":%u,\"prog\":%u,\"oom\":%u},"
         "\"free_int\":%u,\"free_ps\":%u,"
         "\"prebuild\":{\"present\":%u,\"built\":%u,\"too_big\":%u,"
-        "\"failed\":%u,\"ms\":%u},\"render\":%s}",
+        "\"failed\":%u,\"ms\":%u},"
+        "\"mode\":\"%s\",\"show_nlist\":%u,"
+        "\"next\":\"%s\",\"next_ready\":%d,\"next_us\":%u,\"next_why\":%u,"
+        "\"render\":%s}",
         (unsigned)px, (unsigned)slots, (unsigned)ring_b, (unsigned)canvas_b,
         (unsigned)vals_b, (unsigned)runs_b, (unsigned)flat_n, (unsigned)flat_b,
         (unsigned)s_content.layout.njobs, (unsigned)s_content.layout.nruns,
@@ -1189,6 +1340,10 @@ static void on_pixdiag(nc4_ctx_t *ctx, const nc4_frame_t *f)
         (unsigned)s_prebuild.present, (unsigned)s_prebuild.built,
         (unsigned)s_prebuild.too_big, (unsigned)s_prebuild.failed,
         (unsigned)s_prebuild.ms,
+        s_content.mode_name,
+        (unsigned)((nc_px_show() != NULL) ? nc_px_show()->nlist : 0u),
+        s_content.next_mode_name, s_content.next_ready ? 1 : 0,
+        (unsigned)s_content.next_us, (unsigned)s_content.next_why,
         rj[0] ? rj : "{}");
     reply_json(ctx, NC4_CMD_PIXDIAG_RSP, j);
 }

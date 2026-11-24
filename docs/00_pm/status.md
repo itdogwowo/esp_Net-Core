@@ -8097,3 +8097,28 @@ worst case；**真實配對地圖係一張大表慢慢建立**，run 少而長�
 - 需要同時存在嘅只有 **current ＋ next** 兩張：2 × 57.6 KB ＝ 115 KB（PSRAM free 的 6.8%）。
 - 切換流程：layout 由快取 10 ms（或 build）＋ flatify 0.55 ms ≈ 11 ms；要 0 ms 就播放時預建下一張。
 - map 本身開機已 scan 入 RAM，切換唔需要再讀 map 檔。
+
+### 7.229 2026-11-25（playlist 預建下一張 ＋ swap 換場：246 µs；FAT/MSC 鎖已解）
+
+**實作**：
+- pair 常駐兩份 layout＋flat：`layout`（當前）＋ `next_layout`（playlist 下一個）。
+- `content_prepare_next()`：播放時按 `registry.list` 次序預建（layout 快取／build ＋ flatify PSRAM）。
+- `content_swap_next()`：切換只 swap layout／assets 指針，唔重建。
+- 0xF079 加 `mode／show_nlist／next／next_ready／next_us／next_why`。
+- Kconfig `NETCORE_USB_MSC_FORCE_OFF`（recovery：唔交碟，解 FAT 鎖）。
+
+**真機（9,600 px、4 個 mode）**：
+
+| 動作 | 時間 |
+|---|---:|
+| 預建下一張（g500，500 runs） | **19.7 ms** |
+| 預建下一張（full9600，1 run） | **12.2 ms** |
+| **切換（swap）** | **246 µs**（原本 rebuild 40–150 ms） |
+| 每幀 apply（PSRAM flat） | 5.43 ms、fps 49.7–50.7 |
+
+**FAT 被 MSC 鎖**：`system.json` 的 `nc4.links[].msc` 原為 1；用 recovery build
+（FORCE_OFF）解鎖後上傳修正 config（`msc:0`），再回復正常映像；現時 `status storage`
+= `mode:"app"、app_ready:1`，上傳／刪檔正常。
+
+**注意**：device 上殘留舊 mode（id 撞）會令 playlist 的下一格載入失敗；已清走並重上
+9600 內容；正式 Zero-Show 只有 1 個 mode，所以 next 為空（正常）。

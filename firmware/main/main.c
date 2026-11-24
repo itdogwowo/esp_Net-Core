@@ -602,7 +602,11 @@ static void usb_resolve(void)
     // want_msc：只睇這條 USB link 的 msc（預設 0 = 唔交碟）。
     // global system.json 的 usb.msc 已經停用 —— 舊寫法冇作用，所以明講一次，
     // 免得「我明明寫咗 msc=1」查半日。
+#if CONFIG_NETCORE_USB_MSC_FORCE_OFF
+    const bool want_msc = false;      // recovery：唔交碟，FAT 留返畀裝置
+#else
     const bool want_msc = (usb != NULL) && (usb->msc != 0);
+#endif
     if (usb != NULL && !want_msc && scfg != NULL && scfg->usb_msc != 0) {
         ESP_LOGW(TAG, "system.json 的 usb.msc=%u 已停用 → 要交碟請寫 links[].msc:1",
                  (unsigned)scfg->usb_msc);
@@ -2366,7 +2370,11 @@ static void usb_links_audit(void)
     }
     // msc 只在「選了 OTG」時有意義：USJ 沒有 MSC。per-link 制（預設 0）。
     const nc_link_cfg_t *usb = usb_nc4_link();
+#if CONFIG_NETCORE_USB_MSC_FORCE_OFF
+    const bool want_msc = false;      // recovery：唔交碟，FAT 留返畀裝置
+#else
     const bool want_msc = (usb != NULL) && (usb->msc != 0);
+#endif
     if (want_msc && usb->kind != NC_LINK_CDC) {
         ESP_LOGW(TAG, "USB link msc=1 但 personality 不是 OTG（USJ 冇 MSC）→ 跳過");
     }
