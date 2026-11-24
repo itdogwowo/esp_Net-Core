@@ -93,6 +93,8 @@ def main():
     print(f"sd          {sd} µs（{pct(sd, target):.2f}% of target）")
     print(f"min / max   {mn} / {mx} µs（max deviation {max(mx - target, target - mn)} µs）")
     print(f"bad         {bad}（|dt-target| > 20%）")
+    print(f"starved     {last.get('starved', 0)}（環冇新格）；late {last.get('late', 0)}；"
+          f"frames {last.get('frames', 0)}")
 
     if hist:
         top = sorted(range(len(hist)), key=lambda i: hist[i], reverse=True)[:5]

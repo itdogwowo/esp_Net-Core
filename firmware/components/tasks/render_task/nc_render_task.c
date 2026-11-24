@@ -467,9 +467,12 @@ size_t nc_render_fps_json(char *out, size_t cap)
     }
     int k = snprintf(out, cap,
                      "{\"target_us\":%u,\"n\":%u,\"avg_us\":%u,\"sd_us\":%u,"
-                     "\"min_us\":%u,\"max_us\":%u,\"bad\":%u,\"hist\":[",
+                     "\"min_us\":%u,\"max_us\":%u,\"bad\":%u,"
+                     "\"starved\":%lu,\"late\":%lu,\"frames\":%lu,\"hist\":[",
                      (unsigned)s_px.period_us, (unsigned)n, (unsigned)avg, (unsigned)sd,
-                     (unsigned)s_jit.min_us, (unsigned)s_jit.max_us, (unsigned)s_jit.bad);
+                     (unsigned)s_jit.min_us, (unsigned)s_jit.max_us, (unsigned)s_jit.bad,
+                     (unsigned long)s_px.st.starved, (unsigned long)s_px.st.late,
+                     (unsigned long)s_px.st.frames);
     if (k < 0 || (size_t)k >= cap) {
         return 0;
     }
