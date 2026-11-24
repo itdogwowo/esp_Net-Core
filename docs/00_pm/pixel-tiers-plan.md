@@ -494,34 +494,56 @@ git commit -m "project: 2,400 px（16×150）抖動驗收工程與數據"
 
 ---
 
-### Task 6（可選，先量再決定）：I80 波形合成 chunked streaming
+### Task 6（可選，先量再決定）：I80 波形合成 — 展開＋轉置一次過
 
-> ⚠️ 更正：現行 `nc_i80_drv` 已經是 async（3 槽 + 完成回呼），打包與送燈**本來就重疊**；
-> §7.123 的 37.9 ms 是 async 之前的舊量測。先做 Step 0 重測，再決定要唔要做 chunked。
+> **2026-11-25 改寫**（原「chunked streaming」設計作廢）。三個已量測的事實：
+>
+> 1. `nc_i80_drv` 已經是 async（3 槽＋完成回呼），打包與送燈**本來就重疊**；
+>    §7.123 的 37.9 ms 是 async 之前的舊量測。frame ≈ **max(encode, 18 ms)**（§7.199）。
+> 2. chunked DMA 只降低「單次 encode 延遲」，**唔會**提高 throughput —— 所以唔再做。
+> 3. §7.201 實測 8×8 SWAR 轉置只有 **1.22×**（22.52 → 18.51 ms）：瓶頸唔係移位算術，
+>    而係 **gather** —— 每個 byte index 要由 16 條獨立 lane 緩衝各讀 1 byte。
+>
+> **真正有機會的是「展開＋轉置一次過」**（FastLED wave3 的形狀）：每 16 個輸入 byte
+> 直接產生 24 個 u16（48 B），唔經 `wave_pack` 的 172.8 KB 中間緩衝，亦唔做第二次
+> merge。輸出 layout 不變（每個 tick 一個 bus word，16-bit little-endian），所以
+> 呢個 Task 可以用「逐 byte 對拍」做閘門，快唔過舊路徑就唔接 production。
 
 **Files:**
-- Modify: `firmware/components/tasks/render_task/nc_i80_out.c`
+- Modify: `firmware/components/sw/pixel/nc_pixel_encode.c`（新 API：展開＋轉置）
+- Modify: `firmware/components/sw/pixel/include/nc_pixel_core.h`（宣告）
+- Modify: `firmware/components/tasks/render_task/nc_i80_out.c`（**量到快才**接線）
+- Test: `tools/hosttest/pixel_test/pixel_test.c`（新舊路徑 byte-exact）
+- Bench: `firmware/components/bench/effect_bench/nc_layout_bench.c`（variant 17）
 
-- [ ] **Step 0：在 16-lane 板用現行固件重測** `frame_us / enc_us / tx_us / inflight`，
-      確認 frame ≈ max(enc, 18 ms)（預期 19–21 ms）。如果已經係，Task 6 可以唔做。
-- [ ] **Step 1：（如需要）量基線**確認 `enc_us ≈ 18.4–20.1 ms`、`tx_us ≈ 1.16 ms`
-- [ ] **Step 2：把 packed 改成 3 槽環 + 每槽 30 顆／lane 的 chunk**
-
-```c
-// 每個 chunk：30 顆 × 3 byte = 90 byte/lane → 90 × 48 = 4,320 B（16 lane、wave3）
-#define NC_I80_CHUNK_PX 30
-// esp_lcd_panel_io_tx_color() 逐 chunk 提交；on_color_trans_done 內準備下一個 chunk
-```
-
-- [ ] **Step 3：轉置用 nibble LUT（16 × u16）＋ 16 lane 一次轉 u16**
-
-```c
-static const uint16_t s_wave3_nib[16];   // 4 bit → 12 tick
-// 每個 tick：把 16 條 lane 的同一個 bit 併成一個 u16 字
-```
-
-- [ ] **Step 4：量重疊後 frame_us**：Expected 由 37.9–39.6 ms 降到 **≤ 21 ms**（≈48–50 fps）
+- [ ] **Step 0：16-lane 板用現行固件重測 async 基線** `frame_us / enc_us / tx_us / inflight`，
+      確認 frame ≈ max(enc, 18 ms)。**（要硬件；2026-11-25 未有板，未做）**
+- [x] **Step 1：host 原型＋byte-exact 測試**：新 `nc_px_codec_pack_bus()` 直接由
+      `lanes` 個 codec 即時取每顆的線材位元組，8×8 SWAR 轉置後逐 tick 寫 bus word。
+      **8-bit／無抖動**（production 16×600 的實際情況）行廣播快路徑：lane 的
+      `lane_px()` 輸出相同，唔需要 16 次呼叫＋轉置；有抖動才行完整轉置。
+      對舊路徑（`wave_pack` × N ＋ `merge8_store`／`merge8`）**逐 byte 比對**：
+      8／16 lane、RGBW、8-bit／12-bit dither、`bit_cells` 3／4／8、奇數 px。
+- [ ] **Step 2：bench variant 17（0xF077）A/B**：同一塊板、同一份 payload，
+      量 `bus_old_us`、`bus_new_us`、`bus_ok`（逐 byte 相同）。
+      指令：`python3 tools/layout_bench.py --port <PORT> --px 9600 --variant 17 --reps 8`
+      （`layout_bench.py` 已支援 variant 17；輸出多一行「I80 合成：舊路徑 … vs 一次過 …」）
+- [ ] **Step 3：快過舊路徑才接 `i80_encode`**；唔快就保留舊路徑，記錄原因（可回退）。
+- [ ] **Step 4：上板驗證**：`0xF079` 的 `enc_us`／`tx_us`／`inflight`；畫面與舊版
+      逐 byte 相同（同一份 payload、同一 seq）。
 - [ ] **Step 5：Commit**
+
+> **順手修（2026-11-25）**：`i80_encode` 的 16-bit 高位 byte 原本用 `merge8`（OR）。
+> 高位 byte 只會 0→1，lane 由亮變暗會殘留（半邊「卡住」）；低位（off=0）與高位
+> （off=1）是不同 byte，用 `merge8_store` 不會覆蓋另一組。已改成兩組都用 store，
+> 8-bit 路徑行為不變。呢個係 Task 6 量 A/B 之前必須先修，否則「新舊對拍」會把
+> 舊 path 的殘留位當成新 path 的錯。
+
+**驗收（數字待 Step 0／2 上板後填）**：
+- 輸出逐 byte 相同（硬閘門，唔接受「睇落一樣」）。
+- `enc_us`：舊 19.4 ms → 目標 **≤ 12 ms**（暫定；低過 18 ms 線路時間就有意義）。
+- frame ≈ max(enc, 18 ms) ≤ 21 ms（≈48–50 fps）。
+- 若只快 < 20%，唔接 production（免得為少少速度加一條並行路徑）。
 
 ### Task 7：配對改 6 B 單表（定案）
 

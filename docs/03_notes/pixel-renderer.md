@@ -232,6 +232,12 @@ buffer**。C 版本來已經係整數，但熱路徑逐 pixel 呼叫＋逐 bit �
    `nc_px_codec_wave_pack()` 把一條 lane 的波形壓成 bitstream（bit_cells=3 時
    每線材 byte 3 bytes），再用 `nc_px_codec_pack_merge8()` 一次合併 8 條 lane
    （8 個單元一組），輸出仍然係 I80 byte-per-unit。I80 backend 已改用這條路徑。
+5. **展開＋轉置一次過（Task 6 原型，2026-11-25）**：`nc_px_codec_pack_bus()`
+   唔經每條 lane 的 packed 中間緩衝，每顆燈即時取 lane 位元組、8×8 轉置、
+   直接逐 tick 寫 bus word。16×600 的舊路徑要寫＋讀 172.8 KB 中間緩衝；
+   新路徑只寫 86.4 KB 輸出。8-bit／無抖動（production 預設）另有廣播快路徑。
+   **現時只接 bench（0xF077 variant 17），production 未接線**——等 16-lane
+   上板 A/B 有數字先決定（計劃 Task 6 Step 2–4）。host 已逐 byte 對拍 6 個配置。
 
 `0xF062` 量測（測試映像、scratch/輸出放 PSRAM，所以係**保守值**；release 的
 internal 會更快）：

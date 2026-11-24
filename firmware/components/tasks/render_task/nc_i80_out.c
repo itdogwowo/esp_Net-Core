@@ -106,11 +106,10 @@ static bool i80_encode(nc_pixel_backend_t *b, uint32_t slot)
             lp[k] = d->pack[k];
         }
         const uint32_t off = (d->bus_width == 16 && g >= 8) ? 1u : 0u;
-        if (g == 0) {
-            nc_px_codec_pack_merge8_store(lp, d->pack_bytes, out, stride, off);
-        } else {
-            nc_px_codec_pack_merge8(lp, d->pack_bytes, out, stride, off);
-        }
+        // 兩組都用 store：低 byte（off=0）與高 byte（off=1）係唔同的 byte，互不覆蓋，
+        // 所以唔需要先 memset 整格。舊版第二組用 OR：高位 byte 只會 0→1，lane 由亮
+        // 變暗時會殘留（16-bit 板會半邊「卡住」），呢個係今次 Task 6 順手修的 bug。
+        nc_px_codec_pack_merge8_store(lp, d->pack_bytes, out, stride, off);
     }
     return true;
 }

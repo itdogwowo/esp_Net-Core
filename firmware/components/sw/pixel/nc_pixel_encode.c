@@ -664,6 +664,122 @@ void nc_px_codec_pack_merge8_store(const uint8_t *lane[8], uint32_t packed_bytes
     }
 }
 
+// 8×8 bit-matrix transpose（Hacker's Delight §7-3）：輸入 byte k = lane k 的 8 個 bit，
+// 輸出 byte i 的 bit k = lane k 的 bit i。同 nc_px_codec_pack_merge8() 的規則一樣。
+static inline uint64_t pack_bus_t8(uint64_t x)
+{
+    uint64_t t;
+    t = (x ^ (x >> 7)) & 0x00AA00AA00AA00AAULL; x = x ^ t ^ (t << 7);
+    t = (x ^ (x >> 14)) & 0x0000CCCC0000CCCCULL; x = x ^ t ^ (t << 14);
+    t = (x ^ (x >> 28)) & 0x00000000F0F0F0F0ULL; x = x ^ t ^ (t << 28);
+    return x;
+}
+
+// 每個 tick 一個 bus word：k < t_lo 全部 lane 高、t_lo..t_hi 只有 mask 的 lane 高。
+static inline void pack_bus_emit(uint8_t *out, uint32_t *tick, uint32_t stride,
+                                 uint16_t all, uint16_t mask,
+                                 uint32_t t_lo, uint32_t t_hi, uint32_t bc)
+{
+    for (uint32_t k = 0; k < bc; k++) {
+        const uint16_t w = (k < t_lo) ? all : ((k < t_hi) ? mask : 0u);
+        if (stride == 2) {
+            out[*tick * 2u] = (uint8_t)w;
+            out[*tick * 2u + 1u] = (uint8_t)(w >> 8);
+        } else {
+            out[*tick] = (uint8_t)w;
+        }
+        (*tick)++;
+    }
+}
+
+// 一次過「展開＋轉置」：見 header 的契約。核心係「每顆燈只掃一次」：
+//   pixel → lanes 個 lane_px（含抖動）→ 每個線材 byte 做 8×8 轉置 → 逐 tick 寫 bus word。
+// 舊路徑係「lane-major：16 × wave_pack 寫 172.8 KB 中間緩衝，再 merge8 讀返」；
+// 呢度冇中間緩衝，輸出 buffer 只寫一次（86.4 KB），所以成本應該貼近記憶體下限。
+uint32_t nc_px_codec_pack_bus(nc_pixel_codec_t *const codec[], const uint8_t *rgbw,
+                              uint32_t px, uint8_t *out, uint32_t lanes, uint32_t bus_width)
+{
+    if (codec == NULL || rgbw == NULL || out == NULL || lanes == 0 || lanes > 16 ||
+        (bus_width != 8 && bus_width != 16) || lanes > bus_width) {
+        return 0;
+    }
+    nc_pixel_codec_t *c0 = codec[0];
+    if (c0 == NULL || c0->spec->clk || px == 0 || px > c0->px) {
+        return 0;
+    }
+    const uint32_t lb = c0->spec->lane_bytes;
+    const uint32_t bc = c0->cfg.wave.bit_cells;
+    if (lb == 0 || lb > 4 || bc == 0) {
+        return 0;
+    }
+    // 所有 lane 共用同一份波形／格式（production 就是這樣）；唔同就明示失敗，
+    // 唔好靜靜用 lane0 的時序去編其他 lane。
+    for (uint32_t k = 1; k < lanes; k++) {
+        if (codec[k] == NULL || codec[k]->spec != c0->spec ||
+            codec[k]->cfg.wave.bit_cells != bc ||
+            codec[k]->cfg.wave.t0h != c0->cfg.wave.t0h ||
+            codec[k]->cfg.wave.t1h != c0->cfg.wave.t1h ||
+            codec[k]->cfg.bits != c0->cfg.bits ||
+            codec[k]->cfg.dither_mode != c0->cfg.dither_mode ||
+            codec[k]->cfg.zone_px != c0->cfg.zone_px ||
+            codec[k]->px != c0->px) {
+            return 0;
+        }
+    }
+    // 同 wave_lut_build() 的 clamp 完全一致（0 個 cell 當 1；1 位高電平至少 1 cell）。
+    uint32_t t_lo = c0->cfg.wave.t0h;
+    uint32_t t_hi = c0->cfg.wave.t1h;
+    t_lo = (t_lo == 0) ? 1u : (t_lo >= bc ? bc - 1u : t_lo);
+    t_hi = (t_hi <= t_lo) ? bc : (t_hi >= bc ? bc : t_hi);
+    const uint32_t stride = (bus_width == 16) ? 2u : 1u;
+    const uint16_t all = (uint16_t)((1u << lanes) - 1u);
+    // production 的 16 條 lane 共用同一份 payload、同一份 codec 設定，而且預設
+    // bits=8／dither=0 ⇒ lane_px() 對每條 lane 都回同一個 byte。呢個情況唔需要
+    // 16 次 lane_px ＋ 轉置：編一次、把 mask 廣播成 all／0 就係逐 byte 一樣的輸出。
+    // 有抖動（bits>8 或 mode!=0）就一定要逐 lane 推進，唔可以用廣播。
+    const bool broadcast = (c0->cfg.bits == 8 && c0->cfg.dither_mode == 0);
+    uint8_t lv[16][4];
+    uint32_t tick = 0;
+    for (uint32_t i = 0; i < px; i++) {
+        const uint32_t zone = (c0->cfg.zone_px == 0) ? 0u : (i / c0->cfg.zone_px);
+        if (broadcast) {
+            (void)nc_px_codec_lane_px(c0, rgbw + i * NC_PX_BPP, zone, lv[0]);
+            for (uint32_t ch = 0; ch < lb; ch++) {
+                const uint8_t v = lv[0][ch];
+                // s_pack_lut 是 MSB-first：先送 bit7，所以 b 由 7 數到 0。
+                for (int b = 7; b >= 0; b--) {
+                    const uint16_t m = (((v >> b) & 1u) != 0u) ? all : 0u;
+                    pack_bus_emit(out, &tick, stride, all, m, t_lo, t_hi, bc);
+                }
+            }
+            continue;
+        }
+        // 每條 lane 每顆只呼叫一次 lane_px（抖動狀態照樣逐顆推進）。
+        for (uint32_t k = 0; k < lanes; k++) {
+            (void)nc_px_codec_lane_px(codec[k], rgbw + i * NC_PX_BPP, zone, lv[k]);
+        }
+        for (uint32_t ch = 0; ch < lb; ch++) {
+            uint64_t xl = 0, xh = 0;
+            for (uint32_t k = 0; k < lanes; k++) {
+                if (k < 8) {
+                    xl |= (uint64_t)lv[k][ch] << (8u * k);
+                } else {
+                    xh |= (uint64_t)lv[k][ch] << (8u * (k - 8u));
+                }
+            }
+            xl = pack_bus_t8(xl);
+            xh = pack_bus_t8(xh);
+            for (int b = 7; b >= 0; b--) {
+                const uint32_t sh = (uint32_t)b * 8u;
+                const uint16_t m = (uint16_t)(((xl >> sh) & 0xFFu) |
+                                              (((xh >> sh) & 0xFFu) << 8));
+                pack_bus_emit(out, &tick, stride, all, m, t_lo, t_hi, bc);
+            }
+        }
+    }
+    return tick;
+}
+
 uint32_t nc_px_codec_spi_frame(nc_pixel_codec_t *c, const uint8_t *rgbw, uint32_t px,
                                uint8_t *out, uint32_t cap)
 {

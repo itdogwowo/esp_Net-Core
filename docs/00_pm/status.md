@@ -7793,3 +7793,61 @@ esp_err_t nc_px_show_plan(..., nc_px_plan_t *out, nc_px_job_t *jobs, uint16_t jo
 **計劃書**：Task 1–5 的 28 個步驟已經補勾（實作 2026-11-24 完成並上板驗證，見
 `night-report-2026-11-24.md`）；Task 6（可選、chunked DMA）保持未勾；Task 7 Step 5、
 Task 8 Step 5／7 全部完成。計劃只剩「Task 6 可選」未做。
+
+### 7.219 2026-11-25（Task 6 改寫：展開＋轉置一次過；host 原型逐 byte 全過）
+
+**為什麼改寫**：原 Task 6 係 chunked DMA，但 §7.199 已證 async 已經重疊（frame ≈
+max(encode, 18 ms)），chunk 只降低單次延遲；§7.201 量到 SWAR 轉置只有 1.22×
+（22.52 → 18.51 ms），瓶頸係 **gather**（每個 byte index 要由 16 條 lane 各讀 1 B），
+唔係移位算術。所以改成 FastLED wave3 的形狀：**每 16 個輸入 byte 直接產生 24 個 u16**
+（48 B），唔經每條 lane 的 packed 中間緩衝（16×600 舊路徑要寫＋讀 172.8 KB）。
+
+**新 API**（`nc_pixel_encode.c`／`nc_pixel_core.h`）：
+
+```c
+uint32_t nc_px_codec_pack_bus(nc_pixel_codec_t *const codec[], const uint8_t *rgbw,
+                              uint32_t px, uint8_t *out, uint32_t lanes, uint32_t bus_width);
+```
+
+- 每顆燈對每條 lane 呼叫一次 `nc_px_codec_lane_px()`（抖動狀態照樣逐顆推進）；
+- 每個線材 byte 做 8×8 SWAR 轉置，直接逐 tick 寫 bus word（16-bit = little-endian）；
+- 唔經 `wave_pack`、唔經 `merge8`、冇 172.8 KB 中間緩衝；只寫 active ticks
+  （reset 由呼叫端保持 0，同舊路徑一致）。
+- **8-bit／無抖動廣播快路徑**：production 16×600 的 16 條 lane 共用同一份 payload 與
+  codec 設定，`lane_px()` 對每條 lane 回同一個 byte ⇒ 只需編一次、把 mask 廣播成
+  all／0；有抖動（bits>8 或 mode≠0）才逐 lane 推進＋轉置。
+
+**Host 驗證**（`tools/hosttest/pixel_test`，新舊路徑逐 byte 對拍）：
+
+| 配置 | 結果 |
+|---|---|
+| 8 lane／8-bit bus／WS2812／bc=3 | 相同 |
+| 16 lane／16-bit bus／WS2812／bc=3 | 相同 |
+| 16 lane／16-bit bus／WS2812W／12-bit dither／bc=3 | 相同 |
+| 12 lane／16-bit bus（高 4 lane 空）／bc=4 | 相同 |
+| 16 lane／16-bit bus／bc=8（高速時序） | 相同 |
+| 8 lane／8-bit bus／spatial dither／bc=3 | 相同 |
+
+`pixel_test` **360 checks 全過**（另加「全亮→全暗、16-bit 高位 byte 要清 0」的換幀測試）；
+`bash tools/hosttest/run_all.sh` **20/20 全綠**。
+
+**順手修一個真 bug（16-bit 高位殘留）**：`i80_encode` 的高位 byte 原本用
+`nc_px_codec_pack_merge8()`（OR）。高位 byte 只會 0→1，lane 由亮變暗時會殘留
+（16-bit 板會半邊「卡住」）；低位（off=0）與高位（off=1）是不同 byte，用
+`merge8_store` 不會互相覆蓋。已改成兩組都用 store；8-bit 路徑行為不變。
+呢個必須在 A/B 之前修，否則舊 path 的殘留位會被誤認為新 path 的錯。
+
+**未做（等 16-lane 硬件）**：
+
+- Step 0：現行 async 基線（`frame_us`／`enc_us`／`tx_us`／`inflight`）。
+- Step 2：`python3 tools/layout_bench.py --port <PORT> --px 9600 --variant 17 --reps 8`
+  → `bus_old_us`／`bus_new_us`／`bus_ok`。
+- Step 3：快 ≥20% 才接 production；現時 production 仍然係 `wave_pack` + `merge8`
+  （唔想未量就換路徑）。
+
+**Host 速度參考（x86，唔可外推）**：600 px × 16 lane、16-bit、bits=8，
+舊路徑 0.117 ms → 新路徑 0.043 ms（2.72×，逐 byte 相同）。真機要等 variant 17。
+
+**建置**：EffectPerf（704.2 KB）與 Zero-Show（685.8 KB）都 rc=0。
+**Bench 已備好**：`nc_layout_bench.c` variant 17（舊路徑 vs 新 API，同一份 payload、
+逐 byte 比對）；`tools/layout_bench.py` 已支援 variant 17。

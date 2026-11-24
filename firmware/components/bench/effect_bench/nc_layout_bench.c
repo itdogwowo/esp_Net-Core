@@ -492,6 +492,92 @@ static void on_layoutbench(nc4_ctx_t *ctx, const nc4_frame_t *f)
     }
 
     uint32_t flat_build_us = 0, flat_apply_us = 0;
+    uint32_t bus_old_us = 0, bus_new_us = 0, bus_ok = 0;
+    if (variant == 17) {
+        // Task 6 原型：同一份 payload、同一批 codec，比較
+        //   (a) 舊：16 × wave_pack（每條 lane 5,400 B 中間緩衝）＋ 兩組 merge8
+        //   (b) 新：nc_px_codec_pack_bus() 每顆即時轉置、直接寫 bus word
+        // 輸出要逐 byte 相同（bus_ok），時間取 reps 的最小值。
+        const uint32_t lane_px = (px >= 16u) ? (px / 16u) : px;
+        nc_px_codec_cfg_t cc;
+        memset(&cc, 0, sizeof(cc));
+        cc.fmt = NC_PX_FMT_WS2812;
+        cc.bits = 8;
+        cc.dither_mode = 0;
+        cc.px = lane_px;
+        nc_px_wave_default(cc.fmt, &cc.wave);
+        nc_pixel_codec_t *cd[16] = { NULL };
+        uint8_t *pack[16] = { NULL };
+        uint8_t *payload = (uint8_t *)heap_caps_malloc((size_t)lane_px * NC_PX_BPP, alloc_caps);
+        bool ok = (payload != NULL);
+        for (uint32_t i = 0; ok && i < lane_px * NC_PX_BPP; i++) {
+            payload[i] = (uint8_t)((i * 37u + 11u) & 0xFFu);
+        }
+        for (int k = 0; k < 16 && ok; k++) {
+            cd[k] = nc_px_codec_init(nc_px_codec_new(), &cc);
+            ok = (cd[k] != NULL);
+        }
+        const uint32_t pack_bytes = lane_px *
+                                    ((cd[0] != NULL) ? nc_px_codec_lane_bytes(cd[0]) : 3u) *
+                                    cc.wave.bit_cells;
+        const uint32_t active = pack_bytes * 8u * 2u;
+        uint8_t *o1 = (uint8_t *)heap_caps_malloc(active, alloc_caps);
+        uint8_t *o2 = (uint8_t *)heap_caps_malloc(active, alloc_caps);
+        ok = ok && (o1 != NULL && o2 != NULL);
+        for (int k = 0; k < 16 && ok; k++) {
+            pack[k] = (uint8_t *)heap_caps_malloc(pack_bytes, alloc_caps);
+            ok = (pack[k] != NULL);
+        }
+        if (ok) {
+            for (uint8_t r = 1; r <= reps; r++) {
+                memset(o1, 0, active);          // 模擬 driver 的 calloc 槽（唔計入 encode 時間）
+                for (int k = 0; k < 16; k++) {
+                    nc_px_codec_frame(cd[k], r);
+                }
+                const int64_t a0 = esp_timer_get_time();
+                for (int k = 0; k < 16; k++) {
+                    if (nc_px_codec_wave_pack(cd[k], payload, lane_px, pack[k], pack_bytes) == 0) {
+                        ok = false;
+                    }
+                }
+                nc_px_codec_pack_merge8_store((const uint8_t **)&pack[0], pack_bytes, o1, 2, 0);
+                // 高位 byte 用 store（唔用 OR）：同修好之後的 i80_encode 一致。
+                nc_px_codec_pack_merge8_store((const uint8_t **)&pack[8], pack_bytes, o1, 2, 1);
+                const uint32_t us = (uint32_t)(esp_timer_get_time() - a0);
+                if (bus_old_us == 0 || us < bus_old_us) {
+                    bus_old_us = us;
+                }
+            }
+            // 新路徑由同一個狀態開始（bits=8 冇 dither 狀態，但照 reset 保持一致）。
+            for (int k = 0; k < 16; k++) {
+                (void)nc_px_codec_init(cd[k], &cc);
+            }
+            for (uint8_t r = 1; r <= reps; r++) {
+                for (int k = 0; k < 16; k++) {
+                    nc_px_codec_frame(cd[k], r);
+                }
+                const int64_t b0 = esp_timer_get_time();
+                const uint32_t ticks = nc_px_codec_pack_bus(cd, payload, lane_px, o2, 16, 16);
+                const uint32_t us = (uint32_t)(esp_timer_get_time() - b0);
+                if (ticks != pack_bytes * 8u) {
+                    ok = false;
+                }
+                if (bus_new_us == 0 || us < bus_new_us) {
+                    bus_new_us = us;
+                }
+            }
+            bus_ok = (ok && memcmp(o1, o2, active) == 0) ? 1u : 0u;
+            s_sink += o2[0];
+        }
+        for (int k = 0; k < 16; k++) {
+            if (pack[k] != NULL) heap_caps_free(pack[k]);
+            if (cd[k] != NULL) nc_px_codec_free(cd[k]);
+        }
+        if (payload != NULL) heap_caps_free(payload);
+        if (o1 != NULL) heap_caps_free(o1);
+        if (o2 != NULL) heap_caps_free(o2);
+    }
+
     if (variant == 9 || variant == 11 || variant == 12 || variant == 13 || variant == 15) {
         // 原型：先把每一顆的落點＋三個通道起點算成 8 B（dst16, c0, c1, c2），
         // 再跑「讀 8 B、寫 4 B」的最小白迴圈。呢個就係計劃 Task 7 的形狀。
@@ -847,7 +933,7 @@ static void on_layoutbench(nc4_ctx_t *ctx, const nc4_frame_t *f)
         s_sink += c8[round];
     }
 
-    char j[800];
+    char j[1200];
     snprintf(j, sizeof(j),
              "{\"px\":%u,\"groups\":%u,\"variant\":%u,\"jobs\":%u,\"runs\":%u,"
              "\"nv\":%u,\"vals_us\":%u,\"build_us\":%u,\"apply_us\":%u,\"apply12_us\":%u,"
@@ -857,6 +943,7 @@ static void on_layoutbench(nc4_ctx_t *ctx, const nc4_frame_t *f)
              "\"save_us\":%u,\"load_us\":%u,\"cache_bytes\":%ld,\"load_rc\":%d,"
              "\"merge8_us\":%u,\"swar_us\":%u,\"swar_ok\":%u,"
              "\"flat_build_us\":%u,\"flat_apply_us\":%u,"
+             "\"bus_old_us\":%u,\"bus_new_us\":%u,\"bus_ok\":%u,"
              "\"canvas_path_us\":%u,\"direct_us\":%u,\"direct_noclear_us\":%u,"
              "\"direct4_us\":%u,\"batch4_us\":%u,\"batch4_1pass_us\":%u,"
              "\"batch4_1pass_noclear_us\":%u,"
@@ -874,6 +961,7 @@ static void on_layoutbench(nc4_ctx_t *ctx, const nc4_frame_t *f)
              (unsigned)save_us, (unsigned)load_us, cache_bytes, (int)load_rc,
              (unsigned)merge8_us, (unsigned)swar_us, (unsigned)swar_ok,
              (unsigned)flat_build_us, (unsigned)flat_apply_us,
+             (unsigned)bus_old_us, (unsigned)bus_new_us, (unsigned)bus_ok,
              (unsigned)canvas_us, (unsigned)direct_us, (unsigned)direct_noclear_us,
              (unsigned)direct4_us,
              (unsigned)batch4_us, (unsigned)batch4_1pass_us,

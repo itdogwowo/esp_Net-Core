@@ -238,6 +238,14 @@ void nc_px_codec_pack_merge8(const uint8_t *lane[8], uint32_t packed_bytes,
 void nc_px_codec_pack_merge8_store(const uint8_t *lane[8], uint32_t packed_bytes,
                                    uint8_t *out, uint32_t stride, uint32_t off);
 
+// 一次過「展開＋轉置」：唔經每條 lane 的 packed 中間緩衝（wave_pack → merge8 的路徑）。
+// 對每顆、每個線材 byte 即時由 lanes 個 codec 取位元組，做 8×8 bit 轉置，然後逐個
+// tick 直接寫 bus word（8-bit：1 B；16-bit：2 B little-endian，bit k = lane k）。
+// 呼叫前要對每條 lane 做 nc_px_codec_frame(c, seq)；out 只寫 active ticks，
+// reset 部份由呼叫端保持 0。回傳寫出的 tick 數（px × lane_bytes × 8 × bit_cells）。
+uint32_t nc_px_codec_pack_bus(nc_pixel_codec_t *const codec[], const uint8_t *rgbw,
+                              uint32_t px, uint8_t *out, uint32_t lanes, uint32_t bus_width);
+
 // SPI 整幀（頭部 + 每顆 + 尾巴）：out 每個 byte 一個位（bit0 = MOSI）
 uint32_t nc_px_codec_spi_frame(nc_pixel_codec_t *c, const uint8_t *rgbw, uint32_t px,
                                uint8_t *out, uint32_t out_cap);
