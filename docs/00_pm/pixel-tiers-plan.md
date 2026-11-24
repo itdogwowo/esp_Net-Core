@@ -514,7 +514,8 @@ git commit -m "project: 2,400 px（16×150）抖動驗收工程與數據"
 - Modify: `firmware/components/sw/pixel/include/nc_pixel_core.h`（宣告）
 - Modify: `firmware/components/tasks/render_task/nc_i80_out.c`（**量到快才**接線）
 - Test: `tools/hosttest/pixel_test/pixel_test.c`（新舊路徑 byte-exact）
-- Bench: `firmware/components/bench/effect_bench/nc_layout_bench.c`（variant 17）
+- Bench: `firmware/components/bench/effect_bench/nc_layout_bench.c`（variant 17／18，test-only）
+- Lab: `modules/lab/i80_pack_lab/`（host A/B 腳本＋記錄；唔係主體工具）
 
 - [ ] **Step 0：16-lane 板用現行固件重測 async 基線** `frame_us / enc_us / tx_us / inflight`，
       確認 frame ≈ max(enc, 18 ms)。**（要硬件；2026-11-25 未有板，未做）**
@@ -526,8 +527,8 @@ git commit -m "project: 2,400 px（16×150）抖動驗收工程與數據"
       8／16 lane、RGBW、8-bit／12-bit dither、`bit_cells` 3／4／8、奇數 px。
 - [x] **Step 2：bench variant 17（0xF077）A/B**：同一塊板、同一份 payload，
       量 `bus_old_us`、`bus_new_us`、`bus_ok`（逐 byte 相同）。
-      指令：`python3 tools/layout_bench.py --port <PORT> --px 9600 --variant 17 --reps 8`
-      （`layout_bench.py` 已支援 variant 17／18）。
+      指令：`python3 modules/lab/i80_pack_lab/run_ab.py --port <PORT> --px 9600 --variant 17 --reps 8`
+      （lab 工具；`tools/layout_bench.py` 保持通用，冇 lab variant）。
       **實測（ESP32-S3、EffectPerf 映像）**：
       | px | 舊 | 新 | 倍數 | bus_ok |
       |---|---:|---:|---:|---:|

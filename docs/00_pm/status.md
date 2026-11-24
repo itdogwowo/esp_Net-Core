@@ -7840,7 +7840,7 @@ uint32_t nc_px_codec_pack_bus(nc_pixel_codec_t *const codec[], const uint8_t *rg
 **未做（等 16-lane 硬件）**：
 
 - Step 0：現行 async 基線（`frame_us`／`enc_us`／`tx_us`／`inflight`）。
-- Step 2：`python3 tools/layout_bench.py --port <PORT> --px 9600 --variant 17 --reps 8`
+- Step 2：`python3 modules/lab/i80_pack_lab/run_ab.py --port <PORT> --px 9600 --variant 17 --reps 8`
   → `bus_old_us`／`bus_new_us`／`bus_ok`。
 - Step 3：快 ≥20% 才接 production；現時 production 仍然係 `wave_pack` + `merge8`
   （唔想未量就換路徑）。
@@ -7850,7 +7850,7 @@ uint32_t nc_px_codec_pack_bus(nc_pixel_codec_t *const codec[], const uint8_t *rg
 
 **建置**：EffectPerf（704.2 KB）與 Zero-Show（685.8 KB）都 rc=0。
 **Bench 已備好**：`nc_layout_bench.c` variant 17（舊路徑 vs 新 API，同一份 payload、
-逐 byte 比對）；`tools/layout_bench.py` 已支援 variant 17。
+逐 byte 比對）；host 側 orchestration 在 `modules/lab/i80_pack_lab/run_ab.py`。
 
 ### 7.220 2026-11-24（Task 6 上板：24.0 → 6.36 ms（3.77×）；production 已接；修爆棧＋單 lane 回歸）
 

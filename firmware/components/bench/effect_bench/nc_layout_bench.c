@@ -493,6 +493,9 @@ static void on_layoutbench(nc4_ctx_t *ctx, const nc4_frame_t *f)
 
     uint32_t flat_build_us = 0, flat_apply_us = 0;
     uint32_t bus_old_us = 0, bus_new_us = 0, bus_ok = 0;
+    // ── LAB instrumentation（Task 6 I80 A/B）──
+    // 一次性量測：只存在於 test-only 的 effect_bench（EffectPerf 映像），唔入 production。
+    // host 端 orchestration 在 modules/lab/i80_pack_lab/；16-lane 驗完可移除。
     if (variant == 17 || variant == 18) {
         const bool dith = (variant == 18);       // 18 = 12-bit dither（走完整轉置）
         // Task 6 原型：同一份 payload、同一批 codec，比較

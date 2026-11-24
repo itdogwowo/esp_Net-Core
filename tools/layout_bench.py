@@ -36,10 +36,9 @@ def main():
     ap.add_argument("--port", required=True)
     ap.add_argument("--px", type=int, default=9600)
     ap.add_argument("--groups", type=int, default=500)
-    ap.add_argument("--variant", type=int, default=1, choices=(0, 1, 2, 3, 4, 17, 18),
+    ap.add_argument("--variant", type=int, default=1, choices=(0, 1, 2, 3, 4),
                     help="0=每組一段連續、1=每組兩段、2=完全隨機（每顆一條單顆 run）、"
-                         "3=每粒燈自己一個 group、4=每個通道一條 entry（4×px 條）、"
-                         "17=I80 波形合成 A/B（8-bit 廣播路徑）、18=同上但 12-bit dither（完整轉置）")
+                         "3=每粒燈自己一個 group、4=每個通道一條 entry（4×px 條）")
     ap.add_argument("--reps", type=int, default=8)
     ap.add_argument("--all", action="store_true",
                     help="掃 100／500／1000 組 × variant 0／1 ＋ 完全隨機（variant 2）")
@@ -95,12 +94,6 @@ def main():
                 tot = vu + d['apply_us']
                 print(f"    一幀總成本：值流 {vu}µs ＋ apply {d['apply_us']}µs "
                       f"＝ {tot}µs（nv={d.get('nv')}）")
-            # Task 6：I80 波形合成 A/B（variant 17）
-            bo, bn, bok = d.get('bus_old_us'), d.get('bus_new_us'), d.get('bus_ok')
-            if bo is not None and bn is not None:
-                ratio = (bo / bn) if bn else 0.0
-                print(f"    I80 合成：舊路徑 {bo}µs  vs  一次過 {bn}µs（{ratio:.2f}×）"
-                      f"  逐 byte 相同={bok}")
             # production 的抖動層：4 子幀 ＝ 4 次掃表
             du, dru = d.get('dither_us'), d.get('dither_runs_us')
             if du is not None and dru is not None:

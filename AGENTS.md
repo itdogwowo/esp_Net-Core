@@ -25,6 +25,76 @@
 
 ---
 
+## 0.5 快速開始：環境、更新、測試
+
+### 環境（本機實測）
+
+| 項目 | 值 |
+|---|---|
+| OS | macOS（Apple Silicon） |
+| ESP-IDF | `~/esp/esp-idf`（**v6.0.3**；`IDF_PATH=$HOME/esp/esp-idf`） |
+| Python | 3.12（Homebrew；`python3`） |
+| 工具鏈 | `~/.espressif/tools/xtensa-esp-elf/...`（由 IDF export 提供） |
+| 建置入口 | `python3 make.py`（不要直接跑 `idf.py`） |
+| 板子 | ESP32-S3（4 MB flash／2 MB PSRAM；USB CDC） |
+
+```bash
+python3 make.py doctor          # IDF／esptool／板子／磁碟
+python3 make.py ports           # /dev/cu.usbmodem*
+python3 make.py projects        # 板 × project
+```
+
+> `make.py doctor` 如果話找不到 `.idf/esp-idf`，係因為它預設看 repo 內的路徑；
+> 用 `IDF_PATH=$HOME/esp/esp-idf` 或在 `make_config.json` 設 `idf.path`。
+
+### 更新 firmware（USB NC4 OTA；唔使 BOOT）
+
+```bash
+# 1) 建置
+IDF_PATH=$HOME/esp/esp-idf python3 make.py build ESP32-S3-Matrix \
+    --project ESP32-S3-Matrix-LED-Textkit
+
+# 2) OTA 推上板（image 在 artifacts/<board>__<project>.bin）
+python3 tools/ota.py --port /dev/cu.usbmodemXXXX \
+    artifacts/ESP32-S3-Matrix__ESP32-S3-Matrix-LED-Textkit.bin
+
+# 3) 驗證
+python3 tools/nc4.py --port /dev/cu.usbmodemXXXX status sys
+python3 tools/nc4.py --port /dev/cu.usbmodemXXXX status tasks
+```
+
+- 預期：`BEGIN` 2–4 s（同步抹分區）→ `WRITE` 約 150 KB/s → `END` 驗 SHA →
+  `APPLY` 重啟；`status sys` 的 `app` hash 會變、`rst=3`。
+- OTA 失敗先 `tools/ota.py --port <PORT> --abort`，再重推。
+- **唔好**因為 `esptool` 連不上就叫用家按 BOOT；見 §1 鐵律 1。
+
+### 做測試
+
+```bash
+# 主機測試（唔需要板；20 支，全部 -Werror）
+bash tools/hosttest/run_all.sh
+
+# 上板 smoke
+python3 tools/nc4.py --port <PORT> status sys
+python3 tools/nc4.py --port <PORT> status tasks
+python3 tools/nc4.py --port <PORT> status mem
+
+# render 統計（要 tests 映像；NC_ENABLE_TESTS）
+python3 tools/nc4.py --port <PORT> raw 0xF061 00
+
+# 配對／I80 A/B（要 EffectPerf 映像；一次性 lab 工具）
+python3 modules/lab/i80_pack_lab/run_ab.py --port <PORT> --px 9600 --variant 17 --reps 8
+
+# 效果層量測（EffectPerf 映像）
+python3 tools/effect_bench.py --port <PORT>
+```
+
+- `render`／`pixel` 要 `level=4`、`started=1`、`running=1`；否則 `fs_format` 重 seed。
+- 量測要記錄：同一塊板、同一映像、reps、min/median、`bus_ok`／checksum。
+- 冇板就明講「未上板」，唔好把 host 數字外推。
+
+---
+
 ## 1. 使用者反覆提醒的鐵律（先讀這一節）
 
 > 以下係用家最常要提醒 AI 的幾件事。**違反任何一條，就算功能「做到」都算做錯。**
@@ -163,6 +233,20 @@ python3 tools/nc4.py --port <PORT> reboot
 - Commit message 用繁中，講「為什麼」＋量測數字；唔好只寫 "fix"。
 - 改完先 `git diff --check`、`git status`，確認冇 build artifact／暫存檔。
 
+### 鐵律 11：一次性工具放 `modules/lab/`，唔好污染主體
+
+- **一次性實驗／量測** → `modules/lab/<name>_lab/`：
+  - 一個資料夾＝README（目的／結果／怎麼跑）＋腳本或 patch；
+  - 量完可以整包移除；數字記錄在 `docs/00_pm/status.md`／`test-register.md`。
+- **`tools/` 只放永久主機工具**（`nc4.py`、`ota.py`、`layout_bench.py`…）；
+  lab 專用 variant／一次性流程唔好加進去。
+- **`firmware/` 只放 production／driver／正式 bench**；`components/bench/` 係
+  test-only，但仍然是 firmware 樹，只放「需要跟 firmware 一起編」的量測。
+- 本次 Task 6 的 `0xF077` variant 17／18 就係 lab instrumentation：
+  firmware 側留在 test-only bench，host 側 orchestration 搬去
+  `modules/lab/i80_pack_lab/`；`tools/layout_bench.py` 保持通用。
+- 16-lane 驗證完，firmware 側的 lab variant 可以移除（或留 patch 在 lab）。
+
 ---
 
 ## 2. 這個專案是什麼（給第一次接觸的人）
@@ -221,7 +305,7 @@ esp_Net-Core/
 │  └─ _profiles/                 能力碎片（eth-rmii、nc4-ws…）
 ├─ tools/                    主機工具（nc4.py、ota.py、layout_bench.py、hosttest/…）
 ├─ web_tools/                ESP WebMaster（REST／WS／檔案／OTA）
-├─ modules/                  外掛 .nct／.nce
+├─ modules/                  外掛 .nct／.nce ＋ lab/ 一次性實驗
 └─ artifacts/                建置產物（gitignore）
 ```
 
@@ -593,7 +677,8 @@ python3 tools/nc4.py --port <PORT> status mem
 - 取 min／median；reps 要寫出來。
 - 用物理上限做參考線（例如 16×600 線路 18 ms），唔好只看 relative。
 - Host x86 數字只代表相對成本，唔可以外推 S3。
-- 量測腳本：`tools/layout_bench.py`、`tools/effect_bench.py`、`tools/bench/`。
+- 量測腳本：`tools/layout_bench.py`（通用）、`tools/effect_bench.py`、`tools/bench/`；
+  一次性 lab：`modules/lab/i80_pack_lab/run_ab.py`。
 
 ### 12.4 已驗證基準（2026-11-24）
 
@@ -712,7 +797,7 @@ python3 tools/nc4.py --port /dev/cu.usbmodemXXXX reboot
 bash tools/hosttest/run_all.sh
 
 # 量測（EffectPerf 映像）
-python3 tools/layout_bench.py --port /dev/cu.usbmodemXXXX --px 9600 --variant 17 --reps 8
+python3 modules/lab/i80_pack_lab/run_ab.py --port /dev/cu.usbmodemXXXX --px 9600 --variant 17 --reps 8
 python3 tools/layout_bench.py --port /dev/cu.usbmodemXXXX --px 9600 --all
 
 # Recovery（OTA 都做唔到才用）
