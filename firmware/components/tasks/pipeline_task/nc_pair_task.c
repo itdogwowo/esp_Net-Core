@@ -738,6 +738,10 @@ static esp_err_t content_apply_mode_locked(const nc_px_mode_t *mode)
     s_content.step = 0;
     s_content.mode_frames = 0;
     s_content.mode_limit = (mode->maxF > 0) ? mode->maxF : 500;
+    if (s_content.layout.flat_err != 0) {
+        ESP_LOGW(TAG, "6 B 表建唔到（%s）：行 runs（熱路徑會慢）",
+                 esp_err_to_name((esp_err_t)s_content.layout.flat_err));
+    }
     s_content.ready = true;
     s_content.fallback = false;
     s_last_eff_seq = 0;
@@ -1317,7 +1321,7 @@ static void on_pixdiag(nc4_ctx_t *ctx, const nc4_frame_t *f)
     char j[1000];
     (void)snprintf(j, sizeof(j),
         "{\"px\":%u,\"slots\":%u,\"ring_b\":%u,\"canvas_b\":%u,"
-        "\"vals_b\":%u,\"runs_b\":%u,\"flat_n\":%u,\"flat_b\":%u,"
+        "\"vals_b\":%u,\"runs_b\":%u,\"flat_n\":%u,\"flat_b\":%u,\"flat_err\":%d,"
         "\"jobs\":%u,\"runs\":%u,\"naprog\":%u,\"skipped\":%u,"
         "\"skip\":{\"no_asset\":%u,\"no_group\":%u,\"bad_write\":%u,"
         "\"empty\":%u,\"asset_full\":%u,\"prog\":%u,\"oom\":%u},"
@@ -1329,6 +1333,7 @@ static void on_pixdiag(nc4_ctx_t *ctx, const nc4_frame_t *f)
         "\"render\":%s}",
         (unsigned)px, (unsigned)slots, (unsigned)ring_b, (unsigned)canvas_b,
         (unsigned)vals_b, (unsigned)runs_b, (unsigned)flat_n, (unsigned)flat_b,
+        (int)s_content.layout.flat_err,
         (unsigned)s_content.layout.njobs, (unsigned)s_content.layout.nruns,
         (unsigned)s_content.layout.naprog, (unsigned)s_content.layout.skipped,
         (unsigned)s_content.layout.skip_no_asset, (unsigned)s_content.layout.skip_no_group,

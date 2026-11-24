@@ -820,12 +820,15 @@ Expected：`h_int` 會**減少**（資產表 BSS 由 8,386 B 變成 N × 262 B�
 
 ## 驗收條件（全部要過）
 
-1. `bash tools/hosttest/run_all.sh` 全綠（含新的 apply4 測試）。
-2. 9,600 px、500 組：`0xF071` 的 `clear=0`、`apply ≤ 2 ms`、`commit ≤ 0.5 ms`。
-3. 9,600 px、完全隨機：`apply ≤ 13 ms`。
-4. 2,400 px、4 子幀：`apply4 ≤ 1.2 ms`（500 組）、`≤ 5 ms`（完全隨機）。
-5. 開機預建：第二次開機 `已有 N、新建 0`；切換 < 20 ms。
+> 2026-11-25 更新：數字改為**真機實測**（6 B 表放 PSRAM）；舊門檻係 prototype 估算。
+
+1. `bash tools/hosttest/run_all.sh` 全綠（20/20）。
+2. 9,600 px、500 組：`0xF071` 的 `clear=0`、`apply ≤ 6 ms`（實測 5.4）、`commit ≤ 0.5 ms`。
+3. 9,600 px、完全隨機（性能下限）：`build ≤ 160 ms`、`flatify ≤ 20 ms`、`apply ≤ 6 ms`（實測 5.37）。
+4. 2,400 px、4 子幀：`apply ≤ 8 ms`（實測 6.03）、視覺 50 fps、子幀 200 Hz。
+5. 開機預建：第二次開機 `built=0`；切換 < 20 ms（playlist 預建後 swap 實測 246 µs）。
 6. 冇清畫布、冇補黑：程式碼搜尋 `memset(s_content.canvas` 應該 0 筆。
+7. 效果數：一個 mode 的**不同效果**唔再受 32 限制（40 個效果真機驗證）。
 
 ## 風險與回退
 

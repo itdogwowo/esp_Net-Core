@@ -574,7 +574,7 @@ esp_err_t nc_px_layout_build(const nc_px_mode_t *mode, const nc_px_map_t *map,
     lfree(src);
     lfree(ht);
     // 6 B 單表：換場時展開一次（失敗就維持 nflat = 0，熱路徑照行 runs）
-    (void)nc_px_layout_flatify(out);
+    out->flat_err = (int16_t)nc_px_layout_flatify(out);
     return ESP_OK;
 }
 
@@ -632,6 +632,7 @@ esp_err_t nc_px_layout_flatify_place(nc_px_layout_t *l, bool place_psram)
     if (l == NULL) {
         return ESP_ERR_INVALID_ARG;
     }
+    l->flat_err = ESP_OK;
     // 重新展開（build／load 之後叫；改名／重建時可以再叫一次）
     lfree(l->flat);
     l->flat = NULL;
@@ -692,6 +693,7 @@ esp_err_t nc_px_layout_flatify_place(nc_px_layout_t *l, bool place_psram)
     l->flat = f;
     l->nflat = (uint32_t)k;
     l->flat_psram = place_psram;
+    l->flat_err = ESP_OK;
     return ESP_OK;
 }
 
@@ -1416,6 +1418,6 @@ esp_err_t nc_px_layout_load(nc_px_layout_t *out, const char *path, uint32_t key,
     }
     lfree(buf);
     // 表唔入快取檔（衍生資料）：讀完一樣展開，行為同 build 一模一樣
-    (void)nc_px_layout_flatify(out);
+    out->flat_err = (int16_t)nc_px_layout_flatify(out);
     return ESP_OK;
 }
