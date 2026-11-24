@@ -7616,3 +7616,40 @@ SuperMini 映像建置 OK（36 s，esp_net_core.bin 0x9f070）。
 
 **未做**：真機數字（用戶暫時冇硬件）。host 方向：9,600 px／500 組 6 B 表 0.012 ms vs
 runs 0.023 ms ≈ **1.87×**（x86 唔可以外推 S3；等硬件返嚟跑 `tools/layout_bench.py --all`）。
+
+### 7.216 2026-11-25（Task 8：掃描後精確配置，去魔法數字）
+
+計劃 Task 8 落地：資產表唔再係「32 個」的固定陣列，改為**按實際數量配置**。
+
+**形狀**（`nc_px_asset.h`）：
+
+```c
+typedef struct { uint16_t n; uint16_t cap; uint8_t owned; nc_px_asset_t *item; }
+    nc_px_asset_tbl_t;        // 12 B 表頭（舊版：表頭 ＋ 32 × 262 B ＝ 8.4 KB BSS）
+```
+
+新 API：`nc_px_asset_tbl_alloc／free／use／reserve`（板上有 PSRAM 用 PSRAM；`use` 讓
+呼叫端自己塞緩衝，`owned = 0` 本層唔會 free）。`reserve` 唔夠位就倍增（8 → 16 → …），
+舊內容自動帶過去，所以掃描係**一次過**（唔使先數再 parse：數 `"name"` 出現次數會漏掉
+靠檔名補名的效果）。
+
+**三個呼叫點**：
+
+1. 全域表（`nc_px_asset.c`）：`s_tbl` 由 8.4 KB BSS 變 12 B；`clear()` 保留緩衝（重掃唔使再配）。
+   到 65,535（16-bit 欄位硬邊界）先明示拒絕，唔會靜靜 wrap。
+2. pair 的 per-mode 表：按 `mode->nentry` 配置（distinct 效果一定 ≤ entry 數），
+   `build_asset_tbl_into()` 唔再 drop 第 33 個效果；開機預建用的臨時表照樣重用。
+3. aprog：本來就係先數 `ndistinct` 再精確配置（Task 8 Step 4 之前已做），今次只係確認
+   `NC_PX_LAYOUT_ASSET_MAX` 唔再係硬上限。
+
+**驗證**：`pxAsset_test` 改為「200 個全部收、第 200 個搵得到、第一個仲喺（倍增搬過都保住）、
+`loaded = 200`、`rejected = 0`」（舊版係驗「只收 32 個」）；`pxLayout_test [13]` 新增 40 個
+效果 × 各自 4 顆 → `naprog = 40`、`nflat = 160`、`skipped = 0`。全套 host 測試綠。
+`nc_px_asset.c.obj` 的 `s_tbl` ＝ **12 B**（`nm`），EffectPerf 映像建置成功（35 s）。
+
+**刻意未做**：`nc_px_plan_t`（舊 plan，`job[NC_PX_JOB_MAX]`）仍然存在——佢只係 A/B 對拍
+同板上自測 action 用，production 走 `nc_px_layout`。拆它要連 `nc_px_show_plan／
+nc_px_pair_apply` 一齊刪 ＋ 改 4 個檔，屬獨立清理（另開 Task）。現時超上限會明示
+（`skipped++` ＋ log），唔會靜靜少咗。
+
+**未做**：`status sys` 的 `h_int` 前後對比（用戶暫時冇硬件）。

@@ -70,8 +70,8 @@ static void test_single_chain(void)
     printf("[1] 單一 group（0:32）新舊 path 對拍\n");
     nc_px_asset_t asset;
     make_asset(&asset, "breathe", 64);
-    nc_px_asset_tbl_t assets = { .n = 1 };
-    assets.item[0] = asset;
+    nc_px_asset_tbl_t assets = { .n = 1, .cap = 1,
+                                      .item = (nc_px_asset_t[]){ asset } };
 
     const nc_px_hw_inv_t inv[] = { { .hw = NC_PX_HW_WS2812, .base = 0, .px = 32 } };
 
@@ -116,8 +116,8 @@ static void test_reverse(void)
     printf("[2] 反序 slice（31:15:-1）\n");
     nc_px_asset_t asset;
     make_asset(&asset, "breathe", 64);
-    nc_px_asset_tbl_t assets = { .n = 1 };
-    assets.item[0] = asset;
+    nc_px_asset_tbl_t assets = { .n = 1, .cap = 1,
+                                      .item = (nc_px_asset_t[]){ asset } };
     const nc_px_hw_inv_t inv[] = { { .hw = NC_PX_HW_WS2812, .base = 0, .px = 32 } };
 
     nc_px_group_sel_t sel[] = { { .hw = NC_PX_HW_WS2812, .slice = "31:15:-1" } };
@@ -153,8 +153,8 @@ static void test_step(void)
     printf("[3] 隔顆 slice（::2）\n");
     nc_px_asset_t asset;
     make_asset(&asset, "breathe", 64);
-    nc_px_asset_tbl_t assets = { .n = 1 };
-    assets.item[0] = asset;
+    nc_px_asset_tbl_t assets = { .n = 1, .cap = 1,
+                                      .item = (nc_px_asset_t[]){ asset } };
     const nc_px_hw_inv_t inv[] = { { .hw = NC_PX_HW_WS2812, .base = 0, .px = 32 } };
 
     nc_px_group_sel_t sel[] = { { .hw = NC_PX_HW_WS2812, .slice = "::2" } };
@@ -196,9 +196,8 @@ static void test_overlap(void)
     nc_px_asset_t a1;
     make_asset(&a0, "red", 16);
     make_asset(&a1, "green", 16);
-    nc_px_asset_tbl_t assets = { .n = 2 };
-    assets.item[0] = a0;
-    assets.item[1] = a1;
+    nc_px_asset_tbl_t assets = { .n = 2, .cap = 2,
+                                      .item = (nc_px_asset_t[]){ a0, a1 } };
     const nc_px_hw_inv_t inv[] = { { .hw = NC_PX_HW_WS2812, .base = 0, .px = 8 } };
 
     nc_px_group_sel_t s0[] = { { .hw = NC_PX_HW_WS2812, .slice = "0:8" } };
@@ -244,8 +243,8 @@ static void test_500_groups(void)
     enum { PX = 9600 };
     nc_px_asset_t asset;
     make_asset(&asset, "breathe", 64);
-    nc_px_asset_tbl_t assets = { .n = 1 };
-    assets.item[0] = asset;
+    nc_px_asset_tbl_t assets = { .n = 1, .cap = 1,
+                                      .item = (nc_px_asset_t[]){ asset } };
     const nc_px_hw_inv_t inv[] = { { .hw = NC_PX_HW_WS2812, .base = 0, .px = PX } };
 
     enum { NG = 500 };
@@ -443,8 +442,8 @@ static void test_json_500(void)
 
     nc_px_asset_t asset;
     make_asset(&asset, "breathe", 64);
-    nc_px_asset_tbl_t assets = { .n = 1 };
-    assets.item[0] = asset;
+    nc_px_asset_tbl_t assets = { .n = 1, .cap = 1,
+                                      .item = (nc_px_asset_t[]){ asset } };
     const nc_px_hw_inv_t inv[] = { { .hw = NC_PX_HW_WS2812, .base = 0, .px = PX } };
 
     nc_px_layout_t l;
@@ -476,8 +475,8 @@ static void test_cache_roundtrip(void)
     printf("[7] 組合快取：save → load\n");
     nc_px_asset_t asset;
     make_asset(&asset, "breathe", 64);
-    nc_px_asset_tbl_t assets = { .n = 1 };
-    assets.item[0] = asset;
+    nc_px_asset_tbl_t assets = { .n = 1, .cap = 1,
+                                      .item = (nc_px_asset_t[]){ asset } };
     const nc_px_hw_inv_t inv[] = { { .hw = NC_PX_HW_WS2812, .base = 0, .px = 64 } };
 
     nc_px_group_sel_t sel[] = { { .hw = NC_PX_HW_WS2812, .slice = ":" } };
@@ -528,9 +527,8 @@ static void test_overlap_same_channel(void)
     nc_px_asset_t assetA, assetB;
     make_asset(&assetA, "A", 4);
     make_asset(&assetB, "B", 4);
-    nc_px_asset_tbl_t assets = { .n = 2 };
-    assets.item[0] = assetA;
-    assets.item[1] = assetB;
+    nc_px_asset_tbl_t assets = { .n = 2, .cap = 2,
+                                      .item = (nc_px_asset_t[]){ assetA, assetB } };
     const nc_px_hw_inv_t inv[] = { { .hw = NC_PX_HW_WS2812, .base = 0, .px = 5 } };
 
     nc_px_group_sel_t selA[] = { { .hw = NC_PX_HW_WS2812, .slice = "0:4" } };
@@ -568,8 +566,8 @@ static void test_apply4(void)
     printf("[11] apply4 抖動（4 子幀）\n");
     nc_px_asset_t a;
     make_asset(&a, "w", 4);
-    nc_px_asset_tbl_t assets = { .n = 1 };
-    assets.item[0] = a;
+    nc_px_asset_tbl_t assets = { .n = 1, .cap = 1,
+                                      .item = (nc_px_asset_t[]){ a } };
     const nc_px_hw_inv_t inv[] = { { .hw = NC_PX_HW_WS2812, .base = 0, .px = 4 } };
     nc_px_group_sel_t sel[] = { { .hw = NC_PX_HW_WS2812, .slice = ":" } };
     nc_px_group_t g = { .id = 1, .name = "full", .sel = sel, .nsel = 1 };
@@ -610,9 +608,8 @@ static void test_flat6_matches_runs(void)
     nc_px_asset_t a, b;
     make_asset(&a, "A", 24);          // rgb 8 顆剛好 24 個值
     make_asset(&b, "B", 8);
-    nc_px_asset_tbl_t assets = { .n = 2 };
-    assets.item[0] = a;
-    assets.item[1] = b;
+    nc_px_asset_tbl_t assets = { .n = 2, .cap = 2,
+                                      .item = (nc_px_asset_t[]){ a, b } };
     const nc_px_hw_inv_t inv[] = { { .hw = NC_PX_HW_WS2812, .base = 0, .px = 8 } };
     // g0 全鏈寫 rgb；g1 隔顆只寫紅（同 g0 重疊 → 後寫贏）；g2 前半寫 rgbw
     nc_px_group_sel_t s0[] = { { .hw = NC_PX_HW_WS2812, .slice = ":" } };
@@ -692,6 +689,61 @@ static void test_flat6_matches_runs(void)
     nc_px_layout_free(&lay);
 }
 
+// ── [13] 40 個效果（舊上限 32）：資產表／aprog 都按實際數量配置 ──
+// 每個效果寫自己 4 顆，40 × 4 = 160 顆 ＝ 160 筆表（冇重疊）。
+static void test_many_effects(void)
+{
+    printf("[13] 40 個效果（舊上限 32）\n");
+    const uint16_t n = 40;
+    nc_px_asset_tbl_t *t = nc_px_asset_tbl_alloc(n);
+    check(t != NULL, "資產表：按 40 個配置（表頭 ＋ 40 × 每項）");
+    if (t == NULL) {
+        return;
+    }
+    t->n = n;
+    for (uint16_t i = 0; i < n; i++) {
+        char name[16];
+        snprintf(name, sizeof(name), "e%u", (unsigned)i);
+        make_asset(&t->item[i], name, 4);
+    }
+    nc_px_group_t *grp = calloc(n, sizeof(*grp));
+    nc_px_group_sel_t *sels = calloc(n, sizeof(*sels));
+    nc_px_mode_entry_t *en = calloc(n, sizeof(*en));
+    if (grp == NULL || sels == NULL || en == NULL) {
+        check(false, "暫存配置");
+        nc_px_asset_tbl_free(t);
+        free(grp);
+        free(sels);
+        free(en);
+        return;
+    }
+    for (uint16_t i = 0; i < n; i++) {
+        grp[i].id = (uint16_t)(i + 1);
+        snprintf(grp[i].name, sizeof(grp[i].name), "g%u", (unsigned)i);
+        grp[i].sel = &sels[i];
+        grp[i].nsel = 1;
+        sels[i].hw = NC_PX_HW_WS2812;
+        snprintf(sels[i].slice, sizeof(sels[i].slice), "%u:%u",
+                 (unsigned)(i * 4u), (unsigned)(i * 4u + 4u));
+        snprintf(en[i].group, sizeof(en[i].group), "g%u", (unsigned)i);
+        snprintf(en[i].effect, sizeof(en[i].effect), "e%u", (unsigned)i);
+        en[i].write = NC_PX_WRITE_RGB;
+    }
+    nc_px_map_t map = { .id = 1, .name = "m", .group = grp, .ngroups = n };
+    nc_px_mode_t mode = { .id = 1, .name = "m", .nentry = n, .entry = en };
+    const nc_px_hw_inv_t inv[] = { { .hw = NC_PX_HW_WS2812, .base = 0, .px = n * 4u } };
+    nc_px_layout_t lay;
+    check(nc_px_layout_build(&mode, &map, t, inv, 1, &lay) == ESP_OK, "建立");
+    check(lay.naprog == n, "aprog 數 = 40（唔再截 32）");
+    check(lay.skipped == 0, "冇 skip");
+    check(lay.nflat == (uint32_t)n * 4u, "6 B 表 = 40 × 4 = 160 筆");
+    nc_px_layout_free(&lay);
+    nc_px_asset_tbl_free(t);
+    free(grp);
+    free(sels);
+    free(en);
+}
+
 int main(void)
 {
     test_single_chain();
@@ -700,6 +752,7 @@ int main(void)
     test_overlap_same_channel();
     test_apply4();
     test_flat6_matches_runs();
+    test_many_effects();
     test_500_groups();
     test_json_500();
     test_cache_roundtrip();

@@ -15,11 +15,102 @@
 #include "nc_px_json.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "esp_log.h"
 
+#if defined(ESP_PLATFORM)
+#include "esp_heap_caps.h"
+#endif
+
 static const char *TAG = "px_asset";
+
+// 表本體放邊：板上有 PSRAM 就 PSRAM（效果表係冷資料，熱路徑唔會逐幀讀），
+// 冇就 internal；host 就係普通 malloc。
+static void *aalloc(size_t n)
+{
+#if defined(ESP_PLATFORM)
+    void *p = heap_caps_malloc(n, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (p != NULL) {
+        return p;
+    }
+#endif
+    return malloc(n);
+}
+
+#define ASSET_CHUNK 8u          // 第一次配置幾個（之後倍增）
+
+nc_px_asset_tbl_t *nc_px_asset_tbl_alloc(uint16_t cap)
+{
+    nc_px_asset_tbl_t *t = (nc_px_asset_tbl_t *)aalloc(sizeof(*t));
+    if (t == NULL) {
+        return NULL;
+    }
+    memset(t, 0, sizeof(*t));
+    if (cap != 0 && nc_px_asset_tbl_reserve(t, cap) != ESP_OK) {
+        free(t);
+        return NULL;
+    }
+    return t;
+}
+
+void nc_px_asset_tbl_free(nc_px_asset_tbl_t *t)
+{
+    if (t == NULL) {
+        return;
+    }
+    if (t->owned && t->item != NULL) {
+        free(t->item);
+    }
+    t->item = NULL;
+    t->n = 0;
+    t->cap = 0;
+    t->owned = 0;
+    free(t);
+}
+
+void nc_px_asset_tbl_use(nc_px_asset_tbl_t *t, nc_px_asset_t *buf, uint16_t cap)
+{
+    if (t == NULL) {
+        return;
+    }
+    t->n = 0;
+    t->cap = cap;
+    t->owned = 0;
+    t->item = buf;
+}
+
+esp_err_t nc_px_asset_tbl_reserve(nc_px_asset_tbl_t *t, uint16_t need)
+{
+    if (t == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (t->cap >= need) {
+        return ESP_OK;
+    }
+    uint32_t cap = (t->cap != 0) ? t->cap : ASSET_CHUNK;
+    while (cap < need) {
+        cap *= 2u;
+    }
+    if (cap > 0xFFFFu) {
+        cap = 0xFFFFu;
+    }
+    nc_px_asset_t *it = (nc_px_asset_t *)aalloc((size_t)cap * sizeof(*it));
+    if (it == NULL) {
+        return ESP_ERR_NO_MEM;
+    }
+    if (t->item != NULL && t->n > 0) {
+        memcpy(it, t->item, (size_t)t->n * sizeof(*it));
+    }
+    if (t->owned && t->item != NULL) {
+        free(t->item);
+    }
+    t->item = it;
+    t->cap = (uint16_t)cap;
+    t->owned = 1;
+    return ESP_OK;
+}
 
 static nc_px_asset_tbl_t  s_tbl;
 static nc_px_asset_stat_t s_stat;
@@ -27,7 +118,7 @@ static nc_px_asset_stat_t s_stat;
 // ═══════════════════════ 表 ═══════════════════════
 void nc_px_asset_clear(void)
 {
-    memset(&s_tbl, 0, sizeof(s_tbl));
+    s_tbl.n = 0;          // 保留已配置的緩衝：重掃唔使再配一次
     memset(&s_stat, 0, sizeof(s_stat));
 }
 
@@ -49,7 +140,7 @@ const nc_px_asset_t *nc_px_asset_find(const char *name)
     if (name == NULL) {
         return NULL;
     }
-    for (uint8_t i = 0; i < s_tbl.n; i++) {
+    for (uint16_t i = 0; i < s_tbl.n; i++) {
         if (strcmp(s_tbl.item[i].name, name) == 0) {
             return &s_tbl.item[i];
         }
@@ -75,9 +166,12 @@ static esp_err_t tbl_add(const nc_px_asset_t *a)
         ESP_LOGW(TAG, "撞名：%s（保留第一個）", a->name);
         return ESP_ERR_INVALID_STATE;
     }
-    if (s_tbl.n >= NC_PX_ASSET_MAX) {
+    // 冇固定上限：要幾多配幾多（倍增）。配唔到（真係冇記憶體）才拒。
+    // 65,535 係 16-bit 欄位的硬邊界（唔係政策上限）：到頂就明示拒絕，唔好靜靜 wrap。
+    if (s_tbl.n == 0xFFFFu ||
+        nc_px_asset_tbl_reserve(&s_tbl, (uint16_t)(s_tbl.n + 1u)) != ESP_OK) {
         s_stat.rejected++;
-        ESP_LOGW(TAG, "表滿（%d）：%s 唔載入", NC_PX_ASSET_MAX, a->name);
+        ESP_LOGW(TAG, "無記憶體／表滿（已有 %u 個）：%s 唔載入", (unsigned)s_tbl.n, a->name);
         return ESP_ERR_NO_MEM;
     }
     s_tbl.item[s_tbl.n++] = *a;
@@ -404,14 +498,14 @@ size_t nc_px_asset_json(char *out, size_t cap)
         return 0;
     }
     size_t u = 0;
-    int n = snprintf(out, cap, "{\"n\":%u,\"max\":%u,\"rej\":%u,\"dup\":%u,\"items\":[",
-                     (unsigned)s_tbl.n, (unsigned)NC_PX_ASSET_MAX,
+    int n = snprintf(out, cap, "{\"n\":%u,\"cap\":%u,\"rej\":%u,\"dup\":%u,\"items\":[",
+                     (unsigned)s_tbl.n, (unsigned)s_tbl.cap,
                      (unsigned)s_stat.rejected, (unsigned)s_stat.dup);
     if (n < 0 || (size_t)n >= cap) {
         return 0;
     }
     u = (size_t)n;
-    for (uint8_t i = 0; i < s_tbl.n; i++) {
+    for (uint16_t i = 0; i < s_tbl.n; i++) {
         n = snprintf(out + u, cap - u, "%s{\"name\":\"%s\",\"kind\":%u,\"seg\":%u}",
                      (i == 0) ? "" : ",",
                      s_tbl.item[i].name, (unsigned)s_tbl.item[i].kind,

@@ -238,7 +238,9 @@ static void on_layoutbench(nc4_ctx_t *ctx, const nc4_frame_t *f)
     nc_px_group_sel_t *sels = heap_caps_malloc((size_t)LB_SEL_MAX * sizeof(*sels), alloc_caps);
     nc_px_mode_entry_t *entries = heap_caps_malloc((size_t)ngroups * sizeof(*entries),
                                                    alloc_caps);
-    nc_px_asset_tbl_t *assets = heap_caps_malloc(sizeof(nc_px_asset_tbl_t), alloc_caps);
+    // 表頭 ＋ 1 個效果一齊配置（舊版表係內建 32 個 item 的固定陣列）
+    nc_px_asset_tbl_t *assets = heap_caps_malloc(sizeof(nc_px_asset_tbl_t) +
+                                                 sizeof(nc_px_asset_t), alloc_caps);
     uint8_t *c8 = heap_caps_malloc((size_t)px * 4u, alloc_caps);
     uint16_t *c12 = heap_caps_malloc((size_t)px * 8u, alloc_caps);
     uint16_t *vals = heap_caps_malloc((size_t)LB_VALS_MAX * sizeof(uint16_t),
@@ -313,7 +315,7 @@ static void on_layoutbench(nc4_ctx_t *ctx, const nc4_frame_t *f)
 
     nc_px_asset_t asset;
     fill_asset(&asset, 64);
-    memset(assets, 0, sizeof(*assets));
+    nc_px_asset_tbl_use(assets, (nc_px_asset_t *)(assets + 1), 1);
     assets->n = 1;
     assets->item[0] = asset;
     nc_px_mode_t mode;

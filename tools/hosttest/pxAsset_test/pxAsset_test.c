@@ -159,21 +159,26 @@ static void test_limits(void)
     const nc_px_asset_t *m = nc_px_asset_find("many");
     check(m != NULL && m->nseg == NC_PX_SEG_MAX, "20 段：只留 NC_PX_SEG_MAX 段");
 
+    // 冇固定上限（舊版 32）：要 200 個就收 200 個，而且係倍增配置
     nc_px_asset_clear();
+    const int want = 200;
     int added = 0;
-    for (int i = 0; i < NC_PX_ASSET_MAX + 3; i++) {
+    for (int i = 0; i < want; i++) {
         char one[128];
         snprintf(one, sizeof(one), "{\"name\":\"e%d\",\"program\":[]}", i);
         if (add(one, one) == ESP_OK) {
             added++;
         }
     }
-    check(added == NC_PX_ASSET_MAX, "表上限：只收 NC_PX_ASSET_MAX 個");
-    check(nc_px_asset_count() == NC_PX_ASSET_MAX, "表上限：count 一致");
+    check(added == want, "表冇上限：200 個全部收");
+    check(nc_px_asset_count() == want, "表冇上限：count 一致");
+    check(nc_px_asset_find("e199") != NULL, "第 200 個搵得到");
+    check(nc_px_asset_find("e0") != NULL, "第一個仲喺（倍增搬過都保住）");
 
     nc_px_asset_stat_t st;
     nc_px_asset_stats(&st);
-    check(st.rejected >= 3, "表上限：超出計入 rejected");
+    check(st.rejected == 0, "冇人被拒");
+    check(st.loaded == (uint16_t)want, "loaded = 200");
 }
 
 // ── 7. 狀態 JSON ───────────────────────────────────────────────────

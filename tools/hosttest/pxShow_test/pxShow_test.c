@@ -80,10 +80,11 @@ int main(void)
     check(nc_px_mode_parse(mode_txt, strlen(mode_txt), mode_pool, 16, &mode) == ESP_OK,
           "mode 解析");
 
-    nc_px_asset_tbl_t tbl;
-    memset(&tbl, 0, sizeof(tbl));
+    // plan 內部指住這張表的 item，所以成個 test 都唔 free（程序完結就完）
+    nc_px_asset_tbl_t *tbl = nc_px_asset_tbl_alloc((uint16_t)nc_px_asset_count());
+    check(tbl != NULL, "資產表配置");
     for (int i = 0; i < nc_px_asset_count(); i++) {
-        tbl.item[tbl.n++] = *nc_px_asset_at(i);
+        tbl->item[tbl->n++] = *nc_px_asset_at(i);
     }
 
     const nc_px_hw_inv_t inv[] = {
@@ -91,7 +92,7 @@ int main(void)
         { .hw = NC_PX_HW_UARTMOTOR1, .base = 32, .px = 1 },
     };
     static nc_px_plan_t plan;
-    const esp_err_t ep = nc_px_show_plan(&mode, &map, &tbl, inv,
+    const esp_err_t ep = nc_px_show_plan(&mode, &map, tbl, inv,
                                          (uint8_t)(sizeof(inv) / sizeof(inv[0])), &plan);
     check(ep == ESP_OK, "plan 成功");
     check(plan.px == 33, "合成鏈長度 33（ws2812 32 ＋ uartMotor1 1）");
@@ -151,7 +152,7 @@ int main(void)
               "motor_sine 解析");
         // uart_motor_sine 用自訂段型別（唔係六工具）→ 唔會入 program 資產表；
         // 呢個 mode 要等 .nce 後端，plan 應該「搵唔到有效 job」而唔係亂畫。
-        check(nc_px_show_plan(&m2, &map, &tbl, inv, 2, &plan) == ESP_ERR_NOT_FOUND,
+        check(nc_px_show_plan(&m2, &map, tbl, inv, 2, &plan) == ESP_ERR_NOT_FOUND,
               "motor_sine：自訂型別未支援 → NOT_FOUND（唔會亂畫）");
         free(motor);
     }

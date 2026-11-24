@@ -139,24 +139,29 @@ int main(void)
     }
     free(eff);
 
-    nc_px_asset_tbl_t tbl;
-    memset(&tbl, 0, sizeof(tbl));
+    nc_px_asset_tbl_t *tbl = nc_px_asset_tbl_alloc((uint16_t)nc_px_asset_count());
+    if (tbl == NULL) {
+        printf("資產表配置失敗\n");
+        return 1;
+    }
     for (int i = 0; i < nc_px_asset_count(); i++) {
-        tbl.item[tbl.n++] = *nc_px_asset_at(i);
+        tbl->item[tbl->n++] = *nc_px_asset_at(i);
     }
 
     printf("=== 配對／排版成本（host x86，同一份 C 實作）===\n");
     printf("plan = 換場一次（group 解析＋slice＋program 編譯）；frame = 每幀\n\n");
-    bench_size(64, 1, &tbl);
-    bench_size(64, 4, &tbl);
-    bench_size(960, 1, &tbl);
-    bench_size(960, 4, &tbl);
-    bench_size(9600, 1, &tbl);
-    bench_size(9600, 4, &tbl);
+    bench_size(64, 1, tbl);
+    bench_size(64, 4, tbl);
+    bench_size(960, 1, tbl);
+    bench_size(960, 4, tbl);
+    bench_size(9600, 1, tbl);
+    bench_size(9600, 4, tbl);
 
-    printf("\n記憶體：plan %u B（8 jobs × prog）、map %u B、mode %u B、asset %u B、table %u B\n",
+    printf("\n記憶體：plan %u B（8 jobs × prog）、map %u B、mode %u B、asset %u B、"
+           "表頭 %u B＋每項 %u B（舊版固定 32 項 ＝ 8,386 B）\n",
            (unsigned)sizeof(nc_px_plan_t), (unsigned)sizeof(nc_px_map_t),
            (unsigned)sizeof(nc_px_mode_t), (unsigned)sizeof(nc_px_asset_t),
-           (unsigned)sizeof(nc_px_asset_tbl_t));
+           (unsigned)sizeof(nc_px_asset_tbl_t), (unsigned)sizeof(nc_px_asset_t));
+    nc_px_asset_tbl_free(tbl);
     return 0;
 }

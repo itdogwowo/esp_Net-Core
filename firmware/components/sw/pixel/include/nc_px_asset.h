@@ -48,8 +48,7 @@ typedef struct {
 } nc_px_seg_t;
 
 // ═══════════════════════ 一個效果資產 ═══════════════════════
-#define NC_PX_ASSET_MAX   32       // 整棵樹最多幾個（超 = 跳過 + log，唔會爆）
-#define NC_PX_SEG_MAX     16       // 一個 program 最多幾段
+#define NC_PX_SEG_MAX     16       // 一個 program 最多幾段（段唔會多，呢個係真上限）
 
 typedef enum {
     NC_PX_ASSET_PROGRAM = 0,       // DATA：program（JSON 波形）
@@ -70,9 +69,14 @@ typedef struct {
     nc_px_seg_t seg[NC_PX_SEG_MAX];
 } nc_px_asset_t;
 
+// 效果表：**唔再係固定 32 個**（舊版 32 × 262 B ＝ 8,386 B 食死在 BSS，開機就冇）。
+// `n` 已用、`cap` 容量、`item` 由 `nc_px_asset_tbl_*` 管理（板上有 PSRAM 就用 PSRAM）。
+// 呼叫端亦可以自己塞緩衝（`nc_px_asset_tbl_use`，owned = 0 → 本層唔會 realloc／free 它）。
 typedef struct {
-    uint8_t      n;
-    nc_px_asset_t item[NC_PX_ASSET_MAX];
+    uint16_t       n;
+    uint16_t       cap;
+    uint8_t        owned;
+    nc_px_asset_t *item;
 } nc_px_asset_tbl_t;
 
 typedef struct {
@@ -80,6 +84,15 @@ typedef struct {
     uint16_t rejected;    // 解析失敗／未知段型別／表滿
     uint16_t dup;         // 撞名被忽略（保留第一個）
 } nc_px_asset_stat_t;
+
+// ═══════════════════════ 表本體（按實際數量配置，冇上限）═══════════════════════
+// 為什麽要動態：效果數係用戶 DATA（`effects.json` ＋ 一堆檔），固定 32 就係「隱藏上限」。
+// `alloc` 連表頭一齊配置；`use` 用呼叫端自己的緩衝（host 測試／臨時表）；
+// `reserve` 唔夠位就倍增（8 → 16 → …），舊內容自動帶過去。
+nc_px_asset_tbl_t *nc_px_asset_tbl_alloc(uint16_t cap);   // 回 NULL = 記憶體不足
+void               nc_px_asset_tbl_free(nc_px_asset_tbl_t *t);
+void               nc_px_asset_tbl_use(nc_px_asset_tbl_t *t, nc_px_asset_t *buf, uint16_t cap);
+esp_err_t          nc_px_asset_tbl_reserve(nc_px_asset_tbl_t *t, uint16_t need);
 
 // ═══════════════════════ API ═══════════════════════
 // **解析核心**（這一支唔碰檔案系統，所以可以直接在 PC 上測）：

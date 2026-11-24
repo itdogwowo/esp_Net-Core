@@ -383,7 +383,7 @@ static void content_state_reset(void)
     s_content.busy = 0;
     nc_px_layout_free(&s_content.layout);
     if (s_content.assets != NULL) {
-        memset(s_content.assets, 0, sizeof(*s_content.assets));
+        s_content.assets->n = 0;          // 保留已配置的 item 緩衝，下次換場重用
     }
     s_content.mode_name[0] = '\0';
     s_content.map_name[0] = '\0';
@@ -435,32 +435,38 @@ static const nc_px_map_t *select_map(const nc_px_mode_t *mode)
 
 // plan 只需要 mode 引用到的 asset（最多 NC_PX_MODE_ENTRY_MAX 個）；
 // asset 表本身係 sw/pixel 的私有表，只公開 find/at，所以在這裡建一份小表。
-static void build_asset_tbl_into(nc_px_asset_tbl_t *dst, const nc_px_mode_t *mode)
+// 按 entry 數配置（distinct 效果一定 ≤ entry 數），所以冇固定上限，
+// 亦唔會靜靜 drop 第 33 個效果。
+static esp_err_t build_asset_tbl_into(nc_px_asset_tbl_t *dst, const nc_px_mode_t *mode)
 {
-    memset(dst, 0, sizeof(*dst));
+    dst->n = 0;
+    if (nc_px_asset_tbl_reserve(dst, (uint16_t)(mode->nentry ? mode->nentry : 1u)) != ESP_OK) {
+        return ESP_ERR_NO_MEM;
+    }
     for (uint32_t i = 0; i < mode->nentry; i++) {
         const nc_px_asset_t *a = nc_px_asset_find(mode->entry[i].effect);
         if (a == NULL) {
             continue;                     // 未知 effect：plan 會記入 skipped
         }
         bool dup = false;
-        for (uint8_t k = 0; k < dst->n; k++) {
+        for (uint16_t k = 0; k < dst->n; k++) {
             if (strcmp(dst->item[k].name, a->name) == 0) {
                 dup = true;
                 break;
             }
         }
-        if (dup || dst->n >= NC_PX_ASSET_MAX) {
+        if (dup) {
             continue;
         }
         dst->item[dst->n++] = *a;
     }
+    return ESP_OK;
 }
 
 // 給目前的 mode 建表（s_content.assets 是這個 mode 專用的）
-static void build_asset_tbl(const nc_px_mode_t *mode)
+static esp_err_t build_asset_tbl(const nc_px_mode_t *mode)
 {
-    build_asset_tbl_into(s_content.assets, mode);
+    return build_asset_tbl_into(s_content.assets, mode);
 }
 
 static void log_tree(const char *pixel_dir)
@@ -515,7 +521,12 @@ static esp_err_t content_apply_mode_locked(const nc_px_mode_t *mode)
     s_content.white = (mode->white > 100) ? 100 : mode->white;
 
     // plan：mode + map + assets + inventory（8×8 Matrix = 一條 WS2812、base 0）。
-    build_asset_tbl(mode);
+    const esp_err_t te = build_asset_tbl(mode);
+    if (te != ESP_OK) {
+        ESP_LOGW(TAG, "mode %s：效果表配置失敗（entry=%u）", mode->name,
+                 (unsigned)mode->nentry);
+        return te;
+    }
     const nc_px_hw_inv_t inv = {
         .hw = NC_PX_HW_WS2812,
         .base = 0,
@@ -740,7 +751,8 @@ static void content_start_pipeline(void)
     }
 
     // ①b 兩塊「大但唔熱」的表放 PSRAM，避免佔 internal BSS：
-    //     asset 表（32 × 262 B ≈ 8.4 KB）只在換場讀；0xF06B 快照 2 KB 只在主機 poll 時讀。
+    //     asset 表（表頭 ＋ 按 entry 數的效果，262 B／個）只在換場讀；
+    //     0xF06B 快照 2 KB 只在主機 poll 時讀。
     if (s_content.assets == NULL) {
         s_content.assets = (nc_px_asset_tbl_t *)heap_caps_malloc(
             sizeof(nc_px_asset_tbl_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
@@ -817,8 +829,7 @@ static void cache_prebuild_missing(void)
     if (modes == NULL || modes->n == 0 || s_content.px == 0) {
         return;
     }
-    nc_px_asset_tbl_t *tmp = heap_caps_malloc(sizeof(*tmp),
-                                              MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    nc_px_asset_tbl_t *tmp = nc_px_asset_tbl_alloc(0);   // item 之後按 entry 數 reserve
     if (tmp == NULL) {
         ESP_LOGW(TAG, "開機預建：臨時 asset 表配置失敗 → 略過");
         return;
@@ -837,7 +848,10 @@ static void cache_prebuild_missing(void)
             failed++;
             continue;
         }
-        build_asset_tbl_into(tmp, m);
+        if (build_asset_tbl_into(tmp, m) != ESP_OK) {
+            failed++;
+            continue;
+        }
         const uint32_t key = nc_px_layout_cache_key(m->hash, map->hash, s_content.px);
         char path[96];
         (void)snprintf(path, sizeof(path), "%s/cache/%08lx.pxlt", s_content.pixel_dir,
@@ -863,7 +877,7 @@ static void cache_prebuild_missing(void)
         }
         nc_px_layout_free(&lay);
     }
-    heap_caps_free(tmp);
+    nc_px_asset_tbl_free(tmp);
     s_prebuild.present = present;
     s_prebuild.built = built;
     s_prebuild.too_big = too_big;
@@ -897,7 +911,7 @@ static void content_stop(void)
         s_content.canvas = NULL;
     }
     if (s_content.assets != NULL) {
-        heap_caps_free(s_content.assets);
+        nc_px_asset_tbl_free(s_content.assets);   // 連 item 一齊放（owned）
         s_content.assets = NULL;
     }
     if (s_content.last != NULL) {

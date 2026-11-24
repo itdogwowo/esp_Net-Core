@@ -645,16 +645,25 @@ Expected（9,600 px）：500 組 ≤ 2.5 ms、完全隨機 ≤ 5.5 ms（6 B 實�
 - Modify: `firmware/components/tasks/pipeline_task/nc_pair_task.c`
 - Test: `tools/hosttest/pxLayer_test/pxLayout_test.c`（大量效果）、`pxShow_test`
 
-- [ ] **Step 1：把資產表改成 flexible array**
+- [x] **Step 1：把資產表改成 flexible array**
 
 ```c
 typedef struct {
-    uint16_t      n;
-    nc_px_asset_t item[];      // 實際數量由掃描決定
+    uint16_t       n;          // 已用
+    uint16_t       cap;        // 配置了幾個
+    uint8_t        owned;      // 1 = item 由本層配置（可以 realloc／free）
+    nc_px_asset_t *item;
 } nc_px_asset_tbl_t;
 ```
 
-- [ ] **Step 2：掃描先數、再配置、再解析**
+> **實作改動**：用「表頭 ＋ 指標＋容量」，唔用 C99 flexible array。原因：掃描係逐個檔
+> `add`（Step 2 的兩次掃描要讀兩次檔，而且「數 `"name"` 出現次數」會漏掉冇寫 name、
+> 靠檔名補的效果），所以表一定要**可增長**；flexible array 唔可以 realloc。
+> `item` 由 `nc_px_asset_tbl_alloc／reserve／free` 管理（板上 PSRAM 優先），
+> 呼叫端亦可以自己塞緩衝（`nc_px_asset_tbl_use`，owned = 0）。
+> 新增 API：`nc_px_asset_tbl_alloc／free／use／reserve`（`nc_px_asset.h`）。
+
+- [x] **Step 2：掃描先數、再配置、再解析**（改為「用到才倍增」，見 Step 1 註）
 
 ```c
 // nc_px_asset_scan() 內部：
@@ -664,7 +673,7 @@ t->n = 0;
 parse_effects_into(t, json, len);                       // 填入，最多 count 個
 ```
 
-- [ ] **Step 3：pair 的 per-mode 資產表按 entry 數配置**
+- [x] **Step 3：pair 的 per-mode 資產表按 entry 數配置**
 
 ```c
 const size_t bytes = sizeof(nc_px_asset_tbl_t) +
@@ -672,7 +681,7 @@ const size_t bytes = sizeof(nc_px_asset_tbl_t) +
 s_content.assets = heap_caps_malloc(bytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
 ```
 
-- [ ] **Step 4：aprog 先數 distinct 效果，再精確配置**
+- [x] **Step 4：aprog 先數 distinct 效果，再精確配置**（之前已經係咁：`ndistinct` 先掃一次，`out->aprog` 按它配置；`NC_PX_LAYOUT_ASSET_MAX` 唔再係硬上限）
 
 ```c
 uint32_t ndistinct = 0;
@@ -686,7 +695,18 @@ out->aprog = lalloc((size_t)ndistinct * sizeof(nc_px_aprog_t));
 
 - [ ] **Step 5：刪除舊 `nc_px_plan_t` 的 8 條上限**（production 冇用；host 測試改用 layout）
 
-- [ ] **Step 6：host 測試（40 個效果 > 舊上限 32）**
+> **未做，刻意留低**：`nc_px_plan_t`（`job[NC_PX_JOB_MAX]`）仍然被 `nc_px_show.c`、
+> `pxShow_test`、`pxMap_bench`、`nc_test_action.c`（板上的自測 action）用住，係 A/B 對拍
+> 同自測路徑。它唔在 production（production 走 `nc_px_layout`），所以個 8 條上限只影響
+> 呢條舊路徑。要刪就要連 `nc_px_show_plan／nc_px_pair_apply` 一齊拆 ＋ 改 4 個檔的測試
+> ——屬於獨立清理，唔應該夾在「去魔法數字」這一步做（風險大、收益係 0 記憶體）。
+> 建議另開一個 Task「拆舊 plan 路徑」。現時舊路徑超出上限會**明示**（`skipped++` ＋ log）。
+
+- [x] **Step 6：host 測試（40 個效果 > 舊上限 32）**
+
+> 加在 `pxLayout_test.c [13]`：40 個效果 × 各自 4 顆 → `naprog = 40`、`nflat = 160`、
+> `skipped = 0`。另外 `pxAsset_test` 的「表上限」測試改成「200 個全部收、第 200 個搵得到、
+> 第一個仲喺（倍增搬過都保住）、`loaded = 200`」——舊版係驗「只收 32 個、其餘 rejected」。
 
 ```c
 static void test_many_effects(void)
@@ -725,6 +745,10 @@ Run: `bash tools/hosttest/pxLayer_test/run.sh` → Expected: `aprog 數 = 40`、
 
 - [ ] **Step 7：上板量開機記憶體與時間**
 
+> **未做（2026-11-25）：用戶暫時冇硬件。** 靜態證據：`nc_px_asset_tbl_t` 由
+> `32 × 262 B ＝ 8,386 B` 的 BSS 陣列變成 `12 B` 表頭 ＋ 按實際效果數配置
+> （SuperMini／EffectPerf 兩個映像都建置成功）。`status sys` 的 `h_int` 要等硬件。
+
 ```bash
 python3 tools/nc4.py --port /dev/cu.usbmodemB43A45AD52E41 status sys
 ```
@@ -733,7 +757,7 @@ Expected：`h_int` 會**減少**（資產表 BSS 由 8,386 B 變成 N × 262 B�
 `h_ps` 亦會減少（pair assets 與 aprog 都按實際數量配置）。
 把 `status sys` 的數字寫入 status 文件。
 
-- [ ] **Step 8：Commit**
+- [x] **Step 8：Commit**
 
 ## 驗收條件（全部要過）
 
