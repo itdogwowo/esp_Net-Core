@@ -66,12 +66,14 @@ verdict     STABLE
 
 Render 唔再用固定週期 timer，而係 **deadline ＋ slack**（`nc_fps_clock.c`）：
 
-```
-每輪：wait = deadline - now（>0 就等）；做完：
-  早完成 → slack += 多餘時間（cap = NETCORE_PIXEL_SLACK_MS，預設 50 ms）
-  遲到   → 先花 slack；deadline 留在原本 grid → 下一輪等短啲，追返
-  遲到超過存款 → overrun，deadline = now + period（唔爆追）
-```
+**週期 timer 仍然係主人**：節拍完全由 `system.json` 的 `frame_interval_ms` 控制
+（`esp_timer_start_periodic`），緩衝**唔會改週期、唔會追趕**。
+
+時間緩衝（slack）只做兩件事：
+1. **吸收判定**：早完成 → 存入（上限 `NETCORE_PIXEL_SLACK_MS`，預設 50 ms）；
+   遲到 → 由緩衝吸收；吸收得到 → `catchup +1`（視為可接受波幅）；
+   吸收唔到 → `overrun +1`（尖峰超出緩衝，要查）。
+2. **穩定度指標**：`slack_us／catchup／overrun` 直接顯示「緩衝夠唔夠」。
 
 **銀行一開始就係滿的**（避免開機先追趕、影響同步）；之後早完成才補、遲到才花。
 好處：平均 fps 準（唔漂移）；臨時尖峰可以吸收；尖峰過後自動補回存款。

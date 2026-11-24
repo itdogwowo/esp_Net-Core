@@ -8232,3 +8232,14 @@ panic／卡住。因為冇 CDC 就冇 OTA，**要斷電重插；如果仍然冇 
 - 0xF081 新增 `slack_us／catchup／overrun`；`fps_trace.py` 會顯示。
 - Host 測試 `fpsclock_test`（5 組情境）＋全套測試 **全部通過**。
 - **未上板**：板 USB 仍未返（§7.233）。
+
+### 7.236 2026-11-25（修正：timer 仍然係設定週期；slack 只做緩衝／判定）
+
+- 依用家指示：節拍**仍然係 `esp_timer_start_periodic(frame_interval_ms)`**，
+  唔再用一次性 timer＋deadline 追趕；時間緩衝唔會改週期。
+- slack 的用途改為「吸收判定＋指標」：早完成存入（上限 `NETCORE_PIXEL_SLACK_MS`，
+  預設 50 ms，**初始就滿**）；遲到由緩衝吸收 → `catchup`；吸收唔到 → `overrun`。
+- 0xF081 顯示 `slack_us／catchup／overrun`；`fps_drift.py` 可重複量 ppm，
+  換算兩塊 ESP 的建議強制同步間隔。
+- Host tests 全綠（含 `fpsclock_test` 5 組）；Zero-Show 建置成功。
+- **未上板**：板 USB 仍未返（§7.233）。

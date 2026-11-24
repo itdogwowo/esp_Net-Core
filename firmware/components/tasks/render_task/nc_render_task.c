@@ -503,10 +503,8 @@ static void px_render_loop(void *arg)
     s_px.mark_us = prev;
     s_px.mark_frames = 0;
     while (!nc_task_exit_requested()) {
-        // deadline 時鐘：未到就 arm 一次性 timer 等；已過（catch-up）就即刻做。
-        const int64_t wait_us = nc_fps_clock_wait(&s_clock, esp_timer_get_time());
-        if (wait_us > 0 && s_px.timer != NULL && s_px.tick != NULL) {
-            (void)esp_timer_start_once(s_px.timer, (uint64_t)wait_us);
+        // 節拍由**週期 timer** 給；時間緩衝只做統計／吸收，唔改週期。
+        if (s_px.tick != NULL) {
             (void)xSemaphoreTake(s_px.tick, pdMS_TO_TICKS(1000));
         }
         for (int i = 0; i < s_px.nlane; i++) {
@@ -670,7 +668,7 @@ static esp_err_t px_start(const nc_task_res_view_t *res, int nres)
             nc_px_ring_release(s_px.lane[i].q, seq);
         }
     }
-    // 節拍：esp_timer **一次性**，每輪按 deadline 時鐘重新 arm（可追趕）。
+    // 節拍：esp_timer **週期性**，完全按 system.json 的 frame_interval_ms。
     s_px.tick = xSemaphoreCreateBinary();
     const esp_timer_create_args_t targs = {
         .callback = render_tick,
@@ -678,7 +676,8 @@ static esp_err_t px_start(const nc_task_res_view_t *res, int nres)
         .dispatch_method = ESP_TIMER_TASK,
         .name = "render_tick",
     };
-    if (s_px.tick == NULL || esp_timer_create(&targs, &s_px.timer) != ESP_OK) {
+    if (s_px.tick == NULL || esp_timer_create(&targs, &s_px.timer) != ESP_OK ||
+        esp_timer_start_periodic(s_px.timer, s_px.period_us) != ESP_OK) {
         ESP_LOGE(TAG, "節拍 timer 建立失敗（%u µs）", (unsigned)s_px.period_us);
         return ESP_FAIL;
     }
