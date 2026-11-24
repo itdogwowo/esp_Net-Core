@@ -8208,3 +8208,14 @@ panic／卡住。因為冇 CDC 就冇 OTA，**要斷電重插；如果仍然冇 
 
 **教訓**：新增表格式一定要先喺 EffectPerf／lab 驗證完整 boot，再入 production；
 今次係直接上 9600 production，出事後冇遠端 recovery。
+
+### 7.234 2026-11-25（零件時間圖＋FPS 穩定度工具）
+
+- 新增 `tools/pixel_parts_time_fig.py` → `docs/assets/pixel-pairing/parts-time.png`：
+  每幀 20 ms 預算、16×600 線路 18 ms vs encode 6.4 ms、一次性成本（cache 10 ms／
+  build 40–152 ms／flatify 0.55–14.5 ms／預建 12 ms／swap 246 µs）、記憶體佔用。
+- **FPS 穩定度**：render loop 逐幀記錄 dt（µs），統計 n／avg／sd／min／max／bad
+  （|dt-target| > 20%），1 ms histogram（0–63 ms）；0xF081 讀、payload 1 清零。
+- 工具 `tools/fps_trace.py`：輪詢 0xF081，印 target／avg／sd／max／bad／hist top，
+  判 STABLE／BORDERLINE／UNSTABLE；可出 CSV 同 PNG（histogram＋fps 時間線）。
+- **未上板驗證**：板嘅 USB 仍未返（見 §7.233），tool 只做過語法／編譯檢查。

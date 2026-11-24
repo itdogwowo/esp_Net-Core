@@ -15,6 +15,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <math.h>
 
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -409,6 +410,81 @@ const char *nc_render_first_ring(void)
     return nc_px_ring_name(s_px.lane[0].q);
 }
 
+// ── FPS 穩定度：逐輪 dt 的統計（0xF081）──
+typedef struct {
+    uint32_t n;
+    uint64_t sum;          // Σ dt
+    uint64_t sumsq;        // Σ dt²
+    uint32_t min_us;
+    uint32_t max_us;
+    uint32_t bad;          // |dt - target| > target/5
+    uint32_t hist[64];     // 0..62 ms，63 = ≥63 ms
+} fps_jit_t;
+
+static fps_jit_t s_jit;
+
+static void jit_record(uint32_t dt, uint32_t target_us)
+{
+    s_jit.n++;
+    s_jit.sum += dt;
+    s_jit.sumsq += (uint64_t)dt * dt;
+    if (s_jit.min_us == 0 || dt < s_jit.min_us) {
+        s_jit.min_us = dt;
+    }
+    if (dt > s_jit.max_us) {
+        s_jit.max_us = dt;
+    }
+    if (target_us > 0) {
+        const uint32_t diff = (dt > target_us) ? (dt - target_us) : (target_us - dt);
+        if (diff > target_us / 5u) {
+            s_jit.bad++;
+        }
+    }
+    uint32_t b = dt / 1000u;
+    if (b > 63u) {
+        b = 63u;
+    }
+    s_jit.hist[b]++;
+}
+
+void nc_render_fps_reset(void)
+{
+    memset(&s_jit, 0, sizeof(s_jit));
+}
+
+size_t nc_render_fps_json(char *out, size_t cap)
+{
+    if (out == NULL || cap == 0) {
+        return 0;
+    }
+    const uint32_t n = s_jit.n;
+    const uint32_t avg = (n > 0) ? (uint32_t)(s_jit.sum / n) : 0;
+    uint32_t sd = 0;
+    if (n > 0) {
+        const uint64_t mean = s_jit.sum / n;
+        const uint64_t var = (s_jit.sumsq / n) - mean * mean;
+        sd = (uint32_t)sqrt((double)((var > 0) ? var : 0));
+    }
+    int k = snprintf(out, cap,
+                     "{\"target_us\":%u,\"n\":%u,\"avg_us\":%u,\"sd_us\":%u,"
+                     "\"min_us\":%u,\"max_us\":%u,\"bad\":%u,\"hist\":[",
+                     (unsigned)s_px.period_us, (unsigned)n, (unsigned)avg, (unsigned)sd,
+                     (unsigned)s_jit.min_us, (unsigned)s_jit.max_us, (unsigned)s_jit.bad);
+    if (k < 0 || (size_t)k >= cap) {
+        return 0;
+    }
+    for (int i = 0; i < 64; i++) {
+        const int w = snprintf(out + k, cap - (size_t)k, "%s%u", (i > 0) ? "," : "",
+                               (unsigned)s_jit.hist[i]);
+        if (w < 0 || (size_t)(k + w) >= cap) {
+            return 0;
+        }
+        k += w;
+    }
+    const int w = snprintf(out + k, cap - (size_t)k, "]}");
+    return (w > 0 && (size_t)(k + w) < cap) ? (size_t)(k + w) : 0;
+}
+
 // ── 渲染 loop：只做「取最新一格 → 編碼 → 交給後端」，不跑效果。
 static void px_render_loop(void *arg)
 {
@@ -428,6 +504,7 @@ static void px_render_loop(void *arg)
         const int64_t after = esp_timer_get_time();
         const uint32_t dt = (uint32_t)(after - prev);
         s_px.st.frame_us = dt;
+        jit_record(dt, s_px.period_us);
         if (dt > s_px.st.frame_max_us) {
             s_px.st.frame_max_us = dt;
         }

@@ -135,6 +135,9 @@ typedef struct {
 
 void   nc_render_get_stats(nc_px_stat_t *out);
 size_t nc_render_json(char *out, size_t cap);     // 0xF061 與 STATUS 用
+// 0xF081：逐幀間隔的穩定性（n/avg/sd/min/max/bad/1 ms histogram）
+size_t nc_render_fps_json(char *out, size_t cap);
+void   nc_render_fps_reset(void);
 
 // 任務宣告（main.c 在 CONFIG_NETCORE_PIXEL 之下登記；未開回 NULL）
 const nc_task_t *nc_render_task(void);

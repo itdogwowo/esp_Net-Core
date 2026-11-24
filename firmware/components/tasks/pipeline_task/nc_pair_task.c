@@ -1386,6 +1386,8 @@ static void on_reload(nc4_ctx_t *ctx, const nc4_frame_t *f)
 #define NC4_CMD_FLATTIME_RSP 0xF07E
 #define NC4_CMD_APPLYTIME 0xF07F
 #define NC4_CMD_APPLYTIME_RSP 0xF080
+#define NC4_CMD_FPS       0xF081
+#define NC4_CMD_FPS_RSP   0xF082
 
 static void on_pipestats(nc4_ctx_t *ctx, const nc4_frame_t *f)
 {
@@ -1628,6 +1630,20 @@ static void on_applytime(nc4_ctx_t *ctx, const nc4_frame_t *f)
     reply_json(ctx, NC4_CMD_APPLYTIME_RSP, j);
 }
 
+// 0xF081：逐幀間隔統計（payload[0]=1 → 先 reset）；回 0xF082。
+static void on_fps(nc4_ctx_t *ctx, const nc4_frame_t *f)
+{
+    if (f != NULL && f->len >= 1 && f->data[0] == 1) {
+        nc_render_fps_reset();
+    }
+    static char j[900];
+    if (nc_render_fps_json(j, sizeof(j)) == 0) {
+        reply_json(ctx, NC4_CMD_FPS_RSP, "{\"err\":\"nodata\"}");
+        return;
+    }
+    reply_json(ctx, NC4_CMD_FPS_RSP, j);
+}
+
 static void on_pipeburn(nc4_ctx_t *ctx, const nc4_frame_t *f)
 {
     uint32_t sec = 10;
@@ -1658,6 +1674,7 @@ static const nc_action_t s_actions[] = {
     { NC4_CMD_FLATREAD, on_flatread, "pair" },
     { NC4_CMD_FLATTIME, on_flattime, "pair" },
     { NC4_CMD_APPLYTIME, on_applytime, "pair" },
+    { NC4_CMD_FPS, on_fps, "pair" },
 };
 
 NC_ACTION_TABLE_DEF(nc_pair_task_table, "pair", s_actions);
