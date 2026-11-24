@@ -1102,6 +1102,8 @@ static void on_reload(nc4_ctx_t *ctx, const nc4_frame_t *f)
 #define NC4_CMD_FLATREAD_RSP 0xF07C
 #define NC4_CMD_FLATTIME  0xF07D
 #define NC4_CMD_FLATTIME_RSP 0xF07E
+#define NC4_CMD_APPLYTIME 0xF07F
+#define NC4_CMD_APPLYTIME_RSP 0xF080
 
 static void on_pipestats(nc4_ctx_t *ctx, const nc4_frame_t *f)
 {
@@ -1267,6 +1269,70 @@ static void on_flattime(nc4_ctx_t *ctx, const nc4_frame_t *f)
     reply_json(ctx, NC4_CMD_FLATTIME_RSP, j);
 }
 
+// 0xF07F：同一份真實 layout，量 internal / PSRAM flat 表的每幀 apply。
+static void on_applytime(nc4_ctx_t *ctx, const nc4_frame_t *f)
+{
+    (void)f;
+    if (!s_content.ready || s_content.layout.nflat == 0) {
+        reply_json(ctx, NC4_CMD_APPLYTIME_RSP, "{\"err\":\"not_ready\"}");
+        return;
+    }
+    const uint32_t runs = s_content.layout.nruns;
+    const uint32_t nflat = s_content.layout.nflat;
+    const uint32_t naprog = s_content.layout.naprog;
+    uint32_t total = 0;
+    for (uint32_t i = 0; i < naprog; i++) {
+        total += s_content.layout.aprog[i].nv;
+    }
+    uint32_t int_us = 0, ps_us = 0;
+    uint8_t *dst = (uint8_t *)heap_caps_malloc((size_t)s_content.px * NC_PX_BPP,
+                                               MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    uint16_t *vbuf = (uint16_t *)heap_caps_malloc((size_t)total * sizeof(uint16_t),
+                                                  MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    uint16_t **vp = (uint16_t **)heap_caps_malloc((size_t)naprog * sizeof(uint16_t *),
+                                                  MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    if (dst == NULL || vbuf == NULL || vp == NULL) {
+        heap_caps_free(dst);
+        heap_caps_free(vbuf);
+        heap_caps_free(vp);
+        reply_json(ctx, NC4_CMD_APPLYTIME_RSP, "{\"err\":\"oom\"}");
+        return;
+    }
+    uint32_t off = 0;
+    for (uint32_t i = 0; i < naprog; i++) {
+        vp[i] = vbuf + off;
+        for (uint32_t k = 0; k < s_content.layout.aprog[i].nv; k++) {
+            vbuf[off + k] = (uint16_t)((k * 37u + i * 101u) & 0x0FFFu);
+        }
+        off += s_content.layout.aprog[i].nv;
+    }
+    if (nc_px_layout_flatify_place(&s_content.layout, false) == ESP_OK) {
+        for (int r = 0; r < 5; r++) {
+            const int64_t t = esp_timer_get_time();
+            (void)nc_px_layout_apply(&s_content.layout, vp, dst);
+            const uint32_t us = (uint32_t)(esp_timer_get_time() - t);
+            if (r == 0 || us < int_us) int_us = us;
+        }
+    }
+    if (nc_px_layout_flatify_place(&s_content.layout, true) == ESP_OK) {
+        for (int r = 0; r < 5; r++) {
+            const int64_t t = esp_timer_get_time();
+            (void)nc_px_layout_apply(&s_content.layout, vp, dst);
+            const uint32_t us = (uint32_t)(esp_timer_get_time() - t);
+            if (r == 0 || us < ps_us) ps_us = us;
+        }
+    }
+    heap_caps_free(dst);
+    heap_caps_free(vbuf);
+    heap_caps_free(vp);
+    char j[192];
+    (void)snprintf(j, sizeof(j),
+                   "{\"runs\":%u,\"nflat\":%u,\"apply_int_us\":%u,\"apply_ps_us\":%u,"
+                   "\"px\":%u}", (unsigned)runs, (unsigned)nflat,
+                   (unsigned)int_us, (unsigned)ps_us, (unsigned)s_content.px);
+    reply_json(ctx, NC4_CMD_APPLYTIME_RSP, j);
+}
+
 static void on_pipeburn(nc4_ctx_t *ctx, const nc4_frame_t *f)
 {
     uint32_t sec = 10;
@@ -1296,6 +1362,7 @@ static const nc_action_t s_actions[] = {
     { NC4_CMD_PIXDIAG, on_pixdiag, "pair" },
     { NC4_CMD_FLATREAD, on_flatread, "pair" },
     { NC4_CMD_FLATTIME, on_flattime, "pair" },
+    { NC4_CMD_APPLYTIME, on_applytime, "pair" },
 };
 
 NC_ACTION_TABLE_DEF(nc_pair_task_table, "pair", s_actions);

@@ -8077,3 +8077,23 @@ worst case；**真實配對地圖係一張大表慢慢建立**，run 少而長�
 
 **記憶體**：apply 用 internal 最快；PSRAM 版 5.08 ms/幀仍然 <20 ms，可接受；
 所以「一定要 PSRAM」唔成立——internal 預設，PSRAM 只係 staging。
+
+### 7.228 2026-11-25（統一模型：flat 一律 PSRAM；真實 9,600 px 實測）
+
+用家定案：**唔分大小，flat 表一律放 PSRAM**（6 B/px 會隨 px 長大，internal 唔係穩定容量）。
+
+改動：`nc_px_layout_flatify()` 預設 `place_psram = true`；`flatify_place()` 留給量測／例外。
+真機（9600 project、501 組 map、mode full256、9,600 px、1 run）：
+
+| 指標 | 值 |
+|---|---:|
+| flatify | **550 µs** |
+| apply（flat in internal） | **3.07 ms** |
+| apply（flat in PSRAM） | **5.37 ms**（+2.3 ms／幀，仍然 <20 ms） |
+
+**建表／存 Flash 的結論**：
+- **唔應該開機建好全部寫 Flash**：FAT 寫 57.6 KB ≈ 1.2 s 級（12.5 KB→265 ms 推算），
+  讀 57.6 KB ≈ 46 ms，比即場 flatify 0.55 ms 慢 80×；仲有磨損同 MSC 鎖問題。
+- 需要同時存在嘅只有 **current ＋ next** 兩張：2 × 57.6 KB ＝ 115 KB（PSRAM free 的 6.8%）。
+- 切換流程：layout 由快取 10 ms（或 build）＋ flatify 0.55 ms ≈ 11 ms；要 0 ms 就播放時預建下一張。
+- map 本身開機已 scan 入 RAM，切換唔需要再讀 map 檔。

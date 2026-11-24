@@ -697,7 +697,9 @@ esp_err_t nc_px_layout_flatify_place(nc_px_layout_t *l, bool place_psram)
 
 esp_err_t nc_px_layout_flatify(nc_px_layout_t *l)
 {
-    return nc_px_layout_flatify_place(l, false);
+    // 統一模型：flat 表一律放 PSRAM（6 B/px 會隨 px 長大，internal 唔係穩定容量）。
+    // 量測／例外先至用 flatify_place(l, false)。
+    return nc_px_layout_flatify_place(l, true);
 }
 
 // 6 B 表版本的 8-bit 寫入（內圈：一次乘法都冇）
