@@ -1,7 +1,8 @@
-# 建置與燒錄（ESP-IDF v6.1 / macOS 或 WSL Ubuntu）
+# 建置與燒錄（ESP-IDF v6.0.3 / v6.1；macOS 或 WSL Ubuntu）
 
 > **用途**：從零把這台機器弄成「能 build esp_Net-Core」的狀態，並說明燒錄的三種模式。
 > **對象**：第一次在這台機器 build 的人；或 IDF / Python 被升級後壞掉的人。
+> **版本注意**：本機 macOS 2026-11-24 實測 `idf.py --version` = **v6.0.3**；WSL 用 **v6.1／v6.1.1**。ESP-IDF **冇 `v6.1.0` tag**（見 status §7.103），唔好寫成 v6.1.0。
 > **最後驗證**：2026-11-16，WSL Ubuntu + ESP-IDF v6.1，從乾淨的 `artifacts/build/` 重建通過
 > （P4-ETH `0xff040` ≈ 1020 KB、S3-N16R8 `0x118e90` ≈ 1.1 MB）。
 
@@ -79,7 +80,7 @@ cd ~/esp/esp-idf
 
 # 3) 每次開新 shell 都要 source
 . ~/esp/esp-idf/export.sh
-idf.py --version        # 應印 ESP-IDF v6.1
+idf.py --version        # 應印 ESP-IDF v6.1 或 v6.1.1（冇 v6.1.0 tag）
 ```
 
 > 為什麼裝在 `~/esp/esp-idf`：`tools/flash.sh` 和 `docs/02_guides/testing.md` 都假設這個路徑。

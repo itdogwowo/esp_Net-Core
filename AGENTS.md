@@ -93,6 +93,22 @@ python3 tools/effect_bench.py --port <PORT>
 - 量測要記錄：同一塊板、同一映像、reps、min/median、`bus_ok`／checksum。
 - 冇板就明講「未上板」，唔好把 host 數字外推。
 
+### 版本一致性（每次測試都要對）
+
+- **只有一個韌體版本來源**：`PROJECT_VER`（build 時 `git describe --tags --always --dirty`）。
+  以下三者必須一樣：
+  1. `status sys` 的 `fw`
+  2. OTA `0x2207` 回的 version
+  3. image app descriptor 的 version（`tools/ota.py` 的 `version:` 行）
+- `make.py` 每次 build 都明確傳 `-DPROJECT_VER=...`，所以 build dir cache 不會
+  沿用舊版本（今次真係撞過：同一份 code，EffectPerf 係 `197e1e0`、release 係
+  `197e1e0-dirty`）。
+- `tools/ota.py` 預設讀 image 的 app descriptor；要例外覆寫用 `--fw-ver`。
+- 每次測試記錄：image path＋sha256、`fw`、`app`、`idf`、板 MAC；
+  A/B 一定要同一 image、同一板。
+- **IDF 版本以 `idf.py --version` 為準**：本機 macOS `~/esp/esp-idf` 實測 **v6.0.3**；
+  `v6.1.0` 這個 tag **不存在**（只有 `v6.1`／`v6.1.1`）。WSL 若用 v6.1，記錄寫 v6.1。
+
 ---
 
 ## 1. 使用者反覆提醒的鐵律（先讀這一節）
@@ -831,6 +847,7 @@ commit message 說明。
 | 日期 | 改什麼 | 誰 |
 |---|---|---|
 | 2026-11-24 | 初版：專案總覽、10 條鐵律、OTA／建置／測試／pixel／troubleshooting、AI SOP | lead（AI） |
+| 2026-11-24 | 版本一致性：`status fw`／OTA／image 同一個 `PROJECT_VER`；`make.py` 每次傳 `-DPROJECT_VER`；記錄 IDF v6.1.0 不存在 | lead（AI） |
 
 ---
 

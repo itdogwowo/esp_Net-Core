@@ -60,7 +60,7 @@ ESP32-P4（另有 S3 port）上的 **NC4 通訊核心**：多條傳輸通道 →
 
 | 項目 | 結果 |
 |---|---|
-| 工具鏈 | ESP-IDF **v6.1.0**（WSL 內），target `esp32s3` |
+| 工具鏈 | ESP-IDF **v6.1**（WSL 內；`v6.1.0` tag 不存在，見 §7.103），target `esp32s3` |
 | 結果 | **0 error、0 warning**，`esp_net_core.bin` = 408,256 B（398.7 KB） |
 | 靜態 RAM | **108,463 B（105.9 KB）**＝ DRAM 段 31.7%（清 handler static 之前是 127,583 B） |
 | 開機 heap | **233,296 B（227.8 KB）**（之前 214,176 B） |
@@ -163,7 +163,7 @@ USB 的完整分析：[failure-policy.md §4](../03_notes/failure-policy.md)。
 | `tools/bench/cdc_tx.py` | CDC TX 壓測（log／回覆爭出口時的行為） |
 | `bash tools/hosttest/run_all.sh` | 一次跑完 8 支 host test（cfg / cfgstruct / ncd / task / router / mod / hub / plan），全綠 = 冇 error 亦冇 warning |
 | `tools/hosttest/*/run.sh` | 單支 host 測試，不用板子也不用 IDF：hub / plan / mod / **ncd** / **task** / **cfg** / **router**。Windows 上只有 `cfg` / `ncd` / `task` / `router` 有 `run.bat` |
-| **ESP-IDF 環境** | macOS：`~/esp/esp-idf` **v6.0.3**（2026-11-20 實測可以直接 `make.py build` ＋ OTA）；Windows：WSL 內 v6.1.0（Windows 本身冇 IDF）。`firmware/build/` 兩邊共用，看 map 時留意是哪邊 build 的 |
+| **ESP-IDF 環境** | macOS：`~/esp/esp-idf` **v6.0.3**（2026-11-24 實測 `idf.py --version`；可以直接 `make.py build` ＋ OTA）；Windows：WSL 內 v6.1／v6.1.1（Windows 本身冇 IDF；`v6.1.0` tag 不存在）。`firmware/build/` 兩邊共用，看 map 時留意是哪邊 build 的 |
 | `curl http://10.10.1.50:8080/config.json` | 讀寫設定（GET/PUT） |
 
 ---
@@ -7900,3 +7900,37 @@ reps=16 重跑：6,365／1,166 µs，同 reps=8 一樣。
   download mode。
 - 換 project 後 `/data/config/tasks.json` 會沿用舊 level（render／pixel=-1）→
   `0x1103 STATUS_SET {"System":{"fs_format":1}}` ＋ REBOOT 重新 seed（會清 `/data`）。
+
+### 7.221 2026-11-24（版本一致性：status／OTA／image 同一個 `PROJECT_VER`；IDF 版本寫法）
+
+**問題（用家指正）**：每次測試的版本字串對不上。
+
+- `status sys.fw` 硬編 **`0.1.2`**；
+- OTA `0x2207`／image app descriptor 係 **`197e1e0-dirty`**；
+- `tools/ota.py` 的 BEGIN `fw_ver` 又係 **`ota-YYYYMMDD-HHMMSS`**（每次不同）。
+- 另外 build dir 會 cache `PROJECT_VER`：同一份 code，EffectPerf image 係
+  `197e1e0`、release image 係 `197e1e0-dirty`（configure 時間不同）。
+
+**修正**：
+
+1. `status_put_sys()` 的 `fw` 改用 `esp_app_get_description()->version`
+   （即 build 時的 `PROJECT_VER`），移除硬編 `FW_VERSION "0.1.2"`。
+2. `tools/ncbuild/env.py` 新增 `project_ver()`（`git describe --tags --always --dirty`）；
+   `builder.py` 每次 `idf.py` 都傳 `-DPROJECT_VER=...`，build dir 不會沿用舊值。
+3. `tools/ota.py` 預設由 image 的 `esp_app_desc_t`（offset 0x30，32 B）讀 version，
+   唔再用 timestamp；可用 `--fw-ver` 明確覆寫。
+4. `info`：`status sys.idf` 仍然係 `esp_get_idf_version()`，即 v6.0.3。
+
+**驗證（同一塊板、同一 image）**：
+
+| 來源 | 版本 |
+|---|---|
+| image app descriptor（`tools/ota.py` 印） | `0c37516-dirty` |
+| OTA `0x2207` | `0c37516-dirty` |
+| `status sys.fw` | `0c37516-dirty` |
+| `status sys.idf` | `v6.0.3` |
+
+**IDF 版本**：`~/esp/esp-idf` 實測 `idf.py --version` = **v6.0.3**（git `76f5dedd`）；
+`v6.1.0` tag **不存在**（只有 `v6.1`／`v6.1.1`）。文件已統一：macOS 寫 v6.0.3，
+WSL 寫 v6.1／v6.1.1，唔再寫 v6.1.0。若用家想把 macOS 升到 v6.1.x，要另開 Task
+（clone／install／rebuild，不能只改文件）。

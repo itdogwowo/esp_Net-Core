@@ -312,6 +312,17 @@ def git_rev() -> str:
     return out if rc == 0 else "unknown"
 
 
+def project_ver() -> str:
+    """韌體版本＝git describe --tags --always --dirty。
+
+    同一次 configure 只計一次；build dir 會 cache PROJECT_VER，所以一定要在每次
+    idf.py 都明確傳 -DPROJECT_VER，否則改完 code 但 build dir 重 configure 時
+    可能沿用舊版本（status／OTA／image 三方版本就會唔一致）。
+    """
+    rc, out = bash_capture("git describe --tags --always --dirty", cwd=ROOT)
+    return out.strip() if rc == 0 and out.strip() else git_rev()
+
+
 def git_dirty() -> bool:
     rc, out = bash_capture("git status --porcelain", cwd=ROOT)
     return rc == 0 and bool(out)
