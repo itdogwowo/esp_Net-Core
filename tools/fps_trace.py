@@ -95,6 +95,8 @@ def main():
     print(f"bad         {bad}（|dt-target| > 20%）")
     print(f"starved     {last.get('starved', 0)}（環冇新格）；late {last.get('late', 0)}；"
           f"frames {last.get('frames', 0)}")
+    print(f"slack       {last.get('slack_us', 0)} µs；catchup {last.get('catchup', 0)}；"
+          f"overrun {last.get('overrun', 0)}")
 
     if hist:
         top = sorted(range(len(hist)), key=lambda i: hist[i], reverse=True)[:5]

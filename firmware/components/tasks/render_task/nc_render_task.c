@@ -471,13 +471,15 @@ size_t nc_render_fps_json(char *out, size_t cap)
                      "{\"target_us\":%u,\"n\":%u,\"avg_us\":%u,\"sd_us\":%u,"
                      "\"min_us\":%u,\"max_us\":%u,\"bad\":%u,"
                      "\"starved\":%lu,\"late\":%lu,\"frames\":%lu,"
-                     "\"slack_us\":%lld,\"catchup\":%lu,\"overrun\":%lu,\"hist\":[",
+                     "\"slack_us\":%lld,\"catchup\":%lu,\"overrun\":%lu,"
+                     "\"sum_us\":%llu,\"hist\":[",
                      (unsigned)s_px.period_us, (unsigned)n, (unsigned)avg, (unsigned)sd,
                      (unsigned)s_jit.min_us, (unsigned)s_jit.max_us, (unsigned)s_jit.bad,
                      (unsigned long)s_px.st.starved, (unsigned long)s_px.st.late,
                      (unsigned long)s_px.st.frames,
                      (long long)s_clock.slack_us, (unsigned long)s_clock.catchup_n,
-                     (unsigned long)s_clock.overrun_n);
+                     (unsigned long)s_clock.overrun_n,
+                     (unsigned long long)s_jit.sum);
     if (k < 0 || (size_t)k >= cap) {
         return 0;
     }

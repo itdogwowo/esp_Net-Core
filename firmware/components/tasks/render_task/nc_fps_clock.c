@@ -8,7 +8,7 @@ void nc_fps_clock_init(nc_fps_clock_t *c, int64_t now_us, int64_t period_us, int
     c->period_us = (period_us > 0) ? period_us : 1;
     c->cap_us = (cap_us > 0) ? cap_us : 0;
     c->deadline_us = now_us + c->period_us;
-    c->slack_us = 0;
+    c->slack_us = c->cap_us;      // 一開始就滿：避免開機追趕影響同步
     c->catchup_n = 0;
     c->overrun_n = 0;
     c->late_n = 0;

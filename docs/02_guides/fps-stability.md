@@ -73,9 +73,25 @@ Render 唔再用固定週期 timer，而係 **deadline ＋ slack**（`nc_fps_clo
   遲到超過存款 → overrun，deadline = now + period（唔爆追）
 ```
 
+**銀行一開始就係滿的**（避免開機先追趕、影響同步）；之後早完成才補、遲到才花。
 好處：平均 fps 準（唔漂移）；臨時尖峰可以吸收；尖峰過後自動補回存款。
 Kconfig：`NETCORE_PIXEL_SLACK_MS`（0 = 關閉，等於固定節拍；範圍 0–2000）。
 Host 測試：`tools/hosttest/fpsclock_test`（準時／存錢／花錢／爆額／wait 邊界）。
+
+## 2.6 漂移重複量測（決定兩塊 ESP 幾久同步一次）
+
+```bash
+python3 tools/fps_drift.py --port /dev/cu.usbmodemXXXX --windows 6 --window 30
+```
+
+每輪清零 → 等 30 s → 讀 `avg_us`；`ppm = (avg − target) / target × 1e6`。
+
+- `mean／sd／worst |ppm|`：ESP 內部節拍相對名義值的偏差。
+- 兩塊 ESP 的**相對漂移**保守用 `2 × worst`（或 `sd`）。
+- 工具直接換算 tolerance 1／5／20 ms 的建議 resync 間隔：
+  `resync 秒數 = tolerance / (相對漂移 × 1e-6)`。
+
+例：worst 20 ppm、相對 40 ppm → 1 ms 偏差要 25 s 同步一次；20 ms（一幀）要 500 s。
 
 ## 3. 不穩時查什麼（按 histogram 形狀）
 

@@ -28,15 +28,17 @@ int main(void)
         nc_fps_clock_done(&c, now);
     }
     chk(c.deadline_us == 1000000 + 4 * P, "deadline 在 grid 上");
-    chk(c.slack_us == 0, "準時完成唔會儲（沒有多餘）");
+    chk(c.slack_us == CAP, "一開始就滿，準時完成唔會變");
 
     printf("[2] 早完成：多餘時間入 slack，有上限\n");
     nc_fps_clock_init(&c, 0, P, CAP);
+    c.slack_us = 0;                       // 由空開始，測試儲錢
     for (int i = 0; i < 5; i++) {
         nc_fps_clock_done(&c, c.deadline_us - 5000);   // 早 5 ms
     }
     chk(c.slack_us == 25000, "5 次 × 5 ms = 25 ms");
     nc_fps_clock_init(&c, 0, P, CAP);
+    c.slack_us = 0;
     for (int i = 0; i < 20; i++) {
         nc_fps_clock_done(&c, c.deadline_us - 5000);
     }
