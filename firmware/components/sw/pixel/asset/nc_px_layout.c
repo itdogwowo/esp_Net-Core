@@ -32,6 +32,22 @@ static void *lalloc(size_t n)
     return malloc(n);
 }
 
+// 6 B 落點表專用：**只可以放 internal**。呢張表每顆都要讀一次（9,600 px ＝ 57.6 KB），
+// 真機量到：放 PSRAM 反而**慢過** runs（0.60–1.05×，每幀 57.6 KB PSRAM 讀取頻寬），
+// 放 internal 就快 1.0–2.1×（見 status §7.217）。所以唔做「internal 唔夠就落 PSRAM」的
+// 靜默降級——寧願冇表（行 runs，就係舊行為），都唔好行一條比舊行為更慢的路。
+static void *ialloc(size_t n)
+{
+    if (n == 0) {
+        return NULL;
+    }
+#if defined(ESP_PLATFORM)
+    return heap_caps_malloc(n, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+#else
+    return malloc(n);          // host 測試：冇 internal／PSRAM 之分
+#endif
+}
+
 static void lfree(void *p)
 {
     free(p);
@@ -634,7 +650,7 @@ esp_err_t nc_px_layout_flatify(nc_px_layout_t *l)
             return ESP_ERR_INVALID_SIZE;
         }
     }
-    nc_px_flat6_t *f = (nc_px_flat6_t *)lalloc(total * sizeof(nc_px_flat6_t));
+    nc_px_flat6_t *f = (nc_px_flat6_t *)ialloc(total * sizeof(nc_px_flat6_t));
     if (f == NULL) {
         return ESP_ERR_NO_MEM;
     }
@@ -675,6 +691,9 @@ static uint32_t apply_flat(const nc_px_layout_t *l, uint16_t *const *vals, uint8
         case NC_PX_WRITE_RGB: {
             const uint32_t c1 = (c + 1u < nv) ? (c + 1u) : (c + 1u - nv);
             const uint32_t c2 = (c + 2u < nv) ? (c + 2u) : (c + 2u - nv);
+            // 注意：呢度**刻意**用 4 個 byte store，唔用一次 32-bit store。
+            // 真機量到 32-bit store 反而慢 1.5×（2,953 → 4,393 µs，500 組）——byte store
+            // 俾 store buffer 併入同一條 cache line，一個 word store 就沒了這個好處。
             o[0] = (uint8_t)(v[c] >> 4);
             o[1] = (uint8_t)(v[c1] >> 4);
             o[2] = (uint8_t)(v[c2] >> 4);

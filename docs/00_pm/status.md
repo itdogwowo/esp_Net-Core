@@ -7653,3 +7653,37 @@ nc_px_pair_apply` 一齊刪 ＋ 改 4 個檔，屬獨立清理（另開 Task）�
 （`skipped++` ＋ log），唔會靜靜少咗。
 
 **未做**：`status sys` 的 `h_int` 前後對比（用戶暫時冇硬件）。
+
+### 7.217 2026-11-25（6 B 表真機量測：**擺位決定一切**；byte store 贏 word store）
+
+Task 7 的 6 B 表上板量（SuperMini、EffectPerf 映像、9,600 px、reps=8 取最小）：
+
+| 佈局 | 6 B 表位置 | apply（6 B 表） | apply（runs） | 倍數 |
+|---|---|---|---|---|
+| 100 組 1 段 | internal | 3,006 µs | 3,078 µs | 1.02× |
+| 500 組 1 段 | internal | **2,954 µs** | 3,745 µs | 1.27× |
+| 1000 組 1 段 | internal | 2,677 µs | 4,150 µs | 1.55× |
+| 500 組 2 段 | internal | 2,684 µs | 4,012 µs | 1.49× |
+| 1000 組 2 段 | internal | **2,185 µs** | 4,645 µs | **2.13×** |
+
+**第一次量係輸的**：表放 PSRAM（`lalloc`）時 5,155／5,101／4,812 µs —— 即 **0.60–1.05×**，
+慢過 runs。原因唔係算術，係頻寬：表 6 B × 9,500 ＝ 57 KB，每幀都要由 PSRAM 讀一次；
+runs 表只有 8–32 KB，而且 32 KB L1 裝得落，跨幀都熱。**同一份程式、只改擺位，結果由 0.60× 變 2.13×。**
+
+所以 `nc_px_layout_flatify()` 改成**只准 internal**（`heap_caps_malloc(MALLOC_CAP_INTERNAL)`）：
+唔夠 internal 就唔建表、行返 runs（唔會靜默降級去一條更慢的路）。9,600 px ＝ 57.6 KB
+internal（`h_dma` 開機 ~204 KB，扣完仲有 ~146 KB）。`0xF079` 的 `flat_int` 可以確認落咗邊。
+
+**順手量到兩件事**：
+
+1. **runs 在高段數時好貴**：2,000 段要 4,645 µs，比 100 段（3,078 µs）多 1.6 ms ≈ **840 ns／段**。
+   每段開頭 11 次 `% nv`（Xtensa 冇硬件除，軟件除 ~20–40 cycles 一次）就係主因 —— 呢個
+   正好係 6 B 表（值流起點預先算好）贏得最多的地方：段數越多，差距越大。
+2. **32-bit store 反而慢**：把 rgb 的 4 個 byte store 改成一次 word store（`memcpy` 4 B），
+   500 組由 2,954 → **4,393 µs（慢 1.5×）**。byte store 會被 store buffer 併入同一條 cache
+   line，一次 word store 就冇了呢個好處。所以 `apply_flat` 刻意保留 4 個 byte store（已寫註解）。
+
+**仍然未達標**：計劃驗收係「500 組 ≤ 2.5 ms」，而家 2.95 ms。剩下的成本係 canvas 本身
+（9,600 px × 4 B ＝ 38.4 KB PSRAM，~310 ns/px），唔係表。要再快就要減 PSRAM 寫入量
+（例如 16-bit packed canvas 或分塊 DMA），係另一個 Task。`apply12`（12-bit canvas、76.8 KB）
+仍然係 5.4–6.4 ms，未展表（runs only）。

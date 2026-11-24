@@ -110,10 +110,14 @@ esp_err_t nc_px_layout_load(nc_px_layout_t *out, const char *path, uint32_t key,
 // ── 6 B 落點表（Task 7）──
 // 由 runs 一次展開（換場／讀快取之後自動做；唔使呼叫端記住）。
 // 唔展開的情況：`px > 65,535`、`naprog > 255`、有值流 `nv > 65,535` 或 `nv == 0`、
-// rgb 值流 `nv < 3`／rgbw `nv < 4`、總顆數 > 8×px（重疊太多）。此時 `nflat == 0`，
-// 熱路徑照舊行 runs，行為一模一樣。
+// rgb 值流 `nv < 3`／rgbw `nv < 4`、總顆數 > 8×px（重疊太多）、**internal 記憶體唔夠**。
+// 此時 `nflat == 0`，熱路徑照舊行 runs，行為一模一樣。
+//
+// 記憶體擺位係**硬要求**：只可以放 internal SRAM（6 B × 顆數；9,600 px ＝ 57.6 KB）。
+// 真機實測放 PSRAM 會**慢過** runs（每幀 57.6 KB PSRAM 讀取頻寬），所以唔夠 internal
+// 就唔建表、行返 runs——唔會靜默降級去一條更慢的路。
 esp_err_t nc_px_layout_flatify(nc_px_layout_t *l);
-size_t    nc_px_layout_flat_bytes(const nc_px_layout_t *l);   // nflat × 6 B（PSRAM）
+size_t    nc_px_layout_flat_bytes(const nc_px_layout_t *l);   // nflat × 6 B（internal）
 
 // 一幀：vals[i] = 第 i 條值流的指標（長度 aprog[i].nv），dst = canvas（px × 4）。
 // 語義逐條照 mp `pixel_layout._SCATTER`；回傳寫入咗幾多顆（有 6 B 表）或幾多段 run。

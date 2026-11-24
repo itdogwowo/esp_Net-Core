@@ -735,7 +735,7 @@ static void on_layoutbench(nc4_ctx_t *ctx, const nc4_frame_t *f)
     snprintf(j, sizeof(j),
              "{\"px\":%u,\"groups\":%u,\"variant\":%u,\"jobs\":%u,\"runs\":%u,"
              "\"nv\":%u,\"build_us\":%u,\"apply_us\":%u,\"apply12_us\":%u,"
-             "\"flat_n\":%u,\"apply_runs_us\":%u,"
+             "\"flat_n\":%u,\"apply_runs_us\":%u,\"flat_int\":%d,"
              "\"sub_us\":[%u,%u,%u,%u],\"sub_total_us\":%u,"
              "\"save_us\":%u,\"load_us\":%u,\"cache_bytes\":%ld,\"load_rc\":%d,"
              "\"merge8_us\":%u,\"swar_us\":%u,\"swar_ok\":%u,"
@@ -748,6 +748,7 @@ static void on_layoutbench(nc4_ctx_t *ctx, const nc4_frame_t *f)
              (unsigned)lay.njobs, (unsigned)lay.nruns, 64u,
              (unsigned)(t1 - t0), (unsigned)apply_us, (unsigned)apply12_us,
              (unsigned)lay.nflat, (unsigned)apply_runs_us,
+             lay.flat ? (esp_ptr_internal(lay.flat) ? 1 : 0) : -1,
              (unsigned)sub_us[0], (unsigned)sub_us[1],
              (unsigned)sub_us[2], (unsigned)sub_us[3],
              (unsigned)(sub_us[0] + sub_us[1] + sub_us[2] + sub_us[3]),

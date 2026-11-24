@@ -620,11 +620,24 @@ Run: `bash tools/hosttest/pxLayout_test/run.sh` → Expected: ALL PASS
 > 抖動 4 子幀 × 4 phase 都比），再驗 `nflat == Σ run.count`、`flat_bytes == nflat × 6`、
 > 以及 `px > 65,535` 時拒絕展開（唔可以靜靜截斷）。比逐個 case 寫期望值更難出錯。
 
-- [ ] **Step 5：上板量**
+- [x] **Step 5：上板量**
 
-> **未做（2026-11-25）：用戶暫時冇硬件。** host 先量方向（9,600 px／500 組：6 B 表
-> 0.012 ms vs runs 0.023 ms ≈ **1.87×**，x86 唔可以外推 S3）。真機數字等硬件返嚟補
-> `python3 tools/layout_bench.py --all`，並寫入 status。
+> **2026-11-25 已量**（SuperMini、EffectPerf 映像、`tools/layout_bench.py --all`，reps=8 取最小）：
+>
+> | 佈局 | 6 B 表 | runs | 倍數 |
+> |---|---|---|---|
+> | 100 組 | 3,006 µs | 3,078 µs | 1.02× |
+> | 500 組 | **2,954 µs** | 3,745 µs | 1.27× |
+> | 1000 組 | 2,677 µs | 4,150 µs | 1.55× |
+> | 1000 組 × 2 段 | **2,185 µs** | 4,645 µs | **2.13×** |
+>
+> **關鍵發現：擺位決定一切。** 第一次量係表放 **PSRAM** → 0.60–1.05×（慢過 runs，因為
+> 每幀要多讀 57 KB PSRAM）；改放 **internal** 之後變 1.02–2.13×。所以 `flatify()` 只准
+> internal，唔夠就唔建表（行 runs），唔做靜默降級。
+> 詳細數字、原因、同「32-bit store 反而慢 1.5×」的實驗見 status §7.217。
+> 仍然未達 2.5 ms 目標（2.95 ms）：剩下係 canvas 的 PSRAM 寫入，唔係表。
+>
+> 計劃原本的 Expected（500 組 ≤2.5 ms、完全隨機 ≤5.5 ms）**部分未達**。
 
 ```bash
 python3 tools/layout_bench.py --port /dev/cu.usbmodemB43A45AD52E41 --all
