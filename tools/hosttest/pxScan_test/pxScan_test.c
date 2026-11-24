@@ -6,6 +6,14 @@
 #include <stdlib.h>
 #include <string.h>
 
+// gcc 13 把 (void)system(...) 當 -Werror=unused-result；用 helper 消耗回傳值。
+static void sh_run(const char *cmd)
+{
+    if (system(cmd) != 0) {
+        /* 清理／建目錄失敗唔影響測試結果 */
+    }
+}
+
 #include "nc_px_asset.h"
 #include "nc_px_layer_scan.h"
 
@@ -73,8 +81,8 @@ int main(void)
 
     // 重複 id／name：第二個要被拒
     const char *tmp = "tools/hosttest/pxScan_test/tmp_modes";
-    (void)system("rm -rf tools/hosttest/pxScan_test/tmp_modes");
-    (void)system("mkdir -p tools/hosttest/pxScan_test/tmp_modes");
+    sh_run("rm -rf tools/hosttest/pxScan_test/tmp_modes");
+    sh_run("mkdir -p tools/hosttest/pxScan_test/tmp_modes");
     FILE *f = fopen("tools/hosttest/pxScan_test/tmp_modes/a.json", "wb");
     if (f != NULL) {
         fputs("{\"id\":9,\"name\":\"dup\",\"mapping\":\"matrix\","
@@ -91,7 +99,7 @@ int main(void)
     check(nc_px_mode_scan(tmp) == ESP_OK, "重複測試目錄掃描");
     check(nc_px_mode_table()->n == 1 && nc_px_mode_table()->rejected == 1,
           "重複 id → 只收第一個（rejected=1）");
-    (void)system("rm -rf tools/hosttest/pxScan_test/tmp_modes");
+    sh_run("rm -rf tools/hosttest/pxScan_test/tmp_modes");
 
     printf("\n%s（%d 個失敗）\n", g_fail ? "FAILED" : "ALL PASS", g_fail);
     return g_fail ? 1 : 0;

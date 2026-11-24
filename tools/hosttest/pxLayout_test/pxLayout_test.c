@@ -7,6 +7,9 @@
 //   4. 重疊寫（兩個 group 寫同一批燈的不同通道）
 //   5. 500 個 group × 16×600 任意組合（run 數、覆蓋率、抽樣值）
 //   6. 編譯／配對的 host 時間（僅供參考，唔係真機數字）
+// clock_gettime／CLOCK_MONOTONIC 要 POSIX feature macro（gcc 13 預設 -std=c17 會收埋）
+#define _POSIX_C_SOURCE 200809L
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

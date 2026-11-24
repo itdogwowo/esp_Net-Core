@@ -386,7 +386,7 @@ int main(void)
     {
         unload_all();
         CHECK(count_modules() == 0, "unload_all 清空（實際 %d）", count_modules());
-        char dir2[200];
+        char dir2[208];   // dir[200] + "/fw"：gcc 13 -Wformat-truncation
         snprintf(dir2, sizeof(dir2), "%s/fw", dir);
         char cmd2[600];
 #ifdef _WIN32

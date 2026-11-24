@@ -19,6 +19,8 @@
 #include "nc_px_program.h"
 
 static int g_fail;
+// --dump：印出「實際值」方便重影期望值（正弦由多項式換成 sin_lin 之後要重影一次）。
+static bool g_dump;
 
 static void check(bool cond, const char *name)
 {
@@ -157,7 +159,11 @@ static void test_values(void)
     for (uint32_t g = 0; g < p.total; g++) {
         wave[g] = nc_px_engine_program_value(&p, g);
     }
-    check_u32(fnv16(wave, p.total), 0xF23054DDu, "eyes：320 點指紋 0xF23054DD");
+    if (g_dump) {
+        printf("eyes fnv = 0x%08X  (total=%u)\n", (unsigned)fnv16(wave, p.total),
+               (unsigned)p.total);
+    }
+    check_u32(fnv16(wave, p.total), 0x4F6B6443u, "eyes：320 點指紋 0x4F6B6443");
     check_u32(nc_px_engine_program_value(&p, 0), 0, "eyes：g=0（keep 0）");
     check_u32(nc_px_engine_program_value(&p, 59), 0, "eyes：g=59（keep 尾）");
     check_u32(nc_px_engine_program_value(&p, 60), 20, "eyes：g=60（第二段起點 = l_lim）");
@@ -179,7 +185,11 @@ static void test_values(void)
     for (uint32_t g = 0; g < p.total; g++) {
         wave[g] = nc_px_engine_program_value(&p, g);
     }
-    check_u32(fnv16(wave, p.total), 0xF0E06D64u, "breathing：300 點指紋 0xF0E06D64");
+    if (g_dump) {
+        printf("breathing fnv = 0x%08X  (total=%u)\n", (unsigned)fnv16(wave, p.total),
+               (unsigned)p.total);
+    }
+    check_u32(fnv16(wave, p.total), 0xABB5D658u, "breathing：300 點指紋 0xABB5D658");
     check_u32(nc_px_engine_program_value(&p, 0), 2097, "breathing：g=0");
     check_u32(nc_px_engine_program_value(&p, 199), 3986, "breathing：g=199（正弦段尾）");
     check_u32(nc_px_engine_program_value(&p, 200), 3000, "breathing：g=200（方波亮）");
@@ -213,22 +223,42 @@ static void test_frame(void)
     }
 
     // 期望值 = Effect("b", {...}).frame(7)，pixel_n=16、step=1、spacing=3、offset=5
+    // ⚠️ 2026-11-24 重影：正弦由 MP 多項式（3.74 LSB）換成 sin_lin（0.72 LSB），
+    // 所以由正弦推出來的值比 MP 版高 1–3 LSB。其餘結構檢查（段邊界／keep／pulse／
+    // reverse 次序／phase）仍然係 MP oracle。重影方法：`run.sh --dump` 或
+    // `pxProgram_test --dump` 印實際值。
     static const uint16_t want_s1[16] = {
-        2244, 2280, 2318, 2355, 2392, 2429, 2465, 2502,
-        2539, 2575, 2611, 2647, 2683, 2718, 2754, 2789,
+        2246, 2283, 2320, 2357, 2394, 2432, 2469, 2505,
+        2542, 2578, 2614, 2650, 2685, 2721, 2756, 2791,
     };
     static const uint16_t want_s2[16] = {
-        2195, 2232, 2269, 2306, 2343, 2380, 2416, 2453,
-        2489, 2526, 2562, 2599, 2635, 2671, 2707, 2743,
+        2196, 2234, 2271, 2309, 2346, 2383, 2419, 2456,
+        2493, 2529, 2565, 2602, 2637, 2673, 2710, 2745,
     };
 
     uint16_t lv[16];
     nc_px_prog_play_t pl = { .step = 1, .spacing = 3, .offset = 5, .speed = 1, .reverse = false };
     nc_px_engine_program_levels(&p, &pl, 7, lv, 16);
+    if (g_dump) {
+        printf("want_s1 = {");
+        for (int i = 0; i < 16; i++) {
+            printf("%s%u,%s", (i % 8) == 0 ? "\n    " : "", (unsigned)lv[i],
+                   i == 15 ? "\n" : (i % 8) == 7 ? "\n" : " ");
+        }
+        printf("};\n");
+    }
     check(memcmp(lv, want_s1, sizeof(lv)) == 0, "t=7、speed=1：16 點逐值一致");
 
     pl.speed = 2;
     nc_px_engine_program_levels(&p, &pl, 7, lv, 16);
+    if (g_dump) {
+        printf("want_s2 = {");
+        for (int i = 0; i < 16; i++) {
+            printf("%s%u,%s", (i % 8) == 0 ? "\n    " : "", (unsigned)lv[i],
+                   i == 15 ? "\n" : (i % 8) == 7 ? "\n" : " ");
+        }
+        printf("};\n");
+    }
     check(memcmp(lv, want_s2, sizeof(lv)) == 0, "t=7、speed=2：16 點逐值一致");
 
     pl.speed = 1;
@@ -348,9 +378,18 @@ static void test_reject(void)
     check_u32(nc_px_engine_program_value(&p, 5), 0, "空 program 取值 = 0");
 }
 
-int main(void)
+int main(int argc, char **argv)
 {
     printf("pxProgram_test — program interpreter（期望值 = MicroPython 版）\n");
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "--dump") == 0) {
+            g_dump = true;      // 印出實際值（重影期望值時用）；成功與否照樣計
+        }
+    }
+    // 引擎的正弦表係 lazy 建（firmware 由 pixel task 開機時叫）。2026-11-23 之後
+    // program 的 MATH_NOW／SQUARE／PULSE_WAVE 都用 sin_lin，所以測試一定要先建表；
+    // 唔建就會靜靜回 2048（= 正弦永遠打中中間），令所有正弦期望值都錯。
+    nc_px_engine_tables_init();
     test_compile();
     test_values();
     test_frame();
