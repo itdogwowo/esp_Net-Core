@@ -42,6 +42,7 @@
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "freertos/semphr.h"
 
 #include "nc4.h"
 #include "nc_action.h"
@@ -172,6 +173,27 @@ static struct {
 } s_prebuild;
 static void cache_prebuild_missing(void);
 
+#if CONFIG_NETCORE_PIXEL_APPLY_PIPE
+#define PIPE_CHUNK_KB 8u
+#define PIPE_BUFS     3u
+typedef struct {
+    const nc_px_layout_t *l;
+    uint32_t nflat;
+    uint32_t epc;
+    uint32_t bytes;
+    uint8_t *buf[PIPE_BUFS];
+    SemaphoreHandle_t kick;
+    SemaphoreHandle_t full[PIPE_BUFS];
+    SemaphoreHandle_t free_s[PIPE_BUFS];
+    volatile bool stop;
+    bool ready;
+} pipe_ctx_t;
+static pipe_ctx_t s_pipe;
+static volatile uint32_t s_pipe_ok, s_pipe_fail;
+static bool px_pipe_apply(uint8_t *dst);
+static void pipe_stop(void);
+#endif
+
 static volatile bool s_snap_wanted;   // 0xF06B 要求預覽時才由環複製一份
 
 static void snapshot_publish(const uint8_t *rgbw, uint32_t px, uint32_t seq)
@@ -272,7 +294,14 @@ static bool content_frame_once(void)
             nc_pipe_stats_full();
             return false;                 // 環滿：下 tick 再試
         }
-        nc_px_layout_apply(&s_content.layout, s_eff_frame.vals, p);
+#if CONFIG_NETCORE_PIXEL_APPLY_PIPE
+        s_pipe.l = &s_content.layout;
+        s_pipe.nflat = s_content.layout.nflat;
+        if (!px_pipe_apply(p))
+#endif
+        {
+            nc_px_layout_apply(&s_content.layout, s_eff_frame.vals, p);
+        }
         const int64_t a1 = esp_timer_get_time();
         white_mix(p, s_content.px, s_content.white);
         const int64_t w1 = esp_timer_get_time();
@@ -477,6 +506,101 @@ static esp_err_t build_asset_tbl_into(nc_px_asset_tbl_t *dst, const nc_px_mode_t
     }
     return ESP_OK;
 }
+
+#if CONFIG_NETCORE_PIXEL_APPLY_PIPE
+// ── flat 表 chunk 預取：core0 worker 做 PSRAM→internal memcpy ──
+
+static void pipe_worker(void *arg)
+{
+    pipe_ctx_t *c = (pipe_ctx_t *)arg;
+    while (1) {
+        if (xSemaphoreTake(c->kick, portMAX_DELAY) != pdTRUE) {
+            break;
+        }
+        if (c->stop) {
+            break;
+        }
+        const uint32_t nch = (c->nflat + c->epc - 1u) / c->epc;
+        for (uint32_t i = 0; i < nch; i++) {
+            const uint32_t slot = i % PIPE_BUFS;
+            xSemaphoreTake(c->free_s[slot], portMAX_DELAY);
+            uint32_t cnt = c->epc;
+            if (i * c->epc + cnt > c->nflat) {
+                cnt = c->nflat - i * c->epc;
+            }
+            memcpy(c->buf[slot], (const uint8_t *)c->l->flat + (size_t)i * c->epc * 6u,
+                   (size_t)cnt * 6u);
+            xSemaphoreGive(c->full[slot]);
+        }
+    }
+    vTaskDelete(NULL);
+}
+
+static bool pipe_start(void)
+{
+    if (s_pipe.ready) {
+        return true;
+    }
+    memset(&s_pipe, 0, sizeof(s_pipe));
+    s_pipe.epc = (PIPE_CHUNK_KB * 1024u) / 6u;
+    s_pipe.bytes = s_pipe.epc * 6u;
+    s_pipe.kick = xSemaphoreCreateBinary();
+    if (s_pipe.kick == NULL) {
+        return false;
+    }
+    for (uint32_t i = 0; i < PIPE_BUFS; i++) {
+        s_pipe.buf[i] = (uint8_t *)heap_caps_malloc(s_pipe.bytes,
+                                                    MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+        s_pipe.full[i] = xSemaphoreCreateBinary();
+        s_pipe.free_s[i] = xSemaphoreCreateBinary();
+        if (s_pipe.buf[i] == NULL || s_pipe.full[i] == NULL || s_pipe.free_s[i] == NULL) {
+            return false;
+        }
+        xSemaphoreGive(s_pipe.free_s[i]);
+    }
+    if (xTaskCreatePinnedToCore(pipe_worker, "pxpipe", 3072, &s_pipe, 3, NULL, 0) != pdPASS) {
+        return false;
+    }
+    s_pipe.ready = true;
+    ESP_LOGI(TAG, "apply pipe：%u KB × %u 塊（internal）、worker core0",
+             (unsigned)PIPE_CHUNK_KB, (unsigned)PIPE_BUFS);
+    return true;
+}
+
+static void pipe_stop(void)
+{
+    if (s_pipe.ready) {
+        s_pipe.stop = true;
+        xSemaphoreGive(s_pipe.kick);
+        s_pipe.ready = false;
+    }
+}
+
+// 用預取 pipeline 套用目前 layout；失敗就退回直接 apply。
+static bool px_pipe_apply(uint8_t *dst)
+{
+    if (!s_pipe.ready || s_pipe.l == NULL || s_pipe.l->flat == NULL || s_pipe.nflat == 0) {
+        return false;
+    }
+    xSemaphoreGive(s_pipe.kick);
+    const uint32_t nch = (s_pipe.nflat + s_pipe.epc - 1u) / s_pipe.epc;
+    for (uint32_t i = 0; i < nch; i++) {
+        const uint32_t slot = i % PIPE_BUFS;
+        if (xSemaphoreTake(s_pipe.full[slot], pdMS_TO_TICKS(50)) != pdTRUE) {
+            s_pipe_fail++;
+            return false;                  // worker 卡住：退回直接 apply
+        }
+        uint32_t cnt = s_pipe.epc;
+        if (i * s_pipe.epc + cnt > s_pipe.nflat) {
+            cnt = s_pipe.nflat - i * s_pipe.epc;
+        }
+        (void)nc_px_layout_apply_range(s_pipe.l, s_eff_frame.vals, dst, i * s_pipe.epc, cnt);
+        xSemaphoreGive(s_pipe.free_s[slot]);
+    }
+    s_pipe_ok++;
+    return true;
+}
+#endif
 
 // 給目前的 mode 建表（s_content.assets 是這個 mode 專用的）
 static esp_err_t build_asset_tbl(const nc_px_mode_t *mode)
@@ -964,6 +1088,9 @@ static void content_start_pipeline(void)
     }
     ESP_LOGI(TAG, "pair 就緒：%u px、prd 環 %s", (unsigned)s_content.px,
              nc_px_ring_name(s_content.q));
+#if CONFIG_NETCORE_PIXEL_APPLY_PIPE
+    (void)pipe_start();
+#endif
     cache_prebuild_missing();          // 開機檢查一次，缺的組合表補建
 }
 
@@ -1052,6 +1179,9 @@ static esp_err_t content_start(const nc_task_res_view_t *res, int nres)
 
 static void content_stop(void)
 {
+#if CONFIG_NETCORE_PIXEL_APPLY_PIPE
+    pipe_stop();
+#endif
     if (s_content.canvas != NULL) {
         heap_caps_free(s_content.canvas);
         s_content.canvas = NULL;
@@ -1328,7 +1458,7 @@ static void on_pixdiag(nc4_ctx_t *ctx, const nc4_frame_t *f)
         "\"free_int\":%u,\"free_ps\":%u,"
         "\"prebuild\":{\"present\":%u,\"built\":%u,\"too_big\":%u,"
         "\"failed\":%u,\"ms\":%u},"
-        "\"mode\":\"%s\",\"show_nlist\":%u,"
+        "\"mode\":\"%s\",\"show_nlist\":%u,\"pipe\":%d,\"pipe_ok\":%u,\"pipe_fail\":%u,"
         "\"next\":\"%s\",\"next_ready\":%d,\"next_us\":%u,\"next_why\":%u,"
         "\"render\":%s}",
         (unsigned)px, (unsigned)slots, (unsigned)ring_b, (unsigned)canvas_b,
@@ -1347,6 +1477,11 @@ static void on_pixdiag(nc4_ctx_t *ctx, const nc4_frame_t *f)
         (unsigned)s_prebuild.ms,
         s_content.mode_name,
         (unsigned)((nc_px_show() != NULL) ? nc_px_show()->nlist : 0u),
+#if CONFIG_NETCORE_PIXEL_APPLY_PIPE
+        s_pipe.ready ? 1 : 0, (unsigned)s_pipe_ok, (unsigned)s_pipe_fail,
+#else
+        0,
+#endif
         s_content.next_mode_name, s_content.next_ready ? 1 : 0,
         (unsigned)s_content.next_us, (unsigned)s_content.next_why,
         rj[0] ? rj : "{}");

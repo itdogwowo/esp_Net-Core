@@ -252,6 +252,15 @@ menu "esp_Net-Core"
             硬件層已另行驗證時用：render 只建 mock lane，按 fps 消費環，
             咁 effect／pair 就可以量到真實 CPU 成本（唔受線路時間限制）。
 
+    config NETCORE_PIXEL_APPLY_PIPE
+        bool "flat 表 chunk 預取（PSRAM → internal，另一個 core）"
+        depends on NETCORE_PIXEL
+        default n
+        help
+            flat 表放 PSRAM；pair apply 時用 3 塊 internal chunk buffer，
+            由 core0 的 worker 預先 memcpy，pair 只讀 internal。
+            實測（9,600 px、1 run）可將 apply 由 ~5 ms 降到 ~1.6 ms。
+
     config NETCORE_USB_MSC_FORCE_OFF
         bool "強制唔交 MSC（recovery：解 FAT 鎖）"
         depends on NETCORE_USB_OTG

@@ -28,6 +28,7 @@
 #include "nc_pixel_core.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "freertos/semphr.h"
 
 #include "nc4.h"
 #include "nc_action.h"
@@ -171,6 +172,91 @@ static inline uint64_t swar_t8(uint64_t x)
     t = (x ^ (x >> 14)) & 0x0000CCCC0000CCCCULL; x = x ^ t ^ (t << 14);
     t = (x ^ (x >> 28)) & 0x00000000F0F0F0F0ULL; x = x ^ t ^ (t << 28);
     return x;
+}
+
+// ── variant 23：PSRAM flat 表 + internal chunk prefetch（另一個 core 做 memcpy）──
+typedef struct {
+    const nc_px_flat6_t *flat;
+    uint32_t nflat;
+    uint32_t epc;                 // entries per chunk
+    uint32_t bytes;               // epc × 6
+    uint8_t *buf[3];
+    SemaphoreHandle_t full[3];
+    SemaphoreHandle_t free_sem[3];
+} pf_ctx_t;
+
+static void pf_task(void *arg)
+{
+    pf_ctx_t *c = (pf_ctx_t *)arg;
+    const uint32_t nch = (c->nflat + c->epc - 1u) / c->epc;
+    for (uint32_t i = 0; i < nch; i++) {
+        const uint32_t slot = i % 3u;
+        xSemaphoreTake(c->free_sem[slot], portMAX_DELAY);
+        uint32_t cnt = c->epc;
+        if (i * c->epc + cnt > c->nflat) {
+            cnt = c->nflat - i * c->epc;
+        }
+        memcpy(c->buf[slot], (const uint8_t *)c->flat + (size_t)i * c->epc * 6u,
+               (size_t)cnt * 6u);
+        xSemaphoreGive(c->full[slot]);
+    }
+    vTaskDelete(NULL);
+}
+
+static uint32_t run_pipe(const nc_px_layout_t *l, uint16_t *const *vp, uint8_t *dst,
+                         uint32_t chunk_kb)
+{
+    if (l->flat == NULL || l->nflat == 0) {
+        return 0;
+    }
+    pf_ctx_t c = { 0 };
+    c.flat = l->flat;
+    c.nflat = l->nflat;
+    c.epc = (chunk_kb * 1024u) / 6u;
+    if (c.epc == 0) {
+        c.epc = 1;
+    }
+    c.bytes = c.epc * 6u;
+    bool ok = true;
+    for (int i = 0; i < 3; i++) {
+        c.buf[i] = (uint8_t *)heap_caps_malloc(c.bytes, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+        c.full[i] = xSemaphoreCreateBinary();
+        c.free_sem[i] = xSemaphoreCreateBinary();
+        if (c.buf[i] == NULL || c.full[i] == NULL || c.free_sem[i] == NULL) {
+            ok = false;
+        } else {
+            xSemaphoreGive(c.free_sem[i]);
+        }
+    }
+    uint32_t us = 0;
+    if (ok) {
+        TaskHandle_t th = NULL;
+        if (xTaskCreatePinnedToCore(pf_task, "pf", 3072, &c, 1, &th, 1) == pdPASS) {
+            const uint32_t nch = (c.nflat + c.epc - 1u) / c.epc;
+            const int64_t t0 = esp_timer_get_time();
+            for (uint32_t i = 0; i < nch; i++) {
+                const uint32_t slot = i % 3u;
+                xSemaphoreTake(c.full[slot], portMAX_DELAY);
+                uint32_t cnt = c.epc;
+                if (i * c.epc + cnt > c.nflat) {
+                    cnt = c.nflat - i * c.epc;
+                }
+                (void)nc_px_layout_apply_range(l, vp, dst, i * c.epc, cnt);
+                xSemaphoreGive(c.free_sem[slot]);
+            }
+            us = (uint32_t)(esp_timer_get_time() - t0);
+        }
+    }
+    for (int i = 0; i < 3; i++) {
+        heap_caps_free(c.buf[i]);
+        if (c.full[i] != NULL) {
+            vSemaphoreDelete(c.full[i]);
+        }
+        if (c.free_sem[i] != NULL) {
+            vSemaphoreDelete(c.free_sem[i]);
+        }
+    }
+    return us;
 }
 
 static void on_layoutbench(nc4_ctx_t *ctx, const nc4_frame_t *f)
@@ -538,6 +624,12 @@ static void on_layoutbench(nc4_ctx_t *ctx, const nc4_frame_t *f)
         heap_caps_free(dst_int);
     }
 
+    uint32_t pipe4_us = 0, pipe8_us = 0, pipe16_us = 0;
+    if (variant == 23) {
+        pipe4_us = run_pipe(&lay, vptrs, c8, 4);
+        pipe8_us = run_pipe(&lay, vptrs, c8, 8);
+        pipe16_us = run_pipe(&lay, vptrs, c8, 16);
+    }
     uint32_t merge8_us = 0, swar_us = 0, swar_ok = 0;
     if (variant == 10) {
         const uint32_t lane_px = (px >= 16u) ? (px / 16u) : px;   // 16 條線，每條 600 px
@@ -1050,6 +1142,7 @@ static void on_layoutbench(nc4_ctx_t *ctx, const nc4_frame_t *f)
              "\"apply_flat_int_us\":%u,\"apply_flat_ps_us\":%u,"
              "\"flat_write_us\":%u,\"flat_read_us\":%u,"
              "\"memcpy_ps_int_us\":%u,\"memcpy_int_int_us\":%u,"
+             "\"pipe4_us\":%u,\"pipe8_us\":%u,\"pipe16_us\":%u,"
              "\"bus_old_us\":%u,\"bus_new_us\":%u,\"bus_ok\":%u,"
              "\"canvas_path_us\":%u,\"direct_us\":%u,\"direct_noclear_us\":%u,"
              "\"direct4_us\":%u,\"batch4_us\":%u,\"batch4_1pass_us\":%u,"
@@ -1072,6 +1165,7 @@ static void on_layoutbench(nc4_ctx_t *ctx, const nc4_frame_t *f)
              (unsigned)apply_flat_int_us, (unsigned)apply_flat_ps_us,
              (unsigned)flat_write_us, (unsigned)flat_read_us,
              (unsigned)memcpy_ps_int_us, (unsigned)memcpy_int_int_us,
+             (unsigned)pipe4_us, (unsigned)pipe8_us, (unsigned)pipe16_us,
              (unsigned)bus_old_us, (unsigned)bus_new_us, (unsigned)bus_ok,
              (unsigned)canvas_us, (unsigned)direct_us, (unsigned)direct_noclear_us,
              (unsigned)direct4_us,

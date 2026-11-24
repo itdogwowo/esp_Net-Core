@@ -126,6 +126,9 @@ size_t    nc_px_layout_flat_bytes(const nc_px_layout_t *l);   // nflat × 6 B（
 // 一幀：vals[i] = 第 i 條值流的指標（長度 aprog[i].nv），dst = canvas（px × 4）。
 // 語義逐條照 mp `pixel_layout._SCATTER`；回傳寫入咗幾多顆（有 6 B 表）或幾多段 run。
 uint32_t nc_px_layout_apply(const nc_px_layout_t *l, uint16_t *const *vals, uint8_t *dst);
+// 只套用 flat 表的一段（[from, from+count)）；給 chunk／預取 pipeline 用。
+uint32_t nc_px_layout_apply_range(const nc_px_layout_t *l, uint16_t *const *vals,
+                                  uint8_t *dst, uint32_t from, uint32_t count);
 
 // 時間抖動：一次掃描 runs，同時寫 subframes 份 8-bit 輸出。
 // 每份 = base 或 base+1，令 subframes 份平均 = 12-bit>>4（±1）。

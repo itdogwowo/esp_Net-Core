@@ -704,10 +704,18 @@ esp_err_t nc_px_layout_flatify(nc_px_layout_t *l)
     return nc_px_layout_flatify_place(l, true);
 }
 
-// 6 B 表版本的 8-bit 寫入（內圈：一次乘法都冇）
-static uint32_t apply_flat(const nc_px_layout_t *l, uint16_t *const *vals, uint8_t *dst)
+// 6 B 表版本的 8-bit 寫入（內圈：一次乘法都冇）；可以只做一段。
+uint32_t nc_px_layout_apply_range(const nc_px_layout_t *l, uint16_t *const *vals,
+                                  uint8_t *dst, uint32_t from, uint32_t count)
 {
-    for (uint32_t i = 0; i < l->nflat; i++) {
+    if (l == NULL || vals == NULL || dst == NULL || l->flat == NULL) {
+        return 0;
+    }
+    if (from >= l->nflat) {
+        return 0;
+    }
+    const uint32_t end = (count > l->nflat - from) ? l->nflat : (from + count);
+    for (uint32_t i = from; i < end; i++) {
         const nc_px_flat6_t *e = &l->flat[i];
         const uint16_t *v = vals[e->aprog];
         const uint32_t nv = l->aprog[e->aprog].nv;
@@ -768,7 +776,13 @@ static uint32_t apply_flat(const nc_px_layout_t *l, uint16_t *const *vals, uint8
             break;
         }
     }
-    return l->nflat;
+    return end - from;
+}
+
+// 6 B 表版本的 8-bit 寫入（整張）
+static uint32_t apply_flat(const nc_px_layout_t *l, uint16_t *const *vals, uint8_t *dst)
+{
+    return nc_px_layout_apply_range(l, vals, dst, 0, l->nflat);
 }
 
 // ═══════════════════════ apply ═══════════════════════
