@@ -20,6 +20,11 @@ sys.path.insert(0, "tools")
 import nc4  # noqa: E402
 
 
+def _ms(v):
+    """µs → ms（顯示用；JSON 仍然係 µs，機器格式唔變）。"""
+    return "—" if v is None else f"{v / 1000.0:.3f} ms"
+
+
 def run(ser, px, groups, variant, reps, timeout):
     payload = struct.pack("<HHBB", px, groups, variant, reps)
     ser.reset_input_buffer()
@@ -77,8 +82,8 @@ def main():
                 print(out)
                 continue
             print(f"px={d.get('px')} groups={d.get('groups')} v={d.get('variant')} "
-                  f"→ runs={d.get('runs')}  build={d.get('build_us')}µs  "
-                  f"apply8={d.get('apply_us')}µs  apply12={d.get('apply12_us')}µs  "
+                  f"→ runs={d.get('runs')}  build={_ms(d.get('build_us'))}  "
+                  f"apply8={_ms(d.get('apply_us'))}  apply12={_ms(d.get('apply12_us'))}  "
                   f"（{time.time() - t0:.1f}s）")
             # Task 7：6 B 表 vs 舊 run 路徑（同一次量、同一份 layout）
             flat_n = d.get('flat_n')
@@ -86,19 +91,19 @@ def main():
             if flat_n is not None and runs_us is not None:
                 note = "" if flat_n else "（nflat=0：今次行 runs，同上一行一樣）"
                 ratio = (runs_us / d['apply_us']) if d.get('apply_us') else 0.0
-                print(f"    6 B 表 {flat_n} 顆：apply={d.get('apply_us')}µs  vs  "
-                      f"runs={runs_us}µs（{ratio:.2f}×）{note}")
+                print(f"    6 B 表 {flat_n} 顆：apply={_ms(d.get('apply_us'))}  vs  "
+                      f"runs={_ms(runs_us)}（{ratio:.2f}×）{note}")
             # 一幀的「總成本」＝ 效果層生成值流 ＋ 配對層寫入（單子幀）
             vu = d.get('vals_us')
             if vu is not None and d.get('apply_us') is not None:
                 tot = vu + d['apply_us']
-                print(f"    一幀總成本：值流 {vu}µs ＋ apply {d['apply_us']}µs "
-                      f"＝ {tot}µs（nv={d.get('nv')}）")
+                print(f"    一幀總成本：值流 {_ms(vu)} ＋ apply {_ms(d['apply_us'])} "
+                      f"＝ {_ms(tot)}（nv={d.get('nv')}）")
             # production 的抖動層：4 子幀 ＝ 4 次掃表
             du, dru = d.get('dither_us'), d.get('dither_runs_us')
             if du is not None and dru is not None:
                 r2 = (dru / du) if du else 0.0
-                print(f"    抖動 4 子幀：{du}µs  vs  {dru}µs（{r2:.2f}×）")
+                print(f"    抖動 4 子幀：{_ms(du)}  vs  {_ms(dru)}（{r2:.2f}×）")
     finally:
         s.close()
     return 0
