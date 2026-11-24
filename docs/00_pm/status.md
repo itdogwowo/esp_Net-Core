@@ -7851,3 +7851,52 @@ uint32_t nc_px_codec_pack_bus(nc_pixel_codec_t *const codec[], const uint8_t *rg
 **建置**：EffectPerf（704.2 KB）與 Zero-Show（685.8 KB）都 rc=0。
 **Bench 已備好**：`nc_layout_bench.c` variant 17（舊路徑 vs 新 API，同一份 payload、
 逐 byte 比對）；`tools/layout_bench.py` 已支援 variant 17。
+
+### 7.220 2026-11-24（Task 6 上板：24.0 → 6.36 ms（3.77×）；production 已接；修爆棧＋單 lane 回歸）
+
+**板**：ESP32-S3（4 MB flash／2 MB PSRAM，MAC 24:ec:4a:2c:59:60），經 NC4 OTA
+（`tools/ota.py`）上 EffectPerf／Matrix-LED-Textkit，毋須 download mode。
+
+**先撞到一個爆棧（已修）**：任何 `0xF077`（連 variant 0）都會 panic 重啟。
+decode0 任務 stack 只有 **3,072 B**，而 `on_layoutbench` 在回覆 JSON 由 `j[800]`
+加到 `j[1200]` 之後，frame 係 **2,272 B**（objdump `entry a1, 0x8e0`），再加
+`snprintf`／layout build／apply 就爆。改成 `static char j[1200]` 後 frame
+**1,168 B**（`entry a1, 0x490`），variant 0 即刻正常。教訓：decode handler 的
+大緩衝一律 static／heap，唔好放 stack。
+
+**bench A/B（同一塊板、同一份 payload、逐 byte 對拍）**：
+
+| px | 舊路徑 | 新路徑 | 倍數 | bus_ok |
+|---|---:|---:|---:|---:|
+| 9,600（16×600） | 24,018 µs | **6,365 µs** | **3.77×** | 1 |
+| 2,400（16×150） | 4,765 µs | **1,166 µs** | **4.09×** | 1 |
+
+reps=16 重跑：6,365／1,166 µs，同 reps=8 一樣。
+
+**production 接線**（`i80_encode`）：
+- 一次過 `nc_px_codec_pack_bus()`；刪走 8 個 packed 中間緩衝（16×600 省 43.2 KB PSRAM）。
+- **單 lane／8-bit 專用快路徑**：1 lane 時逐 tick 廣播比舊 `merge8` 慢
+  （64 px 實測 **840 µs** vs 舊 357 µs），所以 1 lane 用
+  `nc_px_codec_wave_frame()` 的 LUT memcpy；之後 **139–165 µs**（快舊 ~2.2×）。
+- 16-bit 高位 byte 的 OR→store 修正保留（§7.219）。
+
+**上板驗證（Matrix、1 lane、8-bit、64 px、tests 映像 `0xF061`）**：
+
+| 項目 | 值 |
+|---|---|
+| render fps | 50 |
+| frames | 1,391 |
+| fail | 0 |
+| tx_us | 6–18 µs |
+| enc_us（pack_bus 廣播） | 840 µs（回歸） |
+| enc_us（單 lane 快路徑） | **139–165 µs** |
+
+**仍然未做**：16-lane × 16-bit 實機（冇板）。bench 的 16-lane 數字係同一份 C
+在板上跑，但未經真實 16 條線；Step 0 的 async 基線亦未量。
+
+**操作筆記**：
+- OTA：`python3 tools/ota.py --port <PORT> <image.bin>`；唔使 BOOT。
+  本專案 TinyUSB composite 下 esptool 的自動 reset 無效，要人手 BOOT 才會入
+  download mode。
+- 換 project 後 `/data/config/tasks.json` 會沿用舊 level（render／pixel=-1）→
+  `0x1103 STATUS_SET {"System":{"fs_format":1}}` ＋ REBOOT 重新 seed（會清 `/data`）。

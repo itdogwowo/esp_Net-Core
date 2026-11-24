@@ -524,14 +524,27 @@ git commit -m "project: 2,400 px（16×150）抖動驗收工程與數據"
       `lane_px()` 輸出相同，唔需要 16 次呼叫＋轉置；有抖動才行完整轉置。
       對舊路徑（`wave_pack` × N ＋ `merge8_store`／`merge8`）**逐 byte 比對**：
       8／16 lane、RGBW、8-bit／12-bit dither、`bit_cells` 3／4／8、奇數 px。
-- [ ] **Step 2：bench variant 17（0xF077）A/B**：同一塊板、同一份 payload，
+- [x] **Step 2：bench variant 17（0xF077）A/B**：同一塊板、同一份 payload，
       量 `bus_old_us`、`bus_new_us`、`bus_ok`（逐 byte 相同）。
       指令：`python3 tools/layout_bench.py --port <PORT> --px 9600 --variant 17 --reps 8`
-      （`layout_bench.py` 已支援 variant 17；輸出多一行「I80 合成：舊路徑 … vs 一次過 …」）
-- [ ] **Step 3：快過舊路徑才接 `i80_encode`**；唔快就保留舊路徑，記錄原因（可回退）。
-- [ ] **Step 4：上板驗證**：`0xF079` 的 `enc_us`／`tx_us`／`inflight`；畫面與舊版
-      逐 byte 相同（同一份 payload、同一 seq）。
-- [ ] **Step 5：Commit**
+      （`layout_bench.py` 已支援 variant 17／18）。
+      **實測（ESP32-S3、EffectPerf 映像）**：
+      | px | 舊 | 新 | 倍數 | bus_ok |
+      |---|---:|---:|---:|---:|
+      | 9,600（16×600） | 24,018 µs | **6,365 µs** | **3.77×** | 1 |
+      | 2,400（16×150） | 4,765 µs | **1,166 µs** | **4.09×** | 1 |
+      reps=16 重跑數字一樣（6,365／1,166 µs）→ 唔係偶然。
+- [x] **Step 3：快過舊路徑才接 `i80_encode`**：3.77× ≫ 20%，已接。
+      `i80_encode()` 改成一次過 `nc_px_codec_pack_bus()`，同時刪走
+      8 個 packed 中間緩衝（16×600 省 43.2 KB PSRAM）。
+      **單 lane／8-bit 專用快路徑**：1 lane 時逐 tick 廣播反而慢（實測 64 px：
+      840 µs vs 舊路徑 357 µs），所以 1 lane 用 `nc_px_codec_wave_frame()` 的
+      LUT memcpy 路徑；量到 **139–165 µs**（比舊 357 µs 快 ~2.2×）。
+- [x] **Step 4：上板驗證（1-lane 板）**：Matrix（1 lane、8-bit、64 px）tests 映像
+      `0xF061`：`fps=50`、`frames=1391`、`fail=0`、`tx_us=18`、`enc_us=139–165 µs`。
+      **16-lane 16-bit 實機仍然未做**（冇 16-lane 板）；bench 的 16-lane 數字係
+      同一份 C 在板上跑，但未經真實 16 條線輸出。
+- [x] **Step 5：Commit**
 
 > **順手修（2026-11-25）**：`i80_encode` 的 16-bit 高位 byte 原本用 `merge8`（OR）。
 > 高位 byte 只會 0→1，lane 由亮變暗會殘留（半邊「卡住」）；低位（off=0）與高位
@@ -539,11 +552,13 @@ git commit -m "project: 2,400 px（16×150）抖動驗收工程與數據"
 > 8-bit 路徑行為不變。呢個係 Task 6 量 A/B 之前必須先修，否則「新舊對拍」會把
 > 舊 path 的殘留位當成新 path 的錯。
 
-**驗收（數字待 Step 0／2 上板後填）**：
-- 輸出逐 byte 相同（硬閘門，唔接受「睇落一樣」）。
-- `enc_us`：舊 19.4 ms → 目標 **≤ 12 ms**（暫定；低過 18 ms 線路時間就有意義）。
-- frame ≈ max(enc, 18 ms) ≤ 21 ms（≈48–50 fps）。
-- 若只快 < 20%，唔接 production（免得為少少速度加一條並行路徑）。
+**驗收（2026-11-24 上板後填）**：
+- 輸出逐 byte 相同（硬閘門）：9,600／2,400 px、8/16 lane、8/12-bit dither 全部
+  `bus_ok=1`；host 360 checks 全過。
+- `enc_us`（16×600）：舊 19.4 ms → **6.36 ms**（目標 ≤ 12 ms，達標）。
+- frame ≈ max(enc, 18 ms) ≈ 18 ms（≈50 fps）：16-lane 實機待量。
+- 1-lane 64 px：**139–165 µs**（舊 357 µs）。
+- 若只快 < 20% 唔接 production：實測 3.77×，所以接。
 
 ### Task 7：配對改 6 B 單表（定案）
 

@@ -36,8 +36,6 @@ typedef struct {
     uint8_t             lanes;
     uint8_t             bus_width;           // 8 或 16
     uint8_t             slots;
-    uint32_t            pack_bytes;         // 每條 lane 的 packed 波形 bytes
-    uint8_t            *pack[8];            // 每次 8 條 lane 一組
     const uint8_t      *pay[I80_SLOTS_MAX]; // 這一格屬於環的哪一份 payload
     uint32_t            seq[I80_SLOTS_MAX]; // 這個槽被哪一格佔住（0 = 空閒）
     int                 next;
@@ -73,7 +71,7 @@ static bool i80_acquire(nc_pixel_backend_t *b, uint32_t post_seq, uint32_t *slot
 static bool i80_encode(nc_pixel_backend_t *b, uint32_t slot)
 {
     i80_be_t *d = (i80_be_t *)b->ctx;
-    if (slot >= d->slots || d->pay[slot] == NULL || d->pack[0] == NULL) {
+    if (slot >= d->slots || d->pay[slot] == NULL) {
         return false;
     }
     const uint8_t *p = d->pay[slot];
@@ -82,36 +80,22 @@ static bool i80_encode(nc_pixel_backend_t *b, uint32_t slot)
     if (out == NULL) {
         return false;
     }
-    const uint32_t stride = (d->bus_width == 16) ? 2u : 1u;
-    // 唔再每幀 memset 整格：第一組（lane 0–7）用 store 直接把整格寫死（未用的 lane
-    // 交 NULL → 寫 0），第二組（16-bit 的 lane 8–15）才 OR 進高位 byte。
-    // 16×600 一幀 86,800 B，省掉 memset 就是省 ~2–3.6 ms（PSRAM 寫入）。
-    // 每 8 條 lane 一組：packed 波形（bitstream）→ 8×8 轉置 → I80 byte-per-unit。
-    for (uint8_t g = 0; g < d->lanes; g += 8) {
-        const uint8_t n = (uint8_t)((d->lanes - g > 8) ? 8 : (d->lanes - g));
-        for (uint8_t k = 0; k < n; k++) {
-            nc_pixel_codec_t *c = d->codec[g + k];
-            if (c == NULL) {
-                return false;
-            }
-            nc_px_codec_frame(c, seq);
-            if (nc_px_codec_wave_pack(c, p, d->px, d->pack[k], d->pack_bytes) == 0) {
-                return false;
-            }
+    for (uint8_t k = 0; k < d->lanes; k++) {
+        if (d->codec[k] == NULL) {
+            return false;
         }
-        // 未用到的 lane 一定要交 NULL：malloc 的緩衝有舊資料，否則會 OR 到
-        // D6/D7（dummy）甚至下一組 lane 的位元。
-        const uint8_t *lp[8] = { NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL };
-        for (uint8_t k = 0; k < n; k++) {
-            lp[k] = d->pack[k];
-        }
-        const uint32_t off = (d->bus_width == 16 && g >= 8) ? 1u : 0u;
-        // 兩組都用 store：低 byte（off=0）與高 byte（off=1）係唔同的 byte，互不覆蓋，
-        // 所以唔需要先 memset 整格。舊版第二組用 OR：高位 byte 只會 0→1，lane 由亮
-        // 變暗時會殘留（16-bit 板會半邊「卡住」），呢個係今次 Task 6 順手修的 bug。
-        nc_px_codec_pack_merge8_store(lp, d->pack_bytes, out, stride, off);
+        nc_px_codec_frame(d->codec[k], seq);
     }
-    return true;
+    // 單 lane／8-bit：直接用「線材 byte → 波形 LUT」的 memcpy 路徑。
+    // 廣播路徑係逐 tick 寫；1 lane 時舊 merge8 一次寫 8 tick 反而快（實測 64 px：
+    // pack_bus 840 µs vs 舊路徑 357 µs）。所以 1 lane 保留最直接的那條。
+    if (d->lanes == 1 && d->bus_width == 8) {
+        return nc_px_codec_wave_frame(d->codec[0], p, d->px, out, d->units) != 0;
+    }
+    // Task 6：一次過「展開＋轉置」，直接寫 DMA 槽；唔再經每條 lane 的 packed
+    // 中間緩衝（16×600 舊路徑 16 × 5,400 B ＝ 86.4 KB 寫＋讀，新路徑 0）。
+    // 8-bit／無抖動行廣播快路徑；12-bit dither 行完整 8×8 轉置（host 逐 byte 對拍）。
+    return nc_px_codec_pack_bus(d->codec, p, d->px, out, d->lanes, d->bus_width) != 0;
 }
 
 static bool i80_submit(nc_pixel_backend_t *b, uint32_t slot, uint32_t seq)
@@ -163,12 +147,6 @@ static void i80_be_free(i80_be_t *d)
             d->codec[ln] = NULL;
         }
     }
-    for (int i = 0; i < 8; i++) {
-        if (d->pack[i] != NULL) {
-            heap_caps_free(d->pack[i]);
-            d->pack[i] = NULL;
-        }
-    }
     nc_i80_drv_uninstall();
 }
 
@@ -215,41 +193,12 @@ nc_pixel_backend_t *nc_px_backend_i80(const nc_px_i80_cfg_t *cfg)
         i80_be_free(d);
         return NULL;
     }
-    // packed 波形：px × lane_bytes × bit_cells bytes（每條 lane）；8 條一組去轉置。
-    d->pack_bytes = d->px * (uint32_t)nc_px_codec_lane_bytes(d->codec[0]) * cc.wave.bit_cells;
-    // 先計數（唔猜）：呢一行就係「16×600 到底要幾多記憶體」的答案。
-    ESP_LOGI(TAG, "預算：px=%u lanes=%u bus=%u-bit → packed %u B × 8（%s）、"
-                  "DMA 槽 %u B × %u（%s）",
+    // Task 6：一次過轉置，唔再配置每條 lane 的 packed 中間緩衝
+    //（16×600 舊版 8 × 5,400 B ＝ 43.2 KB PSRAM；新版 0）。
+    ESP_LOGI(TAG, "預算：px=%u lanes=%u bus=%u-bit → 一次過轉置（冇 packed 中間緩衝）、"
+                  "DMA 槽 %u B × %u（internal）",
              (unsigned)d->px, (unsigned)d->lanes, (unsigned)d->bus_width,
-             (unsigned)d->pack_bytes,
-#if CONFIG_NETCORE_PIXEL_PACK_PSRAM
-             "PSRAM",
-#else
-             "internal",
-#endif
-             (unsigned)(d->units * (uint32_t)(d->bus_width / 8)), (unsigned)d->slots,
-             "internal");
-
-
-    // 固定政策：NETCORE_PIXEL_PACK_PSRAM 決定 internal 或 PSRAM，不做 runtime fallback。
-#if CONFIG_NETCORE_PIXEL_PACK_PSRAM
-    const uint32_t pack_caps = MALLOC_CAP_SPIRAM;
-#else
-    const uint32_t pack_caps = MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT;
-#endif
-    for (int i = 0; i < 8; i++) {
-        d->pack[i] = heap_caps_malloc(d->pack_bytes, pack_caps);
-        if (d->pack[i] == NULL) {
-            ESP_LOGE(TAG, "packed 波形緩衝（%u B × 8 = %u B）配置失敗（固定 %s；"
-                          "free internal %u B、free PSRAM %u B）",
-                     (unsigned)d->pack_bytes, (unsigned)(d->pack_bytes * 8u),
-                     (pack_caps & MALLOC_CAP_SPIRAM) ? "PSRAM" : "internal",
-                     (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
-                     (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
-            i80_be_free(d);
-            return NULL;
-        }
-    }
+             (unsigned)(d->units * (uint32_t)(d->bus_width / 8)), (unsigned)d->slots);
 
     // ① 政策：10 個腳位都要有效、唔可以重複、唔可以踩保留腳。
     //    GPIO3 在 S3 是 strapping（JTAG signal source），但 boot 之後當 WS2812 資料線

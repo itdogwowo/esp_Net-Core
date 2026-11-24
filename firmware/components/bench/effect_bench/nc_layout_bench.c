@@ -493,7 +493,8 @@ static void on_layoutbench(nc4_ctx_t *ctx, const nc4_frame_t *f)
 
     uint32_t flat_build_us = 0, flat_apply_us = 0;
     uint32_t bus_old_us = 0, bus_new_us = 0, bus_ok = 0;
-    if (variant == 17) {
+    if (variant == 17 || variant == 18) {
+        const bool dith = (variant == 18);       // 18 = 12-bit dither（走完整轉置）
         // Task 6 原型：同一份 payload、同一批 codec，比較
         //   (a) 舊：16 × wave_pack（每條 lane 5,400 B 中間緩衝）＋ 兩組 merge8
         //   (b) 新：nc_px_codec_pack_bus() 每顆即時轉置、直接寫 bus word
@@ -502,8 +503,8 @@ static void on_layoutbench(nc4_ctx_t *ctx, const nc4_frame_t *f)
         nc_px_codec_cfg_t cc;
         memset(&cc, 0, sizeof(cc));
         cc.fmt = NC_PX_FMT_WS2812;
-        cc.bits = 8;
-        cc.dither_mode = 0;
+        cc.bits = dith ? 12 : 8;
+        cc.dither_mode = dith ? 1 : 0;
         cc.px = lane_px;
         nc_px_wave_default(cc.fmt, &cc.wave);
         nc_pixel_codec_t *cd[16] = { NULL };
@@ -933,7 +934,10 @@ static void on_layoutbench(nc4_ctx_t *ctx, const nc4_frame_t *f)
         s_sink += c8[round];
     }
 
-    char j[1200];
+    // 回覆 JSON 放 static：handler 跑在 decode0 任務上（4 KB stack），
+    // 1,200 B 放 stack 會同 layout build／apply 的區域一齊爆（2026-11-24 上板實測：
+    // 任何 0xF077 都 panic／重啟，連 variant 0 都中）。s_busy 已保證單一 handler。
+    static char j[1200];
     snprintf(j, sizeof(j),
              "{\"px\":%u,\"groups\":%u,\"variant\":%u,\"jobs\":%u,\"runs\":%u,"
              "\"nv\":%u,\"vals_us\":%u,\"build_us\":%u,\"apply_us\":%u,\"apply12_us\":%u,"
