@@ -164,6 +164,17 @@ payload `[px:u16 LE][frames:u16 LE][vpp:u16 LE]`（frames=0 = 按 px 自動：64
 - 換句話說：對 12-bit 路徑，gamma 是 **2 KB internal ＋ 0 ns**；對 8-bit 路徑，
   它是亮度曲線本身，砍掉會令 breath／wave／zone1／ramp 的暗部變亮（同 MP 對不上）。
 
+![有 gamma 同冇 gamma 的分別](gamma-compare.png)
+
+*圖：同一批輸入（linear = level×257）的 8-bit 輸出。上條冇 gamma（中間就是 128），
+下條過 gamma 表（中間是 55）。下面兩條曲線：灰=identity、橙=gamma；藍線標出「輸出 128」
+的位置 —— 冇 gamma 在 50% 時間到，有 gamma 要 73% 時間。*
+
+生成方法（唔需要硬件）：
+`bash tools/hosttest/gamma_bench/run.sh --csv /tmp/g.csv && python tools/hosttest/gamma_bench/plot.py /tmp/g.csv docs/00_pm/gamma-compare.png`
+—— 見 [gamma_bench](../../tools/hosttest/gamma_bench/README.md)（`gamma_bench.c` 直接 link 出貨中的
+`nc_px_engine_tables.c`，golden 會擋住曲線回歸）。
+
 ---
 
 ## 4. 實機數字（S3 240 MHz，EffectPerf 映像，正常 nc4 任務跑住）
