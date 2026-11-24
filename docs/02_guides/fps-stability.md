@@ -95,6 +95,27 @@ python3 tools/fps_drift.py --port /dev/cu.usbmodemXXXX --windows 6 --window 30
 
 例：worst 20 ppm、相對 40 ppm → 1 ms 偏差要 25 s 同步一次；20 ms（一幀）要 500 s。
 
+### overrun 的政策（重要）
+
+- 緩衝（`NETCORE_PIXEL_SLACK_MS`）只用嚟吸收**臨時**波幅；`overrun > 0` 代表
+  尖峰已經大過緩衝。
+- **唔應該靠不斷加大 cap 解決**：cap 越大，代表容忍越大的延迟，反而更唔穩定。
+- 如果長期 overrun：應該 **改效果（減少每幀工作）或降低 FPS**，而唔係加緩衝。
+- 加大 cap 只可以做「已知一次性尖峰」（例如模式切換）的臨時保護。
+
+## 2.7 小時級長跑（便宜、無人值守）
+
+```bash
+# 4 小時，每 60 秒取樣；板重啟會記 gap 並自動重連
+python3 tools/fps_longrun.py --port auto --hours 4 --interval 60 \
+    --csv artifacts/fps_longrun.csv
+```
+
+- 自動等板、自動重連；CSV 每行一個樣本。
+- 完結印：ppm 平均／標準差／最壞、bad／overrun 總數、gap 次數、
+  建議的兩塊 ESP 強制同步間隔。
+- 夜間一鍵：`bash tools/fps_night.sh`（等板 → OTA 安全映像 → 4 小時長跑）。
+
 ## 3. 不穩時查什麼（按 histogram 形狀）
 
 | 形狀 | 可能原因 | 查 |
