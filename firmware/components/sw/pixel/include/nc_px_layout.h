@@ -87,6 +87,7 @@ typedef struct {
     nc_px_flat6_t *flat;            // nflat 個（dst 升序；重疊 = 後面覆蓋前面）
     bool           flat_psram;      // flat 表放喺 PSRAM（量測／政策用）
     int16_t        flat_err;        // 最近一次 flatify 的結果（0=OK；非 0 = 行 runs）
+    uint8_t        flat_uniform;    // flat 表全部同一 write 時的值（0 = 混合）
 } nc_px_layout_t;
 
 // mode ＋ map ＋ assets ＋ inventory → layout（內部 malloc；用完 call free）。

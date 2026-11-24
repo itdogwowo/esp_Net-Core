@@ -221,13 +221,21 @@ static bool pools_alloc(uint32_t total)
     if (total == 0) {
         return false;
     }
+    // 政策：值流細（每塊 ≤48 KB）就放 internal（pair apply 讀得快）；
+    // 大過就 PSRAM。兩個 pool 都要放得落先會用 internal。
+    const size_t pool_bytes = (size_t)total * sizeof(uint16_t);
+    const bool want_internal = (pool_bytes <= 49152u);
     for (int i = 0; i < 2; i++) {
-        // 固定政策：有 PSRAM 就 PSRAM（BULK）；冇 PSRAM 的板（例如 Matrix）退 internal。
-        // 呢個係「板子能力」分支，唔係按 free heap／buffer 大細的智能選擇。
-        s_pool[i] = (uint16_t *)heap_caps_malloc((size_t)total * sizeof(uint16_t),
-                                                 MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        if (want_internal) {
+            s_pool[i] = (uint16_t *)heap_caps_malloc(pool_bytes,
+                                                     MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+        }
         if (s_pool[i] == NULL) {
-            s_pool[i] = (uint16_t *)heap_caps_malloc((size_t)total * sizeof(uint16_t),
+            s_pool[i] = (uint16_t *)heap_caps_malloc(pool_bytes,
+                                                     MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        }
+        if (s_pool[i] == NULL && !want_internal) {
+            s_pool[i] = (uint16_t *)heap_caps_malloc(pool_bytes,
                                                      MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
         }
         if (s_pool[i] == NULL) {

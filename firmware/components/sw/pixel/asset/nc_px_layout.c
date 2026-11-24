@@ -692,6 +692,18 @@ esp_err_t nc_px_layout_flatify_place(nc_px_layout_t *l, bool place_psram)
     }
     l->flat = f;
     l->nflat = (uint32_t)k;
+    l->flat_uniform = 0;
+    if (l->nflat > 0) {
+        const uint8_t w0 = f[0].write;
+        bool same = true;
+        for (uint32_t i = 1; i < l->nflat; i++) {
+            if (f[i].write != w0) {
+                same = false;
+                break;
+            }
+        }
+        l->flat_uniform = same ? w0 : 0;
+    }
     l->flat_psram = place_psram;
     l->flat_err = ESP_OK;
     return ESP_OK;
@@ -702,6 +714,26 @@ esp_err_t nc_px_layout_flatify(nc_px_layout_t *l)
     // 統一模型：flat 表一律放 PSRAM（6 B/px 會隨 px 長大，internal 唔係穩定容量）。
     // 量測／例外先至用 flatify_place(l, false)。
     return nc_px_layout_flatify_place(l, true);
+}
+
+// uniform RGB：冇 switch、冇 default；真實 map 幾乎全部係呢種。
+static uint32_t apply_flat_rgb(const nc_px_layout_t *l, uint16_t *const *vals, uint8_t *dst,
+                               uint32_t from, uint32_t end)
+{
+    for (uint32_t i = from; i < end; i++) {
+        const nc_px_flat6_t *e = &l->flat[i];
+        const uint16_t *v = vals[e->aprog];
+        const uint32_t nv = l->aprog[e->aprog].nv;
+        const uint32_t c = e->src;
+        const uint32_t c1 = (c + 1u < nv) ? (c + 1u) : (c + 1u - nv);
+        const uint32_t c2 = (c + 2u < nv) ? (c + 2u) : (c + 2u - nv);
+        uint8_t *o = dst + ((size_t)e->dst << 2);
+        o[0] = (uint8_t)(v[c] >> 4);
+        o[1] = (uint8_t)(v[c1] >> 4);
+        o[2] = (uint8_t)(v[c2] >> 4);
+        o[3] = 0;
+    }
+    return end - from;
 }
 
 // 6 B 表版本的 8-bit 寫入（內圈：一次乘法都冇）；可以只做一段。
@@ -715,6 +747,9 @@ uint32_t nc_px_layout_apply_range(const nc_px_layout_t *l, uint16_t *const *vals
         return 0;
     }
     const uint32_t end = (count > l->nflat - from) ? l->nflat : (from + count);
+    if (l->flat_uniform == NC_PX_WRITE_RGB) {
+        return apply_flat_rgb(l, vals, dst, from, end);
+    }
     for (uint32_t i = from; i < end; i++) {
         const nc_px_flat6_t *e = &l->flat[i];
         const uint16_t *v = vals[e->aprog];

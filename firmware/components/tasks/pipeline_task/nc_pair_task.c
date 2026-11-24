@@ -174,7 +174,7 @@ static struct {
 static void cache_prebuild_missing(void);
 
 #if CONFIG_NETCORE_PIXEL_APPLY_PIPE
-#define PIPE_CHUNK_KB 8u
+#define PIPE_CHUNK_KB 16u
 #define PIPE_BUFS     3u
 typedef struct {
     const nc_px_layout_t *l;
@@ -558,7 +558,7 @@ static bool pipe_start(void)
         }
         xSemaphoreGive(s_pipe.free_s[i]);
     }
-    if (xTaskCreatePinnedToCore(pipe_worker, "pxpipe", 3072, &s_pipe, 3, NULL, 0) != pdPASS) {
+    if (xTaskCreatePinnedToCore(pipe_worker, "pxpipe", 3072, &s_pipe, 2, NULL, 1) != pdPASS) {
         return false;
     }
     s_pipe.ready = true;

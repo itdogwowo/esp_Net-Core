@@ -8159,3 +8159,29 @@ worst case；**真實配對地圖係一張大表慢慢建立**，run 少而長�
   懷疑 worker（core0）同 effect 爭 core／PSRAM 頻寬，或 chunk 邊界效應；
   已保留 Kconfig（預設關），未有 production 收益前不啟用。
 - `flat_err`（layout + 0xF079）已加：6 B 表建唔到會 log 原因，唔再靜默降級。
+
+### 7.232 2026-11-25（apply 優化實驗：RGB 專用／pipe core／值流 internal 全部無效）
+
+真機 9600、mode full256（9,600 px、1 run、RGB、6 B 表 PSRAM），每項獨立量測：
+
+| 實驗 | apply | 對照 |
+|---|---:|---:|
+| 基準（direct PSRAM） | 4,991–5,388 µs | — |
+| uniform-RGB 專用內圈（去掉 switch） | 5,005 µs | **無增益** |
+| pipe core0、8 KB chunk（ok 620、fail 0） | 5,422 µs | **無增益** |
+| pipe core1、16 KB chunk | 5,422 µs | **無增益** |
+| 值流 pool 放 internal（≤48 KB/塊） | 5,388 µs | **無增益**（many40 4,699） |
+
+**解讀**：
+- bench 的 pipe 1.6 ms（4,800 顆、vals 可能 internal）唔可以直接類比 production；
+- production 5.4 ms ≈ 0.56 µs/px，主要係「flat 57.6 KB PSRAM 讀 + 值流 57.6 KB 讀 +
+  環 38.4 KB PSRAM 寫」的合成成本，唔係 switch／單一指標；
+- 5.4 ms ＝ 20 ms 預算的 27%，仍然可接受。
+
+**保留的改動**：
+- `flat_uniform`＋RGB 專用內圈（混合表照行通用路徑；無害）；
+- 值流 pool：每塊 ≤48 KB 放 internal（平衡 SRAM／PSRAM，省 PSRAM；冇速度壞處）；
+- pipe（`NETCORE_PIXEL_APPLY_PIPE`）預設關，只留 lab。
+
+**下一個值得試**（未做）：uniform RGB 用 **4 B 表**（dst16＋src16，write/aprog 由 layout
+統一）→ 讀取 57.6 → 38.4 KB；或量 cache miss／PSRAM 頻寬再決定。
