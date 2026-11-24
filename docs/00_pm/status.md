@@ -8028,3 +8028,27 @@ WSL 寫 v6.1／v6.1.1，唔再寫 v6.1.0。若用家想把 macOS 升到 v6.1.x�
   但每張仍要 46 ms 讀（FAT）或 2.1 ms memcpy，所以張數唔係主要限制，**讀取時間才是**。
 - 建議：**雙緩衝（current＋next）放 PSRAM**，切換時 memcpy 入 internal（2.1 ms）；
   要免 FAT 就開 1 MB raw partition（18 張）。
+
+### 7.226 2026-11-25（真實配對地圖的 flatify：0.55 ms，不是 14.5 ms）
+
+用 0xF07D 量**真實 layout**（9600 project、501 組 map、mode `full256` 覆蓋 9,600 px）：
+
+| 指標 | 值 |
+|---|---:|
+| runs | 1（`full` 一條連續段） |
+| nflat | 9,600 |
+| flat 表大小 | 57,600 B |
+| **flatify** | **537–564 µs（≈0.55 ms）** |
+
+**修正之前的講法**：14.5 ms 係 bench 的「完全隨機 permutation」（9,598 條 1 顆 run）
+worst case；**真實配對地圖係一張大表慢慢建立**，run 少而長，flatify 只 0.55 ms
+（500 組 bench 亦只 0.375 ms）。所以：
+
+- 換場 flatify **唔係問題**（<1 ms）；
+- 真正貴的是 **layout 建立／快取載入**（build 40–137 ms、cache load 10 ms）；
+- 「播放時預建下一張」仍然可行，但主要價值在 **預建 layout ＋ flat**（總共約 11 ms），
+  唔係避免 14.5 ms；
+- 一張 staging 表 57.6 KB 放 PSRAM 可以（current＋next 兩張），唔需要全部 mode 都放。
+
+**下一步設計**：模式下播放時用 idle slice 預建下一個 mode 的 layout＋flat；
+切換時 swap／memcpy（2.1 ms），達到「即時切換」。

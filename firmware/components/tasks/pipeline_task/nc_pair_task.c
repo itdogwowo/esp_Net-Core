@@ -1100,6 +1100,8 @@ static void on_reload(nc4_ctx_t *ctx, const nc4_frame_t *f)
 #define NC4_CMD_PIXDIAG_RSP 0xF07A
 #define NC4_CMD_FLATREAD  0xF07B
 #define NC4_CMD_FLATREAD_RSP 0xF07C
+#define NC4_CMD_FLATTIME  0xF07D
+#define NC4_CMD_FLATTIME_RSP 0xF07E
 
 static void on_pipestats(nc4_ctx_t *ctx, const nc4_frame_t *f)
 {
@@ -1244,6 +1246,27 @@ static void on_flatread(nc4_ctx_t *ctx, const nc4_frame_t *f)
     reply_json(ctx, NC4_CMD_FLATREAD_RSP, j);
 }
 
+// 0xF07D：量「真實 layout」的 flatify 成本（runs → 6 B 表），唔係 bench 的隨機。
+static void on_flattime(nc4_ctx_t *ctx, const nc4_frame_t *f)
+{
+    (void)f;
+    if (!s_content.ready) {
+        reply_json(ctx, NC4_CMD_FLATTIME_RSP, "{\"err\":\"not_ready\"}");
+        return;
+    }
+    const uint32_t runs = s_content.layout.nruns;
+    const int64_t t0 = esp_timer_get_time();
+    const esp_err_t e = nc_px_layout_flatify_place(&s_content.layout, false);
+    const uint32_t us = (uint32_t)(esp_timer_get_time() - t0);
+    char j[192];
+    (void)snprintf(j, sizeof(j),
+                   "{\"rc\":%d,\"runs\":%u,\"nflat\":%u,\"nflat_b\":%u,\"us\":%u,\"px\":%u}",
+                   (int)e, (unsigned)runs, (unsigned)s_content.layout.nflat,
+                   (unsigned)nc_px_layout_flat_bytes(&s_content.layout),
+                   (unsigned)us, (unsigned)s_content.px);
+    reply_json(ctx, NC4_CMD_FLATTIME_RSP, j);
+}
+
 static void on_pipeburn(nc4_ctx_t *ctx, const nc4_frame_t *f)
 {
     uint32_t sec = 10;
@@ -1272,6 +1295,7 @@ static const nc_action_t s_actions[] = {
     { NC4_CMD_PIPERESET, on_pipereset, "pair" },
     { NC4_CMD_PIXDIAG, on_pixdiag, "pair" },
     { NC4_CMD_FLATREAD, on_flatread, "pair" },
+    { NC4_CMD_FLATTIME, on_flattime, "pair" },
 };
 
 NC_ACTION_TABLE_DEF(nc_pair_task_table, "pair", s_actions);
