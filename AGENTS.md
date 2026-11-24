@@ -620,6 +620,18 @@ python3 tools/ota.py --port /dev/cu.usbmodemXXXX \
 - 4 子幀只用於 2,400 px（16×150）＋子幀率 ≥200 Hz；9,600 px 用單子幀。
 - `apply4` 一次掃 4 份；production 逐子幀 `apply_dither`。
 
+### 10.5b FPS 穩定度（時間緩衝）
+
+- 節拍**仍然由 `esp_timer_start_periodic(frame_interval_ms)` 控制**；唔會追趕、唔改週期。
+- `nc_fps_clock`：早完成存 slack、遲到由 slack 吸收；上限
+  `CONFIG_NETCORE_PIXEL_SLACK_MS`（預設 50 ms，**初始全滿**）。
+- 長期 `overrun` → 改效果或降 FPS，**唔好加大 cap**。
+- 量測：`0xF081` → `0xF082`（`avg/sd/min/max/bad/slack/catchup/overrun/hist`）。
+- 工具：`tools/fps_trace.py`（快測）、`fps_drift.py`（ppm）、
+  `fps_longrun.py`（小時級）、`fps_night.sh`（一鍵）。
+- 指南：`docs/02_guides/fps-stability.md`；整合報告：
+  `docs/00_pm/fps-report-2026-11-25.md`。
+
 ### 10.6 相關指令
 
 - `0xF060 MATRIX`：生產者 stats／effect／dither／color／gain／fps／zone…
