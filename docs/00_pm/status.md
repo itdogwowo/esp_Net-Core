@@ -8052,3 +8052,28 @@ worst case；**真實配對地圖係一張大表慢慢建立**，run 少而長�
 
 **下一步設計**：模式下播放時用 idle slice 預建下一個 mode 的 layout＋flat；
 切換時 swap／memcpy（2.1 ms），達到「即時切換」。
+
+### 7.227 2026-11-25（極端情況效能下限：隨機 9,600 px 全鏈成本）
+
+用家要求「完全隨機」作為**性能下限**（唔係未來場景）。真機 EffectPerf、9,600 px：
+
+| 階段 | 時間 |
+|---|---:|
+| layout build（9,598 條 run） | **152.1 ms** |
+| flatify（runs → 6 B 表，internal） | **14.5 ms** |
+| flatify（PSRAM） | 19.8 ms |
+| 每幀 apply（6 B 表、internal） | **3.0 ms** |
+| 每幀 apply（行 runs，冇表） | **12.0 ms** |
+
+**切換下限（冇快取）＝ 152.1 ＋ 14.5 ＝ 166.6 ms**，之後每幀 3.0 ms。
+（隨機 layout 的表 >32 KB，現行快取會跳過，所以冇「快取載入」可省。）
+
+**分段可行性**：
+- **flatify 14.5 ms**：完全可分（線性掃 runs，狀態＝run index／段內 offset／cursor／c）。
+- **layout build 152 ms**：可分但複雜（bucket 填充 O(entries) + 合併 O(px)），係主要成本。
+- **apply**：每幀必須掃完全部 px，**唔可以跨幀分段**（會撕裂畫面）；只可以在幀內分 chunk 串流。
+- 串流來源如果係 FAT：57.6 KB × 50 fps ＝ 2.88 MB/s > FAT 實測 ~1.25 MB/s → 唔可行；
+  raw partition／mmap 讀速待量（SPI flash 理論較高，可能 5–8 ms/幀）。
+
+**記憶體**：apply 用 internal 最快；PSRAM 版 5.08 ms/幀仍然 <20 ms，可接受；
+所以「一定要 PSRAM」唔成立——internal 預設，PSRAM 只係 staging。
