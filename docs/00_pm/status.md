@@ -7578,3 +7578,41 @@ px=64（256 值）與 px=9,600（38,400 值）逐值成本一樣 → gamma 係�
 → 0xF065 完全冇回覆（唔係 crash）。量測映像一定要 `NC_PROJECT_OVERRIDE=S3/ESP32-S3-Matrix-EffectPerf`。
 另外 `tools/ota.py` 今次卡在 BEGIN（process 0 CPU、等唔到回覆）；改用
 `esptool --before usb-reset --after watchdog-reset write-flash` 5 秒燒完（728,800 B）。
+
+### 7.215 2026-11-25（Task 7：配對層改 6 B 單表）
+
+計劃 Task 7 落地：runs 之外多一張**每顆一筆**的落點表，熱路徑唔再逐段計 `% nv`。
+
+**形狀**（`nc_px_layout.h`）：`nc_px_flat6_t { uint16 dst; uint16 src; uint8 write; uint8 aprog; }`
+＝ 6 B（`_Static_assert` 鎖住）。`src` 係**值流起點**（已經用 write 的步長換算好），
+所以內圈係「讀 6 B → 查值 → 寫 4 B」，一次除法都冇。
+
+**兩個同計劃唔同的決定**：
+
+1. **`src` 存減約後的值流 index，唔係像素 index。** 計劃 Step 2 寫 `f[k].src = run->src + x`，
+   之後每顆再 `×(3或4) % nv`；正式版建表時就算好 `(步長 × run->src) % nv`，之後每顆 +步長回繞。
+   語義同 run 路徑的 `c3x/c3y/c3z` 完全一樣，但省走 9,600 次除法。
+2. **唔按 write 分組。** 計劃 Step 3 想分組省 switch，但分組會改「重疊邊個贏」——run 路徑係
+   dst 升序、後寫覆蓋先寫（`pxLayout_test [9]` 就係測這個）；按 write 分組之後全部 R 會排到
+   全部 RGB 之前，重疊的燈就變 RGB 贏。所以保留單表 + 逐筆 switch（write 一段段咁變，
+   分支預測器食得住）。要再快的下一步係「分表但另外記次序」，唔係犧牲語義。
+
+**展開時機**：`nc_px_layout_build()` 同 `nc_px_layout_load()` 結尾自動叫 `nc_px_layout_flatify()`
+（呼叫端唔使記）。表係**衍生資料**，唔入快取檔 → `NC_PX_LAYOUT_CACHE_VER` 唔使升。
+讀完快取一樣重新展開，行為同 build 一模一樣。
+
+**唔展開（退回 runs，唔會靜靜截斷）**：`px > 65,535`、`naprog > 255`、有值流 `nv > 65,535`
+或 `nv == 0`、rgb 而 `nv < 3`／rgbw 而 `nv < 4`、總顆數 > 8×px（重疊太多）。
+`nc_px_layout_apply()` 同 `apply_dither()` 都有兩條路；`apply4()`／`apply12()` 仍然只行 runs
+（production 冇用它們；抖動 production 路徑係 `apply_dither`，已經行表）。
+
+**記憶體**：6 B × 總顆數（9,600 px ＝ 57.6 KB，PSRAM）。runs 表照留（快取檔同退回路徑要用）。
+0xF079 加 `flat_n`／`flat_b` 兩個欄位（`j` 由 900 → 1,000 B）。
+
+**驗證**：`pxLayout_test` 新增 `test_flat6_matches_runs()`——同一份 layout「用表」同「強制
+runs」各寫一次，**逐 byte 對拍**（8-bit ＋ 抖動 4 子幀 × 4 phase），再驗 `nflat == Σ run.count`、
+`flat_bytes == nflat × 6`、`px > 65,535` 時拒絕展開。全套 host 測試綠；
+SuperMini 映像建置 OK（36 s，esp_net_core.bin 0x9f070）。
+
+**未做**：真機數字（用戶暫時冇硬件）。host 方向：9,600 px／500 組 6 B 表 0.012 ms vs
+runs 0.023 ms ≈ **1.87×**（x86 唔可以外推 S3；等硬件返嚟跑 `tools/layout_bench.py --all`）。

@@ -533,7 +533,7 @@ static const uint16_t s_wave3_nib[16];   // 4 bit → 12 tick
 - Modify: `firmware/components/sw/pixel/include/nc_px_layout.h`、`asset/nc_px_layout.c`
 - Test: `tools/hosttest/pxLayout_test/pxLayout_test.c`
 
-- [ ] **Step 1：加 6 B 表結構（由既有 layout 展開）**
+- [x] **Step 1：加 6 B 表結構（由既有 layout 展開）**
 
 ```c
 typedef struct {
@@ -544,7 +544,7 @@ typedef struct {
 } nc_px_flat6_t;       // 6 B／顆
 ```
 
-- [ ] **Step 2：建立組合時展開（一次性）**
+- [x] **Step 2：建立組合時展開（一次性）**
 
 ```c
 // 由 runs 展開：每段的 count 顆，逐顆寫 dst/src/write/aprog
@@ -561,7 +561,12 @@ for (r = 0; r < lay->nruns && k < px; r++) {
 }
 ```
 
-- [ ] **Step 3：套用時按 write 分組，避免每顆 switch**
+> **實作改動**：正式版 `src` 存的是**已經減約到值流長度的起點**，唔係像素 index。
+> 上面第 557 行寫 `run->src + x`，之後每顆再 `×(3或4) % nv`；改為建表時就算好
+> `(步長 × run->src) % nv`，之後每顆 +步長回繞 → 熱路徑**一次除法都冇**。
+> 語義完全一樣（run 路徑的 `c3x/c3y/c3z` 就係咁嚟），但快過計劃的原型（見 Step 5）。
+
+- [x] **Step 3：套用時按 write 分組，避免每顆 switch**
 
 ```c
 // ① 數每個 write 有幾顆（NC_PX_WRITE_COUNT 個桶）
@@ -593,8 +598,15 @@ for (int w = 0; w < NC_PX_WRITE_COUNT; w++) {
 
 > 正式版唔用上面 O(n×W) 掃描：用 bucket 一次重排 `f[]`（或建表時已分組），
 > 令每個 write 的 range 連續，然後每個 range 一個專用迴圈。
+>
+> **實作決定（2026-11-25）：唔分組，保留單一 dst 升序表＋逐筆 switch。**
+> 分組會改變「重疊時邊個贏」：run 路徑係 dst 升序、後寫覆蓋先寫（`pxLayout_test [9]`）；
+> 按 write 分組之後，全部 R 會排到全部 RGB 之前，重疊的燈就由「後寫贏」變成「RGB 贏」。
+> 要保留語義就只有「同一 write 內穩定」一種分组，而同一 write 分組其實等於唔分——所以
+> 單表 + switch（write 一段一段咁變，分支預測器食得住）係唯一唔會靜靜改畫面語義的做法。
+> 萬一要再快，下一步應該係「按 write 分表但每顆都記住次序」——記憶體換時間，留待有真機數字先講。
 
-- [ ] **Step 4：host 測試（重疊、stride、aprog 各異）**
+- [x] **Step 4：host 測試（重疊、stride、aprog 各異）**
 
 ```c
 // 兩個 entry：A 寫 R、B 寫 G，同一批燈 → 兩個通道都要保留
@@ -603,7 +615,16 @@ for (int w = 0; w < NC_PX_WRITE_COUNT; w++) {
 
 Run: `bash tools/hosttest/pxLayout_test/run.sh` → Expected: ALL PASS
 
+> 實際加的測試係 `pxLayout_test.c` 的 `test_flat6_matches_runs()`：混合 write（rgb／r／rgbw）、
+> 重疊、隔顆，同一份 layout 用「6 B 表」同「強制 runs」各寫一次，**逐 byte 對拍**（8-bit 同
+> 抖動 4 子幀 × 4 phase 都比），再驗 `nflat == Σ run.count`、`flat_bytes == nflat × 6`、
+> 以及 `px > 65,535` 時拒絕展開（唔可以靜靜截斷）。比逐個 case 寫期望值更難出錯。
+
 - [ ] **Step 5：上板量**
+
+> **未做（2026-11-25）：用戶暫時冇硬件。** host 先量方向（9,600 px／500 組：6 B 表
+> 0.012 ms vs runs 0.023 ms ≈ **1.87×**，x86 唔可以外推 S3）。真機數字等硬件返嚟補
+> `python3 tools/layout_bench.py --all`，並寫入 status。
 
 ```bash
 python3 tools/layout_bench.py --port /dev/cu.usbmodemB43A45AD52E41 --all
@@ -611,7 +632,7 @@ python3 tools/layout_bench.py --port /dev/cu.usbmodemB43A45AD52E41 --all
 
 Expected（9,600 px）：500 組 ≤ 2.5 ms、完全隨機 ≤ 5.5 ms（6 B 實測 5.34）。
 
-- [ ] **Step 6：Commit**
+- [x] **Step 6：Commit**
 
 ### Task 8：掃描後精確配置（去魔法數字）
 

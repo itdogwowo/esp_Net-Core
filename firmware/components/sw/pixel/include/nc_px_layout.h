@@ -54,6 +54,17 @@ typedef struct {
     uint32_t job;                   // index into layout->job
 } nc_px_lrun_t;
 
+// 6 B／顆的落點表（`nc_px_layout_flatify()` 由 runs 展開）。
+// 為什麼要這張：runs 每段只有幾顆（500 組 / 9,600 px ≈ 19 顆），但每段要算 11 次
+// `% nv` 加兩層 job/aprog 追蹤；展開成「每顆一筆」之後熱路徑冇除法、冇分表。
+// `src` 是**值流起點**（已經用 write 的通道步長換算好），所以內圈只剩加法回繞。
+typedef struct {
+    uint16_t dst;                   // 落點（canvas 的 pixel index）
+    uint16_t src;                   // 值流起點（第一條通道；rgb/rgbw 之後 +3／+4）
+    uint8_t  write;                 // nc_px_write_t
+    uint8_t  aprog;                 // index into layout->aprog
+} nc_px_flat6_t;                    // 6 B／顆（見 nc_px_layout.c 的 _Static_assert）
+
 typedef struct {
     uint32_t px;                    // 合成鏈總長（inventory 推）
     uint32_t naprog;                // 用到的效果數（值流條數）
@@ -69,9 +80,11 @@ typedef struct {
     uint16_t skip_asset_full;       // 效果數超過 aprog 上限
     uint16_t skip_prog;             // program 編譯失敗
     uint16_t skip_oom;              // 暫存／容量唔夠
+    uint32_t       nflat;           // 6 B 表長度（0 = 冇表 → 熱路徑退回 runs）
     nc_px_aprog_t *aprog;           // naprog 個
     nc_px_ljob_t  *job;             // njobs 個
     nc_px_lrun_t  *run;             // nruns 個（dst 升序）
+    nc_px_flat6_t *flat;            // nflat 個（dst 升序；重疊 = 後面覆蓋前面）
 } nc_px_layout_t;
 
 // mode ＋ map ＋ assets ＋ inventory → layout（內部 malloc；用完 call free）。
@@ -94,8 +107,16 @@ esp_err_t nc_px_layout_save(const nc_px_layout_t *l, const char *path, uint32_t 
 esp_err_t nc_px_layout_load(nc_px_layout_t *out, const char *path, uint32_t key,
                             const nc_px_asset_tbl_t *assets);
 
+// ── 6 B 落點表（Task 7）──
+// 由 runs 一次展開（換場／讀快取之後自動做；唔使呼叫端記住）。
+// 唔展開的情況：`px > 65,535`、`naprog > 255`、有值流 `nv > 65,535` 或 `nv == 0`、
+// rgb 值流 `nv < 3`／rgbw `nv < 4`、總顆數 > 8×px（重疊太多）。此時 `nflat == 0`，
+// 熱路徑照舊行 runs，行為一模一樣。
+esp_err_t nc_px_layout_flatify(nc_px_layout_t *l);
+size_t    nc_px_layout_flat_bytes(const nc_px_layout_t *l);   // nflat × 6 B（PSRAM）
+
 // 一幀：vals[i] = 第 i 條值流的指標（長度 aprog[i].nv），dst = canvas（px × 4）。
-// 語義逐條照 mp `pixel_layout._SCATTER`；回傳寫入的 run 數。
+// 語義逐條照 mp `pixel_layout._SCATTER`；回傳寫入咗幾多顆（有 6 B 表）或幾多段 run。
 uint32_t nc_px_layout_apply(const nc_px_layout_t *l, uint16_t *const *vals, uint8_t *dst);
 
 // 時間抖動：一次掃描 runs，同時寫 subframes 份 8-bit 輸出。

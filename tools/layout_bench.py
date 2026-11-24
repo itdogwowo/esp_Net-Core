@@ -73,6 +73,14 @@ def main():
                   f"→ runs={d.get('runs')}  build={d.get('build_us')}µs  "
                   f"apply8={d.get('apply_us')}µs  apply12={d.get('apply12_us')}µs  "
                   f"（{time.time() - t0:.1f}s）")
+            # Task 7：6 B 表 vs 舊 run 路徑（同一次量、同一份 layout）
+            flat_n = d.get('flat_n')
+            runs_us = d.get('apply_runs_us')
+            if flat_n is not None and runs_us is not None:
+                note = "" if flat_n else "（nflat=0：今次行 runs，同上一行一樣）"
+                ratio = (runs_us / d['apply_us']) if d.get('apply_us') else 0.0
+                print(f"    6 B 表 {flat_n} 顆：apply={d.get('apply_us')}µs  vs  "
+                      f"runs={runs_us}µs（{ratio:.2f}×）{note}")
     finally:
         s.close()
     return 0

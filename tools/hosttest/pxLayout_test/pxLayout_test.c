@@ -348,6 +348,31 @@ static void test_500_groups(void)
 
     printf("  build %.2f ms、apply %.2f ms（host x86，含 500 段隨機次序）\n",
            t1 - t0, t3 - t2);
+
+    // 6 B 表 vs run 路徑（同一份 layout、同一個 canvas；host 數字只睇方向，
+    // 真機要用 tools/layout_bench.py 量）
+    check(l.nflat == PX, "9,600 px 全部展開（1 顆 1 筆）");
+    nc_px_layout_t lr = l;
+    lr.flat = NULL;
+    lr.nflat = 0;
+    const uint32_t reps = 50;
+    double f_ms = 0.0;
+    double r_ms = 0.0;
+    for (int round = 0; round < 2; round++) {
+        const double a0 = now_ms();
+        for (uint32_t i = 0; i < reps; i++) {
+            nc_px_layout_apply(&l, vptrs, canvas);
+        }
+        const double a1 = now_ms();
+        for (uint32_t i = 0; i < reps; i++) {
+            nc_px_layout_apply(&lr, vptrs, canvas);
+        }
+        const double a2 = now_ms();
+        f_ms = (a1 - a0) / (double)reps;
+        r_ms = (a2 - a1) / (double)reps;
+    }
+    printf("  apply：6 B 表 %.3f ms、runs %.3f ms（%.2f×，host 參考）\n",
+           f_ms, r_ms, (f_ms > 0.0) ? (r_ms / f_ms) : 0.0);
     nc_px_layout_free(&l);
 }
 
@@ -576,6 +601,97 @@ static void test_apply4(void)
     nc_px_layout_free(&lay);
 }
 
+// ── [12] 6 B 落點表：同 run 路徑逐 byte 相同（混合 write／重疊／stride）──
+// 這張表是衍生資料：runs 係真相，表只係把「每顆一筆」攤平。任何一個 byte 唔同
+// 就係回歸——用戶見到嘅畫面要靠它。
+static void test_flat6_matches_runs(void)
+{
+    printf("[12] 6 B 落點表（對拍 run 路徑）\n");
+    nc_px_asset_t a, b;
+    make_asset(&a, "A", 24);          // rgb 8 顆剛好 24 個值
+    make_asset(&b, "B", 8);
+    nc_px_asset_tbl_t assets = { .n = 2 };
+    assets.item[0] = a;
+    assets.item[1] = b;
+    const nc_px_hw_inv_t inv[] = { { .hw = NC_PX_HW_WS2812, .base = 0, .px = 8 } };
+    // g0 全鏈寫 rgb；g1 隔顆只寫紅（同 g0 重疊 → 後寫贏）；g2 前半寫 rgbw
+    nc_px_group_sel_t s0[] = { { .hw = NC_PX_HW_WS2812, .slice = ":" } };
+    nc_px_group_sel_t s1[] = { { .hw = NC_PX_HW_WS2812, .slice = "::2" } };
+    nc_px_group_sel_t s2[] = { { .hw = NC_PX_HW_WS2812, .slice = "0:8:2" } };
+    nc_px_group_t groups[3] = {
+        { .id = 1, .name = "g0", .sel = s0, .nsel = 1 },
+        { .id = 2, .name = "g1", .sel = s1, .nsel = 1 },
+        { .id = 3, .name = "g2", .sel = s2, .nsel = 1 },
+    };
+    nc_px_map_t map = { .id = 1, .name = "m", .group = groups, .ngroups = 3 };
+    nc_px_mode_entry_t en[3] = {
+        { .group = "g0", .effect = "A", .write = NC_PX_WRITE_RGB },
+        { .group = "g1", .effect = "B", .write = NC_PX_WRITE_R },
+        { .group = "g2", .effect = "A", .write = NC_PX_WRITE_RGBW },
+    };
+    nc_px_mode_t mode = { .id = 1, .name = "m", .nentry = 3, .entry = en };
+    nc_px_layout_t lay;
+    check(nc_px_layout_build(&mode, &map, &assets, inv, 1, &lay) == ESP_OK, "建立");
+    check(sizeof(nc_px_flat6_t) == 6, "nc_px_flat6_t 就係 6 B");
+    check(lay.nflat > 0, "build 之後自動展開 6 B 表");
+    uint32_t total = 0;
+    for (uint32_t r = 0; r < lay.nruns; r++) {
+        total += lay.run[r].count;
+    }
+    check(lay.nflat == total, "表長度 = Σ run.count（重疊的顆都保留）");
+    check(nc_px_layout_flat_bytes(&lay) == (size_t)lay.nflat * 6u, "flat_bytes = nflat × 6");
+
+    uint16_t va[24], vb[8];
+    for (int i = 0; i < 24; i++) {
+        va[i] = (uint16_t)(0x100 + i * 7);
+    }
+    for (int i = 0; i < 8; i++) {
+        vb[i] = (uint16_t)(0x800 + i * 3);
+    }
+    uint16_t *vp[2] = { va, vb };
+
+    uint8_t out_flat[8 * 4], out_runs[8 * 4];
+    memset(out_flat, 0xAA, sizeof(out_flat));
+    memset(out_runs, 0xAA, sizeof(out_runs));
+    nc_px_layout_apply(&lay, vp, out_flat);       // 6 B 表
+    nc_px_layout_t lr = lay;                     // 同一份 layout，強制行 run 路徑
+    lr.flat = NULL;
+    lr.nflat = 0;
+    nc_px_layout_apply(&lr, vp, out_runs);
+    check(memcmp(out_flat, out_runs, sizeof(out_flat)) == 0, "8-bit 寫入：逐 byte 一樣");
+
+    bool same = true;
+    for (uint32_t ph = 0; ph < 4; ph++) {
+        for (uint8_t sf = 0; sf < 4; sf++) {
+            uint8_t d1[8 * 4], d2[8 * 4];
+            memset(d1, 0x5A, sizeof(d1));
+            memset(d2, 0x5A, sizeof(d2));
+            nc_px_layout_apply_dither(&lay, vp, d1, 4, sf, ph);
+            nc_px_layout_apply_dither(&lr, vp, d2, 4, sf, ph);
+            if (memcmp(d1, d2, sizeof(d1)) != 0) {
+                same = false;
+            }
+        }
+    }
+    check(same, "抖動寫入：4 子幀 × 4 phase 全部一樣");
+
+    // 邊界：px 超過 16-bit 就唔展開（唔可以靜靜截斷），apply 照行 runs
+    nc_px_layout_t t;
+    if (nc_px_layout_build(&mode, &map, &assets, inv, 1, &t) == ESP_OK) {
+        t.px = 70000;
+        check(nc_px_layout_flatify(&t) == ESP_ERR_INVALID_SIZE, "px > 65,535 → 拒絕展開");
+        check(t.nflat == 0 && t.flat == NULL, "拒絕之後冇表（nflat = 0）");
+        uint8_t o1[8 * 4], o2[8 * 4];
+        memset(o1, 0x33, sizeof(o1));
+        memset(o2, 0x33, sizeof(o2));
+        nc_px_layout_apply(&t, vp, o1);
+        nc_px_layout_apply(&lay, vp, o2);
+        check(memcmp(o1, o2, sizeof(o1)) == 0, "冇表時 apply 照行 runs，結果一樣");
+        nc_px_layout_free(&t);
+    }
+    nc_px_layout_free(&lay);
+}
+
 int main(void)
 {
     test_single_chain();
@@ -583,6 +699,7 @@ int main(void)
     test_step();
     test_overlap_same_channel();
     test_apply4();
+    test_flat6_matches_runs();
     test_500_groups();
     test_json_500();
     test_cache_roundtrip();

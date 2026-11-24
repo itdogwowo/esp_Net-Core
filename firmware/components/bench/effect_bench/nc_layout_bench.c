@@ -710,10 +710,30 @@ static void on_layoutbench(nc4_ctx_t *ctx, const nc4_frame_t *f)
         s_sink += c12[r & 3u];
     }
 
-    char j[640];
+    // Task 7：6 B 落點表 vs 舊 run 路徑。同一份 layout，copy 一份清走 flat 就係舊路徑，
+    // 所以兩個數字係同一次上板、同一份資料量出嚟（唔使分兩次燒）。
+    uint32_t apply_runs_us = 0xFFFFFFFFu;
+    {
+        nc_px_layout_t lr = lay;
+        lr.flat = NULL;
+        lr.nflat = 0;
+        for (uint8_t r = 0; r < reps; r++) {
+            const int64_t r0 = esp_timer_get_time();
+            (void)nc_px_layout_apply(&lr, vptrs, c8);
+            const int64_t r1 = esp_timer_get_time();
+            const uint32_t us = (uint32_t)(r1 - r0);
+            if (us < apply_runs_us) {
+                apply_runs_us = us;
+            }
+            s_sink += c8[r & 3u];
+        }
+    }
+
+    char j[760];
     snprintf(j, sizeof(j),
              "{\"px\":%u,\"groups\":%u,\"variant\":%u,\"jobs\":%u,\"runs\":%u,"
              "\"nv\":%u,\"build_us\":%u,\"apply_us\":%u,\"apply12_us\":%u,"
+             "\"flat_n\":%u,\"apply_runs_us\":%u,"
              "\"sub_us\":[%u,%u,%u,%u],\"sub_total_us\":%u,"
              "\"save_us\":%u,\"load_us\":%u,\"cache_bytes\":%ld,\"load_rc\":%d,"
              "\"merge8_us\":%u,\"swar_us\":%u,\"swar_ok\":%u,"
@@ -725,6 +745,7 @@ static void on_layoutbench(nc4_ctx_t *ctx, const nc4_frame_t *f)
              (unsigned)px, (unsigned)ngroups, (unsigned)variant,
              (unsigned)lay.njobs, (unsigned)lay.nruns, 64u,
              (unsigned)(t1 - t0), (unsigned)apply_us, (unsigned)apply12_us,
+             (unsigned)lay.nflat, (unsigned)apply_runs_us,
              (unsigned)sub_us[0], (unsigned)sub_us[1],
              (unsigned)sub_us[2], (unsigned)sub_us[3],
              (unsigned)(sub_us[0] + sub_us[1] + sub_us[2] + sub_us[3]),

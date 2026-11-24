@@ -1142,10 +1142,14 @@ static void on_pixdiag(nc4_ctx_t *ctx, const nc4_frame_t *f)
     const uint32_t canvas_b = px * NC_PX_BPP;
     const uint32_t vals_b = (s_content.ready) ? (s_content.layout.nvals * 2u) : 0u;
     const uint32_t runs_b = (s_content.ready) ? (s_content.layout.nruns * 16u) : 0u;
-    char j[900];
+    // 6 B 落點表：衍生自 runs，熱路徑實際讀的是它（0 = 冇展開，行 runs）
+    const uint32_t flat_n = (s_content.ready) ? s_content.layout.nflat : 0u;
+    const uint32_t flat_b = (s_content.ready)
+                                ? (uint32_t)nc_px_layout_flat_bytes(&s_content.layout) : 0u;
+    char j[1000];
     (void)snprintf(j, sizeof(j),
         "{\"px\":%u,\"slots\":%u,\"ring_b\":%u,\"canvas_b\":%u,"
-        "\"vals_b\":%u,\"runs_b\":%u,"
+        "\"vals_b\":%u,\"runs_b\":%u,\"flat_n\":%u,\"flat_b\":%u,"
         "\"jobs\":%u,\"runs\":%u,\"naprog\":%u,\"skipped\":%u,"
         "\"skip\":{\"no_asset\":%u,\"no_group\":%u,\"bad_write\":%u,"
         "\"empty\":%u,\"asset_full\":%u,\"prog\":%u,\"oom\":%u},"
@@ -1153,7 +1157,7 @@ static void on_pixdiag(nc4_ctx_t *ctx, const nc4_frame_t *f)
         "\"prebuild\":{\"present\":%u,\"built\":%u,\"too_big\":%u,"
         "\"failed\":%u,\"ms\":%u},\"render\":%s}",
         (unsigned)px, (unsigned)slots, (unsigned)ring_b, (unsigned)canvas_b,
-        (unsigned)vals_b, (unsigned)runs_b,
+        (unsigned)vals_b, (unsigned)runs_b, (unsigned)flat_n, (unsigned)flat_b,
         (unsigned)s_content.layout.njobs, (unsigned)s_content.layout.nruns,
         (unsigned)s_content.layout.naprog, (unsigned)s_content.layout.skipped,
         (unsigned)s_content.layout.skip_no_asset, (unsigned)s_content.layout.skip_no_group,

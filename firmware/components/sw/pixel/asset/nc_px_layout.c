@@ -557,6 +557,8 @@ esp_err_t nc_px_layout_build(const nc_px_mode_t *mode, const nc_px_map_t *map,
     lfree(e_src);
     lfree(src);
     lfree(ht);
+    // 6 B 單表：換場時展開一次（失敗就維持 nflat = 0，熱路徑照行 runs）
+    (void)nc_px_layout_flatify(out);
     return ESP_OK;
 }
 
@@ -568,7 +570,160 @@ void nc_px_layout_free(nc_px_layout_t *l)
     lfree(l->aprog);
     lfree(l->job);
     lfree(l->run);
+    lfree(l->flat);
     memset(l, 0, sizeof(*l));
+}
+
+// ═══════════════════════ 6 B 落點表 ═══════════════════════
+// runs → 每顆一筆（見 nc_px_layout.h 的 nc_px_flat6_t）。
+// 展開完之後熱路徑：讀 6 B → 查值 → 寫 4 B，冇 `%`、冇 job 追蹤。
+_Static_assert(sizeof(nc_px_flat6_t) == 6, "nc_px_flat6_t 一定要 6 B（dst2 src2 write1 aprog1）");
+
+// 一個 write 每顆前進幾多個值（同 apply 的 kk／c3x／c4x 一致）
+static uint32_t write_step(uint8_t write)
+{
+    switch (write) {
+    case NC_PX_WRITE_RGB:
+        return 3;
+    case NC_PX_WRITE_RGBW:
+        return 4;
+    default:
+        return 1;
+    }
+}
+
+size_t nc_px_layout_flat_bytes(const nc_px_layout_t *l)
+{
+    return (l == NULL) ? 0 : ((size_t)l->nflat * sizeof(nc_px_flat6_t));
+}
+
+esp_err_t nc_px_layout_flatify(nc_px_layout_t *l)
+{
+    if (l == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    // 重新展開（build／load 之後叫；改名／重建時可以再叫一次）
+    lfree(l->flat);
+    l->flat = NULL;
+    l->nflat = 0;
+    if (l->nruns == 0 || l->px == 0) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    // 16-bit 欄位的邊界：唔夠位就唔展開（run 路徑照做，唔會靜靜截斷）
+    if (l->px > 0xFFFFu || l->naprog > 0xFFu) {
+        return ESP_ERR_INVALID_SIZE;
+    }
+    for (uint32_t a = 0; a < l->naprog; a++) {
+        if (l->aprog[a].nv == 0 || l->aprog[a].nv > 0xFFFFu) {
+            return ESP_ERR_INVALID_SIZE;   // nv == 0：run 路徑寫 0，唔可以省
+        }
+    }
+    // 總顆數（重疊會多過 px；太多就唔展開——記憶體唔值得）
+    size_t total = 0;
+    for (uint32_t r = 0; r < l->nruns; r++) {
+        const nc_px_ljob_t *job = &l->job[l->run[r].job];
+        const uint32_t nv = l->aprog[job->aprog].nv;
+        // 內圈用「加完最多減一次 nv」，所以要確認通道起點 + 步長 < 2×nv
+        const uint32_t need = (job->write == NC_PX_WRITE_RGBW) ? 4u
+                            : (job->write == NC_PX_WRITE_RGB) ? 3u : 1u;
+        if (need > 1u && nv < need) {
+            return ESP_ERR_INVALID_SIZE;
+        }
+        total += l->run[r].count;
+        if (total > (size_t)l->px * 8u || total > (1u << 20)) {
+            return ESP_ERR_INVALID_SIZE;
+        }
+    }
+    nc_px_flat6_t *f = (nc_px_flat6_t *)lalloc(total * sizeof(nc_px_flat6_t));
+    if (f == NULL) {
+        return ESP_ERR_NO_MEM;
+    }
+    size_t k = 0;
+    for (uint32_t r = 0; r < l->nruns; r++) {
+        const nc_px_lrun_t *run = &l->run[r];
+        const nc_px_ljob_t *job = &l->job[run->job];
+        const uint32_t nv = l->aprog[job->aprog].nv;
+        const uint32_t step = write_step(job->write);
+        // 值流起點 = (步長 × 段內第幾顆) 減約到 nv 之內；之後每顆 +step 回繞
+        uint32_t c = (step * (run->src % nv)) % nv;
+        for (uint32_t x = 0; x < run->count; x++, k++) {
+            f[k].dst = (uint16_t)(run->dst + x);
+            f[k].src = (uint16_t)c;
+            f[k].write = job->write;
+            f[k].aprog = (uint8_t)job->aprog;
+            c += step;
+            while (c >= nv) {
+                c -= nv;
+            }
+        }
+    }
+    l->flat = f;
+    l->nflat = (uint32_t)k;
+    return ESP_OK;
+}
+
+// 6 B 表版本的 8-bit 寫入（內圈：一次乘法都冇）
+static uint32_t apply_flat(const nc_px_layout_t *l, uint16_t *const *vals, uint8_t *dst)
+{
+    for (uint32_t i = 0; i < l->nflat; i++) {
+        const nc_px_flat6_t *e = &l->flat[i];
+        const uint16_t *v = vals[e->aprog];
+        const uint32_t nv = l->aprog[e->aprog].nv;
+        uint8_t *o = dst + ((size_t)e->dst << 2);
+        const uint32_t c = e->src;
+        switch (e->write) {
+        case NC_PX_WRITE_RGB: {
+            const uint32_t c1 = (c + 1u < nv) ? (c + 1u) : (c + 1u - nv);
+            const uint32_t c2 = (c + 2u < nv) ? (c + 2u) : (c + 2u - nv);
+            o[0] = (uint8_t)(v[c] >> 4);
+            o[1] = (uint8_t)(v[c1] >> 4);
+            o[2] = (uint8_t)(v[c2] >> 4);
+            o[3] = 0;
+            break;
+        }
+        case NC_PX_WRITE_RGBW: {
+            const uint32_t c1 = (c + 1u < nv) ? (c + 1u) : (c + 1u - nv);
+            const uint32_t c2 = (c + 2u < nv) ? (c + 2u) : (c + 2u - nv);
+            const uint32_t c3 = (c + 3u < nv) ? (c + 3u) : (c + 3u - nv);
+            o[0] = (uint8_t)(v[c] >> 4);
+            o[1] = (uint8_t)(v[c1] >> 4);
+            o[2] = (uint8_t)(v[c2] >> 4);
+            o[3] = (uint8_t)(v[c3] >> 4);
+            break;
+        }
+        case NC_PX_WRITE_R:
+            o[0] = (uint8_t)(v[c] >> 4);
+            break;
+        case NC_PX_WRITE_G:
+            o[1] = (uint8_t)(v[c] >> 4);
+            break;
+        case NC_PX_WRITE_B:
+            o[2] = (uint8_t)(v[c] >> 4);
+            break;
+        case NC_PX_WRITE_W:
+            o[3] = (uint8_t)(v[c] >> 4);
+            break;
+        case NC_PX_WRITE_WW: {
+            const uint16_t val = v[c];
+            o[0] = 0;
+            o[1] = 0;
+            o[2] = (uint8_t)(val & 0xFFu);
+            o[3] = (uint8_t)(val >> 8);
+            break;
+        }
+        case NC_PX_WRITE_WWWW: {
+            const uint8_t b = (uint8_t)(v[c] >> 4);
+            o[0] = b;
+            o[1] = b;
+            o[2] = b;
+            o[3] = b;
+            break;
+        }
+        default:
+            break;
+        }
+    }
+    return l->nflat;
 }
 
 // ═══════════════════════ apply ═══════════════════════
@@ -576,6 +731,9 @@ uint32_t nc_px_layout_apply(const nc_px_layout_t *l, uint16_t *const *vals, uint
 {
     if (l == NULL || vals == NULL || dst == NULL) {
         return 0;
+    }
+    if (l->nflat > 0 && l->flat != NULL) {
+        return apply_flat(l, vals, dst);
     }
     for (uint32_t r = 0; r < l->nruns; r++) {
         const nc_px_lrun_t *run = &l->run[r];
@@ -715,6 +873,36 @@ uint32_t nc_px_layout_apply(const nc_px_layout_t *l, uint16_t *const *vals, uint
     return l->nruns;
 }
 
+// 6 B 表版本的抖動子幀寫入（rgb／rgbw 才做；其他 write 同 run 路徑一樣跳過）
+static void apply_dither_flat(const nc_px_layout_t *l, uint16_t *const vals[],
+                              uint8_t *dst, uint8_t subframes, uint8_t pos)
+{
+    for (uint32_t i = 0; i < l->nflat; i++) {
+        const nc_px_flat6_t *e = &l->flat[i];
+        if (e->write != NC_PX_WRITE_RGB && e->write != NC_PX_WRITE_RGBW) {
+            continue;
+        }
+        const uint16_t *v = vals[e->aprog];
+        const uint32_t nv = l->aprog[e->aprog].nv;
+        const uint32_t nch = (e->write == NC_PX_WRITE_RGBW) ? 4u : 3u;
+        uint8_t *o = dst + ((size_t)e->dst << 2);
+        const uint32_t c = e->src;
+        for (uint32_t ch = 0; ch < nch; ch++) {
+            uint32_t cc = c + ch;
+            if (cc >= nv) {
+                cc -= nv;                 // nv ≥ nch 已由 flatify 檢查，減一次夠
+            }
+            const uint32_t v12 = v[cc];
+            const uint32_t base = v12 >> 4;
+            const uint32_t n1 = (((v12 & 15u) * subframes) + 8u) >> 4;
+            o[ch] = (uint8_t)(base + ((base < 255u && pos < n1) ? 1u : 0u));
+        }
+        if (nch == 3u) {
+            o[3] = 0;
+        }
+    }
+}
+
 // 只寫一個子幀：環 API 一次只可以 begin 一格，所以 production 用這個逐格寫。
 void nc_px_layout_apply_dither(const nc_px_layout_t *l, uint16_t *const vals[],
                                uint8_t *dst, uint8_t subframes, uint8_t sf, uint32_t phase)
@@ -723,6 +911,10 @@ void nc_px_layout_apply_dither(const nc_px_layout_t *l, uint16_t *const vals[],
         return;
     }
     const uint8_t pos = (uint8_t)((sf + phase) % subframes);
+    if (l->nflat > 0 && l->flat != NULL) {
+        apply_dither_flat(l, vals, dst, subframes, pos);
+        return;
+    }
     for (uint32_t r = 0; r < l->nruns; r++) {
         const nc_px_lrun_t *run = &l->run[r];
         const nc_px_ljob_t *job = &l->job[run->job];
@@ -1180,5 +1372,7 @@ esp_err_t nc_px_layout_load(nc_px_layout_t *out, const char *path, uint32_t key,
         off += sizeof(nc_px_lrun_t);
     }
     lfree(buf);
+    // 表唔入快取檔（衍生資料）：讀完一樣展開，行為同 build 一模一樣
+    (void)nc_px_layout_flatify(out);
     return ESP_OK;
 }
