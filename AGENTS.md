@@ -1,0 +1,754 @@
+# 雷霆大文件 — esp_Net-Core 專案總覽（所有 AI 必讀）
+
+> **這份是咩**：呢個 repo 的 AI onboarding 總文件。任何人（AI 或新維護者）第一次接觸
+> 這個專案，**先由頭讀到落尾**，再開始改任何東西。細節文件在 `docs/`，但方向、鐵律、
+> 工作流程、最常踩的坑全部在這一份。
+>
+> **最後更新**：2026-11-24（對應 commit `dd64ef8` 之後）
+> **維護規則**：每次架構／流程／工具改變，先改這份；過期內容直接覆蓋，唔好累積兩套講法。
+
+---
+
+## 0. 30 秒摘要
+
+- **專案**：ESP32-P4（另有 ESP32-S3 port）上的 **NC4 通訊核心**：多條 transport →
+  分核解碼 → 指令執行；外加 **pixel 效果 → 配對 → 渲染 → I80 送燈** 管線。
+- **語言／工具**：C17、ESP-IDF（本機 `~/esp/esp-idf`，v6.0.3）、FreeRTOS、
+  `python3 make.py`、host 測試（唔需要板）。
+- **兩個世界**：
+  1. **NC4／緩衝／任務／網絡**：協議、通道、分核、`nc_buf`。
+  2. **Pixel**：12-bit 效果 → 抖動／配對 → 8-bit 環 → I80／SPI 後端。
+- **板子差異**在 `ports/hardware/`，**跑咩**在 `ports/project/`，**runtime 設定**在
+  裝置 FAT 的 `/data/config/*.json`。
+- **平時更新 firmware 用 USB NC4 OTA**（`tools/ota.py`），**唔使** download mode／
+  唔使叫用家按 BOOT。詳見 §2。
+
+---
+
+## 1. 使用者反覆提醒的鐵律（先讀這一節）
+
+> 以下係用家最常要提醒 AI 的幾件事。**違反任何一條，就算功能「做到」都算做錯。**
+
+### 鐵律 1：更新 firmware 用 USB NC4 OTA，唔好叫用家按 BOOT
+
+**正常情況**（99%）：
+
+```bash
+# 1) 建置（會自動出 artifacts/<board>__<project>.bin）
+IDF_PATH=$HOME/esp/esp-idf python3 make.py build <board> --project <project>
+
+# 2) 用 NC4 OTA 推上板（唔使 download mode、唔使拆線）
+python3 tools/ota.py --port /dev/cu.usbmodemXXXX \
+    artifacts/<board>__<project>.bin
+```
+
+- OTA 走 **NC4 0x22xx**：`BEGIN`（同步抹目標分區）→ `WRITE`（4 KB chunk）→
+  `END`（驗 SHA-256）→ `APPLY`（寫 boot 旗標＋重啟）。
+- 實測速度約 **150 KB/s**；663 KB image 的 `BEGIN` 約 2.9 s、`WRITE` 約 4.3 s。
+  `BEGIN` 等幾秒係正常，唔係死機。
+- 推完之後 port 可能短暫消失再出現；用 `status sys` 確認 `app` hash 變了、
+  `rst=3`（software reset）係正常。
+- 中斷／超時：先 `python3 tools/ota.py --port <PORT> --abort` 清 session，
+  再推。否則下一次 `BEGIN` 會回 `err_begin_partition_conflict`。
+- 只想驗證唔切換：加 `--no-apply`。
+
+**為什麼唔用 esptool／`make.py flash` 做日常更新**：
+
+- S3 的 app 跑 **TinyUSB composite（MSC+CDC）**，唔會實作 Espressif download mode
+  的 reset 序列。`esptool` 會回 `No serial data received`——**呢個係預期，唔係壞板**。
+- 只有以下情況才需要 download mode：
+  - 換 bootloader／分割表／flash 大小；
+  - OTA 推咗壞 image，板卡在 boot loop；
+  - 第一次由完全空白／Arduino 韌體轉過來。
+- 入 download mode 的方法（今次實測有效）：
+  1. **拔 USB**；
+  2. **按住 BOOT（IO0）**；
+  3. **插回 USB**，保持按住 2–3 秒；
+  4. 放開 BOOT。ROM 會用另一個 USB 介面（今次係 `/dev/cu.usbmodem111401`），
+     `esptool`／`make.py flash` 就連得到。
+- 之後：
+  ```bash
+  IDF_PATH=$HOME/esp/esp-idf python3 make.py flash <board> --project <project> \
+      --port /dev/cu.usbmodemXXXX --full
+  ```
+  `--full` 會寫 bootloader＋分割表＋app；只換 app 可用 `app-flash`（`make.py flash`
+  預設），但**分割表唔同就一定要 `--full`**。
+- 文獻有寫 CDC 收字串 `DFU` 可以入 download mode；**今次未驗證**，唔好當主要方法。
+  最可靠仍然係 BOOT＋插電。
+
+> **AI 行為要求**：唔好一遇到 `No serial data received` 就叫用家按 BOOT。
+> 先問「有冇 NC4 port？可唔可以 OTA？」；只有 OTA 都做唔到才要求 recovery。
+
+### 鐵律 2：改完一定要跑全套 host 測試
+
+```bash
+bash tools/hosttest/run_all.sh
+```
+
+- 20 支測試（`cfg_test` … `pxLayout_test`），全部 `-Wall -Wextra -Werror`。
+- 每次跑之前會 `rm -rf <test>/build`，所以 header 改動唔會被舊 binary 遮住。
+- **唔好只跑你改的那一支**；共用 header／codec／config 的影響經常在別處爆。
+- 測試失敗先修，唔好「先 commit 再算」。
+
+### 鐵律 3：要真機數字，唔要估算
+
+- 用家講過好多次：「唔好講估算，直接用 USB（OTA＋nc4）驗證」。
+- 量測工具：
+  - `tools/layout_bench.py`（0xF077，EffectPerf 映像）
+  - `tools/effect_bench.py`（0xF065，EffectPerf）
+  - `tools/nc4.py raw <cmd> <payload>`（任何 0xF0xx）
+  - `tools/nc4.py status ...`（sys／tasks／mem／storage）
+- 冇板／冇某個配置就**明講未量**，唔好把 host x86 數字外推成 S3 數字。
+- 每次量測記錄：同一塊板、同一映像、reps、min/median、`bus_ok`／checksum 之類的
+  正確性閘門。
+
+### 鐵律 4：Pixel 管線零拷貝、唔清畫布、唔補黑
+
+- 配對層直接寫「硬件即將讀取的環槽」：
+  `nc_px_ring_begin()` → `nc_px_layout_apply*()` → `nc_px_ring_commit()`。
+- **冇 canvas、冇 memset、冇「畫完再複製」**。開機只寫黑一次（初始化）。
+- 用户寫什麼就顯示什麼；唔好加「自動黑畫面」「自動補黑」「每幀清畫布」。
+- 搜尋 `memset(s_content.canvas` 應該係 0 筆。
+- 呢個係定案，唔係 optimisation 建議；改動前先讀
+  [`docs/00_pm/pixel-tiers-plan.md`](docs/00_pm/pixel-tiers-plan.md) 的「已定案」。
+
+### 鐵律 5：文件要同步，`status.md` 係快照唔係日誌
+
+- 完成一個 Task：勾計劃的 `- [x]`，並在 `docs/00_pm/status.md` 加一節（§7.x）。
+- **`status.md` 係快照**：舊數字直接覆蓋，唔好把過期數字堆在同一頁；要留歷史用 git。
+- 新設計／量測 → `docs/03_notes/`；協議 → `docs/01_protocol/`；操作 → `docs/02_guides/`。
+- 用戶看的文件用**繁體中文／粵語書面**；code comment 也一樣，解釋「為什麼」。
+
+### 鐵律 6：換 project／config 舊了，用 `fs_format` 重新 seed
+
+換 project 後 `/data/config/tasks.json` 可能仍是舊 level（`render`／`pixel = -1`），
+板子起來但唔點燈。處理：
+
+```bash
+python3 tools/nc4_file.py --port <PORT> set '{"System":{"fs_format":1}}' 1
+python3 tools/nc4.py --port <PORT> reboot
+```
+
+- 會**清空 `/data`** 並重建 FAT，再由 project 的出廠預置重新 seed。
+- 只在「換 project／config 壞／要出廠狀態」時用；一般更新 firmware 唔會清 `/data`。
+- 之後用 `status tasks` 確認 `render`／`pixel` `level=4`、`started=1`、`running=1`。
+
+### 鐵律 7：用 `make.py`，唔好自己亂跑 `idf.py`
+
+- 建置入口：`python3 make.py build <board> [--project <name>] [--tests] [--fresh]`。
+- 每塊板有自己的 build dir／sdkconfig：`artifacts/build/<chip>_<board>/sdkconfig`。
+- 改 `sdkconfig.defaults` 後唔生效 → `--fresh`（只清這塊板的 build dir）。
+- 唔好把 `firmware/sdkconfig` 留低；`make.py clean` 會清舊物。
+- 建置前可跑 `python3 make.py doctor`、`python3 make.py projects`、`python3 make.py ports`。
+
+### 鐵律 8：Decode handler／中斷路徑唔好放大的 stack buffer
+
+- `decode0` 任務 stack 只有 **3,072 B**；`main` 預設 3,072 B（Show 類 project 覆寫成 8,192）；`render` 4,096 B。
+- 任何 handler 的 JSON／大暫存用 `static` 或 heap，**唔好** `char j[1200]` 放 stack。
+- 2026-11-24 真的爆過：`on_layoutbench` 的 `j[1200]` 令 frame 2,272 B，
+  任何 `0xF077` 都 panic。改成 `static` 後 1,168 B 正常。
+- 同類教訓見 `nc_effect_bench.c`、`nc_file_action.c` 的註解。
+
+### 鐵律 9：唔好靜默降級／靜默截斷
+
+- 記憶體唔夠、表太大、欄位超限：**明示失敗**（`skipped++`、`err_*`、log），
+  唔好靜靜行另一條更慢的路或截斷資料。
+- 例：`nc_px_layout_flatify()` 只准 internal；唔夠就唔建表、行 runs，
+  唔會靜默放 PSRAM（放 PSRAM 實測慢過 runs）。
+- 例：舊 `nc_px_plan_t` 容量唔夠會計 `skipped`，唔會靜靜 drop。
+
+### 鐵律 10：未經同意唔好 push
+
+- 可以本地 commit（repo 文化係每個 Task 一個 commit），但 `git push` 前要問。
+- Commit message 用繁中，講「為什麼」＋量測數字；唔好只寫 "fix"。
+- 改完先 `git diff --check`、`git status`，確認冇 build artifact／暫存檔。
+
+---
+
+## 2. 這個專案是什麼（給第一次接觸的人）
+
+### 2.1 一句話
+
+**NC4** 是一條「多通道 → 分核解碼 → 指令 → 回應」的通訊核心；**Pixel** 是建在它上面的
+一條即時管線：效果層算 12-bit 值 → 配對層寫環 → 渲染層編碼成 WS2812 波形 → I80 DMA 送燈。
+
+### 2.2 兩個子系統
+
+| 子系統 | 做什麼 | 主要位置 |
+|---|---|---|
+| **NC4** | USB／UART／TCP／UDP／WS／ESP-NOW／I2C／SPI／CAN 收幀；CRC；分核 decode；router；回覆 | `firmware/components/sys/nc4/`、`main.c` |
+| **Pixel** | 效果（program interpreter／內建效果）→ 配對（layout）→ 8-bit 環 → I80／SPI 波形 → 燈 | `firmware/components/sw/pixel/`、`tasks/pixel_task/`、`tasks/render_task/`、`tasks/pipeline_task/`、`driver/drv_i80/` |
+
+### 2.3 不是什麼
+
+- 不是 Linux／POSIX 應用；冇 file system API 之外的抽象。
+- 不是「全部 config 都可以 runtime 改」：build-time（L1/L2）與 runtime（L3）分開，
+  見 §9。
+- 不是「所有板子都有同一組 capability」：ETH／WiFi／PSRAM／USB 人格由板子決定。
+
+---
+
+## 3. 目錄地圖（去哪裡找什麼）
+
+```text
+esp_Net-Core/
+├─ AGENTS.md                 ← 你在這裡（AI 總文件）
+├─ README.md                 人類入口／目錄地圖
+├─ make.py                   建置入口
+├─ docs/
+│  ├─ 00_pm/                 現況、計劃、量測、路線圖
+│  │  ├─ status.md           ★ 單頁現況（數字＋已定案＋未做）
+│  │  ├─ pixel-tiers-plan.md ★ pixel 三層落地計劃（Task 1–8）
+│  │  ├─ effect-perf.md      EffectPerf 專案與量測
+│  │  └─ night-report-*.md   夜間執行報告
+│  ├─ 01_protocol/           frame、commands、transports
+│  ├─ 02_guides/             build/flash、testing、configuration、connectivity
+│  └─ 03_notes/              架構／設計／量測筆記（task-model、buffers、config-layers…）
+├─ firmware/
+│  ├─ main/main.c            開機 B01–B11、USB、router 裝配
+│  ├─ components/sys/nc4/    framing、decoder、bus、router、link
+│  ├─ components/sys/task*/  任務模型＋管理器
+│  ├─ components/sys/mem/    nc_buf、plan arena
+│  ├─ components/action/     file／ota／test 指令表
+│  ├─ components/sw/pixel/   環、codec、layout、engine（純 C）
+│  ├─ components/tasks/      pixel_task、render_task、pipeline_task
+│  ├─ components/effects/    內建效果
+│  ├─ components/driver/     drv_i80、drv_spi_led
+│  └─ components/bench/      0xF065／0xF077 量測
+├─ ports/
+│  ├─ hardware/<chip>/<board>/   board.json／wiring.json／driver.json／sdkconfig
+│  ├─ project/<chip>/<board>/    project.json＋data/config＋data/pixel
+│  └─ _profiles/                 能力碎片（eth-rmii、nc4-ws…）
+├─ tools/                    主機工具（nc4.py、ota.py、layout_bench.py、hosttest/…）
+├─ web_tools/                ESP WebMaster（REST／WS／檔案／OTA）
+├─ modules/                  外掛 .nct／.nce
+└─ artifacts/                建置產物（gitignore）
+```
+
+**找東西的優先次序**：
+
+1. 想知「現在點」→ `docs/00_pm/status.md`
+2. 想知「下一個 Task」→ `docs/00_pm/pixel-tiers-plan.md`（或 `roadmap.md`／`next-steps.md`）
+3. 想知「協議」→ `docs/01_protocol/commands.md`、`frame.md`
+4. 想知「點 build／flash／test」→ `docs/02_guides/`
+5. 想知「為什麼這樣設計」→ `docs/03_notes/`
+
+---
+
+## 4. 開機流程 B01–B11（main.c）
+
+| 階段 | 名字 | 做什麼 | 失敗的意義 |
+|---|---|---|---|
+| B01 | banner+nvs | 印 banner、開 NVS | NVS 壞 → 後面全部受影響 |
+| B02 | storage+cfg | 掛 FAT／WL、boot record、seed 出廠 preset、讀 config | 失敗 → config 唔 give，B03 之後 SKIP；B11 仍跑 |
+| B03 | capability | 核數收斂、USB 人格（OTG vs USJ）由晶片＋config 定 | 人格錯 → 冇 USB／燒錄／console |
+| B04 | hwcheck | claim 範圍檢查（SDIO／ETH／PIN／PWM／UART） | 腳位衝突 |
+| B05 | hardware | 安裝 driver（PWM、ETH enable…） | 硬件起不來 |
+| B06 | declare | 登記任務、讀 `tasks.json` 的 level／affinity | 任務唔 declare |
+| B07 | commit | 資源 commit（`nc_buf` arena／plan） | 記憶體不足 |
+| B08 | start | `on_start()`、按 layer 開 loop | 任務起不來 |
+| B09 | usb | USB service（MSC／CDC） | 冇 USB 通道 |
+| B10 | channels | net lines start（TCP／UDP／WS／HTTP）＋ bus | 冇網絡通道 |
+| B11 | account | 印記憶體帳、boot 摘要 | 只影響報告 |
+
+- Log 例：`boot[B02] storage+cfg 126.92 ms ok`；摘要 `B01 9.66 | B02 126.92 | …`。
+- **B02 總閘**：storage+cfg 失敗 → CONFIG 唔 give；但壞 config ≠ storage 失敗，
+  degraded 仍會開機（核心任務照跑）。
+- 核心任務（`nc4`／`net`／`core`／NCM 引擎）**不受 `tasks.json` 管**；
+  config 只管租戶。
+
+---
+
+## 5. 任務模型（房東／租戶）
+
+- **核心（房東）**：`nc4`、`net`、`core`、NCM 引擎；`kind=NC_TASK_SYSTEM`；
+  C 宣告，唔寫入 `tasks.json`。
+- **租戶**：一般任務、`.nct` 載入的模組；`kind=NC_TASK_NORMAL`／`EFFECT`；
+  `tasks.json` 管 `level`／`affinity`。
+- `level=-1` = 唔啟動；同一 level 按註冊次序。
+- `affinity=[core0,core1]`，只可以一個 1；`[0,0]` = 唔跑。
+- **未設定 = `[0,0]`**：條目缺失／冇寫 affinity → `on_start` 照跑、loop 唔開。
+- 缺席的租戶會自動補寫 `[0,0]`，**只加不改**。
+- Pixel 兩個租戶：`render`（先登記、建環）→ `pixel`（後登記、找環）。
+  兩條都要 `level=4`、`running=1`；少一條就唔點燈。
+
+### `.nct` / `.nce`
+
+- `/data/pixel/effects/*.nce`（效果）、`/data/tasks/*.nct`（任務）。
+- 掃到 → NCM 引擎 `nc_mod_load()` → 驗證 → 切 arena → `nc_task_attach()`。
+- 改容器格式／manifest 先讀 `docs/03_notes/ncm-contract.md`、`ncm-loader.md`。
+
+---
+
+## 6. NC4 協議與主機工具
+
+### 6.1 Frame
+
+```text
+"NC" | VER=4 | ADDR(2 LE) | CMD(2 LE) | LEN(2 LE) | DATA | CRC32(4 LE)
+CRC 範圍 = VER..DATA（不含 SOF、不含 CRC）
+```
+
+- 回覆 JSON 上限 **2,600 B**；超過回 `{"err":"reply_too_big","need":N,"cap":2600}`。
+- `STATUS_GET` 很多 key 會令回覆超過上限；要分批問。
+- 詳細：`docs/01_protocol/frame.md`。
+
+### 6.2 常用主機命令
+
+```bash
+ls /dev/cu.usbmodem*                      # 找 port；每次插拔可能改名
+python3 make.py ports                     # 哪個 port 空閒
+python3 tools/nc4.py --port <PORT> status sys
+python3 tools/nc4.py --port <PORT> status tasks
+python3 tools/nc4.py --port <PORT> status mem
+python3 tools/nc4.py --port <PORT> status storage
+python3 tools/nc4.py --port <PORT> reboot
+python3 tools/nc4.py --port <PORT> raw 0xF061 00
+```
+
+- `status sys`：`app`（image hash）、`up_s`、`rst`、`heap`、`h_int`、`h_dma`、`h_ps`。
+- `status tasks`：每任務的 `level`／`cfg_level`／`started`／`running`／`b`。
+- `rst` 代碼：1=power-on、3=software、4=panic、5=int WDT、6=task WDT、11=USB。
+- `status cfg`：parse 錯／預設數；`status storage`：FAT／MSC 狀態。
+
+### 6.3 命令域
+
+| 域 | 用途 | 權威 |
+|---|---|---|
+| `0x10xx` | system／reboot／status | `main.c`、`commands.md` |
+| `0x11xx` | STATUS_GET／SET／ACK | `main.c` |
+| `0x20xx` | FILE（FAT 上傳／查詢） | `file_action` |
+| `0x22xx` | OTA（BEGIN／WRITE／END／APPLY／ABORT） | `ota_action` |
+| `0xF0xx` | **測試／量測指令**（release 多數唔編） | `test_action`、各 bench |
+
+- **`0xFxxx` 區段係測試域**：唔好把 production 功能加進去；新指令先查舊 schema，
+  唔好開新域。
+- 常用測試指令：
+  - `0xF060 MATRIX`：效果生產者 stats／設定（pixel 任務）
+  - `0xF061 RENDER`：render stats（**只在 `NC_ENABLE_TESTS` 映像**）
+  - `0xF062 PXBENCH`：編碼吞吐（`CONFIG_NETCORE_PXBENCH`）
+  - `0xF065 EFBENCH`：效果層量測（EffectPerf）
+  - `0xF06B SHOWFRAME`：檔案驅動 show 的 live frame
+  - `0xF077 LAYOUTBENCH`：配對／I80 合成量測（EffectPerf）
+  - `0xF079 PIXDIAG`：pixel 記憶體／配置診斷（pair）
+
+### 6.4 USB 的兩個世界
+
+- **USJ／USB-Serial-JTAG**：ROM 的；download mode 用；console 可走這裡。
+- **TinyUSB OTG composite**：app 的；MSC（FAT 隨身碟）＋ CDC（NC4／log）。
+- 兩者共用 PHY，一次開機只會有一個人格；由 B03 決定。
+- **MSC 開關**係 per-link：`system.json` 的 `links[].msc`（預設 0）。
+- FAT 擁有權：host 掛載 vs device；寫檔前要 `file_mode=1`（`nc4_file.py claim`）。
+- 詳細：`docs/03_notes/usb-layers.md`、`usb-config.md`、`fat-ownership.md`。
+
+---
+
+## 7. 建置（make.py）
+
+```bash
+# 環境
+python3 make.py doctor
+python3 make.py projects          # 板 × project
+python3 make.py ports             # 連接的序列埠
+
+# 建置（release）
+IDF_PATH=$HOME/esp/esp-idf python3 make.py build ESP32-S3-Matrix \
+    --project ESP32-S3-Matrix-LED-Textkit
+
+# 建置（tests：多 58 條 0xF0xx，0xF061 只在這裡）
+IDF_PATH=$HOME/esp/esp-idf python3 make.py build ESP32-S3-Matrix \
+    --project ESP32-S3-Matrix-LED-Textkit --tests
+
+# 改過 sdkconfig.defaults 唔生效
+IDF_PATH=$HOME/esp/esp-idf python3 make.py build <board> --project <project> --fresh
+```
+
+- 產物：
+  - `artifacts/<board>__<project>.bin`（**OTA 用這個**）
+  - `artifacts/<board>.bin`（最新 app）
+  - `artifacts/build/<chip>_<board>/`（build dir／sdkconfig）
+  - `artifacts/logs/...`（建置 log）
+- Project 選擇：
+  - `ESP32-S3-Matrix-EffectPerf`：**只測效果**，render／pixel 關；`0xF065`／`0xF077`。
+  - `ESP32-S3-Matrix-LED-Textkit`：內建效果＋render（production，1 lane I80）。
+  - `ESP32-S3-Matrix-Show`：檔案驅動（effect／pair），要 `/data/pixel` 四層資產。
+  - `ESP32-S3-Zero-Show9600`／`Show2400`：9,600／2,400 px 驗收。
+- `--tests` 會**覆蓋**同一 path 的 `.bin`；之後要 release 記得重建。
+- 建置前確認 `IDF_PATH`；本機係 `$HOME/esp/esp-idf`（v6.0.3）。
+
+---
+
+## 8. 燒錄、OTA、回復（最重要的一節）
+
+### 8.1 日常：NC4 OTA
+
+```bash
+python3 tools/ota.py --port /dev/cu.usbmodemXXXX \
+    artifacts/ESP32-S3-Matrix__ESP32-S3-Matrix-LED-Textkit.bin
+```
+
+流程與預期：
+
+1. `caps`／`state`：`idle=1`、`max_chunk=4096`。
+2. `BEGIN`：裝置先 `esp_ota_begin()` **同步抹目標分區**，663 KB 約 2.9 s；
+   工具 timeout = `10 s + size/100 KB`。
+3. `WRITE`：4 KB chunk，stop-and-wait；約 **150 KB/s**。
+4. `END`：`esp_ota_end()` 驗 SHA-256＋image；失敗回 `err_end_validate_fail`。
+5. `APPLY`：設 boot 分區＋重啟；`rst=3`。
+6. 驗證：`status sys` 的 `app` hash 變了、`up_s` 重新計、`status tasks` 正常。
+
+失敗處理：
+
+| 症狀 | 原因 | 處理 |
+|---|---|---|
+| `BEGIN` 回 `err_begin_partition_conflict` | 上次 OTA 中斷，state=writing | `tools/ota.py --abort`，再推 |
+| `BEGIN` 等很久／no reply | erase 比估算慢 | 先 `status` 查 state；必要時加大 timeout |
+| `WRITE` 中途斷 | USB 拔線／host timeout | `--abort` 後重推；image 已驗 SHA，唔會半截切換 |
+| `APPLY` 後板唔起 | image 壞／分區唔夠 | 入 download mode，`make.py flash --full` 重燒 |
+| `END` SHA 不符 | 檔案傳輸錯／讀錯 image | 重推；確認 image 與 build 一致 |
+
+> **Rollback 未開**：`CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE` 冇開，推壞 image 會卡住。
+> 所以 OTA 前要保留可入 download mode 的方法（BOOT 按鍵）。
+
+### 8.2 Recovery：入 download mode
+
+1. 拔 USB；
+2. 按住 **BOOT／IO0**；
+3. 插 USB，保持按住 2–3 秒；
+4. 放開。port 會變成 ROM 的 USJ（今次係 `111401`，app 的 CDC 係 `24EC...`）。
+5. 燒：
+   ```bash
+   IDF_PATH=$HOME/esp/esp-idf python3 make.py flash <board> --project <project> \
+       --port /dev/cu.usbmodem111401 --full
+   ```
+6. 燒完拔插一次（唔好按 BOOT）返 app。
+
+- `--full` = bootloader＋分割表＋app；換分割表／flash 大小一定要。
+- app-only = `make.py flash` 預設（`app-flash`），保留 NVS／`/data`。
+- `tools/flash.sh` 會自己找 ROM port＋watchdog-reset，但本專案日常用 OTA 就夠。
+
+### 8.3 什麼時候**不要**用 OTA
+
+- 換 bootloader／分割表／flash size；
+- OTA 分區放唔落（image > slot，Matrix 係 1.5 MB）；
+- 板卡在 boot loop／panic loop，USB CDC 起不來；
+- 第一次由 Arduino／空白板轉過來。
+
+---
+
+## 9. 配置四層（改哪裡？）
+
+| 層 | 檔案 | 換它要 rebuild？ | 例子 |
+|---|---|---|---|
+| L1 硬體事實 | `ports/hardware/<chip>/<board>/board.json`＋`sdkconfig.defaults` | ✅ | flash/PSRAM/CPU/ETH/console |
+| L2 能力碎片 | `ports/_profiles/*.defaults` | ✅ | `eth-rmii`、`nc4-ws`、`nc4-udp` |
+| L3 project 預置 | `ports/project/<chip>/<board>/data/config/*.json` | ❌（build 時 embed，但 runtime 可覆蓋） | 腳位、links、tasks |
+| L3 live | 裝置 `/data/config/*.json` | ❌ | 用戶改過的值 |
+
+- **`F.live` 永遠最高優先**；檔案存在就唔會被 seed 覆蓋（只建立、不覆蓋）。
+- `fs_format=1` 會清 `/data` 並重新 seed。
+- `wiring.json` 在 build 時生成 `nc_port.c`；改完要跑
+  `python3 tools/sync_hardware_presets.py`（如有）。
+- `tasks.json` 只管租戶；核心任務照 C 宣告。
+- `system.json` 的 `links[].enable` 控制通道存在性；未 enable = 唔宣告緩衝、唔建 bus。
+- WiFi **兩道閘**：build-time `CONFIG_NETCORE_WIFI`＋runtime `network.json wifi.enable`。
+- `hardware.json` 目前只有 ETH／SDIO／PIN／PWM／UART 係 typed；SPI／I2C／I80／I2S／ENC／XL9555 未 parse。
+- `driver.json` 未接 runtime；改了不會生效。
+
+---
+
+## 10. Pixel 管線（效果 → 配對 → 渲染）
+
+### 10.1 三層＋環
+
+```text
+效果層（12-bit 值）
+  └─ nc_px_aprog_vals()／內建效果／DATA program
+        │
+配對層（layout）
+  └─ nc_px_layout_apply()／apply12()／apply4()／apply_dither()
+        │  直接寫環槽（零拷貝）
+        ▼
+環（i80.prd；64 B 表頭＋px×4 B）
+        │
+渲染層（render_task）
+  └─ 取最新格 → codec → I80／SPI 後端 → DMA
+```
+
+- `pixel` 任務：內容生產者；`prd` loop；**不控 FPS**（有空間就寫）。
+- `render` 任務：`frame_interval_ms`（預設 20 ms = 50 fps）；環 → encode → submit。
+- 兩者只透過環見面；`render` 先登記、`pixel` 後找環。
+- 環契約：`begin_ex()` 拿的那一格才寫；`commit()` 只發布同一格；
+  encode 不可再 peek；DMA 完成才 reclaim。
+
+### 10.2 零拷貝／唔清畫布
+
+- 舊路徑（已刪）：canvas 寫入 → 複製到環；每幀 memset。
+- 現在：`nc_px_ring_begin()` → `nc_px_layout_apply()` → `nc_px_ring_commit()`。
+- 開機只寫黑一次（init），之後每幀覆蓋；用戶寫什麼就顯示什麼。
+- 冇「補黑」、冇「自動黑畫面」、冇隱藏行為。
+
+### 10.3 配對表
+
+- `nc_px_layout`：runs → 6 B 單表（`dst16/src16/write8/aprog8`）。
+- 6 B 表**只准 internal**；唔夠就唔建表、行 runs（唔靜默降級去 PSRAM）。
+- 9,600 px 的 6 B 表 57.6 KB；`flat_int` 可查位置。
+- `apply`（8-bit）／`apply12`（12-bit）／`apply4`（4 子幀一次掃）／`apply_dither`（單子幀）。
+- 重疊語義：dst 升序、後寫覆蓋先寫；唔可以按 write 分組（會改畫面語義）。
+- 快取：`/pixel/cache/<key>.pxlt`，≤32 KB 才存；開機補建缺的。
+
+### 10.4 I80 波形合成（Task 6，已接 production）
+
+- 舊：每條 lane `wave_pack` 成 packed bitstream（16×600：16×5,400 B），再 `merge8` 轉置。
+- 新：`nc_px_codec_pack_bus()` 每顆即時取 lane 位元組 → 8×8 SWAR 轉置 → 逐 tick 寫 bus word。
+- 8-bit／無抖動：廣播快路徑；有 dither：完整轉置。
+- **1 lane／8-bit 例外**：逐 tick 廣播比舊 `merge8` 慢，所以用
+  `nc_px_codec_wave_frame()` 的 LUT memcpy（64 px：840 → 139–165 µs）。
+- 實測（ESP32-S3、EffectPerf）：9,600 px 24,018 → **6,365 µs（3.77×）**；
+  2,400 px 4,765 → **1,166 µs（4.09×）**；`bus_ok=1`。
+- 16-lane × 16-bit 實機仍未做（冇板）；bench 係同一份 C 在板上跑。
+- 16-bit 高位 byte 用 store（唔用 OR），否則 lane 變暗會殘留。
+
+### 10.5 抖動
+
+- `CONFIG_NETCORE_PIXEL_DITHER=0`、`DITHER_BITS=8` 預設：8-bit 直出。
+- 4 子幀只用於 2,400 px（16×150）＋子幀率 ≥200 Hz；9,600 px 用單子幀。
+- `apply4` 一次掃 4 份；production 逐子幀 `apply_dither`。
+
+### 10.6 相關指令
+
+- `0xF060 MATRIX`：生產者 stats／effect／dither／color／gain／fps／zone…
+- `0xF061 RENDER`：render stats（tests 映像）
+- `0xF06B SHOWFRAME`：live frame hex（檔案驅動 show）
+- `0xF079 PIXDIAG`：pixel 記憶體／配置
+- `0xF077 LAYOUTBENCH`：配對＋I80 合成量測（EffectPerf）
+
+---
+
+## 11. 緩衝與記憶體
+
+### 11.1 `nc_buf`：全專案唯一緩衝工具
+
+- 一個工具：N 個等長格＋每格狀態；「在哪個記憶體」（S／P／DMA）同「是否串流」係參數。
+- 三條鐵律：
+  1. **開機一次要齊**：所有 buffer 開機建立，格數／格大小定死。
+  2. **永不釋放**：冇 destroy；runtime buffer 例外，可用 `release()`。
+  3. **執行期只切不租**：只可在預留 arena 內 carve，唔准向 heap 要。
+- 代價：執行期唔可以加大 buffer；要加大就改宣告＋重開機。
+- 詳細：`docs/03_notes/buffers.md`（C1–C11 契約）。
+
+### 11.2 internal vs PSRAM（預設政策）
+
+| 東西 | 位置 | 原因 |
+|---|---|---|
+| 環（i80.prd） | PSRAM（大 px） | 容量；DMA 讀取前會 msync |
+| 效果值流／canvas | PSRAM | 9,600 px × 4 B／8 B |
+| 6 B 配對表 | **internal only** | PSRAM 版慢過 runs（實測） |
+| I80 DMA 槽 | internal（≤48 KB 時） | DMA 需要 |
+| 回覆幀／parser | internal | 細、熱 |
+| 任務 stack | internal | FreeRTOS |
+
+- 不要靜默 fallback；policy 寫在 Kconfig／project defaults。
+- `status sys` 的 `h_int`／`h_dma`／`h_ps` 看剩餘；`status mem` 看 buffer 帳。
+- 9,600 px 的環 3 槽 ≈ 115 KB；16×600 I80 一槽 86.8 KB。
+
+### 11.3 常見 OOM／爆棧
+
+- Decode handler stack 3,072 B：大 JSON／暫存用 static／heap。
+- `0xF077` 一次過量 9,600 px × 4 通道會 OOM（entry 記憶體）——用 2,400 px。
+- 全尺寸值流＋9,600 entry 一次過量會 OOM（≈2.4 MB > 2 MB PSRAM）——分兩段量。
+- PSRAM 2 MB 的板：唔好同時開太大 canvas／packed／entry。
+
+---
+
+## 12. 測試與量測
+
+### 12.1 Host 測試（唔需要板）
+
+```bash
+bash tools/hosttest/run_all.sh
+```
+
+- 20 支：`cfg_test`、`cfgstruct_test`、`ncd_test`、`task_test`、`router_test`、
+  `link_test`、`mod_test`、`hub_test`、`plan_test`、`buf_test`、`portgen_test`、
+  `ncm_test`、`pixel_test`、`pxEngine_test`、`pxAsset_test`、`pxProgram_test`、
+  `pxLayer_test`、`pxShow_test`、`pxScan_test`、`pxLayout_test`。
+- 全部 `-Werror`；失敗先修，唔好選擇性跑。
+
+### 12.2 上板 smoke test
+
+```bash
+python3 tools/nc4.py --port <PORT> status sys
+python3 tools/nc4.py --port <PORT> status tasks
+python3 tools/nc4.py --port <PORT> status mem
+```
+
+- `render`／`pixel`：`level=4`、`started=1`、`running=1`。
+- `status sys`：`rst` 不應該係 4（panic）；`up_s` 穩定。
+- 有 tests 映像才可用 `0xF061`；有 EffectPerf 才可用 `0xF077`／`0xF065`。
+
+### 12.3 量測原則
+
+- 同一塊板、同一時段、同一 workload；checksum／`bus_ok` 要一致。
+- 取 min／median；reps 要寫出來。
+- 用物理上限做參考線（例如 16×600 線路 18 ms），唔好只看 relative。
+- Host x86 數字只代表相對成本，唔可以外推 S3。
+- 量測腳本：`tools/layout_bench.py`、`tools/effect_bench.py`、`tools/bench/`。
+
+### 12.4 已驗證基準（2026-11-24）
+
+| 項目 | 數字 |
+|---|---:|
+| 9,600 px 配對（500 組，6 B 表） | 2,954 µs（舊 runs 3,745） |
+| 9,600 px 完全隨機（9,598 段） | 3,007 µs（舊 11,950） |
+| 每粒燈一個 group（9,600 job） | 3,009 µs（舊 19,025，6.32×） |
+| 16×600 I80 合成（新） | 6,365 µs（舊 24,018，3.77×） |
+| 64 px、1 lane encode | 139–165 µs（舊 357） |
+| 2,400 px × 4 子幀 | apply4 0.95 ms／視覺幀；CPU 6.3 ms |
+
+> 呢啲數字會變；以 `status.md` 最新一節為準。
+
+---
+
+## 13. 常見故障排查
+
+| 症狀 | 最可能原因 | 處理 |
+|---|---|---|
+| `No serial data received`（esptool） | app 跑 TinyUSB，esptool 入唔到 download | 用 OTA；或 BOOT＋插電入 ROM |
+| `status` 冇回覆 | port 錯／app 未起／USJ vs CDC | `ls /dev/cu.usbmodem*`；等 2 s；試另一個 port |
+| port busy | 另一程式（monitor／screen／WebMaster）佔住 | 關掉；`make.py ports` 看空閒 |
+| OTA `err_begin_partition_conflict` | 上次中斷，state=writing | `tools/ota.py --abort` |
+| 板重啟、`rst=4` | panic（爆棧／assert／heap） | 看 log；`CONSOLE_NONE` 冇 backtrace，改用 USJ console build |
+| `rst=6` | task WDT（卡住 >5 s） | 找哪個 loop 卡住；`status tasks` |
+| render／pixel `level=-1` | `/data/config/tasks.json` 舊 | `fs_format` 重 seed |
+| 板起但唔點燈 | render 未跑／腳位錯／I80 未 enable | `status tasks`、`0xF061`、hardware config |
+| 換 project 後行為舊 | `/data` 仍是舊 preset | `fs_format`；確認 `status tasks` |
+| 改了 sdkconfig 冇效 | build dir 的 sdkconfig 已存在 | `make.py build ... --fresh` |
+| 建置 target 不符 | 殘留 `firmware/sdkconfig` | `make.py clean` 或刪舊檔 |
+| 0xF077 任何 variant 都 panic | decode stack 爆（j[1200]） | 大 buffer 改 static（已修，見 §1 鐵律 8） |
+| OTA 後 image 冇變 | 推錯 `.bin`（tests/release 同名） | 確認 `artifacts/<board>__<project>.bin` 時間／hash |
+| `/Volumes/NC-*` 看到但寫入失敗 | FAT 由 host 掛住，device 未接管 | `nc4_file.py claim` 或 release |
+| 9,600 px 量測 OOM | entry／值流太大 | 用 2,400 px 或分兩段量 |
+
+---
+
+## 14. AI 工作流程（照這個做）
+
+### 14.1 開工前
+
+1. 讀 **`AGENTS.md`（本文件）**。
+2. 讀相關計劃：`docs/00_pm/pixel-tiers-plan.md`／`roadmap.md`／`next-steps.md`。
+3. 讀 `docs/00_pm/status.md` 最新一節，確認「現在點」。
+4. `git status`／`git log -5`；確認工作樹乾淨、冇未 commit 的他人的改動。
+5. 找出「這件事的權威文件」：協議→`commands.md`；設計→`03_notes/`；操作→`02_guides/`。
+6. 有板就 `python3 make.py ports`；冇板就明講「未上板」。
+
+### 14.2 改動時
+
+- 先寫／改測試（host）再改實作，或至少同步加測試。
+- 保持語義：zero-copy、dst 升序、後寫覆蓋、唔靜默降級。
+- 改 header 後跑全套 host test（harness 會強制重建）。
+- 改 production 路徑前，先確認有冇 bench／host 覆蓋。
+- 大 buffer 唔好放 decode stack。
+
+### 14.3 驗證
+
+1. `bash tools/hosttest/run_all.sh` → 20/20。
+2. `make.py build ...` → rc=0。
+3. `tools/ota.py` → 推上板（唔使 BOOT）。
+4. `status sys`／`status tasks`／相關 0xF0xx → 數字＋正確性閘門。
+5. 冇板／未量 → 文件寫「未量」，唔好寫「應該」。
+
+### 14.4 收尾
+
+1. 更新計劃 checkbox 與 `docs/00_pm/status.md`（新 §7.x）。
+2. 需要時更新 `03_notes/`（設計）／`commands.md`（協議）。
+3. `git diff --check`；確認冇 artifact。
+4. Commit（繁中 message，講為什麼＋數字）。
+5. **唔好 push**，除非用家明講。
+
+### 14.5 Definition of Done
+
+- [ ] 功能／修正符合原 Task 的驗收條件。
+- [ ] Host tests 全綠（20/20）。
+- [ ] 目標 board／project 建置成功。
+- [ ] 有上板驗證（或明确標示未上板）。
+- [ ] 逐 byte／checksum 類正確性閘門有過。
+- [ ] 計劃／status／相關 note 已更新。
+- [ ] 冇未處理的 warning、冇靜默降級。
+- [ ] Commit 完成（未 push）。
+
+---
+
+## 15. 快速命令卡
+
+```bash
+# 找板／建置
+python3 make.py doctor
+python3 make.py ports
+python3 make.py projects
+IDF_PATH=$HOME/esp/esp-idf python3 make.py build ESP32-S3-Matrix \
+    --project ESP32-S3-Matrix-LED-Textkit
+
+# 日常更新（OTA；唔使 BOOT）
+python3 tools/ota.py --port /dev/cu.usbmodemXXXX \
+    artifacts/ESP32-S3-Matrix__ESP32-S3-Matrix-LED-Textkit.bin
+
+# OTA 失敗
+python3 tools/ota.py --port /dev/cu.usbmodemXXXX --abort
+
+# 板上狀態
+python3 tools/nc4.py --port /dev/cu.usbmodemXXXX status sys
+python3 tools/nc4.py --port /dev/cu.usbmodemXXXX status tasks
+python3 tools/nc4.py --port /dev/cu.usbmodemXXXX status mem
+python3 tools/nc4.py --port /dev/cu.usbmodemXXXX reboot
+
+# 重 seed config（會清 /data）
+python3 tools/nc4_file.py --port /dev/cu.usbmodemXXXX \
+    set '{"System":{"fs_format":1}}' 1
+python3 tools/nc4.py --port /dev/cu.usbmodemXXXX reboot
+
+# Host 測試
+bash tools/hosttest/run_all.sh
+
+# 量測（EffectPerf 映像）
+python3 tools/layout_bench.py --port /dev/cu.usbmodemXXXX --px 9600 --variant 17 --reps 8
+python3 tools/layout_bench.py --port /dev/cu.usbmodemXXXX --px 9600 --all
+
+# Recovery（OTA 都做唔到才用）
+# 拔 USB → 按住 BOOT → 插 USB → 2–3 s 後放開 → 用 ROM port
+IDF_PATH=$HOME/esp/esp-idf python3 make.py flash ESP32-S3-Matrix \
+    --project ESP32-S3-Matrix-LED-Textkit --port /dev/cu.usbmodem111401 --full
+```
+
+---
+
+## 16. 文件權威順序
+
+1. **程式碼＋實測**（`firmware/`、`tools/`、上板 log／`status`）
+2. **`docs/00_pm/status.md`**（最新快照）
+3. **`docs/01_protocol/`**（協議契約）
+4. **`docs/02_guides/`**（操作）
+5. **`docs/03_notes/`**（設計理由）
+6. 舊 handoff／night report（歷史；結論已併入 status）
+
+衝突時：**程式碼＋最新量測 > status > notes > 舊文件**。發現文件過期，順手修正並在
+commit message 說明。
+
+---
+
+## 17. 這份文件的維護
+
+- 新增／改變「鐵律」、建置／OTA 流程、板子清單、指令域 → 改這份。
+- 一次只保留一套講法；舊做法直接刪，唔好留「以前係…」在正文（歷史交給 git）。
+- 每次改完在下面加一行：
+
+| 日期 | 改什麼 | 誰 |
+|---|---|---|
+| 2026-11-24 | 初版：專案總覽、10 條鐵律、OTA／建置／測試／pixel／troubleshooting、AI SOP | lead（AI） |
+
+---
+
+> **最後一句**：呢個 repo 的默認狀態係「有計劃、有量測、有文件」。
+> 你加的每一行 code，最後都要能夠回答三個問題：
+> **為什麼這樣做？點證明它work？邊份文件記錄了？**
