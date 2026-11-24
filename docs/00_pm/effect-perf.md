@@ -109,6 +109,8 @@ payload `[px:u16 LE][frames:u16 LE][vpp:u16 LE]`（frames=0 = 按 px 自動：64
 | `eff.psram` | 值流緩衝是否落在 PSRAM（1＝落咗，上面三個數字變成 PSRAM 頻寬而非生成器） |
 | `eff.build_us[4]` | 一次性建表：正弦／方波／脈衝／保持各建 256 個值（µs） |
 | `eff.per_val_ns[4]` | 逐值成本（ns）：同上四種波 |
+| `eff.gam_ns` | 每幀 ev 個值走 gamma 表（2 KB，linear→8.8）的成本 |
+| `eff.gam_raw_ns` | 同一批值**唔做** gamma、只 `>>8` 的成本；兩者相減＝gamma 本身的價錢 |
 | `eval_ns` | `nc_px_engine_program_value()` 每個 12-bit 值（ns） |
 | `vals_ns` | 舊節：`nc_px_job_vals()` 每幀算 `nv` 個值（`nv = min(px,64)`，畫布類量測用） |
 | `pair8/12` | `nc_px_pair_apply()`／`pair_apply12()` 把值散入畫布（ns/幀） |
@@ -142,6 +144,25 @@ payload `[px:u16 LE][frames:u16 LE][vpp:u16 LE]`（frames=0 = 按 px 自動：64
   `ifree=211,615`、`psram=2,082,872`），可以全部讓給其他應用。
 - 對照（**唔係政策**）：同一支 bench 把值流放 internal 時 38,400 值只需 1.13 ms（29.4 ns/值）。
   換來的是少 76.8 KB internal —— 定案係唔換。
+
+### 3.2 gamma 表值幾多錢（2026-11-24，`eff.gam_ns`）
+
+引擎有三張表，但**只有兩張在 12-bit 生產路徑跑**（正弦 514 B、波表 512 B／效果）。
+第三張是 gamma（2,048 B，linear 16-bit → 8.8 顯示值，`pow(x, 2.2)`）：
+
+| 每值 | 9,600 px × 4 值 | 誰用 |
+|---|---:|---:|---|
+| 走 gamma 表（查表＋6-bit 插值） | **151 ns** | **5.80 ms** | 8-bit 引擎的內建效果（breath／wave／zone1／ramp） |
+| 唔做 gamma、只 `>>8` | 16.8 ns | 0.64 ms | 對照組（量「gamma 本身的價錢」） |
+
+- 數字在 px=64（256 值／幀）與 px=9,600（38,400 值／幀）**一致**（151 / 16.8 ns），
+  即 gamma 純粹是「每值一次查表」，與緩衝在邊無關。
+- **12-bit 三層路徑唔會呼叫 gamma**：`nc_px_layout_apply()` 只做 `>>4`（同 MP 的
+  `array('H')`→8-bit 一致），所以效果層 → 抖動 → 配對整條路徑 gamma = 0 次。
+  gamma 只出現在 `CONFIG_NETCORE_CONTENT=n` 的 8-bit 引擎（SuperMini 預設、Textkit、
+  EffectPerf），每顆燈 1–3 次 → 9,600 px 約 **1.4–4.3 ms/幀**。
+- 換句話說：對 12-bit 路徑，gamma 是 **2 KB internal ＋ 0 ns**；對 8-bit 路徑，
+  它是亮度曲線本身，砍掉會令 breath／wave／zone1／ramp 的暗部變亮（同 MP 對不上）。
 
 ---
 

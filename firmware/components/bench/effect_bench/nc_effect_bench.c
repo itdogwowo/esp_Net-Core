@@ -84,6 +84,8 @@ typedef struct {
     bool     eff_psram;             // 值流緩衝是否落在 PSRAM（影響上面三個數字）
     uint32_t wave_build_us[4];      // 一次性：每種波建 EB_WAVE_TOTAL 個值（µs）
     uint32_t wave_eval_ns[4];       // 每種波的逐值成本（ns）
+    uint32_t gam_ns;                // 每幀 ev 個值：gamma 表（查表＋插值）
+    uint32_t gam_raw_ns;            // 每幀 ev 個值：冇 gamma，直接 >> 8（對照）
 
     bool c8_int_ok;                 // 8-bit 畫布在 internal
     bool c8_ps_ok;                  // 8-bit 畫布在 PSRAM
@@ -532,6 +534,33 @@ static void b_estream1(void *arg, uint32_t frames)
     s_sink += s_evals[0];
 }
 
+// 每幀：gamma 表本身（查表＋6-bit 插值）。同下面 gam_raw 一對，答「gamma 幾多錢」。
+// 輸入掃過整個 0..65535，避免編譯器／cache 把重複輸入吃掉。
+static void b_gamma(void *arg, uint32_t frames)
+{
+    (void)arg;
+    uint32_t acc = 0;
+    for (uint32_t f = 0; f < frames; f++) {
+        for (uint32_t i = 0; i < s_ev; i++) {
+            acc += nc_px_engine_gamma((uint16_t)(i * 7u + f));
+        }
+    }
+    s_sink += acc;
+}
+
+// 對照組：唔做 gamma，直接取高位（linear → 8-bit 最便宜的做法）
+static void b_gamma_raw(void *arg, uint32_t frames)
+{
+    (void)arg;
+    uint32_t acc = 0;
+    for (uint32_t f = 0; f < frames; f++) {
+        for (uint32_t i = 0; i < s_ev; i++) {
+            acc += (uint32_t)((uint16_t)(i * 7u + f) >> 8);
+        }
+    }
+    s_sink += acc;
+}
+
 static void effect_layer_bench(uint16_t px, uint8_t vpp, uint32_t frames, ebench_t *out)
 {
     const uint8_t n = (vpp == 0) ? 1 : vpp;
@@ -573,6 +602,11 @@ static void effect_layer_bench(uint16_t px, uint8_t vpp, uint32_t frames, ebench
         out->wave_build_us[t] = ns / 1000u;
         out->wave_eval_ns[t] = ns / EB_WAVE_TOTAL;
     }
+
+    // gamma 表本身（唔關值流／PSRAM 事；同一個 ev 個值）
+    nc_px_engine_tables_init();                  // 冪等；確保 s_gam 真的建好
+    out->gam_ns = bench_best(b_gamma, NULL, f, 3);
+    out->gam_raw_ns = bench_best(b_gamma_raw, NULL, f, 3);
 
     evals_free();
 }
@@ -762,7 +796,8 @@ static size_t result_json(const ebench_t *r, char *out, size_t cap)
         out, cap,
         "{\"px\":%u,\"fr\":%u,\"rep\":%u,\"nv\":%u,"
         "\"eff\":{\"vpp\":%u,\"ev\":%u,\"vals_ns\":%u,\"stream_ns\":%u,\"fast_ns\":%u,\"psram\":%d,"
-        "\"build_us\":[%u,%u,%u,%u],\"per_val_ns\":[%u,%u,%u,%u]},"
+        "\"build_us\":[%u,%u,%u,%u],\"per_val_ns\":[%u,%u,%u,%u],"
+        "\"gam_ns\":%u,\"gam_raw_ns\":%u},"
         "\"mem\":{\"c8i\":%d,\"c8p\":%d,\"c12i\":%d,\"c12p\":%d,\"ifree\":%u,\"pfree\":%u},"
         "\"eval_ns\":%u,\"vals_ns\":%u,"
         "\"pair8\":{\"i\":%u,\"p\":%u},\"pair12\":{\"i\":%u,\"p\":%u},"
@@ -778,6 +813,7 @@ static size_t result_json(const ebench_t *r, char *out, size_t cap)
         (unsigned)r->wave_build_us[2], (unsigned)r->wave_build_us[3],
         (unsigned)r->wave_eval_ns[0], (unsigned)r->wave_eval_ns[1],
         (unsigned)r->wave_eval_ns[2], (unsigned)r->wave_eval_ns[3],
+        (unsigned)r->gam_ns, (unsigned)r->gam_raw_ns,
         r->c8_int_ok ? 1 : 0, r->c8_ps_ok ? 1 : 0,
         r->c12_int_ok ? 1 : 0, r->c12_ps_ok ? 1 : 0,
         (unsigned)i_free, (unsigned)p_free,
@@ -808,6 +844,10 @@ static void log_result(const ebench_t *r)
              EB_WAVE_TOTAL,
              (unsigned)r->wave_build_us[0], (unsigned)r->wave_build_us[1],
              (unsigned)r->wave_build_us[2], (unsigned)r->wave_build_us[3]);
+    ESP_LOGI(TAG, "gamma 表：ev=%u 個值 %u ns（%u ns/值）｜唔做 gamma（>>8）%u ns（%u ns/值）",
+             (unsigned)r->ev,
+             (unsigned)r->gam_ns, (unsigned)((r->ev != 0) ? (r->gam_ns / r->ev) : 0u),
+             (unsigned)r->gam_raw_ns, (unsigned)((r->ev != 0) ? (r->gam_raw_ns / r->ev) : 0u));
     ESP_LOGI(TAG, "eval=%u ns/val  vals=%u ns/frame", (unsigned)r->eval_ns,
              (unsigned)r->vals_ns);
     ESP_LOGI(TAG, "pair8 i/p=%u/%u  pair12 i/p=%u/%u ns",

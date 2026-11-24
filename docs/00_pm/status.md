@@ -7544,3 +7544,37 @@ assets 動態（仍 32）；6 B 單表；render 子幀接線完整驗證；chunk
 **補測（mock lane 生效後，2,400 px × 4 子幀）**：render **199.9 fps**（200 Hz 子幀、
 視覺 50 fps）、apply **6.03 ms**／視覺幀、commit 12 µs、CPU ≈6.3 ms（31.5%）。
 之前「mock lane 未生效」係 OTA 失敗、板跑舊映像，非程式問題。
+
+### 7.214 2026-11-24（三張表：gamma／正弦／波表；gamma 實測 151 ns/值）
+
+**問題**：使用者問「邊度來咁多表？邊張唔用？gamma 係咩、我邊度用、對效能影響幾大？」
+答完之後把數字量實（`0xF065` 新增 `eff.gam_ns`／`gam_raw_ns`）。
+
+**三張表的分工（全部在 `nc_px_engine_tables.c` ＋ `nc_effect_task.c`）**
+
+| 表 | 大細 | 位置 | 用途 | 12-bit 路徑 |
+|---|---:|---|---|---|
+| gamma `s_gam[1024]` | 2,048 B | internal | linear 16-bit → 8.8（`pow 2.2`） | **唔用**（`>>4` 直接出 8-bit，同 MP 一致） |
+| 正弦 `s_sin_lin[257]` | 514 B | internal | 引擎唯一正弦 | 用（建波表時） |
+| 波表 `s_wave[]` | 512 B／效果 | internal | program 值的快取 | 用（每幀取值） |
+
+冇「唔用」的表：舊 1024 點正弦表（`s_sin[1024]`，2 KB）已於 §7.135／§7.139 刪除。
+gamma 只出現在 `CONFIG_NETCORE_CONTENT=n` 的 8-bit 引擎（breath／wave／zone1／ramp），
+12-bit 三層路徑一次都唔會 call。
+
+**實測（SuperMini、S3 240 MHz、EffectPerf 映像 `d60472bf`）**
+
+| | ns/值 | 9,600 px × 4 值 |
+|---|---:|---:|
+| `nc_px_engine_gamma()` | **151** | **5.80 ms** |
+| 對照：`>>8`（唔做 gamma） | 16.8 | 0.64 ms |
+
+px=64（256 值）與 px=9,600（38,400 值）逐值成本一樣 → gamma 係「每值一次查表」，
+同緩衝位置無關。8-bit 路徑每顆燈 call 1–3 次 → 9,600 px ≈ 1.4–4.3 ms/幀；
+12-bit 路徑 = 0 次。
+
+**踩到的坑**：我把 `effect_bench` 的改動建進 `PROJECT=S3/ESP32-S3-SuperMini` 的映像，
+但 `firmware/CMakeLists.txt:129` 只在 `NC_PROJECT` 含 `EffectPerf` 時才加入那個 component
+→ 0xF065 完全冇回覆（唔係 crash）。量測映像一定要 `NC_PROJECT_OVERRIDE=S3/ESP32-S3-Matrix-EffectPerf`。
+另外 `tools/ota.py` 今次卡在 BEGIN（process 0 CPU、等唔到回覆）；改用
+`esptool --before usb-reset --after watchdog-reset write-flash` 5 秒燒完（728,800 B）。

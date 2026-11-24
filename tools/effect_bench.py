@@ -121,6 +121,11 @@ def show(r: dict) -> None:
         print(f"  波表(%% 取模)   {fmt_ns(eff.get('stream_ns'))} → "
               f"{(eff.get('stream_ns') or 0) / 20_000_000 * 100:.1f}% of 20 ms"
               f"   （{(eff.get('stream_ns') or 0) / max(1, ev):.1f} ns/值）")
+        gam, graw = eff.get("gam_ns"), eff.get("gam_raw_ns")
+        if gam is not None and graw is not None:
+            print(f"  gamma 表        {fmt_ns(gam)} → {gam / max(1, ev):.1f} ns/值"
+                  f"   唔做 gamma(>>8) {fmt_ns(graw)} → {graw / max(1, ev):.1f} ns/值"
+                  f"   差 {(gam - graw) / 1_000_000:.3f} ms/幀（{ev} 值）")
         build = eff.get("build_us") or []
         per = eff.get("per_val_ns") or []
         names = ["正弦 math_now", "方波 square", "脈衝 pulse_wave", "保持 keep"]
