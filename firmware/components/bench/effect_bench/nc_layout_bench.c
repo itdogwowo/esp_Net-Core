@@ -238,7 +238,8 @@ static void on_layoutbench(nc4_ctx_t *ctx, const nc4_frame_t *f)
     const bool chan_layout = (variant == 4);
     const bool perm_layout = (variant == 2 || variant == 3 || chan_layout ||
         ((variant == 5 || variant == 6 || variant == 7 || variant == 8 || variant == 9 ||
-          variant == 11 || variant == 12 || variant == 13 || variant == 15) && groups_in == 0));
+          variant == 11 || variant == 12 || variant == 13 || variant == 15 ||
+          variant == 20 || variant == 21) && groups_in == 0));
     if (chan_layout) {
         // ngroups 係 uint16：4 × px 要 ≤ 65535 → px ≤ 16383。再受 entry 記憶體限制
         // （每個 entry 64 B），所以 px 會自動封頂。
@@ -439,6 +440,76 @@ static void on_layoutbench(nc4_ctx_t *ctx, const nc4_frame_t *f)
         const uint32_t us = (uint32_t)(esp_timer_get_time() - v0);
         if (us < vals_us) {
             vals_us = us;
+        }
+    }
+
+    uint32_t flat_int_us = 0, flat_ps_us = 0, apply_flat_int_us = 0, apply_flat_ps_us = 0;
+    uint32_t flat_write_us = 0, flat_read_us = 0;
+    if (variant == 20 || variant == 21) {
+        // 同一份 layout：先 internal、再 PSRAM，各量 flatify 同 apply
+        const int64_t a0 = esp_timer_get_time();
+        if (nc_px_layout_flatify_place(&lay, false) == ESP_OK) {
+            flat_int_us = (uint32_t)(esp_timer_get_time() - a0);
+            uint32_t best = 0xFFFFFFFFu;
+            for (int r = 0; r < 5; r++) {
+                const int64_t t = esp_timer_get_time();
+                (void)nc_px_layout_apply(&lay, vptrs, c8);
+                const uint32_t us = (uint32_t)(esp_timer_get_time() - t);
+                if (us < best) best = us;
+            }
+            apply_flat_int_us = best;
+        }
+        const int64_t b0 = esp_timer_get_time();
+        if (nc_px_layout_flatify_place(&lay, true) == ESP_OK) {
+            flat_ps_us = (uint32_t)(esp_timer_get_time() - b0);
+            uint32_t best = 0xFFFFFFFFu;
+            for (int r = 0; r < 5; r++) {
+                const int64_t t = esp_timer_get_time();
+                (void)nc_px_layout_apply(&lay, vptrs, c8);
+                const uint32_t us = (uint32_t)(esp_timer_get_time() - t);
+                if (us < best) best = us;
+            }
+            apply_flat_ps_us = best;
+
+            if (variant == 21 && lay.flat != NULL && lay.nflat > 0) {
+                // 模擬「半永久化」：寫 57.6 KB 去 FAT，再讀返
+                const size_t bytes = (size_t)lay.nflat * sizeof(nc_px_flat6_t);
+                FILE *f = fopen("/data/flat_bench.bin", "wb");
+                if (f != NULL) {
+                    const int64_t w0 = esp_timer_get_time();
+                    (void)fwrite(lay.flat, 1, bytes, f);
+                    (void)fclose(f);
+                    flat_write_us = (uint32_t)(esp_timer_get_time() - w0);
+                    nc_px_flat6_t *buf = (nc_px_flat6_t *)heap_caps_malloc(
+                        bytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+                    if (buf != NULL) {
+                        FILE *rf = fopen("/data/flat_bench.bin", "rb");
+                        if (rf != NULL) {
+                            const int64_t r0 = esp_timer_get_time();
+                            const size_t got = fread(buf, 1, bytes, rf);
+                            (void)fclose(rf);
+                            flat_read_us = (uint32_t)(esp_timer_get_time() - r0);
+                            if (got == bytes) {
+                                heap_caps_free(lay.flat);
+                                lay.flat = buf;
+                                lay.flat_psram = true;
+                                uint32_t best2 = 0xFFFFFFFFu;
+                                for (int r = 0; r < 5; r++) {
+                                    const int64_t t = esp_timer_get_time();
+                                    (void)nc_px_layout_apply(&lay, vptrs, c8);
+                                    const uint32_t us = (uint32_t)(esp_timer_get_time() - t);
+                                    if (us < best2) best2 = us;
+                                }
+                                apply_flat_ps_us = best2;
+                            } else {
+                                heap_caps_free(buf);
+                            }
+                        } else {
+                            heap_caps_free(buf);
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -950,6 +1021,9 @@ static void on_layoutbench(nc4_ctx_t *ctx, const nc4_frame_t *f)
              "\"save_us\":%u,\"load_us\":%u,\"cache_bytes\":%ld,\"load_rc\":%d,"
              "\"merge8_us\":%u,\"swar_us\":%u,\"swar_ok\":%u,"
              "\"flat_build_us\":%u,\"flat_apply_us\":%u,"
+             "\"flat_int_us\":%u,\"flat_ps_us\":%u,"
+             "\"apply_flat_int_us\":%u,\"apply_flat_ps_us\":%u,"
+             "\"flat_write_us\":%u,\"flat_read_us\":%u,"
              "\"bus_old_us\":%u,\"bus_new_us\":%u,\"bus_ok\":%u,"
              "\"canvas_path_us\":%u,\"direct_us\":%u,\"direct_noclear_us\":%u,"
              "\"direct4_us\":%u,\"batch4_us\":%u,\"batch4_1pass_us\":%u,"
@@ -968,6 +1042,9 @@ static void on_layoutbench(nc4_ctx_t *ctx, const nc4_frame_t *f)
              (unsigned)save_us, (unsigned)load_us, cache_bytes, (int)load_rc,
              (unsigned)merge8_us, (unsigned)swar_us, (unsigned)swar_ok,
              (unsigned)flat_build_us, (unsigned)flat_apply_us,
+             (unsigned)flat_int_us, (unsigned)flat_ps_us,
+             (unsigned)apply_flat_int_us, (unsigned)apply_flat_ps_us,
+             (unsigned)flat_write_us, (unsigned)flat_read_us,
              (unsigned)bus_old_us, (unsigned)bus_new_us, (unsigned)bus_ok,
              (unsigned)canvas_us, (unsigned)direct_us, (unsigned)direct_noclear_us,
              (unsigned)direct4_us,

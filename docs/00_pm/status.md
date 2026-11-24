@@ -7934,3 +7934,26 @@ reps=16 重跑：6,365／1,166 µs，同 reps=8 一樣。
 `v6.1.0` tag **不存在**（只有 `v6.1`／`v6.1.1`）。文件已統一：macOS 寫 v6.0.3，
 WSL 寫 v6.1／v6.1.1，唔再寫 v6.1.0。若用家想把 macOS 升到 v6.1.x，要另開 Task
 （clone／install／rebuild，不能只改文件）。
+
+### 7.222 2026-11-24（6 B 表放 internal vs PSRAM；flatify 成本；Flash 持久化評估）
+
+真機 EffectPerf、9,600 px、0xF077 variant 20／21（min of 5）：
+
+| 佈局 | flatify（internal） | apply（internal） | flatify（PSRAM） | apply（PSRAM） |
+|---|---:|---:|---:|---:|
+| 500 組（nflat 4,500） | **0.375 ms** | **1.225 ms** | 2.077 ms | 1.746 ms |
+| 完全隨機（nflat 9,600） | **14.538 ms** | **3.006 ms** | 19.820 ms | 5.079 ms |
+
+**結論**：
+1. **flat 表放 internal 才快**：PSRAM 版 apply 慢 42%（500 組）／69%（隨機）；
+   同之前的實作量測一致。**唔應該改放 PSRAM**。
+2. **flatify 本身係換場一次性成本**：500 組 0.375 ms（可忽略）；**完全隨機 14.5 ms**
+   （大過每幀 apply 的 3 ms，但只做一次）。
+3. **Flash 半永久化唔值得**：EffectPerf 映像冇 `/data`（write/read = 0 µs，量唔到），
+   但用快取實測推算：12.5 KB → 10 ms（≈1.25 MB/s），57.6 KB ≈ **46 ms**；
+   比重新 flatify 的 14.5 ms（隨機）慢 3×，比 500 組的 0.375 ms 慢 120×。
+   → **每次換場重新 flatify 就好，唔好寫 Flash。**
+
+**pipeline 的 32 條值流**（同場確認）：係**每個 mode** 的**不同效果數**（值流條數），
+唔係 mode 數；一個 mode 有 >32 個不同效果時 `nc_pipe_aprog_publish()` 會靜默 return。
+最後一個固定上限，待改動態。

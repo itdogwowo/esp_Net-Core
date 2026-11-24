@@ -85,6 +85,7 @@ typedef struct {
     nc_px_ljob_t  *job;             // njobs 個
     nc_px_lrun_t  *run;             // nruns 個（dst 升序）
     nc_px_flat6_t *flat;            // nflat 個（dst 升序；重疊 = 後面覆蓋前面）
+    bool           flat_psram;      // flat 表放喺 PSRAM（量測／政策用）
 } nc_px_layout_t;
 
 // mode ＋ map ＋ assets ＋ inventory → layout（內部 malloc；用完 call free）。
@@ -117,6 +118,8 @@ esp_err_t nc_px_layout_load(nc_px_layout_t *out, const char *path, uint32_t key,
 // 真機實測放 PSRAM 會**慢過** runs（每幀 57.6 KB PSRAM 讀取頻寬），所以唔夠 internal
 // 就唔建表、行返 runs——唔會靜默降級去一條更慢的路。
 esp_err_t nc_px_layout_flatify(nc_px_layout_t *l);
+// 量測／政策用：place_psram = true 時 6 B 表放 PSRAM（預設 internal，實測較快）。
+esp_err_t nc_px_layout_flatify_place(nc_px_layout_t *l, bool place_psram);
 size_t    nc_px_layout_flat_bytes(const nc_px_layout_t *l);   // nflat × 6 B（internal）
 
 // 一幀：vals[i] = 第 i 條值流的指標（長度 aprog[i].nv），dst = canvas（px × 4）。

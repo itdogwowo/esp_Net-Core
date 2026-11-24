@@ -613,7 +613,21 @@ size_t nc_px_layout_flat_bytes(const nc_px_layout_t *l)
     return (l == NULL) ? 0 : ((size_t)l->nflat * sizeof(nc_px_flat6_t));
 }
 
-esp_err_t nc_px_layout_flatify(nc_px_layout_t *l)
+static void *palloc(size_t n)
+{
+    if (n == 0) {
+        return NULL;
+    }
+#if defined(ESP_PLATFORM)
+    void *p = heap_caps_malloc(n, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (p != NULL) {
+        return p;
+    }
+#endif
+    return malloc(n);
+}
+
+esp_err_t nc_px_layout_flatify_place(nc_px_layout_t *l, bool place_psram)
 {
     if (l == NULL) {
         return ESP_ERR_INVALID_ARG;
@@ -650,7 +664,9 @@ esp_err_t nc_px_layout_flatify(nc_px_layout_t *l)
             return ESP_ERR_INVALID_SIZE;
         }
     }
-    nc_px_flat6_t *f = (nc_px_flat6_t *)ialloc(total * sizeof(nc_px_flat6_t));
+    nc_px_flat6_t *f = (nc_px_flat6_t *)(place_psram
+        ? palloc(total * sizeof(nc_px_flat6_t))
+        : ialloc(total * sizeof(nc_px_flat6_t)));
     if (f == NULL) {
         return ESP_ERR_NO_MEM;
     }
@@ -675,7 +691,13 @@ esp_err_t nc_px_layout_flatify(nc_px_layout_t *l)
     }
     l->flat = f;
     l->nflat = (uint32_t)k;
+    l->flat_psram = place_psram;
     return ESP_OK;
+}
+
+esp_err_t nc_px_layout_flatify(nc_px_layout_t *l)
+{
+    return nc_px_layout_flatify_place(l, false);
 }
 
 // 6 B 表版本的 8-bit 寫入（內圈：一次乘法都冇）
