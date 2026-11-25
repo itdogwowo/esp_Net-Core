@@ -3,123 +3,115 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Pixel 四層緩衝與 handoff</title>
+<title>Pixel 四層：緩衝區 × 任務（誰擁有、誰正在用）</title>
 <style>
   :root{
     --bg:#0b1020; --panel:#121a2e; --panel2:#0e1628; --line:#26324d;
     --text:#e6edf3; --muted:#8ea0bd; --dim:#5d6f8e;
-    --blue:#4c9aff; --cyan:#39d0d8; --amber:#f2b84b; --green:#45d483;
-    --purple:#b18cff; --red:#ff6b6b; --pink:#ff8fc7;
+    --effect:#4c9aff; --paint:#39d0d8; --encode:#f2b84b; --render:#45d483;
+    --free:#1a2338; --ready:#10294a; --inflight:#211a3d; --busy:#0f2c21;
   }
   *{box-sizing:border-box}
   body{
-    margin:0; background:radial-gradient(1200px 600px at 20% -10%,#17223c 0%,var(--bg) 55%);
+    margin:0; background:radial-gradient(1200px 600px at 15% -10%,#17223c 0%,var(--bg) 55%);
     color:var(--text); font-family:ui-sans-serif,system-ui,-apple-system,"Noto Sans TC","PingFang TC",sans-serif;
-    padding:28px 26px 40px; min-width:1080px;
+    padding:24px 24px 40px; min-width:1180px;
   }
-  h1{font-size:24px; margin:0 0 6px; letter-spacing:.5px}
-  .sub{color:var(--muted); font-size:13px; margin-bottom:18px}
-  .sub code{color:var(--cyan)}
-  .controls{display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:18px}
+  h1{font-size:23px; margin:0 0 5px}
+  .sub{color:var(--muted); font-size:12.5px; margin-bottom:14px; line-height:1.6}
+  .sub code{color:var(--paint)}
+  .controls{display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:14px}
   .controls label{font-size:12px; color:var(--muted); display:flex; gap:6px; align-items:center}
   select,button{
     background:var(--panel); color:var(--text); border:1px solid var(--line);
     border-radius:8px; padding:7px 12px; font-size:13px; cursor:pointer;
   }
-  select:hover,button:hover{border-color:var(--blue)}
+  button:hover,select:hover{border-color:var(--effect)}
   button.primary{background:#16345f; border-color:#2b5c9e}
-  button:active{transform:translateY(1px)}
-  .grid{
-    display:grid; grid-template-columns:1.05fr .85fr 1.15fr 1.15fr .9fr;
-    gap:26px; align-items:start; position:relative;
+  .diagram{
+    position:relative; display:grid; grid-template-columns:196px minmax(620px,1fr) 270px;
+    column-gap:0; align-items:start;
   }
-  .stage{
-    position:relative; background:linear-gradient(180deg,var(--panel) 0%,var(--panel2) 100%);
-    border:1px solid var(--line); border-radius:14px; padding:14px 14px 12px;
-    min-height:300px; transition:box-shadow .35s,border-color .35s,transform .35s;
+  #arrows{position:absolute; inset:0; width:100%; height:100%; z-index:0; overflow:visible; pointer-events:none}
+  .rail,.wall,.inspector{position:relative; z-index:1}
+
+  /* ── 任務 rail ── */
+  .rail{display:flex; flex-direction:column; gap:12px; padding-top:2px}
+  .task{
+    border:1px solid var(--line); border-left:4px solid var(--t);
+    border-radius:10px; background:linear-gradient(180deg,#121a2e,#0d1526);
+    padding:10px 11px; transition:box-shadow .3s, transform .3s, border-color .3s;
   }
-  .stage.active{border-color:var(--blue); box-shadow:0 0 0 1px #2b5c9e,0 0 28px rgba(76,154,255,.18)}
-  .stage + .stage::before{
-    content:"→"; position:absolute; left:-20px; top:44px; color:var(--dim); font-size:18px;
+  .task.active{box-shadow:0 0 0 1px var(--t),0 0 22px color-mix(in srgb,var(--t) 28%,transparent); transform:translateX(2px)}
+  .task h2{font-size:12.5px; margin:0 0 3px; color:var(--t)}
+  .task p{margin:0; font-size:10.5px; color:var(--muted); line-height:1.5}
+  .task .use{font-size:10px; color:var(--dim); margin-top:5px}
+  .task .use b{color:var(--muted); font-weight:500}
+
+  /* ── 緩衝區 wall ── */
+  .wall{display:flex; flex-direction:column; gap:12px; padding-left:126px}
+  .group{
+    border:1px solid var(--line); border-radius:12px; padding:10px 12px 12px;
+    background:linear-gradient(180deg,rgba(18,26,46,.9),rgba(13,21,38,.9));
+    transition:box-shadow .3s,border-color .3s;
   }
-  .stage h2{font-size:13px; margin:0 0 3px; letter-spacing:.3px}
-  .stage h2 .idx{color:var(--cyan); margin-right:6px}
-  .stage .role{font-size:11px; color:var(--muted); margin-bottom:12px; min-height:30px; line-height:1.45}
-  .buf{
-    border:1px dashed var(--line); border-radius:10px; padding:9px 10px; margin-bottom:8px;
-    background:#0c1425; transition:background .35s,border-color .35s,box-shadow .35s;
+  .group.active{border-color:var(--accent,var(--effect)); box-shadow:0 0 0 1px var(--accent,var(--effect)),0 0 26px color-mix(in srgb,var(--accent,var(--effect)) 16%,transparent)}
+  .group h3{
+    font-size:12px; margin:0 0 2px; display:flex; gap:8px; align-items:baseline;
   }
-  .buf .name{display:flex; justify-content:space-between; gap:8px; font-size:12px}
-  .buf .name b{font-weight:600}
-  .buf .name span{color:var(--dim); font-size:10.5px}
-  .buf .meta{color:var(--dim); font-size:10.5px; margin-top:3px}
-  .buf.active{background:#13294a; border-color:var(--blue); box-shadow:0 0 18px rgba(76,154,255,.25)}
-  .buf.pulse{animation:pulse .5s ease}
-  @keyframes pulse{0%{transform:scale(.98)}50%{transform:scale(1.02)}100%{transform:scale(1)}}
-  .slots{display:grid; gap:6px}
-  .slot{
-    display:flex; align-items:center; justify-content:space-between; gap:6px;
-    border:1px solid var(--line); border-radius:8px; padding:7px 9px;
-    background:#0c1425; font-size:11.5px; transition:all .3s;
+  .group h3 .owner{font-size:9.5px; font-weight:400; color:var(--dim); border:1px solid var(--line); border-radius:999px; padding:1px 7px}
+  .group h3 .shared{font-size:9.5px; font-weight:400; color:var(--encode); border:1px solid #4a3a16; background:#221a08; border-radius:999px; padding:1px 7px}
+  .group .meta{font-size:10px; color:var(--dim); margin-bottom:8px}
+  .group .meta b{color:var(--muted); font-weight:500}
+  .cards{display:flex; gap:7px; flex-wrap:wrap}
+  .card{
+    flex:1 1 118px; min-width:108px; border:1px solid var(--line); border-radius:9px;
+    background:#0c1425; padding:7px 9px; transition:all .3s;
   }
-  .slot .tag{color:var(--dim); font-size:10px}
-  .slot.free{opacity:.55}
-  .slot.filling{border-color:var(--amber); background:#2a2110}
-  .slot.ready{border-color:var(--blue); background:#10294a}
-  .slot.inflight{border-color:var(--purple); background:#211a3d}
-  .slot.busy{border-color:var(--green); background:#0f2c21}
-  .slot .seq{font-variant-numeric:tabular-nums; color:var(--muted)}
-  .pill{display:inline-block; font-size:9.5px; padding:1px 6px; border-radius:999px; border:1px solid var(--line); color:var(--muted)}
-  .queue{display:flex; gap:4px; margin:10px 0 4px; min-height:26px}
-  .q{
-    width:20px; height:24px; border-radius:5px; background:#0c1425; border:1px solid var(--line);
-    font-size:9px; display:flex; align-items:center; justify-content:center; color:var(--dim);
-  }
-  .q.filled{background:#2a2110; border-color:var(--amber); color:var(--amber)}
-  .queue-label{font-size:10px; color:var(--dim); margin-top:2px}
-  .processor{
-    border:1px solid var(--line); border-radius:10px; background:#0c1425;
-    padding:12px; text-align:center; font-size:12px; margin-bottom:8px;
-    transition:all .3s;
-  }
-  .processor.active{border-color:var(--cyan); box-shadow:0 0 18px rgba(57,208,216,.2)}
-  .processor small{color:var(--dim); font-size:10px}
-  .leds{display:flex; gap:6px; margin:12px 0 6px}
-  .led{
-    width:16px; height:16px; border-radius:50%; background:#1a2338; border:1px solid #2b3750;
-    transition:all .2s;
-  }
-  .led.on{background:var(--pink); box-shadow:0 0 12px var(--pink); border-color:var(--pink)}
-  .arrow-line{color:var(--dim); font-size:10px; text-align:center; margin:4px 0}
-  .status{
-    margin-top:20px; border:1px solid var(--line); border-radius:12px;
-    background:linear-gradient(180deg,#101a30,#0d1526); padding:14px 16px;
-    display:grid; grid-template-columns:1.2fr 1fr; gap:16px;
-  }
-  .status .step{font-size:13px; line-height:1.55}
-  .status .step b{color:var(--cyan)}
-  .status .nums{display:grid; grid-template-columns:1fr 1fr; gap:8px 14px; font-size:12px}
-  .status .nums div{display:flex; justify-content:space-between; gap:10px; border-bottom:1px dashed #1e2a42; padding:3px 0}
-  .status .nums span:first-child{color:var(--muted)}
-  .status .nums span:last-child{font-variant-numeric:tabular-nums}
-  .legend{display:flex; gap:16px; flex-wrap:wrap; color:var(--muted); font-size:11px; margin-top:14px}
-  .legend i{display:inline-block; width:9px; height:9px; border-radius:2px; margin-right:5px; vertical-align:middle}
-  table.copy{width:100%; border-collapse:collapse; margin-top:16px; font-size:12px}
-  table.copy th,table.copy td{border-bottom:1px solid #1e2a42; padding:7px 8px; text-align:left}
-  table.copy th{color:var(--muted); font-weight:500}
-  table.copy td.n{color:var(--amber); font-variant-numeric:tabular-nums}
-  .note{color:var(--dim); font-size:11px; line-height:1.6; margin-top:10px}
-  .k{font-family:ui-monospace,SFMono-Regular,Menlo,monospace; color:var(--cyan); font-size:11px}
-  .warning{color:var(--amber)}
+  .card .top{display:flex; justify-content:space-between; gap:6px; font-size:11px}
+  .card .top b{font-weight:600}
+  .card .st{font-size:9px; color:var(--dim); border:1px solid var(--line); border-radius:999px; padding:0 5px}
+  .card .sub{font-size:9.5px; color:var(--dim); margin-top:3px; line-height:1.4}
+  .card.free{opacity:.55}
+  .card.ready{border-color:var(--ready); background:#0d1d33}
+  .card.inflight{border-color:var(--inflight); background:#171331}
+  .card.busy{border-color:var(--busy); background:#0c211a}
+  .card.active{opacity:1; border-color:var(--accent); box-shadow:0 0 18px color-mix(in srgb,var(--accent) 30%,transparent); background:#12233d}
+  .queue{display:grid; grid-template-columns:repeat(16,1fr); gap:3px; margin-top:2px}
+  .q{height:22px; border-radius:4px; border:1px solid var(--line); background:#0c1425; display:flex; align-items:center; justify-content:center; font-size:8px; color:var(--dim)}
+  .q.f{background:#2a2110; border-color:var(--encode); color:var(--encode)}
+  .queue-legend{font-size:9px; color:var(--dim); margin-top:4px}
+
+  /* ── inspector ── */
+  .inspector{display:flex; flex-direction:column; gap:12px; margin-left:18px}
+  .box{border:1px solid var(--line); border-radius:12px; background:var(--panel2); padding:12px}
+  .box h4{font-size:11px; margin:0 0 7px; color:var(--muted); font-weight:500}
+  .step-no{font-size:10px; color:var(--dim)}
+  .step-tag{font-size:13px; margin:1px 0 4px; color:var(--text)}
+  .step-text{font-size:11px; color:var(--muted); line-height:1.55; min-height:52px}
+  .nums{display:grid; grid-template-columns:1fr 1fr; gap:6px 12px; font-size:11px}
+  .nums div{display:flex; justify-content:space-between; gap:8px; border-bottom:1px dashed #1e2a42; padding:2px 0}
+  .nums span:first-child{color:var(--dim)}
+  .nums span:last-child{font-variant-numeric:tabular-nums}
+  .legend{display:flex; flex-direction:column; gap:5px; font-size:10px; color:var(--dim)}
+  .legend i{display:inline-block; width:8px; height:8px; border-radius:2px; margin-right:5px; vertical-align:middle}
+  table.handoff{width:100%; border-collapse:collapse; margin-top:14px; font-size:11px}
+  table.handoff th,table.handoff td{border-bottom:1px solid #1e2a42; padding:6px 7px; text-align:left}
+  table.handoff th{color:var(--muted); font-weight:500}
+  table.handoff td.n{color:var(--encode); font-variant-numeric:tabular-nums}
+  .note{color:var(--dim); font-size:10.5px; line-height:1.6; margin-top:8px}
+  .k{font-family:ui-monospace,SFMono-Regular,Menlo,monospace; color:var(--paint); font-size:10.5px}
+  @keyframes dash{to{stroke-dashoffset:-24}}
+  .arrow{stroke-dasharray:7 5; animation:dash .75s linear infinite}
 </style>
 </head>
 <body>
 
-<h1>Pixel 四層緩衝與 handoff</h1>
+<h1>Pixel 四層：緩衝區 × 任務</h1>
 <div class="sub">
-  四條任務：<code>pixel_effect_task</code> → <code>pixel_paint_task</code> →
-  <code>pixel_encode_task</code> → <code>render</code>。
-  按「下一步」逐格睇，或者按播放自動跑。重點：<b>只有 ring → DMA 這一步 copy 像素</b>。
+  先列出<b>全部 buffer</b>（連 owner、邊個寫、邊個讀）；按「下一步」時，
+  <b>正在用它的任務</b>會亮燈，並由任務畫箭嘴到 buffer。
+  <code>owner</code>＝建立／擁有 lifetime 的任務；<code>W</code>＝寫入；<code>R</code>＝讀取。
 </div>
 
 <div class="controls">
@@ -142,123 +134,155 @@
   <span class="note" id="cfgline"></span>
 </div>
 
-<main class="grid">
-  <!-- 1 effect -->
-  <section class="stage" id="st-effect">
-    <h2><span class="idx">1</span>pixel_effect_task</h2>
-    <div class="role">算 12-bit 值流；雙 pool 交替，只傳 frame 指標（唔 copy 值）。</div>
-    <div class="buf" id="poolA">
-      <div class="name"><b>pool A</b><span>Σnv × 2 B</span></div>
-      <div class="meta" id="poolAmeta">seq — · 空閒</div>
+<div class="diagram" id="diagram">
+  <svg id="arrows" aria-hidden="true"></svg>
+
+  <!-- 任務 rail -->
+  <aside class="rail">
+    <div class="task" id="task-effect" style="--t:var(--effect)">
+      <h2>1 · pixel_effect_task</h2>
+      <p>算 12-bit 值流；雙 pool 交替。</p>
+      <div class="use"><b>W</b> pool（自己擁有）</div>
     </div>
-    <div class="buf" id="poolB">
-      <div class="name"><b>pool B</b><span>Σnv × 2 B</span></div>
-      <div class="meta" id="poolBmeta">seq — · 空閒</div>
+    <div class="task" id="task-paint" style="--t:var(--paint)">
+      <h2>2 · pixel_paint_task</h2>
+      <p>layout／dither／white mix；直接寫環。</p>
+      <div class="use"><b>R</b> pool · <b>W</b> ring · <b>W</b> snapshot（要求時）</div>
     </div>
-    <div class="note">兩塊 pool 加起來 = <b>2 份</b>值流；paint 用完 ack 才可以重用。</div>
-  </section>
-
-  <!-- 2 paint -->
-  <section class="stage" id="st-paint">
-    <h2><span class="idx">2</span>pixel_paint_task</h2>
-    <div class="role">按 layout 把值流寫入環的落點；抖動／white mix 都在這裡。</div>
-    <div class="processor" id="paintProc">
-      直接寫環槽<br><small>0 copy · 零拷貝</small>
+    <div class="task" id="task-encode" style="--t:var(--encode)">
+      <h2>3 · pixel_encode_task</h2>
+      <p>環 → 該硬件格式；入 DMA 槽＋queue。</p>
+      <div class="use"><b>R</b> ring · <b>W</b> DMA · <b>W</b> queue</div>
     </div>
-    <div class="note">
-      呢層<b>冇自己的像素 buffer</b>：<span class="k">nc_px_ring_begin_ex()</span> 拿到邊一格，
-      就即場寫入那一格。只有 0xF06B 預覽要求時，才額外 copy 一份 snapshot。
+    <div class="task" id="task-render" style="--t:var(--render)">
+      <h2>4 · render</h2>
+      <p>submit／reclaim；DMA 完成才還環格。</p>
+      <div class="use"><b>R</b> queue · <b>W</b> DMA · <b>R</b> DMA done · <b>W</b> ring（free）</div>
     </div>
-  </section>
+  </aside>
 
-  <!-- 3 ring -->
-  <section class="stage" id="st-ring">
-    <h2><span class="idx">環</span>prd ring（i80.prd）</h2>
-    <div class="role">paint 寫、encode 讀；每格 64 B 前綴（24 B 表頭＋padding）＋px×4 B（R,G,B,W）。</div>
-    <div class="slots" id="ringSlots"></div>
-    <div class="note" id="ringInfo"></div>
-  </section>
+  <!-- 緩衝區 wall -->
+  <main class="wall">
+    <section class="group" id="grp-pool">
+      <h3>effect pool <span class="owner">owner: effect</span><span class="shared">shared: effect → paint</span></h3>
+      <div class="meta"><b>2 份</b> · W effect · R paint · 雙緩衝＋ack</div>
+      <div class="cards" id="poolCards"></div>
+    </section>
 
-  <!-- 4 encode -->
-  <section class="stage" id="st-encode">
-    <h2><span class="idx">3</span>pixel_encode_task</h2>
-    <div class="role">peek 最新環格 → 編碼成該硬件格式，寫入後端 DMA 槽。</div>
-    <div class="slots" id="dmaSlots"></div>
-    <div class="queue" id="queue"></div>
-    <div class="queue-label">ready queue（格索引，12 B/項；唔係像素）</div>
-    <div class="note">這一步是<b>唯一一次像素 copy</b>：環（PSRAM）→ DMA 槽（internal）。</div>
-  </section>
+    <section class="group" id="grp-ring">
+      <h3>prd ring（i80.prd） <span class="owner">owner: render</span><span class="shared">shared: paint → encode</span></h3>
+      <div class="meta"><b id="ringCount">3 份</b> · W paint · R encode · 每格 64 B 前綴＋px×4 B</div>
+      <div class="cards" id="ringCards"></div>
+    </section>
 
-  <!-- 5 render -->
-  <section class="stage" id="st-render">
-    <h2><span class="idx">4</span>render</h2>
-    <div class="role">submit → DMA 讀 internal 槽送硬件；完成才還環格。</div>
-    <div class="processor" id="renderProc">submit / reclaim<br><small>0 copy</small></div>
-    <div class="leds" id="leds"></div>
-    <div class="note">DMA 完成 → <span class="k">nc_px_ring_release(seq)</span>。<br>
-      提前 release = torn frame。</div>
-  </section>
-</main>
+    <section class="group" id="grp-dma">
+      <h3>DMA 槽（後端） <span class="owner">owner: render／backend</span><span class="shared">shared: encode → DMA</span></h3>
+      <div class="meta"><b id="dmaCount">3 份</b> · W encode · R DMA（硬件）· internal</div>
+      <div class="cards" id="dmaCards"></div>
+    </section>
 
-<div class="status">
-  <div class="step">
-    <b id="stepno">STEP 0</b> · <span id="steptext">按「下一步」開始。</span>
-    <div class="note" id="extra"></div>
-  </div>
-  <div class="nums">
-    <div><span>視覺幀</span><span id="nframe">0</span></div>
-    <div><span>子幀 / 幀</span><span id="nsf">1</span></div>
-    <div><span>環格數</span><span id="nring">3</span></div>
-    <div><span>DMA 槽數</span><span id="ndma">3</span></div>
-    <div><span>累計像素 copy</span><span id="ncopies">0</span></div>
-    <div><span>每視覺幀 copy</span><span id="ncpf">1</span></div>
-  </div>
+    <section class="group" id="grp-queue">
+      <h3>ready queue <span class="owner">owner: render</span><span class="shared">shared: encode → render</span></h3>
+      <div class="meta"><b>16 格索引</b>（12 B／項）· push encode · pop render · 唔係像素</div>
+      <div class="queue" id="queue"></div>
+      <div class="queue-legend" id="queueLegend">— 空</div>
+    </section>
+
+    <section class="group" id="grp-snap">
+      <h3>0xF06B snapshot <span class="owner">owner: paint</span></h3>
+      <div class="meta"><b>0 或 1 份</b> · W paint（要求預覽時） · R 0xF06B handler · 額外 copy</div>
+      <div class="cards" id="snapCards"></div>
+    </section>
+  </main>
+
+  <!-- inspector -->
+  <aside class="inspector">
+    <div class="box">
+      <div class="step-no" id="stepno">STEP 0</div>
+      <div class="step-tag" id="steptag">按「下一步」開始</div>
+      <div class="step-text" id="steptext">每按一次只做一個 handoff；箭嘴會指去正在用的 buffer。</div>
+    </div>
+    <div class="box">
+      <h4>計數</h4>
+      <div class="nums">
+        <div><span>視覺幀</span><span id="nframe">0</span></div>
+        <div><span>子幀 / 幀</span><span id="nsf">1</span></div>
+        <div><span>環格</span><span id="nring">3</span></div>
+        <div><span>DMA 槽</span><span id="ndma">3</span></div>
+        <div><span>累計 copy</span><span id="ncopies">0</span></div>
+        <div><span>每幀 copy</span><span id="ncpf">1</span></div>
+      </div>
+    </div>
+    <div class="box">
+      <h4>圖例</h4>
+      <div class="legend">
+        <span><i style="background:#1a2338;border:1px solid #2b3750"></i>FREE</span>
+        <span><i style="background:#0d1d33;border:1px solid #4c9aff"></i>READY</span>
+        <span><i style="background:#171331;border:1px solid #b18cff"></i>INFLIGHT</span>
+        <span><i style="background:#0c211a;border:1px solid #45d483"></i>BUSY</span>
+        <span>任務色：<b style="color:var(--effect)">effect</b>／<b style="color:var(--paint)">paint</b>／<b style="color:var(--encode)">encode</b>／<b style="color:var(--render)">render</b></span>
+      </div>
+    </div>
+  </aside>
 </div>
 
-<div class="legend">
-  <span><i style="background:#1a2338;border:1px solid #2b3750"></i>FREE</span>
-  <span><i style="background:#2a2110;border:1px solid #f2b84b"></i>FILLING</span>
-  <span><i style="background:#10294a;border:1px solid #4c9aff"></i>READY（等 encode）</span>
-  <span><i style="background:#211a3d;border:1px solid #b18cff"></i>INFLIGHT（DMA 讀緊）</span>
-  <span><i style="background:#0f2c21;border:1px solid #45d483"></i>BUSY / 已 submit</span>
-</div>
-
-<table class="copy">
-  <tr><th>handoff</th><th>用什麼</th><th>像素 copy</th><th>滿了怎樣</th></tr>
-  <tr><td>effect → paint</td><td>2 塊值流 pool＋<span class="k">ack(seq)</span></td><td class="n">0</td><td>effect 等 paint ack（背壓）</td></tr>
-  <tr><td>paint → 環</td><td><span class="k">nc_px_ring_begin_ex / commit</span></td><td class="n">0</td><td>paint <span class="k">busy++</span>，下一輪再試；唔覆蓋</td></tr>
-  <tr><td>環 → encode</td><td><span class="k">peek</span> 最新格 → 後端 DMA 槽</td><td class="n">1（每子幀）</td><td>peek 永遠拿最新；舊 READY 格被釋放（skipped）</td></tr>
-  <tr><td>encode → render</td><td>ready queue（<span class="k">lane/slot/seq</span>）</td><td class="n">0</td><td>queue 滿：fallback 直接 submit（唔放生 DMA 槽）</td></tr>
-  <tr><td>render → 硬件</td><td>DMA 讀 internal 槽</td><td class="n">0</td><td>submit 失敗：還環格＋fail++</td></tr>
+<table class="handoff">
+  <tr><th>buffer</th><th>owner</th><th>W</th><th>R</th><th>滿了／lifecycle</th></tr>
+  <tr><td>effect pool ×2</td><td>effect</td><td class="n">effect</td><td class="n">paint</td><td>paint ack 後才重用；effect 等 ack（背壓）</td></tr>
+  <tr><td>prd ring ×N</td><td>render</td><td class="n">paint</td><td class="n">encode</td><td>paint 拿 FREE 格；滿了 busy++ 下一輪再試；DMA 完成才 free</td></tr>
+  <tr><td>DMA 槽 ×N</td><td>render／backend</td><td class="n">encode</td><td class="n">DMA 硬件</td><td>submit 後 BUSY；done callback 後 free</td></tr>
+  <tr><td>ready queue ×16</td><td>render</td><td class="n">encode</td><td class="n">render</td><td>queue 滿：fallback 直接 submit（唔放生 DMA 槽）</td></tr>
+  <tr><td>0xF06B snapshot</td><td>paint</td><td class="n">paint</td><td class="n">0xF06B handler</td><td>只有要求預覽才 copy；最多 1 份</td></tr>
 </table>
 
 <div class="note">
-  <b>份數總結</b>：effect pool <b>2</b> 份；環 <b>N</b> 份（預設 3；4 子幀用 5）；
-  後端 DMA 槽 <b>N</b> 份（internal）；ready queue <b>16</b> 格索引（不是像素）；
-  0xF06B snapshot 額外 <b>0 或 1</b> 份。
+  <b>份數總結</b>：pool <b>2</b>、ring <b>N</b>、DMA <b>N</b>、queue <b>16</b>（索引）、snapshot <b>0/1</b>。
+  <b>像素 copy</b>：effect→paint 0、paint→ring 0、ring→DMA 1（每子幀）、encode→render 0、render→硬件 0。
+  <br><b>shared 的意思</b>：同一個 buffer 由兩個任務「先後」使用（writer 完成 → state 轉 READY → reader 接手），
+  唔係同時读写；箭嘴只會指向當前這一步的使用者。
 </div>
 
 <script>
 (() => {
   const $ = (id) => document.getElementById(id);
-  const MAX_Q = 8;
+  const NS = "http://www.w3.org/2000/svg";
+  const MAX_Q = 16;
+
+  const COLORS = { effect: "#4c9aff", paint: "#39d0d8", encode: "#f2b84b", render: "#45d483" };
 
   const state = {
     px: 64, sf: 1,
     frame: 0, phase: 0, step: 0, last: -1,
-    pool: -1, poolSeq: [0, 0], ack: 0,
+    pool: -1, lastPool: -1, poolSeq: [0, 0], ack: 0,
     ring: [], dma: [], queue: [], copies: 0,
-    playing: true, led: false, timer: null,
+    playing: true, timer: null,
   };
 
   const PHASES = [
-    { tag: "effect 寫 pool", text: () => `pixel_effect_task 把新的 12-bit 值流寫入 pool ${state.pool === 0 ? "A" : "B"}（seq ${state.frame + 1}）。` },
-    { tag: "paint 寫環", text: () => `pixel_paint_task 直接寫入環格 ${state.sf} 份子幀：FILLING → READY。這一步 0 copy。` },
-    { tag: "paint ack", text: () => `paint 完成 → ack(seq ${state.frame + 1})；effect 可以重用另一塊 pool。` },
-    { tag: "encode → DMA", text: () => `pixel_encode_task 把 ${state.sf} 個環格編碼入 DMA 槽；像素 copy = ${state.sf} 次。` },
-    { tag: "render submit", text: () => `render 從 ready queue 取格索引 submit；DMA 開始讀 internal 槽。` },
-    { tag: "DMA 完成", text: () => `DMA 完成 → reclaim 還環格；這一視覺幀完成。` },
+    { tag: "effect 寫 pool", text: () => `effect 把新值流寫入 pool ${state.lastPool === 0 ? "A" : "B"}（seq ${state.frame + 1}）；W。` },
+    { tag: "paint 讀 pool、寫 ring", text: () => `paint 讀 pool（R）→ layout／dither → 直接寫 ${state.sf} 個環格（W）。pixel copy = 0。` },
+    { tag: "paint ack", text: () => `paint 完成 → ack(seq ${state.frame + 1})；pool 可以再用。` },
+    { tag: "encode 讀 ring、寫 DMA／queue", text: () => `encode 讀 ${state.sf} 個環格（R）→ 編碼入 DMA 槽（W）→ push queue（W）。pixel copy = ${state.sf}。` },
+    { tag: "render pop queue、submit DMA", text: () => `render 由 queue 拿格索引（R）→ submit DMA（W）。` },
+    { tag: "DMA done、還 ring", text: () => `DMA 完成（R done）→ reclaim；render 把環格 free（W）。` },
   ];
+
+  // 每一步：任務 → buffer group，label（W/R/push/pop…）
+  const ARROWS = [
+    [["effect", "grp-pool", "W"]],
+    [["paint", "grp-pool", "R"], ["paint", "grp-ring", "W"]],
+    [["paint", "grp-pool", "ack"]],
+    [["encode", "grp-ring", "R"], ["encode", "grp-dma", "W"], ["encode", "grp-queue", "push"]],
+    [["render", "grp-queue", "pop"], ["render", "grp-dma", "submit"]],
+    [["render", "grp-dma", "done"], ["render", "grp-ring", "free"]],
+  ];
+
+  const TASK_EL = {
+    effect: () => $("task-effect"),
+    paint: () => $("task-paint"),
+    encode: () => $("task-encode"),
+    render: () => $("task-render"),
+  };
 
   function slotCount() { return state.sf > 1 ? state.sf + 1 : 3; }
   function ringSlotBytes() { return 64 + state.px * 4; }
@@ -266,8 +290,8 @@
 
   function reset() {
     state.frame = 0; state.phase = 0; state.step = 0; state.last = -1;
-    state.pool = -1; state.poolSeq = [0, 0]; state.ack = 0;
-    state.copies = 0; state.queue = []; state.led = false;
+    state.pool = -1; state.lastPool = -1; state.poolSeq = [0, 0]; state.ack = 0;
+    state.copies = 0; state.queue = [];
     const n = slotCount();
     state.ring = Array.from({ length: n }, (_, i) => ({ state: "FREE", seq: 0, sf: i }));
     state.dma = Array.from({ length: n }, (_, i) => ({ state: "FREE", seq: 0, sf: i }));
@@ -276,110 +300,201 @@
     render();
   }
 
-  function activeStage(id) {
-    ["st-effect", "st-paint", "st-ring", "st-encode", "st-render"].forEach((x) =>
-      $(x).classList.toggle("active", x === id));
-    $("paintProc").classList.toggle("active", id === "st-paint");
-    $("renderProc").classList.toggle("active", id === "st-render");
+  function activeTaskOf(phase) {
+    return ["effect", "paint", "paint", "encode", "render", "render"][phase];
   }
 
   function step() {
     const act = state.phase;
-    if (state.phase === 0) {
+    if (act === 0) {
       state.pool = state.frame % 2;
+      state.lastPool = state.pool;
       state.poolSeq[state.pool] = state.frame + 1;
-    } else if (state.phase === 1) {
+    } else if (act === 1) {
       for (let i = 0; i < state.sf; i++) {
         state.ring[i] = { state: "READY", seq: state.frame + 1, sf: i };
       }
-      // subframe 4：第 5 格留空（headroom）
-      for (let i = state.sf; i < state.ring.length; i++) state.ring[i].state = "FREE";
-    } else if (state.phase === 2) {
+    } else if (act === 2) {
       state.ack = state.frame + 1;
-      state.pool = -1;              // 交還 pool，下一幀再寫
-    } else if (state.phase === 3) {
+      state.pool = -1;
+    } else if (act === 3) {
       for (let i = 0; i < state.sf; i++) {
         state.dma[i] = { state: "READY", seq: state.frame + 1, sf: i };
         state.ring[i].state = "INFLIGHT";
         state.copies++;
         if (state.queue.length < MAX_Q) state.queue.push(i);
       }
-    } else if (state.phase === 4) {
+    } else if (act === 4) {
       state.queue = [];
       for (let i = 0; i < state.sf; i++) state.dma[i].state = "BUSY";
-    } else if (state.phase === 5) {
+    } else if (act === 5) {
       for (let i = 0; i < state.sf; i++) {
         state.dma[i].state = "FREE";
         state.ring[i].state = "FREE";
       }
-      state.led = true;
       state.frame++;
-      setTimeout(() => { state.led = false; render(); }, 260);
     }
-
     state.last = act;
     state.step++;
     state.phase = (state.phase + 1) % 6;
     render();
   }
 
+  function card(html, cls, accent) {
+    return `<div class="card ${cls}"${accent ? ` style="--accent:${accent}"` : ""}>${html}</div>`;
+  }
+
   function render() {
     const n = slotCount();
-    $("cfgline").textContent =
-      `${state.px} px · ${state.sf} 子幀 · 環 ${n} 格 × ${ringSlotBytes()} B = ${fmtKB(n * ringSlotBytes())}`;
-    $("nsf").textContent = String(state.sf);
-    $("nring").textContent = String(n);
-    $("ndma").textContent = String(n);
-    $("nframe").textContent = String(state.frame);
-    $("ncopies").textContent = String(state.copies);
-    $("ncpf").textContent = String(state.sf);
-    $("ringInfo").textContent =
-      `每格 64 B 前綴（24 B 表頭＋padding）+ ${state.px * 4} B payload = ${ringSlotBytes()} B；共 ${fmtKB(n * ringSlotBytes())}`;
-    $("poolAmeta").textContent = `seq ${state.poolSeq[0] || "—"} · ${state.pool === 0 ? "使用中" : (state.ack >= state.poolSeq[0] && state.poolSeq[0] ? "已 ack" : "待用")}`;
-    $("poolBmeta").textContent = `seq ${state.poolSeq[1] || "—"} · ${state.pool === 1 ? "使用中" : (state.ack >= state.poolSeq[1] && state.poolSeq[1] ? "已 ack" : "待用")}`;
-    $("poolA").classList.toggle("active", state.pool === 0);
-    $("poolB").classList.toggle("active", state.pool === 1);
+    const active = state.last >= 0 ? activeTaskOf(state.last) : null;
+    const accent = active ? COLORS[active] : null;
+
+    $("cfgline").textContent = `${state.px} px · ${state.sf} 子幀 · ring ${n} × ${ringSlotBytes()} B = ${fmtKB(n * ringSlotBytes())}`;
+    $("nsf").textContent = state.sf;
+    $("nring").textContent = n;
+    $("ndma").textContent = n;
+    $("nframe").textContent = state.frame;
+    $("ncopies").textContent = state.copies;
+    $("ncpf").textContent = state.sf;
+    $("ringCount").textContent = n + " 份";
+    $("dmaCount").textContent = n + " 份";
+
+    // pools
+    $("poolCards").innerHTML = [0, 1].map((i) => {
+      const seq = state.poolSeq[i];
+      const inUse = state.pool === i || (state.last >= 0 && state.last <= 2 && state.lastPool === i);
+      const st = inUse ? "使用中" : (seq && state.ack >= seq ? "已 ack" : "待用");
+      const cls = inUse ? "active free" : (seq && state.ack >= seq ? "ready" : "free");
+      return card(`<div class="top"><b>pool ${i === 0 ? "A" : "B"}</b><span class="st">${seq ? "seq " + seq : "空"}</span></div>
+        <div class="sub">Σnv × 2 B · ${st}</div>`, cls, inUse ? accent : null);
+    }).join("");
 
     // ring
-    $("ringSlots").innerHTML = state.ring.map((s, i) => {
+    $("ringCards").innerHTML = state.ring.map((s, i) => {
       const st = s.state.toLowerCase();
-      const sub = state.sf > 1 && i < state.sf ? `<span class="pill">sf ${i + 1}</span>` : "";
-      return `<div class="slot ${st}"><span><b>slot ${i}</b> ${sub}</span><span class="seq">seq ${s.seq || "—"} · ${s.state}</span></div>`;
+      const activeRing = state.last !== -1 && (state.last === 1 || state.last === 3 || state.last === 5) && i < state.sf;
+      return card(`<div class="top"><b>slot ${i}</b><span class="st">${s.state}</span></div>
+        <div class="sub">${state.sf > 1 && i < state.sf ? "sf " + (i + 1) + " · " : ""}seq ${s.seq || "—"} · 64B+${state.px * 4}B</div>`,
+        st + (activeRing ? " active" : ""), activeRing ? accent : null);
     }).join("");
 
     // dma
-    $("dmaSlots").innerHTML = state.dma.map((s, i) => {
+    $("dmaCards").innerHTML = state.dma.map((s, i) => {
       const st = s.state.toLowerCase();
-      return `<div class="slot ${st}"><span><b>DMA ${i}</b></span><span class="seq">seq ${s.seq || "—"} · ${s.state}</span></div>`;
+      const activeDma = state.last !== -1 && (state.last === 3 || state.last === 4 || state.last === 5) && i < state.sf;
+      return card(`<div class="top"><b>DMA ${i}</b><span class="st">${s.state}</span></div>
+        <div class="sub">seq ${s.seq || "—"} · 編碼後 bus word</div>`,
+        st + (activeDma ? " active" : ""), activeDma ? accent : null);
     }).join("");
 
     // queue
-    let q = "";
-    for (let i = 0; i < MAX_Q; i++) {
+    $("queue").innerHTML = Array.from({ length: MAX_Q }, (_, i) => {
       const v = state.queue[i];
-      q += `<div class="q ${v !== undefined ? "filled" : ""}">${v !== undefined ? "S" + v : ""}</div>`;
+      const hot = state.last === 3 || state.last === 4;
+      return `<div class="q ${v !== undefined ? "f" : ""}"${hot && v !== undefined ? ` style="box-shadow:0 0 8px ${COLORS[hot ? "encode" : "render"]}"` : ""}>${v !== undefined ? "S" + v : ""}</div>`;
+    }).join("");
+    $("queueLegend").textContent = state.queue.length
+      ? `${state.queue.length} 項：${state.queue.map((x) => "S" + x).join(" ")}`
+      : "— 空";
+
+    // snapshot
+    $("snapCards").innerHTML = card(`<div class="top"><b>snapshot</b><span class="st">0 份</span></div>
+      <div class="sub">未要求（0xF06B 預覽時才 copy）</div>`, "free");
+
+    // task active
+    for (const [k, fn] of Object.entries(TASK_EL)) fn().classList.toggle("active", active === k);
+
+    // groups active + accent
+    const groupIds = ["grp-pool", "grp-ring", "grp-dma", "grp-queue", "grp-snap"];
+    for (const id of groupIds) {
+      const el = $(id);
+      el.classList.remove("active");
+      el.style.removeProperty("--accent");
     }
-    $("queue").innerHTML = q;
+    if (state.last >= 0) {
+      for (const [, target] of ARROWS[state.last]) {
+        const el = $(target);
+        el.classList.add("active");
+        el.style.setProperty("--accent", accent);
+      }
+    }
 
-    // leds
-    $("leds").innerHTML = Array.from({ length: 8 }, () => `<span class="led ${state.led ? "on" : ""}"></span>`).join("");
-
-    // step text（顯示「剛剛完成」那一步，數字才對得上）
-    const done = state.last;
-    if (done >= 0) {
-      const p = PHASES[done];
+    // step text
+    if (state.last >= 0) {
       $("stepno").textContent = "STEP " + state.step;
-      $("steptext").textContent = p.tag;
-      $("extra").textContent = p.text();
+      $("steptag").textContent = PHASES[state.last].tag;
+      $("steptext").textContent = PHASES[state.last].text();
     } else {
       $("stepno").textContent = "STEP 0";
-      $("steptext").textContent = "按「下一步」開始。";
-      $("extra").textContent = "每按一次只做一個 handoff，方便對照 buffer 狀態。";
+      $("steptag").textContent = "按「下一步」開始";
+      $("steptext").textContent = "每按一次只做一個 handoff；箭嘴會指去正在用的 buffer。";
     }
 
-    // stage highlight
-    const map = ["st-effect", "st-paint", "st-paint", "st-encode", "st-render", "st-render"];
-    activeStage(done >= 0 ? map[done] : "st-effect");
+    requestAnimationFrame(drawArrows);
+  }
+
+  function drawArrows() {
+    const svg = $("arrows");
+    const diagram = $("diagram");
+    const dr = diagram.getBoundingClientRect();
+    svg.setAttribute("viewBox", `0 0 ${dr.width} ${dr.height}`);
+    while (svg.firstChild) svg.removeChild(svg.firstChild);
+
+    const defs = document.createElementNS(NS, "defs");
+    for (const [k, color] of Object.entries(COLORS)) {
+      const m = document.createElementNS(NS, "marker");
+      m.setAttribute("id", "ah-" + k);
+      m.setAttribute("markerWidth", "8");
+      m.setAttribute("markerHeight", "8");
+      m.setAttribute("refX", "7");
+      m.setAttribute("refY", "4");
+      m.setAttribute("orient", "auto");
+      const p = document.createElementNS(NS, "path");
+      p.setAttribute("d", "M0,0 L8,4 L0,8 z");
+      p.setAttribute("fill", color);
+      m.appendChild(p);
+      defs.appendChild(m);
+    }
+    svg.appendChild(defs);
+
+    if (state.last < 0) return;
+    const arrs = ARROWS[state.last];
+    const accent = COLORS[activeTaskOf(state.last)];
+
+    arrs.forEach(([task, target, label], i) => {
+      const sEl = TASK_EL[task]();
+      const tEl = $(target);
+      if (!sEl || !tEl) return;
+      const sr = sEl.getBoundingClientRect();
+      const tr = tEl.getBoundingClientRect();
+      const sx = sr.right - dr.left;
+      const sy = sr.top + sr.height / 2 - dr.top + (i - (arrs.length - 1) / 2) * 8;
+      const tx = tr.left - dr.left + 4;
+      const ty = tr.top - dr.top + 22 + i * 10;
+      const dx = Math.max(36, (tx - sx) * 0.55);
+      const d = `M ${sx} ${sy} C ${sx + dx} ${sy}, ${tx - dx} ${ty}, ${tx} ${ty}`;
+
+      const path = document.createElementNS(NS, "path");
+      path.setAttribute("d", d);
+      path.setAttribute("fill", "none");
+      path.setAttribute("stroke", accent);
+      path.setAttribute("stroke-width", "2");
+      path.setAttribute("stroke-linecap", "round");
+      path.setAttribute("opacity", "0.9");
+      path.setAttribute("marker-end", `url(#ah-${task})`);
+      path.setAttribute("class", "arrow");
+      svg.appendChild(path);
+
+      const text = document.createElementNS(NS, "text");
+      text.setAttribute("x", (sx + tx) / 2);
+      text.setAttribute("y", (sy + ty) / 2 - 5);
+      text.setAttribute("fill", accent);
+      text.setAttribute("font-size", "10");
+      text.setAttribute("font-family", "ui-monospace,monospace");
+      text.setAttribute("text-anchor", "middle");
+      text.textContent = `${task} · ${label}`;
+      svg.appendChild(text);
+    });
   }
 
   $("next").addEventListener("click", step);
@@ -390,17 +505,22 @@
     state.playing = !state.playing;
     $("play").textContent = state.playing ? "⏸ 暫停" : "▶ 播放";
   });
+  window.addEventListener("resize", () => requestAnimationFrame(drawArrows));
 
-  // 可分享：?px=9600&sf=4
   const params = new URLSearchParams(location.search);
   if (params.get("px")) state.px = Number(params.get("px")) || state.px;
   if (params.get("sf") === "4") state.sf = 4;
 
-  state.timer = setInterval(() => {
-    if (state.playing) step();
-  }, 1000);
-
+  state.timer = setInterval(() => { if (state.playing) step(); }, 1100);
   reset();
+
+  // ?step=N：直接跳到第 N 步（方便截圖／討論）
+  const jump = Number(params.get("step")) || 0;
+  if (jump > 0) {
+    state.playing = false;
+    $("play").textContent = "▶ 播放";
+    for (let i = 0; i < jump; i++) step();
+  }
 })();
 </script>
 </body>
