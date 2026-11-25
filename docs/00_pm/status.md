@@ -8348,3 +8348,52 @@ host test 同 build，抓到兩個真缺陷：
 
 註：WSL 的 git `core.autocrlf` 未設（Windows 是 `true`），所以在 WSL 看 `git diff` 會見到
 全部檔案「已修改」——那是 CRLF/LF 假象（`--ignore-cr-at-eol` 之後 0 差異）。**唔好喺 WSL commit**。
+
+### 7.240 2026-11-25（WSL 的 ESP-IDF 由 v6.0.3 升到 v6.1.1；6.1.1 建置驗證）
+
+**環境**：WSL Ubuntu 24.04.1（WSL2、20 核、15.6 GB）。升級前 `~/esp/esp-idf` = v6.0.3
+（commit `76f5dedd`）。repo 自己的 `.idf/esp-idf`（Windows）本身已經係 v6.1.1
+（`051e4c4e`），所以今次係把 WSL 那邊對齊。
+
+**做法**（shallow clone，所以用 tag 深度抓，唔重 clone）：
+
+```bash
+cd ~/esp/esp-idf
+git fetch --depth=1 origin refs/tags/v6.1.1:refs/tags/v6.1.1
+git checkout -f v6.1.1
+git submodule update --init --recursive --depth 1
+./install.sh esp32c3,esp32p4,esp32s3,esp32c6
+. ./export.sh && idf.py --version     # → ESP-IDF v6.1.1
+```
+
+工具鏈**冇重新下載**：`~/.espressif` 本身已經有 6.1 需要的 `esp-15.2.0_20251204` 同
+`python_env/idf6.1_py3.12_env`，所以 `install.sh` 只係核對。
+
+**回退**（記錄用）：`git -C ~/esp/esp-idf checkout 76f5dedd && git submodule update --init --recursive`。
+
+**6.1.1 建置驗證**（真 build，唔係只編譯）：
+
+| 板 | 結果 | image | 對比 6.0.3 |
+|---|---|---|---|
+| ESP32-S3-Matrix | 建置完成（81 s） | 675.8 KB | +9,584 B |
+| ESP32-P4-ETH | 建置完成（181 s） | 1.0 MB | +30,992 B |
+
+- `make.py doctor`：`ESP-IDF /home/user/esp/esp-idf (v6.1.1)`、`idf.py ESP-IDF v6.1.1`、`esptool v5.7.0`
+- build log **冇 deprecation**；只剩兩個本來就有的 warning（`nc4_line_net.c` 的
+  `ws_producer`／`s_ws_http` unused；vendor `esp_hosted` 的 `start_req` unused）
+
+**6.1 的 breaking changes 對本專案的影響（逐項查過）**：
+
+| 6.1 breaking change | 本專案 |
+|---|---|
+| MQTT 移去 component manager | 冇用 `esp_mqtt`／`mqtt_client` |
+| 周邊 public header 移除 FreeRTOS 依賴 | 兩個 S3／P4 build 都過 |
+| GPIO 巨集改名／移除（`MAX_PAD_GPIO_NUM` 等） | 冇用 |
+| LCD 色彩 API 改 FourCC（取代 `bits_per_pixel`） | 專案冇用 `bits_per_pixel` |
+| SPI 唔再收 `ESP_INTR_FLAG_SHARED` | 冇用 |
+| `soc/uart_channel.h` 移除 | 冇 include |
+| **ESP32-P4 預設 revision 改成 v3.0** | 已經有 `ports/_profiles/p4-rev3.defaults`／`p4-pre-rev3.defaults`；舊板要 `CONFIG_ESP32P4_SELECTS_REV_LESS_V3=y` |
+| MbedTLS PSA 持久金鑰格式改 | 專案冇用 PSA 持久金鑰（NVS 只存設定） |
+
+註：**macOS 那邊仍然是 v6.0.3**（AGENTS.md §0.5 寫的環境）。兩邊版本唔同，記錄量測時要
+寫清楚用邊個。
