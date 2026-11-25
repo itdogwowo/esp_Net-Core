@@ -262,14 +262,15 @@
     frame: 0, phase: 0, step: 0, last: -1,
     pool: -1, lastPool: -1, poolSeq: [0, 0], ack: 0,
     ring: [], dma: [], queue: [], copies: 0,
+    ringWr: 0, dmaWr: 0, writtenRing: [], writtenDma: [], submittedDma: [],
     playing: true, timer: null,
   };
 
   const PHASES = [
     { tag: "effect 寫 pool", text: () => `effect 把新值流寫入 pool ${state.lastPool === 0 ? "A" : "B"}（seq ${state.frame + 1}）；W。` },
-    { tag: "paint 讀 pool、寫 ring", text: () => `paint 讀 pool（R）→ layout／dither → 直接寫 ${state.sf} 個環格（W）。pixel copy = 0。` },
+    { tag: "paint 讀 pool、寫 ring", text: () => `paint 讀 pool（R）→ layout／dither → 直接寫環格 ${state.writtenRing.join("、")}（W）。pixel copy = 0。` },
     { tag: "paint ack", text: () => `paint 完成 → ack(seq ${state.frame + 1})；pool 可以再用。` },
-    { tag: "encode 讀 ring、寫 DMA／queue", text: () => `encode 讀 ${state.sf} 個環格（R）→ 編碼入 DMA 槽（W）→ push queue（W）。pixel copy = ${state.sf}。` },
+    { tag: "encode 讀 ring、寫 DMA／queue", text: () => `encode 讀環格 ${state.writtenRing.join("、")}（R）→ 編碼入 DMA ${state.writtenDma.join("、")}（W）→ push queue（W）。pixel copy = ${state.sf}。` },
     { tag: "render pop queue、submit DMA", text: () => `render 由 queue 拿格索引（R）→ submit DMA（W）。` },
     { tag: "DMA done、還 ring", text: () => `DMA 完成（R done）→ reclaim；render 把環格 free（W）。` },
   ];
@@ -302,6 +303,8 @@
     state.frame = 0; state.phase = 0; state.step = 0; state.last = -1;
     state.pool = -1; state.lastPool = -1; state.poolSeq = [0, 0]; state.ack = 0;
     state.copies = 0; state.queue = [];
+    state.ringWr = 0; state.dmaWr = 0;
+    state.writtenRing = []; state.writtenDma = []; state.submittedDma = [];
     const n = slotCount();
     state.ring = Array.from({ length: n }, (_, i) => ({ state: "FREE", seq: 0, sf: i }));
     state.dma = Array.from({ length: n }, (_, i) => ({ state: "FREE", seq: 0, sf: i }));
@@ -321,27 +324,39 @@
       state.lastPool = state.pool;
       state.poolSeq[state.pool] = state.frame + 1;
     } else if (act === 1) {
+      // 環的 writer 游標：一格一格 round-robin，唔會永遠寫 slot 0
+      state.writtenRing = [];
+      const n = state.ring.length;
       for (let i = 0; i < state.sf; i++) {
-        state.ring[i] = { state: "READY", seq: state.frame + 1, sf: i };
+        const idx = (state.ringWr + i) % n;
+        if (state.ring[idx].state !== "FREE") break;      // 環滿：停手，下一輪再試
+        state.ring[idx] = { state: "READY", seq: state.frame + 1, sf: i };
+        state.writtenRing.push(idx);
       }
+      state.ringWr = (state.ringWr + state.writtenRing.length) % n;
     } else if (act === 2) {
       state.ack = state.frame + 1;
       state.pool = -1;
     } else if (act === 3) {
-      for (let i = 0; i < state.sf; i++) {
-        state.dma[i] = { state: "READY", seq: state.frame + 1, sf: i };
-        state.ring[i].state = "INFLIGHT";
+      // DMA 槽同樣 round-robin，對應後端 acquire 的 next slot
+      state.writtenDma = [];
+      const n = state.dma.length;
+      state.writtenRing.forEach((ridx, k) => {
+        const didx = (state.dmaWr + k) % n;
+        state.dma[didx] = { state: "READY", seq: state.frame + 1, sf: k };
+        state.ring[ridx].state = "INFLIGHT";
         state.copies++;
-        if (state.queue.length < MAX_Q) state.queue.push(i);
-      }
+        if (state.queue.length < MAX_Q) state.queue.push(ridx);
+        state.writtenDma.push(didx);
+      });
+      state.dmaWr = (state.dmaWr + state.writtenDma.length) % n;
     } else if (act === 4) {
       state.queue = [];
-      for (let i = 0; i < state.sf; i++) state.dma[i].state = "BUSY";
+      state.submittedDma = [...state.writtenDma];
+      for (const i of state.submittedDma) state.dma[i].state = "BUSY";
     } else if (act === 5) {
-      for (let i = 0; i < state.sf; i++) {
-        state.dma[i].state = "FREE";
-        state.ring[i].state = "FREE";
-      }
+      for (const i of state.writtenDma) state.dma[i].state = "FREE";
+      for (const i of state.writtenRing) state.ring[i].state = "FREE";
       state.frame++;
     }
     state.last = act;
@@ -382,16 +397,16 @@
     // ring
     $("ringCards").innerHTML = state.ring.map((s, i) => {
       const st = s.state.toLowerCase();
-      const activeRing = state.last !== -1 && (state.last === 1 || state.last === 3 || state.last === 5) && i < state.sf;
+      const activeRing = state.last !== -1 && (state.last === 1 || state.last === 3 || state.last === 5) && state.writtenRing.includes(i);
       return card(`<div class="top"><b>slot ${i}</b><span class="st">${s.state}</span></div>
-        <div class="sub">${state.sf > 1 && i < state.sf ? "sf " + (i + 1) + " · " : ""}seq ${s.seq || "—"} · 64B+${state.px * 4}B</div><div class="bar"><i></i></div>`,
+        <div class="sub">${state.sf > 1 && s.seq ? "sf " + (s.sf + 1) + " · " : ""}seq ${s.seq || "—"} · 64B+${state.px * 4}B</div><div class="bar"><i></i></div>`,
         st + (activeRing ? " active" : ""), activeRing ? accent : null);
     }).join("");
 
     // dma
     $("dmaCards").innerHTML = state.dma.map((s, i) => {
       const st = s.state.toLowerCase();
-      const activeDma = state.last !== -1 && (state.last === 3 || state.last === 4 || state.last === 5) && i < state.sf;
+      const activeDma = state.last !== -1 && (state.last === 3 || state.last === 4 || state.last === 5) && (state.writtenDma.includes(i) || state.submittedDma.includes(i));
       return card(`<div class="top"><b>DMA ${i}</b><span class="st">${s.state}</span></div>
         <div class="sub">seq ${s.seq || "—"} · 編碼後 bus word</div><div class="bar"><i></i></div>`,
         st + (activeDma ? " active" : ""), activeDma ? accent : null);
