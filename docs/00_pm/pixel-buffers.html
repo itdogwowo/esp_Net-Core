@@ -157,7 +157,9 @@
   粗嘅一筆係<b>具體交接</b> —— 由邊塊卡指去邊塊卡（例如 pool B → slot 2、slot 2 → DMA 1）。
   <b>任務與緩衝</b>之間只畫讀寫關係（<code>W</code>／<code>R</code>）。
   <code>owner</code>＝建立／擁有 lifetime。
-  <br><span class="warn">每格 = 一個 frame_interval（20 ms 或 5 ms）；每層的工作都縮在一個 tick 內完成，圖上只顯示 tick 邊界的狀態。
+  <br><span class="warn">一格 tick = 一個 frame_interval（20 ms 或 5 ms）。每個 tick 內部拆成<b>有序微步</b>：
+  reclaim → submit → encode 讀環格 → encode 寫 DMA → paint 逐格交 → effect。<b>「⏭ 單步」= 行一個微步</b>，
+  所以 paint 交 4 格會分 4 步見到、encode 亦分兩步（先 peek 再寫 DMA）。
   每個 buffer 都照實作輪替：effect pool A／B 交替、DMA 槽 round-robin、ready queue 係環（讀寫指標一路向前）。</span>
 </div>
 
@@ -171,10 +173,10 @@
   </label>
   <label>速度
     <select id="speed">
-      <option value="500">很慢（每 500 ms 一格）</option>
-      <option value="300" selected>慢（300 ms）</option>
-      <option value="150">中（150 ms）</option>
-      <option value="60">快（60 ms）</option>
+      <option value="500">很慢（每微步 500 ms）</option>
+      <option value="300" selected>慢（每步 300 ms）</option>
+      <option value="150">中（每步 150 ms）</option>
+      <option value="60">快（每步 60 ms）</option>
     </select>
   </label>
   <button class="primary" id="play">▶ 播放</button>
@@ -368,11 +370,10 @@
   const COLORS = { effect: "#4c9aff", paint: "#39d0d8", encode: "#f2b84b", render: "#45d483" };
 
   // ── 實作常數（firmware 對應）──
-  const DMA_SLOTS   = 3;    // drv_i80：NC_I80_DRV_SLOTS_MAX（3 = 三緩衝）
-  const QUEUE_MAX   = 16;   // nc_render_task.c：xQueueCreate(NC_PX_MAX_LANES * 2, sizeof(px_ready_t))
-  const DMA_TICKS   = 1;    // 一次出線時間：16×600 ≈ 18 ms、16×150 ≈ 4.5 ms，都係一個 frame_interval 之內
+  const DMA_SLOTS = 3;   // drv_i80：NC_I80_DRV_SLOTS_MAX（三緩衝）
+  const QUEUE_MAX = 16;  // nc_render_task.c：xQueueCreate(NC_PX_MAX_LANES * 2, …)
+  const DMA_TICKS = 1;   // 一次出線時間 ≈ 一個 frame_interval
 
-  // ── 場景（對應 project 的真實設定）──
   const PRESETS = {
     p9600: { px: 9600, ns: 1, frameMs: 20, ring: 3 },
     p2400: { px: 2400, ns: 4, frameMs: 5,  ring: 5 },
@@ -381,13 +382,14 @@
 
   const S = {
     preset: "p9600", px: 9600, ns: 1, frameMs: 20, ringN: 3,
-    tick: 0, msPerTick: 300, acc: 0, playing: false,
+    tick: 0, msPerStep: 150, acc: 0, playing: false,
     frameSeq: 0, commitSeq: 0, wr: 0, lastSeq: 0,
     poolNext: 0, dmaNext: 0,
     pools: [], ring: [], dma: [],
     queue: new Array(QUEUE_MAX).fill(null), qrd: 0, qwr: 0,
     effPending: null,
     links: [],
+    gen: null, cur: null,
     st: { commits: 0, encoded: 0, skipped: 0, submitted: 0, pushed: 0, popped: 0,
           busy: 0, starved: 0, effWait: 0, reclaimed: 0, peakQ: 0 },
     act: {},
@@ -395,18 +397,16 @@
     log: [],
   };
 
-  function slotBytes(px) { const used = 64 + px * 4; return Math.ceil(used / 64) * 64; }
-  function fmtKB(n) { return (n / 1024).toFixed(1) + " KB"; }
-  function clamp01(v) { return Math.max(0, Math.min(1, v)); }
-  function pct(v) { return (clamp01(v) * 100).toFixed(0) + "%"; }
-  function frameLabel(frame, sf) { return S.ns > 1 ? `F${frame}.${sf + 1}` : `F${frame}`; }
-  function qlen() { return S.qwr - S.qrd; }
-  function cid(kind, i) { return `c-${kind}-${i}`; }
+  const slotBytes = (px) => Math.ceil((64 + px * 4) / 64) * 64;
+  const fmtKB = (n) => (n / 1024).toFixed(1) + " KB";
+  const pct = (v) => (Math.max(0, Math.min(1, v)) * 100).toFixed(0) + "%";
+  const frameLabel = (f, sf) => (S.ns > 1 ? `F${f}.${sf + 1}` : `F${f}`);
+  const qlen = () => S.qwr - S.qrd;
+  const cid = (kind, i) => `c-${kind}-${i}`;
+  const poolName = (i) => (i === 0 ? "A" : "B");
 
-  // 一次「邊塊去邊塊」的短動畫：ttl 個 tick 之後消失
-  function link(from, to, color, label, dash) {
-    // 單步時只留一步（睇得清「呢一步邊塊去邊塊」）；連續播放留兩步免得閃得太快
-    S.links.push({ from, to, color, label, ttl: S.playing ? 2 : 1, dash: !!dash });
+  function link(from, to, color, label) {
+    S.links.push({ from, to, color, label, ttl: 2 });
   }
 
   function reset() {
@@ -415,75 +415,75 @@
     S.tick = 0; S.frameSeq = 0; S.commitSeq = 0; S.wr = 0; S.lastSeq = 0;
     S.poolNext = 0; S.dmaNext = 0;
     S.pools = [0, 1].map(() => ({ state: "free", frame: 0 }));
-    S.ring = Array.from({ length: S.ringN }, () => ({ state: "free", seq: 0, frame: 0, sf: 0, hold: -1, skip: 0 }));
-    S.dma = Array.from({ length: DMA_SLOTS }, () => ({ state: "free", seq: 0, ring: -1, frame: 0, sf: 0, left: 0 }));
+    S.ring = Array.from({ length: S.ringN }, () => ({ state: "free", seq: 0, frame: 0, sf: 0, hold: -1, skip: 0, prog: 0 }));
+    S.dma = Array.from({ length: DMA_SLOTS }, () => ({ state: "free", seq: 0, ring: -1, frame: 0, sf: 0, left: 0, justFree: 0 }));
     S.queue = new Array(QUEUE_MAX).fill(null); S.qrd = 0; S.qwr = 0;
     S.effPending = null; S.links = [];
+    S.gen = null; S.cur = null; S.acc = 0;
     S.st = { commits: 0, encoded: 0, skipped: 0, submitted: 0, pushed: 0, popped: 0,
              busy: 0, starved: 0, effWait: 0, reclaimed: 0, peakQ: 0 };
     S.act = {};
     S.lastPaint = ""; S.lastEncode = ""; S.lastRender = ""; S.lastEffect = ""; S.lastReclaim = "";
-    S.log = []; S.acc = 0;
+    S.log = [];
     $("play").textContent = S.playing ? "⏸ 暫停" : "▶ 播放";
     render();
   }
 
-  // ══════════ 一個 tick（= 一個 frame_interval）══════════
-  // 次序：reclaim → push（pop→submit）→ encode（peek→DMA→push）→ paint（交 ns 格）→ effect（出下一幀）
-  function tick() {
+  // ══════════ 一個 tick = 一串有序微步（generator）══════════
+  // 每個 yield 就係一個「單步」。所以 paint 交 4 格會分開 4 步見到，
+  // encode 亦分「讀環格」同「寫 DMA 槽」兩步。
+  function* tickGen() {
     S.tick++;
-    const act = { effect: false, paint: false, encode: false, render: false };
+    S.cur = { n: S.tick, lines: [] };
+    const log = (s) => S.cur.lines.push(s);
 
-    // 0）短動畫同假消費閃燈一齊倒數
-    S.links = S.links.filter((l) => (--l.ttl) > 0);
-    S.ring.forEach((r) => { if (r.skip > 0) r.skip--; });
-    S.dma.forEach((d) => { if (d.justFree > 0) d.justFree--; });
-
-    // ① reclaim：DMA 完成 → 還 DMA 槽 + release 環格（render 的 push loop 先做）
-    S.lastReclaim = "";
-    S.dma.forEach((d, di) => {
-      if (d.state !== "dma") return;
+    // ① reclaim：每個送完的 DMA 一格微步
+    for (let i = 0; i < S.dma.length; i++) {
+      const d = S.dma[i];
+      if (d.state !== "dma") continue;
       d.left--;
-      if (d.left > 0) return;
+      if (d.left > 0) continue;
       const wasFrame = d.frame ? frameLabel(d.frame, d.sf) : "—";
       const wasRing = d.ring;
       if (wasRing >= 0) {
-        S.lastReclaim = `DMA ${di} 送完 ${wasFrame} → 環 slot ${wasRing} 還返 FREE、DMA ${di} 變 FREE`;
-      }
-      if (d.ring >= 0) {
-        const r = S.ring[d.ring];
-        r.state = "free"; r.seq = 0; r.hold = -1; r.frame = 0; r.sf = 0;
+        const r = S.ring[wasRing];
+        r.state = "free"; r.seq = 0; r.hold = -1; r.frame = 0; r.sf = 0; r.prog = 0;
       }
       d.state = "free"; d.seq = 0; d.ring = -1; d.frame = 0; d.sf = 0; d.justFree = 2;
       S.st.reclaimed++;
-      act.render = true;
-    });
+      S.act = { render: true };
+      S.lastRender = `reclaim：DMA ${i} 送完 ${wasFrame}`;
+      log(`reclaim：DMA ${i} 送完 ${wasFrame}` + (wasRing >= 0 ? ` → 環 slot ${wasRing} 還返 FREE、DMA ${i} 變 FREE` : ""));
+      yield;
+    }
 
-    // ② push loop：由環的讀指標 pop 一項 → submit（FreeRTOS queue 係環，讀寫指標一直向前）
+    // ② push loop：pop 一個索引 → submit
     if (qlen() > 0) {
       const item = S.queue[S.qrd % QUEUE_MAX];
       S.queue[S.qrd % QUEUE_MAX] = null;
       S.qrd++;
       S.st.popped++;
       const d = S.dma[item.dma];
+      S.act = { render: true };
       if (d.state === "ready") {
         d.state = "dma"; d.left = DMA_TICKS;
         S.st.submitted++;
         S.lastRender = `pop ${frameLabel(item.frame, item.sf)} → submit DMA ${item.dma}`;
+        log(`render：由 queue 讀指標 pop 一項 {lane,slot=${item.dma},seq} → submit DMA ${item.dma}（${frameLabel(item.frame, item.sf)}）出線`);
         link(cid("dma", item.dma), "grp-hw", COLORS.render, frameLabel(item.frame, item.sf));
-        act.render = true;
       } else {
         S.st.starved++;
         S.lastRender = `pop 到 DMA ${item.dma} 但槽已無效（掉一次）`;
+        log(`render：pop 到 DMA ${item.dma} 但個槽已經唔係 ready（掉一次）`);
       }
-    } else {
-      S.lastRender = act.render ? "（今個 tick 只做 reclaim，冇嘢 submit）" : "等 queue（encode 未 push）";
+      yield;
     }
 
-    // ③ encode tick：peek 最新一格（舊 READY 假消費）→ 寫 DMA 槽（round-robin）→ push 索引
+    // ③ encode：先「讀環格」（peek + 假消費），再「寫 DMA 槽」
     if (qlen() >= QUEUE_MAX) {
       S.st.starved++;
-      S.lastEncode = "queue 滿 → 呢個 tick 唔 acquire";
+      S.act = {}; S.lastEncode = "queue 滿 → 呢個 tick 唔 acquire";
+      log("encode：queue 滿（16 項）→ 呢個 tick 唔 acquire");
     } else {
       let newest = -1;
       for (let i = 0; i < S.ring.length; i++) {
@@ -492,109 +492,164 @@
       }
       if (newest < 0) {
         S.st.starved++;
-        S.lastEncode = "starved：冇新 READY 格";
+        S.act = {}; S.lastEncode = "starved：冇新 READY 格";
+        log("encode：冇新 READY 格（starved）");
       } else if (S.ring[newest].seq === S.lastSeq) {
         S.st.starved++;
-        S.lastEncode = "starved：最新格同上一格一樣（post_seq）";
+        S.act = {}; S.lastEncode = "starved：最新格同上一格一樣（post_seq）";
+        log("encode：最新格已經 encode 過（post_seq 一樣）→ 呢輪 skip");
       } else {
-        // 假消費：比最新舊、仲係 READY 的格直接還原成 FREE（唔會補播）
-        let fake = 0;
+        // 3a：peek 最新 + 假消費舊格
         const fakeNames = [];
         for (let i = 0; i < S.ring.length; i++) {
           if (i === newest || S.ring[i].state !== "ready" || S.ring[i].hold >= 0) continue;
           const r = S.ring[i];
           fakeNames.push(`slot ${i}(${frameLabel(r.frame, r.sf)})`);
-          r.state = "free"; r.skip = 2; r.hold = -1;
+          r.state = "free"; r.skip = 2; r.hold = -1; r.prog = 0;
           r.seq = 0; r.frame = 0; r.sf = 0;
-          S.st.skipped++; fake++;
+          S.st.skipped++;
         }
-        // DMA 槽：由 dmaNext 開始搵第一個 free（同 i80 的 round-robin 一致）
+        const rr = S.ring[newest];
+        S.act = { encode: true };
+        S.lastEncode = `peek 最新 = slot ${newest}（${frameLabel(rr.frame, rr.sf)}，seq ${rr.seq}）`;
+        log(`encode：peek 最新一格 = slot ${newest}（${frameLabel(rr.frame, rr.sf)}，seq ${rr.seq}）`
+          + (fakeNames.length ? `；順手假消費 ${fakeNames.length} 格：${fakeNames.join("、")}（唔會再送）` : ""));
+        yield;
+
+        // 3b：寫 DMA 槽 + push 索引
         let slot = -1;
         for (let k = 0; k < S.dma.length; k++) {
           const idx = (S.dmaNext + k) % S.dma.length;
           if (S.dma[idx].state === "free") { slot = idx; break; }
         }
-        const r = S.ring[newest];
+        S.act = { encode: true };
         if (slot < 0) {
-          r.state = "free"; r.skip = 2; r.seq = 0; r.frame = 0; r.sf = 0; r.hold = -1;
+          rr.state = "free"; rr.skip = 2; rr.seq = 0; rr.frame = 0; rr.sf = 0; rr.hold = -1; rr.prog = 0;
           S.st.starved++;
           S.lastEncode = "全部 DMA 槽在飛 → release 嗰格（starved）";
+          log("encode：三個 DMA 槽都仲在飛 → release 嗰格環格，呢輪唔送（starved）");
         } else {
           S.dmaNext = (slot + 1) % S.dma.length;
-          S.dma[slot] = { state: "ready", seq: r.seq, ring: newest, frame: r.frame, sf: r.sf, left: 0 };
-          r.hold = slot;
-          S.queue[S.qwr % QUEUE_MAX] = { dma: slot, seq: r.seq, frame: r.frame, sf: r.sf };
+          S.dma[slot] = { state: "ready", seq: rr.seq, ring: newest, frame: rr.frame, sf: rr.sf, left: 0, justFree: 0 };
+          rr.hold = slot;
+          S.queue[S.qwr % QUEUE_MAX] = { dma: slot, seq: rr.seq, frame: rr.frame, sf: rr.sf };
           S.qwr++;
-          S.lastSeq = r.seq;
+          S.lastSeq = rr.seq;
           S.st.encoded++; S.st.pushed++;
           S.st.peakQ = Math.max(S.st.peakQ, qlen());
-          S.lastEncode = `peek 最新 = slot ${newest}（${frameLabel(r.frame, r.sf)}，seq ${r.seq}）→ 寫 DMA ${slot}`
-            + (fake ? `；順手假消費 ${fake} 格：${fakeNames.join("、")}（唔會再送）` : "");
-          link(cid("ring", newest), cid("dma", slot), COLORS.encode, frameLabel(r.frame, r.sf));
-          act.encode = true;
+          S.lastEncode = `寫入 DMA ${slot}，push 索引（${frameLabel(rr.frame, rr.sf)}）`;
+          log(`encode：編成 ${frameLabel(rr.frame, rr.sf)} → 寫 DMA ${slot}（seq ${rr.seq}）；push 12 B 索引落 queue`);
+          link(cid("ring", newest), cid("dma", slot), COLORS.encode, frameLabel(rr.frame, rr.sf));
         }
+        yield;
       }
     }
 
-    // ④ paint：有新視覺幀就一次交 ns 格（begin → 寫 → commit，全在同一個 tick）
+    // ④ paint：逐個子幀一格微步（前一個 commit 完，下一個開始填）
     if (S.effPending !== null) {
       const p = S.effPending;
-      let done = 0, broke = false;
       const committed = [];
+      let prev = -1, broke = false;
       for (let sf = 0; sf < S.ns; sf++) {
         const i = S.wr % S.ringN;
         if (S.ring[i].state !== "free") { S.st.busy++; broke = true; break; }
-        S.ring[i] = { state: "ready", seq: ++S.commitSeq, frame: p.id, sf, hold: -1, skip: 0 };
+        let line = "paint：";
+        if (prev >= 0) {
+          S.ring[prev].state = "ready";
+          S.ring[prev].seq = ++S.commitSeq;
+          S.ring[prev].prog = 1;
+          S.st.commits++;
+          committed.push(`slot ${prev}(${frameLabel(p.id, prevSf)})`);
+          line += `commit slot ${prev}（${frameLabel(p.id, prevSf)}）→ READY；`;
+        }
+        S.ring[i] = { state: "filling", seq: 0, frame: p.id, sf, hold: -1, skip: 0, prog: 1 };
+        prev = i; var prevSf = sf;
         S.wr = (i + 1) % S.ringN;
-        S.st.commits++; done++;
-        committed.push(`slot ${i}(${frameLabel(p.id, sf)})`);
+        S.act = { paint: true };
+        S.lastPaint = `讀 pool ${poolName(p.pool)}（F${p.id}）→ 填 slot ${i}（子幀 ${sf + 1}/${S.ns}）`;
+        line += `開始填 slot ${i}（子幀 ${sf + 1}/${S.ns}，${frameLabel(p.id, sf)}）`;
+        log(line);
         link(cid("pool", p.pool), cid("ring", i), COLORS.paint, S.ns > 1 ? "" : frameLabel(p.id, sf));
+        yield;
       }
-      if (done > 0) act.paint = true;
+      if (prev >= 0) {
+        S.ring[prev].state = "ready";
+        S.ring[prev].seq = ++S.commitSeq;
+        S.ring[prev].prog = 1;
+        S.st.commits++;
+        committed.push(`slot ${prev}(${frameLabel(p.id, prevSf)})`);
+        log(`paint：commit slot ${prev}（${frameLabel(p.id, prevSf)}）→ READY` + (broke ? "；環滿，停手等下一輪" : "；4 格交齊，pool 可以 ack"));
+      }
+      S.act = { paint: true };
       if (!broke) {
         S.pools[p.pool].state = "free";
         S.effPending = null;
-        S.lastPaint = `讀 pool ${p.pool === 0 ? "A" : "B"}（F${p.id}）→ 一次過交 ${done} 格：${committed.join("、")}；pool ${p.pool === 0 ? "A" : "B"} 放返（ack）`;
+        S.lastPaint = `讀 pool ${poolName(p.pool)}（F${p.id}）→ 交 ${committed.length} 格：${committed.join("、")}；pool ${poolName(p.pool)} 放返（ack）`;
+        log(`paint：由 pool ${poolName(p.pool)} 一次過寫 ${committed.length} 格（begin→寫→commit，逐格做）：${committed.join("、")}；之後 ack 令 pool ${poolName(p.pool)} 可以重用`);
       } else {
-        S.lastPaint = `環滿：只交咗 ${done} 格（${committed.join("、")}）就停，busy++ 下一輪再試；已交的照用`;
+        S.lastPaint = `環滿：只交咗 ${committed.length} 格（${committed.join("、")}）就停，busy++ 下一輪再試`;
+        log(`paint：環滿，只交咗 ${committed.length} 格就停（busy++，已交的照用）`);
       }
-    } else if (!act.paint) {
-      S.lastPaint = "等新視覺幀（effect）";
+      yield;
+    } else {
+      S.act = {}; S.lastPaint = "等新視覺幀（effect）";
     }
 
-    // ⑤ effect：每 ns 個 tick 產一幀；pool 嚴格交替（s_next_slot ^= 1），揀到嗰塊未 ack 就等
+    // ⑤ effect：每 ns 個 tick 產一幀（pool 嚴格交替）
     if (S.tick % S.ns === 0) {
       const slot = S.poolNext;
+      S.act = {};
       if (S.effPending !== null) {
         S.st.effWait++;
-        S.lastEffect = `F${S.effPending.id} 已出，等 paint 交環（pool ${S.effPending.pool === 0 ? "A" : "B"} 未 ack）`;
+        S.lastEffect = `F${S.effPending.id} 已出，等 paint 交環（pool ${poolName(S.effPending.pool)} 未 ack）`;
+        log(`effect：等 paint 交環（pool ${poolName(S.effPending.pool)} 未 ack）`);
       } else if (S.pools[slot].state !== "free") {
         S.st.effWait++;
-        S.lastEffect = `等 pool ${slot === 0 ? "A" : "B"} 被 ack（另一塊正在用）`;
+        S.lastEffect = `等 pool ${poolName(slot)} 被 ack（另一塊正在用）`;
+        log(`effect：揀到 pool ${poolName(slot)} 但未 ack → 等`);
       } else {
         S.frameSeq++;
         S.pools[slot] = { state: "full", frame: S.frameSeq };
         S.effPending = { id: S.frameSeq, pool: slot };
         S.poolNext = slot ^ 1;
-        S.lastEffect = `F${S.frameSeq} → pool ${slot === 0 ? "A" : "B"}`;
-        act.effect = true;
+        S.act = { effect: true };
+        S.lastEffect = `F${S.frameSeq} → pool ${poolName(slot)}`;
+        log(`effect：算好值流 F${S.frameSeq} → 寫入 pool ${poolName(slot)}（下一輪交環；下一幀會用 pool ${poolName(S.poolNext)}）`);
       }
-    } else if (!act.effect) {
-      if (S.effPending !== null) S.lastEffect = `F${S.effPending.id} 已出，等 paint 交環`;
-      else S.lastEffect = "等下一個視覺幀";
+    } else if (S.effPending === null) {
+      S.lastEffect = "等下一個視覺幀";
     }
 
-    S.act = act;
-    S.log.push({
-      n: S.tick,
-      lines: [
-        `effect：${S.lastEffect}`,
-        `paint ：${S.lastPaint}`,
-        `encode：${S.lastEncode}`,
-        `render：${S.lastRender}`,
-      ].concat(S.lastReclaim ? [`reclaim：${S.lastReclaim}`] : []),
-    });
-    if (S.log.length > 300) S.log.shift();
+    if (!S.cur.lines.length) log("（今個 tick 冇動作：四層都在等對方）");
+  }
+
+  function finishTick() {
+    if (S.cur) {
+      S.log.push(S.cur);
+      if (S.log.length > 300) S.log.shift();
+    }
+    S.cur = null;
+    S.gen = null;
+  }
+
+  // 行一個微步（單步 / 播放都用這個）
+  function advance() {
+    S.links = S.links.filter((l) => (--l.ttl) > 0);
+    S.ring.forEach((r) => { if (r.skip > 0) r.skip--; });
+    S.dma.forEach((d) => { if (d.justFree > 0) d.justFree--; });
+    S.act = {};
+    if (!S.gen) S.gen = tickGen();
+    const r = S.gen.next();
+    if (r.done) finishTick();
+    render();
+  }
+
+  // 一次跑完整個 tick（測試／快播用）
+  function tick() {
+    if (!S.gen) S.gen = tickGen();
+    let r;
+    do { r = S.gen.next(); } while (!r.done);
+    finishTick();
     render();
   }
 
@@ -602,7 +657,7 @@
   function card(id, html, cls, accent) {
     return `<div class="card ${cls}" id="${id}"${accent ? ` style="--accent:${accent}"` : ""}>${html}</div>`;
   }
-  function bar(v) { return `<div class="bar"><i style="width:${pct(v)}"></i></div>`; }
+  const bar = (v) => `<div class="bar"><i style="width:${pct(v)}"></i></div>`;
   function markGroup(id, on, accent) {
     const el = $(id);
     if (!el) return;
@@ -613,7 +668,7 @@
   function render() {
     const sb = slotBytes(S.px);
     $("cfgline").textContent =
-      `${S.px} px · ${S.ns} 子幀 · ${S.frameMs} ms／格 · ring ${S.ringN} × ${sb} B = ${fmtKB(sb * S.ringN)} · DMA ${DMA_SLOTS} 槽`;
+      `${S.px} px · ${S.ns} 子幀 · ${S.frameMs} ms／tick · ring ${S.ringN} × ${sb} B = ${fmtKB(sb * S.ringN)} · DMA ${DMA_SLOTS} 槽`;
     $("ringMeta").innerHTML = `<b>${S.ringN} 格</b> × ${sb} B（round64(64 + px×4)）· W paint · R encode（<b>peek 最新</b>）`;
     $("tlabel").textContent = `t = ${S.tick} ticks（1 tick = ${S.frameMs} ms）`;
     $("nframe").textContent = S.frameSeq;
@@ -623,28 +678,29 @@
     $("nsubmit").textContent = S.st.submitted;
     $("npeak").textContent = S.st.peakQ;
 
-    // pools
     $("poolCards").innerHTML = S.pools.map((p, i) => {
       const writing = S.effPending !== null && S.effPending.pool === i;
-      const reading = S.act.paint && S.effPending === null && p.state === "free" ? false : false;
       const cls = p.state === "free" ? "free" : "busy";
       const label = p.state === "free" ? "free（等下一幀；paint 已 ack）"
-        : writing ? `effect 寫入 F${p.frame}（下一個 tick paint 讀）`
+        : writing ? `effect 寫入 F${p.frame}（之後 paint 讀）`
         : `F${p.frame} 等 paint 交環（未 ack）`;
       return card(cid("pool", i),
-        `<div class="top"><b>pool ${i === 0 ? "A" : "B"}</b>
+        `<div class="top"><b>pool ${poolName(i)}</b>
           <span class="st">${p.state === "free" ? "FREE" : (writing ? "WRITE" : "FULL")}</span></div>
          <div class="sub">${label}</div>${bar(p.state === "free" ? 0 : 1)}`,
         cls + (writing ? " active" : ""), COLORS.effect);
     }).join("");
 
-    // ring
     $("ringCards").innerHTML = S.ring.map((r, i) => {
       let st, label, cls, barv = 0, accent = null;
       if (r.skip > 0) {
         st = "SKIPPED"; cls = "skip"; label = "假消費：冇 encode 就被釋放"; barv = 1;
       } else if (r.state === "free") {
         st = "FREE"; cls = "free"; label = "FREE";
+      } else if (r.state === "filling") {
+        st = "FILLING"; cls = "busy"; barv = 1;
+        label = `paint 寫緊（子幀 ${r.sf + 1}/${S.ns}）`;
+        accent = COLORS.paint;
       } else if (r.state === "ready") {
         barv = 1;
         if (r.hold >= 0) {
@@ -653,16 +709,13 @@
           label = (d && d.state === "dma") ? `DMA ${r.hold} 送緊（等 reclaim）` : `DMA ${r.hold} 已佔用（等 render submit）`;
         } else { st = "READY"; cls = "ready"; label = "READY（等 encode peek）"; }
         accent = COLORS.encode;
-      } else {
-        st = r.state.toUpperCase(); cls = "free"; label = r.state;
-      }
+      } else { st = r.state.toUpperCase(); cls = "free"; label = r.state; }
       return card(cid("ring", i),
         `<div class="top"><b>slot ${i}</b><span class="st">${st}</span></div>
          <div class="sub">${r.frame ? frameLabel(r.frame, r.sf) + " · " : ""}${label}</div>${bar(barv)}`,
         cls + (r.skip > 0 ? " active" : ""), r.skip > 0 ? "#e06ad8" : accent);
     }).join("");
 
-    // dma
     $("dmaCards").innerHTML = S.dma.map((d, i) => {
       const freed = d.state === "free" && d.justFree > 0;
       const label = freed ? "✓ 還格（DMA 完成 → 槽可以再用）"
@@ -673,11 +726,10 @@
         + (d.state !== "free" || freed ? " active" : "");
       return card(cid("dma", i),
         `<div class="top"><b>DMA ${i}</b><span class="st">${freed ? "✓ FREE" : d.state === "dma" ? "SENDING" : d.state.toUpperCase()}</span></div>
-         <div class="sub">${d.frame ? frameLabel(d.frame, d.sf) + " · " : ""}${label}</div>${bar(d.state === "free" ? 0 : 1)}`,
+         <div class="sub">${d.frame ? frameLabel(d.frame, d.sf) + " · " : ""}${label}</div>${bar(d.state === "free" ? 0 : (d.state === "dma" ? 0.5 : 1))}`,
         cls, d.state === "dma" ? COLORS.render : d.state === "ready" ? COLORS.encode : null);
     }).join("");
 
-    // queue（FreeRTOS 環：讀寫指標一直向前，所以同一項會逐格移動）
     $("queue").innerHTML = Array.from({ length: QUEUE_MAX }, (_, i) => {
       const v = S.queue[i];
       const isWr = (i === S.qwr % QUEUE_MAX);
@@ -695,49 +747,36 @@
     $("snapCards").innerHTML = card("c-snap", `<div class="top"><b>snapshot</b><span class="st">0 份</span></div>
       <div class="sub">未要求（0xF06B 預覽時才由 paint 喺 sf=0 copy）</div>${bar(0)}`, "free");
 
-    // tasks
     const renderIdle = qlen() ? `下一輪先 pop（queue 有 ${qlen()} 項）` : (S.lastRender || "閒置");
     $("w-effect").innerHTML = S.act.effect ? `<b>${S.lastEffect}</b>` : (S.lastEffect || "閒置");
     $("w-paint").innerHTML = S.act.paint ? `<b>${S.lastPaint}</b>` : (S.lastPaint || "閒置");
     $("w-encode").innerHTML = S.act.encode ? `<b>${S.lastEncode}</b>` : (S.lastEncode || "閒置");
     $("w-render").innerHTML = S.act.render ? `<b>${S.lastRender}</b>` : renderIdle;
-    for (const k of ["effect", "paint", "encode", "render"]) {
-      $("task-" + k).classList.toggle("active", !!S.act[k]);
-    }
+    for (const k of ["effect", "paint", "encode", "render"]) $("task-" + k).classList.toggle("active", !!S.act[k]);
 
-    // 組高亮
     markGroup("grp-pool", S.act.effect || S.act.paint, S.act.paint ? COLORS.paint : COLORS.effect);
     markGroup("grp-ring", S.act.paint || S.act.encode, S.act.encode ? COLORS.encode : COLORS.paint);
     markGroup("grp-dma", S.act.encode || S.act.render, S.act.render ? COLORS.render : COLORS.encode);
     markGroup("grp-queue", S.act.encode || S.act.render, S.act.render ? COLORS.render : COLORS.encode);
 
-    // activity
     const lines = [];
     if (S.act.effect) lines.push(`<b>effect</b> ${S.lastEffect}`);
     if (S.act.paint) lines.push(`<b>paint</b> ${S.lastPaint}`);
     if (S.act.encode) lines.push(`<b>encode</b> ${S.lastEncode}`);
     if (S.act.render) lines.push(`<b>render</b> ${S.lastRender}`);
-    if (S.ns > 1 && S.act.paint) {
-      lines.push(`<span style="color:var(--skip)">4 子幀係一次過交；下一個 tick encode 只拎最新嗰個，另外 3 個變假消費。</span>`);
-    }
-    const idle = [];
-    if (!S.act.effect) idle.push("effect");
-    if (!S.act.paint) idle.push("paint");
-    if (!S.act.encode) idle.push("encode");
-    if (!S.act.render) idle.push("render");
-    if (idle.length && idle.length < 4) lines.push(`<span style="color:var(--dim)">今個 tick 冇嘢做：${idle.join("、")}（等對方）</span>`);
-    $("activity").innerHTML = lines.length ? lines.join("<br>") : "全部閒置";
-    $("headline").textContent = `${4 - idle.length}／4 層今個 tick 有動作`;
+    $("activity").innerHTML = lines.length ? lines.join("<br>") : "呢個微步冇動作（等對方／等節拍）";
+    const active = ["effect", "paint", "encode", "render"].filter((k) => S.act[k]).length;
+    $("headline").textContent = active ? `今個微步：${["effect", "paint", "encode", "render"].filter((k) => S.act[k]).join("、")}` : "今個微步冇動作";
 
     $("callout").hidden = !(S.ns > 1 && S.st.skipped > 0);
 
-    // 逐步記錄（最新一段高亮，自動捲到底）
-    $("stephint").textContent = `共 ${S.log.length} 步 · ${S.ns} 子幀 → paint 每次交 ${S.ns} 格`;
-    if (S.log.length) {
-      const rows = S.log.slice(-40);
+    $("stephint").textContent = `共 ${S.log.length} 個 tick · ${S.ns} 子幀 → paint 每次交 ${S.ns} 格（逐格做，所以會見到 ${S.ns} 步）`;
+    const rowsAll = (S.cur && S.cur.lines.length) ? S.log.concat([S.cur]) : S.log;
+    if (rowsAll.length) {
+      const rows = rowsAll.slice(-40);
       $("steplog").innerHTML = rows.map((e, i) => {
         const last = i === rows.length - 1;
-        const body = e.lines.map((l) => `<span class="l${/starved|等|冇嘢/.test(l) ? "" : " hit"}">${l}</span>`).join("");
+        const body = e.lines.map((l) => `<span class="l${/等|starved|冇/.test(l) ? "" : " hit"}">${l}</span>`).join("");
         return `<div class="e${last ? " new" : ""}"><span class="n">#${e.n} · ${S.frameMs} ms</span>${body}</div>`;
       }).join("");
       const box = $("steplog");
@@ -762,7 +801,6 @@
     }
     return defs;
   }
-  // 兩點之間的彎線（來源／目標可能上下左右）
   function curve(sx, sy, tx, ty) {
     const vertical = Math.abs(ty - sy) >= Math.abs(tx - sx);
     const d = vertical ? Math.min(60, Math.abs(ty - sy) * 0.6) : Math.min(60, Math.abs(tx - sx) * 0.5);
@@ -778,14 +816,12 @@
     svg.setAttribute("viewBox", `0 0 ${dr.width} ${dr.height}`);
     while (svg.firstChild) svg.removeChild(svg.firstChild);
     svg.appendChild(defsMarkers());
-
     const rel = (r) => ({ l: r.left - dr.left, t: r.top - dr.top, w: r.width, h: r.height, r: r.right - dr.left, b: r.bottom - dr.top });
 
-    // ① 結構骨架：緩衝 → 緩衝（永遠淡淡的，標出整體流向）
     const FLOW = [
       ["grp-pool", "grp-ring", "paint 寫環（0 copy）", COLORS.paint, () => S.act.paint, "paint"],
-      ["grp-ring", "grp-dma",  "encode peek → 轉置（1 copy）", COLORS.encode, () => S.act.encode, "encode"],
-      ["grp-dma",  "grp-hw",   "submit → DMA 出線（0 copy）", COLORS.render, () => S.act.render, "render"],
+      ["grp-ring", "grp-dma", "encode peek → 轉置（1 copy）", COLORS.encode, () => S.act.encode, "encode"],
+      ["grp-dma", "grp-hw", "submit → DMA 出線（0 copy）", COLORS.render, () => S.act.render, "render"],
     ];
     for (const [aid, bid, label, color, when, key] of FLOW) {
       const a = $(aid), b = $(bid);
@@ -796,8 +832,7 @@
       const on = when();
       svg.appendChild(el("path", {
         d: `M ${x} ${y1} L ${x} ${y2}`, fill: "none", stroke: color,
-        "stroke-width": on ? 1.6 : 1, opacity: on ? 0.55 : 0.22,
-        "marker-end": `url(#ah-${key})`,
+        "stroke-width": on ? 1.6 : 1, opacity: on ? 0.55 : 0.22, "marker-end": `url(#ah-${key})`,
       }));
       const t = el("text", {
         x: x + 9, y: (y1 + y2) / 2 + 3, fill: on ? color : "#5d6d8a",
@@ -807,7 +842,6 @@
       svg.appendChild(t);
     }
 
-    // ② 控制：DMA ⇢ queue（索引）
     {
       const a = $("grp-dma"), b = $("grp-queue");
       if (a && b) {
@@ -830,7 +864,6 @@
       }
     }
 
-    // ③ 任務 ↔ 緩衝（讀寫關係，只畫有動作的）
     const pairs = [];
     if (S.act.paint) pairs.push(["paint", "grp-pool", "R", "from"]);
     if (S.act.encode) pairs.push(["encode", "grp-ring", "R", "from"]);
@@ -860,39 +893,29 @@
       svg.appendChild(t);
     }
 
-    // ④ 具體「邊塊去邊塊」：直接由來源卡畫去目標卡
     for (const l of S.links) {
       const a = $(l.from), b = $(l.to);
       if (!a || !b) continue;
       const ar = rel(a.getBoundingClientRect()), br = rel(b.getBoundingClientRect());
-      const skew = l.dash ? 26 : 0;
       let sx, sy, tx, ty;
-      if (br.t >= ar.b - 2) {            // 目標在下面
-        sx = ar.l + ar.w / 2 + skew; sy = ar.b + 1;
-        tx = br.l + br.w / 2 + skew; ty = br.t - 2;
-      } else if (br.l >= ar.r - 2) {     // 目標在右
-        sx = ar.r + 1; sy = ar.t + ar.h / 2;
-        tx = br.l - 2; ty = br.t + br.h / 2;
-      } else if (ar.l >= br.r - 2) {     // 目標在左
-        sx = ar.l - 1; sy = ar.t + ar.h / 2;
-        tx = br.r + 2; ty = br.t + br.h / 2;
-      } else {                           // 目標在上面
-        sx = ar.l + ar.w / 2 + skew; sy = ar.t - 1;
-        tx = br.l + br.w / 2 + skew; ty = br.b + 2;
+      if (br.t >= ar.b - 2) {
+        sx = ar.l + ar.w / 2; sy = ar.b + 1; tx = br.l + br.w / 2; ty = br.t - 2;
+      } else if (br.l >= ar.r - 2) {
+        sx = ar.r + 1; sy = ar.t + ar.h / 2; tx = br.l - 2; ty = br.t + br.h / 2;
+      } else if (ar.l >= br.r - 2) {
+        sx = ar.l - 1; sy = ar.t + ar.h / 2; tx = br.r + 2; ty = br.t + br.h / 2;
+      } else {
+        sx = ar.l + ar.w / 2; sy = ar.t - 1; tx = br.l + br.w / 2; ty = br.b + 2;
       }
       svg.appendChild(el("path", {
         d: curve(sx, sy, tx, ty), fill: "none", stroke: l.color,
-        "stroke-width": 2, "stroke-linecap": "round",
-        opacity: 0.35 + 0.3 * Math.min(1, l.ttl),
-        "stroke-dasharray": l.dash ? "5 4" : "0",
-        "marker-end": `url(#ah-${Object.keys(COLORS).find((k) => COLORS[k] === l.color) || "render"})`,
-        class: "arrow",
+        "stroke-width": 2, "stroke-linecap": "round", opacity: 0.45 + 0.25 * Math.min(1, l.ttl),
+        "marker-end": `url(#ah-${Object.keys(COLORS).find((k) => COLORS[k] === l.color) || "render"})`, class: "arrow",
       }));
       if (l.label) {
         const t = el("text", {
           x: (sx + tx) / 2 + 6, y: (sy + ty) / 2 - 3, fill: l.color,
-          "font-size": 8.5, "font-family": "ui-monospace,monospace",
-          opacity: 0.9,
+          "font-size": 8.5, "font-family": "ui-monospace,monospace", opacity: 0.9,
         });
         t.textContent = l.label;
         svg.appendChild(t);
@@ -902,16 +925,15 @@
 
   $("reset").addEventListener("click", reset);
   $("preset").addEventListener("change", (e) => { S.preset = e.target.value; reset(); });
-  $("speed").addEventListener("change", (e) => { S.msPerTick = Number(e.target.value); S.acc = 0; });
+  $("speed").addEventListener("change", (e) => { S.msPerStep = Number(e.target.value); S.acc = 0; });
   $("play").addEventListener("click", () => {
     S.playing = !S.playing;
     $("play").textContent = S.playing ? "⏸ 暫停" : "▶ 播放";
   });
-  // 單步：暫停之後每按一次前進一個 tick（= 一個 frame_interval），方便慢慢睇
   $("step").addEventListener("click", () => {
     S.playing = false;
     $("play").textContent = "▶ 播放";
-    tick();
+    advance();
   });
   window.addEventListener("keydown", (e) => {
     if (e.target && /^(INPUT|SELECT|TEXTAREA)$/.test(e.target.tagName)) return;
@@ -922,13 +944,12 @@
   window.addEventListener("resize", () => requestAnimationFrame(drawArrows));
 
   reset();
-  // 用 50 ms 的心跳做累加，實際節奏由「速度（每格幾多 ms）」決定
   setInterval(() => {
     if (!S.playing) return;
-    S.acc += 50;
+    S.acc += 40;
     let guard = 0;
-    while (S.acc >= S.msPerTick && guard++ < 20) { S.acc -= S.msPerTick; tick(); }
-  }, 50);
+    while (S.acc >= S.msPerStep && guard++ < 10) { S.acc -= S.msPerStep; advance(); }
+  }, 40);
 })();
 </script>
 </body>
