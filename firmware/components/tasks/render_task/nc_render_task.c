@@ -1,7 +1,7 @@
 // nc_render_task.c — 公用輸出層 render_task（推送／渲染；LED 現在、LCD 將來）。
 //
 // 2026-11-25 四層四任務：
-//   pixel_effect_task（效果值）→ pixel_pair_task（抖動＋配對）→
+//   pixel_effect_task（效果值）→ pixel_paint_task（抖動＋配對）→
 //   pixel_encode_task（環 → 編碼 → 後端的 DMA 槽；獨立 component）→
 //   **render_task（本檔；DMA 槽 → 硬件；環／lane／節拍的主人）**。
 //
@@ -1033,7 +1033,7 @@ static const nc_task_loop_t s_push_loops[] = {
 
 // 第四層：公用輸出／渲染（LED 現在、LCD 將來；唔屬 pixel 系列）。
 // 環、lane、後端、節拍都係它擁有（order 10 先 on_start，pixel_encode_task 同
-// pixel_pair_task 之後才找得到環）。真正的 submit 在 push loop。
+// pixel_paint_task 之後才找得到環）。真正的 submit 在 push loop。
 static const nc_task_t s_task = {
     .name = "render",
     .kind = NC_TASK_NORMAL,

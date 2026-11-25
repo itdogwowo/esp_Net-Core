@@ -6,11 +6,11 @@
 >
 > 同 EffectPerf 的分別：EffectPerf 只量效果管線、唔點燈；Show 是**真的出畫面**的 production
 > 映像。生產者由已退役的 `pixel_task`（內建六個效果）換成四層管線：
-> **pixel_effect_task（波形值）→ pixel_pair_task（配對／white mix／寫環）→
+> **pixel_effect_task（波形值）→ pixel_paint_task（配對／white mix／寫環）→
 > pixel_encode_task（編碼）→ render_task（公用推送／I80）**。
 >
 > **2026-11-25 更新（四層四任務）**：`pixel_effect_task`（效果值）→
-> `pixel_pair_task`（抖動＋配對）→ `pixel_encode_task`（編碼）→ `render_task`（推送）。
+> `pixel_paint_task`（抖動＋配對）→ `pixel_encode_task`（編碼）→ `render_task`（推送）。
 > `render_task` 係**公用輸出層**（LED 現在、LCD 將來），唔屬 pixel 系列；wave 係
 > 獨立 component／任務，兩者只傳「格索引」隊列，唔 copy。抖動維持在 pair 的內圈
 > （定案見 status §7.241）。舊 `pixel_task` 已退役；舊名 `effect`／`pair`／`render`
@@ -42,13 +42,13 @@ sw/pixel 的四層表（nc_px_layer_scan）
 nc_px_layout_t（aprog[] 值流 ＋ job[] ＋ dst 升序 runs[]）
   │   ← group.sel → index → counting bucket → run 合併（見 pixel-layout-pairing.md）
   │
-  ├─ pixel_pair_task 發佈 aprog[]（nc_pipe_aprog_publish）；pixel_effect_task 拿副本
+  ├─ pixel_paint_task 發佈 aprog[]（nc_pipe_aprog_publish）；pixel_effect_task 拿副本
   │
   ├─ pixel_effect_task（core0，50 fps）：每條值流一個 wave table／pool（×2 雙緩衝）→
   │    nc_pipe_effect_frame_t {seq, plan_gen, naprog, nv[], vals*[]}（只發指標）
-  │    pixel_pair_task 處理完一幀才 ack(seq)，effect 之後才重用該 slot
+  │    pixel_paint_task 處理完一幀才 ack(seq)，effect 之後才重用該 slot
   │
-  ├─ pixel_pair_task（core1）：copy latest frame → nc_px_layout_apply() 順序掃 runs
+  ├─ pixel_paint_task（core1）：copy latest frame → nc_px_layout_apply() 順序掃 runs
   │    寫 canvas → white_mix → prd 環；layout 由 pair 擁有
   │
   ▼
@@ -66,11 +66,11 @@ render_task：DMA 完成還格 → submit → I80 → 64 顆燈（50 fps）
 | 檔案 → struct | `sw/pixel`（`nc_px_layer*`／`nc_px_asset*`） | 掃目錄、解析 JSON、建表（PC 可測） |
 | mode → layout | `sw/pixel`（`nc_px_layout.c`） | group.sel 展開、range、dst 排序 run 表、預編譯 program |
 | 波形值 | `pixel_effect_task` | 每條值流 evaluate program；雙 pool＋ack；50 fps |
-| 配對／white mix | `pixel_pair_task` | 載四層、建 layout、run 寫入（抖動內圈）、white mix、寫環、`0xF06B` |
+| 配對／white mix | `pixel_paint_task` | 載四層、建 layout、run 寫入（抖動內圈）、white mix、寫環、`0xF06B` |
 | 編碼 | `pixel_encode_task` | 環 → 該硬件格式；只傳格索引，唔 copy |
 | 環 → 燈 | `render_task`（公用） | 環／lane／節拍、DMA 完成還格、submit（完全唔知四層） |
 
-## 2. 四層任務（`tasks/pixel_effect_task/`、`pixel_pair_task/`、`pixel_encode_task/`、`render_task/`）
+## 2. 四層任務（`tasks/pixel_effect_task/`、`pixel_paint_task/`、`pixel_encode_task/`、`render_task/`）
 
 由 **`CONFIG_NETCORE_CONTENT`**（`depends on NETCORE_PIXEL`，default n）開關；`CONFIG` 關閉時
 `.c` 整段 `#if` 掉、component 是空 object（同 `effect_bench` 同一模式）。component 用
@@ -81,7 +81,7 @@ render_task：DMA 完成還格 → submit → I80 → 64 顆燈（50 fps）
 | 欄位 | 值 | 說明 |
 |---|---|---|
 | 效果 | `pixel_effect_task`／loop `effect`；NORMAL／4／order 22；stack 4096／core0；50 fps |
-| 配對 | `pixel_pair_task`／loop `pair`；NORMAL／4／order 21；stack 4096／core1；`0xF06B` 在此 |
+| 配對 | `pixel_paint_task`／loop `pair`；NORMAL／4／order 21；stack 4096／core1；`0xF06B` 在此 |
 | 編碼 | `pixel_encode_task`／loop `encode`（獨立 component）；NORMAL／4／order 11；stack 4096／core1 |
 | 推送 | `render`／loop `push`；NORMAL／4／order 10；stack 3072／core1；環／lane／節拍的主人（公用） |
 

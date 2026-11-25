@@ -450,7 +450,7 @@ static int active_claims(const tm_slot_t *s)
 // 舊裝置一升 firmware 就會「config 對不上 → 任務當成冇設定 → (0,0) 唔跑」，
 // 即係 OTA 完燈就熄。alias 令舊名仍然生效，新名先係正名。
 //
-// 2026-11-25：pixel 管線四任務（effect→pixel_effect_task、pair→pixel_pair_task、
+// 2026-11-25：pixel 管線四任務（effect→pixel_effect_task、pair→pixel_paint_task、
 // render→pixel_encode_task；render 本身係公用任務、保留原名）。舊 device 的 tasks.json 仍然係
 // effect／pair／render，所以逐層 fallback 到 content → show。
 static const char *cfg_alias_of(const char *name)
@@ -458,7 +458,7 @@ static const char *cfg_alias_of(const char *name)
     if (strcmp(name, "pixel_effect_task") == 0) {
         return "effect";
     }
-    if (strcmp(name, "pixel_pair_task") == 0) {
+    if (strcmp(name, "pixel_paint_task") == 0) {
         return "pair";
     }
     // encode 本來是 render 任務內的 encode 段：舊 config 只有 render 一條。

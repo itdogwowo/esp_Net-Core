@@ -5,7 +5,7 @@
     "",
     "跟 ESP32-S3-Matrix-LED-Textkit 的分別只在 producer：",
     "  · LED-Textkit：舊 pixel_task 已退役（只剩輸出層，冇生產者）；",
-    "  · 這個 project：pixel_pair_task＋pixel_effect_task（/data/pixel 四層：",
+    "  · 這個 project：pixel_paint_task＋pixel_effect_task（/data/pixel 四層：",
     "    effects／map／modes／registry）→ 同一個 prd 環。",
     "  · pixel_encode_task（畫波）＋render（推送）開（→ I80 → 64 顆燈，50 fps）。",
     "",

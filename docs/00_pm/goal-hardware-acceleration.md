@@ -29,6 +29,7 @@
 |---|---|---|---|
 | GDMA／2D-DMA | ✅ GDMA | ✅ GDMA＋**DMA2D** | `esp_driver_dma` |
 | RMT（WS2812／自訂波形） | ✅ | ✅ | `esp_driver_rmt` |
+| PARLIO（並行輸出，1–16 data＋clk） | ❌ | ✅ | `esp_driver_parlio` |
 | LCD_CAM：I80 LCD／RGB LCD／Camera | ✅ | ✅ | `esp_lcd`（I80/RGB）、`esp_driver_cam` |
 | I2S（audio） | ✅ | ✅ | `esp_driver_i2s` |
 | ADC continuous＋DMA | ✅ | ✅ | `esp_adc` |
@@ -38,7 +39,7 @@
 | ISP／Camera | ❌ | ✅ | `esp_driver_isp`／`esp_driver_cam` |
 
 > 重點：**P4 係真正嘅影像加速板**（PPA／DMA2D／JPEG／ISP）；S3 嘅 L3 主力係
-> RMT／LCD_CAM／I2S／ADC-DMA／GDMA。所以「終極目標」分兩條：S3 做「輸出／波形／
+> RMT／LCD_CAM／I2S／ADC-DMA／GDMA；P4 另加 PARLIO 並行輸出。所以「終極目標」分兩條：S3 做「輸出／波形／
 > 感測」硬件化，P4 做「影像 pipeline」硬件化。
 
 ## 3. 目標場景（用嚟證明 L3）

@@ -1,7 +1,7 @@
 // nc_px_effect_task.c — 四層管線第一段 pixel_effect_task：只生產波形值（layout 版）。
 //
 // 2026-11-25 四層四任務：
-//   **pixel_effect_task**（本檔）→ pixel_pair_task（抖動＋配對）→
+//   **pixel_effect_task**（本檔）→ pixel_paint_task（抖動＋配對）→
 //   pixel_encode_task（畫波）→ render_task（公用推送）。
 //
 // 唔讀 /data、唔碰 map／write／ring；plan（aprog 清單）由 pair 經

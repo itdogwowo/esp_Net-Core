@@ -6,7 +6,7 @@
 ## 1. 角色
 
 ```text
-pixel_pair_task 寫環（4 B/px：R,G,B,W）
+pixel_paint_task 寫環（4 B/px：R,G,B,W）
         │
 pixel_encode_task：環 → 該後端的格式（bus word／bitstream／RMT symbol／PARLIO word）
         │  只傳「格索引」隊列

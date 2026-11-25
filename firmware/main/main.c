@@ -4320,7 +4320,7 @@ static esp_err_t ph_declare(void)
     // 任務註冊已經改成「component 自己現身」（NC_TASK_AUTO_REG，constructor），
     // 呢度唔再有清單。次序由 nc_task_t 的 (level, order) 決定：
     // render order=10 先 on_start 建立環／lane／節拍，然後
-    // pixel_encode_task 11、pixel_pair_task 21、pixel_effect_task 22。
+    // pixel_encode_task 11、pixel_paint_task 21、pixel_effect_task 22。
 #ifdef NC_ENABLE_TESTS
     // 測試「功能」改用外掛模組（/data/tasks/*.nct，動態加載）——
     // hello／probe 等唔再入固件；bench_a/b/c 與 tcp_sink/src 已於 2026-11-19 刪除

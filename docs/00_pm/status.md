@@ -8462,7 +8462,7 @@ IDF_PATH=~/esp/esp-idf python3 make.py build ESP32-P4-ETH    --fresh
 | 層 | 任務名 | 角色 | order | core |
 |---|---|---|---:|---|
 | 1 | `pixel_effect_task` | 只 evaluate program → 12-bit 值流（雙 pool＋ack） | 22 | 0 |
-| 2 | `pixel_pair_task` | 抖動＋配對（layout runs）→ write → white mix → prd 環 | 21 | 1 |
+| 2 | `pixel_paint_task` | 抖動＋配對（layout runs）→ write → white mix → prd 環 | 21 | 1 |
 | 3 | `pixel_encode_task` | 環 → codec → 後端 DMA 槽（只傳格索引，唔 copy） | 11 | 1 |
 | 4 | `pixel_render_task` | DMA 完成還格 → submit → I80；環／lane／節拍的主人 | 10 | 1 |
 
@@ -8471,10 +8471,10 @@ IDF_PATH=~/esp/esp-idf python3 make.py build ESP32-P4-ETH    --fresh
 | 檔案／目錄 | 做乜 |
 |---|---|
 | `tasks/pixel_effect_task/` | 只留 effect＋pipe stats＋`nc_pipeline.h`；任務名 `effect` → `pixel_effect_task` |
-| `tasks/pixel_pair_task/`（新 component） | pair 由 pixel_effect_task 拆出；任務名 `pair` → `pixel_pair_task` |
+| `tasks/pixel_paint_task/`（新 component） | pair 由 pixel_effect_task 拆出；任務名 `pair` → `pixel_paint_task` |
 | `tasks/render_task/` → `tasks/pixel_render_task/` | wave／push 由「同一任務兩個 loop」升格成兩個任務；`CONFIG_NETCORE_PX_SPLIT_PUSH` 移除（永遠分開） |
 | `tasks/pixel_task/` | **刪除**（舊 8×8 內建效果生產者） |
-| `nc_task.c` | 新增 alias 鏈：`pixel_effect_task→effect→content→show`、`pixel_pair_task→pair→content→show`、`pixel_encode_task/pixel_render_task→render`；舊 `/data` config OTA 後仍然生效 |
+| `nc_task.c` | 新增 alias 鏈：`pixel_effect_task→effect→content→show`、`pixel_paint_task→pair→content→show`、`pixel_encode_task/pixel_render_task→render`；舊 `/data` config OTA 後仍然生效 |
 | `firmware/CMakeLists.txt`／`main`／`test_action` | component 清單與依賴跟住改 |
 | 8 個 project 的 `tasks.json` | 全部改新名；Matrix／Textkit／SuperMini 只留輸出層；EffectPerf 輸出層 level=-1 |
 
@@ -8511,7 +8511,7 @@ IDF_PATH=~/esp/esp-idf python3 make.py build ESP32-P4-ETH    --fresh
 | 層 | 現行任務 | component | 說明 |
 |---|---|---|---|
 | 1 | `pixel_effect_task` | `tasks/pixel_effect_task/` | 只算效果值 |
-| 2 | `pixel_pair_task` | `tasks/pixel_pair_task/` | 抖動＋配對 |
+| 2 | `pixel_paint_task` | `tasks/pixel_paint_task/` | 抖動＋配對 |
 | 3 | `pixel_encode_task` | `tasks/pixel_encode_task/`（新） | 編碼（硬件格式）；只擁有 loop／節拍／生命週期 |
 | 4 | `render` | `tasks/render_task/`（公用） | 推送／渲染；環／lane／後端／節拍的主人 |
 
@@ -8537,7 +8537,7 @@ IDF_PATH=~/esp/esp-idf python3 make.py build ESP32-P4-ETH    --fresh
 | Zero-Show2400 | 705.4 KB（`0xb05b0`） |
 | EffectPerf | 715.4 KB（`0xb2db0`） |
 | tests 映像（Zero-Show） | 871.8 KB（`0xd9f30`，test_action 依賴 `render_task`） |
-| ELF 任務名 | `pixel_effect_task`／`pixel_pair_task`／`pixel_encode_task`／`render`（冇 `pixel_render_task`） |
+| ELF 任務名 | `pixel_effect_task`／`pixel_paint_task`／`pixel_encode_task`／`render`（冇 `pixel_render_task`） |
 
 **核心配置**：四條任務各自有 `tasks.json` 的 `level`／`affinity`，用家可以自行分配
 core（例如 effect core0、pair／wave／render core1，或再拆）。
@@ -8588,6 +8588,47 @@ word；「wave」只涵蓋 WS2812 波形，所以用「把像素編成該硬件�
 | Matrix-Show（四任務） | **705.5 KB**（`0xb05d0`） |
 | Matrix-LED-Textkit（輸出層） | **665.1 KB**（`0xa6480`） |
 | C3 DevKitM（冇 pixel 任務） | **552.3 KB**（`0x8a150`） |
-| Show ELF 任務名 | `pixel_effect_task`／`pixel_pair_task`／`pixel_encode_task`／`render` |
+| Show ELF 任務名 | `pixel_effect_task`／`pixel_paint_task`／`pixel_encode_task`／`render` |
 
 RMT／PARLIO 未有 driver，所以冇真機數字。
+
+### 7.245 2026-11-25（`pair` → `pixel_paint_task`；RMT／PARLIO 正式入規劃；緩衝環討論文件）
+
+**用家回饋**：
+① `pair` 唔夠直觀，改一個容易想像的名字；
+② PARLIO（P4 並行輸出）、RMT（C 系列）要寫進規劃；
+③ 下一步討論緩衝環：四層之間怎樣溝通、怎樣協同。
+
+**改名**：
+
+| 舊 | 新 |
+|---|---|
+| `pixel_pair_task`（component／任務） | **`pixel_paint_task`**（上色：把效果值塗到環的落點） |
+| loop `pair` | loop `paint` |
+| `nc_px_pair_task.c` | `nc_px_paint_task.c` |
+| `tasks/pixel_pair_task/` | `tasks/pixel_paint_task/` |
+
+alias：`pixel_paint_task → pair → content → show`（舊 `/data` config OTA 後仍然生效）。
+
+**規劃**：
+
+- `docs/00_pm/pixel-tiers-plan.md` 新增 **Task 9**：RMT（C3/C6/S3）＋ PARLIO（P4）
+  驅動、hardware typed 段、上板驗收。
+- `docs/00_pm/next-steps.md` 新增 §15（15.1–15.5）。
+- `docs/00_pm/goal-hardware-acceleration.md` 硬件表加 PARLIO（P4）。
+- `docs/03_notes/pixel-output-backends.md`：後端矩陣／契約。
+
+**緩衝環討論**：新增 [pixel-ring-flow.md](../03_notes/pixel-ring-flow.md)，
+記錄四段 handoff（effect pool → prd 環 → DMA 槽 → ready queue）、三種滿了策略、
+四個張力（最新優先、4 子幀非原子、多後端冇 fanout、節拍主人）同七條待拍板問題。
+
+**驗證（macOS，idf=v6.1.1；未上板）**：
+
+| 項目 | 結果 |
+|---|---|
+| `bash tools/hosttest/run_all.sh` | **21/21 OK** |
+| Matrix-Show（四任務） | **705.5 KB**（`0xb05e0`） |
+| Show ELF 任務名 | `pixel_effect_task`／`pixel_paint_task`／`pixel_encode_task`／`render` |
+
+**未做**：RMT／PARLIO 驅動仍然未實作；環的語義（最新 vs FIFO、subframe group、
+fanout）等用家拍板。

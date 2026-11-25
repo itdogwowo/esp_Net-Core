@@ -1,7 +1,7 @@
-// nc_px_pair_task.c — 四層管線第二段 pixel_pair_task（抖動＋配對）。
+// nc_px_paint_task.c — 四層管線第二段 pixel_paint_task（抖動＋配對＋上色）。
 //
 // 2026-11-25 四層四任務：
-//   pixel_effect_task（值流）→ **pixel_pair_task**（本檔）→ pixel_encode_task（畫波）→
+//   pixel_effect_task（值流）→ **pixel_paint_task**（本檔）→ pixel_encode_task（編碼）→
 //   render_task（公用推送）。
 //
 // 本檔只做：
@@ -62,7 +62,7 @@
 #include "nc_store.h"
 #include "nc_task.h"
 
-static const char *TAG = "px_pair";
+static const char *TAG = "px_paint";
 
 // ── 0xF06B／0xF06C：最近一幀 ──
 #define NC4_CMD_SHOWFRAME     0xF06B
@@ -106,7 +106,7 @@ typedef struct {
     uint32_t          mode_limit;         // 幾幀後換下一個（maxF，0=500）
 
     // 0xF06B 快照：最近一次 commit 的 4 B/px 畫面（最多 SHOWFRAME_PX_MAX 顆）。
-    // 由 pair loop 寫、nc4 decode task 讀 → 用 spinlock 護住。
+    // 由 paint loop 寫、nc4 decode task 讀 → 用 spinlock 護住。
     portMUX_TYPE  lock;
     uint8_t      *last;         // PSRAM：0xF06B 快照（SHOWFRAME_PX_MAX × 4 B）
     uint32_t      last_px;
@@ -118,7 +118,7 @@ static show_state_t s_content = {
     .lock = portMUX_INITIALIZER_UNLOCKED,
 };
 
-// 0xF06D：decode task 只排隊，真正 rebuild plan 由 pair loop 喺幀邊界做
+// 0xF06D：decode task 只排隊，真正 rebuild plan 由 paint loop 喺幀邊界做
 // （plan／asset table 係 content task 擁有，唔可以同 decode task 同時改）。
 static volatile uint8_t s_pending_mode = 0xFF;
 static volatile bool    s_pending_reload;
@@ -170,7 +170,7 @@ static void white_mix(uint8_t *canvas, uint32_t px, uint8_t w)
     }
 }
 
-// 最新一幀的快照：pair loop 寫、0xF06B handler 讀。
+// 最新一幀的快照：paint loop 寫、0xF06B handler 讀。
 // rgbw = NULL 代表「黑幀」（fallback 時用），會把快照內的有效像素清 0。
 static struct {
     uint32_t present, built, too_big, failed, ms;
@@ -644,7 +644,7 @@ static void ensure_pixel_dirs(const char *pixel_dir)
     }
 }
 
-// 由 mode 建 plan（切換 mode 同開機共用）。只在 pair loop／on_start 呼叫。
+// 由 mode 建 plan（切換 mode 同開機共用）。只在 paint loop／on_start 呼叫。
 // playlist 的下一個：registry list 次序（同 auto_play 一致），跳過唔存在／同一個 mode。
 static const nc_px_mode_t *playlist_next_mode(void)
 {
@@ -1229,7 +1229,7 @@ static void on_showframe(nc4_ctx_t *ctx, const nc4_frame_t *f)
     const size_t cap = NC4_REPLY_JSON_MAX + 1;   // + NUL；回覆幀另有 4 B CRC 餘量
     int n = 0;
 
-    // 快照由 pair loop 更新（另一個任務、可能另一核）→ 短臨界區。
+    // 快照由 paint loop 更新（另一個任務、可能另一核）→ 短臨界區。
     // hex 直接寫入 decoder 的回覆緩衝，唔喺 decode task 的棧上開大 buffer。
     taskENTER_CRITICAL(&s_content.lock);
     if (!s_content.last_valid || s_content.last == NULL) {
@@ -1282,7 +1282,7 @@ static void on_showframe(nc4_ctx_t *ctx, const nc4_frame_t *f)
 static const nc_task_loop_t s_loops[] = {
     {
         // 生產者：檔案樹 → 環。優先級低 render 一級（同 pixel_task 的 prd 一樣）。
-        .name = "pair",
+        .name = "paint",
         .fn = content_loop,
         .stack = 4096,
         .prio = NC_PRIO_OTHERS_MAX - 1,
@@ -1293,7 +1293,7 @@ static const nc_task_loop_t s_loops[] = {
 };
 
 static const nc_task_t s_task = {
-    .name = "pixel_pair_task",        // 2026-11-25 正名（tasks.json 舊名 pair 由 alias 讀）
+    .name = "pixel_paint_task",        // 2026-11-25 正名（tasks.json 舊名 pair 由 alias 讀）
     .kind = NC_TASK_NORMAL,
     .level = 4,
     .order = 21,
@@ -1303,7 +1303,7 @@ static const nc_task_t s_task = {
     .nloops = 1,
 };
 
-NC_TASK_AUTO_REG(pixel_pair_task, &s_task);
+NC_TASK_AUTO_REG(pixel_paint_task, &s_task);
 
 #define NC4_CMD_SHOWMODE     0xF06D
 #define NC4_CMD_SHOWMODE_RSP 0xF06E
@@ -1335,7 +1335,7 @@ static void reply_json(nc4_ctx_t *ctx, uint16_t cmd, const char *json)
     }
 }
 
-// payload [mode_id:u8]；只排隊，pair loop 喺下一幀邊界 rebuild plan。
+// payload [mode_id:u8]；只排隊，paint loop 喺下一幀邊界 rebuild plan。
 // 回覆即刻回目前 mode（未切換）；主機用 0xF06B 確認新 frame。
 static void on_showmode(nc4_ctx_t *ctx, const nc4_frame_t *f)
 {

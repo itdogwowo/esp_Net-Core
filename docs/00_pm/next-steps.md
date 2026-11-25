@@ -316,3 +316,27 @@ pixel 只是其中一個使用者。**2026-11-19：已更名為 `nc_i80_out.c`�
 
 **風險**：14.3 之前，interpreter 係「已驗證但冇人用」的部件（正弦已於 2026-11-23 收斂成單一 `sin_lin`，見 status §7.194）。
 決定 cfg 形狀時要順便想「換效果時 gen 要唔要 +1」（現時換 effect id 會 +1）。
+
+---
+
+## 15. 2026-11-25：多硬件輸出後端（RMT／PARLIO）
+
+> 決策：`pixel_encode_task`（原 wave）要出多種硬件格式；`i80`／`spi` 已實作，
+> `rmt`／`parlio` 要正式排入計劃。詳細 Task 見
+> [pixel-tiers-plan Task 9](pixel-tiers-plan.md)、後端契約見
+> [pixel-output-backends.md](../03_notes/pixel-output-backends.md)。
+
+| # | 項目 | 狀態 | 備註 |
+|---|---|---|---|
+| 15.1 | `drv_rmt`＋`nc_rmt_out.c`（C3/C6/S3） | ⏸ 未做 | IDF `esp_driver_rmt`；一條 lane 一個 TX channel；bytes encoder；done callback 還格 |
+| 15.2 | `hardware.json` 加 `RMT` typed 段 | ⏸ 未做 | `data[]`／`resolution`；`ncportgen` 生成；過渡期用 Kconfig pins |
+| 15.3 | `drv_parlio`＋`nc_parlio_out.c`（P4） | ⏸ 未做 | IDF `esp_driver_parlio`；data_width 1–16＋clk；重用 `nc_px_codec_pack_bus` |
+| 15.4 | `hardware.json` 加 `PARLIO` typed 段 | ⏸ 未做 | `data[]`／`clk`／`freq` |
+| 15.5 | 上板驗收（C3 RMT／P4 PARLIO） | ⏸ 未做 | `bus_ok`／checksum／fps／CPU；未上板前唔准寫「已支援」 |
+
+**風險**：
+
+- RMT symbol／bytes 記憶體要 internal；大 px 要分塊或限制 px。
+- PARLIO DMA buffer 都要 internal；16×600 一幀 bus word ≈ 29 KB（2 B/tick），
+  3 槽 ≈ 87 KB。
+- 腳位要入 hardware 層；過渡期 Kconfig pins 只可以當「未遷移板」。

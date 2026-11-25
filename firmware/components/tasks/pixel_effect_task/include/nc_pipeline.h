@@ -1,6 +1,6 @@
 // nc_pipeline.h — effect → pair 的窄介面（layout 版）。
 //
-// 四任務：pixel_effect_task（只算波形值）→ pixel_pair_task（抖動／配對／white mix／寫環）
+// 四任務：pixel_effect_task（只算波形值）→ pixel_paint_task（抖動／配對／white mix／寫環）
 // → pixel_encode_task（畫波）→ render_task（公用推送）。
 //
 // 這一版配合 `nc_px_layout`（data-driven 排版）：pair 把編譯好的 `aprog[]`

@@ -1,7 +1,7 @@
 // nc_px_encode_task.c — pixel 管線第三層：編碼（pixel_encode_task）。
 //
 // 2026-11-25 四層四任務：
-//   pixel_effect_task（效果值）→ pixel_pair_task（抖動＋配對）→
+//   pixel_effect_task（效果值）→ pixel_paint_task（抖動＋配對）→
 //   **pixel_encode_task（本檔；環 → 硬件線材格式）** → render_task（公用推送）。
 //
 // 為什麼叫 encode 而唔係 wave：

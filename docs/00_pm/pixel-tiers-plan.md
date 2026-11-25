@@ -1,7 +1,7 @@
 # 像素三層（效果 → 抖動 → 配對）落地實作計劃
 
 > **2026-11-25 名稱更新**：本文的「今日名稱」已是歷史。現行四個任務係
-> `pixel_effect_task`／`pixel_pair_task`／`pixel_encode_task`／`render`（公用輸出層，
+> `pixel_effect_task`／`pixel_paint_task`／`pixel_encode_task`／`render`（公用輸出層，
 > 唔屬 pixel 系列；舊 `effect`／`pair`／`render` 由 `nc_task.c` alias 讀取）；
 > 舊 `pixel_task` 已退役。
 > 計劃內容與量測不變，只係名同路徑過時。
@@ -845,3 +845,55 @@ Expected：`h_int` 會**減少**（資產表 BSS 由 8,386 B 變成 N × 262 B�
 | 抖動閃爍 | `phase = commits` 令 +1 位輪流 |
 | 快取檔寫入 265 ms／個 | 只在開機補建；表 > 32 KB 唔存 |
 | 完全隨機 9,600 px 8-bit 94% | 零拷貝後降到 61%（12.29 ms） |
+
+---
+
+### Task 9（2026-11-25 新增規劃）：多硬件輸出後端 —— RMT（C 系列／S3）＋ PARLIO（P4）
+
+**背景**：`pixel_encode_task`（原 `pixel_wave_task`）要出多種硬件格式，唔止 I80／SPI。
+`wave` 呢個名已退役；後端矩陣見 [pixel-output-backends.md](../03_notes/pixel-output-backends.md)。
+
+**現況**：`i80`／`spi` 已實作；`rmt`／`parlio` 係 `driver.json` 已收的名字，但
+`setup_backends()` 會大聲報錯、停用 lane（唔會靜默退 mock）。
+
+**Files（預計）**：
+
+| 檔案 | 責任 |
+|---|---|
+| `firmware/components/driver/drv_rmt/` | RMT TX channel、bytes encoder、done callback；一條 lane 一個 channel |
+| `firmware/components/tasks/render_task/nc_rmt_out.c` | RMT backend adapter（acquire／encode／submit／reclaim／json） |
+| `firmware/components/driver/drv_parlio/` | P4 PARLIO TX unit（data_width 1–16、clock、queue） |
+| `firmware/components/tasks/render_task/nc_parlio_out.c` | PARLIO backend adapter（重用 `nc_px_codec_pack_bus`） |
+| `firmware/components/sys/config/`＋`tools/ncportgen.py` | `hardware.json` 的 `RMT`／`PARLIO` typed 段 |
+| `ports/hardware/<chip>/<board>/wiring.json` | 腳位事實（data[]／clk） |
+
+**Steps**：
+
+- [ ] **Step 1：RMT driver ＋ adapter（C3 先）**
+  - `rmt_new_tx_channel`（resolution 40 MHz）＋ `rmt_new_bytes_encoder` 或 symbol table；
+    WS2812 時序由 `driver.json` 的 LED 段（`format`／`clk_hz`／`bit_cells`／`t0h`／`t1h`）
+    換成 RMT tick；reset ≥ 50 µs。
+  - `submit` 用 `rmt_transmit`（queue_nonblocking），done callback 記 slot；`reclaim`
+    完成才 `nc_px_ring_release`。
+  - 腳位先用 Kconfig 過渡（單 data GPIO list），同 I80 未遷移板做法一致。
+- [ ] **Step 2：RMT 上板驗收（C3）**
+  - 1 lane、64／300 px：`bus_ok=1`、逐 byte checksum、frame cadence；`0xF061` 的
+    `fail`／`starved` 計數。
+- [ ] **Step 3：PARLIO driver ＋ adapter（P4）**
+  - `parlio_new_tx_unit`：data_width = lane 數（1–16）、`output_clk_freq_hz` = bit rate、
+    `max_transfer_size` = 一幀 bus bytes；`parlio_tx_unit_transmit` 收 bus word；
+    done callback 還格。
+  - 編碼重用 `nc_px_codec_pack_bus`（同 I80 一樣的 bus word 格式）。
+- [ ] **Step 4：PARLIO 上板驗收（P4）**
+  - 16 lane × 600 px：`bus_ok`、fps、CPU；同 I80 對照。
+- [ ] **Step 5：hardware.json typed 段＋`ncportgen`**
+  - `RMT.list[]`（`data`）／`PARLIO.list[]`（`data[]`、`clk`、`freq`）；runtime 可覆蓋。
+- [ ] **Step 6：文件／Kconfig／status**
+
+**驗收條件**：
+
+1. `driver.json` 只改 `LED.backend`（`i80`／`spi`／`rmt`／`parlio`），
+   `tasks.json`／`pixel_encode_task` 不需改。
+2. 每個後端都要有 `bus_ok`／checksum；RMT 要示波器或邏輯分析儀看 reset gap。
+3. 同一塊板、同一 image、reps ≥ 8；記錄 min／median、`fail`／`starved`。
+4. 未上板前唔准寫「已支援」；只可以寫「build 過」。

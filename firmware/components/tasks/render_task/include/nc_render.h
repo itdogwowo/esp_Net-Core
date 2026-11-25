@@ -1,7 +1,7 @@
 // nc_render.h — 公用輸出層（render_task）：環 → 編碼 → 後端／驅動。
 //
 // 2026-11-25 四層四任務（render 唔屬 pixel 系列；LCD 等将来共用）：
-//   pixel_effect_task → pixel_pair_task → **pixel_encode_task（編碼）** →
+//   pixel_effect_task → pixel_paint_task → **pixel_encode_task（編碼）** →
 //   **render_task（推送／渲染）**。
 //   · render_task 擁有環／lane／後端／節拍（order 10 先 on_start）；
 //   · pixel_encode_task（另一個 component）經 nc_render_encode_* 拿節拍、叫 encode；

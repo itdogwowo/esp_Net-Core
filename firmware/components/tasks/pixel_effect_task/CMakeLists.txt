@@ -5,7 +5,7 @@
 # 唔登記任務、唔佔 buffer（同 effect_bench 同一個模式）。
 #
 # 職責：按 plan 的 aprog 逐條 evaluate program → 雙 pool（ack 防撕裂）→
-# 經 nc_pipeline.h 的 fixed frame 交指標給 pixel_pair_task。唔碰 map／write／環。
+# 經 nc_pipeline.h 的 fixed frame 交指標給 pixel_paint_task。唔碰 map／write／環。
 idf_component_register(
     SRCS "nc_px_effect_task.c" "nc_px_pipe_stats.c"
     REQUIRES task pixel
