@@ -127,6 +127,7 @@
   .callout b{color:var(--encode)}
   .explain{display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-top:16px; max-width:1180px}
   .ecard{border:1px solid var(--line); border-radius:12px; background:var(--panel2); padding:11px 13px}
+  .ecard.wide{grid-column:1 / -1}
   .ecard h4{font-size:12px; margin:0 0 6px; color:var(--text); font-weight:600}
   .ecard p{margin:0 0 6px; font-size:10.5px; line-height:1.6; color:var(--muted)}
   .ecard p:last-child{margin-bottom:0}
@@ -214,8 +215,6 @@
         <h3>DMA 槽（後端） <span class="owner">owner: render／backend</span><span class="shared">shared: encode → DMA</span></h3>
         <div class="meta"><b>3 槽</b>（<span class="k">NC_I80_DRV_SLOTS_MAX</span>）· W encode · R DMA · internal</div>
         <div class="cards" id="dmaCards"></div>
-        <div class="hint"><b>槽＝緩衝，唔係頻道</b>：整條 I80 只有 <b>一條 DMA</b>，三個槽只係三塊 internal 記憶體，輪流「送緊／編好等送／空」。
-          encode 揀一個空槽寫入，並記住 <span class="k">d->seq[k]</span>（呢個槽屬於邊個 seq）；submit 之後硬件由嗰個槽讀；<span class="k">reclaim</span> 見到 <span class="k">slot_done(k)</span> 才清空。</div>
       </section>
 
       <section class="group" id="grp-queue">
@@ -293,6 +292,23 @@
   </div>
 </div>
 
+<div class="ecard wide" style="margin-top:12px">
+    <h4>任務之間點耦合？邊個綁定邊個？</h4>
+    <p><b>原則</b>：四條任務各自係獨立 FreeRTOS task（effect core0、paint core1、encode／render core1），
+       唔會互相 call function、唔會直接改對方嘅變數；大家只係<b>睇 buffer 的狀態</b>
+       （<span class="k">state</span>／<span class="k">seq</span>／<span class="k">wr</span>）同 queue 決定做唔做嘢。</p>
+    <p><b>純靠緩衝</b>：paint→環（<span class="k">begin</span> 拿 FREE、<span class="k">commit</span> 標 READY）、encode→環（<span class="k">peek</span> 最新）、
+       encode→queue（push 索引）、render→queue（pop）、render→DMA（<span class="k">submit</span>）、
+       reclaim→環（<span class="k">slot_done</span> 之後才 <span class="k">release</span>）。
+       呢幾段冇「指定對方」——任何生產者都可以餵任何一條環。</p>
+    <p><b>但有三個例外要知</b>：
+       ① <b>節拍</b>：<span class="k">esp_timer</span> 喺 render，encode 等它個 semaphore（<span class="k">nc_render_encode_wait</span>）—— render 停，encode 就跟住停；
+       ② <b>ack</b>：paint 寫 <span class="k">s_ack</span>、effect 讀（volatile，無鎖），1:1 綁住兩塊 pool；
+       ③ <b>環的擁有者</b>：paint 預設只餵 <span class="k">nc_render_first_ring()</span>，多後端（i80＋LCD）時第二條環冇畫面（<span class="k">pixel-ring-flow.md §4.5</span>）。</p>
+    <p><b>所以</b>：buffer 係唯一的資料通道（零拷貝），但「邊個叫醒邊個」仍然靠上面三個 sync 物件。
+       圖上每一支箭嘴都係「讀／寫某個 buffer」，冇一支係「任務 call 任務」。</p>
+  </div>
+
 <table class="handoff">
   <tr><th>buffer</th><th>數量／大小（實作）</th><th>W</th><th>R</th><th>滿了／lifecycle</th></tr>
   <tr><td>effect pool</td><td class="n">2 × Σ nv × 2 B（PSRAM）</td><td class="n">effect</td><td class="n">paint</td><td>paint 未 ack → effect <code>wait_slot()</code> 等（背壓，唔會撕裂）</td></tr>
@@ -359,8 +375,9 @@
   function cid(kind, i) { return `c-${kind}-${i}`; }
 
   // 一次「邊塊去邊塊」的短動畫：ttl 個 tick 之後消失
-  function link(from, to, color, label) {
-    S.links.push({ from, to, color, label, ttl: 2 });
+  function link(from, to, color, label, dash) {
+    // 單步時只留一步（睇得清「呢一步邊塊去邊塊」）；連續播放留兩步免得閃得太快
+    S.links.push({ from, to, color, label, ttl: S.playing ? 2 : 1, dash: !!dash });
   }
 
   function reset() {
@@ -391,10 +408,11 @@
     S.ring.forEach((r) => { if (r.skip > 0) r.skip--; });
 
     // ① reclaim：DMA 完成 → 還 DMA 槽 + release 環格（render 的 push loop 先做）
-    S.dma.forEach((d) => {
+    S.dma.forEach((d, di) => {
       if (d.state !== "dma") return;
       d.left--;
       if (d.left > 0) return;
+      link("grp-hw", cid("dma", di), "#7f93b5", "", true);
       if (d.ring >= 0) {
         const r = S.ring[d.ring];
         r.state = "free"; r.seq = 0; r.hold = -1; r.frame = 0; r.sf = 0;
@@ -415,6 +433,7 @@
         d.state = "dma"; d.left = DMA_TICKS;
         S.st.submitted++;
         S.lastRender = `pop ${frameLabel(item.frame, item.sf)} → submit DMA ${item.dma}`;
+        link(cid("dma", item.dma), "grp-hw", COLORS.render, frameLabel(item.frame, item.sf));
         act.render = true;
       } else {
         S.st.starved++;
@@ -778,10 +797,11 @@
       const a = $(l.from), b = $(l.to);
       if (!a || !b) continue;
       const ar = rel(a.getBoundingClientRect()), br = rel(b.getBoundingClientRect());
+      const skew = l.dash ? 26 : 0;
       let sx, sy, tx, ty;
       if (br.t >= ar.b - 2) {            // 目標在下面
-        sx = ar.l + ar.w / 2; sy = ar.b + 1;
-        tx = br.l + br.w / 2; ty = br.t - 2;
+        sx = ar.l + ar.w / 2 + skew; sy = ar.b + 1;
+        tx = br.l + br.w / 2 + skew; ty = br.t - 2;
       } else if (br.l >= ar.r - 2) {     // 目標在右
         sx = ar.r + 1; sy = ar.t + ar.h / 2;
         tx = br.l - 2; ty = br.t + br.h / 2;
@@ -789,13 +809,15 @@
         sx = ar.l - 1; sy = ar.t + ar.h / 2;
         tx = br.r + 2; ty = br.t + br.h / 2;
       } else {                           // 目標在上面
-        sx = ar.l + ar.w / 2; sy = ar.t - 1;
-        tx = br.l + br.w / 2; ty = br.b + 2;
+        sx = ar.l + ar.w / 2 + skew; sy = ar.t - 1;
+        tx = br.l + br.w / 2 + skew; ty = br.b + 2;
       }
       svg.appendChild(el("path", {
         d: curve(sx, sy, tx, ty), fill: "none", stroke: l.color,
         "stroke-width": 2, "stroke-linecap": "round",
-        opacity: 0.35 + 0.3 * Math.min(1, l.ttl), "marker-end": `url(#ah-${Object.keys(COLORS).find((k) => COLORS[k] === l.color)})`,
+        opacity: 0.35 + 0.3 * Math.min(1, l.ttl),
+        "stroke-dasharray": l.dash ? "5 4" : "0",
+        "marker-end": `url(#ah-${Object.keys(COLORS).find((k) => COLORS[k] === l.color) || "render"})`,
         class: "arrow",
       }));
       if (l.label) {
