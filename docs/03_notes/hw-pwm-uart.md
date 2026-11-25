@@ -108,8 +108,9 @@
 
 `hardware.json` 仍有以下段只會被計 unknown，未有 typed parser／driver：
 
-- `SPI`、`I2C`、`I80`、`I2S`、`ENC`、`XL9555`
-- `TFT`／`PCM5102`／`PCA9685` 等 driver.json chip 段（runtime 未讀）
+- `I2C`、`I2S`、`ENC`、`XL9555`（**`SPI` 與 `I80` 已於 2026-11-24 typed**）
+- `TFT`／`PCM5102`／`PCA9685` 等 driver.json chip 段（runtime 未讀；`LED` 段例外，
+  它在 build 時就被讀）
 
-下一步：先做 SPI／I2C（很多 chip 依賴），再做 I80／I2S；`driver.json` 的
-user override → runtime merge 也要補。
+下一步：先做 I2C／I2S（很多 chip 依賴）；`driver.json` 的
+user override → runtime merge 也要補（目前只有 LED 的 build-time 路徑）。

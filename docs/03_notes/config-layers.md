@@ -143,12 +143,13 @@ CDC／MSC／log 三樣都冇人要 → 連 TinyUSB 都唔裝。以前缺名會�
 | UART | ✅ typed pins | `UART`（NC4 使用另外在 `system.json` links） |
 | ETH | ✅ typed enable／pins | `ETH` |
 | SDIO | ✅ typed | `SDIO` |
-| SPI／I2C／I80／I2S／ENC／XL9555 | 🟡 只係 generated seed，未 typed | 改了**不會生效**，等 driver |
+| SPI／I80 | ✅ typed（2026-11-24） | `SPI`／`I80`；`I80` 是燈鏈／面板的腳位來源（`bus_width` 由 `len(data)` 推） |
+| I2C／I2S／ENC／XL9555 | 🟡 只係 generated seed，未 typed | 改了**不會生效**，等 driver |
 | USB | 🟡 link 在 `system.json`；`msc`／`cdc_log` 在 `usb` 段；port 能力在 build | 見 [usb-layers.md](usb-layers.md) |
 | flash／PSRAM／CPU／console／分割表 | ❌ build-time | `board.json`／`sdkconfig.defaults` |
 
 所以「把所有硬件線路註冊進 Interface」不是改個名就完成：**每個 driver 要先有 typed struct**
-（PIN／PWM／UART／ETH／SDIO 已有；SPI／I2C／I80／I2S 未有），USB 也要先有 port registry。
+（PIN／PWM／UART／ETH／SDIO／I80／SPI 已有；I2C／I2S／ENC／XL9555 未有），USB 也要先有 port registry。
 改名本身只係文件／schema 的整理，唔會令未 typed 的段生效。
 
 ### USB 在 Interface 裡應該長什麼樣（目標，未實作）
@@ -286,8 +287,9 @@ nc_cfg_close(cfg);
 
 ```text
 ① NVS init
-② hardware.json → 硬體 init（GPIO/SPI/I2C/UART/ETH PHY；缺檔用 generated `nc_port.c`）
-③ driver.json   → driver init（ETH DMA、USB、TFT…）
+② hardware.json → 硬體 init（GPIO/SPI/I80/UART/ETH PHY；缺檔用 generated `nc_port.c`）
+③ driver.json   → **build 時**已編成 struct（只有 `LED` 段）；開機唔讀 JSON。
+                  LED 的腳位在 ② 的 `nc_hardware_cfg_t.i80[]`／`spi[]`，由 render 任務取用。
 ④ 硬體起來了，讀分配：
      system.json  → nc4.links[] / routes[]（引擎由 routes 推導，不寫 engines[]）
      network.json → IP

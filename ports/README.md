@@ -15,7 +15,7 @@ ports/
 ├─ hardware/<chip>/<board>/     這塊板「有什麼」
 │  ├─ board.json                 F.spec   晶片／flash／PSRAM／CPU／console／能力
 │  ├─ wiring.json                F.wiring 腳位、匯流排、板載晶片（**firmware 預設的唯一來源**）
-│  ├─ driver.json                F.device 掛在匯流排上的裝置（build-time；runtime 逐段接）
+│  ├─ driver.json                F.device 掛在匯流排上的裝置（build-time；只有 LED 段會被讀）
 │  ├─ sdkconfig.defaults         F.build  硬體事實（flash/PSRAM/CPU/console/ETH）
 │  ├─ partitions.csv             這塊 flash 的分割表（可選；沒有就用 firmware/partitions.csv）
 │  └─ README.md

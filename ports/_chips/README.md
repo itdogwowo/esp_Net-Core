@@ -8,4 +8,5 @@
 ```
 
 合併次序（目標）：`_chips/<profile>.json` → 板子 `driver.json` 覆蓋 → runtime。
-目前 firmware 仍未讀 `driver.json`；這層先做資料分家與 `tools/board.py check` 驗證。
+目前 firmware 只有 **`LED` 段**會經 `tools/ncportgen.py` 被讀（其餘段仍未讀）；
+`tools/board.py check` 會驗 `profile` 指到的檔案存在。

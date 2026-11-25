@@ -278,7 +278,7 @@ typedef struct {
     bool     enable;       // 真的要用這組
     uint8_t  backend;      // nc_led_backend_t
     int8_t   bus;          // hardware 層同類 list 的 index（i80[]／spi[]）；-1 = 未引用
-    uint8_t  lanes;        // 前幾條資料線真的接燈（1..bus_width；SPI 固定 1）
+    uint8_t  lanes;        // 前幾條資料線真的接燈（上限 = hardware i80[] 那條的資料線數；SPI 固定 1）
     uint16_t px;           // **每條 lane** 幾顆（不是總數）
     char     fmt[NC_CFG_LED_FMT_MAX];  // 線材格式：ws2812 / ws2812w / ws2815 / ws2801 / apa102
     // 波形時序（0 = 用該格式的內建預設 nc_px_wave_default()）

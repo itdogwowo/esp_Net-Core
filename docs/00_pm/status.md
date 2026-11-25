@@ -8279,6 +8279,7 @@ panic／卡住。因為冇 CDC 就冇 OTA，**要斷電重插；如果仍然冇 
 走舊路徑（`board.py check` 會 warn 講明邊個贏）。
 
 **驗證**：`board.py check` 0 error；`tools/hosttest/portgen_test/test_led_schema.py` 24 項
+（§7.238 加咗 I80／SPI 檢查之後係 34 項）
 全過（codegen、讓位、壞 schema 要 build 失敗、分層守門、Kconfig 對帳）；`nc_port.c`
 用 IDF 的 xtensa gcc 真編譯。
 

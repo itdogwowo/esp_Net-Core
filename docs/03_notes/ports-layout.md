@@ -187,10 +187,12 @@ const nc_hardware_cfg_t *nc_port_hw_defaults(void) { return &s_hw; }
 link 的三個字典欄位（`iface` / `service` / `mem`）在 runtime 的用戶 JSON 仍然寫字串，
 但 parse 一次就只存 1 byte；`nc_cfg_iface_name()` 等只給 log／STATUS 用。
 
-**已經 typed 的 hardware 段**：`ETH`、`SDIO`、`PIN`、`PWM`、`UART`。
-其餘（`SPI`、`I2C`、`I80`、`I2S`、`ENC`、`XL9555`）目前只留在
+**已經 typed 的 hardware 段**：`ETH`、`SDIO`、`PIN`、`PWM`、`UART`、`I80`、`SPI`（後兩者 2026-11-24）。
+其餘（`I2C`、`I2S`、`ENC`、`XL9555`）目前只留在
 `preset_hardware.json` 給人看，還沒有 struct；等 driver 有型別再逐段接。
-`driver.json` 也還是 build-time 資料，runtime 未讀。
+`driver.json` 仍然是 build-time 資料（開機唔讀），但 **`LED` 段在 build 時由
+`tools/ncportgen.py` 變成 `nc_led_cfg_t`**，`bus:{type,index}` 用來引用 hardware 層的
+`i80[]`／`spi[]`；其餘段 firmware 未讀。
 
 ---
 
@@ -202,7 +204,7 @@ link 的三個字典欄位（`iface` / `service` / `mem`）在 runtime 的用戶
 | `kind` 的複合字串（`eth_tcp` / `wifi_udp`） | 2026-11-16 新格式用 `kind:"tcp", iface:"eth"`；舊字串仍然拆開接受 | ✅ 已完成；冇 `name` 時生成的名字仍是 `eth_tcp0` |
 | `rx` 的位置 | 新格式直接在 link 下面；舊 `cfg.rx` 仍然讀 | ✅ 已完成 |
 | `network.json` 的 lan / wifi / bt / espnow | 仍然是各處 ad hoc 讀（`nc_wifi.c`、`nc_net_lines.c`、`nc_net_raw.c`、`main.c`），沒有單一 typed struct | 下一步：`nc_cfg_network()` ＋ 一個 parser；先由 LAN IP 與 WiFi 兩段開始 |
-| `driver.json` 的 `bus:{type,index}` | build-time 資料，runtime 未讀；每個裝置重複一個小字典 | 有 driver 型別後改成 `bus_type` + `bus_index` 兩個 u8，並 embed 成 generated 表 |
+| `driver.json` 的 `bus:{type,index}` | build-time；只有 `LED` 段會被讀（`ncportgen` → `nc_led_cfg_t`），其餘段仍未讀；每個裝置重複一個小字典 | LED 已改由 `bus` 引用 hardware 層的 `i80[]`／`spi[]`；其餘裝置有型別後照同一做法 |
 | `routes[].out[]` | 字串（link 名 / `decodeN`），每列 4×16 B | 下一步可改成 `{type, index}`；但 router 目前靠字串，先不動 |
 | `tasks.json` 的 `name` | 字串 24 B × 20 | 任務名是程式註冊的，可用 id；但用戶要看得懂，暫留 |
 | `_comment` | 每個 JSON 都一大段 | 只留在 `F.preset`（給人看）；不要進 firmware 的 generated C |

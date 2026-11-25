@@ -93,7 +93,7 @@
 |---|---|---|---|---|
 | `F.spec` | **板卡規格** | `ports/hardware/<chip>/<board>/board.json` | 板卡作者 | 建置 |
 | `F.wiring` | **板卡接線** | `ports/hardware/<chip>/<board>/wiring.json` | 板卡作者 | 建置 |
-| `F.device` | **板載裝置** | `ports/hardware/<chip>/<board>/driver.json` | 板卡作者 | 建置（runtime 逐段接） |
+| `F.device` | **板載裝置** | `ports/hardware/<chip>/<board>/driver.json` | 板卡作者 | 建置（只有 `LED` 段已被讀；其餘逐段接） |
 | `F.build` | **建置開關** | `ports/hardware/<chip>/<board>/sdkconfig.defaults`、`ports/_profiles/*.defaults`（project 層冇 build 設定） | 板卡作者 | 建置 |
 | `F.project` | **項目選擇** | `ports/project/<chip>/<board>/project.json` | 項目作者 | 建置 |
 | `F.preset` | **出廠預置** | `ports/project/<chip>/<board>/data/config/*.json` | 項目作者 | 首次開機（檔案不存在時） |
