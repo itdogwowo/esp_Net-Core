@@ -159,6 +159,20 @@ static const nc_task_t s_mod_tenant = {
     .loops = s_tenant_loops, .nloops = 1,
 };
 
+// ── 2026-11-25 改名遷移：新名要讀得返舊 tasks.json 的設定 ──
+static const nc_task_loop_t s_alias_loops[] = {
+    { .name = "alias_loop", .fn = loop_fn, .stack = 2048, .prio = 2,
+      .core = 0, .layer = 1 },
+};
+static const nc_task_t s_mod_alias = {
+    .name = "pixel_effect_task", .kind = NC_TASK_NORMAL, .level = 1,
+    .loops = s_alias_loops, .nloops = 1,
+};
+static const nc_task_t s_mod_alias_off = {
+    .name = "pixel_wave_task", .kind = NC_TASK_NORMAL, .level = 1,
+    .loops = s_alias_loops, .nloops = 1,
+};
+
 // 開機預設（對齊 e0b4617 的契約）：核心由 C 宣告（不受 config 管）；
 // 租戶要 tasks.json 明確寫 affinity 才會跑（未設定 = (0,0) = 唔跑）。
 static const cfg_stub_task_t s_cfg_boot[] = {
@@ -185,7 +199,7 @@ static const cfg_stub_task_t s_cfg_off[] = {
 };
 
 // 換一份 config，重跑一次完整開機（登記 → 宣告 → 啟動 → 開 loop）。
-static int tenant_boot(const cfg_stub_task_t *cfg, int n)
+static int boot_one(const nc_task_t *mod, const cfg_stub_task_t *cfg, int n)
 {
     nc_task_reset();
     mod_stub_loop_reset();
@@ -194,10 +208,15 @@ static int tenant_boot(const cfg_stub_task_t *cfg, int n)
     } else {
         cfg_stub_clear();
     }
-    nc_task_register(&s_mod_tenant);
+    nc_task_register(mod);
     nc_task_declare_all();
     nc_task_start_all();
     return nc_task_boot();
+}
+
+static int tenant_boot(const cfg_stub_task_t *cfg, int n)
+{
+    return boot_one(&s_mod_tenant, cfg, n);
 }
 
 int main(void)
@@ -327,6 +346,30 @@ int main(void)
     case_begin("config：level = -1 → 完全唔啟動");
     CHECK(tenant_boot(s_cfg_off, 1) == 0, "沒有 loop 被開");
     CHECK(!nc_task_started("tenant"), "沒有 started（唔 declare、唔啟動）");
+
+    case_begin("config：舊名 effect → 新任務 pixel_effect_task 照讀（OTA 不熄燈）");
+    {
+        static const cfg_stub_task_t old[] = {
+            { .name = "effect", .level = 4, .has_level = true,
+              .aff = { 0, 1 }, .has_aff = true },
+        };
+        CHECK(boot_one(&s_mod_alias, old, 1) == 1, "舊名 effect 仍然開 loop");
+        CHECK(mod_stub_loop_running("alias_loop"), "alias_loop 在跑");
+        CHECK(cfg_stub_appended_count() == 0, "認得舊名 → 不會補寫新條目（實際 %d）",
+              cfg_stub_appended_count());
+        nc_task_json(json, sizeof(json));
+        CHECK(json_has(json, "pixel_effect_task", "\"core\":1"), "跟舊 config 跑 core 1");
+    }
+
+    case_begin("config：舊名 render level=-1 → pixel_wave_task 跟住關");
+    {
+        static const cfg_stub_task_t old[] = {
+            { .name = "render", .level = -1, .has_level = true,
+              .aff = { 0, 1 }, .has_aff = true },
+        };
+        CHECK(boot_one(&s_mod_alias_off, old, 1) == 0, "舊名 render 關 → wave 都唔開");
+        CHECK(!nc_task_started("pixel_wave_task"), "pixel_wave_task 沒有 started");
+    }
 
     printf("\n%s（%d 個失敗）\n", s_fail ? "FAILED" : "ALL PASS", s_fail);
     return s_fail ? 1 : 0;

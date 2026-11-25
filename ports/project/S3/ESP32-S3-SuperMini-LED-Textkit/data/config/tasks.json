@@ -1,23 +1,32 @@
 {
   "version": 1,
   "_comment": [
-    "Tasks 層：只列「用戶任務」（租戶）。核心任務（nc4 / net / core / ncm）永遠照固件宣告跑，唔入呢個檔。",
-    "pixel：像素渲染器（送 6 條 WS2812 燈鏈）。level 4、core1 → 開機就會跑兩條 loop：",
-    "       prd（效果→環，60 fps）＋ pixel（環→硬件，300 fps）；",
-    "       冇呢條 → 補成 (0,0)＝只行 on_start、唔開 loop（燈唔會更新）。",
-    "fps 由 project 的 sdkconfig.defaults 給（CONFIG_NETCORE_PIXEL_FPS=300）；",
-    "生產者（效果）自己 60 fps 更新，6 條 chain 由同一個 I80 後端同步送。"
+    "Tasks 層（SuperMini-LED-Textkit）：只剩輸出層。",
+    "",
+    "2026-11-25 舊 pixel_task（8×8 內建六效果生產者）已退役 —— 它只是測試用。",
+    "SuperMini：6 條燈鏈輸出測試。",
+    "pixel_render_task：環 → 畫波 → 推送（核心 1）。pixel_wave_task 係同一輸出層",
+    "                的畫波任務（核心 1），兩者都要開。",
+    "",
+    "冇生產者寫環時燈唔會更新（環係空）；要效果就要改用 Show 管線＋/data/pixel 資產。",
+    "affinity [0,1] = 只在 core1（只可以有一個 1）。"
   ],
   "tasks": [
     {
-      "name": "render",
+      "name": "pixel_render_task",
       "level": 4,
-      "affinity": [0, 1]
+      "affinity": [
+        0,
+        1
+      ]
     },
     {
-      "name": "pixel",
+      "name": "pixel_wave_task",
       "level": 4,
-      "affinity": [0, 1]
+      "affinity": [
+        0,
+        1
+      ]
     }
   ]
 }

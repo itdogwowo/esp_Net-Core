@@ -1,24 +1,28 @@
-// nc_pair_task.c — production 三任務的 pair 段（effect → pair → render）。
+// nc_px_pair_task.c — 四層管線第二段 pixel_pair_task（抖動＋配對）。
 //
-// 跟 pixel_task（內建六個效果）的分工：
-//   · pixel_task：內建效果 → 環（CONFIG_NETCORE_PIXEL 的一部分，所有 project 共用）；
-//   · pair  ：/data/pixel 四層 → 配對 → white mix → 環；effect 只算波形值。
-// 兩者都是「prd 環的生產者」，同一個 project 只可以開其中一個（tasks.json 決定）。
+// 2026-11-25 四層四任務：
+//   pixel_effect_task（值流）→ **pixel_pair_task**（本檔）→ pixel_wave_task（畫波）→
+//   pixel_render_task（推送）。
 //
-// 為什麼要這一支而不是把四層塞入 pixel_task：
-//   四層資料係「用戶內容」（Web UI 上傳、可改、可換 mode），生命週期同內建效果唔同；
-//   而且 production 的 8×8 Show 唔要內建六個效果。獨立 component 用 CONFIG 開關，
-//   release 映像可以有、其他 project 完全唔編（同 effect_bench 一樣）。
+// 本檔只做：
+//   · /data/pixel 四層 → 建 plan／layout；
+//   · 每幀拿 effect 最新值流 → 按 group/range/write 配對（抖動在內圈：apply_dither／apply4）
+//     → white mix → 寫 prd 環；0xF06B／0xF06D／0xF06F 指令。
+// 唔 encode、唔 submit、唔碰硬件；環由 pixel_render_task 建立／登記。
+//
+// 為什麼獨立 component：四層資料係「用戶內容」（Web UI 上傳、可改、可換 mode），
+// 生命週期同內建效果唔同；用 CONFIG_NETCORE_CONTENT 開關，release 映像可以有、
+// 其他 project 完全唔編（同 effect_bench 一樣）。
 //
 // 資料流（每幀）：
 //   memset(canvas, 0) → nc_px_show_frame(plan, step, canvas)      // 四層解釋在 sw/pixel
 //   → white mix（mode 的 "white" 0..100，四通道 out=(out*(100-w)+255*w)/100）
 //   → nc_px_ring_begin_ex() 的 payload（4 B/px，R,G,B,W）→ commit → step++
-// 環係 render 任務建立／登記的（名字含 "prd"）；這裡只負責寫。
+// 環係 pixel_render_task 建立／登記的；這裡只負責寫。
 //
 // 失敗策略（唔好令 boot loop）：
 //   /data 未掛載、/data/pixel 缺失、effects／mode／map 解析失敗、plan 冇 job、canvas
-//   配置失敗 → log 清楚原因，進入 fallback：loop 仍然每幀填黑（render 會顯示黑），
+//   配置失敗 → log 清楚原因，進入 fallback：loop 仍然每幀填黑（輸出層會顯示黑），
 //   唔會 crash、唔會卡住、唔會阻止開機。之後修好檔案重開機就會用真 plan。
 //
 // 0xF06B SHOWFRAME（回 0xF06C）：把最近一幀以 hex 交主機（Web UI poll）。
@@ -58,7 +62,7 @@
 #include "nc_store.h"
 #include "nc_task.h"
 
-static const char *TAG = "content";
+static const char *TAG = "px_pair";
 
 // ── 0xF06B／0xF06C：最近一幀 ──
 #define NC4_CMD_SHOWFRAME     0xF06B
@@ -253,8 +257,6 @@ static bool content_frame_once(void)
         }
         const uint32_t lat_us = ((uint32_t)esp_timer_get_time() > s_eff_frame.t_pub_us)
                                 ? (uint32_t)esp_timer_get_time() - s_eff_frame.t_pub_us : 0;
-        nc_px_hdr_t *hdr = NULL;
-        const int64_t a0 = esp_timer_get_time();
 #if CONFIG_NETCORE_PIXEL_SUBFRAMES > 1
         const uint32_t ns = (uint32_t)CONFIG_NETCORE_PIXEL_SUBFRAMES;
         uint32_t apply_us = 0, white_us = 0, commit_us = 0;
@@ -289,6 +291,8 @@ static bool content_frame_once(void)
         (void)t_all0;
         nc_pipe_stats_pair(0, apply_us, white_us, commit_us, lat_us);
 #else
+        nc_px_hdr_t *hdr = NULL;
+        const int64_t a0 = esp_timer_get_time();
         uint8_t *p = nc_px_ring_begin_ex(s_content.q, &hdr);
         if (p == NULL) {
             nc_pipe_stats_full();
@@ -1289,7 +1293,7 @@ static const nc_task_loop_t s_loops[] = {
 };
 
 static const nc_task_t s_task = {
-    .name = "pair",
+    .name = "pixel_pair_task",        // 2026-11-25 正名（tasks.json 舊名 pair 由 alias 讀）
     .kind = NC_TASK_NORMAL,
     .level = 4,
     .order = 21,
@@ -1299,7 +1303,7 @@ static const nc_task_t s_task = {
     .nloops = 1,
 };
 
-NC_TASK_AUTO_REG(pair, &s_task);
+NC_TASK_AUTO_REG(pixel_pair_task, &s_task);
 
 #define NC4_CMD_SHOWMODE     0xF06D
 #define NC4_CMD_SHOWMODE_RSP 0xF06E

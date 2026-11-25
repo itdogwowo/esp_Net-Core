@@ -26,6 +26,14 @@ const nc_hardware_cfg_t *nc_port_hw_defaults(void)
     return NULL;
 }
 
+// 同一道理：nc_cfg_defaults_led() 亦用 weak nc_port_led()（driver.json 的 LED 段）。
+// 2026-11-25 補：之前漏了這個替身，macOS 的 ld64 會直接報 undefined symbol。
+const nc_led_cfg_t *nc_port_led(void);
+const nc_led_cfg_t *nc_port_led(void)
+{
+    return NULL;
+}
+
 static void vlog(const char *lvl, const char *tag, const char *fmt, va_list ap)
 {
     printf("%s[%s] ", lvl, tag ? tag : "?");

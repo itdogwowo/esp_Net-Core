@@ -1,24 +1,17 @@
-# pixel_effect_task（tasks 層）：管線系列 —— px_effect（波形值）＋ px_pair（抖動＋配對）。
+# pixel_effect_task（tasks 層）：管線第一段 —— 只生產波形值。
 #
 # 由 CONFIG_NETCORE_CONTENT 開關（Kconfig：depends NETCORE_PIXEL，default n）。
-# 關閉時 nc_pair_task.c 內容整段 #if 掉 → component 只是一個空 object，
-# 唔登記任務、唔登記指令（同 effect_bench 同一個模式）。
+# 關閉時 nc_px_effect_task.c 內容整段 #if 掉 → component 只是空 object，
+# 唔登記任務、唔佔 buffer（同 effect_bench 同一個模式）。
 #
-# 職責：
-#   px_pair：on_start 載四層→建 plan；讀 px_effect fixed frame→按 ranges/write 配對＋抖動→
-#           white mix→prd 環；0xF06B/0xF06D/0xF06F 指令。
-#   px_effect：只 evaluate program 波形值（50 fps），經 nc_pipeline.h 的 fixed frame
-#           交給 pair；唔碰 map／write／ring。
-#
-# 送燈仍然係 render 任務（tasks/render_task）的事；兩者只透過環見面。
+# 職責：按 plan 的 aprog 逐條 evaluate program → 雙 pool（ack 防撕裂）→
+# 經 nc_pipeline.h 的 fixed frame 交指標給 pixel_pair_task。唔碰 map／write／環。
 idf_component_register(
-    SRCS "nc_px_pair_task.c" "nc_px_effect_task.c" "nc_px_pipe_stats.c"
-    # pixel：環／layer 掃描／show plan／合成。store：/data 掛載點（nc_store_fs_base）。
-    # task：任務管理器。nc4：指令表＋ decode context。
-    REQUIRES nc4 pixel task store render_task
-    INCLUDE_DIRS "include"
+    SRCS "nc_px_effect_task.c" "nc_px_pipe_stats.c"
+    REQUIRES task pixel
+    INCLUDE_DIRS "include"      # nc_pipeline.h：effect ↔ pair 的唯一介面
     PRIV_REQUIRES freertos esp_timer heap log
-    # 指令表同任務都係 constructor 自己登記；冇任何 symbol 被 main 引用，
+    # 任務同 pipe API 都係 constructor 自己登記；冇 symbol 被 main 直接引用，
     # 唔加 WHOLE_ARCHIVE 就會整份 object 被 linker 丟掉。
     WHOLE_ARCHIVE
 )

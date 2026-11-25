@@ -2,7 +2,7 @@
   "_comment": [
     "16×600 = 9,600 px 的 production 量測 project（Same hardware：Zero、GPIO1 單 lane）。",
     "只改 CONFIG_NETCORE_PIXEL_LEDS=9600＋一份 500 組 map／三條 mode；",
-    "render 仍然係 1 lane（物理 288 ms/幀 = 3.47 fps），用來量 effect／pair 的真機成本。"
+    "pixel_render_task 仍然係 1 lane（物理 288 ms/幀 = 3.47 fps），用來量 effect／pair 的真機成本。"
   ],
   "version": 1,
   "name": "ESP32-S3-Zero-Show9600",

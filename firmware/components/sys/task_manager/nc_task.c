@@ -444,6 +444,48 @@ static int active_claims(const tm_slot_t *s)
     return n;
 }
 
+// 舊任務名 → 再舊一個名（改名遷移用）。每次改名加一行，load_cfg 會逐跳找。
+//
+// 為什麼要 alias：tasks.json 在裝置的 /data，OTA 唔會覆寫；如果只認新名，
+// 舊裝置一升 firmware 就會「config 對不上 → 任務當成冇設定 → (0,0) 唔跑」，
+// 即係 OTA 完燈就熄。alias 令舊名仍然生效，新名先係正名。
+//
+// 2026-11-25：pixel 管線四任務正名（effect→pixel_effect_task、pair→pixel_pair_task、
+// render→pixel_render_task／pixel_wave_task）。舊 device 的 tasks.json 仍然係
+// effect／pair／render，所以逐層 fallback 到 content → show。
+static const char *cfg_alias_of(const char *name)
+{
+    if (strcmp(name, "pixel_effect_task") == 0) {
+        return "effect";
+    }
+    if (strcmp(name, "pixel_pair_task") == 0) {
+        return "pair";
+    }
+    // wave 同 render 本來是同一個 render 任務（wave 係 render loop 內的 encode 段）；
+    // 舊 config 只有 render 一條，兩個新任務都讀它。
+    if (strcmp(name, "pixel_wave_task") == 0 ||
+        strcmp(name, "pixel_render_task") == 0) {
+        return "render";
+    }
+    if (strcmp(name, "effect") == 0 || strcmp(name, "pair") == 0) {
+        return "content";       // 2026-11-21：content 拆成 pair／effect
+    }
+    if (strcmp(name, "content") == 0) {
+        return "show";          // 2026-11-21：show 改名 content
+    }
+    return NULL;
+}
+
+static const nc_task_cfg_t *cfg_find(const nc_tasks_cfg_t *cfg, const char *name)
+{
+    for (uint8_t k = 0; k < cfg->n_tasks; k++) {
+        if (strcmp(cfg->tasks[k].name, name) == 0) {
+            return &cfg->tasks[k];
+        }
+    }
+    return NULL;
+}
+
 // 讀 tasks 層：只取 level / affinity。名字對不上 → 用固件預設（cfg_seen = false）。
 // 型別化之後這裡只讀 struct；不再自己 parse JSON，也不再有「config 讀不到」的分支。
 static void load_cfg(void)
@@ -465,33 +507,17 @@ static void load_cfg(void)
         if (cfg == NULL) {
             continue;
         }
-        const nc_task_cfg_t *match = NULL;
-        for (uint8_t k = 0; k < cfg->n_tasks; k++) {
-            if (strcmp(cfg->tasks[k].name, s->name) == 0) {
-                match = &cfg->tasks[k];
-                break;
-            }
-        }
-        // 2026-11-21：舊任務名 show 改名 content（避免同 render 混淆）。
-        // 舊裝置的 tasks.json 仍是 "show"；只在新名冇條目時讀舊名，讓 OTA 後
-        // 不會因為 config 名字對不上而把 content 任務自動關掉。
+        const nc_task_cfg_t *match = cfg_find(cfg, s->name);
+        // 名字對不上 → 逐層 fallback 到舊名（見 cfg_alias_of 的註解）。
+        // 最多 4 跳：pixel_effect_task → effect → content → show。
         if (match == NULL) {
-            // 2026-11-21：content 再拆成 pair／effect（三任務）。
-            // 舊 config 只有 content：pair／effect 都讀它，OTA 後不會兩個都自動關掉。
-            const char *alias = NULL;
-            if (strcmp(s->name, "content") == 0) {
-                alias = "show";
-            } else if (strcmp(s->name, "pair") == 0 ||
-                       strcmp(s->name, "effect") == 0) {
-                alias = "content";
+            const char *old = cfg_alias_of(s->name);
+            for (int hop = 0; match == NULL && old != NULL && hop < 4; hop++) {
+                match = cfg_find(cfg, old);
+                old = cfg_alias_of(old);
             }
-            if (alias != NULL) {
-                for (uint8_t k = 0; k < cfg->n_tasks; k++) {
-                    if (strcmp(cfg->tasks[k].name, alias) == 0) {
-                        match = &cfg->tasks[k];
-                        break;
-                    }
-                }
+            if (match != NULL) {
+                ESP_LOGI(TAG, "cfg %s 用舊名 %s 的設定", s->name, match->name);
             }
         }
         if (match == NULL) {

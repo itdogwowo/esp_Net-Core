@@ -1,19 +1,20 @@
 {
   "version": 1,
   "_comment": [
-    "Tasks 層（Zero-Show）：render／pair／effect 三任務。",
+    "Tasks 層（Zero-Show）：pixel 管線四層四任務（2026-11-25 正名）。",
     "",
-    "render：環 → 編碼 → I80 → WS2812（核心 1，50 fps）。",
-    "pair  ：effect 值 → 依 plan 的 group/range/write 配對 → white mix → prd 環（核心 1）。",
-    "effect：只 evaluate program 波形值（核心 0，50 fps）；三任務分離。",
-    "pixel ：level=-1 —— 這個映像不跑韌體內建六個效果。",
+    "pixel_effect_task：只 evaluate program 波形值（核心 0，50 fps）。",
+    "pixel_pair_task  ：effect 值 → 依 plan 的 group/range/write 配對（抖動在內圈）→",
+    "                   white mix → prd 環（核心 1）。",
+    "pixel_wave_task  ：環 → 編碼 → 後端 DMA 槽（核心 1，只傳格索引）。",
+    "pixel_render_task：DMA 完成還格＋submit 送燈（核心 1；擁有環／lane／節拍）。",
+    "舊名 effect／pair／render 由 nc_task.c 的 alias 讀取，OTA 後不會被關掉。",
     "",
-    "affinity [0,1] = 只在 core1；[1,0] = 只在 core0（只可以有一個 1）。",
-    "pair／effect 缺席會由 nc_task_sync_cfg() 補成 [0,0]（唔跑）—— 所以一定要列。"
+    "affinity [0,1] = 只在 core1；[1,0] = 只在 core0（只可以有一個 1）。"
   ],
   "tasks": [
     {
-      "name": "render",
+      "name": "pixel_render_task",
       "level": 4,
       "affinity": [
         0,
@@ -21,7 +22,7 @@
       ]
     },
     {
-      "name": "pair",
+      "name": "pixel_wave_task",
       "level": 4,
       "affinity": [
         0,
@@ -29,16 +30,20 @@
       ]
     },
     {
-      "name": "effect",
+      "name": "pixel_pair_task",
+      "level": 4,
+      "affinity": [
+        0,
+        1
+      ]
+    },
+    {
+      "name": "pixel_effect_task",
       "level": 4,
       "affinity": [
         1,
         0
       ]
-    },
-    {
-      "name": "pixel",
-      "level": -1
     }
   ]
 }

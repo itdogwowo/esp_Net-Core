@@ -1,18 +1,19 @@
 {
   "version": 1,
   "_comment": [
-    "Tasks 層：只列「用戶任務」（租戶）。核心任務（nc4 / net / core / ncm）永遠照固件宣告跑，唔入呢個檔。",
-    "name：任務名（固件或 .nct 宣告的名字）",
-    "level：-1 = 唔啟動；同一 level 內按註冊次序",
-    "prio：可選，1–6（租戶上限；7–15 保留區只准核心，寫 7 以上視為無效）；冇寫 = 用 loop 宣告值",
-    "affinity：[core0, core1]，只可以有一個 1；(0,0) = 唔跑",
-    "未設定 = (0,0)：冇寫 affinity、或者成條條目都冇，一律當 (0,0)（on_start 照跑、loop 唔開）",
-    "缺席的條目：固件或 `.nct` / `.nce` 有、呢度冇 → 開機會自動補寫（只加不改），補寫的條目寫 [0, 0]（預設關閉）",
-    "pixel＝效果／Map 生產者（寫環）；render＝渲染任務（環 → I80 → 燈）。兩條都要開。"
+    "Tasks 層（Matrix）：只剩輸出層。",
+    "",
+    "2026-11-25 舊 pixel_task（8×8 內建六效果生產者）已退役 —— 它只是測試用。",
+    "Matrix：8×8 測試板。",
+    "pixel_render_task：環 → 畫波 → 推送（核心 1）。pixel_wave_task 係同一輸出層",
+    "                的畫波任務（核心 1），兩者都要開。",
+    "",
+    "冇生產者寫環時燈唔會更新（環係空）；要效果就要改用 Show 管線＋/data/pixel 資產。",
+    "affinity [0,1] = 只在 core1（只可以有一個 1）。"
   ],
   "tasks": [
     {
-      "name": "render",
+      "name": "pixel_render_task",
       "level": 4,
       "affinity": [
         0,
@@ -20,7 +21,7 @@
       ]
     },
     {
-      "name": "pixel",
+      "name": "pixel_wave_task",
       "level": 4,
       "affinity": [
         0,

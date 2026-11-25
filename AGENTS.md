@@ -12,8 +12,8 @@
 ## 0. 30 秒摘要
 
 - **專案**：ESP32-P4（另有 ESP32-S3 port）上的 **NC4 通訊核心**：多條 transport →
-  分核解碼 → 指令執行；外加 **pixel 效果 → 配對 → 渲染 → I80 送燈** 管線。
-- **語言／工具**：C17、ESP-IDF（macOS **v6.0.3**／Windows・WSL **v6.1.1**；見 §0.5，
+  分核解碼 → 指令執行；外加 **pixel 效果 → 抖動＋配對 → 畫波 → 推送 → I80 送燈** 管線。
+- **語言／工具**：C17、ESP-IDF（macOS／Windows `.idf`／WSL **全部 v6.1.1**；見 §0.5，
   **三個環境版本要統一**）、FreeRTOS、`python3 make.py`、host 測試（唔需要板）。
 - **兩個世界**：
   1. **NC4／緩衝／任務／網絡**：協議、通道、分核、`nc_buf`。
@@ -31,14 +31,14 @@
 
 | 環境 | 用途 | ESP-IDF | IDF 路徑 | 工具鏈 |
 |---|---|---|---|---|
-| macOS（Apple Silicon） | 主要開發／量測 | **v6.0.3** | `~/esp/esp-idf` | `~/.espressif` |
+| macOS（Apple Silicon） | 主要開發／量測 | **v6.1.1** | `~/esp/esp-idf` | `~/.espressif` |
 | Windows | 這台機的 repo `.idf/` | **v6.1.1** | `<repo>/.idf/esp-idf` | `<repo>/.idf/tools`（Windows exe） |
 | WSL Ubuntu 24.04（20 核） | 跑 host test／build | **v6.1.1** | `/home/user/esp/esp-idf` | `~/.espressif`（Linux） |
 
 - Python 3.12；建置入口 `python3 make.py`（**不要**直接跑 `idf.py`）。
 - 板子：ESP32-S3（4 MB flash／2 MB PSRAM；USB CDC）；另有 P4／C3 port。
-- ⚠ **三個地方版本唔同 = 兩個唔同的 image**（實測同一份 code：Matrix 差 9,584 B、
-  P4-ETH 差 24,688 B）。要用數字比較，先統一版本；未統一之前，每次記錄都要寫
+- ⚠ **三個地方版本唔同 = 兩個唔同的 image**（統一前實測同一份 code：Matrix 差 9,584 B、
+  P4-ETH 差 24,688 B）。2026-11-25 起三個環境都係 **v6.1.1**；記錄仍然要寫
   `idf=` 同**邊個環境**（見 §0.5「版本一致性」與鐵律 12）。
 
 ```bash
@@ -92,7 +92,8 @@ python3 modules/lab/i80_pack_lab/run_ab.py --port <PORT> --px 9600 --variant 17 
 python3 tools/effect_bench.py --port <PORT>
 ```
 
-- `render`／`pixel` 要 `level=4`、`started=1`、`running=1`；否則 `fs_format` 重 seed。
+- Show 映像要 `pixel_effect_task`／`pixel_pair_task`／`pixel_wave_task`／`pixel_render_task`
+  全部 `level=4`、`started=1`、`running=1`；否則 `fs_format` 重 seed。
 - 量測要記錄：同一塊板、同一映像、reps、min/median、`bus_ok`／checksum。
 - 冇板就明講「未上板」，唔好把 host 數字外推。
 
@@ -110,7 +111,8 @@ python3 tools/effect_bench.py --port <PORT>
 - 每次測試記錄：image path＋sha256、`fw`、`app`、`idf`、板 MAC；
   A/B 一定要同一 image、同一板。
 - **IDF 版本以 `idf.py --version` 為準，而且三個環境要統一**（用家 2026-11-25 明確要求）：
-  - 現時：macOS **v6.0.3**；Windows `.idf/` 與 WSL **v6.1.1**（見 §0.5 環境表）——**待統一**。
+  - 現時：macOS `~/esp/esp-idf`、Windows `.idf/`、WSL **全部 v6.1.1**（2026-11-25 實測
+    `git -C ~/esp/esp-idf describe --tags`；見 §0.5 環境表）——**已統一**。
   - 唔同版 = 同一份 code 出兩個 image（實測 Matrix 差 9,584 B、P4-ETH 差 24,688 B），
     **數字唔可以互相對比**。
   - 升級／降級要**一次過升齊**；未升齊之前，每次記錄都要寫 `idf=` 同喺邊個環境跑。
@@ -215,7 +217,7 @@ bash tools/hosttest/run_all.sh
 
 ### 鐵律 6：換 project／config 舊了，用 `fs_format` 重新 seed
 
-換 project 後 `/data/config/tasks.json` 可能仍是舊 level（`render`／`pixel = -1`），
+換 project 後 `/data/config/tasks.json` 可能仍是舊 level（`pixel_render_task`／`pixel_wave_task = -1`），
 板子起來但唔點燈。處理：
 
 ```bash
@@ -225,7 +227,7 @@ python3 tools/nc4.py --port <PORT> reboot
 
 - 會**清空 `/data`** 並重建 FAT，再由 project 的出廠預置重新 seed。
 - 只在「換 project／config 壞／要出廠狀態」時用；一般更新 firmware 唔會清 `/data`。
-- 之後用 `status tasks` 確認 `render`／`pixel` `level=4`、`started=1`、`running=1`。
+- 之後用 `status tasks` 確認四條 pixel 任務 `level=4`、`started=1`、`running=1`。
 
 ### 鐵律 7：用 `make.py`，唔好自己亂跑 `idf.py`
 
@@ -237,7 +239,7 @@ python3 tools/nc4.py --port <PORT> reboot
 
 ### 鐵律 8：Decode handler／中斷路徑唔好放大的 stack buffer
 
-- `decode0` 任務 stack 只有 **3,072 B**；`main` 預設 3,072 B（Show 類 project 覆寫成 8,192）；`render` 4,096 B。
+- `decode0` 任務 stack 只有 **3,072 B**；`main` 預設 3,072 B（Show 類 project 覆寫成 8,192）；`pixel_wave_task` 4,096 B、`pixel_render_task`（push）3,072 B。
 - 任何 handler 的 JSON／大暫存用 `static` 或 heap，**唔好** `char j[1200]` 放 stack。
 - 2026-11-24 真的爆過：`on_layoutbench` 的 `j[1200]` 令 frame 2,272 B，
   任何 `0xF077` 都 panic。改成 `static` 後 1,168 B 正常。
@@ -274,11 +276,12 @@ python3 tools/nc4.py --port <PORT> reboot
 ### 鐵律 12：版本要統一（IDF ＋ 韌體）
 
 - 同一個 repo 有**三個環境**（macOS／Windows `.idf`／WSL），**IDF 版本必須一致**。
-  現時 macOS 係 **v6.0.3**、Windows 同 WSL 係 **v6.1.1** → **待統一**（見 §0.5 環境表）。
+  現時 macOS／Windows `.idf`／WSL **全部 v6.1.1**（已統一；見 §0.5 環境表）。
 - 升級／降級要**一次過升齊**；唔好長期兩版並存，更唔好一邊 6.0 一邊 6.1 去比數字。
 - 記錄任何 build／量測／OTA 之前，先寫 **`idf=`**（`idf.py --version`）同**邊個環境**：
   `idf=v6.1.1 (WSL)`。冇寫 = 呢個數字唔可以同其他數字比較。
-- 實測：同一份 code，6.0.3 vs 6.1.1 的 image 差 **Matrix +9,584 B、P4-ETH +24,688 B**。
+- 統一前實測：同一份 code，6.0.3 vs 6.1.1 的 image 差 **Matrix +9,584 B、P4-ETH +24,688 B**
+  （歷史數字；而家三個環境同版，唔再有這個差）。
 - 韌體版本仍然只有一個來源：`PROJECT_VER`（見 §0.5），`status`／OTA／image 三者要一樣。
 - 部機**冇板**時唔緊要（build 唔需要板），但 `idf=` 唔可以漏。
 
@@ -296,7 +299,7 @@ python3 tools/nc4.py --port <PORT> reboot
 | 子系統 | 做什麼 | 主要位置 |
 |---|---|---|
 | **NC4** | USB／UART／TCP／UDP／WS／ESP-NOW／I2C／SPI／CAN 收幀；CRC；分核 decode；router；回覆 | `firmware/components/sys/nc4/`、`main.c` |
-| **Pixel** | 效果（program interpreter／內建效果）→ 配對（layout）→ 8-bit 環 → I80／SPI 波形 → 燈 | `firmware/components/sw/pixel/`、`tasks/pixel_task/`、`tasks/render_task/`、`tasks/pipeline_task/`、`driver/drv_i80/` |
+| **Pixel** | 效果（program interpreter）→ 抖動＋配對（layout）→ 畫波（encode）→ 推送 → I80／SPI 波形 → 燈 | `firmware/components/sw/pixel/`、`tasks/pixel_effect_task/`、`tasks/pixel_pair_task/`、`tasks/pixel_render_task/`、`driver/drv_i80/` |
 
 ### 2.3 不是什麼
 
@@ -330,7 +333,7 @@ esp_Net-Core/
 │  ├─ components/sys/mem/    nc_buf、plan arena
 │  ├─ components/action/     file／ota／test 指令表
 │  ├─ components/sw/pixel/   環、codec、layout、engine（純 C）
-│  ├─ components/tasks/      pixel_task、render_task、pipeline_task
+│  ├─ components/tasks/      pixel_effect_task、pixel_pair_task、pixel_render_task（wave＋render）
 │  ├─ components/effects/    內建效果
 │  ├─ components/driver/     drv_i80、drv_spi_led
 │  └─ components/bench/      0xF065／0xF077 量測
@@ -388,8 +391,11 @@ esp_Net-Core/
 - `affinity=[core0,core1]`，只可以一個 1；`[0,0]` = 唔跑。
 - **未設定 = `[0,0]`**：條目缺失／冇寫 affinity → `on_start` 照跑、loop 唔開。
 - 缺席的租戶會自動補寫 `[0,0]`，**只加不改**。
-- Pixel 兩個租戶：`render`（先登記、建環）→ `pixel`（後登記、找環）。
-  兩條都要 `level=4`、`running=1`；少一條就唔點燈。
+- Pixel 四層四任務（2026-11-25 正名）：`pixel_effect_task`（效果值）→
+  `pixel_pair_task`（抖動＋配對）→ `pixel_wave_task`（畫波）→ `pixel_render_task`（推送）。
+  `pixel_render_task` order 10 先 on_start（建立環／lane／節拍），其餘按 order 跟；
+  四條都要 `level=4`、`running=1`；少一條就唔點燈。舊名 `effect`／`pair`／`render`
+  由 `nc_task.c` 的 alias 讀取，OTA 後不會被關掉。
 
 ### `.nct` / `.nce`
 
@@ -488,12 +494,12 @@ IDF_PATH=$HOME/esp/esp-idf python3 make.py build <board> --project <project> --f
   - `artifacts/build/<chip>_<board>/`（build dir／sdkconfig）
   - `artifacts/logs/...`（建置 log）
 - Project 選擇：
-  - `ESP32-S3-Matrix-EffectPerf`：**只測效果**，render／pixel 關；`0xF065`／`0xF077`。
+  - `ESP32-S3-Matrix-EffectPerf`：**只測效果**，輸出層關；`0xF065`／`0xF077`。
   - `ESP32-S3-Matrix-LED-Textkit`：內建效果＋render（production，1 lane I80）。
-  - `ESP32-S3-Matrix-Show`：檔案驅動（effect／pair），要 `/data/pixel` 四層資產。
+  - `ESP32-S3-Matrix-Show`：檔案驅動（pixel_effect／pair／wave／render），要 `/data/pixel` 四層資產。
   - `ESP32-S3-Zero-Show9600`／`Show2400`：9,600／2,400 px 驗收。
 - `--tests` 會**覆蓋**同一 path 的 `.bin`；之後要 release 記得重建。
-- 建置前確認 `IDF_PATH`：macOS `$HOME/esp/esp-idf`（**v6.0.3**）；WSL
+- 建置前確認 `IDF_PATH`：macOS `$HOME/esp/esp-idf`（**v6.1.1**）；WSL
   `/home/user/esp/esp-idf`（**v6.1.1**）——記錄要寫 `idf=`（見鐵律 12）。
 
 ---
@@ -582,29 +588,36 @@ python3 tools/ota.py --port /dev/cu.usbmodemXXXX \
 
 ---
 
-## 10. Pixel 管線（效果 → 配對 → 渲染）
+## 10. Pixel 管線（效果 → 抖動＋配對 → 畫波 → 推送）
 
-### 10.1 三層＋環
+### 10.1 四層四任務＋環
 
 ```text
-效果層（12-bit 值）
-  └─ nc_px_aprog_vals()／內建效果／DATA program
-        │
-配對層（layout）
-  └─ nc_px_layout_apply()／apply12()／apply4()／apply_dither()
-        │  直接寫環槽（零拷貝）
+pixel_effect_task（core0，50 fps）
+  └─ 每條 aprog evaluate program → 12-bit 值流（雙 pool＋ack，防撕裂）
+        │  只傳指標（nc_pipe_effect_frame_t），唔複製值流
         ▼
-環（i80.prd；64 B 表頭＋px×4 B）
+pixel_pair_task（core1）
+  └─ nc_px_layout_apply()／apply12()／apply4()／apply_dither()
+        │  抖動在配對內圈（9,600 px 5.4 ms、零中間 buffer）
+        ▼
+環（i80.prd；64 B 表頭＋px×4 B）        ← 零拷貝：直接寫硬件即將讀的格
         │
-渲染層（render_task）
-  └─ 取最新格 → codec → I80／SPI 後端 → DMA
+pixel_wave_task（core1，order 11）
+  └─ 取最新格 → codec → 後端 DMA 槽 → 入「格索引」隊列（8 格，唔 copy）
+        │
+pixel_render_task（core1，order 10；環／lane／節拍的主人）
+  └─ DMA 完成還格 → submit → I80／SPI → 燈
 ```
 
-- `pixel` 任務：內容生產者；`prd` loop；**不控 FPS**（有空間就寫）。
-- `render` 任務：`frame_interval_ms`（預設 20 ms = 50 fps）；環 → encode → submit。
-- 兩者只透過環見面；`render` 先登記、`pixel` 後找環。
+- 四個任務全部 `level=4`；`pixel_render_task` 先 on_start（建立環／後端／節拍），
+  其餘按 order 跟。少一條就唔點燈。
+- `pixel_effect_task`／`pixel_pair_task` 只在 `CONFIG_NETCORE_CONTENT=y` 存在；
+  `pixel_wave_task`／`pixel_render_task` 屬 `CONFIG_NETCORE_PIXEL`，release 都有。
 - 環契約：`begin_ex()` 拿的那一格才寫；`commit()` 只發布同一格；
-  encode 不可再 peek；DMA 完成才 reclaim。
+  encode 不可再 peek；**DMA 完成才 reclaim**（reclaim 在 push loop）。
+- 舊 `pixel`（8×8 內建引擎）2026-11-25 **已退役**：它只是測試用生產者。
+  舊 `effect`／`pair`／`render` 任務名由 `nc_task.c` 的 alias 讀取，OTA 後不會熄燈。
 
 ### 10.2 零拷貝／唔清畫布
 
@@ -660,7 +673,7 @@ python3 tools/ota.py --port /dev/cu.usbmodemXXXX \
 ### 10.6 相關指令
 
 - `0xF060 MATRIX`：生產者 stats／effect／dither／color／gain／fps／zone…
-- `0xF061 RENDER`：render stats（tests 映像）
+- `0xF061 RENDER`：輸出層 stats（wave＋push；tests 映像）
 - `0xF06B SHOWFRAME`：live frame hex（檔案驅動 show）
 - `0xF079 PIXDIAG`：pixel 記憶體／配置
 - `0xF077 LAYOUTBENCH`：配對＋I80 合成量測（EffectPerf）
@@ -732,7 +745,8 @@ python3 tools/nc4.py --port <PORT> status tasks
 python3 tools/nc4.py --port <PORT> status mem
 ```
 
-- `render`／`pixel`：`level=4`、`started=1`、`running=1`。
+- `pixel_render_task`／`pixel_wave_task`／`pixel_pair_task`／`pixel_effect_task`：
+  `level=4`、`started=1`、`running=1`。
 - `status sys`：`rst` 不應該係 4（panic）；`up_s` 穩定。
 - 有 tests 映像才可用 `0xF061`；有 EffectPerf 才可用 `0xF077`／`0xF065`。
 
@@ -770,7 +784,7 @@ python3 tools/nc4.py --port <PORT> status mem
 | OTA `err_begin_partition_conflict` | 上次中斷，state=writing | `tools/ota.py --abort` |
 | 板重啟、`rst=4` | panic（爆棧／assert／heap） | 看 log；`CONSOLE_NONE` 冇 backtrace，改用 USJ console build |
 | `rst=6` | task WDT（卡住 >5 s） | 找哪個 loop 卡住；`status tasks` |
-| render／pixel `level=-1` | `/data/config/tasks.json` 舊 | `fs_format` 重 seed |
+| pixel 任務 `level=-1` | `/data/config/tasks.json` 舊 | `fs_format` 重 seed（alias 已可讀舊名） |
 | 板起但唔點燈 | render 未跑／腳位錯／I80 未 enable | `status tasks`、`0xF061`、hardware config |
 | 換 project 後行為舊 | `/data` 仍是舊 preset | `fs_format`；確認 `status tasks` |
 | 改了 sdkconfig 冇效 | build dir 的 sdkconfig 已存在 | `make.py build ... --fresh` |
@@ -899,6 +913,8 @@ commit message 說明。
 | 2026-11-24 | 版本一致性：`status fw`／OTA／image 同一個 `PROJECT_VER`；`make.py` 每次傳 `-DPROJECT_VER`；記錄 IDF v6.1.0 不存在 | lead（AI） |
 | 2026-11-24 | 配置分層：`driver.json` 只放裝置參數（只有 `LED` 段會被讀）；`I80`／`SPI` 型別化入 `hardware.json`，`/data/config/hardware.json` 的 `I80` 由死段變真 | lead（AI） |
 | 2026-11-25 | **鐵律 12「版本要統一」**：三個環境（macOS v6.0.3／Windows `.idf` v6.1.1／WSL v6.1.1）要一致；記錄要寫 `idf=` 同環境；附 6.0.3 vs 6.1.1 的 image 差異實測。順手把 host test 由 20 支更新為 21 支（加入 `fpsclock_test`） | lead（AI） |
+| 2026-11-25 | **pixel 四層四任務正名**：`pixel_effect_task`／`pixel_pair_task`／`pixel_wave_task`／`pixel_render_task`；wave／push 由 loop 升格成任務；舊 `pixel_task` 退役；`nc_task.c` 加 alias 鏈（OTA 不熄燈） | lead（AI） |
+| 2026-11-25 | **IDF 版本已統一 v6.1.1**：macOS `~/esp/esp-idf` `git describe` = v6.1.1，三個環境同版；6.0.3 的對照數字保留作歷史 | lead（AI） |
 | 2026-11-25 | **數據修正（A/B 驗證後）**：P4-ETH 的 6.1.1−6.0.3 image 差由 `+30,992 B` 更正為 **`+24,688 B`**（原本係對住更舊產物）；Matrix `+9,584 B` 證實正確。另註明 25 支 `run.sh` 之中只有 21 支係測試（4 支係 bench） | lead（AI） |
 
 ---

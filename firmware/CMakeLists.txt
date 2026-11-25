@@ -116,12 +116,14 @@ set(_nc_extra_dirs
     "${CMAKE_CURRENT_LIST_DIR}/components/effects/pixel_effects"
     # ── 任務（生產任務，不是測試）──
     "${CMAKE_CURRENT_LIST_DIR}/components/tasks/hw_gpio"
-    # pixel_task：效果／Map 生產者；render_task：渲染（LED 現在，LCD 將來）
-    "${CMAKE_CURRENT_LIST_DIR}/components/tasks/pixel_task"
-    "${CMAKE_CURRENT_LIST_DIR}/components/tasks/render_task"
-    # pixel_effect_task：production 三任務（effect＋pair）＋/data/pixel 四層；render 不變。
-    # 由 CONFIG_NETCORE_CONTENT 開關，CONFIG 關閉時 .c 內容為空、不登記任何東西。
-    "${CMAKE_CURRENT_LIST_DIR}/components/tasks/pixel_effect_task")
+    # pixel 管線四層四任務（2026-11-25）：
+    #   pixel_effect_task（效果值）→ pixel_pair_task（抖動＋配對）→
+    #   pixel_wave_task＋pixel_render_task（畫波／推送，同一個輸出層 component）。
+    # 舊 pixel_task（8×8 內建引擎）已退役：它只是測試用生產者，唔再擴充。
+    "${CMAKE_CURRENT_LIST_DIR}/components/tasks/pixel_render_task"
+    "${CMAKE_CURRENT_LIST_DIR}/components/tasks/pixel_effect_task"
+    # pair 由 CONFIG_NETCORE_CONTENT 開關；關閉時 .c 內容為空、不登記任何東西。
+    "${CMAKE_CURRENT_LIST_DIR}/components/tasks/pixel_pair_task")
 # effect_bench：純效果效能（0xF065），**測試／量測專用**。
 # 只有建置 EffectPerf project 才加入 component；production／Show 映像連目錄都唔掃。
 # 用 NC_PROJECT 環境變數（builder 每次 idf.py 都會帶）判定，避免 CONFIG_* 未載入

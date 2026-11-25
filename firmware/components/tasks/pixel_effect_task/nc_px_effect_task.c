@@ -1,4 +1,8 @@
-// nc_effect_task.c — 三任務管線的第一段：只生產波形值（layout 版）。
+// nc_px_effect_task.c — 四層管線第一段 pixel_effect_task：只生產波形值（layout 版）。
+//
+// 2026-11-25 四層四任務：
+//   **pixel_effect_task**（本檔）→ pixel_pair_task（抖動＋配對）→
+//   pixel_wave_task（畫波）→ pixel_render_task（推送）。
 //
 // 唔讀 /data、唔碰 map／write／ring；plan（aprog 清單）由 pair 經
 // nc_pipe_aprog_publish() 發佈，這裡 copy 一份再自己建 wave table。
@@ -23,7 +27,7 @@
 #include "nc_prio.h"
 #include "nc_task.h"
 
-static const char *TAG = "effect";
+static const char *TAG = "px_effect";
 
 static SemaphoreHandle_t s_mtx;
 static uint32_t s_gen;                     // 目前生效的 plan gen（0 = 未取過）
@@ -31,7 +35,6 @@ static uint32_t s_gen;                     // 目前生效的 plan gen（0 = 未
 // aprog 副本（每份 cap × 536 B）**放 PSRAM**，唔佔 internal。
 // 冇固定上限：按 naprog 配置／倍增；只有指標陣列留 internal。
 static nc_pipe_aprog_set_t s_set;          // 目前生效的 aprog 副本（own arrays）
-static portMUX_TYPE s_set_lock = portMUX_INITIALIZER_UNLOCKED;
 
 // 值流 pool（兩塊交替）；pool[slot] 長度 = Σ nv
 static uint16_t *s_pool[2];
@@ -424,7 +427,7 @@ static const nc_task_loop_t s_loops[] = {
 };
 
 static const nc_task_t s_task = {
-    .name = "effect",
+    .name = "pixel_effect_task",      // 2026-11-25 正名（tasks.json 舊名 effect 由 alias 讀）
     .kind = NC_TASK_NORMAL,
     .level = 4,
     .order = 22,
@@ -434,6 +437,6 @@ static const nc_task_t s_task = {
     .nloops = 1,
 };
 
-NC_TASK_AUTO_REG(effect, &s_task);
+NC_TASK_AUTO_REG(pixel_effect_task, &s_task);
 
 #endif  // CONFIG_NETCORE_CONTENT

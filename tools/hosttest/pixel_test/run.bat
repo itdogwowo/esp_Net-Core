@@ -13,7 +13,7 @@ setlocal EnableExtensions
 cd /d "%~dp0\..\..\.."
 
 set "PXF=firmware\components\sw\pixel"
-set "PXT=firmware\components\tasks\render_task"
+set "PXT=firmware\components\tasks\pixel_render_task"
 set "INC=/I%PXF%\include /I%PXT%\include /Itools\hosttest\pixel_test\include"
 set "SRCS=%PXF%\nc_pixel_q.c %PXF%\nc_pixel_encode.c %PXT%\nc_pixel_backend_mock.c %PXT%\nc_pixel_backend_direct.c tools\hosttest\pixel_test\pixel_test.c"
 

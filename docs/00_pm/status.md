@@ -1,7 +1,7 @@
 # 專案現況總結（單頁）
 
 > **用途**：所有「已經驗證的事實、已定案的設計、還沒做的事」集中在這一頁；
-> 細節都連到對應文件。**最後更新**：2026-11-21。
+> 細節都連到對應文件。**最後更新**：2026-11-25。
 
 ---
 
@@ -8450,3 +8450,51 @@ IDF_PATH=~/esp/esp-idf python3 make.py build ESP32-P4-ETH    --fresh
 **未做**：① `pixel_task` 真正退役（Textkit 冇 `/data/pixel`，要靠 8×8 engine 或 effects.json）；
 ② 任務名改 `px_*` 連 `tasks.json`／`nc_task.c` alias 一齊遷移；③ 分核（暫時全部 `NC_CORE_ANY`）；
 ④ 上板量 `0xF081`／`0xF071`（split 前後）。
+### 7.242 2026-11-25（pixel 四層四任務正式落地：pixel_effect／pair／wave／render；舊 pixel_task 退役）
+
+**決策（用家 2026-11-25）**：pixel 管線要「流程化存在」，四層各自係一個具體任務，
+名字用簡單直覺的 `pixel_*_task`；舊 `pixel`（8×8 內建六效果）**直接退役**（嗰啲只係測試）。
+
+| 層 | 任務名 | 角色 | order | core |
+|---|---|---|---:|---|
+| 1 | `pixel_effect_task` | 只 evaluate program → 12-bit 值流（雙 pool＋ack） | 22 | 0 |
+| 2 | `pixel_pair_task` | 抖動＋配對（layout runs）→ write → white mix → prd 環 | 21 | 1 |
+| 3 | `pixel_wave_task` | 環 → codec → 後端 DMA 槽（只傳格索引，唔 copy） | 11 | 1 |
+| 4 | `pixel_render_task` | DMA 完成還格 → submit → I80；環／lane／節拍的主人 | 10 | 1 |
+
+**改動**：
+
+| 檔案／目錄 | 做乜 |
+|---|---|
+| `tasks/pixel_effect_task/` | 只留 effect＋pipe stats＋`nc_pipeline.h`；任務名 `effect` → `pixel_effect_task` |
+| `tasks/pixel_pair_task/`（新 component） | pair 由 pixel_effect_task 拆出；任務名 `pair` → `pixel_pair_task` |
+| `tasks/render_task/` → `tasks/pixel_render_task/` | wave／push 由「同一任務兩個 loop」升格成兩個任務；`CONFIG_NETCORE_PX_SPLIT_PUSH` 移除（永遠分開） |
+| `tasks/pixel_task/` | **刪除**（舊 8×8 內建效果生產者） |
+| `nc_task.c` | 新增 alias 鏈：`pixel_effect_task→effect→content→show`、`pixel_pair_task→pair→content→show`、`pixel_wave_task/pixel_render_task→render`；舊 `/data` config OTA 後仍然生效 |
+| `firmware/CMakeLists.txt`／`main`／`test_action` | component 清單與依賴跟住改 |
+| 8 個 project 的 `tasks.json` | 全部改新名；Matrix／Textkit／SuperMini 只留輸出層；EffectPerf 輸出層 level=-1 |
+
+**wave → push 的實作**：8 格「格索引」隊列（`px_ready_t`），唔 copy 像素；wave 先確認
+隊列有位才 acquire（避免 encode 後 release 環格會令後端 DMA 槽永久洩漏）；push loop
+每次先 `reclaim`（DMA 完成才 release 環格）再 submit。隊列滿／submit 失敗都明示
+`fail++` 並還格，唔靜默丟。
+
+**驗證（macOS，idf=v6.1.1＝三個環境已統一；未上板）**：
+
+| 項目 | 結果 |
+|---|---|
+| `bash tools/hosttest/run_all.sh` | **21/21 OK**（另加 task_test 兩個 alias case） |
+| `make.py build ESP32-S3-Matrix --project …-Show --fresh` | **705.3 KB**（0xb0510） |
+| `make.py build ESP32-S3-Zero --project …-Show2400` | **705.3 KB**（0xb0540，mock／PSRAM／四任務常開） |
+| `make.py build ESP32-S3-Matrix --project …-LED-Textkit` | **665.0 KB**（0xa6400；−7,536 B，舊 pixel_task 移除） |
+| `make.py build ESP32-S3-Matrix --project …-EffectPerf` | **715.4 KB**（0xb2d80；輸出層 level=-1、effect_bench 照跑） |
+
+**已知取捨**：
+
+- Matrix／Matrix-LED-Textkit／SuperMini-LED-Textkit 現在**只有輸出層、冇生產者**（舊
+  `pixel_task` 已退役）；環係空，燈唔會更新。要效果就要用 Show 管線＋`/data/pixel` 資產。
+- 舊 `0xF060 MATRIX` 仍然編譯，但引擎冇人 bind（`nc_px_engine_json` 會回 `ready:0`），
+  只可以讀／寫設定，唔會再生產畫面；內建效果 registry 亦冇任務登記。
+- 未上板：四任務的實際排程、`0xF061`（wave＋push 合併 stats）、split 前後差異全部未量。
+- `pixel_render_task` 的 loop 只叫 `push`（submit／reclaim）；環同定時器仍在它的
+  `on_start` 建立，所以 config 關掉佢會連 wave 都停（預期）。

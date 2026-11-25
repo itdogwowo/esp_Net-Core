@@ -1,11 +1,13 @@
-// nc_render.h — 渲染任務（render task）：把環裡的幀交給後端／驅動。
+// nc_render.h — 輸出層（pixel_wave_task ＋ pixel_render_task）：環 → 編碼 → 後端／驅動。
 //
-// 分工（2026-11-18）：
-//   · 效果／Map：另一個任務（tasks/pixel_task）＋ sw/pixel 的環與編碼器；
-//   · **這個任務只做渲染**：取最新一格 → 編碼 → 後端 → 硬件。
-//     將來 LCD 同 LED 都由同一個 render 任務處理，所以這裡刻意不放效果。
+// 2026-11-25 四層四任務：
+//   pixel_effect_task → pixel_pair_task → **pixel_wave_task（畫波）** →
+//   **pixel_render_task（推送）**。
+//   · pixel_render_task 擁有環／lane／後端／節拍（order 10 先 on_start）；
+//   · pixel_wave_task 只做「取最新一格 → 編碼 → 入隊」（order 11）；
+//   · 兩者只傳「格索引」隊列，唔 copy 像素。
 //
-// 一個 render 任務可以跑多道 lane（每道 lane = 一個後端 + 一條環）；
+// 一個輸出層可以跑多道 lane（每道 lane = 一個後端 + 一條環）；
 // 一條環可以由任何生產者餵（像素效果、`.nce`、主機推送）。
 #pragma once
 
@@ -102,7 +104,7 @@ typedef struct {
 nc_pixel_backend_t *nc_px_backend_spi(const nc_px_spi_cfg_t *cfg);
 
 // ═══════════════════════ 渲染器 ═══════════════════════
-// 一個任務（名 "render"），跑一或多道 lane；每道 lane 一個後端 + 一條環。
+// 輸出層跑一或多道 lane；每道 lane 一個後端 + 一條環。
 typedef struct {
     char be[NC_PX_BACKEND_MAX];    // 後端名
     char ring[NC_PX_NAME_MAX + 1]; // 環名（空 = "<後端>.<lane>"）
@@ -139,8 +141,9 @@ size_t nc_render_json(char *out, size_t cap);     // 0xF061 與 STATUS 用
 size_t nc_render_fps_json(char *out, size_t cap);
 void   nc_render_fps_reset(void);
 
-// 任務宣告（main.c 在 CONFIG_NETCORE_PIXEL 之下登記；未開回 NULL）
-const nc_task_t *nc_render_task(void);
+// 任務宣告（constructor 自己登記；CONFIG_NETCORE_PIXEL 未開時回 NULL）
+const nc_task_t *nc_render_task(void);       // pixel_render_task（推送）
+const nc_task_t *nc_render_wave_task(void);  // pixel_wave_task（畫波）
 
 // 第一條真正綁到後端嘅環名（例如 i80 後端起唔到時會係 "mock.prd"）。
 // 生產者（pair／pixel）唔應該靠「名入面有 prd」去猜自己餵邊條環。

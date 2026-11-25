@@ -5,13 +5,15 @@
 > 20% 效果」的 white mix；另加 `0xF06B SHOWFRAME`（回 `0xF06C`）給 Web UI 預覽。
 >
 > 同 EffectPerf 的分別：EffectPerf 只量效果管線、唔點燈；Show 是**真的出畫面**的 production
-> 映像。生產者由 `pixel_task`（內建六個效果）換成三任務管線：
-> **effect（波形值）→ pair（配對／white mix／寫環）→ render（編碼／I80）**。
-> `pixel_task`／render／編碼器／環全部唔改（render 仍然只認 canvas）。
+> 映像。生產者由已退役的 `pixel_task`（內建六個效果）換成四層管線：
+> **pixel_effect_task（波形值）→ pixel_pair_task（配對／white mix／寫環）→
+> pixel_wave_task（編碼）→ pixel_render_task（推送／I80）**。
 >
-> **2026-11-25 更新**：component 改名 `tasks/pixel_effect_task/`（檔案 `nc_px_*`）；畫面
-> 繪製（wave）同推送（push）可以用 `CONFIG_NETCORE_PX_SPLIT_PUSH` 拆成兩個 loop，
-> 中間只傳「格索引」隊列，唔 copy。抖動維持在 pair 的內圈（定案見 status §7.241）。
+> **2026-11-25 更新（四層四任務正名）**：`pixel_effect_task`（效果值）→
+> `pixel_pair_task`（抖動＋配對）→ `pixel_wave_task`（畫波）→ `pixel_render_task`（推送）。
+> wave／push 由 loop 升格成獨立任務，中間只傳「格索引」隊列，唔 copy；抖動維持在
+> pair 的內圈（定案見 status §7.241）。舊 `pixel_task` 已退役，舊名 `effect`／`pair`／
+> `render` 由 `nc_task.c` 的 alias 讀取（OTA 不熄燈）。
 >
 > **2026-11-22 更新**：production canvas 及 Show I80 packed 波形已固定 PSRAM；
 > 所有 LED 數走同一條服務路徑，沒有 internal/PSRAM runtime 分支。完整量測、
@@ -39,19 +41,21 @@ sw/pixel 的四層表（nc_px_layer_scan）
 nc_px_layout_t（aprog[] 值流 ＋ job[] ＋ dst 升序 runs[]）
   │   ← group.sel → index → counting bucket → run 合併（見 pixel-layout-pairing.md）
   │
-  ├─ pair 發佈 aprog[]（nc_pipe_aprog_publish）；effect 拿副本
+  ├─ pixel_pair_task 發佈 aprog[]（nc_pipe_aprog_publish）；pixel_effect_task 拿副本
   │
-  ├─ effect 任務（core0，50 fps）：每條值流一個 wave table／pool（×2 雙緩衝）→
+  ├─ pixel_effect_task（core0，50 fps）：每條值流一個 wave table／pool（×2 雙緩衝）→
   │    nc_pipe_effect_frame_t {seq, plan_gen, naprog, nv[], vals*[]}（只發指標）
-  │    pair 處理完一幀才 ack(seq)，effect 之後才重用該 slot
+  │    pixel_pair_task 處理完一幀才 ack(seq)，effect 之後才重用該 slot
   │
-  ├─ pair 任務（core1）：copy latest frame → nc_px_layout_apply() 順序掃 runs
+  ├─ pixel_pair_task（core1）：copy latest frame → nc_px_layout_apply() 順序掃 runs
   │    寫 canvas → white_mix → prd 環；layout 由 pair 擁有
   │
   ▼
-prd 環（4 B/px = R,G,B,W；render 任務建立／登記）
+prd 環（4 B/px = R,G,B,W；pixel_render_task 建立／登記）
   ▼
-render 任務（nc_render_task）：取最新一格 → 編碼（ws2812 GRB）→ I80 → 64 顆燈（50 fps）
+pixel_wave_task：取最新一格 → 編碼（ws2812 GRB）→ 後端 DMA 槽 → 格索引隊列
+  ▼
+pixel_render_task：DMA 完成還格 → submit → I80 → 64 顆燈（50 fps）
 ```
 
 **邊個負責什麼**（同 §7.142 的架構決定一致）：
@@ -60,11 +64,12 @@ render 任務（nc_render_task）：取最新一格 → 編碼（ws2812 GRB）�
 |---|---|---|
 | 檔案 → struct | `sw/pixel`（`nc_px_layer*`／`nc_px_asset*`） | 掃目錄、解析 JSON、建表（PC 可測） |
 | mode → layout | `sw/pixel`（`nc_px_layout.c`） | group.sel 展開、range、dst 排序 run 表、預編譯 program |
-| 波形值 | `effect` 任務（pixel_effect_task component） | 每條值流 evaluate program；雙 pool＋ack；50 fps |
-| 配對／white mix | `pair` 任務（pixel_effect_task component） | 載四層、建 layout、run 寫入、white mix、寫環、`0xF06B` |
-| 環 → 燈 | `tasks/render_task` | 編碼、DMA、送燈（完全唔知四層） |
+| 波形值 | `pixel_effect_task` | 每條值流 evaluate program；雙 pool＋ack；50 fps |
+| 配對／white mix | `pixel_pair_task` | 載四層、建 layout、run 寫入（抖動內圈）、white mix、寫環、`0xF06B` |
+| 畫波 | `pixel_wave_task` | 環 → codec → 後端 DMA 槽；只傳格索引，唔 copy |
+| 環 → 燈 | `pixel_render_task` | 環／lane／節拍、DMA 完成還格、submit（完全唔知四層） |
 
-## 2. `pair`＋`effect` 任務（`firmware/components/tasks/pixel_effect_task/`）
+## 2. 四層任務（`tasks/pixel_effect_task/`、`pixel_pair_task/`、`pixel_render_task/`）
 
 由 **`CONFIG_NETCORE_CONTENT`**（`depends on NETCORE_PIXEL`，default n）開關；`CONFIG` 關閉時
 `.c` 整段 `#if` 掉、component 是空 object（同 `effect_bench` 同一模式）。component 用
@@ -74,9 +79,10 @@ render 任務（nc_render_task）：取最新一格 → 編碼（ws2812 GRB）�
 
 | 欄位 | 值 | 說明 |
 |---|---|---|
-| pair | `pair`／`pair`；NORMAL／4／order 21；stack 4096／core1；`0xF06B` 在此 |
-| effect | `effect`／`effect`；NORMAL／4／order 22；stack 4096／core0；50 fps |
-| render | 既有 `render`；core1；只讀 prd 環 |
+| 效果 | `pixel_effect_task`／loop `effect`；NORMAL／4／order 22；stack 4096／core0；50 fps |
+| 配對 | `pixel_pair_task`／loop `pair`；NORMAL／4／order 21；stack 4096／core1；`0xF06B` 在此 |
+| 畫波 | `pixel_wave_task`／loop `wave`；NORMAL／4／order 11；stack 4096／core1 |
+| 推送 | `pixel_render_task`／loop `push`；NORMAL／4／order 10；stack 3072／core1；環／lane／節拍的主人 |
 
 **on_start（開機一次）**：
 

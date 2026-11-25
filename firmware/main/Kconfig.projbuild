@@ -133,17 +133,15 @@ menu "esp_Net-Core"
         depends on NETCORE_PIXEL
         default n
         help
-            加入 production 的三任務管線（effect → pair → render）：
-            · effect：只 evaluate program 波形值（50 fps）；
-            · pair  ：載入 `/data/pixel` 四層、建 plan、按 group/range/write 配對、
-              white mix（0..100），寫入 render 的 prd 環；0xF06B/0xF06D/0xF06F 也在這裡；
-            · render：現有的 encode／I80，不變。
-            三任務由 project 的 tasks.json 各自設 level／affinity；effect 預設 core0，
-            pair／render core1。
-
-            這一支唔屬於 NC_ENABLE_TESTS，也不會取代 pixel_task：
-            哪一個當生產者由 project 的 `data/config/tasks.json` 決定
-            （例如 `ESP32-S3-Matrix-Show`：render＋show 開、pixel 關）。
+            加入 production 的四層管線（2026-11-25 四任務正名）：
+            · pixel_effect_task：只 evaluate program 波形值（50 fps）；
+            · pixel_pair_task  ：載入 `/data/pixel` 四層、建 plan、按 group/range/write
+              配對（抖動在內圈）、white mix（0..100），寫入 prd 環；
+              0xF06B/0xF06D/0xF06F 也在這裡；
+            · pixel_wave_task／pixel_render_task：畫波／推送，屬 NETCORE_PIXEL，
+              即使這一項關閉都存在（只是冇生產者餵環）。
+            四任務由 project 的 tasks.json 各自設 level／affinity；effect 預設 core0，
+            pair／wave／render core1。
 
             內容缺失（/data/pixel 未上傳）時只 log warning 並填黑，
             不會讓開機失敗。量產映像預設關閉。
@@ -288,15 +286,6 @@ menu "esp_Net-Core"
             1 = 每個視覺幀送一次（8-bit）。
             4 = 時間抖動：每個視覺幀送 4 個子幀（等效 10-bit）。
             子幀率 = 視覺 fps × 子幀數；每條線的像素要相應減少（例如 600 → 150）。
-
-    config NETCORE_PX_SPLIT_PUSH
-        bool "畫波（encode）同推送（submit）分兩個 loop"
-        depends on NETCORE_PIXEL
-        default n
-        help
-            畫波留在 render loop；推送搬去獨立 push loop。兩個 loop 之間
-            只有一條「格索引」隊列，唔會 copy 任何像素資料。
-            未上板驗證前預設 n（行為同單 loop 完全一樣）。
 
     config NETCORE_PIXEL_RING_SLOTS
         int "prd 環格數（要 ≥ 子幀數 + 1）"

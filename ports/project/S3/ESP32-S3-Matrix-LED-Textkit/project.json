@@ -9,7 +9,7 @@
     "sdkconfig.defaults 提供 —— 這裡只選擇 project 與執行期預置。",
     "",
     "執行期預置（data/config）：system.json 的 frame_interval_ms＝20（50 fps）、",
-    "tasks.json 開 render／pixel（level 4、core1）。要改行為改這些檔，唔使 rebuild。"
+    "tasks.json 開 pixel_wave_task／pixel_render_task（level 4、core1）。舊內建效果生產者\n    pixel_task 已退役；這個 project 現在只有輸出層（冇生產者寫環）。要改行為改這些檔。"
   ],
   "version": 1,
   "name": "ESP32-S3-Matrix-LED-Textkit",
