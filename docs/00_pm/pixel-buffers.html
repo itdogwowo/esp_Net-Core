@@ -63,6 +63,7 @@
   .card .st{font-size:9px; color:var(--dim); border:1px solid var(--line); border-radius:999px; padding:0 5px; white-space:nowrap}
   .card .sub{font-size:9.5px; color:var(--dim); margin-top:3px; line-height:1.4; min-height:13px; font-variant-numeric:tabular-nums}
   .card.free{opacity:.55}
+  .card.held{opacity:.8; border-style:dashed}
   .card.ready{border-color:var(--ready); background:#0d1d33}
   .card.inflight{border-color:var(--inflight); background:#171331}
   .card.busy{border-color:var(--busy); background:#0c211a}
@@ -222,6 +223,7 @@
       <h4>圖例</h4>
       <div class="legend">
         <span><i style="background:#1a2338;border:1px solid #2b3750"></i>FREE</span>
+        <span><i style="background:#0a1220;border:1px dashed #2b3750"></i>HELD（paint 已留位、未填）</span>
         <span><i style="background:#0d1d33;border:1px solid #4c9aff"></i>READY</span>
         <span><i style="background:#171331;border:1px solid #b18cff"></i>INFLIGHT</span>
         <span><i style="background:#0c211a;border:1px solid #45d483"></i>BUSY／SENDING</span>
@@ -254,18 +256,21 @@
   const MAX_Q = 16;
   const COLORS = { effect: "#4c9aff", paint: "#39d0d8", encode: "#f2b84b", render: "#45d483" };
   const RATE = { effect: 0.085, paint: 0.072, encode: 0.085, dma: 0.16, render: 0.5 };
+  // render 由節拍驅動：每 RENDER_BEAT 個 tick 才收一次 queue。正因為收得慢過 encode 出，
+  // queue 才會真的積一項——佢就係用嚟吸收呢個速率差。
+  const RENDER_BEAT = 6;
 
   const S = {
     px: 64, sf: 1, speed: 2,
     tick: 0, frameSeq: 0, seq: 0, copies: 0,
     pools: [], ring: [], dma: [], queue: [],
     ringWr: 0, dmaWr: 0,
-    led: false, playing: true, timer: null,
+    playing: true, timer: null,
     W: null,
   };
 
   function newWorker() {
-    return { active: false, prog: 0, pool: -1, slots: [], ring: -1, dma: -1,
+    return { active: false, prog: 0, pool: -1, slots: [], done: [], ring: -1, dma: -1,
              frame: 0, sf: 0 };
   }
 
@@ -282,11 +287,12 @@
   function fmtKB(n) { return (n / 1024).toFixed(1) + " KB"; }
   function clamp01(v) { return Math.max(0, Math.min(1, v)); }
   function pct(v) { return (clamp01(v) * 100).toFixed(0) + "%"; }
-  function frameLabel(frame, sf) { return sf > 0 && S.sf > 1 ? `F${frame}.${sf + 1}` : `F${frame}`; }
+  // sf 係 0-based（第 k 個子幀），顯示要 1-based；以前寫 sf > 0，第一個子幀跌返做 F12 冇小數。
+  function frameLabel(frame, sf) { return S.sf > 1 ? `F${frame}.${sf + 1}` : `F${frame}`; }
 
   function reset() {
     S.tick = 0; S.frameSeq = 0; S.seq = 0; S.copies = 0;
-    S.ringWr = 0; S.dmaWr = 0; S.queue = []; S.led = false;
+    S.ringWr = 0; S.dmaWr = 0; S.queue = [];
     const n = slotCount();
     S.pools = [0, 1].map(() => ({ state: "free", frame: 0, prog: 0 }));
     S.ring = Array.from({ length: n }, (_, i) => ({ state: "free", frame: 0, sf: 0, seq: 0, prog: 0 }));
@@ -334,8 +340,10 @@
         if (slots.length === S.sf) {
           W.paint = { ...newWorker(), active: true, pool: p, slots, frame: S.pools[p].frame };
           S.pools[p].state = "reading";
+          // 留位用 held，唔可以標 free：呢幾格已經屬於 F<n>，只係未開始填。
+          // 標成 free 會令畫面講「空格」但身上有 frame 號，freeRingRun() 亦會重複數它。
           slots.forEach((idx, k) => {
-            S.ring[idx] = { state: "free", frame: S.pools[p].frame, sf: k, seq: 0, prog: 0 };
+            S.ring[idx] = { state: "held", frame: S.pools[p].frame, sf: k, seq: 0, prog: 0 };
           });
           // 第一個子幀即刻開始填；其餘等前面填完才逐格接上
           S.ring[slots[0]].state = "filling";
@@ -345,20 +353,25 @@
     }
     if (W.paint.active) {
       W.paint.prog += RATE.paint;                 // 每 tick 填一個子幀的比例
-      const total = S.sf;
-      for (let k = 0; k < total; k++) {
+      for (let k = 0; k < W.paint.slots.length; k++) {
+        // 交棒之後 DMA 會自己還格。呢一刻唔可以再寫同一格，否則同一個子幀會再 ready 一次
+        //（encode 送兩次；被重複佔走的頻寬令後面的子幀反而漏掉）。
+        if (W.paint.done.indexOf(k) >= 0) continue;
         const idx = W.paint.slots[k];
         const local = clamp01(W.paint.prog - k);  // 第 k 格自己的 0..1
         if (local <= 0) continue;
-        if (S.ring[idx].state === "free") S.ring[idx].state = "filling";
-        S.ring[idx].prog = local;
-        if (local >= 1 && S.ring[idx].state === "filling") {
-          S.ring[idx].state = "ready";
-          S.ring[idx].seq = ++S.seq;
-          S.ring[idx].prog = 1;
+        const slot = S.ring[idx];
+        if (slot.state === "held") slot.state = "filling";
+        if (slot.state !== "filling") { W.paint.done.push(k); continue; }  // 已經唔係自己嘅格
+        slot.prog = local;
+        if (local >= 1) {
+          slot.state = "ready";
+          slot.seq = ++S.seq;
+          slot.prog = 1;
+          W.paint.done.push(k);
         }
       }
-      if (W.paint.prog >= total) {
+      if (W.paint.prog >= W.paint.slots.length) {
         S.pools[W.paint.pool].state = "free";
         S.pools[W.paint.pool].prog = 0;
         W.paint.active = false;
@@ -366,8 +379,14 @@
     }
 
     // 3) encode：拿最早 READY 的 ring 格 + free DMA 槽
+    //    按 commit 序（seq）揀，唔係按 index：環繞圈之後 index 細嘅可能反而較新，
+    //    index 序會令新子幀爬頭，畫面就唔係 FIFO。
     if (!W.encode.active && S.queue.length < MAX_Q) {
-      const r = S.ring.findIndex((x) => x.state === "ready");
+      let r = -1;
+      for (let i = 0; i < S.ring.length; i++) {
+        if (S.ring[i].state !== "ready") continue;
+        if (r < 0 || S.ring[i].seq < S.ring[r].seq) r = i;
+      }
       let d = -1;
       for (let k = 0; k < S.dma.length; k++) {
         const idx = (S.dmaWr + k) % S.dma.length;
@@ -396,7 +415,8 @@
     }
 
     // 4) render：queue → submit（submit 很快；DMA 之後非同步送）
-    if (!W.render.active && S.queue.length > 0) {
+    //    收 queue 受節拍限制：encode 出得比節拍快時，queue 就會積住一兩項。
+    if (!W.render.active && S.queue.length > 0 && S.tick % RENDER_BEAT === 0) {
       const item = S.queue.shift();
       S.dma[item.dma].state = "sending";
       S.dma[item.dma].prog = 0;
@@ -408,18 +428,17 @@
       if (W.render.prog >= 1) W.render.active = false;
     }
 
-    // 5) DMA 完成 → free DMA 槽 + ring 格
+    // 5) DMA 完成 → free DMA 槽 + ring 格（frame/sf 一齊清，否則 FREE 卡會留住舊 frame 號）
     S.dma.forEach((d) => {
       if (d.state !== "sending") return;
       d.prog += RATE.dma;
       if (d.prog >= 1) {
-        d.state = "free"; d.prog = 0;
         if (d.ring >= 0) {
-          S.ring[d.ring].state = "free"; S.ring[d.ring].prog = 0; S.ring[d.ring].seq = 0;
+          const r = S.ring[d.ring];
+          r.state = "free"; r.prog = 0; r.seq = 0; r.frame = 0; r.sf = 0;
           d.ring = -1;
         }
-        S.led = true;
-        setTimeout(() => { S.led = false; render(); }, 180);
+        d.state = "free"; d.prog = 0; d.frame = 0; d.sf = 0;
       }
     });
 
@@ -463,17 +482,20 @@
 
     // ring
     $("ringCards").innerHTML = S.ring.map((r, i) => {
-      const filling = W.paint.active && W.paint.slots.includes(i);
+      const filling = W.paint.active && r.state === "filling" && W.paint.slots.includes(i);
       const reading = W.encode.active && W.encode.ring === i;
       const active = filling || reading;
       const accent = filling ? COLORS.paint : (reading ? COLORS.encode : null);
       const label = r.state === "free" ? "FREE"
+        : r.state === "held" ? "paint 留位（等前面填完）"
         : r.state === "filling" ? `paint 寫入 ${pct(r.prog)}`
         : r.state === "ready" ? "READY（等 encode）"
         : r.state === "reading" ? `encode 讀取 ${pct(W.encode.prog)}`
         : "DMA 讀緊";
+      const barv = r.state === "filling" ? r.prog
+        : (r.state === "ready" || r.state === "reading" || r.state === "inflight") ? 1 : 0;
       return card(`<div class="top"><b>slot ${i}</b><span class="st">${r.state.toUpperCase()}</span></div>
-        <div class="sub">${r.frame ? frameLabel(r.frame, r.sf) + " · " : ""}${label}</div>${bar(r.state === "free" ? 0 : (r.state === "filling" ? r.prog : 1))}`,
+        <div class="sub">${r.frame ? frameLabel(r.frame, r.sf) + " · " : ""}${label}</div>${bar(barv)}`,
         r.state + (active ? " active" : ""), accent);
     }).join("");
 
@@ -606,9 +628,9 @@
       const from = dir === "from";
       const off = (n - 1) * 7;
       const sx = from ? (gr.left - dr.left + 4) : (sr.right - dr.left);
-      const sy = from ? (gr.top - dr.top + 24 + (i % 3) * 8) : (sr.top + sr.height / 2 - dr.top + off);
+      const sy = from ? (gr.top - dr.top + 24 + (n - 1) * 8) : (sr.top + sr.height / 2 - dr.top + off);
       const tx = from ? (sr.right - dr.left - 8) : (gr.left - dr.left + 6);
-      const ty = from ? (sr.top + sr.height / 2 - dr.top + off) : (gr.top - dr.top + 24 + (i % 3) * 8);
+      const ty = from ? (sr.top + sr.height / 2 - dr.top + off) : (gr.top - dr.top + 24 + (n - 1) * 8);
       const dx = Math.max(36, Math.abs(tx - sx) * 0.55);
       const c = (tx > sx) ? dx : -dx;
       const d = `M ${sx} ${sy} C ${sx + c} ${sy}, ${tx - c} ${ty}, ${tx} ${ty}`;
