@@ -14,8 +14,8 @@
 > - 最後更新：2026-11-26（首次建立；涵蓋 9 條主線）。
 >
 > **唔包**：非效能類的架構演進（任務模型、config 四層、driver 分層、命名）。
-> 那些看 [task-model.md](task-model.md)、[config-layers.md](config-layers.md)、
-> [driver-layer.md](driver-layer.md)。
+> 那些看 [task-model.md](../03_notes/task-model.md)、[config-layers.md](../03_notes/config-layers.md)、
+> [driver-layer.md](../03_notes/driver-layer.md)。
 
 ---
 
@@ -231,7 +231,7 @@ chunk ≥32 KB 才有意義，64 KB 才接近滿速。
 | S3 WiFi > 0.8 MB/s | 未做到；C 版仍未穩定超 MPY |
 | P4 device→PC 單 stream（仍低 MPY 12–14%） | 雙 stream 已補回；單 stream 未解 |
 | 12-bit canvas 留在 internal（tile／chunk） | 未做；現時 8-bit canvas 定案 |
-| RMT（C 系列）／PARLIO（P4）後端 | 未實作（[pixel-output-backends.md](pixel-output-backends.md)） |
+| RMT（C 系列）／PARLIO（P4）後端 | 未實作（[pixel-output-backends.md](../03_notes/pixel-output-backends.md)） |
 | 4 B 表入 production | 回退；要先 lab 完整 boot 驗證 |
 
 ---

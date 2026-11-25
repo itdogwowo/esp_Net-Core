@@ -179,7 +179,7 @@ reps=16 重跑數字一樣 → 唔係偶然。
 
 **A8 改名（0 性能影響）** — `pixel_wave_task` → `pixel_encode_task`，因為「wave」
 只涵蓋 WS2812 波形，實際要出 I80／SPI／RMT／PARLIO 多種格式
-（[pixel-output-backends.md](pixel-output-backends.md)）。
+（[pixel-output-backends.md](../03_notes/pixel-output-backends.md)）。
 
 ### 1.3 為什麼係 3.77×（三份貢獻）
 
@@ -258,7 +258,7 @@ reps=16 重跑數字一樣 → 唔係偶然。
 | 11-24 | `197e1e0`：**真 bug** 16-bit 高位 byte 用 OR → lane 由亮變暗會殘留（半邊「卡住」）；改成 store | 低位（off=0）與高位（off=1）係不同 byte，store 唔會互相覆蓋 |
 
 環契約（`begin_ex()` 拿到的格才寫、`commit()` 只發布同一格、encode 不可再 peek、
-DMA 完成才 reclaim）見 [pixel-ring-flow.md](pixel-ring-flow.md)。
+DMA 完成才 reclaim）見 [pixel-ring-flow.md](../03_notes/pixel-ring-flow.md)。
 環前綴 64 B（24 B 表頭＋padding）、3 個 DMA 槽、完成回呼帶單調 order 避免認錯格。
 
 ---
@@ -300,7 +300,7 @@ DMA 完成才 reclaim）見 [pixel-ring-flow.md](pixel-ring-flow.md)。
 |---|---|---|
 | 16-lane × 16-bit 實機 encode A/B（Step 0 基線） | 未做 | 冇 16 條線的板 |
 | 16×600 @ 50 fps 全鏈 | 未驗證 | 同上；但 encode 6.36 ms < 線路 18 ms |
-| RMT（C 系列）／PARLIO（P4）後端 | 未實作 | [pixel-output-backends.md](pixel-output-backends.md) |
+| RMT（C 系列）／PARLIO（P4）後端 | 未實作 | [pixel-output-backends.md](../03_notes/pixel-output-backends.md) |
 | 4 B 表入 production | 已回退 | 要 EffectPerf 完整 boot 驗證先 |
 | flat chunk 預取入 production | 預設關 | production 未見增益（§7.231） |
 | 9,600 px × 4 子幀 | 唔做 | 每視覺幀 ≈20 ms，4 子幀只配 2,400 px |
@@ -327,7 +327,7 @@ DMA 完成才 reclaim）見 [pixel-ring-flow.md](pixel-ring-flow.md)。
 3. **失敗的實驗一樣要寫**：寫「假設 → 實測 → 為什麼錯」，唔好只留成功。
 4. 數量級不同的量測點唔可以互相對比，表內要標清楚（見 §1.1 的警告）。
 5. 呢份係**歷史**；最新數字覆蓋去 [status.md](../00_pm/status.md)，
-   設計理由去 [pixel-renderer.md](pixel-renderer.md)，唔好三份講同一件事講到唔同版本。
+   設計理由去 [pixel-renderer.md](../03_notes/pixel-renderer.md)，唔好三份講同一件事講到唔同版本。
 6. **唔屬 pixel 的主線**（NC4／通道／緩衝／效果層／USB-FAT）寫去
    [tech-evolution.md](tech-evolution.md)（全樹版）；呢份只收 pixel 管線，
    兩份唔好重複貼同一批數字。

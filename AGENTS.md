@@ -348,8 +348,8 @@ esp_Net-Core/
 │  │  └─ night-report-*.md   夜間執行報告
 │  ├─ 01_protocol/           frame、commands、transports
 │  ├─ 02_guides/             build/flash、testing、configuration、connectivity
-│  └─ 03_notes/              架構／設計／量測筆記（tech-evolution ★ 全樹進化日誌、
-│                            pixel-evolution ★ pixel 專文、task-model、buffers…）
+│  ├─ 03_notes/              架構／設計／量測筆記（task-model、buffers、config-layers…）
+│  └─ 04_evolution/          進化日誌（tech-evolution ★ 全樹 9 條主線、pixel-evolution ★ 專文）
 ├─ firmware/
 │  ├─ main/main.c            開機 B01–B11、USB、router 裝配
 │  ├─ components/sys/nc4/    framing、decoder、bus、router、link
@@ -378,9 +378,8 @@ esp_Net-Core/
 3. 想知「協議」→ `docs/01_protocol/commands.md`、`frame.md`
 4. 想知「點 build／flash／test」→ `docs/02_guides/`
 5. 想知「為什麼這樣設計」→ `docs/03_notes/`
-6. 想知「為什麼變快／每一步試過什麼／失敗過什麼」→
-   `docs/03_notes/tech-evolution.md`（**全樹進化日誌**：9 條主線，每條 commit＋數字＋量測點）；
-   pixel 管線的逐階段細節（含 8×8 SWAR 圖解）再看 `docs/03_notes/pixel-evolution.md`
+6. 想知「為什麼變快／每一步試過什麼／失敗過什麼」→ `docs/04_evolution/`
+   （`tech-evolution.md` 全樹 9 條主線；`pixel-evolution.md` pixel 逐階段細節，含 8×8 SWAR 圖解）
 
 ---
 
@@ -687,7 +686,7 @@ render_task（公用輸出層；core1，order 10；環／lane／節拍的主人�
   `err_busy`。recovery：`CONFIG_NETCORE_USB_MSC_FORCE_OFF=y` 臨時唔交碟。
 - 16-bit 高位 byte 用 store（唔用 OR），否則 lane 變暗會殘留。
 - **每一步的歷史（含失敗實驗與數字）見
-  [`docs/03_notes/pixel-evolution.md`](docs/03_notes/pixel-evolution.md)**；
+  [`docs/04_evolution/pixel-evolution.md`](docs/04_evolution/pixel-evolution.md)**；
   本節只講現況。
 
 ### 10.5 抖動
@@ -942,10 +941,11 @@ IDF_PATH=$HOME/esp/esp-idf python3 make.py flash ESP32-S3-Matrix \
 2. **`docs/00_pm/status.md`**（最新快照）
 3. **`docs/01_protocol/`**（協議契約）
 4. **`docs/02_guides/`**（操作）
-5. **`docs/03_notes/`**（設計理由）
-6. 舊 handoff／night report（歷史；結論已併入 status）
+5. **`docs/03_notes/`**（設計理由：現況機制）
+6. **`docs/04_evolution/`**（歷史：點行到呢度；數字只作導航，現況仍以 status 為準）
+7. 舊 handoff／night report（歷史；結論已併入 status）
 
-衝突時：**程式碼＋最新量測 > status > notes > 舊文件**。發現文件過期，順手修正並在
+衝突時：**程式碼＋最新量測 > status > protocol／guides > notes > evolution > 舊文件**。發現文件過期，順手修正並在
 commit message 說明。
 
 ---
@@ -968,9 +968,10 @@ commit message 說明。
 | 2026-11-25 | **任務邊界更正**：`pixel_encode_task` 拆獨立 component（四個 component／四條任務）；`render_task` 改回公用名（唔屬 pixel 系列），encode 經 `nc_render_encode_*` 用它的環／lane／節拍 | lead（AI） |
 | 2026-11-25 | **IDF 版本已統一 v6.1.1**：macOS `~/esp/esp-idf` `git describe` = v6.1.1，三個環境同版；6.0.3 的對照數字保留作歷史 | lead（AI） |
 | 2026-11-25 | **數據修正（A/B 驗證後）**：P4-ETH 的 6.1.1−6.0.3 image 差由 `+30,992 B` 更正為 **`+24,688 B`**（原本係對住更舊產物）；Matrix `+9,584 B` 證實正確。另註明 25 支 `run.sh` 之中只有 21 支係測試（4 支係 bench） | lead（AI） |
-| 2026-11-26 | **新增技術進化日誌 [`pixel-evolution.md`](docs/03_notes/pixel-evolution.md)**：編碼 143 ms → 6.36 ms 的每一步（含 1.22× 失敗實驗、1-lane 回歸）、配對／環／FPS 三條主線、負結果清單、量測點警告。§3 目錄地圖、找東西次序加第 6 條、§10.4 加指針 | lead（AI） |
+| 2026-11-26 | **新增技術進化日誌 [`pixel-evolution.md`](docs/04_evolution/pixel-evolution.md)**：編碼 143 ms → 6.36 ms 的每一步（含 1.22× 失敗實驗、1-lane 回歸）、配對／環／FPS 三條主線、負結果清單、量測點警告。§3 目錄地圖、找東西次序加第 6 條、§10.4 加指針 | lead（AI） |
 | 2026-11-26 | **新增測試環境層 [`tenv`](docs/02_guides/test-environment.md)**：`tools/tenv.py`（init／bind／brief／plan／stamp／verify／selftest）＋`tools/testenv/policy.json`（IDF 要求、host test 支數）＋`.testenv/`（本機意圖／事實，唔進 git）。§0.6 新章、§14.1／§14.3 開工先跑、§15 命令卡；同時修 `ncbuild/env.py` 的空 `.idf` 遮住真 IDF、Windows COM 列舉 | lead（AI） |
-| 2026-11-26 | **再加全樹版 [`tech-evolution.md`](docs/03_notes/tech-evolution.md)**：9 條主線（NC4 收發／通道／緩衝／任務棧／效果層／配對／編碼／USB-FAT／建置）＋§11 跨主線負結果（12 條）＋§12 量測規矩；pixel 專文保留做細節。找東西第 6 條改成「全樹→專文」兩層 | lead（AI） |
+| 2026-11-26 | **再加全樹版 [`tech-evolution.md`](docs/04_evolution/tech-evolution.md)**：9 條主線（NC4 收發／通道／緩衝／任務棧／效果層／配對／編碼／USB-FAT／建置）＋§11 跨主線負結果（12 條）＋§12 量測規矩；pixel 專文保留做細節。找東西第 6 條改成「全樹→專文」兩層 | lead（AI） |
+| 2026-11-26 | **進化日誌獨立成層 `docs/04_evolution/`**：`tech-evolution.md`＋`pixel-evolution.md` 由 `03_notes` 搬入（`git mv`，歷史保留），新增 [`04_evolution/README.md`](docs/04_evolution/README.md)（判準／導航／維護規則／新主線骨架）。§3 目錄地圖、找東西第 6 條、§10.4、§16 權威順序、§17 一齊改 | lead（AI） |
 
 ---
 

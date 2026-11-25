@@ -8640,7 +8640,7 @@ fanout）等用家拍板。
 用家要求：把「一步步登出來」的經驗（每一步改了什麼方法、量到什麼數字、提升幾多）
 寫成獨立文件，唔好每次叫人翻 git log 或者散在 status 各節。
 
-**新增 [`docs/03_notes/pixel-evolution.md`](../03_notes/pixel-evolution.md)**：
+**新增 [`docs/04_evolution/pixel-evolution.md`](../04_evolution/pixel-evolution.md)**（當時在 `03_notes`，2026-11-26 搬入 `04_evolution/`）：
 
 | 節 | 內容 |
 |---|---|
@@ -8663,8 +8663,8 @@ fanout）等用家拍板。
 用家要求：唔止 pixel 一條線，整棵樹的技術優化要一次過寫成「一步一步」的紀錄，
 有數據、有改了什麼、有提升幾多，唔好每次翻 git log。
 
-**新增 [`docs/03_notes/tech-evolution.md`](../03_notes/tech-evolution.md)**（全樹版）；
-pixel 專文 [`pixel-evolution.md`](../03_notes/pixel-evolution.md) 保留（細節參考它的 §1／§2）。
+**新增 [`docs/04_evolution/tech-evolution.md`](../04_evolution/tech-evolution.md)**（全樹版）；
+pixel 專文 [`pixel-evolution.md`](../04_evolution/pixel-evolution.md) 保留（細節參考它的 §1／§2）。
 
 | 主線 | 代表數字 |
 |---|---|
@@ -8683,6 +8683,36 @@ pixel 專文 [`pixel-evolution.md`](../03_notes/pixel-evolution.md) 保留（細
 同 **§12 量測方法規矩**（物理上限／達標率、量測點唔可以跨表比）。
 
 **索引**：AGENTS §3 目錄地圖、找東西次序第 6 條（全樹→專文兩層）、§17 維護表；
-docs/README.md 03_notes 表；`pixel-evolution.md` §8 加互相指針。
+docs/README.md 03_notes 表（2026-11-26 搬去 `04_evolution/`）；`pixel-evolution.md` §8 加互相指針。
 
 **驗證**：純文件改動；相對連結與表格欄數用腳本檢查（0 問題）。
+
+### 7.248 2026-11-26（文件分層：進化日誌獨立成 `docs/04_evolution/`）
+
+用家問「進化日誌值唔值得獨立一個文件夾」。答：值得——`03_notes` 已經 80+ 份，講的是
+「現況機制、為什麼這樣設計」；進化日誌講「點行到呢度」，會一直 append。兩種生命周期
+唔同，混在一起會互相蓋過（一個會改寫、一個只會加）。
+
+**結構**：
+
+```text
+docs/
+├─ 00_pm/         現況快照、計劃、量測
+├─ 01_protocol/   協議契約
+├─ 02_guides/     操作
+├─ 03_notes/      設計理由（現況機制）
+└─ 04_evolution/  進化日誌（時間線）★ 新
+   ├─ README.md            判準／導航／維護規則／新主線骨架
+   ├─ tech-evolution.md    全樹 9 條主線
+   └─ pixel-evolution.md   pixel 專文
+```
+
+- 兩份文件由 `03_notes` **`git mv`** 搬入（歷史保留）；檔名唔改，舊連結只改路徑。
+- `03_notes` 的相對連結改成 `../03_notes/…`（pixel-output-backends／pixel-renderer／
+  pixel-ring-flow／config-layers／driver-layer／task-model）。
+- 索引：AGENTS §3 目錄地圖、找東西第 6 條、§10.4、**§16 權威順序新增第 6 層**
+  （evolution 在 notes 之後、舊文件之前）、§17；`docs/README.md` 由「四個分類」改
+  「五個分類」，03_notes **83 → 81**、04_evolution **3**。
+
+**驗證**：純文件搬遷，冇 code／建置影響；全 repo 相對連結＋表格欄數用腳本掃過
+（0 missing、0 mismatch）。

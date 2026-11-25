@@ -1,16 +1,17 @@
 # esp_Net-Core 文件索引
 
-> **用途**：全部文件的單一入口。依「你是誰」分四類，從這裡找你要的。
+> **用途**：全部文件的單一入口。依「你是誰」分五類，從這裡找你要的。
 > **最後整理**：2026-11（新增 `00_pm/` 項目管理層，把「計劃」與「技術文件」分開）
 
-## 四個分類怎麼選
+## 五個分類怎麼選
 
 | 分類 | 看什麼的人 | 內容 | 份數 |
 |---|---|---|---|
 | **00_pm** 項目管理 | 想知道「做到哪、接下來做什麼」的人 | 現況、路線圖、決策與待辦 | 9 |
 | **01_protocol** 協議層 | 對接方 / 寫 transport / 寫 PC 工具的人 | NC4 在哪些通道上跑、每個通道要自己做什麼 | 3 |
 | **02_guides** 使用教學 | 要 build / 燒錄 / 跑測試 / 選連線 / 改設定的人 | 工具怎麼用、測試怎麼跑、**每台機的測試環境怎樣識別**、連線怎麼選、**設定放哪怎樣生效**、數字怎麼判讀 | 8 |
-| **03_notes** 設計筆記 | 維護者 / 想了解設計脈絡的人 | 架構、分層、路由、任務模型、記憶體、研究、上板紀錄 | 83 |
+| **03_notes** 設計筆記 | 維護者 / 想了解設計脈絡的人 | 架構、分層、路由、任務模型、記憶體、研究、上板紀錄 | 81 |
+| **04_evolution** 進化日誌 | 想知道「為什麼變快、試過什麼、失敗過什麼」的人 | 時間線、每步數字、負結果、量測點 | 3 |
 
 > **趕時間先看**：[00_pm/status.md](00_pm/status.md) —— 一頁涵蓋「已驗證的數字、已定案的架構、還沒做的事、要測的場景」。
 
@@ -60,8 +61,6 @@
 
 | 文件 | 內容 |
 |---|---|
-| [tech-evolution.md](03_notes/tech-evolution.md) | **全樹技術進化日誌（時間線）**：9 條主線（NC4 收發／通道吞吐／緩衝貼身化／任務棧／效果層／配對／編碼／USB-FAT／建置），每條有 commit、之前→之後、量測點；另有**跨主線負結果表**（12 條做過但無效的方向）與量測方法規矩。**要答「這棵樹快在哪、怎麼快起來」先讀這份** |
-| [pixel-evolution.md](03_notes/pixel-evolution.md) | **Pixel 技術進化日誌（專文）**：編碼 143 ms → 6.36 ms 的每一步（含 SWAR 1.22× 失敗實驗、1-lane 回歸、單 lane 例外）、配對 6 B 表的擺位反轉（0.60×→2.13×）、環／FPS 兩條主線、**負結果清單**、量測點警告（邊啲數字唔可以互相對比） |
 | [driver-layer.md](03_notes/driver-layer.md) | **驅動與匯流排層（`driver/` / `bus/`）**：舊專案 `slave/driver/*_drv.py` 怎麼落地；**`bus/` 是通用匯流排（NC4／LED(SPI)／LCD(I80) 都係它的 personality，唔綁 NC4）**；driver／bus／sys 三層判準、六條 driver 規則、遷移順序 |
 | [hw-ownership.md](03_notes/hw-ownership.md) | **硬體門面 `nc_hw`（owner／command／snapshot）**：中央只做目錄＋命令入口＋最新 snapshot；真正寫硬體的是 owner task；UI／NC4 只讀 snapshot 或送 command；GPIO owner 已上板、`ph_hwcheck` 第一版、claim／保留腳位 |
 | [hw-pwm-uart.md](03_notes/hw-pwm-uart.md) | **PWM／UART／PIN 硬體設定與驅動**：舊專案 config 風格、typed `hardware.json`、LEDC PWM、UART／RS485 DE、`0xF039`–`0xF03B`；A 板上板結果 |
@@ -119,6 +118,16 @@
 | [ncm-loader.md](03_notes/ncm-loader.md) | **NCM 容器格式與載入流程**：`.nct` / `.nce` 48 B 檔頭、**§3.1 manifest（模組自我宣告：kind / core / layer / fps / px / 預算 / 指令）**、載入六步 C 骨架、原子指標交換、八種失敗模式對照表、資料驅動替代方案、M1–M5 里程碑、**§10 服務化（三層：wasm / ncm / module）與「彈性」的邊界** |
 | [ncm-engine.md](03_notes/ncm-engine.md) | **NCM 引擎是什麼**：**延後綁定**機制（把本來要重燒才能改的功能變成換檔案就換）；什麼時候用／不要用（UI → 驅動 → 效果）；六件專責；三個規則（單一 active / tick / 預算 strike）；arena 是宣告值、只給被載入的模組；與 task manager / plan / backend 的接口；名詞表 |
 | [effect-language.md](03_notes/effect-language.md) | **分離式固件與燈效語言**：什麼進固件、什麼是檔案（+ 什麼時候才要再燒一次）、六條路線比較（params / IR / 自訂 DSL / WASM AOT / 原生 ELF / mpy）、為什麼選 WAMR + TinyGo、**效果模組 ABI v0**、記憶體放哪裡、P0 spike 清單 |
+
+---
+
+## 04_evolution — 進化日誌
+
+| 文件 | 內容 |
+|---|---|
+| [README.md](04_evolution/README.md) | **這一層的入口**：判準（幾時入 03_notes、幾時入 04_evolution）、兩份文件分工、按問題導航、維護規則、新增主線的骨架 |
+| [tech-evolution.md](04_evolution/tech-evolution.md) | **全樹技術進化日誌**：9 條主線（NC4 收發／通道吞吐／緩衝貼身化／任務棧／效果層／配對／編碼／USB-FAT／建置），每條有 commit、之前→之後、量測點；另有**跨主線負結果表**（12 條做過但無效的方向）與量測方法規矩。**要答「這棵樹快在哪」先讀這份** |
+| [pixel-evolution.md](04_evolution/pixel-evolution.md) | **Pixel 技術進化日誌（專文）**：編碼 143 ms → 6.36 ms 的每一步（含 8×8 SWAR 圖解、1.22× 失敗實驗、1-lane 回歸）、配對 6 B 表擺位反轉（0.60×→2.13×）、環／FPS 兩條主線、**負結果清單**、量測點警告 |
 
 ---
 
