@@ -129,12 +129,16 @@ typedef struct {
 
 // ── hardware 層（hardware.json）：實體匯流排 ──
 // 一個層一個檔，跟 system/tasks 同一個生命周期（seed → load → struct）。
-// 已型別化：ETH、SDIO。其他段（PIN/SPI/I2C/I80/UART/I2S/PWM/ENC/XL9555）
-// 只會被計入 unknown —— **改它們不會生效**，等有 driver 用到再逐個加型別。
+// 已型別化：ETH、SDIO、PIN、PWM、UART、I80、SPI（2026-11-24 補 I80／SPI）。
+// 其他段（I2C/I2S/ENC/XL9555）只會被計入 unknown —— **改它們不會生效**，
+// 等有 driver 用到再逐個加型別。
 #define NC_CFG_MAX_SDIO 2
 #define NC_CFG_MAX_PWM  8
 #define NC_CFG_MAX_UART 3
 #define NC_CFG_MAX_PIN  16
+#define NC_CFG_MAX_I80  2
+#define NC_CFG_MAX_SPI  2
+#define NC_CFG_I80_DATA_MAX 16     // D0..D15（8-bit 用前 8 支）
 #define NC_CFG_PIN_LABEL_MAX 16
 #define NC_CFG_PWM_LABEL_MAX 16
 
@@ -204,6 +208,35 @@ typedef struct {
     uint16_t en_settle_ms;
 } nc_uart_cfg_t;
 
+// I80（LCD_CAM 8080）：舊專案原形狀 `{enable, data[], wr, cs, freq}`。
+//   · data[] = D0..D(n-1)；**bus_width 由 len(data) 推出**（8 或 16），唔另外寫一個欄位。
+//   · dc 是 esp_lcd I80 必需要的 D/C 腳（舊專案 LCD 由 PIN 的 tft_dc 提供；燈鏈直接寫這裡）。
+//   · wr／dc 送燈時是 dummy，但一定要是有效 GPIO。
+// 這一層是「腳位的唯二出處」（另一處是 wiring.json，經 ncportgen 生成預設）：
+// 用戶改 /data/config/hardware.json 就覆蓋預設，唔使重 build。
+typedef struct {
+    bool     enable;
+    uint8_t  bus_width;      // 8／16（由 n_data 推出；json 寫錯會被糾正）
+    uint8_t  n_data;
+    int8_t   data[NC_CFG_I80_DATA_MAX];   // D0..D(n-1)
+    int8_t   wr;             // WR（dummy 但要有）
+    int8_t   dc;             // D/C（esp_lcd 必要）
+    int8_t   cs;             // LCD 的 chip select；-1 = 沒有
+    uint32_t freq_hz;        // LCD PCLK；燈鏈的 PCLK 由 driver 的 timing 給
+} nc_i80_cfg_t;
+
+// SPI：舊專案 `{baudrate, phase, polarity, GPIO{sck,mosi,miso}, data_pins[]}`。
+// 時脈式燈鏈（WS2801／APA102）用 MOSI＋SCLK；miso 未接 = -1。
+typedef struct {
+    bool     enable;
+    uint32_t baud;
+    uint8_t  phase;
+    uint8_t  polarity;
+    int8_t   sck;
+    int8_t   mosi;
+    int8_t   miso;
+} nc_spi_cfg_t;
+
 typedef struct {
     uint16_t      version;
     nc_eth_cfg_t  eth;
@@ -215,7 +248,46 @@ typedef struct {
     nc_pwm_cfg_t  pwm[NC_CFG_MAX_PWM];
     uint8_t       n_uart;
     nc_uart_cfg_t uart[NC_CFG_MAX_UART];
+    uint8_t       n_i80;
+    nc_i80_cfg_t  i80[NC_CFG_MAX_I80];
+    uint8_t       n_spi;
+    nc_spi_cfg_t  spi[NC_CFG_MAX_SPI];
 } nc_hardware_cfg_t;
+
+// ── driver 層（driver.json 的 LED 段）：掛在匯流排上的燈鏈 ──
+// 「硬件先、driver 後」：**腳位只出現在 hardware 層**（wiring.json → nc_i80_cfg_t／
+// nc_spi_cfg_t，runtime 可由 /data/config/hardware.json 覆蓋）；
+// 這一組只寫「用邊條 bus、幾條 lane、每條幾顆、乜格式、乜時序」。
+//
+// present=0（driver.json 冇 LED 段）→ render 用 CONFIG_NETCORE_PIXEL_*，
+// 即係未遷移的板子行為完全不變。present=1 而 enable=0 → 明確唔用（唔會退 Kconfig）。
+#define NC_CFG_LED_FMT_MAX   12   // "ws2812w" / "apa102" …（長度不夠 = 不合法）
+
+typedef enum {
+    NC_LED_BACKEND_NONE = 0,   // 未設定 → 當作冇宣告
+    NC_LED_BACKEND_I80,        // LCD_CAM 8080：8／16 條資料線 = 8／16 條 lane
+    NC_LED_BACKEND_SPI,        // SPI MOSI/SCLK（WS2801／APA102 時脈式）
+    NC_LED_BACKEND_RMT,        // schema 已收；firmware 後端（drv_rmt）未實作
+    NC_LED_BACKEND_PARLIO,     // schema 已收；P4 的 parlio 後端未實作
+    NC_LED_BACKEND_DIRECT,     // 軟件 relay（量測／無硬件）
+    NC_LED_BACKEND_MOCK,       // 只計數（量 CPU）
+} nc_led_backend_t;
+
+typedef struct {
+    bool     present;      // build-time driver.json 有 LED 段
+    bool     enable;       // 真的要用這組
+    uint8_t  backend;      // nc_led_backend_t
+    int8_t   bus;          // hardware 層同類 list 的 index（i80[]／spi[]）；-1 = 未引用
+    uint8_t  lanes;        // 前幾條資料線真的接燈（1..bus_width；SPI 固定 1）
+    uint16_t px;           // **每條 lane** 幾顆（不是總數）
+    char     fmt[NC_CFG_LED_FMT_MAX];  // 線材格式：ws2812 / ws2812w / ws2815 / ws2801 / apa102
+    // 波形時序（0 = 用該格式的內建預設 nc_px_wave_default()）
+    //   I80：clk_hz = PCLK；SPI：clk_hz = SPI 時鐘
+    uint32_t clk_hz;
+    uint8_t  bit_cells;
+    uint8_t  t0h;
+    uint8_t  t1h;
+} nc_led_cfg_t;
 
 typedef struct {
     uint16_t       version;

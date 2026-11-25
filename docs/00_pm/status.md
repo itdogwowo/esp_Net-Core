@@ -7793,3 +7793,78 @@ esp_err_t nc_px_show_plan(..., nc_px_plan_t *out, nc_px_job_t *jobs, uint16_t jo
 **計劃書**：Task 1–5 的 28 個步驟已經補勾（實作 2026-11-24 完成並上板驗證，見
 `night-report-2026-11-24.md`）；Task 6（可選、chunked DMA）保持未勾；Task 7 Step 5、
 Task 8 Step 5／7 全部完成。計劃只剩「Task 6 可選」未做。
+
+### 7.219 2026-11-24（driver 層定案：硬件先、driver 後；LED 真係由 JSON 生效）
+
+**起點**：`ports/hardware/S3/ESP32-S3-SuperMini/drivers.json`（未 track）—— 檔名多一個 `s`、
+內容係舊專案 `slave/config.json` 的 flat 寫法（SPI／I2C／UART／PIN／I80 全部帶 GPIO）。
+
+| 問題 | 事實 |
+|---|---|
+| 檔名 | 工具鏈只認 `driver.json`（`firmware/main/CMakeLists.txt`、`tools/board.py`）→ 成個檔 0 讀者 |
+| 分層 | 硬件段落（PIN／SPI／I2C／I80／UART）寫入 driver 層 → 腳位有兩個出處，其中一個永遠係死資料 |
+| schema | 舊 `GPIO:{spi:-1}` 寫法；新規矩係 `bus:{type,index}` ＋ `profile` |
+| 空轉段 | `RMT`／`PARLIO`／`IMU` 在 firmware／`ports/_chips/` 都唔存在 |
+| 真相 | LED lane 一直只係 Kconfig（`CONFIG_NETCORE_PIXEL_I80_*`）；`wiring.json` 的 I80 段得個註解 |
+
+**定案**：driver 層**唔准寫腳位**；硬件先（`wiring.json`）→ `driver.json` 用 `bus` 引用 →
+`tools/ncportgen.py` 併埋生成 `nc_led_cfg_t` → render 讀 struct（零 JSON 解析）。
+
+**改動**：
+
+| 檔案 | 做乜 |
+|---|---|
+| `firmware/components/sys/config/include/nc_cfg_types.h` | 新 `nc_led_cfg_t`（backend／bus／lanes／px／fmt／pins／timing）＋ `nc_led_backend_t` |
+| `nc_cfg.h`／`nc_cfg_defaults.c` | `nc_cfg_defaults_led()`；`nc_port_led()` 用 weak（host test 冇生成檔回 NULL） |
+| `tools/ncportgen.py` | 讀 `driver.json` 的 `LED`；由 `wiring.json` 的 `I80`／`SPI` 解析腳位；驗 schema（pins／lanes≤width／px／format↔order／timing）；`--project` 判斷「project 覆寫 pixel → board LED 讓位」 |
+| `nc_render_task.c` | 三態：冇宣告→Kconfig；`enable=0`→只留 mock；`enable=1`→JSON 決定 backend／px／format／timing／pins。`MOCK_ONLY` 永遠贏 |
+| `firmware/main/CMakeLists.txt` | ncportgen 傳 `--project`；project `sdkconfig.defaults` 加入生成物依賴 |
+| `tools/board.py` | 守門：`drivers.json` 手誤、driver 層硬件段、`GPIO`（USB／`xsmt`／舊單線段例外）、`bus` 指唔到、LED schema、與 sdkconfig 的 `PIXEL_I80_*` 對帳、後端未編入 Kconfig |
+| `ports/.../ESP32-S3-Matrix`、`.../ESP32-S3-Zero` | 腳位搬入 `wiring.json` 的 `I80`；`driver.json` 的 `LED` 改新 schema（值與 Kconfig 逐項相同） |
+| `ports/.../ESP32-S3-SuperMini` | 刪 `drivers.json`；新 `driver.json`（全 `enable=0`，示範 schema；外接燈具仍然係 project sdkconfig） |
+
+**行為不變的證明**：Matrix（`14,38,…`）同 Zero（`1,38,…`）的 pins／px（64）／format／lanes
+與 Kconfig 逐項相同；`Zero-Show2400`／`Zero-Show9600`／`SuperMini-LED-Textkit` 的 project
+覆寫了 `CONFIG_NETCORE_PIXEL_*` → `ncportgen` 生成的 `s_led.present = false` → render 完全
+走舊路徑（`board.py check` 會 warn 講明邊個贏）。
+
+**驗證**：`board.py check` 0 error；`tools/hosttest/portgen_test/test_led_schema.py` 24 項
+全過（codegen、讓位、壞 schema 要 build 失敗、分層守門、Kconfig 對帳）；`nc_port.c`
+用 IDF 的 xtensa gcc 真編譯。
+
+**未做**：`rmt`／`parlio` 後端（schema 已收，寫了會大聲報錯並跳過該 lane）；
+project 層 `driver.json`（外接燈具目前只能經 project sdkconfig；下一步可以收成同一份 schema）。
+
+### 7.220 2026-11-24（修正 §7.219：I80／SPI 型別化入 hardware.json，driver 層只剩裝置參數）
+
+**使用者指正**：「我們不是已經有 `/data/config/hardware.json` 來處理硬件的初始化嗎？」
+查證：`nc_cfg_apply_hardware()` 只有 `apply_eth / apply_sdio / apply_pin / apply_pwm /
+apply_uart`；`root_keys` 有 `I80` 所以唔會計 unknown，但**冇 `apply_i80`**
+→ `/data/config/hardware.json` 的 `I80.data/wr/cs` 改了**完全冇效果、連 warning 都冇**。
+§7.219 把腳位生成入 `nc_led_cfg_t.pins[]`，等於繞過這個正路入口，而且多開一個出處。
+
+**改法（照舊專案原有形狀，唔發明新欄位）**：
+
+| 層 | 內容 |
+|---|---|
+| `wiring.json` → `nc_hardware_cfg_t.i80[]` | `{data[], wr, dc, cs, freq}`；**`bus_width` 由 `len(data)` 推出**（8／16），唔另設欄位；`dc` 是 esp_lcd 必要（舊專案 LCD 由 `PIN` 的 `tft_dc` 給） |
+| 同樣 `SPI` → `nc_hardware_cfg_t.spi[]` | `{baud, phase, polarity, sck, mosi, miso}`；時脈式燈鏈（WS2801／APA102）用 |
+| `/data/config/hardware.json` | 同一段，開機時由 `apply_i80()`／`apply_spi()` 覆蓋 → **改腳位唔使重 build** |
+| `driver.json` 的 `LED` | 只剩 `backend／bus index／lanes／px／format／timing`（`pins[]`／`bus_width` 已刪） |
+| `render` | 腳位由 `nc_cfg_hardware()->i80[led.bus]`／`spi[led.bus]` 取；Kconfig 仍然係 fallback |
+
+**驗證**：`board.py check` 0 error；`test_led_schema.py` 34 項全過（含「driver 層冇再寫
+pins」、「bus_width 由 data 長度推出」、「nc_cfg_load.c 有 apply_i80 且被呼叫」）；
+9 塊板的 `nc_port.c` 全部生成成功；Matrix／Zero／SuperMini／P4-ETH 的 `nc_port.c`、
+`nc_render_task.c`、`nc_cfg_load.c`、`nc_cfg_defaults.c` 全部用 IDF 的 xtensa gcc 編過
+（-Werror）。**未跑完整 `make.py build`**：本機 sandbox 擋住 WSL（`Wsl/E_ACCESSDENIED`），
+要在平日的 shell 跑一次 `python3 make.py build ESP32-S3-Matrix --fresh`。
+
+**副作用（已處理）**：`ncportgen` 對 enable=1 但 `data` 唔係 8／16 支（或 SPI 未填
+sck／mosi）的條目由「靜靜跳過」改成 **build 失敗** —— 否則 `driver.json` 的
+`bus.index` 會同 `i80[]`／`spi[]` 的 index 錯位。
+
+**遷移注意（上板前睇）**：舊裝置的 `/data/config/hardware.json` 種子是在 I80 還「未生效」
+的年代寫的（`I80.enable=0`、`list:[]`）。新 firmware 會把那個 `enable=0` 當成**用戶明確
+關閉** → `n_i80=0` → 燈鏈拿不到腳位。要用 **full flash**（`make.py flash … --full`）重新
+seed 一次，或者手動把該檔的 I80 段改成新種子的內容。

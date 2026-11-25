@@ -90,6 +90,42 @@ CONSOLE_SYM = {
     "none": "ESP_CONSOLE_NONE",
 }
 
+# ── driver 層（ports/hardware/<chip>/<board>/driver.json）──
+# 「硬件先、driver 後」（2026-11-24）：腳位與匯流排本身只寫在 wiring.json；
+# driver.json 只寫「邊個裝置、掛邊條 bus（bus = {type,index}）、裝置參數」。
+# 這些段出現在 driver.json = 放錯層（舊專案 slave/config.json 是一個大檔，會誘人咁做）。
+DRV_HW_SECTIONS = ("ETH", "PIN", "SPI", "I2C", "I80", "UART", "I2S",
+                   "PWM", "SDIO", "ENC", "XL9555")
+DRV_KNOWN = {"version", "_comment", "USB", "TFT", "SDcard", "Audio", "PCM5102",
+             "GT1151Q", "HUSB238", "PCA9685", "APA102", "WS2812", "uartMotor",
+             "LED", "IMU"}
+BUS_KINDS = {"spi": "SPI", "i2c": "I2C", "uart": "UART", "i2s": "I2S",
+             "sdio": "SDIO", "i80": "I80"}
+
+LED_BACKENDS = ("i80", "spi", "rmt", "parlio", "direct", "mock")
+# 有 firmware 後端的（其餘只有 schema；上板會大聲報錯並跳過該 lane）
+LED_BACKEND_WIRED = ("i80", "spi", "direct", "mock")
+# 格式 → 線材次序（跟 sw/pixel/nc_pixel_encode.c 的 format 表一致）
+LED_FMT_ORDER = {"ws2812": ("GRB",), "ws2812w": ("GRBW",), "ws2815": ("GRB",),
+                 "ws2801": ("RGB",), "apa102": ("BGR", "BGRW")}
+LED_SPI_FMTS = ("ws2801", "apa102")
+LED_MAX_PX = 16384
+
+# driver 層仍然有 GPIO 的合法例外（其餘一律當「放錯層」）：
+#   · USB：dm／dp 是固定 PHY 腳，屬裝置本身（而且 wiring.json 已經係真相，這裡只是舊段）
+#   · PCM5102 的 xsmt：擴音機的 mute 控制線，唔係匯流排腳位（舊專案 _comment 就係咁寫）
+# 下面這些是**未有 firmware 讀者**的舊單線寫法：只 warn，唔逼即刻遷移。
+DRV_LEGACY_GPIO_SECTIONS = {"WS2812", "APA102", "PCA9685", "GT1151Q",
+                            "HUSB238", "uartMotor", "IMU"}
+
+# project 的 sdkconfig.defaults 一旦寫了任何一個，外接燈具就由 project 的 Kconfig 決定
+# （board 的 driver.json LED 段會讓位；同一條規則寫在 ncportgen.py）。
+PROJECT_PIXEL_SYMS = ("NETCORE_PIXEL_I80_PINS", "NETCORE_PIXEL_I80_LANES",
+                      "NETCORE_PIXEL_I80_BUS_WIDTH", "NETCORE_PIXEL_LEDS",
+                      "NETCORE_PIXEL_FORMAT", "NETCORE_PIXEL_SPI",
+                      "NETCORE_PIXEL_SPI_MOSI", "NETCORE_PIXEL_SPI_SCLK",
+                      "NETCORE_PIXEL_SPI_HZ", "NETCORE_PIXEL_MOCK_ONLY")
+
 # 每個 runtime 檔允許的頂層鍵（檔名 → 允許的鍵）；一個層一個檔
 RUNTIME_KEYS_BY_FILE = {
     "system.json":   {"version", "_comment", "cID", "log_debug_mode", "hostname",
@@ -413,6 +449,264 @@ def _check_seeds(pdir: Path, declared: list[str], r: Report) -> None:
         pass
 
 
+def _int_of(v, default: int | None = None) -> int | None:
+    """JSON 可能係 int／bool／字串；唔係整數就回 default。"""
+    if isinstance(v, bool):
+        return int(v)
+    if isinstance(v, int):
+        return v
+    if isinstance(v, str) and re.fullmatch(r"-?\d+", v.strip()):
+        return int(v.strip())
+    return default
+
+
+def _resolve_bus(wiring: dict | None, kind: str, index: int,
+                 label: str, r: Report) -> dict | None:
+    """driver.json 的 bus.index → wiring.json 的 <kind>.list[index]。
+
+    index = -1 係「未接」：回 None，唔當錯（由呼叫端決定 enable 時算唔算錯）。
+    """
+    if wiring is None:
+        return None
+    if index < 0:
+        return None
+    lst = (wiring.get(kind) or {}).get("list") or []
+    if index >= len(lst) or not isinstance(lst[index], dict):
+        r.err(f"{label} 引用 {kind}.list[{index}]，但 wiring.json 的 {kind} 只有 "
+              f"{len(lst)} 條（index 由 0 開始）")
+        return None
+    return lst[index]
+
+
+def _check_bus_ref(wiring: dict | None, bus, label: str, enabled: bool, r: Report) -> None:
+    if not isinstance(bus, dict):
+        r.err(f"{label} 要係物件：{{ \"type\": \"spi\", \"index\": 0 }}")
+        return
+    kind = str(bus.get("type") or "").lower()
+    if kind not in BUS_KINDS:
+        r.err(f"{label}.type={bus.get('type')!r} 看不懂（用 {' / '.join(BUS_KINDS)}）")
+        return
+    idx = _int_of(bus.get("index"))
+    if idx is None:
+        r.err(f"{label}.index 要係整數（-1 = 未接）")
+        return
+    if idx < 0:
+        if enabled:
+            r.err(f"{label}.index=-1（bus 未接）但 enable 是開的 —— 先在 wiring.json 的 "
+                  f"{BUS_KINDS[kind]} 段填好腳位，再把 index 指過去")
+        return
+    _resolve_bus(wiring, BUS_KINDS[kind], idx, label, r)
+
+
+def _check_led_i80(wiring: dict | None, bus, led: dict, label: str,
+                   r: Report) -> dict | None:
+    """I80 燈鏈：腳位一定要由 hardware 層（wiring.json → nc_i80_cfg_t）解析得到，
+    driver 層唔准自己寫。bus_width 由 data 的長度決定（舊專案原形狀）。"""
+    if not isinstance(bus, dict) or str(bus.get("type") or "").lower() != "i80":
+        r.err(f'{label}: backend=i80 要用 bus 引用 hardware 層：{{ "type": "i80", "index": 0 }}')
+        return None
+    idx = _int_of(bus.get("index"), -1)
+    if idx < 0:
+        r.err(f"{label}: bus.index=-1（未接）但 enable 是開的 —— 先在 wiring.json 的 I80 段"
+              "填好 data／wr／dc")
+        return None
+    b = _resolve_bus(wiring, "I80", idx, f"{label}.bus", r)
+    if b is None:
+        return None
+    data = [x for x in (b.get("data") or []) if isinstance(x, int)]
+    width = len(data)
+    if width not in (8, 16):
+        r.err(f"{label}: wiring.json I80[{idx}].data 有 {width} 支（要 8 或 16：D0..D7／D0..D15）")
+        return None
+    if "bus_width" in b and _int_of(b.get("bus_width")) != width:
+        r.err(f"{label}: wiring.json I80[{idx}] 有 bus_width，但 data 有 {width} 支 —— "
+              "bus_width 由 data 長度決定，請刪掉那個欄位")
+    wr, dc = _int_of(b.get("wr"), -1), _int_of(b.get("dc"), -1)
+    if wr is None or dc is None or wr < 0 or dc < 0:
+        r.err(f"{label}: wiring.json I80[{idx}] 的 wr／dc 未填（I80 硬性要求，送燈時是 dummy）")
+        return None
+    lanes = _int_of(led.get("lanes"), 1)
+    if lanes is None or not (1 <= lanes <= width):
+        r.err(f"{label}.lanes={led.get('lanes')} 超出 wiring.json I80[{idx}] 的 "
+              f"{width} 條資料線（最多 {width} 條）")
+    return {"pins": data + [wr, dc], "width": width, "lanes": lanes, "index": idx}
+
+
+def _led_vs_kconfig(cfg_port: dict, info: dict, label: str, r: Report) -> None:
+    """Kconfig 仍然係 fallback；兩邊都寫了就要一致，否則「改咗唔生效」會靜靜發生。"""
+    raw = cfg_port.get("NETCORE_PIXEL_I80_PINS")
+    if isinstance(raw, str):
+        want = [int(x) for x in re.findall(r"-?\d+", raw)]
+        if want and want != info["pins"]:
+            r.err(f"{label} 與 sdkconfig 的 CONFIG_NETCORE_PIXEL_I80_PINS 唔一致："
+                  f"driver.json/wiring.json → {info['pins']}；sdkconfig → {want}"
+                  "（兩邊都係真相，改到一樣為止）")
+    raw = cfg_port.get("NETCORE_PIXEL_I80_LANES")
+    if isinstance(raw, str) and _int_of(raw) is not None and info["lanes"] is not None:
+        if _int_of(raw) != info["lanes"]:
+            r.err(f"{label}.lanes={info['lanes']} 與 CONFIG_NETCORE_PIXEL_I80_LANES="
+                  f"{_int_of(raw)} 唔一致")
+    raw = cfg_port.get("NETCORE_PIXEL_I80_BUS_WIDTH")
+    if isinstance(raw, str) and _int_of(raw) is not None and _int_of(raw) != info["width"]:
+        r.err(f"{label}: wiring.json I80 bus_width={info['width']} 與 "
+              f"CONFIG_NETCORE_PIXEL_I80_BUS_WIDTH={_int_of(raw)} 唔一致")
+
+
+def _check_led(d: Path, drv: dict, wiring: dict | None,
+               cfg_port: dict, r: Report) -> bool:
+    """LED 段 schema。回 True = 有宣告而且 enable（外接燈具要讓位的那個判斷用）。"""
+    led = drv.get("LED")
+    if led is None:
+        return False
+    label = f"{rel(d)}/driver.json 的 LED"
+    if not isinstance(led, dict):
+        r.err(f"{label} 要係物件")
+        return False
+    if "list" in led:
+        r.err(f"{label} 只可以係一個物件（v1 一組燈鏈；多組要等 render 支援多後端）")
+    for old in ("type", "count", "gpio", "cols", "rows"):
+        if old in led:
+            r.err(f"{label}.{old} 係舊寫法（firmware 從來冇讀）→ 改用 "
+                  "backend／bus／lanes／px／format／timing")
+    enable = bool(_int_of(led.get("enable"), 0))
+    backend = str(led.get("backend") or "").lower()
+    if backend not in LED_BACKENDS:
+        r.err(f"{label}.backend={led.get('backend')!r} 看不懂（用 {' / '.join(LED_BACKENDS)}）")
+        return enable
+    if backend not in LED_BACKEND_WIRED:
+        r.warn(f"{label}.backend={backend} 未有 firmware 後端（drv_{backend}）→ "
+               "上板會大聲報錯並跳過這道 lane，唔會點燈")
+    fmt = str(led.get("format") or "").lower()
+    if fmt and fmt not in LED_FMT_ORDER:
+        r.err(f"{label}.format={led.get('format')!r} 看不懂（用 {' / '.join(LED_FMT_ORDER)}）")
+    order = led.get("order")
+    if isinstance(order, str) and order.strip() and fmt in LED_FMT_ORDER:
+        if order.strip().upper() not in LED_FMT_ORDER[fmt]:
+            r.err(f"{label}.order={order!r} 與 format={fmt!r} 唔一致（{fmt} 是 "
+                  f"{'/'.join(LED_FMT_ORDER[fmt])}）；線材次序由格式決定，唔需要寫 order")
+    if not enable:
+        return False        # 明確關閉：腳位可以未定（index:-1 合法）
+
+    if not fmt:
+        r.err(f"{label}: enable=1 但冇寫 format（{' / '.join(LED_FMT_ORDER)}）")
+    elif backend == "spi" and fmt not in LED_SPI_FMTS:
+        r.err(f"{label}: backend=spi 只可以配時脈式格式（{' / '.join(LED_SPI_FMTS)}），"
+              f"現在係 {fmt}")
+    elif backend in ("i80", "rmt", "parlio") and fmt in LED_SPI_FMTS:
+        r.err(f"{label}: backend={backend} 係歸零碼波形，配唔到時脈格式 {fmt}（要 spi backend）")
+
+    px = _int_of(led.get("px"), 0)
+    if px is None or not (1 <= px <= LED_MAX_PX):
+        r.err(f"{label}.px={led.get('px')} 唔合法（一條 lane 幾顆；1..{LED_MAX_PX}）")
+
+    tm = led.get("timing")
+    tm = tm if isinstance(tm, dict) else {}
+    if "timing" in led and not isinstance(led.get("timing"), dict):
+        r.err(f"{label}.timing 要係物件：{{ \"pclk_hz\": …, \"bit_cells\": …, \"t0h\": …, \"t1h\": … }}")
+    clk = _int_of(tm.get("pclk_hz", tm.get("clk_hz")), 0) or 0
+    bc = _int_of(tm.get("bit_cells"), 0) or 0
+    t0 = _int_of(tm.get("t0h"), 0) or 0
+    t1 = _int_of(tm.get("t1h"), 0) or 0
+    if clk and not (1000000 <= clk <= 20000000):
+        r.err(f"{label}.timing.pclk_hz={clk}（1 MHz..20 MHz）")
+    if bc and not (1 <= bc <= 16):
+        r.err(f"{label}.timing.bit_cells={bc}（1..16）")
+    if t0 and t0 < 1:
+        r.err(f"{label}.timing.t0h 一定要 ≥ 1（整組低電平會被燈當成 reset）")
+    if bc and t0 and t0 > bc:
+        r.err(f"{label}.timing.t0h={t0} > bit_cells={bc}")
+    if bc and t1 and t1 > bc:
+        r.err(f"{label}.timing.t1h={t1} > bit_cells={bc}")
+    if t0 and t1 and t0 >= t1:
+        r.err(f"{label}.timing 要 t0h < t1h（現在 {t0} / {t1}）")
+
+    bus = led.get("bus")
+    if backend == "i80":
+        info = _check_led_i80(wiring, bus, led, label, r)
+        if info is not None:
+            _led_vs_kconfig(cfg_port, info, label, r)
+    elif backend == "spi":
+        if not isinstance(bus, dict) or str(bus.get("type") or "").lower() != "spi":
+            r.err(f'{label}: backend=spi 要用 bus 引用 hardware 層：{{ "type": "spi", "index": 0 }}')
+        else:
+            idx = _int_of(bus.get("index"), -1)
+            b = _resolve_bus(wiring, "SPI", idx, f"{label}.bus", r) if idx >= 0 else None
+            if idx < 0:
+                r.err(f"{label}: bus.index=-1（未接）但 enable 是開的")
+            elif b is not None:
+                g = b.get("GPIO") if isinstance(b.get("GPIO"), dict) else {}
+                if _int_of(g.get("mosi"), -1) is None or _int_of(g.get("mosi"), -1) < 0 \
+                        or _int_of(g.get("sck"), -1) is None or _int_of(g.get("sck"), -1) < 0:
+                    r.err(f"{label}: wiring.json SPI[{idx}] 的 GPIO.mosi／sck 未填")
+        if _int_of(led.get("lanes"), 1) not in (None, 1):
+            r.err(f"{label}.lanes={led.get('lanes')}：SPI 只有一條 MOSI，只可以 1 條 lane")
+    elif backend in ("direct", "mock"):
+        if bus is not None:
+            r.err(f"{label}: backend={backend} 唔掛匯流排，請移除 bus")
+    elif isinstance(bus, dict):
+        # rmt／parlio 未有 driver：bus 可以預留，寫了就照樣驗 index。
+        _check_bus_ref(wiring, bus, f"{label}.bus", True, r)
+
+    # 後端要真係編得入 image，否則 JSON 寫得再對都只會「大聲報錯然後跳過」。
+    if str(cfg_port.get("NETCORE_PIXEL") or "") not in ("y", "1"):
+        r.warn(f"{label}: sdkconfig 冇開 CONFIG_NETCORE_PIXEL → 這個 project 唔會編渲染器"
+               "（driver.json 的 LED 段形同備用）")
+    if backend == "i80" and str(cfg_port.get("NETCORE_PIXEL_I80") or "") not in ("y", "1"):
+        r.warn(f"{label}: backend=i80 但 sdkconfig 冇開 CONFIG_NETCORE_PIXEL_I80 → "
+               "i80 後端唔會編入，上板會跳過這道 lane")
+    if backend == "spi" and str(cfg_port.get("NETCORE_PIXEL_SPI") or "") not in ("y", "1"):
+        r.warn(f"{label}: backend=spi 但 sdkconfig 冇開 CONFIG_NETCORE_PIXEL_SPI → "
+               "spi 後端唔會編入")
+    return True
+
+
+def _check_driver_layers(d: Path, drv: dict, wiring: dict | None,
+                         cfg_port: dict, r: Report) -> bool:
+    """driver.json 的分層與 schema。回 True = 有 LED 段而且 enable。"""
+    label = f"{rel(d)}/driver.json"
+    for sec in DRV_HW_SECTIONS:
+        if sec in drv:
+            r.err(f"{label} 有 {sec} 段 —— 那是 hardware 層（wiring.json）的東西；"
+                  "driver 層只寫裝置＋bus 引用（硬件先、driver 後）")
+    for k in drv:
+        if k in DRV_KNOWN or k.startswith("_"):
+            continue
+        r.warn(f"{label} 有未知段落 {k!r}（打錯字？）")
+
+    def walk(node, path: str, enabled: bool, in_usb: bool, section: str) -> None:
+        if not isinstance(node, dict):
+            return
+        local_en = enabled
+        if "enable" in node:
+            v = _int_of(node.get("enable"))
+            if v is not None:
+                local_en = bool(v)
+        for k, v in node.items():
+            here = f"{path}.{k}" if path else k
+            sub_usb = in_usb or (not path and k == "USB")
+            sub_sec = k if not path else section
+            if k == "GPIO" and not sub_usb:
+                keys = set(v) if isinstance(v, dict) else set()
+                if section == "PCM5102" and keys <= {"xsmt"}:
+                    pass                      # 擴音機 mute 控制線，唔係匯流排腳位
+                elif section in DRV_LEGACY_GPIO_SECTIONS:
+                    r.warn(f"{label} 的 {here} 係舊單線寫法（firmware 未讀）；"
+                           f"燈鏈請用 LED 段（backend／bus／lanes／px／format）")
+                else:
+                    r.err(f"{label} 的 {here} 寫了腳位 —— driver 層唔准有 GPIO；"
+                          "腳位只出現在 wiring.json，driver 用 bus 引用")
+            if k == "bus":
+                _check_bus_ref(wiring, v, f"{label} 的 {here}", local_en, r)
+            if isinstance(v, dict):
+                walk(v, here, local_en, sub_usb, sub_sec)
+            elif isinstance(v, list):
+                for i, item in enumerate(v):
+                    walk(item, f"{here}[{i}]", local_en, sub_usb, sub_sec)
+
+    walk(drv, "", True, False, "")
+    return _check_led(d, drv, wiring, cfg_port, r)
+
+
 def check_board(d: Path, cfg_common: dict, cfg_port: dict) -> Report:
     r = Report()
     b = load_board(d)
@@ -503,7 +797,25 @@ def check_board(d: Path, cfg_common: dict, cfg_port: dict) -> Report:
     if (d / "data" / "config").is_dir():
         r.err(f"{rel(d)}/data/config/ 屬於 project 層，硬體層不應該有 runtime 預置")
 
+    # --- wiring.json：firmware 預設的唯一來源（build 會 FATAL_ERROR 如果缺）---
+    wiring: dict | None = None
+    wiring_path = d / "wiring.json"
+    if not wiring_path.is_file():
+        r.err(f"{rel(d)}/wiring.json 不存在 —— build 會失敗（ncportgen 只認 wiring.json 做腳位來源）")
+    else:
+        try:
+            wiring = json.loads(wiring_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as e:
+            r.err(f"wiring.json 不是合法 JSON：{e}")
+
+    # 檔名手誤：工具鏈只認 driver.json（單數）；drivers.json 完全冇人讀。
+    if (d / "drivers.json").is_file():
+        r.err(f"{rel(d)}/drivers.json：檔名多咗個 s —— firmware 同 tools 只認 driver.json，"
+              "成個檔冇任何嘢讀。硬件段落搬去 wiring.json，裝置段落合併入 driver.json。")
+
     # --- build-time driver.json：每個 profile 都要有 _chips/<name>.json ---
+    drv: dict | None = None
+    drv_led_on = False
     drv_path = d / "driver.json"
     if drv_path.exists():
         try:
@@ -525,6 +837,7 @@ def check_board(d: Path, cfg_common: dict, cfg_port: dict) -> Report:
             for prof in walk(drv):
                 if not (CHIPS / f"{prof}.json").exists():
                     r.err(f"driver.json 引用 profile {prof!r}，但 ports/_chips/{prof}.json 不存在")
+            drv_led_on = _check_driver_layers(d, drv, wiring, cfg_port, r)
     else:
         r.warn("沒有 build-time driver.json（只有 USB 配置的板子可以沒有）")
 
@@ -567,6 +880,16 @@ def check_board(d: Path, cfg_common: dict, cfg_port: dict) -> Report:
             r.err(f"{rel(pdir)}/project.json 有 profiles：能力碎片屬 hardware 層，"
                   f"搬去 hardware/board.json 的 profiles（project 只放 runtime 設定）")
         _check_project_sdkconfig(pdir, r)
+        if drv_led_on:
+            # board 的 LED 段會被 project sdkconfig 讓位（規則寫在 ncportgen.py）；
+            # 講清楚邊個贏，免得「改了 driver.json 但點燈變咗」。
+            pj_kv = parse_kconfig(pdir / "sdkconfig.defaults")
+            shadow = sorted(k for k in pj_kv if k in PROJECT_PIXEL_SYMS)
+            if shadow:
+                r.warn(f"{rel(pdir)}/sdkconfig.defaults 覆寫了 {len(shadow)} 個 "
+                       f"NETCORE_PIXEL_* → 這個 project 的燈鏈由 Kconfig 決定"
+                       f"（{rel(d)}/driver.json 的 LED 段會讓位）：{', '.join(shadow[:4])}"
+                       + ("…" if len(shadow) > 4 else ""))
         _check_seeds(pdir, p.get("seed") or [], r)
         known_p = {"version", "name", "hardware", "seed", "aliases", "default", "_comment"}
         for k in p:

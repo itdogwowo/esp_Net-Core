@@ -52,6 +52,9 @@ for rel, sub in [("P4/ESP32-P4-ETH", "p4eth"), ("S3/ESP32-S3-N16R8", "s3n16"),
 print("  OK")
 PY
 
+echo "  LED 段（driver.json → nc_led_cfg_t）＋分層守門"
+"$PYTHON" "$ROOT/tools/hosttest/portgen_test/test_led_schema.py"
+
 if command -v cc >/dev/null 2>&1; then
     echo "  generated C 編譯（-Werror，不 link IDF）"
     CJSON="$ROOT/firmware/managed_components/espressif__cjson/cJSON"

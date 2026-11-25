@@ -108,10 +108,13 @@ static nc_pixel_cfg_t s_cfg = {
 #endif
 };
 
+static bool s_cfg_explicit;   // nc_render_set_cfg() 明確給過 → driver.json 唔可以蓋
+
 void nc_render_set_cfg(const nc_pixel_cfg_t *cfg)
 {
     if (cfg != NULL) {
         s_cfg = *cfg;
+        s_cfg_explicit = true;
         s_nplan = 0;                 // 設定改了，plan 重算
     }
 }
@@ -121,6 +124,52 @@ const nc_pixel_cfg_t *nc_render_cfg(void)
     return &s_cfg;
 }
 
+// ═══════════════════════ 燈鏈來源：driver.json 先行、Kconfig 後備 ═══════════════════════
+// 「硬件先、driver 後」：腳位在 wiring.json，這裡只拿 ncportgen 併好的 nc_led_cfg_t。
+// 三種狀態，語意唔可以混：
+//   present=0                → 完全冇宣告（未遷移的板子）→ 用 CONFIG_NETCORE_PIXEL_*
+//   present=1, enable=0      → 明確「唔用燈」→ 只留 mock lane，**唔會**退回 Kconfig
+//   present=1, enable=1      → backend／lanes／px／format／timing／pins 全部由 JSON 決定
+// project 的 sdkconfig 覆寫了 pixel（外接燈具）→ ncportgen 已經讓位，這裡拿到 present=0。
+static const nc_led_cfg_t *led_cfg(void)
+{
+    static bool done;
+    static const nc_led_cfg_t *c;
+    if (!done) {
+        done = true;
+        c = nc_cfg_defaults_led();          // NULL = 冇宣告
+        if (c != NULL) {
+            ESP_LOGI(TAG, "燈鏈由 driver.json 決定：enable=%d backend=%u lanes=%u px=%u fmt=%s",
+                     c->enable ? 1 : 0, (unsigned)c->backend, (unsigned)c->lanes,
+                     (unsigned)c->px, c->fmt);
+        }
+    }
+    return c;
+}
+
+// 「真的要用燈」= 有宣告而且 enable。
+static const nc_led_cfg_t *led_active(void)
+{
+    const nc_led_cfg_t *c = led_cfg();
+    return (c != NULL && c->enable) ? c : NULL;
+}
+
+#if !CONFIG_NETCORE_PIXEL_MOCK_ONLY
+// MOCK_ONLY 的映像只用 mock lane，唔會叫後端名 → 呢個 function 會冇人用。
+static const char *led_backend_name(uint8_t backend)
+{
+    switch (backend) {
+    case NC_LED_BACKEND_I80:    return "i80";
+    case NC_LED_BACKEND_SPI:    return "spi";
+    case NC_LED_BACKEND_RMT:    return "rmt";
+    case NC_LED_BACKEND_PARLIO: return "parlio";
+    case NC_LED_BACKEND_DIRECT: return "direct";
+    case NC_LED_BACKEND_MOCK:   return "mock";
+    default:                    return NULL;
+    }
+}
+#endif
+
 // ═══════════════════════ 後端：誰存在、要幾大 ═══════════════════════
 // 一個後端的「一格幾顆」由它自己回答，而且**不碰硬體**：
 //   · i80／spi 只在 Kconfig 開了、而且板上有腳位時才算存在；
@@ -129,6 +178,12 @@ static uint32_t stage_px(const char *be)
 {
     if (be == NULL) {
         return 0;
+    }
+    // driver.json 宣告了燈鏈 → 一格幾顆是它的 px（per lane），唔再讀 Kconfig。
+    // present=1 而 enable=0 都照用 px：那時只剩 mock lane，環的大小仍然要一致。
+    const nc_led_cfg_t *decl = led_cfg();
+    if (decl != NULL && decl->px > 0) {
+        return (uint32_t)decl->px;
     }
     const uint32_t px = (CONFIG_NETCORE_PIXEL_LEDS > 0) ? (uint32_t)CONFIG_NETCORE_PIXEL_LEDS
                                                         : 0u;
@@ -156,6 +211,34 @@ static int plan_lanes(void)
     if (s_nplan > 0) {
         return s_nplan;
     }
+    // driver.json 有 LED 段 → 預設的 lane 由它決定（backend + "<backend>.prd" 環）。
+    // 只改「預設」：nc_render_set_cfg() 已經明確給過的唔會被蓋走。
+    static bool json_applied;
+    const nc_led_cfg_t *decl = led_cfg();        // 有宣告（唔理 enable）
+    const nc_led_cfg_t *led = led_active();      // 有宣告而且要用
+    if (!json_applied && !s_cfg_explicit && decl != NULL) {
+        json_applied = true;
+#if CONFIG_NETCORE_PIXEL_MOCK_ONLY
+        // 量 CPU 的映像（Show2400 之類）刻意唔點燈：mock-only 永遠贏。
+        ESP_LOGW(TAG, "Kconfig 是 MOCK_ONLY → 忽略 driver.json 的燈鏈（量測模式）");
+        (void)led;
+#else
+        memset(s_cfg.lane, 0, sizeof(s_cfg.lane));
+        s_cfg.nlane = 1;
+        const char *be = (led != NULL) ? led_backend_name(led->backend) : NULL;
+        if (be == NULL) {
+            // present=1 而 enable=0（或者 backend 未設定）= 明確唔用燈：
+            // 只留 mock，唔會退回去讀 Kconfig 亂開 i80。
+            be = "mock";
+            if (led != NULL) {
+                ESP_LOGE(TAG, "driver.json 的 backend=%u 冇對應名稱 → 只留 mock lane",
+                         (unsigned)led->backend);
+            }
+        }
+        (void)snprintf(s_cfg.lane[0].be, sizeof(s_cfg.lane[0].be), "%s", be);
+        (void)snprintf(s_cfg.lane[0].ring, sizeof(s_cfg.lane[0].ring), "%s.prd", be);
+#endif
+    }
     for (int i = 0; i < s_cfg.nlane && i < NC_PX_MAX_LANES; i++) {
         const uint32_t px = stage_px(s_cfg.lane[i].be);
         if (px == 0) {
@@ -177,21 +260,47 @@ static int plan_lanes(void)
     return s_nplan;
 }
 
-// codec 設定：格式與時序是「板子的物理事實」，全部由 Kconfig 給。
+// codec 設定：格式與時序是「板子的物理事實」。
+// driver.json 有 LED 段 → 由它給（timing 省略 = 用格式本身的預設波形）；
+// 否則跟 Kconfig（未遷移的板子）。
 static void codec_cfg_of(nc_px_codec_cfg_t *cc, uint32_t px, const char *be)
 {
     memset(cc, 0, sizeof(*cc));
+    const nc_led_cfg_t *led = led_active();
     nc_px_format_t fmt = NC_PX_FMT_WS2812W;
-    (void)nc_px_format_parse(CONFIG_NETCORE_PIXEL_FORMAT, &fmt);
+    if (led != NULL) {
+        if (!nc_px_format_parse(led->fmt, &fmt)) {
+            ESP_LOGE(TAG, "driver.json 的 format=%s 唔認得 → 用 ws2812w", led->fmt);
+            fmt = NC_PX_FMT_WS2812W;
+        }
+    } else {
+        (void)nc_px_format_parse(CONFIG_NETCORE_PIXEL_FORMAT, &fmt);
+    }
     if (strcmp(be, "direct") == 0) {
         fmt = NC_PX_FMT_WS2812;      // direct 只是把波形放著，用小一點的格式
     }
     cc->fmt = fmt;
     nc_px_wave_default(fmt, &cc->wave);
-    cc->wave.clk_hz = CONFIG_NETCORE_PIXEL_PCLK_HZ;
-    cc->wave.bit_cells = CONFIG_NETCORE_PIXEL_BIT_CELLS;
-    cc->wave.t0h = CONFIG_NETCORE_PIXEL_T0H;
-    cc->wave.t1h = CONFIG_NETCORE_PIXEL_T1H;
+    if (led != NULL) {
+        // 0 = 該格式的預設值（見 nc_px_wave_default）；寫了就以 JSON 為準。
+        if (led->clk_hz > 0) {
+            cc->wave.clk_hz = led->clk_hz;
+        }
+        if (led->bit_cells > 0) {
+            cc->wave.bit_cells = led->bit_cells;
+        }
+        if (led->t0h > 0) {
+            cc->wave.t0h = led->t0h;
+        }
+        if (led->t1h > 0) {
+            cc->wave.t1h = led->t1h;
+        }
+    } else {
+        cc->wave.clk_hz = CONFIG_NETCORE_PIXEL_PCLK_HZ;
+        cc->wave.bit_cells = CONFIG_NETCORE_PIXEL_BIT_CELLS;
+        cc->wave.t0h = CONFIG_NETCORE_PIXEL_T0H;
+        cc->wave.t1h = CONFIG_NETCORE_PIXEL_T1H;
+    }
     cc->bits = (uint8_t)CONFIG_NETCORE_PIXEL_DITHER_BITS;
     cc->dither_mode = (uint8_t)CONFIG_NETCORE_PIXEL_DITHER;
     cc->zone_px = (uint16_t)CONFIG_NETCORE_PIXEL_ZONE_PX;
@@ -227,7 +336,61 @@ static bool parse_i80_pins(int out[18], int width)
     }
     return true;
 }
-#endif
+
+// I80 的腳位來源：**hardware 層**（driver.json 只寫 bus index）。
+//   · 有 driver.json 的 LED 段 → nc_cfg_hardware()->i80[led->bus]（wiring.json 的預設，
+//     runtime 可以由 /data/config/hardware.json 覆蓋 —— 唔使重 build）
+//   · 冇 → Kconfig 字串（未遷移的板子，行為不變）
+// 回 false = 這道 i80 lane 唔應該起。
+static bool i80_src(int out[18], int *width_out, int *lanes_out)
+{
+    const nc_led_cfg_t *led = led_active();
+    if (led != NULL) {
+        if (led->backend != NC_LED_BACKEND_I80) {
+            return false;
+        }
+        const nc_hardware_cfg_t *hw = nc_cfg_hardware();
+        if (hw == NULL || led->bus < 0 || led->bus >= (int)hw->n_i80) {
+            ESP_LOGE(TAG, "LED.bus=%d 指唔到 hardware 的 I80（這塊板有 %d 條）→ 這道 lane 停用",
+                     (int)led->bus, (hw != NULL) ? (int)hw->n_i80 : 0);
+            return false;
+        }
+        const nc_i80_cfg_t *b = &hw->i80[led->bus];
+        if (!b->enable) {
+            ESP_LOGE(TAG, "hardware 的 I80[%d] 是 enable=false → 這道 lane 停用", (int)led->bus);
+            return false;
+        }
+        const int w = (b->bus_width == 16) ? 16 : 8;
+        if (b->n_data < w || b->wr < 0 || b->dc < 0) {
+            ESP_LOGE(TAG, "I80[%d] 腳位不完整（n_data=%u wr=%d dc=%d）→ 這道 lane 停用",
+                     (int)led->bus, (unsigned)b->n_data, (int)b->wr, (int)b->dc);
+            return false;
+        }
+        for (int i = 0; i < w; i++) {
+            out[i] = b->data[i];
+        }
+        out[w] = b->wr;
+        out[w + 1] = b->dc;
+        int lanes = (int)led->lanes;
+        if (lanes < 1) {
+            lanes = 1;
+        }
+        if (lanes > w) {
+            lanes = w;
+        }
+        *width_out = w;
+        *lanes_out = lanes;
+        return true;
+    }
+    const int w = (CONFIG_NETCORE_PIXEL_I80_BUS_WIDTH == 16) ? 16 : 8;
+    if (!parse_i80_pins(out, w)) {
+        return false;
+    }
+    *width_out = w;
+    *lanes_out = CONFIG_NETCORE_PIXEL_I80_LANES;
+    return true;
+}
+#endif  // CONFIG_NETCORE_PIXEL_I80
 
 static esp_err_t setup_backends(void)
 {
@@ -239,15 +402,16 @@ static esp_err_t setup_backends(void)
 #if CONFIG_NETCORE_PIXEL_I80
         if (strcmp(pl->be, "i80") == 0) {
             static int s_i80_pins[18];
-            const uint8_t width = (CONFIG_NETCORE_PIXEL_I80_BUS_WIDTH == 16) ? 16u : 8u;
-            if (!parse_i80_pins(s_i80_pins, width)) {
+            int width = 8;
+            int lanes = 1;
+            if (!i80_src(s_i80_pins, &width, &lanes)) {
                 ESP_LOGE(TAG, "I80 腳位設定壞了 → 這道 lane 停用");
                 continue;
             }
             nc_px_i80_cfg_t ic = {
                 .pins = s_i80_pins,
-                .lanes = (uint8_t)CONFIG_NETCORE_PIXEL_I80_LANES,
-                .bus_width = width,
+                .lanes = (uint8_t)lanes,
+                .bus_width = (uint8_t)width,
                 .pclk_hz = cc.wave.clk_hz,
                 .px = pl->px,
                 .fmt = cc.fmt,
@@ -268,11 +432,40 @@ static esp_err_t setup_backends(void)
 #endif
 #if CONFIG_NETCORE_PIXEL_SPI
         if (strcmp(pl->be, "spi") == 0) {
+            int mosi = CONFIG_NETCORE_PIXEL_SPI_MOSI;
+            int sclk = CONFIG_NETCORE_PIXEL_SPI_SCLK;
+            uint32_t clk_hz = CONFIG_NETCORE_PIXEL_SPI_HZ;
+            const nc_led_cfg_t *led = led_active();
+            if (led != NULL) {
+                // 腳位由 hardware 層的 SPI[] 來（同 I80 一樣，runtime 可覆蓋）。
+                const nc_hardware_cfg_t *hw = nc_cfg_hardware();
+                if (led->backend != NC_LED_BACKEND_SPI) {
+                    continue;
+                }
+                if (hw == NULL || led->bus < 0 || led->bus >= (int)hw->n_spi) {
+                    ESP_LOGE(TAG, "LED.bus=%d 指唔到 hardware 的 SPI（有 %d 條）→ 停用",
+                             (int)led->bus, (hw != NULL) ? (int)hw->n_spi : 0);
+                    continue;
+                }
+                const nc_spi_cfg_t *b = &hw->spi[led->bus];
+                if (!b->enable || b->mosi < 0 || b->sck < 0) {
+                    ESP_LOGE(TAG, "hardware 的 SPI[%d] 未接（mosi=%d sck=%d）→ 停用",
+                             (int)led->bus, (int)b->mosi, (int)b->sck);
+                    continue;
+                }
+                mosi = b->mosi;
+                sclk = b->sck;
+                if (led->clk_hz > 0) {
+                    clk_hz = led->clk_hz;
+                } else if (b->baud > 0) {
+                    clk_hz = b->baud;
+                }
+            }
             nc_px_spi_cfg_t sc = {
-                .pin_mosi = CONFIG_NETCORE_PIXEL_SPI_MOSI,
-                .pin_sclk = CONFIG_NETCORE_PIXEL_SPI_SCLK,
+                .pin_mosi = mosi,
+                .pin_sclk = sclk,
                 .host = -1,
-                .clock_hz = CONFIG_NETCORE_PIXEL_SPI_HZ,
+                .clock_hz = clk_hz,
                 .px = pl->px,
                 .fmt = cc.fmt,
                 .dither_bits = cc.bits,
@@ -295,7 +488,14 @@ static esp_err_t setup_backends(void)
             (void)nc_px_backend_register(nc_px_backend_direct());
             continue;
         }
-        (void)nc_px_backend_register(nc_px_backend_mock());
+        if (strcmp(pl->be, "mock") == 0) {
+            (void)nc_px_backend_register(nc_px_backend_mock());
+            continue;
+        }
+        // 走到這裡 = 呢個後端冇 firmware 支援（driver.json 寫了 rmt／parlio 但未實作，
+        // 或者 Kconfig 冇開 i80／spi）。寧願大聲講，唔好靜靜退到 mock。
+        ESP_LOGE(TAG, "後端 \"%s\" 未有 firmware 支援 → 這道 lane 停用"
+                 "（driver.json 的 backend 要對得上實際 driver）", pl->be);
     }
     return (s_nbe > 0) ? ESP_OK : ESP_ERR_NOT_FOUND;
 }

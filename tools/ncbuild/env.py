@@ -267,6 +267,10 @@ def bash(cmd: str, cwd: Path | None = None, log: Path | None = None,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
+        # Windows 的 console 預設 cp950：idf.py／git 一印中文或 box-drawing 字元就
+        # UnicodeDecodeError（reader thread 死掉 → stdout 變 None）。一律用 UTF-8。
+        encoding="utf-8",
+        errors="replace",
         bufsize=1,
     )
     fh = None
@@ -291,8 +295,10 @@ def bash(cmd: str, cwd: Path | None = None, log: Path | None = None,
 def bash_capture(cmd: str, cwd: Path | None = None, timeout: int = 60) -> tuple[int, str]:
     try:
         r = subprocess.run(["bash", "-c", cmd], cwd=str(cwd) if cwd else None,
-                           capture_output=True, text=True, timeout=timeout)
-        return r.returncode, (r.stdout + r.stderr).strip()
+                           capture_output=True, text=True, timeout=timeout,
+                           encoding="utf-8", errors="replace")
+        out = (r.stdout or "") + (r.stderr or "")
+        return r.returncode, out.strip()
     except subprocess.TimeoutExpired:
         return 124, "timeout"
 

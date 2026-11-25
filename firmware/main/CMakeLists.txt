@@ -56,11 +56,21 @@ endif()
 if(EXISTS "${PORT_DIR}/driver.json")
     list(APPEND _gen_dep "${PORT_DIR}/driver.json")
 endif()
+# project 的 sdkconfig.defaults 會決定「外接燈具由誰講」：project 一旦覆寫
+# CONFIG_NETCORE_PIXEL_*，board 的 driver.json LED 段就讓位（見 ncportgen.py）。
+# 所以它也是生成物的輸入 —— 漏了它，改了 project 的 pixel 設定而 nc_port.c 不會重生成。
+set(_gen_project_arg)
+if(NC_PROJECT_DIR)
+    list(APPEND _gen_project_arg --project "${NC_PROJECT_DIR}")
+    if(EXISTS "${NC_PROJECT_DIR}/sdkconfig.defaults")
+        list(APPEND _gen_dep "${NC_PROJECT_DIR}/sdkconfig.defaults")
+    endif()
+endif()
 # configure 時先跑一次：確保 EMBED_FILES 在 configure 階段就見得到檔案；
 # build 時再由下面的 custom command 按 JSON mtime 重新產生。
 execute_process(
     COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_LIST_DIR}/../../tools/ncportgen.py"
-            --hardware "${PORT_DIR}" --out "${_gen_dir}"
+            --hardware "${PORT_DIR}" --out "${_gen_dir}" ${_gen_project_arg}
     RESULT_VARIABLE _gen_rc)
 if(NOT _gen_rc EQUAL 0)
     message(FATAL_ERROR "ncportgen failed for ${PORT_DIR}")
@@ -69,7 +79,7 @@ if(NOT CMAKE_SCRIPT_MODE_FILE)
     add_custom_command(
         OUTPUT  "${_gen_c}" "${_gen_h}" "${_gen_hw}"
         COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_LIST_DIR}/../../tools/ncportgen.py"
-                --hardware "${PORT_DIR}" --out "${_gen_dir}"
+                --hardware "${PORT_DIR}" --out "${_gen_dir}" ${_gen_project_arg}
         DEPENDS ${_gen_dep}
         COMMENT "hardware JSON → firmware 預設（nc_port.c）"
         VERBATIM)

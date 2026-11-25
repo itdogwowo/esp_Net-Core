@@ -24,10 +24,14 @@ build 時優先嵌入它。改 `wiring.json` 後要跑一次 sync，否則 snaps
 > `nc_cfg_defaults_hardware()` 回傳 generated 表，用戶 `/data/config/hardware.json`
 > 只覆蓋差異。`nc_cfg_boot_ex()` 的 wiring base 參數已不再由 `main` 使用。
 >
-> **`driver.json` 仍未接 runtime**：它是 `ports/hardware/<board>/driver.json`
-> （build-time，不進 USB），firmware 沒有讀它；改了不會生效。
-> `hardware.json` 其餘段（`SPI`／`I2C`／`I80`／`I2S`／`ENC`／`XL9555`）同理，
-> 只留在 generated seed，等 driver 有型別才逐個接。
+> **`driver.json` 只放裝置參數（2026-11-24）**：它是 `ports/hardware/<board>/driver.json`
+> （build-time，不進 USB）。`LED` 段只寫 backend／bus／lanes／px／format／timing；
+> **腳位在 hardware 層**（`wiring.json` 的 `I80`／`SPI` → `nc_i80_cfg_t`／`nc_spi_cfg_t`，
+> runtime 可由 `/data/config/hardware.json` 覆蓋）。render 任務讀 `nc_cfg_hardware()`＋
+> `nc_led_cfg_t`，不再經 Kconfig。
+> **其餘段（TFT／SDcard／PCA9685…）firmware 仍然冇讀**，改了不會生效。
+> `hardware.json` 其餘未型別化的段（`I2C`／`I2S`／`ENC`／`XL9555`）同理，
+> 只留在 generated seed，等 driver 有型別才逐個接。**`I80` 與 `SPI` 已型別化**（見 §5）。
 > 下面 §2–§4 有一部分是**目標設計**，不是現況；以本頁頂部 2026-11-16 更新為準。
 >
 > **2026-11-16 晚 link schema（canonical）**：`kind` 是 composite（`eth_tcp`／`wifi_tcp`…）
@@ -213,7 +217,7 @@ ports/
   hardware/<chip>/<board>/
     board.json               ← 不可變事實（chip/flash/PSRAM/console/features）
     wiring.json              ← 板級 pins/buses（ncportgen 編成 nc_port.c，零 runtime 解析）
-    driver.json              ← PHY/DMA/TFT/USB 參數（build-time，runtime 未讀）
+    driver.json              ← PHY/DMA/TFT/USB 參數＋LED 段（build-time；只有 LED 已接）
     sdkconfig.defaults       ← IDF build config（L1 + 硬體能力碎片）
     partitions.csv           ← 這塊 flash 的分割表（可選）
   project/<chip>/<board>/
@@ -237,7 +241,7 @@ ports/
 |---|---|---|---|
 | `wiring.json`（build-time） | 硬體層 | **build 時**（`ncportgen` → `nc_port.c`） | 用 `k_hw` 內建預設 |
 | `hardware.json`（user） | 硬體層 | **硬體 init 之前**（覆蓋 generated 預設） | 用 generated 預設 |
-| `driver.json`（build-time） | driver 層 | 未接 | 用 driver 內建預設 |
+| `driver.json`（build-time） | driver 層 | **build 時**（`ncportgen` → `nc_port.c` 的 `nc_led_cfg_t`） | 冇 LED 段 → render 用 Kconfig |
 | `system.json` | 系統層（main） | **硬體起來之後**（分配要看實際硬體） | 只啟動硬體實際支援的通道 |
 | `network.json` | 網路層 | ETH/WiFi 起來前 | 用內建 IP 或 DHCP |
 | `tasks.json` | 任務管理器 | 任務登記前 | level／affinity；`prio`（1–6，可選）覆寫 loop 宣告值；`level=-1`=停用 |
@@ -383,13 +387,19 @@ ETH PHY 沒 link、UART 沒接，就不該照 config 硬開一條 link。
   "PIN":  { "enable": 0, "list": [ { "GPIO": null, "label": "tft_dc", "mode": "OUT", "initial": 0 } ] },
   "SPI":  { "enable": 0, "list": [ { "baudrate": 80000000, "phase": 0, "polarity": 0,
                                      "GPIO": { "sck": null, "mosi": null, "miso": null }, "data_pins": [] } ] },
-  "I80":  { "enable": 0, "list": [ { "data": [], "wr": -1, "cs": -1, "freq": 80000000 } ] },
+  "I80":  { "enable": 0, "list": [ { "data": [14,38,39,40,41,42,47,48], "wr": 1, "dc": 2,
+                                     "cs": -1, "freq": 80000000 } ] },
   "SDIO": { "enable": 0, "list": [ { "freq": 40000000, "width": 4,
                                      "GPIO": { "sck": null, "cmd": null, "data": [-1,-1,-1,-1] } } ] },
   "XL9555": { "enable": 0, "bus": { "type": "i2c", "index": -1 }, "addr": "0x20",
               "list": [ { "IO": 0, "label": "LCD_RST", "mode": "OUT", "initial": 1 } ] }
 }
 ```
+
+**型別化的段（改它 = 真的改行為）**：`ETH`／`SDIO`／`PIN`／`PWM`／`UART`／**`I80`**／**`SPI`**。
+`I80` 沿用舊專案原形狀 `{data[], wr, cs, freq}` ＋ 一個 `dc`（esp_lcd 必要）：
+**`bus_width` 由 `data` 的長度推出**（8 → D0..D7、16 → D0..D15），唔另設欄位（多一個欄位
+就多一個真相）。未型別化的只剩 `I2C`／`I2S`／`ENC`／`XL9555`——改它們仍然唔會生效。
 
 `ETH` 是特例：不掛在任何匯流排上，整段放最頂，不拆去 driver。
 DMA 大小（1600）與環數（16/16）**不在 config**——那是 build-time，見 `ports/_profiles/eth-rmii.defaults`
@@ -399,19 +409,25 @@ DMA 大小（1600）與環數（16/16）**不在 config**——那是 build-time
 
 ### `driver.json`
 
+> **2026-11-24 定案：driver 層唔准寫腳位。**
+> 腳位與匯流排本身只寫在 `wiring.json`；`driver.json` 只寫「邊個裝置、掛邊條 bus、
+> 裝置參數」。理由：一隻腳如果有兩個出處，總有一個係死資料（`drivers.json` 事件）。
+
 ```jsonc
 {
   "version": 1,
 
-  "USB":    { "enable": 1,
-              "list": [ { "phy": "usj-fs", "GPIO": { "dm": 19, "dp": 20 }, "enable": 1 } ] },
-  "TFT":    { "enable": 0, "bus": { "type": "spi", "index": -1 }, "driver": "ST7789",
-              "width": 240, "height": 320, "rotation": 0, "color_order": "RGB",
-              "invert": 0, "pixel_format": "RGB565_BE",
+  "TFT":    { "enable": 0, "bus": { "type": "spi", "index": -1 }, "profile": "ST7789",
               "pins": { "dc": "tft_dc", "cs": "tft_cs", "rst": "tft_rst", "bl": "tft_bl" },
               "xl9555": { "rst": 0, "bl": 1 } },
   "SDcard": { "enable": 0, "bus": { "type": "sdio", "index": 0 }, "mount": "/sd", "slot": 0 },
-  "PCM5102": { "enable": 0, "list": [ { "bus": { "type": "i2s", "index": -1 }, "GPIO": { "xsmt": null } } ] }
+  "PCM5102": { "enable": 0, "list": [ { "bus": { "type": "i2s", "index": -1 },
+                                        "GPIO": { "xsmt": null }, "profile": "PCM5102" } ] },
+
+  // 燈鏈（2026-11-24）：只寫裝置參數；腳位在 hardware 層的 I80（bus.index 指過去）
+  "LED": { "enable": 1, "backend": "i80", "bus": { "type": "i80", "index": 0 },
+           "lanes": 1, "px": 64, "format": "ws2812",
+           "timing": { "pclk_hz": 2500000, "bit_cells": 3, "t0h": 1, "t1h": 2 } }
 }
 ```
 
@@ -419,7 +435,25 @@ DMA 大小（1600）與環數（16/16）**不在 config**——那是 build-time
 `index` 選第幾個實例（0 = 該類型 `list` 的第一個，-1 = 未接）。
 不用 `spi_id` 那種 id——因為 id 是使用者自己填的，index 跟註冊次序一致，不容易對錯。
 
-`USB` 排最前：它不掛在任何匯流排上，跟 `ETH` 在 hardware 的地位對稱。
+`USB` 已經搬去 hardware 層（`wiring.json` 的 `USB.list[].phy`）——舊 `driver.json` 的
+`USB` 段 firmware 從來冇讀，只係歷史。`ETH` 同理（不掛匯流排，整段在 `wiring.json` 最頂）。
+
+**LED 段的三種狀態**（`nc_led_cfg_t.present` / `enable`）：
+
+| present | enable | render 行為 |
+|---|---|---|
+| 冇 LED 段 | — | 用 `CONFIG_NETCORE_PIXEL_*`（未遷移的板子行為完全不變） |
+| 有 | `0` | 明確唔用燈 → 只留 mock lane，唔退 Kconfig；腳位可以未定 |
+| 有 | `1` | backend／lanes／px／format／timing 由 JSON 決定；**腳位由 `nc_cfg_hardware()` 取** |
+
+即係：driver 層講「點用」，hardware 層講「邊支腳」。所以修正腳位有兩條路——
+改 `wiring.json` 再 build（改預設），或者插 USB 改 `/data/config/hardware.json` 的 `I80`
+（runtime 覆蓋，唔使重 build）。
+
+`backend` 目前只有 `i80`／`spi`／`direct`／`mock` 有 firmware 後端；
+`rmt`／`parlio` 收 schema 但未有 driver（`board.py check` 會 warn，上板會大聲報錯）。
+**project 的 `sdkconfig.defaults` 一旦覆寫 `CONFIG_NETCORE_PIXEL_*`，board 的 LED 段就讓位**
+（外接燈具屬 project；規則在 `tools/ncportgen.py`，check 會講明邊個贏）。
 
 **舊專案的硬體節怎麼分到這兩層**（照抄時的對照表）：
 
@@ -429,9 +463,11 @@ DMA 大小（1600）與環數（16/16）**不在 config**——那是 build-time
 | `SDcard` → `SDIO` | `hardware.json` | 只留匯流排（腳位、freq、width）；卡本身在 driver |
 | `Network.lan`（GPIO + driver + phy） | `hardware.json` → `ETH` | 整段搬，不拆；特例放最頂 |
 | `XL9555` | `hardware.json` | I2C 上註冊，IO 變成 label 給 driver 用 |
-| `TFT` / `SDcard` / `WS2812` / `APA102` / `PCA9685` | `driver.json` | 用 `bus.index` 引用 hardware |
+| `WS2812` / `APA102` 的**腳位** | `hardware.json`（`I80`／`SPI` 段） | 舊寫法 `WS2812.list[].GPIO` 已冇人讀 |
+| `WS2812` / `APA102` 的**裝置參數**（幾顆、格式、時序） | `driver.json` → `LED` 段 | 用 `bus.index` 引用 hardware |
+| `TFT` / `SDcard` / `PCA9685` | `driver.json` | 用 `bus.index` 引用 hardware |
 | `Audio` / `PCM5102` / `GT1151Q` / `HUSB238` / `uartMotor` | `driver.json` | 同上 |
-| `USB` | `driver.json` | 排最前（不掛匯流排） |
+| `USB` | `hardware.json` | 2026-11-16 已搬（`wiring.json` 的 `USB.list[]`） |
 
 **量測值不進 config**：已經量到「最好」的數字，用戶不需要調、也不應該調——
 寫在 firmware 或 build-time，真的要改的人要重新量。

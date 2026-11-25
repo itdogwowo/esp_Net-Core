@@ -251,7 +251,23 @@ const nc_hardware_cfg_t *nc_cfg_defaults_hardware(void)
 
 #if defined(__GNUC__)
 extern uint8_t nc_port_usb_kind(uint8_t idx) __attribute__((weak));
+extern const nc_led_cfg_t *nc_port_led(void) __attribute__((weak));
 #endif
+
+// driver 層（build-time driver.json）的燈鏈：有生成檔就用它，冇就回 NULL
+// （render 收到 NULL → 用 Kconfig，未遷移的板子行為不變）。
+const nc_led_cfg_t *nc_cfg_defaults_led(void)
+{
+#if defined(__GNUC__)
+    if (nc_port_led != NULL) {
+        const nc_led_cfg_t *led = nc_port_led();
+        if (led != NULL && led->present) {
+            return led;
+        }
+    }
+#endif
+    return NULL;
+}
 
 uint8_t nc_cfg_usb_default_kind(uint8_t idx)
 {

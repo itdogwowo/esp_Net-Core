@@ -1,0 +1,87 @@
+{
+  "version": 1,
+  "_comment": [
+    "Driver 層（S3-SuperMini）：掛在這塊板匯流排上的裝置。腳位一律在 wiring.json；",
+    "這裡只寫「用邊條 bus（bus = {type,index}）＋裝置參數」，唔會再寫一次 GPIO。",
+    "",
+    "這塊板目前冇板載裝置：全部 enable = 0。下面每個段落都保留完整 schema，",
+    "有硬件之後填 value、把 enable 開 1 就可以；腳位仍然只改 wiring.json。",
+    "",
+    "⚠ 外接燈鏈（例如 project ESP32-S3-SuperMini-LED-Textkit 的 6 條 WS2812）",
+    "  唔屬於板子：那組 I80 腳位是 project 的 build-time 事實，寫在",
+    "  ports/project/<...>/sdkconfig.defaults 的 CONFIG_NETCORE_PIXEL_*。",
+    "  一旦 project 寫了那些符號，本檔的 LED 段就會讓位（見 tools/ncportgen.py）。"
+  ],
+
+  "TFT": {
+    "_comment": "pins 的值是 wiring.json PIN.list 的 label；xl9555 是 I80 面板用的 IO 編號（不是 label）",
+    "enable": 0,
+    "bus": { "type": "spi", "index": -1 },
+    "profile": "ST7789",
+    "pins": { "dc": "tft_dc", "cs": "tft_cs", "rst": "tft_rst", "bl": "tft_bl" },
+    "xl9555": { "rst": 0, "bl": 1 }
+  },
+
+  "APA102": {
+    "enable": 0,
+    "list": [
+      { "bus": { "type": "spi", "index": -1 }, "profile": "APA102" }
+    ]
+  },
+
+  "PCA9685": {
+    "enable": 0,
+    "list": [
+      { "bus": { "type": "i2c", "index": -1 }, "profile": "PCA9685" }
+    ]
+  },
+
+  "PCM5102": {
+    "enable": 0,
+    "list": [
+      { "bus": { "type": "i2s", "index": -1 }, "profile": "PCM5102",
+        "GPIO": { "xsmt": null } }
+    ]
+  },
+
+  "GT1151Q": {
+    "enable": 0,
+    "bus": { "type": "i2c", "index": -1 },
+    "int": "touch_int",
+    "profile": "GT1151Q"
+  },
+
+  "HUSB238": {
+    "enable": 0,
+    "bus": { "type": "i2c", "index": -1 },
+    "profile": "HUSB238"
+  },
+
+  "uartMotor": {
+    "enable": 0,
+    "list": [
+      { "bus": { "type": "uart", "index": -1 }, "profile": "UART_MOTOR" }
+    ]
+  },
+
+  "LED": {
+    "_comment": [
+      "通用燈鏈 schema（2026-11-24 定案）。呢塊板冇板載燈 → enable = 0。",
+      "enable = 1 的寫法（以 6 條 WS2812 為例）：",
+      "  \"backend\": \"i80\"（或 spi；rmt／parlio 仲未實作，寫了會大聲報錯）",
+      "  \"bus\": {\"type\": \"i80\", \"index\": 0}   → hardware 層 I80[] 第 0 條",
+      "  \"lanes\": 6                                → 前 6 條資料線真的接燈",
+      "  \"px\": 20                                  → 每條 lane 幾顆（不是總數）",
+      "  \"format\": \"ws2812\"（ws2812／ws2812w／ws2815／ws2801／apa102）",
+      "  \"timing\": {pclk_hz, bit_cells, t0h, t1h}  → 省略 = 用格式本身的預設波形",
+      "腳位**不在這裡**：寫在 wiring.json 的 I80.list[]（data／wr／dc），",
+      "runtime 可以用 /data/config/hardware.json 的同一段覆蓋，唔使重 build。"
+    ],
+    "enable": 0,
+    "backend": "i80",
+    "bus": { "type": "i80", "index": -1 },
+    "lanes": 1,
+    "px": 1,
+    "format": "ws2812"
+  }
+}

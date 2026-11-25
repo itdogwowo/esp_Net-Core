@@ -2,8 +2,10 @@
   "version": 1,
   "_comment": [
     "Hardware 層（S3-Zero）：WS2812 資料在 GPIO1；Zero 沒有板載 IMU。",
-    "I80 腳位是 build-time 事實，寫在 sdkconfig.defaults；LED 宣告只是鏡子。",
-    "I80 段仍然只是文件的影子（nc_cfg 還未型別化它），改這裡不會生效。"
+    "I80 腳位（D0..D7／WR／DC）是硬件事實，寫在下面的 I80 段 —— 送燈用的 driver 參數",
+    "（幾條 lane、每條幾顆、格式、時序）在 driver.json 的 LED 段，用 bus 引用這裡。",
+    "如果 project 的 sdkconfig.defaults 覆寫了 CONFIG_NETCORE_PIXEL_*（例如 Show2400／Show9600），",
+    "board 的 LED 段會讓位，render 改用 Kconfig。"
   ],
   "_gpio_convention": "兩種『未設定』寫法不能混用：-1 = 未設定／不啟用（driver 以 >= 0 判斷）；null = 沒接這條線（driver 以 is not None 判斷，寫 -1 會變成 Pin(-1) 而爆掉）。標 -1 的欄位可以安全留著；標 null 的欄位要填真實腳位才 enable。",
   "ETH": {
@@ -85,11 +87,13 @@
     "list": []
   },
   "I80": {
-    "enable": 0,
+    "_comment": "WS2812 用 I80（LCD_CAM 8080）當 8 條 lane 的動機。data = D0..D7（長度就是 bus_width）；只有 D0 = GPIO1 真的接燈，D1..D7／WR／DC 是 I80 硬性要求的 dummy。dc 是 esp_lcd 必要的 D/C 腳。freq 是 LCD 的意義；送燈的 PCLK 由 driver.json 的 LED.timing 給。runtime 可以用 /data/config/hardware.json 覆蓋。",
+    "enable": 1,
     "list": [
       {
-        "data": [],
-        "wr": -1,
+        "data": [1, 38, 39, 40, 41, 42, 47, 48],
+        "wr": 2,
+        "dc": 4,
         "cs": -1,
         "freq": 80000000
       }

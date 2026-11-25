@@ -180,9 +180,100 @@ wiring.json ──ncportgen──► nc_port.c（static const nc_hardware_cfg_t�
 也是 `hardware.json` 的第一次 seed。用戶改 `/data/config/hardware.json` 只覆蓋差異；
 firmware 不會因為用戶檔缺失而失去硬體預設。
 
-> `wiring.json` 裡的 `SPI`／`I2C`／`I80`／`I2S`／`ENC`／`XL9555` 目前**只保留在 seed**，
+> `wiring.json` 裡的 `I2C`／`I2S`／`ENC`／`XL9555` 目前**只保留在 seed**，
 > 還沒有對應的 typed struct；`ncportgen` 會把它們原樣放進 `preset_hardware.json`，
-> 等 driver 有型別再逐段接。已 typed 的是 `ETH`／`SDIO`／`PIN`／`PWM`／`UART`。
+> 等 driver 有型別再逐段接。已 typed 的是 `ETH`／`SDIO`／`PIN`／`PWM`／`UART`／`I80`／`SPI`。
+
+### 5.1 `hardware/driver.json`（F.device）：掛在匯流排上的裝置
+
+**一句話規矩：腳位／匯流排本身只寫在 hardware 層（`wiring.json` → 生成
+`nc_hardware_cfg_t`，runtime 可由 `/data/config/hardware.json` 覆蓋）；`driver.json` 只寫
+「邊個裝置、掛邊條 bus、裝置參數」。** 呢個就係「先建硬件，再建用硬件的東西」。
+
+```text
+wiring.json（硬件：I80 的 D0..D7／WR／DC 喺邊支腳）
+      │  ncportgen（build 時）→ nc_hardware_cfg_t.i80[]（nc_port.c 的 static const）
+      │ ／ 開機時 /data/config/hardware.json 同段覆蓋（唔使重 build）
+      ▼
+driver.json（裝置：backend、bus index、幾條 lane、每條幾顆、格式、時序）
+      │  ncportgen → nc_led_cfg_t
+      ▼
+render 任務：nc_cfg_hardware()->i80[led.bus] 取腳位 ＋ nc_led_cfg_t 取參數
+```
+
+`driver.json` 引用匯流排一律用 `bus = { "type", "index" }`：`type` 選種類
+（`spi` / `i2c` / `uart` / `i2s` / `sdio` / `i80`），`index` 選該類型 `list` 的第幾個
+（`-1` = 未接）。裝置本身的型號／能力用 `profile` 指去 `ports/_chips/<name>.json`。
+
+#### 燈鏈（LED 段）
+
+```jsonc
+// ports/hardware/S3/ESP32-S3-Matrix/driver.json —— 只有裝置參數
+"LED": {
+  "enable": 1,
+  "backend": "i80",                            // i80 / spi / direct / mock（rmt／parlio 未實作）
+  "bus": { "type": "i80", "index": 0 },        // → hardware 層 I80[] 的第 0 條
+  "lanes": 1,                                  // 前幾條資料線真的接燈
+  "px": 64,                                    // **每條 lane** 幾顆（不是總數）
+  "format": "ws2812",                          // ws2812／ws2812w／ws2815／ws2801／apa102
+  "timing": { "pclk_hz": 2500000, "bit_cells": 3, "t0h": 1, "t1h": 2 }
+}
+```
+
+對應的硬件（腳位）在 `wiring.json`（**舊專案原形狀**，`bus_width` 由 `data` 長度推出）：
+
+```jsonc
+"I80": {
+  "enable": 1,
+  "list": [
+    { "data": [14, 38, 39, 40, 41, 42, 47, 48],   // D0..D7（8 支 = 8-bit；16 支 = 16-bit）
+      "wr": 1,                                    // I80 硬性要求；送燈時是 dummy
+      "dc": 2,                                    // esp_lcd 必要的 D/C（LED 也是 dummy）
+      "cs": -1,                                   // LCD 面板的 CS；燈鏈 = -1
+      "freq": 80000000 }                          // LCD 的 PCLK；LED 用 LED.timing.pclk_hz
+  ]
+}
+```
+
+| 欄位 | 意思 | 唔寫會點 |
+|---|---|---|
+| `backend` | 用邊個 driver | `enable=1` 就一定要寫 |
+| `bus` | 引用 hardware 層的哪條匯流排 | `i80`／`spi` 一定要 |
+| `lanes` | 幾條資料線真的接燈（1..data 支數；SPI 只可以 1） | 預設 1 |
+| `px` | **每條** lane 幾顆 | `enable=1` 就一定要 |
+| `format` | 線材格式（決定 GRB／GRBW／RGB 同每顆幾個 byte） | `enable=1` 就一定要 |
+| `timing` | 波形時序；`pclk_hz`／`bit_cells`／`t0h`／`t1h` | 預設用該格式的內建波形 |
+
+三種狀態唔可以混：
+
+| `present` | `enable` | 行為 |
+|---|---|---|
+| 冇 LED 段 | — | render 用 `CONFIG_NETCORE_PIXEL_*`（未遷移的板子行為不變） |
+| 有 | `0` | 明確唔用燈 → 只留 mock lane，**唔會**退回 Kconfig；腳位可以未定（`index:-1`） |
+| 有 | `1` | device 參數由 JSON 決定；**腳位由 `nc_cfg_hardware()` 取** |
+
+> **腳位改錯有兩條路**：改 `wiring.json` 再 build（改預設），或者插 USB 改
+> `/data/config/hardware.json` 的 `I80` 段（runtime 覆蓋，唔使重 build）。
+> `I80` 由 2026-11-24 起真的會被 `nc_cfg_apply_hardware()` 讀（以前只係死段）。
+>
+> **project 覆寫就讓位**：`ports/project/<...>/sdkconfig.defaults` 一旦寫了任何
+> `CONFIG_NETCORE_PIXEL_*`（外接燈具屬 project），board 的 LED 段會自動讓位、render 用
+> Kconfig。規則由 `tools/ncportgen.py` 在 build 時判定（`--project` 參數），
+> `tools/board.py check` 會 warn 講明邊個贏。理由：外接燈鏈的腳位是**那組燈具**的事，
+> 唔應該寫死在一塊通用開發板上。
+
+#### 常見錯誤（`board.py check` 會擋）
+
+| 症狀 | 真正原因 |
+|---|---|
+| `drivers.json`（多個 s）| 工具鏈只認 `driver.json`，成個檔冇人讀 |
+| `driver.json` 出現 `I80`／`SPI`／`I2C`／`UART`／`PIN` 段 | 那是 hardware 層，搬去 `wiring.json` |
+| `driver.json` 出現 `GPIO` | 腳位只可以出現一次：hardware 層 |
+| `I80` 寫 `bus_width` | 由 `data` 長度決定，唔可以另寫一個（會漂移） |
+| `LED.order` 同 `format` 唔一致 | 線材次序由格式決定，`order` 只會被對帳 |
+| `wiring.json` 與 `sdkconfig` 的 `NETCORE_PIXEL_I80_PINS` 唔一致 | 兩個真相；改到一樣為止 |
+
+
 
 ---
 
@@ -344,8 +435,10 @@ port 兩層的完整設計與 OTA／分割表問答見
 > 這是 **build-time 預設**；執行期熱切換（MicroPython `machine.freq()` 那種）目前未實作，
 > 要開 `CONFIG_PM_ENABLE` ＋ `esp_pm_configure()`，並補 UART／SPI／LEDC 等時鐘補償。
 >
-> `driver.json` 只有 P4-ETH／Matrix／N16R8 有；其餘四塊板沒有掛外部裝置，check 的
-> warning 是預期（不是缺檔錯誤）。晶片能力（cores／USB）在 `ports/hardware/_chips/`，
+> `driver.json` 目前 P4-ETH／Matrix／Zero／N16R8／SuperMini 有（SuperMini 全 `enable=0`，係
+> schema 示範）；C3-DevKitM／Mini-Nano／P4-FireBeetle2／P4-WIFI6-DB 冇掛外部裝置，
+> check 的 warning 是預期（不是缺檔錯誤）。**只有 `LED` 段真的會被 firmware 讀**（見 §5.1）。
+> 晶片能力（cores／USB）在 `ports/hardware/_chips/`，
 > 它的 `usb.link` 必須與 `nc_cfg_chip.c` 的 fallback 一致（`usb_jtag0`／`cdc0`）。
 
 ### 10.6 自動檢查

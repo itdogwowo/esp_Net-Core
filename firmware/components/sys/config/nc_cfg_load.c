@@ -840,6 +840,129 @@ static void apply_uart(const cJSON *root, nc_hardware_cfg_t *out, nc_cfg_stat_t 
     }
 }
 
+// I80（LCD_CAM 8080）：腳位的唯一 runtime 出處。
+// 原形狀 {enable, list:[{data[],wr,cs,freq}]}；dc 是 esp_lcd 必要（舊專案 LCD 由 PIN 的
+// tft_dc 提供，燈鏈直接寫這裡）。**bus_width 由 data 的長度推出**（8／16）——
+// 唔加第三個欄位，因為第三個欄位一定會同另外兩個漂移。
+static void apply_i80(const cJSON *root, nc_hardware_cfg_t *out, nc_cfg_stat_t *st)
+{
+    const cJSON *i80 = item(root, "I80");
+    if (i80 == NULL) {
+        st->defaulted++;
+        return;                  // 段缺失 → 保留 generated 預設（nc_port.c）
+    }
+    if (!cJSON_IsObject(i80)) {
+        st->invalid++;
+        return;
+    }
+    if (!get_bool(i80, "enable", false, st)) {
+        out->n_i80 = 0;
+        return;
+    }
+    const cJSON *list = item(i80, "list");
+    if (!cJSON_IsArray(list)) {
+        st->defaulted++;
+        return;
+    }
+    out->n_i80 = 0;
+    const cJSON *it = NULL;
+    cJSON_ArrayForEach(it, list) {
+        if (out->n_i80 >= NC_CFG_MAX_I80) {
+            st->invalid++;
+            break;
+        }
+        const cJSON *data = item(it, "data");
+        if (!cJSON_IsArray(data)) {
+            st->invalid++;
+            continue;
+        }
+        nc_i80_cfg_t e;
+        memset(&e, 0, sizeof(e));
+        const cJSON *d = NULL;
+        cJSON_ArrayForEach(d, data) {
+            if (e.n_data >= NC_CFG_I80_DATA_MAX) {
+                st->invalid++;
+                break;
+            }
+            if (!cJSON_IsNumber(d)) {
+                st->invalid++;
+                continue;
+            }
+            const int v = d->valueint;
+            if (v < 0 || v > NC_CFG_GPIO_MAX) {
+                st->invalid++;
+                continue;
+            }
+            e.data[e.n_data++] = (int8_t)v;
+        }
+        if (e.n_data != 8 && e.n_data != 16) {
+            st->invalid++;       // 只可以 8 或 16 條資料線
+            continue;
+        }
+        e.bus_width = e.n_data;  // 由 data 長度決定，不是另一個欄位
+        e.wr = get_pin_opt(it, "wr", st);
+        e.dc = get_pin_opt(it, "dc", st);
+        e.cs = get_pin_opt(it, "cs", st);
+        if (e.wr < 0 || e.dc < 0) {
+            st->defaulted++;     // WR／DC 未填 → 這條不建立（唔好拿 -1 去 init）
+            continue;
+        }
+        e.enable = true;
+        e.freq_hz = (uint32_t)get_int(it, "freq", 80000000, 1000000, 80000000, st);
+        out->i80[out->n_i80++] = e;
+    }
+}
+
+// SPI：時脈式燈鏈（WS2801／APA102）與面板。miso 未接 = -1。
+static void apply_spi(const cJSON *root, nc_hardware_cfg_t *out, nc_cfg_stat_t *st)
+{
+    const cJSON *spi = item(root, "SPI");
+    if (spi == NULL) {
+        st->defaulted++;
+        return;
+    }
+    if (!cJSON_IsObject(spi)) {
+        st->invalid++;
+        return;
+    }
+    if (!get_bool(spi, "enable", false, st)) {
+        out->n_spi = 0;
+        return;
+    }
+    const cJSON *list = item(spi, "list");
+    if (!cJSON_IsArray(list)) {
+        st->defaulted++;
+        return;
+    }
+    out->n_spi = 0;
+    const cJSON *it = NULL;
+    cJSON_ArrayForEach(it, list) {
+        if (out->n_spi >= NC_CFG_MAX_SPI) {
+            st->invalid++;
+            break;
+        }
+        const cJSON *g = item(it, "GPIO");
+        if (!cJSON_IsObject(g)) {
+            st->invalid++;
+            continue;
+        }
+        nc_spi_cfg_t e;
+        memset(&e, 0, sizeof(e));
+        e.sck = get_pin_opt(g, "sck", st);
+        e.mosi = get_pin_opt(g, "mosi", st);
+        e.miso = get_pin_opt(g, "miso", st);
+        if (e.sck < 0 || e.mosi < 0) {
+            st->defaulted++;
+            continue;
+        }
+        e.enable = true;
+        e.baud = (uint32_t)get_int(it, "baudrate", 80000000, 100000, 80000000, st);
+        e.phase = (uint8_t)get_int(it, "phase", 0, 0, 1, st);
+        e.polarity = (uint8_t)get_int(it, "polarity", 0, 0, 1, st);
+        out->spi[out->n_spi++] = e;
+    }
+}
+
 esp_err_t nc_cfg_apply_hardware(const cJSON *root, nc_hardware_cfg_t *out, nc_cfg_stat_t *st)
 {
     if (out == NULL || st == NULL) {
@@ -874,6 +997,8 @@ esp_err_t nc_cfg_apply_hardware(const cJSON *root, nc_hardware_cfg_t *out, nc_cf
     apply_pin(root, out, st);    // GPIO owner 開機套用
     apply_pwm(root, out, st);    // LEDC
     apply_uart(root, out, st);   // UART / RS485
+    apply_i80(root, out, st);    // I80（LCD／燈鏈）：2026-11-24 起真的生效
+    apply_spi(root, out, st);    // SPI（時脈式燈鏈／面板）
     return ESP_OK;
 }
 

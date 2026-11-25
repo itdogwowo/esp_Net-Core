@@ -100,13 +100,18 @@
     ]
   },
   "LED": {
-    "_comment": "WS2812 鏈（GPIO1，64 顆／8×8 假設；只用 1 顆亦可）。真正驅動在 drv_i80。",
+    "_comment": [
+      "WS2812 鏈（D0 = GPIO1，64 顆／8×8 假設；只用 1 顆亦可）。",
+      "硬件（腳位／線寬）在 wiring.json 的 I80 段；這裡只寫「用邊條 bus、幾條 lane、",
+      "每條幾顆、乜格式、時序」，build 時 ncportgen 併埋生成 nc_led_cfg_t。",
+      "真正驅動在 driver/drv_i80。"
+    ],
     "enable": 1,
-    "type": "ws2812b",
-    "count": 64,
-    "cols": 8,
-    "rows": 8,
-    "order": "RGB",
-    "gpio": 1
+    "backend": "i80",
+    "bus": { "type": "i80", "index": 0 },
+    "lanes": 1,
+    "px": 64,
+    "format": "ws2812",
+    "timing": { "pclk_hz": 2500000, "bit_cells": 3, "t0h": 1, "t1h": 2 }
   }
 }

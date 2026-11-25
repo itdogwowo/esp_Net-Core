@@ -54,6 +54,11 @@ const nc_tasks_cfg_t  *nc_cfg_defaults_tasks(void);
 const nc_resources_cfg_t *nc_cfg_defaults_resources(void);
 const nc_hardware_cfg_t *nc_cfg_defaults_hardware(void);
 
+// driver 層（build-time driver.json）宣告的燈鏈。NULL = 這塊板冇宣告
+// （或 present=0）→ render 用 CONFIG_NETCORE_PIXEL_*，行為跟舊版一樣。
+// 由 tools/ncportgen.py 生成 nc_port_led()；host test 冇生成檔時回 NULL。
+const nc_led_cfg_t *nc_cfg_defaults_led(void);
+
 // USB hardware.json 的 USB.list[index] → internal link kind（NC_LINK_CDC／USBJTAG）；
 // 0xFF = 這塊板冇這條 USB port。
 uint8_t nc_cfg_usb_default_kind(uint8_t idx);
