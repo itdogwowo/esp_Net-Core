@@ -5,7 +5,7 @@
     "",
     "2026-11-25 舊 pixel_task（8×8 內建六效果生產者）已退役 —— 它只是測試用。",
     "SuperMini：6 條燈鏈輸出測試。",
-    "render：環 → 畫波 → 推送（核心 1）。pixel_wave_task 係同一輸出層",
+    "render：環 → 畫波 → 推送（核心 1）。pixel_encode_task 係同一輸出層",
     "                的畫波任務（核心 1），兩者都要開。",
     "",
     "冇生產者寫環時燈唔會更新（環係空）；要效果就要改用 Show 管線＋/data/pixel 資產。",
@@ -21,7 +21,7 @@
       ]
     },
     {
-      "name": "pixel_wave_task",
+      "name": "pixel_encode_task",
       "level": 4,
       "affinity": [
         0,

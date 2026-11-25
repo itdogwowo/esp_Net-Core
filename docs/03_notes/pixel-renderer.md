@@ -24,7 +24,7 @@
 | `tasks` | `components/tasks/pixel_effect_task/` | **效果任務**：按 plan 算 12-bit 值流（雙 pool＋ack） | `task`、`pixel` |
 | `tasks` | `components/tasks/pixel_pair_task/` | **抖動＋配對任務**：四層 → layout → 寫環 | `task`、`pixel`、`store` |
 | `effects` | `components/effects/pixel_effects/` | **內建效果內容**（時間＋參數 → canonical 畫面）；框架在 `sw/pixel` | `pixel` |
-| `tasks` | `components/tasks/pixel_wave_task/` | **畫波任務**：環 → 編碼 → 後端 DMA 槽；節拍由 render 給 | `task`、`core`、`render_task` |
+| `tasks` | `components/tasks/pixel_encode_task/` | **畫波任務**：環 → 編碼 → 後端 DMA 槽；節拍由 render 給 | `task`、`core`、`render_task` |
 | `tasks` | `components/tasks/render_task/` | **公用輸出層**：推送／渲染（LED 現在、LCD 將來）；環／lane／節拍的主人 | `task`、`mem`、`hw`、`core`、`pixel`、driver |
 | `driver` | `components/driver/drv_i80/`、`drv_spi_led/` | 腳位、PCLK、DMA、完成回呼 | `esp_lcd`／`esp_driver_spi` |
 

@@ -2,7 +2,7 @@
 //
 // 2026-11-25 四層四任務：
 //   **pixel_effect_task**（本檔）→ pixel_pair_task（抖動＋配對）→
-//   pixel_wave_task（畫波）→ render_task（公用推送）。
+//   pixel_encode_task（畫波）→ render_task（公用推送）。
 //
 // 唔讀 /data、唔碰 map／write／ring；plan（aprog 清單）由 pair 經
 // nc_pipe_aprog_publish() 發佈，這裡 copy 一份再自己建 wave table。

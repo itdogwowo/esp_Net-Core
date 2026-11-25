@@ -4,7 +4,7 @@
     "「檔案驅動 show」的 production 映像。",
     "",
     "生產者：pixel_pair_task＋pixel_effect_task（/data/pixel 四層）→ prd 環；",
-    "pixel_wave_task（畫波）＋render（推送）開（→ I80 → WS2812）。",
+    "pixel_encode_task（畫波）＋render（推送）開（→ I80 → WS2812）。",
     "",
     "編譯開關：CONFIG_NETCORE_CONTENT=y。不開 NC_ENABLE_TESTS、不含 effect_bench。",
     "LED 資料腳 GPIO1 在 hardware sdkconfig；本 project 只覆寫功能。",

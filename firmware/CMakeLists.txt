@@ -118,10 +118,10 @@ set(_nc_extra_dirs
     "${CMAKE_CURRENT_LIST_DIR}/components/tasks/hw_gpio"
     # pixel 管線四層四任務（2026-11-25）：
     #   pixel_effect_task（效果值）→ pixel_pair_task（抖動＋配對）→
-    #   pixel_wave_task（畫波）→ render_task（公用推送／渲染，唔屬 pixel 系列）。
+    #   pixel_encode_task（編碼）→ render_task（公用推送／渲染，唔屬 pixel 系列）。
     # 舊 pixel_task（8×8 內建引擎）已退役：它只是測試用生產者，唔再擴充。
     "${CMAKE_CURRENT_LIST_DIR}/components/tasks/render_task"
-    "${CMAKE_CURRENT_LIST_DIR}/components/tasks/pixel_wave_task"
+    "${CMAKE_CURRENT_LIST_DIR}/components/tasks/pixel_encode_task"
     "${CMAKE_CURRENT_LIST_DIR}/components/tasks/pixel_effect_task"
     # pair 由 CONFIG_NETCORE_CONTENT 開關；關閉時 .c 內容為空、不登記任何東西。
     "${CMAKE_CURRENT_LIST_DIR}/components/tasks/pixel_pair_task")

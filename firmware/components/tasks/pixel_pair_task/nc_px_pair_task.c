@@ -1,7 +1,7 @@
 // nc_px_pair_task.c — 四層管線第二段 pixel_pair_task（抖動＋配對）。
 //
 // 2026-11-25 四層四任務：
-//   pixel_effect_task（值流）→ **pixel_pair_task**（本檔）→ pixel_wave_task（畫波）→
+//   pixel_effect_task（值流）→ **pixel_pair_task**（本檔）→ pixel_encode_task（畫波）→
 //   render_task（公用推送）。
 //
 // 本檔只做：

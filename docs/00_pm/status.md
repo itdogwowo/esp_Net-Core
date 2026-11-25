@@ -8463,7 +8463,7 @@ IDF_PATH=~/esp/esp-idf python3 make.py build ESP32-P4-ETH    --fresh
 |---|---|---|---:|---|
 | 1 | `pixel_effect_task` | 只 evaluate program → 12-bit 值流（雙 pool＋ack） | 22 | 0 |
 | 2 | `pixel_pair_task` | 抖動＋配對（layout runs）→ write → white mix → prd 環 | 21 | 1 |
-| 3 | `pixel_wave_task` | 環 → codec → 後端 DMA 槽（只傳格索引，唔 copy） | 11 | 1 |
+| 3 | `pixel_encode_task` | 環 → codec → 後端 DMA 槽（只傳格索引，唔 copy） | 11 | 1 |
 | 4 | `pixel_render_task` | DMA 完成還格 → submit → I80；環／lane／節拍的主人 | 10 | 1 |
 
 **改動**：
@@ -8474,7 +8474,7 @@ IDF_PATH=~/esp/esp-idf python3 make.py build ESP32-P4-ETH    --fresh
 | `tasks/pixel_pair_task/`（新 component） | pair 由 pixel_effect_task 拆出；任務名 `pair` → `pixel_pair_task` |
 | `tasks/render_task/` → `tasks/pixel_render_task/` | wave／push 由「同一任務兩個 loop」升格成兩個任務；`CONFIG_NETCORE_PX_SPLIT_PUSH` 移除（永遠分開） |
 | `tasks/pixel_task/` | **刪除**（舊 8×8 內建效果生產者） |
-| `nc_task.c` | 新增 alias 鏈：`pixel_effect_task→effect→content→show`、`pixel_pair_task→pair→content→show`、`pixel_wave_task/pixel_render_task→render`；舊 `/data` config OTA 後仍然生效 |
+| `nc_task.c` | 新增 alias 鏈：`pixel_effect_task→effect→content→show`、`pixel_pair_task→pair→content→show`、`pixel_encode_task/pixel_render_task→render`；舊 `/data` config OTA 後仍然生效 |
 | `firmware/CMakeLists.txt`／`main`／`test_action` | component 清單與依賴跟住改 |
 | 8 個 project 的 `tasks.json` | 全部改新名；Matrix／Textkit／SuperMini 只留輸出層；EffectPerf 輸出層 level=-1 |
 
@@ -8503,7 +8503,7 @@ IDF_PATH=~/esp/esp-idf python3 make.py build ESP32-P4-ETH    --fresh
 - `pixel_render_task` 的 loop 只叫 `push`（submit／reclaim）；環同定時器仍在它的
   `on_start` 建立，所以 config 關掉佢會連 wave 都停（預期）。
 
-### 7.243 2026-11-25（更正：畫波獨立 `pixel_wave_task` component；render 改回公用 `render_task`）
+### 7.243 2026-11-25（更正：畫波獨立 `pixel_encode_task` component；render 改回公用 `render_task`）
 
 **用家回饋**：只見到三個任務（component 層面），而且 `pixel_render_task` 唔應該入 pixel
 系列——render 係公用輸出層，其他子系統（LCD 等）都會用。
@@ -8512,19 +8512,19 @@ IDF_PATH=~/esp/esp-idf python3 make.py build ESP32-P4-ETH    --fresh
 |---|---|---|---|
 | 1 | `pixel_effect_task` | `tasks/pixel_effect_task/` | 只算效果值 |
 | 2 | `pixel_pair_task` | `tasks/pixel_pair_task/` | 抖動＋配對 |
-| 3 | `pixel_wave_task` | `tasks/pixel_wave_task/`（新） | 畫波；只擁有 loop／節拍／生命週期 |
+| 3 | `pixel_encode_task` | `tasks/pixel_encode_task/`（新） | 編碼（硬件格式）；只擁有 loop／節拍／生命週期 |
 | 4 | `render` | `tasks/render_task/`（公用） | 推送／渲染；環／lane／後端／節拍的主人 |
 
 **改動**：
 
 - `pixel_render_task` component 改回 `render_task`，任務名 `render`；佢唔再有 pixel 前綴。
-- 新增 `components/tasks/pixel_wave_task/`：`pixel_wave_task` 係獨立任務（order 11），
-  經 `nc_render_wave_ready()`／`nc_render_wave_wait()`／`nc_render_wave_tick()` 叫
+- 新增 `components/tasks/pixel_encode_task/`：`pixel_encode_task` 係獨立任務（order 11），
+  經 `nc_render_encode_ready()`／`nc_render_encode_wait()`／`nc_render_encode_tick()` 叫
   render 做 acquire＋encode＋入隊；render 仍然擁有環／lane／後端／timer。
 - `tasks.json`：`pixel_render_task` → `render`；其餘三個不變（共四條）。
-- alias：`pixel_wave_task → render`（舊 config 只有 render 一條）；
+- alias：`pixel_encode_task → render`（舊 config 只有 render 一條）；
   `render` 自己直接對名，唔使 alias。
-- CMake：`render_task` 由 main／test_action／pair 直接依賴；`pixel_wave_task` 依賴
+- CMake：`render_task` 由 main／test_action／pair 直接依賴；`pixel_encode_task` 依賴
   `render_task`。
 
 **驗證（macOS，idf=v6.1.1；未上板）**：
@@ -8537,7 +8537,57 @@ IDF_PATH=~/esp/esp-idf python3 make.py build ESP32-P4-ETH    --fresh
 | Zero-Show2400 | 705.4 KB（`0xb05b0`） |
 | EffectPerf | 715.4 KB（`0xb2db0`） |
 | tests 映像（Zero-Show） | 871.8 KB（`0xd9f30`，test_action 依賴 `render_task`） |
-| ELF 任務名 | `pixel_effect_task`／`pixel_pair_task`／`pixel_wave_task`／`render`（冇 `pixel_render_task`） |
+| ELF 任務名 | `pixel_effect_task`／`pixel_pair_task`／`pixel_encode_task`／`render`（冇 `pixel_render_task`） |
 
 **核心配置**：四條任務各自有 `tasks.json` 的 `level`／`affinity`，用家可以自行分配
 core（例如 effect core0、pair／wave／render core1，或再拆）。
+
+### 7.244 2026-11-25（`pixel_wave_task` → `pixel_encode_task`；後端支援矩陣：I80／SPI 已實作，RMT／PARLIO 待做）
+
+**用家回饋**：`wave` 這個名字容易引人誤解；同一個任務要支援多種硬件的「波」——
+P4 的 PARLIO（並行訊號輸出）同 C 系列（C3/C6）的 RMT。
+
+**改名**：
+
+| 舊 | 新 |
+|---|---|
+| `pixel_wave_task`（component／任務） | **`pixel_encode_task`** |
+| loop `wave` | loop `encode` |
+| `nc_render_wave_ready/wait/tick` | **`nc_render_encode_ready/wait/tick`** |
+| `tasks/pixel_wave_task/` | `tasks/pixel_encode_task/`（`nc_px_encode_task.c`） |
+
+為什麼叫 encode：同一層要出 I80／SPI 的 bus word、RMT 的 symbol、PARLIO 的並行
+word；「wave」只涵蓋 WS2812 波形，所以用「把像素編成該硬件線材格式」的 encode。
+
+**後端支援矩陣**（詳見 [pixel-output-backends.md](../03_notes/pixel-output-backends.md)）：
+
+| backend | 硬件 | 狀態 |
+|---|---|---|
+| `i80` | LCD_CAM 8080（8／16 lane） | **已實作**（production） |
+| `spi` | WS2801／APA102 | **已實作**（production） |
+| `rmt` | WS2812／自訂波形（C3/C6/S3） | **未實作**（driver adapter + pins 待做） |
+| `parlio` | P4 並行輸出（1–16 data + clk） | **未實作**（driver adapter + pins 待做） |
+| `direct`／`mock` | 量測／無硬件 | 已實作 |
+
+**未做（實作順序）**：
+
+1. `drv_rmt`（IDF `esp_driver_rmt`）＋ `nc_rmt_out.c`：bytes encoder、WS2812 時序、
+   C3 板驗證（`bus_ok`／checksum）。
+2. `hardware.json` 加 `RMT` typed 段（`data[]`／`resolution`）＋ `ncportgen`。
+3. `drv_parlio`（IDF `esp_driver_parlio`）＋ `nc_parlio_out.c`：P4 驗證。
+4. `hardware.json` 加 `PARLIO` typed 段（`data[]`／`clk`／`freq`）。
+
+> `driver.json` 寫 `backend:"rmt"`／`"parlio"` 目前會在建 backend 時大聲報錯並停用
+> 該 lane（`setup_backends()` 的既有行為）——唔會靜默退到 mock。
+
+**驗證（macOS，idf=v6.1.1；未上板）**：
+
+| 項目 | 結果 |
+|---|---|
+| `bash tools/hosttest/run_all.sh` | **21/21 OK** |
+| Matrix-Show（四任務） | **705.5 KB**（`0xb05d0`） |
+| Matrix-LED-Textkit（輸出層） | **665.1 KB**（`0xa6480`） |
+| C3 DevKitM（冇 pixel 任務） | **552.3 KB**（`0x8a150`） |
+| Show ELF 任務名 | `pixel_effect_task`／`pixel_pair_task`／`pixel_encode_task`／`render` |
+
+RMT／PARLIO 未有 driver，所以冇真機數字。

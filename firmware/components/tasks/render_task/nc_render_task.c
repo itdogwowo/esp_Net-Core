@@ -2,7 +2,7 @@
 //
 // 2026-11-25 四層四任務：
 //   pixel_effect_task（效果值）→ pixel_pair_task（抖動＋配對）→
-//   pixel_wave_task（環 → 編碼 → 後端的 DMA 槽；獨立 component）→
+//   pixel_encode_task（環 → 編碼 → 後端的 DMA 槽；獨立 component）→
 //   **render_task（本檔；DMA 槽 → 硬件；環／lane／節拍的主人）**。
 //
 // render 唔屬 pixel 系列：其他子系統（LCD 等）都會用同一個輸出層。
@@ -760,17 +760,17 @@ size_t nc_render_fps_json(char *out, size_t cap)
     return (w > 0 && (size_t)(k + w) < cap) ? (size_t)(k + w) : 0;
 }
 
-// ── 畫波：由 pixel_wave_task（pixel_wave_task component）呼叫。 ──
+// ── 畫波：由 pixel_encode_task（pixel_encode_task component）呼叫。 ──
 // render_task 係公用的輸出層（LED 現在、LCD 將來），唔屬 pixel 系列；
 // 所以畫波任務只拿這三個 API，環／lane／後端／節拍仍然由 render 擁有。
-bool nc_render_wave_ready(void)
+bool nc_render_encode_ready(void)
 {
     return s_px.started && s_px.ready != NULL;
 }
 
-bool nc_render_wave_wait(uint32_t timeout_ms)
+bool nc_render_encode_wait(uint32_t timeout_ms)
 {
-    if (!nc_render_wave_ready()) {
+    if (!nc_render_encode_ready()) {
         return false;
     }
     // 節拍由**週期 timer** 給；時間緩衝只做統計／吸收，唔改週期。
@@ -780,9 +780,9 @@ bool nc_render_wave_wait(uint32_t timeout_ms)
     return true;
 }
 
-void nc_render_wave_tick(void)
+void nc_render_encode_tick(void)
 {
-    if (!nc_render_wave_ready()) {
+    if (!nc_render_encode_ready()) {
         return;
     }
     for (int i = 0; i < s_px.nlane; i++) {
@@ -1009,7 +1009,7 @@ static esp_err_t px_start(const nc_task_res_view_t *res, int nres)
 static void px_stop(void)
 {
     s_px.started = false;
-    // 唔 delete tick／ready：pixel_wave_task 係另一個 component 的任務，可能仍然等緊；
+    // 唔 delete tick／ready：pixel_encode_task 係另一個 component 的任務，可能仍然等緊；
     // destroy 會 use-after-free。停止時只停 timer，物件留到重開機（一次性小 leak）。
     if (s_px.timer != NULL) {
         (void)esp_timer_stop(s_px.timer);
@@ -1032,7 +1032,7 @@ static const nc_task_loop_t s_push_loops[] = {
 };
 
 // 第四層：公用輸出／渲染（LED 現在、LCD 將來；唔屬 pixel 系列）。
-// 環、lane、後端、節拍都係它擁有（order 10 先 on_start，pixel_wave_task 同
+// 環、lane、後端、節拍都係它擁有（order 10 先 on_start，pixel_encode_task 同
 // pixel_pair_task 之後才找得到環）。真正的 submit 在 push loop。
 static const nc_task_t s_task = {
     .name = "render",

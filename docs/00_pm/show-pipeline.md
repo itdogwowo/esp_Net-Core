@@ -7,10 +7,10 @@
 > 同 EffectPerf 的分別：EffectPerf 只量效果管線、唔點燈；Show 是**真的出畫面**的 production
 > 映像。生產者由已退役的 `pixel_task`（內建六個效果）換成四層管線：
 > **pixel_effect_task（波形值）→ pixel_pair_task（配對／white mix／寫環）→
-> pixel_wave_task（編碼）→ render_task（公用推送／I80）**。
+> pixel_encode_task（編碼）→ render_task（公用推送／I80）**。
 >
 > **2026-11-25 更新（四層四任務）**：`pixel_effect_task`（效果值）→
-> `pixel_pair_task`（抖動＋配對）→ `pixel_wave_task`（畫波）→ `render_task`（推送）。
+> `pixel_pair_task`（抖動＋配對）→ `pixel_encode_task`（編碼）→ `render_task`（推送）。
 > `render_task` 係**公用輸出層**（LED 現在、LCD 將來），唔屬 pixel 系列；wave 係
 > 獨立 component／任務，兩者只傳「格索引」隊列，唔 copy。抖動維持在 pair 的內圈
 > （定案見 status §7.241）。舊 `pixel_task` 已退役；舊名 `effect`／`pair`／`render`
@@ -54,7 +54,7 @@ nc_px_layout_t（aprog[] 值流 ＋ job[] ＋ dst 升序 runs[]）
   ▼
 prd 環（4 B/px = R,G,B,W；render_task 建立／登記）
   ▼
-pixel_wave_task：取最新一格 → 編碼（ws2812 GRB）→ 後端 DMA 槽 → 格索引隊列
+pixel_encode_task：取最新一格 → 編碼（ws2812 GRB）→ 後端 DMA 槽 → 格索引隊列
   ▼
 render_task：DMA 完成還格 → submit → I80 → 64 顆燈（50 fps）
 ```
@@ -67,10 +67,10 @@ render_task：DMA 完成還格 → submit → I80 → 64 顆燈（50 fps）
 | mode → layout | `sw/pixel`（`nc_px_layout.c`） | group.sel 展開、range、dst 排序 run 表、預編譯 program |
 | 波形值 | `pixel_effect_task` | 每條值流 evaluate program；雙 pool＋ack；50 fps |
 | 配對／white mix | `pixel_pair_task` | 載四層、建 layout、run 寫入（抖動內圈）、white mix、寫環、`0xF06B` |
-| 畫波 | `pixel_wave_task` | 環 → codec → 後端 DMA 槽；只傳格索引，唔 copy |
+| 編碼 | `pixel_encode_task` | 環 → 該硬件格式；只傳格索引，唔 copy |
 | 環 → 燈 | `render_task`（公用） | 環／lane／節拍、DMA 完成還格、submit（完全唔知四層） |
 
-## 2. 四層任務（`tasks/pixel_effect_task/`、`pixel_pair_task/`、`pixel_wave_task/`、`render_task/`）
+## 2. 四層任務（`tasks/pixel_effect_task/`、`pixel_pair_task/`、`pixel_encode_task/`、`render_task/`）
 
 由 **`CONFIG_NETCORE_CONTENT`**（`depends on NETCORE_PIXEL`，default n）開關；`CONFIG` 關閉時
 `.c` 整段 `#if` 掉、component 是空 object（同 `effect_bench` 同一模式）。component 用
@@ -82,7 +82,7 @@ render_task：DMA 完成還格 → submit → I80 → 64 顆燈（50 fps）
 |---|---|---|
 | 效果 | `pixel_effect_task`／loop `effect`；NORMAL／4／order 22；stack 4096／core0；50 fps |
 | 配對 | `pixel_pair_task`／loop `pair`；NORMAL／4／order 21；stack 4096／core1；`0xF06B` 在此 |
-| 畫波 | `pixel_wave_task`／loop `wave`（獨立 component）；NORMAL／4／order 11；stack 4096／core1 |
+| 編碼 | `pixel_encode_task`／loop `encode`（獨立 component）；NORMAL／4／order 11；stack 4096／core1 |
 | 推送 | `render`／loop `push`；NORMAL／4／order 10；stack 3072／core1；環／lane／節拍的主人（公用） |
 
 **on_start（開機一次）**：

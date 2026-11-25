@@ -12,7 +12,7 @@
 ## 0. 30 秒摘要
 
 - **專案**：ESP32-P4（另有 ESP32-S3 port）上的 **NC4 通訊核心**：多條 transport →
-  分核解碼 → 指令執行；外加 **pixel 效果 → 抖動＋配對 → 畫波 → 推送 → I80 送燈** 管線。
+  分核解碼 → 指令執行；外加 **pixel 效果 → 抖動＋配對 → 編碼 → 推送 → I80／SPI／RMT／PARLIO 送燈** 管線。
 - **語言／工具**：C17、ESP-IDF（macOS／Windows `.idf`／WSL **全部 v6.1.1**；見 §0.5，
   **三個環境版本要統一**）、FreeRTOS、`python3 make.py`、host 測試（唔需要板）。
 - **兩個世界**：
@@ -92,7 +92,7 @@ python3 modules/lab/i80_pack_lab/run_ab.py --port <PORT> --px 9600 --variant 17 
 python3 tools/effect_bench.py --port <PORT>
 ```
 
-- Show 映像要 `pixel_effect_task`／`pixel_pair_task`／`pixel_wave_task`／`render`
+- Show 映像要 `pixel_effect_task`／`pixel_pair_task`／`pixel_encode_task`／`render`
   全部 `level=4`、`started=1`、`running=1`；否則 `fs_format` 重 seed。
 - 量測要記錄：同一塊板、同一映像、reps、min/median、`bus_ok`／checksum。
 - 冇板就明講「未上板」，唔好把 host 數字外推。
@@ -217,7 +217,7 @@ bash tools/hosttest/run_all.sh
 
 ### 鐵律 6：換 project／config 舊了，用 `fs_format` 重新 seed
 
-換 project 後 `/data/config/tasks.json` 可能仍是舊 level（`render`／`pixel_wave_task = -1`），
+換 project 後 `/data/config/tasks.json` 可能仍是舊 level（`render`／`pixel_encode_task = -1`），
 板子起來但唔點燈。處理：
 
 ```bash
@@ -239,7 +239,7 @@ python3 tools/nc4.py --port <PORT> reboot
 
 ### 鐵律 8：Decode handler／中斷路徑唔好放大的 stack buffer
 
-- `decode0` 任務 stack 只有 **3,072 B**；`main` 預設 3,072 B（Show 類 project 覆寫成 8,192）；`pixel_wave_task` 4,096 B、`render`（push）3,072 B。
+- `decode0` 任務 stack 只有 **3,072 B**；`main` 預設 3,072 B（Show 類 project 覆寫成 8,192）；`pixel_encode_task` 4,096 B、`render`（push）3,072 B。
 - 任何 handler 的 JSON／大暫存用 `static` 或 heap，**唔好** `char j[1200]` 放 stack。
 - 2026-11-24 真的爆過：`on_layoutbench` 的 `j[1200]` 令 frame 2,272 B，
   任何 `0xF077` 都 panic。改成 `static` 後 1,168 B 正常。
@@ -292,14 +292,15 @@ python3 tools/nc4.py --port <PORT> reboot
 ### 2.1 一句話
 
 **NC4** 是一條「多通道 → 分核解碼 → 指令 → 回應」的通訊核心；**Pixel** 是建在它上面的
-一條即時管線：效果層算 12-bit 值 → 配對層寫環 → 渲染層編碼成 WS2812 波形 → I80 DMA 送燈。
+一條即時管線：效果層算 12-bit 值 → 配對層寫環 → 編碼層出該硬件的線材格式
+（I80／SPI／RMT／PARLIO）→ 輸出層送燈。
 
 ### 2.2 兩個子系統
 
 | 子系統 | 做什麼 | 主要位置 |
 |---|---|---|
 | **NC4** | USB／UART／TCP／UDP／WS／ESP-NOW／I2C／SPI／CAN 收幀；CRC；分核 decode；router；回覆 | `firmware/components/sys/nc4/`、`main.c` |
-| **Pixel** | 效果（program interpreter）→ 抖動＋配對（layout）→ 畫波（encode）→ 推送 → I80／SPI 波形 → 燈 | `firmware/components/sw/pixel/`、`tasks/pixel_effect_task/`、`tasks/pixel_pair_task/`、`tasks/pixel_wave_task/`、`tasks/render_task/`（公用）、`driver/drv_i80/` |
+| **Pixel** | 效果（program interpreter）→ 抖動＋配對（layout）→ 編碼（encode，多種硬件格式）→ 推送 → I80／SPI／RMT／PARLIO → 燈 | `firmware/components/sw/pixel/`、`tasks/pixel_effect_task/`、`tasks/pixel_pair_task/`、`tasks/pixel_encode_task/`、`tasks/render_task/`（公用）、`driver/drv_i80/` |
 
 ### 2.3 不是什麼
 
@@ -333,7 +334,7 @@ esp_Net-Core/
 │  ├─ components/sys/mem/    nc_buf、plan arena
 │  ├─ components/action/     file／ota／test 指令表
 │  ├─ components/sw/pixel/   環、codec、layout、engine（純 C）
-│  ├─ components/tasks/      pixel_effect_task、pixel_pair_task、pixel_wave_task、render_task（公用輸出層）
+│  ├─ components/tasks/      pixel_effect_task、pixel_pair_task、pixel_encode_task、render_task（公用輸出層）
 │  ├─ components/effects/    內建效果
 │  ├─ components/driver/     drv_i80、drv_spi_led
 │  └─ components/bench/      0xF065／0xF077 量測
@@ -392,7 +393,7 @@ esp_Net-Core/
 - **未設定 = `[0,0]`**：條目缺失／冇寫 affinity → `on_start` 照跑、loop 唔開。
 - 缺席的租戶會自動補寫 `[0,0]`，**只加不改**。
 - Pixel 四層四任務（2026-11-25 正名）：`pixel_effect_task`（效果值）→
-  `pixel_pair_task`（抖動＋配對）→ `pixel_wave_task`（畫波）→ `render_task`（公用推送／渲染）。
+  `pixel_pair_task`（抖動＋配對）→ `pixel_encode_task`（編碼）→ `render_task`（公用推送／渲染）。
   `render_task` order 10 先 on_start（建立環／lane／節拍），其餘按 order 跟；
   四條都要 `level=4`、`running=1`；少一條就唔點燈。舊名 `effect`／`pair` 由
   `nc_task.c` 的 alias 讀取（`render` 係現名），OTA 後不會被關掉。
@@ -588,7 +589,7 @@ python3 tools/ota.py --port /dev/cu.usbmodemXXXX \
 
 ---
 
-## 10. Pixel 管線（效果 → 抖動＋配對 → 畫波 → 推送）
+## 10. Pixel 管線（效果 → 抖動＋配對 → 編碼 → 推送）
 
 ### 10.1 四層四任務＋環
 
@@ -603,18 +604,22 @@ pixel_pair_task（core1）
         ▼
 環（i80.prd；64 B 表頭＋px×4 B）        ← 零拷貝：直接寫硬件即將讀的格
         │
-pixel_wave_task（core1，order 11）
-  └─ 取最新格 → codec → 後端 DMA 槽 → 入「格索引」隊列（8 格，唔 copy）
+pixel_encode_task（core1，order 11）
+  └─ 取最新格 → 該硬件格式（I80 bus word／SPI bit／RMT symbol／PARLIO word）
+     → 入「格索引」隊列（8 格，唔 copy）
         │
 render_task（公用輸出層；core1，order 10；環／lane／節拍的主人）
-  └─ DMA 完成還格 → submit → I80／SPI → 燈
+  └─ DMA 完成還格 → submit → I80／SPI／RMT／PARLIO → 燈
 ```
 
 - 四個任務全部 `level=4`；`render_task` 先 on_start（建立環／後端／節拍），
   其餘按 order 跟。少一條就唔點燈。
 - `pixel_effect_task`／`pixel_pair_task` 只在 `CONFIG_NETCORE_CONTENT=y` 存在；
-  `pixel_wave_task`／`render_task` 屬 `CONFIG_NETCORE_PIXEL`，release 都有；
+  `pixel_encode_task`／`render_task` 屬 `CONFIG_NETCORE_PIXEL`，release 都有；
   `render_task` 係公用輸出層（LCD 將來共用），唔屬 pixel 系列。
+- 後端支援矩陣：`i80`／`spi` 已實作；`rmt`（C 系列／S3）同 `parlio`（P4）嘅
+  adapter／pins 仍然待做，見 [`pixel-output-backends.md`](docs/03_notes/pixel-output-backends.md)。
+  `driver.json` 寫了未實作的 backend 會大聲報錯、停用 lane，唔會靜默退 mock。
 - 環契約：`begin_ex()` 拿的那一格才寫；`commit()` 只發布同一格；
   encode 不可再 peek；**DMA 完成才 reclaim**（reclaim 在 push loop）。
 - 舊 `pixel`（8×8 內建引擎）2026-11-25 **已退役**：它只是測試用生產者。
@@ -747,7 +752,7 @@ python3 tools/nc4.py --port <PORT> status tasks
 python3 tools/nc4.py --port <PORT> status mem
 ```
 
-- `render`／`pixel_wave_task`／`pixel_pair_task`／`pixel_effect_task`：
+- `render`／`pixel_encode_task`／`pixel_pair_task`／`pixel_effect_task`：
   `level=4`、`started=1`、`running=1`。
 - `status sys`：`rst` 不應該係 4（panic）；`up_s` 穩定。
 - 有 tests 映像才可用 `0xF061`；有 EffectPerf 才可用 `0xF077`／`0xF065`。
@@ -915,8 +920,9 @@ commit message 說明。
 | 2026-11-24 | 版本一致性：`status fw`／OTA／image 同一個 `PROJECT_VER`；`make.py` 每次傳 `-DPROJECT_VER`；記錄 IDF v6.1.0 不存在 | lead（AI） |
 | 2026-11-24 | 配置分層：`driver.json` 只放裝置參數（只有 `LED` 段會被讀）；`I80`／`SPI` 型別化入 `hardware.json`，`/data/config/hardware.json` 的 `I80` 由死段變真 | lead（AI） |
 | 2026-11-25 | **鐵律 12「版本要統一」**：三個環境（macOS v6.0.3／Windows `.idf` v6.1.1／WSL v6.1.1）要一致；記錄要寫 `idf=` 同環境；附 6.0.3 vs 6.1.1 的 image 差異實測。順手把 host test 由 20 支更新為 21 支（加入 `fpsclock_test`） | lead（AI） |
-| 2026-11-25 | **pixel 四層四任務正名**：`pixel_effect_task`／`pixel_pair_task`／`pixel_wave_task`／`render`；wave 獨立 component、render 係公用輸出層（唔屬 pixel）；舊 `pixel_task` 退役；`nc_task.c` 加 alias 鏈（OTA 不熄燈） | lead（AI） |
-| 2026-11-25 | **任務邊界更正**：`pixel_wave_task` 拆獨立 component（四個 component／四條任務）；`render_task` 改回公用名（唔屬 pixel 系列），wave 經 `nc_render_wave_*` 用它的環／lane／節拍 | lead（AI） |
+| 2026-11-25 | **pixel 四層四任務正名**：`pixel_effect_task`／`pixel_pair_task`／`pixel_encode_task`／`render`；wave 獨立 component、render 係公用輸出層（唔屬 pixel）；舊 `pixel_task` 退役；`nc_task.c` 加 alias 鏈（OTA 不熄燈） | lead（AI） |
+| 2026-11-25 | **`pixel_wave_task` → `pixel_encode_task`**：wave 只涵蓋 WS2812 波形，實際要出 I80／SPI／RMT（C 系列）／PARLIO（P4）多種格式；API 改 `nc_render_encode_*`；後端矩陣見 `docs/03_notes/pixel-output-backends.md` | lead（AI） |
+| 2026-11-25 | **任務邊界更正**：`pixel_encode_task` 拆獨立 component（四個 component／四條任務）；`render_task` 改回公用名（唔屬 pixel 系列），encode 經 `nc_render_encode_*` 用它的環／lane／節拍 | lead（AI） |
 | 2026-11-25 | **IDF 版本已統一 v6.1.1**：macOS `~/esp/esp-idf` `git describe` = v6.1.1，三個環境同版；6.0.3 的對照數字保留作歷史 | lead（AI） |
 | 2026-11-25 | **數據修正（A/B 驗證後）**：P4-ETH 的 6.1.1−6.0.3 image 差由 `+30,992 B` 更正為 **`+24,688 B`**（原本係對住更舊產物）；Matrix `+9,584 B` 證實正確。另註明 25 支 `run.sh` 之中只有 21 支係測試（4 支係 bench） | lead（AI） |
 

@@ -169,7 +169,7 @@ static const nc_task_t s_mod_alias = {
     .loops = s_alias_loops, .nloops = 1,
 };
 static const nc_task_t s_mod_alias_off = {
-    .name = "pixel_wave_task", .kind = NC_TASK_NORMAL, .level = 1,
+    .name = "pixel_encode_task", .kind = NC_TASK_NORMAL, .level = 1,
     .loops = s_alias_loops, .nloops = 1,
 };
 
@@ -361,14 +361,14 @@ int main(void)
         CHECK(json_has(json, "pixel_effect_task", "\"core\":1"), "跟舊 config 跑 core 1");
     }
 
-    case_begin("config：舊名 render level=-1 → pixel_wave_task 跟住關");
+    case_begin("config：舊名 render level=-1 → pixel_encode_task 跟住關");
     {
         static const cfg_stub_task_t old[] = {
             { .name = "render", .level = -1, .has_level = true,
               .aff = { 0, 1 }, .has_aff = true },
         };
-        CHECK(boot_one(&s_mod_alias_off, old, 1) == 0, "舊名 render 關 → wave 都唔開");
-        CHECK(!nc_task_started("pixel_wave_task"), "pixel_wave_task 沒有 started");
+        CHECK(boot_one(&s_mod_alias_off, old, 1) == 0, "舊名 render 關 → encode 都唔開");
+        CHECK(!nc_task_started("pixel_encode_task"), "pixel_encode_task 沒有 started");
     }
 
     printf("\n%s（%d 個失敗）\n", s_fail ? "FAILED" : "ALL PASS", s_fail);
