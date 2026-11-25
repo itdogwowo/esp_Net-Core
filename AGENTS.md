@@ -4,7 +4,7 @@
 > 這個專案，**先由頭讀到落尾**，再開始改任何東西。細節文件在 `docs/`，但方向、鐵律、
 > 工作流程、最常踩的坑全部在這一份。
 >
-> **最後更新**：2026-11-24（對應 commit `dd64ef8` 之後）
+> **最後更新**：2026-11-25（版本統一提醒、鐵律 12、host test 21 支）
 > **維護規則**：每次架構／流程／工具改變，先改這份；過期內容直接覆蓋，唔好累積兩套講法。
 
 ---
@@ -13,8 +13,8 @@
 
 - **專案**：ESP32-P4（另有 ESP32-S3 port）上的 **NC4 通訊核心**：多條 transport →
   分核解碼 → 指令執行；外加 **pixel 效果 → 配對 → 渲染 → I80 送燈** 管線。
-- **語言／工具**：C17、ESP-IDF（本機 `~/esp/esp-idf`，v6.0.3）、FreeRTOS、
-  `python3 make.py`、host 測試（唔需要板）。
+- **語言／工具**：C17、ESP-IDF（macOS **v6.0.3**／Windows・WSL **v6.1.1**；見 §0.5，
+  **三個環境版本要統一**）、FreeRTOS、`python3 make.py`、host 測試（唔需要板）。
 - **兩個世界**：
   1. **NC4／緩衝／任務／網絡**：協議、通道、分核、`nc_buf`。
   2. **Pixel**：12-bit 效果 → 抖動／配對 → 8-bit 環 → I80／SPI 後端。
@@ -27,16 +27,19 @@
 
 ## 0.5 快速開始：環境、更新、測試
 
-### 環境（本機實測）
+### 環境（三個地方；**版本一定要統一**）
 
-| 項目 | 值 |
-|---|---|
-| OS | macOS（Apple Silicon） |
-| ESP-IDF | `~/esp/esp-idf`（**v6.0.3**；`IDF_PATH=$HOME/esp/esp-idf`） |
-| Python | 3.12（Homebrew；`python3`） |
-| 工具鏈 | `~/.espressif/tools/xtensa-esp-elf/...`（由 IDF export 提供） |
-| 建置入口 | `python3 make.py`（不要直接跑 `idf.py`） |
-| 板子 | ESP32-S3（4 MB flash／2 MB PSRAM；USB CDC） |
+| 環境 | 用途 | ESP-IDF | IDF 路徑 | 工具鏈 |
+|---|---|---|---|---|
+| macOS（Apple Silicon） | 主要開發／量測 | **v6.0.3** | `~/esp/esp-idf` | `~/.espressif` |
+| Windows | 這台機的 repo `.idf/` | **v6.1.1** | `<repo>/.idf/esp-idf` | `<repo>/.idf/tools`（Windows exe） |
+| WSL Ubuntu 24.04（20 核） | 跑 host test／build | **v6.1.1** | `/home/user/esp/esp-idf` | `~/.espressif`（Linux） |
+
+- Python 3.12；建置入口 `python3 make.py`（**不要**直接跑 `idf.py`）。
+- 板子：ESP32-S3（4 MB flash／2 MB PSRAM；USB CDC）；另有 P4／C3 port。
+- ⚠ **三個地方版本唔同 = 兩個唔同的 image**（實測同一份 code：Matrix 差 9,584 B、
+  P4-ETH 差 30,992 B）。要用數字比較，先統一版本；未統一之前，每次記錄都要寫
+  `idf=` 同**邊個環境**（見 §0.5「版本一致性」與鐵律 12）。
 
 ```bash
 python3 make.py doctor          # IDF／esptool／板子／磁碟
@@ -71,7 +74,7 @@ python3 tools/nc4.py --port /dev/cu.usbmodemXXXX status tasks
 ### 做測試
 
 ```bash
-# 主機測試（唔需要板；20 支，全部 -Werror）
+# 主機測試（唔需要板；21 支，全部 -Werror）
 bash tools/hosttest/run_all.sh
 
 # 上板 smoke
@@ -106,8 +109,13 @@ python3 tools/effect_bench.py --port <PORT>
 - `tools/ota.py` 預設讀 image 的 app descriptor；要例外覆寫用 `--fw-ver`。
 - 每次測試記錄：image path＋sha256、`fw`、`app`、`idf`、板 MAC；
   A/B 一定要同一 image、同一板。
-- **IDF 版本以 `idf.py --version` 為準**：本機 macOS `~/esp/esp-idf` 實測 **v6.0.3**；
-  `v6.1.0` 這個 tag **不存在**（只有 `v6.1`／`v6.1.1`）。WSL 若用 v6.1，記錄寫 v6.1。
+- **IDF 版本以 `idf.py --version` 為準，而且三個環境要統一**（用家 2026-11-25 明確要求）：
+  - 現時：macOS **v6.0.3**；Windows `.idf/` 與 WSL **v6.1.1**（見 §0.5 環境表）——**待統一**。
+  - 唔同版 = 同一份 code 出兩個 image（實測 Matrix 差 9,584 B、P4-ETH 差 30,992 B），
+    **數字唔可以互相對比**。
+  - 升級／降級要**一次過升齊**；未升齊之前，每次記錄都要寫 `idf=` 同喺邊個環境跑。
+    記錄格式：`idf=v6.1.1 (WSL)`。
+  - `v6.1.0` 這個 tag **不存在**（只有 `v6.1`／`v6.1.1`）；以 `git describe --tags` 為準。
 
 ---
 
@@ -171,7 +179,7 @@ python3 tools/ota.py --port /dev/cu.usbmodemXXXX \
 bash tools/hosttest/run_all.sh
 ```
 
-- 20 支測試（`cfg_test` … `pxLayout_test`），全部 `-Wall -Wextra -Werror`。
+- 21 支測試（`cfg_test` … `fpsclock_test`），全部 `-Wall -Wextra -Werror`。
 - 每次跑之前會 `rm -rf <test>/build`，所以 header 改動唔會被舊 binary 遮住。
 - **唔好只跑你改的那一支**；共用 header／codec／config 的影響經常在別處爆。
 - 測試失敗先修，唔好「先 commit 再算」。
@@ -262,6 +270,17 @@ python3 tools/nc4.py --port <PORT> reboot
   firmware 側留在 test-only bench，host 側 orchestration 搬去
   `modules/lab/i80_pack_lab/`；`tools/layout_bench.py` 保持通用。
 - 16-lane 驗證完，firmware 側的 lab variant 可以移除（或留 patch 在 lab）。
+
+### 鐵律 12：版本要統一（IDF ＋ 韌體）
+
+- 同一個 repo 有**三個環境**（macOS／Windows `.idf`／WSL），**IDF 版本必須一致**。
+  現時 macOS 係 **v6.0.3**、Windows 同 WSL 係 **v6.1.1** → **待統一**（見 §0.5 環境表）。
+- 升級／降級要**一次過升齊**；唔好長期兩版並存，更唔好一邊 6.0 一邊 6.1 去比數字。
+- 記錄任何 build／量測／OTA 之前，先寫 **`idf=`**（`idf.py --version`）同**邊個環境**：
+  `idf=v6.1.1 (WSL)`。冇寫 = 呢個數字唔可以同其他數字比較。
+- 實測：同一份 code，6.0.3 vs 6.1.1 的 image 差 **Matrix +9,584 B、P4-ETH +30,992 B**。
+- 韌體版本仍然只有一個來源：`PROJECT_VER`（見 §0.5），`status`／OTA／image 三者要一樣。
+- 部機**冇板**時唔緊要（build 唔需要板），但 `idf=` 唔可以漏。
 
 ---
 
@@ -474,7 +493,8 @@ IDF_PATH=$HOME/esp/esp-idf python3 make.py build <board> --project <project> --f
   - `ESP32-S3-Matrix-Show`：檔案驅動（effect／pair），要 `/data/pixel` 四層資產。
   - `ESP32-S3-Zero-Show9600`／`Show2400`：9,600／2,400 px 驗收。
 - `--tests` 會**覆蓋**同一 path 的 `.bin`；之後要 release 記得重建。
-- 建置前確認 `IDF_PATH`；本機係 `$HOME/esp/esp-idf`（v6.0.3）。
+- 建置前確認 `IDF_PATH`：macOS `$HOME/esp/esp-idf`（**v6.0.3**）；WSL
+  `/home/user/esp/esp-idf`（**v6.1.1**）——記錄要寫 `idf=`（見鐵律 12）。
 
 ---
 
@@ -694,10 +714,10 @@ python3 tools/ota.py --port /dev/cu.usbmodemXXXX \
 bash tools/hosttest/run_all.sh
 ```
 
-- 20 支：`cfg_test`、`cfgstruct_test`、`ncd_test`、`task_test`、`router_test`、
+- 21 支：`cfg_test`、`cfgstruct_test`、`ncd_test`、`task_test`、`router_test`、
   `link_test`、`mod_test`、`hub_test`、`plan_test`、`buf_test`、`portgen_test`、
   `ncm_test`、`pixel_test`、`pxEngine_test`、`pxAsset_test`、`pxProgram_test`、
-  `pxLayer_test`、`pxShow_test`、`pxScan_test`、`pxLayout_test`。
+  `pxLayer_test`、`pxShow_test`、`pxScan_test`、`pxLayout_test`、`fpsclock_test`。
 - 全部 `-Werror`；失敗先修，唔好選擇性跑。
 
 ### 12.2 上板 smoke test
@@ -779,7 +799,7 @@ python3 tools/nc4.py --port <PORT> status mem
 
 ### 14.3 驗證
 
-1. `bash tools/hosttest/run_all.sh` → 20/20。
+1. `bash tools/hosttest/run_all.sh` → 21/21。
 2. `make.py build ...` → rc=0。
 3. `tools/ota.py` → 推上板（唔使 BOOT）。
 4. `status sys`／`status tasks`／相關 0xF0xx → 數字＋正確性閘門。
@@ -796,7 +816,7 @@ python3 tools/nc4.py --port <PORT> status mem
 ### 14.5 Definition of Done
 
 - [ ] 功能／修正符合原 Task 的驗收條件。
-- [ ] Host tests 全綠（20/20）。
+- [ ] Host tests 全綠（21/21）。
 - [ ] 目標 board／project 建置成功。
 - [ ] 有上板驗證（或明确標示未上板）。
 - [ ] 逐 byte／checksum 類正確性閘門有過。
@@ -874,6 +894,7 @@ commit message 說明。
 | 2026-11-24 | 初版：專案總覽、10 條鐵律、OTA／建置／測試／pixel／troubleshooting、AI SOP | lead（AI） |
 | 2026-11-24 | 版本一致性：`status fw`／OTA／image 同一個 `PROJECT_VER`；`make.py` 每次傳 `-DPROJECT_VER`；記錄 IDF v6.1.0 不存在 | lead（AI） |
 | 2026-11-24 | 配置分層：`driver.json` 只放裝置參數（只有 `LED` 段會被讀）；`I80`／`SPI` 型別化入 `hardware.json`，`/data/config/hardware.json` 的 `I80` 由死段變真 | lead（AI） |
+| 2026-11-25 | **鐵律 12「版本要統一」**：三個環境（macOS v6.0.3／Windows `.idf` v6.1.1／WSL v6.1.1）要一致；記錄要寫 `idf=` 同環境；附 6.0.3 vs 6.1.1 的 image 差異實測。順手把 host test 由 20 支更新為 21 支（加入 `fpsclock_test`） | lead（AI） |
 
 ---
 
