@@ -219,6 +219,9 @@ python3 tools/nc4.py --port $P raw 0xF062 10580205   # 16 lane × 600 px × 5 �
 
 ## 10. 優化（2026-11-18 晚：對照舊 mp_Net-Core 的原則）
 
+> **完整時間線（每一步的數字、失敗實驗、量測點）見 [pixel-evolution.md](pixel-evolution.md)。**
+> 本節只保留機制解釋，唔重複歷史；有新數據先入日誌，再回來改機制描述。
+
 舊專案（MicroPython）的原則：**全程整數、固定數值域、唔逐 pixel 呼叫、一次掃整條
 buffer**。C 版本來已經係整數，但熱路徑逐 pixel 呼叫＋逐 bit 寫入，仍然慢。已做：
 

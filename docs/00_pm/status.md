@@ -8633,3 +8633,26 @@ alias：`pixel_paint_task → pair → content → show`（舊 `/data` config OT
 
 **未做**：RMT／PARLIO 驅動仍然未實作；環的語義（最新 vs FIFO、subframe group、
 fanout）等用家拍板。
+
+### 7.246 2026-11-26（文件：pixel 技術進化日誌獨立成文，唔再靠 git log 做偵探）
+
+用家要求：把「一步步登出來」的經驗（每一步改了什麼方法、量到什麼數字、提升幾多）
+寫成獨立文件，唔好每次叫人翻 git log 或者散在 status 各節。
+
+**新增 [`docs/03_notes/pixel-evolution.md`](../03_notes/pixel-evolution.md)**：
+
+| 節 | 內容 |
+|---|---|
+| §0 | 名詞（**8×8 SWAR 轉置 ≠ 8×8 燈板**，附 4×4 例子）、enc_us 定義 |
+| §1 | **編碼主線**：143 → 38.5 → 35.4 → 14.33 → **6.36 ms**；含 1.22× 失敗實驗、1-lane 840 µs 回歸、量測點警告（0xF062／0xF077／production 唔可以跨表比） |
+| §2 | **配對主線**：runs 11.95 → 3.0 ms；6 B 表 PSRAM 0.60× vs internal 2.13×；flat 一律 PSRAM；swap 246 µs；負結果 6 條 |
+| §3 | 環／零拷貝（含 16-bit 高位 OR→store 真 bug） |
+| §4 | FPS 時間銀行（唔係 throughput，係穩定度） |
+| §5 | 七條跨主線教訓（先量唔好估／改資料流 > 改算術／擺位決定一切…） |
+| §6–9 | 未完成＋指令對照＋維護規則＋commit 索引 |
+
+**索引接線**：`AGENTS.md` §3 目錄地圖、找東西次序新增第 6 條、§10.4 指針、
+§17 維護表；`docs/README.md` 的 03_notes 表；`pixel-renderer.md` §10 指向日誌
+（一份講歷史、一份講機制），避免兩份講同一件事。
+
+**驗證**：純文件改動，冇 code／建置影響；連結以相對路徑（`../00_pm/status.md` 等）檢查過。

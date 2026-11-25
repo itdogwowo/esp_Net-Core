@@ -326,7 +326,8 @@ esp_Net-Core/
 │  │  └─ night-report-*.md   夜間執行報告
 │  ├─ 01_protocol/           frame、commands、transports
 │  ├─ 02_guides/             build/flash、testing、configuration、connectivity
-│  └─ 03_notes/              架構／設計／量測筆記（task-model、buffers、config-layers…）
+│  └─ 03_notes/              架構／設計／量測筆記（pixel-evolution ★ 技術進化日誌、
+│                            task-model、buffers、config-layers…）
 ├─ firmware/
 │  ├─ main/main.c            開機 B01–B11、USB、router 裝配
 │  ├─ components/sys/nc4/    framing、decoder、bus、router、link
@@ -355,6 +356,8 @@ esp_Net-Core/
 3. 想知「協議」→ `docs/01_protocol/commands.md`、`frame.md`
 4. 想知「點 build／flash／test」→ `docs/02_guides/`
 5. 想知「為什麼這樣設計」→ `docs/03_notes/`
+6. 想知「為什麼變快／每一步試過什麼／失敗過什麼」→
+   `docs/03_notes/pixel-evolution.md`（**技術進化日誌**：每條都有 commit＋數字＋量測點）
 
 ---
 
@@ -660,6 +663,9 @@ render_task（公用輸出層；core1，order 10；環／lane／節拍的主人�
 - **MSC 預設 0**：`nc4.links[].msc=1` 會把 FAT 交畀 USB host，之後上傳／刪檔全部
   `err_busy`。recovery：`CONFIG_NETCORE_USB_MSC_FORCE_OFF=y` 臨時唔交碟。
 - 16-bit 高位 byte 用 store（唔用 OR），否則 lane 變暗會殘留。
+- **每一步的歷史（含失敗實驗與數字）見
+  [`docs/03_notes/pixel-evolution.md`](docs/03_notes/pixel-evolution.md)**；
+  本節只講現況。
 
 ### 10.5 抖動
 
@@ -928,6 +934,7 @@ commit message 說明。
 | 2026-11-25 | **任務邊界更正**：`pixel_encode_task` 拆獨立 component（四個 component／四條任務）；`render_task` 改回公用名（唔屬 pixel 系列），encode 經 `nc_render_encode_*` 用它的環／lane／節拍 | lead（AI） |
 | 2026-11-25 | **IDF 版本已統一 v6.1.1**：macOS `~/esp/esp-idf` `git describe` = v6.1.1，三個環境同版；6.0.3 的對照數字保留作歷史 | lead（AI） |
 | 2026-11-25 | **數據修正（A/B 驗證後）**：P4-ETH 的 6.1.1−6.0.3 image 差由 `+30,992 B` 更正為 **`+24,688 B`**（原本係對住更舊產物）；Matrix `+9,584 B` 證實正確。另註明 25 支 `run.sh` 之中只有 21 支係測試（4 支係 bench） | lead（AI） |
+| 2026-11-26 | **新增技術進化日誌 [`pixel-evolution.md`](docs/03_notes/pixel-evolution.md)**：編碼 143 ms → 6.36 ms 的每一步（含 1.22× 失敗實驗、1-lane 回歸）、配對／環／FPS 三條主線、負結果清單、量測點警告。§3 目錄地圖、找東西次序加第 6 條、§10.4 加指針 | lead（AI） |
 
 ---
 
