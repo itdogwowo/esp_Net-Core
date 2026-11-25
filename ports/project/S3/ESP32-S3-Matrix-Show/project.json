@@ -7,7 +7,7 @@
     "  · LED-Textkit：舊 pixel_task 已退役（只剩輸出層，冇生產者）；",
     "  · 這個 project：pixel_pair_task＋pixel_effect_task（/data/pixel 四層：",
     "    effects／map／modes／registry）→ 同一個 prd 環。",
-    "  · pixel_wave_task（畫波）＋pixel_render_task（推送）開（→ I80 → 64 顆燈，50 fps）。",
+    "  · pixel_wave_task（畫波）＋render（推送）開（→ I80 → 64 顆燈，50 fps）。",
     "",
     "編譯開關：CONFIG_NETCORE_CONTENT=y（sdkconfig.defaults）。不開 NC_ENABLE_TESTS。",
     "內容（/data/pixel）是主機資產：由 Web UI／tools/show_upload.py 上傳；",

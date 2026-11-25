@@ -1,7 +1,8 @@
-# pixel_render_task（tasks 層）：輸出層 —— pixel_wave_task（畫波）＋ pixel_render_task（推送）。
+# render_task（tasks 層）：公用輸出層 —— 推送／渲染（LED 現在、LCD 將來）。
 #
-# 第四層 pixel_render_task 擁有環／lane／後端／節拍；第三層 pixel_wave_task 只做
-# 環 → 編碼 → 後端 DMA 槽，中間經「格索引」隊列交給 push，唔 copy 像素。
+# 2026-11-25：render 唔屬 pixel 系列（其他子系統都會用）。它擁有環／lane／後端／
+# 節拍；pixel 的畫波由另一個 component（pixel_wave_task）經 nc_render_wave_* 呼叫，
+# 中間只傳「格索引」隊列，唔 copy 像素。
 # 硬體在 components/driver/drv_i80、drv_spi_led；環／編碼在 components/sw/pixel。
 idf_component_register(
     SRCS "nc_render_task.c" "nc_pixel_backend_mock.c" "nc_pixel_backend_direct.c"

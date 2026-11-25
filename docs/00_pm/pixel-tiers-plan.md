@@ -1,8 +1,9 @@
 # 像素三層（效果 → 抖動 → 配對）落地實作計劃
 
 > **2026-11-25 名稱更新**：本文的「今日名稱」已是歷史。現行四個任務係
-> `pixel_effect_task`／`pixel_pair_task`／`pixel_wave_task`／`pixel_render_task`
-> （舊 `effect`／`pair`／`render` 由 `nc_task.c` alias 讀取）；舊 `pixel_task` 已退役。
+> `pixel_effect_task`／`pixel_pair_task`／`pixel_wave_task`／`render`（公用輸出層，
+> 唔屬 pixel 系列；舊 `effect`／`pair`／`render` 由 `nc_task.c` alias 讀取）；
+> 舊 `pixel_task` 已退役。
 > 計劃內容與量測不變，只係名同路徑過時。
 
 > **For agentic workers:** 本專案沒有 superpowers 子技能；照 Task 順序逐個做，每步勾 `- [ ]`。

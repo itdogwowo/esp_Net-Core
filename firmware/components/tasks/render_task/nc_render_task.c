@@ -1,9 +1,11 @@
-// nc_render_task.c — 輸出層兩個任務：pixel_wave_task（畫波）＋ pixel_render_task（推送）。
+// nc_render_task.c — 公用輸出層 render_task（推送／渲染；LED 現在、LCD 將來）。
 //
-// 2026-11-25 用家定案：pixel 管線四層各自係一個具體任務
+// 2026-11-25 四層四任務：
 //   pixel_effect_task（效果值）→ pixel_pair_task（抖動＋配對）→
-//   pixel_wave_task（環 → 編碼 → 後端的 DMA 槽）→
-//   pixel_render_task（DMA 槽 → 硬件；環／lane／節拍的主人）。
+//   pixel_wave_task（環 → 編碼 → 後端的 DMA 槽；獨立 component）→
+//   **render_task（本檔；DMA 槽 → 硬件；環／lane／節拍的主人）**。
+//
+// render 唔屬 pixel 系列：其他子系統（LCD 等）都會用同一個輸出層。
 //
 // 為什麼畫波同推送要分兩個任務：
 //   · 畫波係 CPU 重活（9,600 px 合成 ~6.4 ms），推送係 submit＋等 DMA；
@@ -12,11 +14,11 @@
 //   · wave → push 只傳「格索引」（8 格隊列），唔 copy 任何像素。
 //
 // 一個 render 任務可以有多道 lane；每道 lane = 一個後端 + 一條環。
-// 環由 pixel_render_task 宣告（declare）同建立，生產者（pair／.nce／主機）按名字找回。
+// 環由 render_task 宣告（declare）同建立，生產者（pair／wave／.nce／主機）按名字找回。
 //
 // 檔案分工：
 //   sw/pixel                    環、編碼器、效果引擎（純 C，host 測試同一份）
-//   tasks/pixel_render_task     這個檔＋後端轉接（i80／spi／direct／mock）
+//   tasks/render_task           這個檔＋後端轉接（i80／spi／direct／mock）
 //   driver/drv_i80、drv_spi_led 硬件（PCLK／DMA／完成）
 #include "nc_render.h"
 #include "nc_fps_clock.h"
@@ -595,7 +597,7 @@ static void reclaim_all(void)
 }
 
 // 一道 lane 畫波：acquire（環最新一格）→ encode（寫後端的 DMA 槽）→ 入隊。
-// 唔 submit、唔 reclaim：呢兩件事係 pixel_render_task 的工作。
+// 唔 submit、唔 reclaim：呢兩件事係 render_task 的工作。
 static void lane_encode(int idx)
 {
     px_lane_t *ln = &s_px.lane[idx];
@@ -758,66 +760,77 @@ size_t nc_render_fps_json(char *out, size_t cap)
     return (w > 0 && (size_t)(k + w) < cap) ? (size_t)(k + w) : 0;
 }
 
-// ── 畫波 loop（pixel_wave_task）：節拍 → 每道 lane acquire＋encode → 入隊。
-// 唔 reclaim、唔 submit、唔碰硬件；呢兩件事係 pixel_render_task 的工作。
-static void px_wave_loop(void *arg)
+// ── 畫波：由 pixel_wave_task（pixel_wave_task component）呼叫。 ──
+// render_task 係公用的輸出層（LED 現在、LCD 將來），唔屬 pixel 系列；
+// 所以畫波任務只拿這三個 API，環／lane／後端／節拍仍然由 render 擁有。
+bool nc_render_wave_ready(void)
 {
-    (void)arg;
-    int64_t prev = esp_timer_get_time();
-    s_px.mark_us = prev;
-    s_px.mark_frames = 0;
-    while (!nc_task_exit_requested()) {
-        // render 任務未 on_start（或者被 config 關掉）→ 冇環／冇 queue，等它。
-        if (!s_px.started || s_px.ready == NULL) {
-            vTaskDelay(pdMS_TO_TICKS(100));
-            nc_task_beat();
-            continue;
-        }
-        // 節拍由**週期 timer** 給；時間緩衝只做統計／吸收，唔改週期。
-        // timeout 短（200 ms）令 stop 請求可以快點被看到（正常 20 ms 一個節拍）。
-        if (s_px.tick != NULL) {
-            (void)xSemaphoreTake(s_px.tick, pdMS_TO_TICKS(200));
-        }
-        for (int i = 0; i < s_px.nlane; i++) {
-            lane_encode(i);
-        }
-        const int64_t after = esp_timer_get_time();
-        nc_fps_clock_done(&s_clock, after);
-        const uint32_t dt = (uint32_t)(after - prev);
-        s_px.st.frame_us = dt;
-        jit_record(dt, s_px.period_us);
-        if (dt > s_px.st.frame_max_us) {
-            s_px.st.frame_max_us = dt;
-        }
-        prev = after;
+    return s_px.started && s_px.ready != NULL;
+}
 
-        const int64_t span = after - s_px.mark_us;
-        if (span >= 1000000) {
-            const uint32_t n = s_px.st.frames - s_px.mark_frames;
-            s_px.st.fps_x10 = (uint32_t)(((int64_t)n * 10 * 1000000) / span);
-            s_px.mark_us = after;
-            s_px.mark_frames = s_px.st.frames;
-            uint32_t drop = 0;
-            for (int i = 0; i < nc_px_ring_count(); i++) {
-                nc_px_q_stat_t qs;
-                nc_px_ring_stats(nc_px_ring_at(i), &qs);
-                drop += qs.drops;
-            }
-            s_px.st.drop = drop;
-        }
-        nc_task_beat();
+bool nc_render_wave_wait(uint32_t timeout_ms)
+{
+    if (!nc_render_wave_ready()) {
+        return false;
+    }
+    // 節拍由**週期 timer** 給；時間緩衝只做統計／吸收，唔改週期。
+    if (s_px.tick != NULL) {
+        (void)xSemaphoreTake(s_px.tick, pdMS_TO_TICKS(timeout_ms));
+    }
+    return true;
+}
 
-        // 節拍由 timer 控制；如果這一輪做超過一個 period，記一次 late。
-        if (s_px.period_us > 0) {
-            const uint32_t spent = (uint32_t)(esp_timer_get_time() - after);
-            if (spent > s_px.period_us) {
-                s_px.st.late++;
-            }
+void nc_render_wave_tick(void)
+{
+    if (!nc_render_wave_ready()) {
+        return;
+    }
+    for (int i = 0; i < s_px.nlane; i++) {
+        lane_encode(i);
+    }
+
+    static int64_t s_prev;          // 畫波任務的上一輪時間（首次呼叫才初始化）
+    const int64_t after = esp_timer_get_time();
+    if (s_prev == 0) {
+        s_prev = after;
+        s_px.mark_us = after;
+        s_px.mark_frames = 0;
+        return;
+    }
+    nc_fps_clock_done(&s_clock, after);
+    const uint32_t dt = (uint32_t)(after - s_prev);
+    s_px.st.frame_us = dt;
+    jit_record(dt, s_px.period_us);
+    if (dt > s_px.st.frame_max_us) {
+        s_px.st.frame_max_us = dt;
+    }
+    s_prev = after;
+
+    const int64_t span = after - s_px.mark_us;
+    if (span >= 1000000) {
+        const uint32_t n = s_px.st.frames - s_px.mark_frames;
+        s_px.st.fps_x10 = (uint32_t)(((int64_t)n * 10 * 1000000) / span);
+        s_px.mark_us = after;
+        s_px.mark_frames = s_px.st.frames;
+        uint32_t drop = 0;
+        for (int i = 0; i < nc_px_ring_count(); i++) {
+            nc_px_q_stat_t qs;
+            nc_px_ring_stats(nc_px_ring_at(i), &qs);
+            drop += qs.drops;
+        }
+        s_px.st.drop = drop;
+    }
+
+    // 節拍由 timer 控制；如果這一輪做超過一個 period，記一次 late。
+    if (s_px.period_us > 0) {
+        const uint32_t spent = (uint32_t)(esp_timer_get_time() - after);
+        if (spent > s_px.period_us) {
+            s_px.st.late++;
         }
     }
 }
 
-// ── 推送 loop（pixel_render_task）：先還完成的 DMA 格，再 submit 畫好的格。
+// ── 推送 loop（render_task）：先還完成的 DMA 格，再 submit 畫好的格。
 static void px_push_loop(void *arg)
 {
     (void)arg;
@@ -996,7 +1009,7 @@ static esp_err_t px_start(const nc_task_res_view_t *res, int nres)
 static void px_stop(void)
 {
     s_px.started = false;
-    // 唔 delete tick／ready：pixel_wave_task 係另一個任務，可能仍然等緊它們；
+    // 唔 delete tick／ready：pixel_wave_task 係另一個 component 的任務，可能仍然等緊；
     // destroy 會 use-after-free。停止時只停 timer，物件留到重開機（一次性小 leak）。
     if (s_px.timer != NULL) {
         (void)esp_timer_stop(s_px.timer);
@@ -1004,19 +1017,6 @@ static void px_stop(void)
         s_px.timer = NULL;
     }
 }
-
-static const nc_task_loop_t s_wave_loops[] = {
-    {
-        // 畫波：環 → 編碼 → 後端 DMA 槽（只入隊，唔 submit）。
-        .name = "wave",
-        .fn = px_wave_loop,
-        .stack = CONFIG_NETCORE_PIXEL_STACK,
-        .prio = NC_PRIO_OTHERS_MAX,   // 租戶上限；寫更高會被管理器夾回來
-        .core = CONFIG_NETCORE_PIXEL_CORE,
-        .layer = 5,
-        .period_ms = 0,               // loop 自己計節拍
-    },
-};
 
 static const nc_task_loop_t s_push_loops[] = {
     {
@@ -1031,10 +1031,11 @@ static const nc_task_loop_t s_push_loops[] = {
     },
 };
 
-// 第四層：硬件推送／渲染。環、lane、後端、節拍都係它擁有（order 10 先 on_start，
-// wave 同 pair 之後才找得到環）。真正的 submit 在 push loop。
+// 第四層：公用輸出／渲染（LED 現在、LCD 將來；唔屬 pixel 系列）。
+// 環、lane、後端、節拍都係它擁有（order 10 先 on_start，pixel_wave_task 同
+// pixel_pair_task 之後才找得到環）。真正的 submit 在 push loop。
 static const nc_task_t s_task = {
-    .name = "pixel_render_task",
+    .name = "render",
     .kind = NC_TASK_NORMAL,
     .level = 4,
     .order = 10,
@@ -1045,40 +1046,17 @@ static const nc_task_t s_task = {
     .nloops = 1,
 };
 
-NC_TASK_AUTO_REG(pixel_render_task, &s_task);
-
-// 第三層：畫波。order 11 → pixel_render_task 的 on_start 一定先跑（環／定時器已就緒）。
-// 冇 declare／on_start：所有共享狀態都由 pixel_render_task 建立。
-static const nc_task_t s_wave_task = {
-    .name = "pixel_wave_task",
-    .kind = NC_TASK_NORMAL,
-    .level = 4,
-    .order = 11,
-    .loops = s_wave_loops,
-    .nloops = 1,
-};
-
-NC_TASK_AUTO_REG(pixel_wave_task, &s_wave_task);
+NC_TASK_AUTO_REG(render, &s_task);
 
 const nc_task_t *nc_render_task(void)
 {
     return &s_task;
 }
 
-const nc_task_t *nc_render_wave_task(void)
-{
-    return &s_wave_task;
-}
-
 #else   // !CONFIG_NETCORE_PIXEL
 
 // 這塊板沒開 pixel：main.c 不會登記，呼叫端只會拿到 NULL。
 const nc_task_t *nc_render_task(void)
-{
-    return NULL;
-}
-
-const nc_task_t *nc_render_wave_task(void)
 {
     return NULL;
 }

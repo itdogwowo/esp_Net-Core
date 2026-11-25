@@ -4,7 +4,7 @@
     "「只測效果管線效能」的專用映像。",
     "",
     "跟 ESP32-S3-Matrix-LED-Textkit 的分別：",
-    "  · 這個 project 不跑輸出層任務（pixel_render_task／pixel_wave_task 都 level=-1）：",
+    "  · 這個 project 不跑輸出層任務（render／pixel_wave_task 都 level=-1）：",
     "    不點燈、不跑基礎燈效（OFF/SOLID/ZONE1/RAMP/BREATH/WAVE），也不佔 I80 腳；",
     "  · 只編 CONFIG_NETCORE_EFFECT_BENCH（自己一個 component、自己一條 0xF065），",
     "    不開 NC_ENABLE_TESTS、不含 0xF060–0xF064、network、ncm、其他量測指令；",

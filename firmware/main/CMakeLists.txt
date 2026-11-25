@@ -178,8 +178,8 @@ idf_component_register(
               # driver/：匯流排驅動器（對照舊專案 slave/driver/*_drv.py）
               drv_uart drv_pwm bus_core bus_uart hw hw_gpio
                    nc4 mem config ota_action task_manager core bus_net store state nclog file_action
-                   # pixel_render_task＝輸出層（畫波＋推送；Kconfig 沒開時回 NULL）
-                   pixel_render_task
+                   # render_task＝公用輸出層（推送／渲染；Kconfig 沒開時回 NULL）
+                   render_task
                    esp_driver_usb_serial_jtag
                    ${_nc_priv_extra}
     ${_preset_args}

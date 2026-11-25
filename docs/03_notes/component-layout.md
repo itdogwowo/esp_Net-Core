@@ -80,7 +80,7 @@ esp_Net-Core/
 │  │  ├─ sw/                          # 🟡 pixel/（環＋編碼＋engine/；ring/·encode/ 仍平放）
 │  │  ├─ effects/                     # ✅ pixel_effects/（5 個效果實作＋登記表）
 │  │  ├─ action/                      # 🟡 ota_action/ file_action/ test_action/（dev）
-│  │  ├─ tasks/                       # 🟡 hw_gpio/、pixel_effect_task/、pixel_pair_task/、pixel_render_task/（wave＋push）
+│  │  ├─ tasks/                       # 🟡 hw_gpio/、pixel_effect_task/、pixel_pair_task/、pixel_wave_task/、render_task/（公用輸出層）
 │  │  ├─ host/                        # 🟡 ncm/（模組載入＋WAMR）
 │  │  ├─ ui/                          # ⬜ pages/
 │  │  └─ schema/                      # ⬜ （生成物）

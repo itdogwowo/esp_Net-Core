@@ -9,7 +9,7 @@
   ],
   "tasks": [
     {
-      "name": "pixel_render_task",
+      "name": "render",
       "level": -1
     },
     {

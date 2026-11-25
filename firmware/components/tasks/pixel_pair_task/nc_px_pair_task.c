@@ -2,13 +2,13 @@
 //
 // 2026-11-25 四層四任務：
 //   pixel_effect_task（值流）→ **pixel_pair_task**（本檔）→ pixel_wave_task（畫波）→
-//   pixel_render_task（推送）。
+//   render_task（公用推送）。
 //
 // 本檔只做：
 //   · /data/pixel 四層 → 建 plan／layout；
 //   · 每幀拿 effect 最新值流 → 按 group/range/write 配對（抖動在內圈：apply_dither／apply4）
 //     → white mix → 寫 prd 環；0xF06B／0xF06D／0xF06F 指令。
-// 唔 encode、唔 submit、唔碰硬件；環由 pixel_render_task 建立／登記。
+// 唔 encode、唔 submit、唔碰硬件；環由 render_task（公用輸出層）建立／登記。
 //
 // 為什麼獨立 component：四層資料係「用戶內容」（Web UI 上傳、可改、可換 mode），
 // 生命週期同內建效果唔同；用 CONFIG_NETCORE_CONTENT 開關，release 映像可以有、
@@ -18,7 +18,7 @@
 //   memset(canvas, 0) → nc_px_show_frame(plan, step, canvas)      // 四層解釋在 sw/pixel
 //   → white mix（mode 的 "white" 0..100，四通道 out=(out*(100-w)+255*w)/100）
 //   → nc_px_ring_begin_ex() 的 payload（4 B/px，R,G,B,W）→ commit → step++
-// 環係 pixel_render_task 建立／登記的；這裡只負責寫。
+// 環係 render_task 建立／登記的；這裡只負責寫。
 //
 // 失敗策略（唔好令 boot loop）：
 //   /data 未掛載、/data/pixel 缺失、effects／mode／map 解析失敗、plan 冇 job、canvas

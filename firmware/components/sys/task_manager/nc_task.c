@@ -450,8 +450,8 @@ static int active_claims(const tm_slot_t *s)
 // 舊裝置一升 firmware 就會「config 對不上 → 任務當成冇設定 → (0,0) 唔跑」，
 // 即係 OTA 完燈就熄。alias 令舊名仍然生效，新名先係正名。
 //
-// 2026-11-25：pixel 管線四任務正名（effect→pixel_effect_task、pair→pixel_pair_task、
-// render→pixel_render_task／pixel_wave_task）。舊 device 的 tasks.json 仍然係
+// 2026-11-25：pixel 管線四任務（effect→pixel_effect_task、pair→pixel_pair_task、
+// render→pixel_wave_task；render 本身係公用任務、保留原名）。舊 device 的 tasks.json 仍然係
 // effect／pair／render，所以逐層 fallback 到 content → show。
 static const char *cfg_alias_of(const char *name)
 {
@@ -461,10 +461,9 @@ static const char *cfg_alias_of(const char *name)
     if (strcmp(name, "pixel_pair_task") == 0) {
         return "pair";
     }
-    // wave 同 render 本來是同一個 render 任務（wave 係 render loop 內的 encode 段）；
-    // 舊 config 只有 render 一條，兩個新任務都讀它。
-    if (strcmp(name, "pixel_wave_task") == 0 ||
-        strcmp(name, "pixel_render_task") == 0) {
+    // wave 本來是 render 任務內的 encode 段：舊 config 只有 render 一條，
+    // pixel_wave_task 讀它；render_task 自己就叫 render，直接對名。
+    if (strcmp(name, "pixel_wave_task") == 0) {
         return "render";
     }
     if (strcmp(name, "effect") == 0 || strcmp(name, "pair") == 0) {

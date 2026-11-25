@@ -1,10 +1,10 @@
-// nc_render.h — 輸出層（pixel_wave_task ＋ pixel_render_task）：環 → 編碼 → 後端／驅動。
+// nc_render.h — 公用輸出層（render_task）：環 → 編碼 → 後端／驅動。
 //
-// 2026-11-25 四層四任務：
+// 2026-11-25 四層四任務（render 唔屬 pixel 系列；LCD 等将来共用）：
 //   pixel_effect_task → pixel_pair_task → **pixel_wave_task（畫波）** →
-//   **pixel_render_task（推送）**。
-//   · pixel_render_task 擁有環／lane／後端／節拍（order 10 先 on_start）；
-//   · pixel_wave_task 只做「取最新一格 → 編碼 → 入隊」（order 11）；
+//   **render_task（推送／渲染）**。
+//   · render_task 擁有環／lane／後端／節拍（order 10 先 on_start）；
+//   · pixel_wave_task（另一個 component）經 nc_render_wave_* 拿節拍、叫 encode；
 //   · 兩者只傳「格索引」隊列，唔 copy 像素。
 //
 // 一個輸出層可以跑多道 lane（每道 lane = 一個後端 + 一條環）；
@@ -142,8 +142,15 @@ size_t nc_render_fps_json(char *out, size_t cap);
 void   nc_render_fps_reset(void);
 
 // 任務宣告（constructor 自己登記；CONFIG_NETCORE_PIXEL 未開時回 NULL）
-const nc_task_t *nc_render_task(void);       // pixel_render_task（推送）
-const nc_task_t *nc_render_wave_task(void);  // pixel_wave_task（畫波）
+const nc_task_t *nc_render_task(void);       // render_task（公用輸出層）
+
+// ── 畫波（給 pixel_wave_task 用；render 擁有環／lane／節拍）──
+// ready：render 已 on_start 而且 queue 存在；false 時 wave 應該 delay 再試。
+// wait ：等一個 frame 節拍（timeout_ms 給 stop 請求快點被看到）。
+// tick ：對所有 lane 做 acquire＋encode＋入 ready 隊列（唔 submit、唔 reclaim）。
+bool nc_render_wave_ready(void);
+bool nc_render_wave_wait(uint32_t timeout_ms);
+void nc_render_wave_tick(void);
 
 // 第一條真正綁到後端嘅環名（例如 i80 後端起唔到時會係 "mock.prd"）。
 // 生產者（pair／pixel）唔應該靠「名入面有 prd」去猜自己餵邊條環。

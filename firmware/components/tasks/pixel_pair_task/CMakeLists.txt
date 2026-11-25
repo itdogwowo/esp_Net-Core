@@ -10,7 +10,7 @@
 # pair publish aprog、effect snapshot；effect copy frame、pair ack。
 idf_component_register(
     SRCS "nc_px_pair_task.c"
-    REQUIRES nc4 pixel task store pixel_effect_task pixel_render_task
+    REQUIRES nc4 pixel task store pixel_effect_task render_task
     PRIV_REQUIRES freertos esp_timer heap log
     WHOLE_ARCHIVE
 )

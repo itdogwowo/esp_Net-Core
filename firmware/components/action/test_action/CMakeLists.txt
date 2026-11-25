@@ -10,7 +10,7 @@ endif()
 list(APPEND _req esp_wifi esp_netif esp_event)
 # 0xF060 MATRIX / 0xF061 RENDER 只喺 Kconfig NETCORE_PIXEL=y 時有內容；component
 # 本身一定存在（測試映像），所以直接加依賴，唔靠 CONFIG_*（第一輪 configure 睇唔到）。
-list(APPEND _req pixel pixel_render_task)
+list(APPEND _req pixel render_task)
 idf_component_register(
     SRCS "nc_test_action.c"
     INCLUDE_DIRS "include"

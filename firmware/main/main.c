@@ -107,7 +107,7 @@
 #include "nc4_router.h"
 #include "nc_task.h"
 #include "nc_prio.h"
-#include "nc_render.h"         // 輸出層：pixel_wave_task ＋ pixel_render_task（tasks/pixel_render_task）
+#include "nc_render.h"         // 公用輸出層 render_task（tasks/render_task）
 #include "nvs.h"
 #include "nvs_flash.h"
 #include "esp_mac.h"
@@ -4319,7 +4319,7 @@ static esp_err_t ph_declare(void)
     }
     // 任務註冊已經改成「component 自己現身」（NC_TASK_AUTO_REG，constructor），
     // 呢度唔再有清單。次序由 nc_task_t 的 (level, order) 決定：
-    // pixel_render_task order=10 先 on_start 建立環／lane／節拍，然後
+    // render order=10 先 on_start 建立環／lane／節拍，然後
     // pixel_wave_task 11、pixel_pair_task 21、pixel_effect_task 22。
 #ifdef NC_ENABLE_TESTS
     // 測試「功能」改用外掛模組（/data/tasks/*.nct，動態加載）——

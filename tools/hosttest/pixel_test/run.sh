@@ -13,7 +13,7 @@ cd "$(dirname "$0")/../../.."
 
 CC=${CC:-cc}
 PXF=firmware/components/sw/pixel
-PXT=firmware/components/tasks/pixel_render_task
+PXT=firmware/components/tasks/render_task
 OUT="tools/hosttest/pixel_test/build"
 mkdir -p "$OUT"
 

@@ -8452,6 +8452,10 @@ IDF_PATH=~/esp/esp-idf python3 make.py build ESP32-P4-ETH    --fresh
 ④ 上板量 `0xF081`／`0xF071`（split 前後）。
 ### 7.242 2026-11-25（pixel 四層四任務正式落地：pixel_effect／pair／wave／render；舊 pixel_task 退役）
 
+> **2026-11-25 更正**：用家指出 ① `render` 係公用輸出層，唔應該叫 `pixel_render_task`；
+> ② 畫波要獨立 component（之前同 render 迫在同一個 component，只見到三個）。
+> 現行版本見 §7.243；本節保留為第一個 commit（8e2f03f）的歷史。
+
 **決策（用家 2026-11-25）**：pixel 管線要「流程化存在」，四層各自係一個具體任務，
 名字用簡單直覺的 `pixel_*_task`；舊 `pixel`（8×8 內建六效果）**直接退役**（嗰啲只係測試）。
 
@@ -8498,3 +8502,42 @@ IDF_PATH=~/esp/esp-idf python3 make.py build ESP32-P4-ETH    --fresh
 - 未上板：四任務的實際排程、`0xF061`（wave＋push 合併 stats）、split 前後差異全部未量。
 - `pixel_render_task` 的 loop 只叫 `push`（submit／reclaim）；環同定時器仍在它的
   `on_start` 建立，所以 config 關掉佢會連 wave 都停（預期）。
+
+### 7.243 2026-11-25（更正：畫波獨立 `pixel_wave_task` component；render 改回公用 `render_task`）
+
+**用家回饋**：只見到三個任務（component 層面），而且 `pixel_render_task` 唔應該入 pixel
+系列——render 係公用輸出層，其他子系統（LCD 等）都會用。
+
+| 層 | 現行任務 | component | 說明 |
+|---|---|---|---|
+| 1 | `pixel_effect_task` | `tasks/pixel_effect_task/` | 只算效果值 |
+| 2 | `pixel_pair_task` | `tasks/pixel_pair_task/` | 抖動＋配對 |
+| 3 | `pixel_wave_task` | `tasks/pixel_wave_task/`（新） | 畫波；只擁有 loop／節拍／生命週期 |
+| 4 | `render` | `tasks/render_task/`（公用） | 推送／渲染；環／lane／後端／節拍的主人 |
+
+**改動**：
+
+- `pixel_render_task` component 改回 `render_task`，任務名 `render`；佢唔再有 pixel 前綴。
+- 新增 `components/tasks/pixel_wave_task/`：`pixel_wave_task` 係獨立任務（order 11），
+  經 `nc_render_wave_ready()`／`nc_render_wave_wait()`／`nc_render_wave_tick()` 叫
+  render 做 acquire＋encode＋入隊；render 仍然擁有環／lane／後端／timer。
+- `tasks.json`：`pixel_render_task` → `render`；其餘三個不變（共四條）。
+- alias：`pixel_wave_task → render`（舊 config 只有 render 一條）；
+  `render` 自己直接對名，唔使 alias。
+- CMake：`render_task` 由 main／test_action／pair 直接依賴；`pixel_wave_task` 依賴
+  `render_task`。
+
+**驗證（macOS，idf=v6.1.1；未上板）**：
+
+| 項目 | 結果 |
+|---|---|
+| `bash tools/hosttest/run_all.sh` | **21/21 OK** |
+| Matrix-Show | 705.3 KB（`0xb0560`） |
+| Matrix-LED-Textkit | 665.0 KB（`0xa6430`） |
+| Zero-Show2400 | 705.4 KB（`0xb05b0`） |
+| EffectPerf | 715.4 KB（`0xb2db0`） |
+| tests 映像（Zero-Show） | 871.8 KB（`0xd9f30`，test_action 依賴 `render_task`） |
+| ELF 任務名 | `pixel_effect_task`／`pixel_pair_task`／`pixel_wave_task`／`render`（冇 `pixel_render_task`） |
+
+**核心配置**：四條任務各自有 `tasks.json` 的 `level`／`affinity`，用家可以自行分配
+core（例如 effect core0、pair／wave／render core1，或再拆）。
