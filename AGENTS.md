@@ -694,6 +694,10 @@ render_task（公用輸出層；core1，order 10；環／lane／節拍的主人�
 - `CONFIG_NETCORE_PIXEL_DITHER=0`、`DITHER_BITS=8` 預設：8-bit 直出。
 - 4 子幀只用於 2,400 px（16×150）＋子幀率 ≥200 Hz；9,600 px 用單子幀。
 - `apply4` 一次掃 4 份；production 逐子幀 `apply_dither`。
+- **點開、要改幾多處、推導公式同物理上限**（`subframes / interval_ms / ring_slots / px/lane`
+  四個數要一致，錯咗唔會響）→ [`03_notes/pixel-subframe-modes.md`](docs/03_notes/pixel-subframe-modes.md)。
+- 環的取格政策：多子幀＝逐格 FIFO（背壓，四格全部送）、單子幀＝最新優先；
+  見 [`pixel-ring-flow.md`](docs/03_notes/pixel-ring-flow.md) §2.3。
 
 ### 10.5b FPS 穩定度（時間緩衝）
 

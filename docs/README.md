@@ -66,6 +66,7 @@
 | [hw-pwm-uart.md](03_notes/hw-pwm-uart.md) | **PWM／UART／PIN 硬體設定與驅動**：舊專案 config 風格、typed `hardware.json`、LEDC PWM、UART／RS485 DE、`0xF039`–`0xF03B`；A 板上板結果 |
 | [led-controller-plan.md](03_notes/led-controller-plan.md) | **LED Controller 規劃（C 版，無 OOP）**：`nc_led` struct＋ops、frame／dStay、I80/SPI/PCA9685 backend、50 FPS 閘門；**尚未實作，等硬件** |
 | [rgb-matrix-dither.md](03_notes/rgb-matrix-dither.md) | **8×8 WS2812 矩陣（I80 ＋ 分區時間抖動）**：GPIO14 一條鏈、4 MHz／5 cycles 的 WS2812 波形、7,936 B ≈ 1.98 ms → 450 fps 閘門、8.8 定點＋誤差回饋抖動、8 區不同 rate／phase、`0xF060` 指令與上板驗證次序；**測試任務，未上板** |
+| [pixel-subframe-modes.md](03_notes/pixel-subframe-modes.md) | **子幀模式（8-bit ↔ 10-bit 抖動）點開**：現況要改 4 處（3 個要重 build）、兩個獨立輸入（visual_fps／dither_bits）推導其餘、線時間 ≤ 子幀週期的物理上限、`CONFIG_NETCORE_PIXEL_FPS` 語義衝突、半自動設計與實作清單；**設計稿，未實作** |
 | [net-lines.md](03_notes/net-lines.md) | **統一網絡線路 TCP／UDP／WS → nc4_bus**：read/send 介面、單一 parser、S3 WiFi 上板 RTT（TCP 12.2 ms／UDP 11.9 ms／WS 21.4 ms）、burst 限制、P4 後續 |
 | [ota-web.md](03_notes/ota-web.md) | **網絡 OTA 與網頁 v0**：`POST /ota` raw `.bin`、`GET /` 最小頁、`/config.json`；**已上板：`/` 200、`/ota` 0.1.1→0.1.2**；安全只限可信 LAN |
 | [file-transfer.md](03_notes/file-transfer.md) | **CDC FAT（檔案指令）**：`0x2001–0x200B`（含 `FILE_SCAN` + `/manifest.json`）；`.part`→sha256→`.bak` 的寫入流程、pending／confirm／undo、FAT 擁有權、UI 對接欄位；**給冇 USB driver、只得 CDC 的 MCU** |
