@@ -16,7 +16,7 @@ pixel_paint_task
   │  直接寫環槽 payload（零拷貝）
   │  nc_px_ring_begin_ex() → layout apply／dither／white mix → nc_px_ring_commit()
   ▼
-prd 環（N 格；每格 64 B 表頭＋px×4 B）
+prd 環（N 格；每格 64 B 前綴（24 B 表頭＋padding）＋px×4 B）
   │  encode 用 peek 取「最新」一格；舊 READY 格會被釋放（假消費）
   ▼
 pixel_encode_task

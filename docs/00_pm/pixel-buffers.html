@@ -1,0 +1,407 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pixel 四層緩衝與 handoff</title>
+<style>
+  :root{
+    --bg:#0b1020; --panel:#121a2e; --panel2:#0e1628; --line:#26324d;
+    --text:#e6edf3; --muted:#8ea0bd; --dim:#5d6f8e;
+    --blue:#4c9aff; --cyan:#39d0d8; --amber:#f2b84b; --green:#45d483;
+    --purple:#b18cff; --red:#ff6b6b; --pink:#ff8fc7;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; background:radial-gradient(1200px 600px at 20% -10%,#17223c 0%,var(--bg) 55%);
+    color:var(--text); font-family:ui-sans-serif,system-ui,-apple-system,"Noto Sans TC","PingFang TC",sans-serif;
+    padding:28px 26px 40px; min-width:1080px;
+  }
+  h1{font-size:24px; margin:0 0 6px; letter-spacing:.5px}
+  .sub{color:var(--muted); font-size:13px; margin-bottom:18px}
+  .sub code{color:var(--cyan)}
+  .controls{display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:18px}
+  .controls label{font-size:12px; color:var(--muted); display:flex; gap:6px; align-items:center}
+  select,button{
+    background:var(--panel); color:var(--text); border:1px solid var(--line);
+    border-radius:8px; padding:7px 12px; font-size:13px; cursor:pointer;
+  }
+  select:hover,button:hover{border-color:var(--blue)}
+  button.primary{background:#16345f; border-color:#2b5c9e}
+  button:active{transform:translateY(1px)}
+  .grid{
+    display:grid; grid-template-columns:1.05fr .85fr 1.15fr 1.15fr .9fr;
+    gap:26px; align-items:start; position:relative;
+  }
+  .stage{
+    position:relative; background:linear-gradient(180deg,var(--panel) 0%,var(--panel2) 100%);
+    border:1px solid var(--line); border-radius:14px; padding:14px 14px 12px;
+    min-height:300px; transition:box-shadow .35s,border-color .35s,transform .35s;
+  }
+  .stage.active{border-color:var(--blue); box-shadow:0 0 0 1px #2b5c9e,0 0 28px rgba(76,154,255,.18)}
+  .stage + .stage::before{
+    content:"→"; position:absolute; left:-20px; top:44px; color:var(--dim); font-size:18px;
+  }
+  .stage h2{font-size:13px; margin:0 0 3px; letter-spacing:.3px}
+  .stage h2 .idx{color:var(--cyan); margin-right:6px}
+  .stage .role{font-size:11px; color:var(--muted); margin-bottom:12px; min-height:30px; line-height:1.45}
+  .buf{
+    border:1px dashed var(--line); border-radius:10px; padding:9px 10px; margin-bottom:8px;
+    background:#0c1425; transition:background .35s,border-color .35s,box-shadow .35s;
+  }
+  .buf .name{display:flex; justify-content:space-between; gap:8px; font-size:12px}
+  .buf .name b{font-weight:600}
+  .buf .name span{color:var(--dim); font-size:10.5px}
+  .buf .meta{color:var(--dim); font-size:10.5px; margin-top:3px}
+  .buf.active{background:#13294a; border-color:var(--blue); box-shadow:0 0 18px rgba(76,154,255,.25)}
+  .buf.pulse{animation:pulse .5s ease}
+  @keyframes pulse{0%{transform:scale(.98)}50%{transform:scale(1.02)}100%{transform:scale(1)}}
+  .slots{display:grid; gap:6px}
+  .slot{
+    display:flex; align-items:center; justify-content:space-between; gap:6px;
+    border:1px solid var(--line); border-radius:8px; padding:7px 9px;
+    background:#0c1425; font-size:11.5px; transition:all .3s;
+  }
+  .slot .tag{color:var(--dim); font-size:10px}
+  .slot.free{opacity:.55}
+  .slot.filling{border-color:var(--amber); background:#2a2110}
+  .slot.ready{border-color:var(--blue); background:#10294a}
+  .slot.inflight{border-color:var(--purple); background:#211a3d}
+  .slot.busy{border-color:var(--green); background:#0f2c21}
+  .slot .seq{font-variant-numeric:tabular-nums; color:var(--muted)}
+  .pill{display:inline-block; font-size:9.5px; padding:1px 6px; border-radius:999px; border:1px solid var(--line); color:var(--muted)}
+  .queue{display:flex; gap:4px; margin:10px 0 4px; min-height:26px}
+  .q{
+    width:20px; height:24px; border-radius:5px; background:#0c1425; border:1px solid var(--line);
+    font-size:9px; display:flex; align-items:center; justify-content:center; color:var(--dim);
+  }
+  .q.filled{background:#2a2110; border-color:var(--amber); color:var(--amber)}
+  .queue-label{font-size:10px; color:var(--dim); margin-top:2px}
+  .processor{
+    border:1px solid var(--line); border-radius:10px; background:#0c1425;
+    padding:12px; text-align:center; font-size:12px; margin-bottom:8px;
+    transition:all .3s;
+  }
+  .processor.active{border-color:var(--cyan); box-shadow:0 0 18px rgba(57,208,216,.2)}
+  .processor small{color:var(--dim); font-size:10px}
+  .leds{display:flex; gap:6px; margin:12px 0 6px}
+  .led{
+    width:16px; height:16px; border-radius:50%; background:#1a2338; border:1px solid #2b3750;
+    transition:all .2s;
+  }
+  .led.on{background:var(--pink); box-shadow:0 0 12px var(--pink); border-color:var(--pink)}
+  .arrow-line{color:var(--dim); font-size:10px; text-align:center; margin:4px 0}
+  .status{
+    margin-top:20px; border:1px solid var(--line); border-radius:12px;
+    background:linear-gradient(180deg,#101a30,#0d1526); padding:14px 16px;
+    display:grid; grid-template-columns:1.2fr 1fr; gap:16px;
+  }
+  .status .step{font-size:13px; line-height:1.55}
+  .status .step b{color:var(--cyan)}
+  .status .nums{display:grid; grid-template-columns:1fr 1fr; gap:8px 14px; font-size:12px}
+  .status .nums div{display:flex; justify-content:space-between; gap:10px; border-bottom:1px dashed #1e2a42; padding:3px 0}
+  .status .nums span:first-child{color:var(--muted)}
+  .status .nums span:last-child{font-variant-numeric:tabular-nums}
+  .legend{display:flex; gap:16px; flex-wrap:wrap; color:var(--muted); font-size:11px; margin-top:14px}
+  .legend i{display:inline-block; width:9px; height:9px; border-radius:2px; margin-right:5px; vertical-align:middle}
+  table.copy{width:100%; border-collapse:collapse; margin-top:16px; font-size:12px}
+  table.copy th,table.copy td{border-bottom:1px solid #1e2a42; padding:7px 8px; text-align:left}
+  table.copy th{color:var(--muted); font-weight:500}
+  table.copy td.n{color:var(--amber); font-variant-numeric:tabular-nums}
+  .note{color:var(--dim); font-size:11px; line-height:1.6; margin-top:10px}
+  .k{font-family:ui-monospace,SFMono-Regular,Menlo,monospace; color:var(--cyan); font-size:11px}
+  .warning{color:var(--amber)}
+</style>
+</head>
+<body>
+
+<h1>Pixel 四層緩衝與 handoff</h1>
+<div class="sub">
+  四條任務：<code>pixel_effect_task</code> → <code>pixel_paint_task</code> →
+  <code>pixel_encode_task</code> → <code>render</code>。
+  按「下一步」逐格睇，或者按播放自動跑。重點：<b>只有 ring → DMA 這一步 copy 像素</b>。
+</div>
+
+<div class="controls">
+  <label>像素數
+    <select id="px">
+      <option value="64">64 px（8×8）</option>
+      <option value="2400">2,400 px（16×150）</option>
+      <option value="9600">9,600 px（16×600）</option>
+    </select>
+  </label>
+  <label>子幀
+    <select id="sf">
+      <option value="1">1（8-bit）</option>
+      <option value="4">4（時間抖動）</option>
+    </select>
+  </label>
+  <button class="primary" id="play">⏸ 暫停</button>
+  <button id="next">下一步 →</button>
+  <button id="reset">重設</button>
+  <span class="note" id="cfgline"></span>
+</div>
+
+<main class="grid">
+  <!-- 1 effect -->
+  <section class="stage" id="st-effect">
+    <h2><span class="idx">1</span>pixel_effect_task</h2>
+    <div class="role">算 12-bit 值流；雙 pool 交替，只傳 frame 指標（唔 copy 值）。</div>
+    <div class="buf" id="poolA">
+      <div class="name"><b>pool A</b><span>Σnv × 2 B</span></div>
+      <div class="meta" id="poolAmeta">seq — · 空閒</div>
+    </div>
+    <div class="buf" id="poolB">
+      <div class="name"><b>pool B</b><span>Σnv × 2 B</span></div>
+      <div class="meta" id="poolBmeta">seq — · 空閒</div>
+    </div>
+    <div class="note">兩塊 pool 加起來 = <b>2 份</b>值流；paint 用完 ack 才可以重用。</div>
+  </section>
+
+  <!-- 2 paint -->
+  <section class="stage" id="st-paint">
+    <h2><span class="idx">2</span>pixel_paint_task</h2>
+    <div class="role">按 layout 把值流寫入環的落點；抖動／white mix 都在這裡。</div>
+    <div class="processor" id="paintProc">
+      直接寫環槽<br><small>0 copy · 零拷貝</small>
+    </div>
+    <div class="note">
+      呢層<b>冇自己的像素 buffer</b>：<span class="k">nc_px_ring_begin_ex()</span> 拿到邊一格，
+      就即場寫入那一格。只有 0xF06B 預覽要求時，才額外 copy 一份 snapshot。
+    </div>
+  </section>
+
+  <!-- 3 ring -->
+  <section class="stage" id="st-ring">
+    <h2><span class="idx">環</span>prd ring（i80.prd）</h2>
+    <div class="role">paint 寫、encode 讀；每格 64 B 前綴（24 B 表頭＋padding）＋px×4 B（R,G,B,W）。</div>
+    <div class="slots" id="ringSlots"></div>
+    <div class="note" id="ringInfo"></div>
+  </section>
+
+  <!-- 4 encode -->
+  <section class="stage" id="st-encode">
+    <h2><span class="idx">3</span>pixel_encode_task</h2>
+    <div class="role">peek 最新環格 → 編碼成該硬件格式，寫入後端 DMA 槽。</div>
+    <div class="slots" id="dmaSlots"></div>
+    <div class="queue" id="queue"></div>
+    <div class="queue-label">ready queue（格索引，12 B/項；唔係像素）</div>
+    <div class="note">這一步是<b>唯一一次像素 copy</b>：環（PSRAM）→ DMA 槽（internal）。</div>
+  </section>
+
+  <!-- 5 render -->
+  <section class="stage" id="st-render">
+    <h2><span class="idx">4</span>render</h2>
+    <div class="role">submit → DMA 讀 internal 槽送硬件；完成才還環格。</div>
+    <div class="processor" id="renderProc">submit / reclaim<br><small>0 copy</small></div>
+    <div class="leds" id="leds"></div>
+    <div class="note">DMA 完成 → <span class="k">nc_px_ring_release(seq)</span>。<br>
+      提前 release = torn frame。</div>
+  </section>
+</main>
+
+<div class="status">
+  <div class="step">
+    <b id="stepno">STEP 0</b> · <span id="steptext">按「下一步」開始。</span>
+    <div class="note" id="extra"></div>
+  </div>
+  <div class="nums">
+    <div><span>視覺幀</span><span id="nframe">0</span></div>
+    <div><span>子幀 / 幀</span><span id="nsf">1</span></div>
+    <div><span>環格數</span><span id="nring">3</span></div>
+    <div><span>DMA 槽數</span><span id="ndma">3</span></div>
+    <div><span>累計像素 copy</span><span id="ncopies">0</span></div>
+    <div><span>每視覺幀 copy</span><span id="ncpf">1</span></div>
+  </div>
+</div>
+
+<div class="legend">
+  <span><i style="background:#1a2338;border:1px solid #2b3750"></i>FREE</span>
+  <span><i style="background:#2a2110;border:1px solid #f2b84b"></i>FILLING</span>
+  <span><i style="background:#10294a;border:1px solid #4c9aff"></i>READY（等 encode）</span>
+  <span><i style="background:#211a3d;border:1px solid #b18cff"></i>INFLIGHT（DMA 讀緊）</span>
+  <span><i style="background:#0f2c21;border:1px solid #45d483"></i>BUSY / 已 submit</span>
+</div>
+
+<table class="copy">
+  <tr><th>handoff</th><th>用什麼</th><th>像素 copy</th><th>滿了怎樣</th></tr>
+  <tr><td>effect → paint</td><td>2 塊值流 pool＋<span class="k">ack(seq)</span></td><td class="n">0</td><td>effect 等 paint ack（背壓）</td></tr>
+  <tr><td>paint → 環</td><td><span class="k">nc_px_ring_begin_ex / commit</span></td><td class="n">0</td><td>paint <span class="k">busy++</span>，下一輪再試；唔覆蓋</td></tr>
+  <tr><td>環 → encode</td><td><span class="k">peek</span> 最新格 → 後端 DMA 槽</td><td class="n">1（每子幀）</td><td>peek 永遠拿最新；舊 READY 格被釋放（skipped）</td></tr>
+  <tr><td>encode → render</td><td>ready queue（<span class="k">lane/slot/seq</span>）</td><td class="n">0</td><td>queue 滿：fallback 直接 submit（唔放生 DMA 槽）</td></tr>
+  <tr><td>render → 硬件</td><td>DMA 讀 internal 槽</td><td class="n">0</td><td>submit 失敗：還環格＋fail++</td></tr>
+</table>
+
+<div class="note">
+  <b>份數總結</b>：effect pool <b>2</b> 份；環 <b>N</b> 份（預設 3；4 子幀用 5）；
+  後端 DMA 槽 <b>N</b> 份（internal）；ready queue <b>16</b> 格索引（不是像素）；
+  0xF06B snapshot 額外 <b>0 或 1</b> 份。
+</div>
+
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const MAX_Q = 8;
+
+  const state = {
+    px: 64, sf: 1,
+    frame: 0, phase: 0, step: 0, last: -1,
+    pool: -1, poolSeq: [0, 0], ack: 0,
+    ring: [], dma: [], queue: [], copies: 0,
+    playing: true, led: false, timer: null,
+  };
+
+  const PHASES = [
+    { tag: "effect 寫 pool", text: () => `pixel_effect_task 把新的 12-bit 值流寫入 pool ${state.pool === 0 ? "A" : "B"}（seq ${state.frame + 1}）。` },
+    { tag: "paint 寫環", text: () => `pixel_paint_task 直接寫入環格 ${state.sf} 份子幀：FILLING → READY。這一步 0 copy。` },
+    { tag: "paint ack", text: () => `paint 完成 → ack(seq ${state.frame + 1})；effect 可以重用另一塊 pool。` },
+    { tag: "encode → DMA", text: () => `pixel_encode_task 把 ${state.sf} 個環格編碼入 DMA 槽；像素 copy = ${state.sf} 次。` },
+    { tag: "render submit", text: () => `render 從 ready queue 取格索引 submit；DMA 開始讀 internal 槽。` },
+    { tag: "DMA 完成", text: () => `DMA 完成 → reclaim 還環格；這一視覺幀完成。` },
+  ];
+
+  function slotCount() { return state.sf > 1 ? state.sf + 1 : 3; }
+  function ringSlotBytes() { return 64 + state.px * 4; }
+  function fmtKB(n) { return (n / 1024).toFixed(1) + " KB"; }
+
+  function reset() {
+    state.frame = 0; state.phase = 0; state.step = 0; state.last = -1;
+    state.pool = -1; state.poolSeq = [0, 0]; state.ack = 0;
+    state.copies = 0; state.queue = []; state.led = false;
+    const n = slotCount();
+    state.ring = Array.from({ length: n }, (_, i) => ({ state: "FREE", seq: 0, sf: i }));
+    state.dma = Array.from({ length: n }, (_, i) => ({ state: "FREE", seq: 0, sf: i }));
+    $("px").value = String(state.px);
+    $("sf").value = String(state.sf);
+    render();
+  }
+
+  function activeStage(id) {
+    ["st-effect", "st-paint", "st-ring", "st-encode", "st-render"].forEach((x) =>
+      $(x).classList.toggle("active", x === id));
+    $("paintProc").classList.toggle("active", id === "st-paint");
+    $("renderProc").classList.toggle("active", id === "st-render");
+  }
+
+  function step() {
+    const act = state.phase;
+    if (state.phase === 0) {
+      state.pool = state.frame % 2;
+      state.poolSeq[state.pool] = state.frame + 1;
+    } else if (state.phase === 1) {
+      for (let i = 0; i < state.sf; i++) {
+        state.ring[i] = { state: "READY", seq: state.frame + 1, sf: i };
+      }
+      // subframe 4：第 5 格留空（headroom）
+      for (let i = state.sf; i < state.ring.length; i++) state.ring[i].state = "FREE";
+    } else if (state.phase === 2) {
+      state.ack = state.frame + 1;
+      state.pool = -1;              // 交還 pool，下一幀再寫
+    } else if (state.phase === 3) {
+      for (let i = 0; i < state.sf; i++) {
+        state.dma[i] = { state: "READY", seq: state.frame + 1, sf: i };
+        state.ring[i].state = "INFLIGHT";
+        state.copies++;
+        if (state.queue.length < MAX_Q) state.queue.push(i);
+      }
+    } else if (state.phase === 4) {
+      state.queue = [];
+      for (let i = 0; i < state.sf; i++) state.dma[i].state = "BUSY";
+    } else if (state.phase === 5) {
+      for (let i = 0; i < state.sf; i++) {
+        state.dma[i].state = "FREE";
+        state.ring[i].state = "FREE";
+      }
+      state.led = true;
+      state.frame++;
+      setTimeout(() => { state.led = false; render(); }, 260);
+    }
+
+    state.last = act;
+    state.step++;
+    state.phase = (state.phase + 1) % 6;
+    render();
+  }
+
+  function render() {
+    const n = slotCount();
+    $("cfgline").textContent =
+      `${state.px} px · ${state.sf} 子幀 · 環 ${n} 格 × ${ringSlotBytes()} B = ${fmtKB(n * ringSlotBytes())}`;
+    $("nsf").textContent = String(state.sf);
+    $("nring").textContent = String(n);
+    $("ndma").textContent = String(n);
+    $("nframe").textContent = String(state.frame);
+    $("ncopies").textContent = String(state.copies);
+    $("ncpf").textContent = String(state.sf);
+    $("ringInfo").textContent =
+      `每格 64 B 前綴（24 B 表頭＋padding）+ ${state.px * 4} B payload = ${ringSlotBytes()} B；共 ${fmtKB(n * ringSlotBytes())}`;
+    $("poolAmeta").textContent = `seq ${state.poolSeq[0] || "—"} · ${state.pool === 0 ? "使用中" : (state.ack >= state.poolSeq[0] && state.poolSeq[0] ? "已 ack" : "待用")}`;
+    $("poolBmeta").textContent = `seq ${state.poolSeq[1] || "—"} · ${state.pool === 1 ? "使用中" : (state.ack >= state.poolSeq[1] && state.poolSeq[1] ? "已 ack" : "待用")}`;
+    $("poolA").classList.toggle("active", state.pool === 0);
+    $("poolB").classList.toggle("active", state.pool === 1);
+
+    // ring
+    $("ringSlots").innerHTML = state.ring.map((s, i) => {
+      const st = s.state.toLowerCase();
+      const sub = state.sf > 1 && i < state.sf ? `<span class="pill">sf ${i + 1}</span>` : "";
+      return `<div class="slot ${st}"><span><b>slot ${i}</b> ${sub}</span><span class="seq">seq ${s.seq || "—"} · ${s.state}</span></div>`;
+    }).join("");
+
+    // dma
+    $("dmaSlots").innerHTML = state.dma.map((s, i) => {
+      const st = s.state.toLowerCase();
+      return `<div class="slot ${st}"><span><b>DMA ${i}</b></span><span class="seq">seq ${s.seq || "—"} · ${s.state}</span></div>`;
+    }).join("");
+
+    // queue
+    let q = "";
+    for (let i = 0; i < MAX_Q; i++) {
+      const v = state.queue[i];
+      q += `<div class="q ${v !== undefined ? "filled" : ""}">${v !== undefined ? "S" + v : ""}</div>`;
+    }
+    $("queue").innerHTML = q;
+
+    // leds
+    $("leds").innerHTML = Array.from({ length: 8 }, () => `<span class="led ${state.led ? "on" : ""}"></span>`).join("");
+
+    // step text（顯示「剛剛完成」那一步，數字才對得上）
+    const done = state.last;
+    if (done >= 0) {
+      const p = PHASES[done];
+      $("stepno").textContent = "STEP " + state.step;
+      $("steptext").textContent = p.tag;
+      $("extra").textContent = p.text();
+    } else {
+      $("stepno").textContent = "STEP 0";
+      $("steptext").textContent = "按「下一步」開始。";
+      $("extra").textContent = "每按一次只做一個 handoff，方便對照 buffer 狀態。";
+    }
+
+    // stage highlight
+    const map = ["st-effect", "st-paint", "st-paint", "st-encode", "st-render", "st-render"];
+    activeStage(done >= 0 ? map[done] : "st-effect");
+  }
+
+  $("next").addEventListener("click", step);
+  $("reset").addEventListener("click", reset);
+  $("px").addEventListener("change", (e) => { state.px = Number(e.target.value); reset(); });
+  $("sf").addEventListener("change", (e) => { state.sf = Number(e.target.value); reset(); });
+  $("play").addEventListener("click", () => {
+    state.playing = !state.playing;
+    $("play").textContent = state.playing ? "⏸ 暫停" : "▶ 播放";
+  });
+
+  // 可分享：?px=9600&sf=4
+  const params = new URLSearchParams(location.search);
+  if (params.get("px")) state.px = Number(params.get("px")) || state.px;
+  if (params.get("sf") === "4") state.sf = 4;
+
+  state.timer = setInterval(() => {
+    if (state.playing) step();
+  }, 1000);
+
+  reset();
+})();
+</script>
+</body>
+</html>

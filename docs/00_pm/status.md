@@ -8618,7 +8618,8 @@ alias：`pixel_paint_task → pair → content → show`（舊 `/data` config OT
 - `docs/00_pm/goal-hardware-acceleration.md` 硬件表加 PARLIO（P4）。
 - `docs/03_notes/pixel-output-backends.md`：後端矩陣／契約。
 
-**緩衝環討論**：新增 [pixel-ring-flow.md](../03_notes/pixel-ring-flow.md)，
+**緩衝環討論**：新增 [pixel-ring-flow.md](../03_notes/pixel-ring-flow.md) 同互動圖
+[pixel-buffers.html](pixel-buffers.html)，
 記錄四段 handoff（effect pool → prd 環 → DMA 槽 → ready queue）、三種滿了策略、
 四個張力（最新優先、4 子幀非原子、多後端冇 fanout、節拍主人）同七條待拍板問題。
 

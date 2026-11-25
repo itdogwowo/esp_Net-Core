@@ -602,7 +602,7 @@ pixel_paint_task（core1）
   └─ nc_px_layout_apply()／apply12()／apply4()／apply_dither()
         │  抖動在配對內圈（9,600 px 5.4 ms、零中間 buffer）
         ▼
-環（i80.prd；64 B 表頭＋px×4 B）        ← 零拷貝：直接寫硬件即將讀的格
+環（i80.prd；64 B 前綴（24 B 表頭＋padding）＋px×4 B）        ← 零拷貝：直接寫硬件即將讀的格
         │
 pixel_encode_task（core1，order 11）
   └─ 取最新格 → 該硬件格式（I80 bus word／SPI bit／RMT symbol／PARLIO word）
