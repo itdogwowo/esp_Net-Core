@@ -73,6 +73,7 @@
   .card.ready{border-color:var(--ready); background:#0d1d33}
   .card.hold{border-color:#3f6ea8; border-style:dashed; background:#101c2c}
   .card.skip{border-color:var(--skip); background:#241029}
+  .card.peek{border-color:#ffd166; background:#241f08; box-shadow:0 0 18px #ffd16655}
   .card.reclaimed{border-color:#45d483; border-style:dashed; background:#0a1a14}
   .card.busy{border-color:var(--busy); background:#0c211a}
   .card.active{opacity:1; box-shadow:0 0 18px color-mix(in srgb,var(--accent,var(--effect)) 30%,transparent)}
@@ -276,6 +277,7 @@
       <div class="legend">
         <span><i style="background:#1a2338;border:1px solid #2b3750"></i>FREE</span>
         <span><i style="background:#0d1d33;border:1px solid #4c9aff"></i>READY（等 encode）</span>
+        <span><i style="background:#241f08;border:1px solid #ffd166"></i>PEEK（encode 揀中，seq 最大）</span>
         <span><i style="background:#101c2c;border:1px dashed #3f6ea8"></i>DMA 用緊（仍然係 READY）</span>
         <span><i style="background:#241029;border:1px solid #e06ad8"></i>假消費（冇 encode 就釋放）</span>
         <span><i style="background:#0c211a;border:1px solid #45d483"></i>BUSY／SENDING</span>
@@ -499,24 +501,38 @@
         S.act = {}; S.lastEncode = "starved：最新格同上一格一樣（post_seq）";
         log("encode：最新格已經 encode 過（post_seq 一樣）→ 呢輪 skip");
       } else {
-        // 3a：peek 最新 + 假消費舊格
+        // 3a：掃描環上所有 READY 格，揀 seq 最大嗰格（firmware 的 peek 規則）
+        const readyList = [];
+        for (let i = 0; i < S.ring.length; i++) {
+          const r = S.ring[i];
+          if (r.state === "ready") readyList.push({ i, seq: r.seq, label: frameLabel(r.frame, r.sf), hold: r.hold });
+        }
+        const rr = S.ring[newest];
+        rr.peeked = 3;
+        S.act = { encode: true };
+        S.lastEncode = `掃描 ${readyList.length} 格 READY → 揀 seq 最大 = slot ${newest}（seq ${rr.seq}）`;
+        log(`encode：掃環上 READY 共 ${readyList.length} 格 → ${readyList.map((x) => `slot ${x.i}(seq ${x.seq}, ${x.label})`).join("、")}`);
+        log(`encode：peek 規則 = 攞 <b>seq 最大</b> 嗰格 → 揀 slot ${newest}（${frameLabel(rr.frame, rr.sf)}，seq ${rr.seq}）`);
+        yield;
+
+        // 3b：其餘 READY 格「假消費」（比最新舊、又冇人攞）→ 直接釋放，唔會補播
         const fakeNames = [];
         for (let i = 0; i < S.ring.length; i++) {
           if (i === newest || S.ring[i].state !== "ready" || S.ring[i].hold >= 0) continue;
           const r = S.ring[i];
-          fakeNames.push(`slot ${i}(${frameLabel(r.frame, r.sf)})`);
-          r.state = "free"; r.skip = 2; r.hold = -1; r.prog = 0;
+          fakeNames.push(`slot ${i}(seq ${r.seq}, ${frameLabel(r.frame, r.sf)})`);
+          r.state = "free"; r.skip = 2; r.hold = -1; r.prog = 0; r.peeked = 0;
           r.seq = 0; r.frame = 0; r.sf = 0;
           S.st.skipped++;
         }
-        const rr = S.ring[newest];
-        S.act = { encode: true };
-        S.lastEncode = `peek 最新 = slot ${newest}（${frameLabel(rr.frame, rr.sf)}，seq ${rr.seq}）`;
-        log(`encode：peek 最新一格 = slot ${newest}（${frameLabel(rr.frame, rr.sf)}，seq ${rr.seq}）`
-          + (fakeNames.length ? `；順手假消費 ${fakeNames.length} 格：${fakeNames.join("、")}（唔會再送）` : ""));
-        yield;
+        if (fakeNames.length) {
+          S.act = { encode: true };
+          S.lastEncode = `其餘 ${fakeNames.length} 格舊過佢，直接釋放（假消費）`;
+          log(`encode：比佢舊的 ${fakeNames.length} 格冇人攞 → 即刻釋放（假消費，唔會補送）：${fakeNames.join("、")}`);
+          yield;
+        }
 
-        // 3b：寫 DMA 槽 + push 索引
+        // 3c：寫 DMA 槽 + push 索引
         let slot = -1;
         for (let k = 0; k < S.dma.length; k++) {
           const idx = (S.dmaNext + k) % S.dma.length;
@@ -530,7 +546,7 @@
           log("encode：三個 DMA 槽都仲在飛 → release 嗰格環格，呢輪唔送（starved）");
         } else {
           S.dmaNext = (slot + 1) % S.dma.length;
-          S.dma[slot] = { state: "ready", seq: rr.seq, ring: newest, frame: rr.frame, sf: rr.sf, left: 0, justFree: 0 };
+          S.dma[slot] = { state: "ready", seq: rr.seq, ring: newest, frame: rr.frame, sf: rr.sf, left: 0, justFree: 0, justWritten: 2 };
           rr.hold = slot;
           S.queue[S.qwr % QUEUE_MAX] = { dma: slot, seq: rr.seq, frame: rr.frame, sf: rr.sf };
           S.qwr++;
@@ -636,7 +652,8 @@
   function advance() {
     S.links = S.links.filter((l) => (--l.ttl) > 0);
     S.ring.forEach((r) => { if (r.skip > 0) r.skip--; });
-    S.dma.forEach((d) => { if (d.justFree > 0) d.justFree--; });
+    S.dma.forEach((d) => { if (d.justFree > 0) d.justFree--; if (d.justWritten > 0) d.justWritten--; });
+    S.ring.forEach((r) => { if (r.peeked > 0) r.peeked--; });
     S.act = {};
     if (!S.gen) S.gen = tickGen();
     const r = S.gen.next();
@@ -703,11 +720,14 @@
         accent = COLORS.paint;
       } else if (r.state === "ready") {
         barv = 1;
-        if (r.hold >= 0) {
+        if (r.peeked > 0) {
+          st = "PEEK"; cls = "peek";
+          label = `seq ${r.seq} · ◀ encode 揀咗呢格（seq 最大）`;
+        } else if (r.hold >= 0) {
           st = "READY"; cls = "hold";
           const d = S.dma[r.hold];
           label = (d && d.state === "dma") ? `DMA ${r.hold} 送緊（等 reclaim）` : `DMA ${r.hold} 已佔用（等 render submit）`;
-        } else { st = "READY"; cls = "ready"; label = "READY（等 encode peek）"; }
+        } else { st = "READY"; cls = "ready"; label = `seq ${r.seq} · READY（等 encode peek）`; }
         accent = COLORS.encode;
       } else { st = r.state.toUpperCase(); cls = "free"; label = r.state; }
       return card(cid("ring", i),
@@ -718,8 +738,10 @@
 
     $("dmaCards").innerHTML = S.dma.map((d, i) => {
       const freed = d.state === "free" && d.justFree > 0;
+      const written = d.state === "ready" && d.justWritten > 0;
       const label = freed ? "✓ 還格（DMA 完成 → 槽可以再用）"
         : d.state === "free" ? "FREE"
+        : written ? "◀ encode 啱啱寫入（等 render pop）"
         : d.state === "ready" ? "編好、等 render pop"
         : `送緊（${d.left} 格）`;
       const cls = (freed ? "reclaimed" : d.state === "free" ? "free" : d.state === "ready" ? "ready" : "busy")
