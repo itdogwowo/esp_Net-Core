@@ -14,12 +14,41 @@ from __future__ import annotations
 import datetime as _dt
 import hashlib
 import json
+import locale
 import shutil
 from pathlib import Path
 
 from . import env
 
 TS_FMT = "%Y_%m_%d_%H_%M_%S"       # 與 mp_Make-Tools 相同的檔名格式
+
+
+def _load_json(path: Path) -> dict:
+    """讀側錄 JSON（一定要跨機讀得返）。
+
+    以前用 `read_text()`／`write_text()`，等於用**本機編碼**：Windows（cp950）寫出來的
+    中文 note，拿到 Linux／WSL（UTF-8）讀就 `UnicodeDecodeError` —— `make.py build`
+    建置成功之後才爆在 `previous_size()`。舊檔仍然要讀得到，所以逐個編碼試。
+    """
+    raw = path.read_bytes()
+    seen: list[str] = []
+    for enc in ("utf-8", locale.getpreferredencoding(False), "cp950"):
+        if enc in seen:
+            continue
+        seen.append(enc)
+        try:
+            data = json.loads(raw.decode(enc))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            continue
+        if isinstance(data, dict):
+            return data
+    return {}
+
+
+def _save_json(path: Path, info: dict) -> None:
+    """一律寫 UTF-8（LF）：新檔唔會再留低本機編碼的陷阱。"""
+    path.write_text(json.dumps(info, ensure_ascii=False, indent=2) + "\n",
+                    encoding="utf-8", newline="\n")
 
 
 def stamp() -> str:
@@ -38,10 +67,7 @@ def _read_sidecar(bin_path: Path) -> dict:
     js = bin_path.with_suffix(".json")
     if not js.exists():
         return {}
-    try:
-        return json.loads(js.read_text())
-    except json.JSONDecodeError:
-        return {}
+    return _load_json(js)
 
 
 def _stamp_of(bin_path: Path) -> str:
@@ -120,10 +146,11 @@ def archive(cfg: dict, board: str, bin_path: Path, meta: dict | None = None) -> 
             new_side = rotated.with_suffix(".json")
             side.rename(new_side)
             try:                       # 側錄裡的 file 要跟著改名，否則 outputs/prune 會指錯
-                info = json.loads(new_side.read_text())
-                info["file"] = rotated.name
-                new_side.write_text(json.dumps(info, ensure_ascii=False, indent=2) + "\n")
-            except (json.JSONDecodeError, OSError):
+                info = _load_json(new_side)
+                if info:
+                    info["file"] = rotated.name
+                    _save_json(new_side, info)
+            except OSError:
                 pass
 
     shutil.copy2(bin_path, plain)
@@ -138,7 +165,7 @@ def archive(cfg: dict, board: str, bin_path: Path, meta: dict | None = None) -> 
         "git_dirty": env.git_dirty(),
         **(meta or {}),
     }
-    plain.with_suffix(".json").write_text(json.dumps(info, ensure_ascii=False, indent=2) + "\n")
+    _save_json(plain.with_suffix(".json"), info)
     return plain
 
 
@@ -148,9 +175,8 @@ def list_outputs(cfg: dict, board: str | None = None) -> list[dict]:
         return []
     rows = []
     for js in out_dir.glob("*.json"):
-        try:
-            info = json.loads(js.read_text())
-        except json.JSONDecodeError:
+        info = _load_json(js)
+        if not info:
             continue
         if board and info.get("board") != board:
             continue
