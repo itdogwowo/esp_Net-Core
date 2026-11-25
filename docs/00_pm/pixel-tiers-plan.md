@@ -57,7 +57,7 @@
 
 | 檔案 | 責任 |
 |---|---|
-| `firmware/components/tasks/pipeline_task/nc_pair_task.c` | 零拷貝、開機補建、抖動子幀排程 |
+| `firmware/components/tasks/pixel_effect_task/nc_pair_task.c` | 零拷貝、開機補建、抖動子幀排程 |
 | `firmware/components/sw/pixel/asset/nc_px_layout.c` | `nc_px_layout_apply4()`（一次掃表寫 4 份） |
 | `firmware/components/sw/pixel/include/nc_px_layout.h` | `apply4` 宣告、覆蓋率欄位 |
 | `firmware/main/Kconfig.projbuild` | `NETCORE_PIXEL_SUBFRAMES`、`NETCORE_PIXEL_RING_SLOTS` |
@@ -91,7 +91,7 @@ git commit -m "refactor: 依用家命名調整 pixel API（行為不變）"
 ### Task 1：配對層零拷貝（直接寫環槽）
 
 **Files:**
-- Modify: `firmware/components/tasks/pipeline_task/nc_pair_task.c:206-262`
+- Modify: `firmware/components/tasks/pixel_effect_task/nc_pair_task.c:206-262`
 - Test: `tools/hosttest/pxShow_test/pxShow_test.c`（既有 apply 測試；新增「寫入任意 dst 等於寫畫布」）
 
 - [x] **Step 1：寫失敗測試**
@@ -167,7 +167,7 @@ Expected: 建置成功；`0xF071` 的 `clear` 應為 0、`apply` 為寫入時間
 - [x] **Step 7：Commit**
 
 ```bash
-git add firmware/components/tasks/pipeline_task/nc_pair_task.c tools/hosttest/pxShow_test/pxShow_test.c
+git add firmware/components/tasks/pixel_effect_task/nc_pair_task.c tools/hosttest/pxShow_test/pxShow_test.c
 git commit -m "pair: 零拷貝寫環（唔經畫布、唔清畫布）"
 ```
 
@@ -176,7 +176,7 @@ git commit -m "pair: 零拷貝寫環（唔經畫布、唔清畫布）"
 ### Task 2：開機補建缺少的組合表
 
 **Files:**
-- Modify: `firmware/components/tasks/pipeline_task/nc_pair_task.c`（新增 `cache_prebuild_missing()`；`build_asset_tbl_into()` 已存在）
+- Modify: `firmware/components/tasks/pixel_effect_task/nc_pair_task.c`（新增 `cache_prebuild_missing()`；`build_asset_tbl_into()` 已存在）
 - Test: 真機：刪快取 → 重開 → log
 
 - [x] **Step 1：加函式（放在 `content_start()` 之前）**
@@ -244,7 +244,7 @@ static void cache_prebuild_missing(void)
 - [x] **Step 4：Commit**
 
 ```bash
-git add firmware/components/tasks/pipeline_task/nc_pair_task.c
+git add firmware/components/tasks/pixel_effect_task/nc_pair_task.c
 git commit -m "pair: 開機補建缺少的組合表（≤32 KB 才存）"
 ```
 
@@ -438,7 +438,7 @@ Expected：`render.fps` = 200（子幀率）；每 4 個子幀為一個視覺幀
 - [x] **Step 6：Commit**
 
 ```bash
-git add firmware/main/Kconfig.projbuild firmware/components/tasks/pipeline_task/nc_pair_task.c \
+git add firmware/main/Kconfig.projbuild firmware/components/tasks/pixel_effect_task/nc_pair_task.c \
         firmware/components/tasks/render_task/nc_render_task.c
 git commit -m "pair/render: 每視覺幀寫 N 個抖動子幀（Kconfig）"
 ```
@@ -697,7 +697,7 @@ Expected（9,600 px）：500 組 ≤ 2.5 ms、完全隨機 ≤ 5.5 ms（6 B 實�
 **Files:**
 - Modify: `firmware/components/sw/pixel/include/nc_px_asset.h`、`asset/nc_px_asset.c`
 - Modify: `firmware/components/sw/pixel/asset/nc_px_layout.c`
-- Modify: `firmware/components/tasks/pipeline_task/nc_pair_task.c`
+- Modify: `firmware/components/tasks/pixel_effect_task/nc_pair_task.c`
 - Test: `tools/hosttest/pxLayer_test/pxLayout_test.c`（大量效果）、`pxShow_test`
 
 - [x] **Step 1：把資產表改成 flexible array**

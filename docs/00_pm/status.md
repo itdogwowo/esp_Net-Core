@@ -5633,7 +5633,7 @@ Web UI 要用一條高頻指令預覽最近一幀。
 **做咗**（只動 `content_task` ＋ layer parser ＋ project ＋ docs，EffectPerf／pixel_task／
 render／編碼器全部唔改）：
 
-- 新 component `firmware/components/tasks/pipeline_task/nc_pair_task.c`（CONFIG 開關、
+- 新 component `firmware/components/tasks/pixel_effect_task/nc_pair_task.c`（CONFIG 開關、
   `WHOLE_ARCHIVE`＋constructor 自己登記，`main.c` 唔使改）：
   - 任務：`show`／loop `show`／NORMAL／level 4／order 21／stack 4096／core 1／
     prio `NC_PRIO_OTHERS_MAX-1`（5，低 render 一級）／layer 5／period 0。
@@ -5768,7 +5768,7 @@ LED 太光／受熱（用家反映「LED 甩了」）。production 8×8 不需�
 **改名**：`show_task` 嘅語意同 `render_task` 太接近（兩者都似「顯示」），production
 生產者改名 **`content_task`**：
 
-- component：`firmware/components/tasks/pipeline_task/`、`nc_pair_task.c`
+- component：`firmware/components/tasks/pixel_effect_task/`、`nc_pair_task.c`
 - task／loop 名：**`content`**（`tasks.json` 同步；舊 `show` 名由 task_manager
   讀 config 時做 alias，OTA 舊 `/data/config/tasks.json` 不會令新任務自動關閉）
 - Kconfig：`CONFIG_NETCORE_CONTENT`（原本 `NETCORE_SHOW`）
@@ -5946,7 +5946,7 @@ dummy 腳不要接東西。
 | **pair** | core1 | 載 `/data/pixel`、建 plan、按 group/range/write 配對、white mix、寫 prd 環；0xF06B/0xF06D/0xF06F；auto_play |
 | **render** | core1 | 現有 encode→I80→WS2812；只認 canvas |
 
-介面 `firmware/components/tasks/pipeline_task/include/nc_pipeline.h`：
+介面 `firmware/components/tasks/pixel_effect_task/include/nc_pipeline.h`：
 
 - `nc_pipe_plan_snapshot(plan, assets, cap, &gen)`：pair → effect；copy plan，asset 逐個
   copy 並 repoint，effect 不再持有 pair 的 asset 表 pointer。
@@ -8412,3 +8412,41 @@ IDF_PATH=~/esp/esp-idf python3 make.py build ESP32-P4-ETH    --fresh
 
 註：**macOS 那邊仍然是 v6.0.3**（AGENTS.md §0.5 寫的環境）。兩邊版本唔同，記錄量測時要
 寫清楚用邊個。
+### 7.241 2026-11-25（任務整合：component 改名 `pixel_effect_task`；畫波／推送拆兩個 loop；抖動併入配對定案）
+
+**決策（用家 2026-11-25）**：`pixel_task`（8×8 引擎＋dither＋emit）唔再擴充；新管線係
+**effect → pair（抖動併入）→ wave（畫波）→ push（推送）**，同一個系列
+`components/tasks/pixel_effect_task/`。
+
+**抖動放邊一步（圖：`artifacts/dither-vs-pair-order.png`）**：
+
+| 次序 | 9,600 px 代價 | 判斷 |
+|---|---:|---|
+| A 抖動先 → 配對 | 多 28.8 KB frame、多 57.6 KB 流量、**+3.4 ms** | 可行但貴 |
+| B 配對先 → 抖動 | 環要 8 B/px（76.8 KB×5 格）、多一次全掃、**~12 ms** | 唔可行 |
+| **C 配對內圈（現況 `apply_dither`／`apply4`）** | **5.4 ms、零中間 buffer** | **定案** |
+
+→ 抖動唔係獨立一步，係「配對寫入那一刻的函數」；要獨立任務就只出 phase／offset。
+
+**改動**：
+
+| 檔案 | 做乜 |
+|---|---|
+| `firmware/CMakeLists.txt` | `EXTRA_COMPONENT_DIRS` 由 `tasks/pipeline_task` 改 `tasks/pixel_effect_task` |
+| `tasks/pixel_effect_task/` | component 改名；`nc_effect_task.c`→`nc_px_effect_task.c`、`nc_pair_task.c`→`nc_px_pair_task.c`、`nc_pipe_stats.c`→`nc_px_pipe_stats.c` |
+| 任務名 | **暫時保留 `effect`／`pair`**（`tasks.json` 兼容）；component／檔名前綴標明同一系列，改名連 config 一次過搬留待下一步 |
+| `tasks/render_task/nc_render_task.c` | 新增 `CONFIG_NETCORE_PX_SPLIT_PUSH`：開啟時 render 任務多一個 `push` loop；wave→push 用 8 格「格索引」隊列（唔 copy）；隊列滿明示 `fail++` 並還格 |
+| `firmware/main/Kconfig.projbuild` | `NETCORE_PX_SPLIT_PUSH`（default n；未上板驗證前唔開） |
+| `ports/project/S3/ESP32-S3-Zero-Show2400/sdkconfig.defaults` | trial 開啟 split（mock 後端先驗編譯／排程） |
+
+**驗證（WSL，idf=v6.1.1）**：
+
+| 項目 | 結果 |
+|---|---|
+| `bash tools/hosttest/run_all.sh` | **21/21 OK** |
+| `make.py build ESP32-S3-Matrix --project …-Show`（split off） | 建置完成 **704.5 KB**（+0 B vs 上一顆）|
+| `make.py build ESP32-S3-Zero --project …-Show2400 --fresh`（split on） | 建置完成 **704.8 KB** |
+
+**未做**：① `pixel_task` 真正退役（Textkit 冇 `/data/pixel`，要靠 8×8 engine 或 effects.json）；
+② 任務名改 `px_*` 連 `tasks.json`／`nc_task.c` alias 一齊遷移；③ 分核（暫時全部 `NC_CORE_ANY`）；
+④ 上板量 `0xF081`／`0xF071`（split 前後）。

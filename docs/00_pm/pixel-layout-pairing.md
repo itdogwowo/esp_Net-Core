@@ -236,8 +236,8 @@ commit、render」。如果連換場的那 10–20 ms 都想省，就做 PC 預�
 | `sw/pixel/asset/nc_px_layer.c` | 兩步解析：`nc_px_map_count()`／`nc_px_map_parse(pool)`、`nc_px_mode_count()`／`nc_px_mode_parse(pool)` |
 | `sw/pixel/include/nc_px_layout.h` | `nc_px_aprog_t`／`nc_px_ljob_t`／`nc_px_lrun_t`／`nc_px_layout_t` |
 | `sw/pixel/asset/nc_px_layout.c` | 編譯（counting bucket＋run 合併）／`apply`／`apply12`／`aprog_vals` |
-| `tasks/pipeline_task/nc_effect_task.c` | 每條值流一個 pool（×2 雙緩衝）、ack 防撕裂、wave table per aprog |
-| `tasks/pipeline_task/nc_pair_task.c` | mode switch 建 layout、發佈 aprog、逐幀 `nc_px_layout_apply` |
+| `tasks/pixel_effect_task/nc_effect_task.c` | 每條值流一個 pool（×2 雙緩衝）、ack 防撕裂、wave table per aprog |
+| `tasks/pixel_effect_task/nc_pair_task.c` | mode switch 建 layout、發佈 aprog、逐幀 `nc_px_layout_apply` |
 | `tools/hosttest/pxLayout_test/` | 新 host 測試（500 組、反序、隔顆、重疊、新舊對拍） |
 
 ### 8.2 實測（host x86）

@@ -22,6 +22,7 @@
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
+#include "freertos/queue.h"
 #include "freertos/task.h"
 #include "nc_cfg.h"
 #include "nc_prio.h"
@@ -509,6 +510,15 @@ typedef struct {
     uint32_t            last_seq;
 } px_lane_t;
 
+#if CONFIG_NETCORE_PX_SPLIT_PUSH
+// wave → push 的「已編碼、等提交」隊列。每項只有索引，唔搬任何像素資料。
+typedef struct {
+    uint8_t  lane;
+    uint32_t slot;
+    uint32_t seq;
+} px_ready_t;
+#endif
+
 static struct {
     bool         started;
     uint32_t     period_us;      // 由 system.json frame_interval_ms 換算
@@ -520,6 +530,9 @@ static struct {
     int64_t      mark_us;
     SemaphoreHandle_t tick;      // 節拍：esp_timer 週期性給（唔 busy-wait）
     esp_timer_handle_t timer;
+#if CONFIG_NETCORE_PX_SPLIT_PUSH
+    QueueHandle_t ready;         // wave → push（已編碼、等提交）
+#endif
 } s_px;
 static nc_fps_clock_t s_clock;
 
@@ -564,9 +577,10 @@ static esp_err_t bind_lanes(void)
     return (s_px.nlane > 0) ? ESP_OK : ESP_ERR_NOT_FOUND;
 }
 
-// 一道 lane 的一輪。
-static void lane_tick(px_lane_t *ln)
+// 一道 lane 的一輪：reclaim → acquire → encode →（提交或入隊）。
+static void lane_tick(int idx)
 {
+    px_lane_t *ln = &s_px.lane[idx];
     // ① 先還掉「已送完」的格（DMA 完成才算；後端自己知道）
     ln->be->reclaim(ln->be);
 
@@ -595,6 +609,14 @@ static void lane_tick(px_lane_t *ln)
     }
     const int64_t t1 = esp_timer_get_time();
     s_px.st.enc_us = (uint32_t)(t1 - t0);
+#if CONFIG_NETCORE_PX_SPLIT_PUSH
+    // 畫波（encode）同推送（submit）分兩個 loop：這裡只排隊，唔碰硬件。
+    const px_ready_t r = { .lane = (uint8_t)idx, .slot = slot, .seq = seq };
+    if (xQueueSend(s_px.ready, &r, 0) != pdTRUE) {
+        nc_px_ring_release(ln->q, seq);       // 隊列滿 = 這幀放棄（明示，不靜默）
+        s_px.st.fail++;
+    }
+#else
     if (!ln->be->submit(ln->be, slot, seq)) {
         nc_px_ring_release(ln->q, seq);       // 沒有提交 → 立刻還格
         s_px.st.fail++;
@@ -602,6 +624,7 @@ static void lane_tick(px_lane_t *ln)
     }
     s_px.st.tx_us = (uint32_t)(esp_timer_get_time() - t1);
     s_px.st.frames++;
+#endif
 }
 
 const char *nc_render_first_ring(void)
@@ -708,7 +731,7 @@ static void px_render_loop(void *arg)
             (void)xSemaphoreTake(s_px.tick, pdMS_TO_TICKS(1000));
         }
         for (int i = 0; i < s_px.nlane; i++) {
-            lane_tick(&s_px.lane[i]);
+            lane_tick(i);
         }
         const int64_t after = esp_timer_get_time();
         nc_fps_clock_done(&s_clock, after);
@@ -883,6 +906,13 @@ static esp_err_t px_start(const nc_task_res_view_t *res, int nres)
     }
     nc_fps_clock_init(&s_clock, esp_timer_get_time(), (int64_t)s_px.period_us,
                       (int64_t)CONFIG_NETCORE_PIXEL_SLACK_MS * 1000);
+#if CONFIG_NETCORE_PX_SPLIT_PUSH
+    s_px.ready = xQueueCreate(NC_PX_MAX_LANES * 2, sizeof(px_ready_t));
+    if (s_px.ready == NULL) {
+        ESP_LOGE(TAG, "push 隊列配置失敗");
+        return ESP_ERR_NO_MEM;
+    }
+#endif
     s_px.started = true;
     ESP_LOGI(TAG, "渲染器就緒：%d 道 lane、%u fps（frame_interval_ms=%u）；lane0 = %s（環 %s）",
              s_px.nlane, (unsigned)s_px.fps, (unsigned)interval_ms, s_px.lane[0].be->name,
@@ -893,6 +923,12 @@ static esp_err_t px_start(const nc_task_res_view_t *res, int nres)
 static void px_stop(void)
 {
     s_px.started = false;
+#if CONFIG_NETCORE_PX_SPLIT_PUSH
+    if (s_px.ready != NULL) {
+        vQueueDelete(s_px.ready);
+        s_px.ready = NULL;
+    }
+#endif
     if (s_px.timer != NULL) {
         (void)esp_timer_stop(s_px.timer);
         (void)esp_timer_delete(s_px.timer);
@@ -903,6 +939,33 @@ static void px_stop(void)
         s_px.tick = NULL;
     }
 }
+
+#if CONFIG_NETCORE_PX_SPLIT_PUSH
+// 推送 loop：只做 submit（其餘時間等隊列）。冇 encode、冇環操作。
+static void px_push_loop(void *arg)
+{
+    (void)arg;
+    while (!nc_task_exit_requested()) {
+        px_ready_t r;
+        if (xQueueReceive(s_px.ready, &r, pdMS_TO_TICKS(100)) != pdTRUE) {
+            nc_task_beat();
+            continue;
+        }
+        if (r.lane < (uint8_t)s_px.nlane) {
+            px_lane_t *ln = &s_px.lane[r.lane];
+            const int64_t t0 = esp_timer_get_time();
+            if (!ln->be->submit(ln->be, r.slot, r.seq)) {
+                nc_px_ring_release(ln->q, r.seq);
+                s_px.st.fail++;
+            } else {
+                s_px.st.tx_us = (uint32_t)(esp_timer_get_time() - t0);
+                s_px.st.frames++;
+            }
+        }
+        nc_task_beat();
+    }
+}
+#endif
 
 static const nc_task_loop_t s_loops[] = {
     {
@@ -915,6 +978,18 @@ static const nc_task_loop_t s_loops[] = {
         .layer = 5,
         .period_ms = 0,               // loop 自己計節拍
     },
+#if CONFIG_NETCORE_PX_SPLIT_PUSH
+    {
+        // 推送：畫波完成 → submit。獨立 loop，唔使等渲染節拍。
+        .name = "push",
+        .fn = px_push_loop,
+        .stack = 3072,                // 只 call submit，唔使 renderer 咁大
+        .prio = NC_PRIO_OTHERS_MAX,
+        .core = CONFIG_NETCORE_PIXEL_CORE,
+        .layer = 5,
+        .period_ms = 0,
+    },
+#endif
 };
 
 static const nc_task_t s_task = {
@@ -926,7 +1001,7 @@ static const nc_task_t s_task = {
     .on_start = px_start,
     .on_stop = px_stop,
     .loops = s_loops,
-    .nloops = 1,
+    .nloops = (uint8_t)(sizeof(s_loops) / sizeof(s_loops[0])),
 };
 
 NC_TASK_AUTO_REG(render, &s_task);

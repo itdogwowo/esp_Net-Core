@@ -289,6 +289,15 @@ menu "esp_Net-Core"
             4 = 時間抖動：每個視覺幀送 4 個子幀（等效 10-bit）。
             子幀率 = 視覺 fps × 子幀數；每條線的像素要相應減少（例如 600 → 150）。
 
+    config NETCORE_PX_SPLIT_PUSH
+        bool "畫波（encode）同推送（submit）分兩個 loop"
+        depends on NETCORE_PIXEL
+        default n
+        help
+            畫波留在 render loop；推送搬去獨立 push loop。兩個 loop 之間
+            只有一條「格索引」隊列，唔會 copy 任何像素資料。
+            未上板驗證前預設 n（行為同單 loop 完全一樣）。
+
     config NETCORE_PIXEL_RING_SLOTS
         int "prd 環格數（要 ≥ 子幀數 + 1）"
         depends on NETCORE_PIXEL

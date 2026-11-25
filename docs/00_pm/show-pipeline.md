@@ -9,6 +9,10 @@
 > **effect（波形值）→ pair（配對／white mix／寫環）→ render（編碼／I80）**。
 > `pixel_task`／render／編碼器／環全部唔改（render 仍然只認 canvas）。
 >
+> **2026-11-25 更新**：component 改名 `tasks/pixel_effect_task/`（檔案 `nc_px_*`）；畫面
+> 繪製（wave）同推送（push）可以用 `CONFIG_NETCORE_PX_SPLIT_PUSH` 拆成兩個 loop，
+> 中間只傳「格索引」隊列，唔 copy。抖動維持在 pair 的內圈（定案見 status §7.241）。
+>
 > **2026-11-22 更新**：production canvas 及 Show I80 packed 波形已固定 PSRAM；
 > 所有 LED 數走同一條服務路徑，沒有 internal/PSRAM runtime 分支。完整量測、
 > 500 組可變長度 run 的 8-bit／12-bit 成本見
@@ -56,11 +60,11 @@ render 任務（nc_render_task）：取最新一格 → 編碼（ws2812 GRB）�
 |---|---|---|
 | 檔案 → struct | `sw/pixel`（`nc_px_layer*`／`nc_px_asset*`） | 掃目錄、解析 JSON、建表（PC 可測） |
 | mode → layout | `sw/pixel`（`nc_px_layout.c`） | group.sel 展開、range、dst 排序 run 表、預編譯 program |
-| 波形值 | `effect` 任務（pipeline_task component） | 每條值流 evaluate program；雙 pool＋ack；50 fps |
-| 配對／white mix | `pair` 任務（pipeline_task component） | 載四層、建 layout、run 寫入、white mix、寫環、`0xF06B` |
+| 波形值 | `effect` 任務（pixel_effect_task component） | 每條值流 evaluate program；雙 pool＋ack；50 fps |
+| 配對／white mix | `pair` 任務（pixel_effect_task component） | 載四層、建 layout、run 寫入、white mix、寫環、`0xF06B` |
 | 環 → 燈 | `tasks/render_task` | 編碼、DMA、送燈（完全唔知四層） |
 
-## 2. `pair`＋`effect` 任務（`firmware/components/tasks/pipeline_task/`）
+## 2. `pair`＋`effect` 任務（`firmware/components/tasks/pixel_effect_task/`）
 
 由 **`CONFIG_NETCORE_CONTENT`**（`depends on NETCORE_PIXEL`，default n）開關；`CONFIG` 關閉時
 `.c` 整段 `#if` 掉、component 是空 object（同 `effect_bench` 同一模式）。component 用
@@ -137,7 +141,7 @@ out = (out * (100 - w) + 255 * w) / 100       # 整數除法；R/G/B/W 四通道
 - `{"err":"nodata"}`：show 未開始／未有快照（例如 render 未起）。
 - `{"err":"big","px":N}`：`px > 512`，或 hex 塞唔落 decoder 的回覆 JSON 上限
   `NC4_REPLY_JSON_MAX`（2,600 B；約 px ≤ 315）。production 64 px 永遠在限內。
-- 指令表：`firmware/components/tasks/pipeline_task/nc_pair_task.c` 的
+- 指令表：`firmware/components/tasks/pixel_effect_task/nc_pair_task.c` 的
   `NC_ACTION_TABLE_DEF(nc_pair_task_table, "pair", …)`；`0xF06B` 喺 `status cmds` 見到
   主人是 `content`。
 

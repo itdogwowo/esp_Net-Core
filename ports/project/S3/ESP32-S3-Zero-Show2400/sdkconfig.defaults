@@ -11,3 +11,5 @@ CONFIG_NETCORE_PIXEL_FPS=200
 
 # 量 CPU：render 只用 mock lane（硬件層已另行驗證）。
 CONFIG_NETCORE_PIXEL_MOCK_ONLY=y
+# 畫波／推送分兩個 loop（trial：mock 後端先驗編譯同排程）
+CONFIG_NETCORE_PX_SPLIT_PUSH=y
