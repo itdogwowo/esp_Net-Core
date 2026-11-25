@@ -326,8 +326,8 @@ esp_Net-Core/
 │  │  └─ night-report-*.md   夜間執行報告
 │  ├─ 01_protocol/           frame、commands、transports
 │  ├─ 02_guides/             build/flash、testing、configuration、connectivity
-│  └─ 03_notes/              架構／設計／量測筆記（pixel-evolution ★ 技術進化日誌、
-│                            task-model、buffers、config-layers…）
+│  └─ 03_notes/              架構／設計／量測筆記（tech-evolution ★ 全樹進化日誌、
+│                            pixel-evolution ★ pixel 專文、task-model、buffers…）
 ├─ firmware/
 │  ├─ main/main.c            開機 B01–B11、USB、router 裝配
 │  ├─ components/sys/nc4/    framing、decoder、bus、router、link
@@ -357,7 +357,8 @@ esp_Net-Core/
 4. 想知「點 build／flash／test」→ `docs/02_guides/`
 5. 想知「為什麼這樣設計」→ `docs/03_notes/`
 6. 想知「為什麼變快／每一步試過什麼／失敗過什麼」→
-   `docs/03_notes/pixel-evolution.md`（**技術進化日誌**：每條都有 commit＋數字＋量測點）
+   `docs/03_notes/tech-evolution.md`（**全樹進化日誌**：9 條主線，每條 commit＋數字＋量測點）；
+   pixel 管線的逐階段細節（含 8×8 SWAR 圖解）再看 `docs/03_notes/pixel-evolution.md`
 
 ---
 
@@ -935,6 +936,7 @@ commit message 說明。
 | 2026-11-25 | **IDF 版本已統一 v6.1.1**：macOS `~/esp/esp-idf` `git describe` = v6.1.1，三個環境同版；6.0.3 的對照數字保留作歷史 | lead（AI） |
 | 2026-11-25 | **數據修正（A/B 驗證後）**：P4-ETH 的 6.1.1−6.0.3 image 差由 `+30,992 B` 更正為 **`+24,688 B`**（原本係對住更舊產物）；Matrix `+9,584 B` 證實正確。另註明 25 支 `run.sh` 之中只有 21 支係測試（4 支係 bench） | lead（AI） |
 | 2026-11-26 | **新增技術進化日誌 [`pixel-evolution.md`](docs/03_notes/pixel-evolution.md)**：編碼 143 ms → 6.36 ms 的每一步（含 1.22× 失敗實驗、1-lane 回歸）、配對／環／FPS 三條主線、負結果清單、量測點警告。§3 目錄地圖、找東西次序加第 6 條、§10.4 加指針 | lead（AI） |
+| 2026-11-26 | **再加全樹版 [`tech-evolution.md`](docs/03_notes/tech-evolution.md)**：9 條主線（NC4 收發／通道／緩衝／任務棧／效果層／配對／編碼／USB-FAT／建置）＋§11 跨主線負結果（12 條）＋§12 量測規矩；pixel 專文保留做細節。找東西第 6 條改成「全樹→專文」兩層 | lead（AI） |
 
 ---
 

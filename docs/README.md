@@ -10,7 +10,7 @@
 | **00_pm** 項目管理 | 想知道「做到哪、接下來做什麼」的人 | 現況、路線圖、決策與待辦 | 9 |
 | **01_protocol** 協議層 | 對接方 / 寫 transport / 寫 PC 工具的人 | NC4 在哪些通道上跑、每個通道要自己做什麼 | 3 |
 | **02_guides** 使用教學 | 要 build / 燒錄 / 跑測試 / 選連線 / 改設定的人 | 工具怎麼用、測試怎麼跑、連線怎麼選、**設定放哪怎樣生效**、數字怎麼判讀 | 6 |
-| **03_notes** 設計筆記 | 維護者 / 想了解設計脈絡的人 | 架構、分層、路由、任務模型、記憶體、研究、上板紀錄 | 82 |
+| **03_notes** 設計筆記 | 維護者 / 想了解設計脈絡的人 | 架構、分層、路由、任務模型、記憶體、研究、上板紀錄 | 83 |
 
 > **趕時間先看**：[00_pm/status.md](00_pm/status.md) —— 一頁涵蓋「已驗證的數字、已定案的架構、還沒做的事、要測的場景」。
 
@@ -58,7 +58,8 @@
 
 | 文件 | 內容 |
 |---|---|
-| [pixel-evolution.md](03_notes/pixel-evolution.md) | **Pixel 技術進化日誌（時間線）**：編碼 143 ms → 6.36 ms 的每一步（含 SWAR 1.22× 失敗實驗、1-lane 回歸、單 lane 例外）、配對 6 B 表的擺位反轉（0.60×→2.13×）、環／FPS 兩條主線、**負結果清單**、量測點警告（邊啲數字唔可以互相對比）。**要答「點解變快」先讀這份，唔使翻 git log** |
+| [tech-evolution.md](03_notes/tech-evolution.md) | **全樹技術進化日誌（時間線）**：9 條主線（NC4 收發／通道吞吐／緩衝貼身化／任務棧／效果層／配對／編碼／USB-FAT／建置），每條有 commit、之前→之後、量測點；另有**跨主線負結果表**（12 條做過但無效的方向）與量測方法規矩。**要答「這棵樹快在哪、怎麼快起來」先讀這份** |
+| [pixel-evolution.md](03_notes/pixel-evolution.md) | **Pixel 技術進化日誌（專文）**：編碼 143 ms → 6.36 ms 的每一步（含 SWAR 1.22× 失敗實驗、1-lane 回歸、單 lane 例外）、配對 6 B 表的擺位反轉（0.60×→2.13×）、環／FPS 兩條主線、**負結果清單**、量測點警告（邊啲數字唔可以互相對比） |
 | [driver-layer.md](03_notes/driver-layer.md) | **驅動與匯流排層（`driver/` / `bus/`）**：舊專案 `slave/driver/*_drv.py` 怎麼落地；**`bus/` 是通用匯流排（NC4／LED(SPI)／LCD(I80) 都係它的 personality，唔綁 NC4）**；driver／bus／sys 三層判準、六條 driver 規則、遷移順序 |
 | [hw-ownership.md](03_notes/hw-ownership.md) | **硬體門面 `nc_hw`（owner／command／snapshot）**：中央只做目錄＋命令入口＋最新 snapshot；真正寫硬體的是 owner task；UI／NC4 只讀 snapshot 或送 command；GPIO owner 已上板、`ph_hwcheck` 第一版、claim／保留腳位 |
 | [hw-pwm-uart.md](03_notes/hw-pwm-uart.md) | **PWM／UART／PIN 硬體設定與驅動**：舊專案 config 風格、typed `hardware.json`、LEDC PWM、UART／RS485 DE、`0xF039`–`0xF03B`；A 板上板結果 |

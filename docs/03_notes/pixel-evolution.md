@@ -328,6 +328,9 @@ DMA 完成才 reclaim）見 [pixel-ring-flow.md](pixel-ring-flow.md)。
 4. 數量級不同的量測點唔可以互相對比，表內要標清楚（見 §1.1 的警告）。
 5. 呢份係**歷史**；最新數字覆蓋去 [status.md](../00_pm/status.md)，
    設計理由去 [pixel-renderer.md](pixel-renderer.md)，唔好三份講同一件事講到唔同版本。
+6. **唔屬 pixel 的主線**（NC4／通道／緩衝／效果層／USB-FAT）寫去
+   [tech-evolution.md](tech-evolution.md)（全樹版）；呢份只收 pixel 管線，
+   兩份唔好重複貼同一批數字。
 
 ---
 

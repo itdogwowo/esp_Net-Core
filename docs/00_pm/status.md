@@ -8656,3 +8656,32 @@ fanout）等用家拍板。
 （一份講歷史、一份講機制），避免兩份講同一件事。
 
 **驗證**：純文件改動，冇 code／建置影響；連結以相對路徑（`../00_pm/status.md` 等）檢查過。
+
+### 7.247 2026-11-26（全樹技術進化日誌：9 條主線一次過收攏）
+
+用家要求：唔止 pixel 一條線，整棵樹的技術優化要一次過寫成「一步一步」的紀錄，
+有數據、有改了什麼、有提升幾多，唔好每次翻 git log。
+
+**新增 [`docs/03_notes/tech-evolution.md`](../03_notes/tech-evolution.md)**（全樹版）；
+pixel 專文 [`pixel-evolution.md`](../03_notes/pixel-evolution.md) 保留（細節參考它的 §1／§2）。
+
+| 主線 | 代表數字 |
+|---|---|
+| A NC4 收發核心 | 每核一個 decoder（唔再共用鎖）；hub 102k → **257k ops/s**；靜態 −3,136 B；RING 2,226 mismatch → 0 |
+| B 通道與網絡 | WS RTT P4 6.5 → **3.6 ms**、S3 14–16 → **7.4 ms**；WS 1 KB 1.87 → **5.51 MB/s**；P4 雙 stream **9.22／9.55 MB/s** |
+| C 緩衝貼身化 | UART **−13.3 KB**、棧 **−6.4 KB**、`.bss` **−65 KB**；SD 4K 2,124 → 64K **8,460 KB/s（92%）** |
+| D 任務／棧 | `stack_cover` 實測配棧；`0xF077` frame 2,272 → 1,168 B（爆棧修） |
+| E 效果層 | wave table：gen 15.6 → **2.0 ms**；full8 16.57 → **4.41 ms**；12-bit canvas 20× 慢（PSRAM random） |
+| F 配對 | 零拷貝 9.86 → **3.27 ms**；6 B 表 2.13×；隨機 3.97× |
+| G 編碼 | 16×600 24.0 → **6.36 ms（3.77×）** |
+| H USB／FAT／OTA | OTA 142–191 KB/s（典型 150）；FAT 64 KB chunk 92% 滿速 |
+| I 建置／工具 | IDF 統一 v6.1.1；tests handler −6,512／−6,800 B；bench 家族 |
+
+另有 **§11 跨主線負結果表**（12 條做過但無效：UART 環加大、C11 atomics、PSRAM tiling、
+12-bit canvas、值流 internal、SWAR 單獨、1-lane 廣播、4 B 表、chunk 預取…），
+同 **§12 量測方法規矩**（物理上限／達標率、量測點唔可以跨表比）。
+
+**索引**：AGENTS §3 目錄地圖、找東西次序第 6 條（全樹→專文兩層）、§17 維護表；
+docs/README.md 03_notes 表；`pixel-evolution.md` §8 加互相指針。
+
+**驗證**：純文件改動；相對連結與表格欄數用腳本檢查（0 問題）。
