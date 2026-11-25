@@ -92,6 +92,9 @@
   .q .n{font-size:8.5px; font-variant-numeric:tabular-nums}
   .q .d{font-size:7.5px; opacity:.85}
   .queue-legend{font-size:9px; color:var(--dim); margin-top:6px; line-height:1.45}
+  .hint{font-size:9.5px; color:var(--dim); margin-top:7px; line-height:1.5;
+        border-top:1px dashed #1e2a42; padding-top:6px}
+  .hint b{color:var(--muted); font-weight:500}
 
   .hw{border:1px dashed #33507a; border-radius:12px; padding:9px 12px;
       background:linear-gradient(180deg,rgba(16,24,42,.9),rgba(10,16,30,.9));
@@ -122,6 +125,12 @@
   .callout{margin-top:12px; border:1px solid #4a3a16; background:#1c1608; border-radius:10px;
            padding:10px 12px; font-size:10.5px; line-height:1.65; color:var(--muted)}
   .callout b{color:var(--encode)}
+  .explain{display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-top:16px; max-width:1180px}
+  .ecard{border:1px solid var(--line); border-radius:12px; background:var(--panel2); padding:11px 13px}
+  .ecard h4{font-size:12px; margin:0 0 6px; color:var(--text); font-weight:600}
+  .ecard p{margin:0 0 6px; font-size:10.5px; line-height:1.6; color:var(--muted)}
+  .ecard p:last-child{margin-bottom:0}
+  .ecard b{color:var(--text); font-weight:500}
   @keyframes dash{to{stroke-dashoffset:-24}}
   .arrow{stroke-dasharray:7 5; animation:dash .65s linear infinite}
 </style>
@@ -155,8 +164,10 @@
     </select>
   </label>
   <button class="primary" id="play">⏸ 暫停</button>
+  <button id="step">⏭ 單步</button>
   <button id="reset">重設</button>
   <span class="note" id="cfgline"></span>
+  <span class="note" style="color:var(--dim)">（空白鍵 播放／暫停、→ 單步、R 重設）</span>
 </div>
 
 <div class="diagram" id="diagram">
@@ -203,6 +214,8 @@
         <h3>DMA 槽（後端） <span class="owner">owner: render／backend</span><span class="shared">shared: encode → DMA</span></h3>
         <div class="meta"><b>3 槽</b>（<span class="k">NC_I80_DRV_SLOTS_MAX</span>）· W encode · R DMA · internal</div>
         <div class="cards" id="dmaCards"></div>
+        <div class="hint"><b>槽＝緩衝，唔係頻道</b>：整條 I80 只有 <b>一條 DMA</b>，三個槽只係三塊 internal 記憶體，輪流「送緊／編好等送／空」。
+          encode 揀一個空槽寫入，並記住 <span class="k">d->seq[k]</span>（呢個槽屬於邊個 seq）；submit 之後硬件由嗰個槽讀；<span class="k">reclaim</span> 見到 <span class="k">slot_done(k)</span> 才清空。</div>
       </section>
 
       <section class="group" id="grp-queue">
@@ -210,6 +223,7 @@
         <div class="meta"><b>16 格 × 12 B</b> · 只有 <span class="k">{lane,slot,seq}</span> 索引，唔搬像素</div>
         <div class="queue" id="queue"></div>
         <div class="queue-legend" id="queueLegend">— 空</div>
+        <div class="hint">encode 寫完 DMA 槽 → push <span class="k">{lane,slot,seq}</span>；render pop → <span class="k">submit</span> 嗰個槽。<b>12 B 索引，唔搬像素。</b></div>
       </section>
     </div>
 
@@ -256,6 +270,27 @@
       </div>
     </div>
   </aside>
+</div>
+
+<div class="explain">
+  <div class="ecard">
+    <h4>ready queue 到底做咩？</h4>
+    <p><b>問題</b>：寫 DMA 槽嘅係 <span class="k">pixel_encode_task</span>，叫硬件送嘅係 <span class="k">render_task</span>。兩個係唔同任務（唔同優先級、唔同核心），唔可以你 call 我我 call 你。</p>
+    <p><b>所以</b>：encode 寫完槽 <span class="k">k</span>，只係 push 一項 <span class="k">{lane, slot=k, seq}</span> 落 queue；<span class="k">render</span> 的 push loop 每輪 pop 一項，再 <span class="k">submit(k)</span>。</p>
+    <p><b>三件事</b>：① 跨任務交棒（FreeRTOS queue，唔使自己寫鎖）；② 保證 submit 次序 = encode 次序；
+       ③ 滿 16 項就 fallback 直接 submit（唔會漏咗個槽，令 DMA 槽永遠洩漏）。</p>
+    <p><b>點解成日見唔到佢有貨</b>：單 lane 時 encode 每 tick 出 1 項、push loop 每輪就收 1 項，所以通常只有 0–1 項。
+       16 深係 <span class="k">NC_PX_MAX_LANES × 2</span>（8 lane × 2），唔係因為單 lane 需要咁多。</p>
+  </div>
+  <div class="ecard">
+    <h4>DMA 槽：係緩衝，唔係頻道</h4>
+    <p><b>佢係記憶體</b>：每槽 = 一幀的線材格式（internal RAM，DMA-capable），由 <span class="k">nc_i80_drv_install()</span> 一次過開 <span class="k">slot_bytes × slots</span>。</p>
+    <p><b>只有一條 DMA</b>：整條 I80（LCD_CAM）得一條匯流排，三個槽只係三緩衝（<span class="k">NC_I80_DRV_SLOTS_MAX = 3</span>），
+       一個送緊、一個編好等送、一個空——咁 CPU 就唔使等 DMA 送完才開始編下一幀。<b>唔係用咗三條頻道。</b></p>
+    <p><b>「綁定 slot 0」係咩</b>：encode 揀一個空槽 <span class="k">k</span>，會記低 <span class="k">d->seq[k] = seq</span>、<span class="k">d->pay[k] = 環 payload</span>，
+       即係「呢個槽而家屬於邊一格畫面」。圖上「slot 2 · DMA 2 已佔用」就係呢個對應；
+       DMA 送完 <span class="k">reclaim</span> 見到 <span class="k">slot_done(k)</span> 才清 <span class="k">seq[k]</span>，個槽才變返 FREE。</p>
+  </div>
 </div>
 
 <table class="handoff">
@@ -781,6 +816,18 @@
   $("play").addEventListener("click", () => {
     S.playing = !S.playing;
     $("play").textContent = S.playing ? "⏸ 暫停" : "▶ 播放";
+  });
+  // 單步：暫停之後每按一次前進一個 tick（= 一個 frame_interval），方便慢慢睇
+  $("step").addEventListener("click", () => {
+    S.playing = false;
+    $("play").textContent = "▶ 播放";
+    tick();
+  });
+  window.addEventListener("keydown", (e) => {
+    if (e.target && /^(INPUT|SELECT|TEXTAREA)$/.test(e.target.tagName)) return;
+    if (e.key === " ") { e.preventDefault(); $("play").click(); }
+    else if (e.key === "ArrowRight" || e.key === "s") { e.preventDefault(); $("step").click(); }
+    else if (e.key === "r" || e.key === "R") { e.preventDefault(); reset(); }
   });
   window.addEventListener("resize", () => requestAnimationFrame(drawArrows));
 
