@@ -406,6 +406,16 @@ def _wiring_bus(wiring: dict, kind: str, index: int) -> dict:
     return bus
 
 
+def _suppressed_stub(suppressed: list[str]) -> str:
+    """project 覆寫了 pixel → 這塊板的 LED 段完全讓位（render 用 Kconfig）。"""
+    note = ("// driver.json 有 LED 段，但這個 project 的 sdkconfig.defaults 覆寫了\n"
+            + "".join(f"//   {k}\n" for k in sorted(set(suppressed)))
+            + "// → 外接燈具屬 project，render 用 Kconfig（board 的 LED 段讓位）。\n")
+    return (note
+            + "static const nc_led_cfg_t s_led = { .present = false, .enable = false };\n"
+            "const nc_led_cfg_t *nc_port_led(void) { return &s_led; }\n")
+
+
 def gen_led(driver: dict | None, wiring: dict,
             suppressed: list[str] | None = None) -> tuple[str, dict]:
     """driver.json 的 LED 段 → nc_led_cfg_t（build-time 生成）。
@@ -444,6 +454,16 @@ def gen_led(driver: dict | None, wiring: dict,
         if fmt_s and fmt_s not in LED_FMT_ORDER:
             raise GenError(f"LED.format={led.get('format')!r} 看不懂（用 "
                            + " / ".join(LED_FMT_ORDER) + "）")
+        # ⚠ 讓位要贏過「enable=0」：project 覆寫 pixel 時，board 段（即使係 enable=0）
+        # 都唔可以講「明確唔用燈」——否則 render 會只留 mock，外接燈鏈就唔會亮。
+        # 這正是 SuperMini（board 冇燈）＋ textkit（project 有燈）的情況。
+        if suppressed:
+            return _suppressed_stub(suppressed), {
+                "present": False, "enable": False, "backend": backend_s, "bus": -1,
+                "px": num(led.get("px"), 0), "format": fmt_s,
+                "lanes": num(led.get("lanes"), 0),
+                "wired": backend_s in LED_BACKEND_WIRED,
+                "suppressed_by": sorted(set(suppressed))}
         body = [
             "// driver.json 有 LED 段但 enable=0 → 明確唔用燈（render 只留 mock lane，",
             "// 唔會退回去讀 Kconfig 亂開 i80）。腳位未定是合法的。",
@@ -561,12 +581,7 @@ def gen_led(driver: dict | None, wiring: dict,
                "lanes": lanes, "px": px, "format": fmt, "bus_width": width,
                "wired": backend_s in LED_BACKEND_WIRED}
     if suppressed:
-        note = ("// driver.json 有 LED 段，但這個 project 的 sdkconfig.defaults 覆寫了\n"
-                + "".join(f"//   {k}\n" for k in sorted(set(suppressed)))
-                + "// → 外接燈具屬 project，render 用 Kconfig（board 的 LED 段讓位）。\n")
-        return (note
-                + "static const nc_led_cfg_t s_led = { .present = false, .enable = false };\n"
-                "const nc_led_cfg_t *nc_port_led(void) { return &s_led; }\n",
+        return (_suppressed_stub(suppressed),
                 {**summary, "present": False, "suppressed_by": sorted(set(suppressed))})
     return "\n".join(body) + "\n", summary
 

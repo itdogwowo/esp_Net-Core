@@ -114,6 +114,19 @@ def main() -> int:
            ".data = { 1, 38, 39, 40, 41, 42, 47, 48 }" in c)
         ok("Zero 的 wr／dc = 2／4", ".wr = 2, .dc = 4" in c)
 
+        # ── 3b. board 冇燈（enable=0）但 project 有燈 → 讓位要贏過「明確關閉」 ──
+        # 迴歸：SuperMini 的 board LED 係 enable=0，textkit 用 project sdkconfig 開燈。
+        # 如果生成 present=true/enable=false，render 會只留 mock lane → 燈唔會亮。
+        print("ncportgen：board 冇燈但 project 有燈（SuperMini＋textkit）")
+        p = gen("S3/ESP32-S3-SuperMini", tmp / "sm_textkit",
+                "S3/ESP32-S3-SuperMini-LED-Textkit")
+        ok("生成成功", p.returncode == 0, p.stderr.strip())
+        c = (tmp / "sm_textkit" / "nc_port.c").read_text(encoding="utf-8")
+        ok("讓位：s_led present=false（單行 stub）",
+           "static const nc_led_cfg_t s_led = { .present = false, .enable = false };" in c)
+        ok("唔可以當成「明確關閉」（冇 disable 註解）", "明確唔用燈" not in c)
+        ok("有講明讓位原因", "讓位" in c and "NETCORE_PIXEL_" in c)
+
         # ── 4. 壞 schema：bus 指唔到 → build 要失敗（唔可以靜靜當冇事）──
         print("ncportgen：壞 schema 要 build 失敗")
         bad = tmp / "bad"

@@ -8304,7 +8304,7 @@ apply_uart`；`root_keys` 有 `I80` 所以唔會計 unknown，但**冇 `apply_i8
 | `driver.json` 的 `LED` | 只剩 `backend／bus index／lanes／px／format／timing`（`pins[]`／`bus_width` 已刪） |
 | `render` | 腳位由 `nc_cfg_hardware()->i80[led.bus]`／`spi[led.bus]` 取；Kconfig 仍然係 fallback |
 
-**驗證**：`board.py check` 0 error；`test_led_schema.py` 34 項全過（含「driver 層冇再寫
+**驗證**：`board.py check` 0 error；`test_led_schema.py` 34 項全過（§7.239 之後 38 項；含「driver 層冇再寫
 pins」、「bus_width 由 data 長度推出」、「nc_cfg_load.c 有 apply_i80 且被呼叫」）；
 9 塊板的 `nc_port.c` 全部生成成功；Matrix／Zero／SuperMini／P4-ETH 的 `nc_port.c`、
 `nc_render_task.c`、`nc_cfg_load.c`、`nc_cfg_defaults.c` 全部用 IDF 的 xtensa gcc 編過
@@ -8319,3 +8319,32 @@ sck／mosi）的條目由「靜靜跳過」改成 **build 失敗** —— 否則
 的年代寫的（`I80.enable=0`、`list:[]`）。新 firmware 會把那個 `enable=0` 當成**用戶明確
 關閉** → `n_i80=0` → 燈鏈拿不到腳位。要用 **full flash**（`make.py flash … --full`）重新
 seed 一次，或者手動把該檔的 I80 段改成新種子的內容。
+
+### 7.239 2026-11-25（第一次在 WSL 真跑：抓到兩個缺陷 —— 讓位次序、產物側錄編碼）
+
+之前只做得到「逐檔 xtensa 編譯」，今次在 **WSL Ubuntu 24.04 / IDF v6.0.3** 真跑
+host test 同 build，抓到兩個真缺陷：
+
+1. **讓位要贏過 `enable=0`**：SuperMini 的 board `LED` 是 `enable=0`，textkit project
+   用 sdkconfig 開 6 條鏈。`ncportgen` 原本先判「enable=0 → present=true, enable=false」，
+   令 render 當成「明確唔用燈」→ 只留 mock lane，**textkit 唔會點燈**。
+   改成：project 覆寫 pixel 時，board 段**一律讓位**（`present=false` → render 用 Kconfig），
+   唔理 board 段係 enabled 抑或 disabled。`test_led_schema` 加 4 項（現 **38 項**）。
+2. **產物側錄 JSON 用了本機編碼**：`tools/ncbuild/artifacts.py` 的 `read_text()`／
+   `write_text()` 冇指定 encoding —— Windows（cp950）寫的中文 `note`，WSL（UTF-8）讀就
+   `UnicodeDecodeError`，而且係**建置成功之後**才爆在 `previous_size()`。
+   改成寫入一律 UTF-8（LF），讀取逐個編碼試（UTF-8 → 本機 → cp950），舊檔仍然讀得返
+   （`make.py outputs` 現在列得出 2026-11-23 那兩顆）。
+
+**驗證（WSL，20 核）**：
+
+| 項目 | 結果 |
+|---|---|
+| `bash tools/hosttest/run_all.sh` | **21/21 OK**（20 支＋上游新加的 `fpsclock_test`） |
+| `make.py build ESP32-S3-Matrix --fresh` | 建置完成 **666.4 KB**（89 s） |
+| `make.py build ESP32-S3-SuperMini --project …-LED-Textkit` | 建置完成 **666.6 KB** |
+| 生成物（真 build 的 nc_port.c） | Matrix `.n_i80=1`（data／wr／dc 來自 wiring）；textkit `s_led = { .present = false }` ＋讓位註解 |
+| 修正後重跑 build | 冇 traceback；`previous_size()` 正常顯示 `+0 B`／`-445312 B` |
+
+註：WSL 的 git `core.autocrlf` 未設（Windows 是 `true`），所以在 WSL 看 `git diff` 會見到
+全部檔案「已修改」——那是 CRLF/LF 假象（`--ignore-cr-at-eol` 之後 0 差異）。**唔好喺 WSL commit**。
