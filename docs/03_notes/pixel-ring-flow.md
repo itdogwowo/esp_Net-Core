@@ -73,9 +73,19 @@ render_task push loop
 
 1. **最新優先 vs 每幀必送**：`peek` 永遠拿最新，中間的格被釋放；所以 paint 快過
    encode 時，舊幀直接消失（`skipped`），不是 FIFO。
-2. **4 子幀不是原子 group**：paint 連續 commit 4 格；如果 encode 的 20 ms tick
+2. **4 子幀不是原子 group**：paint 連續 commit 4 格；如果 encode 的 tick
    刚好夾在中間，可能只 encode 到 1–3 個子幀，下一個 tick 才補。視覺上係「半個
    抖動 frame」，通常看不出，但語義上唔完整。
+   > **2026-11-25 更正（由程式碼推導，未上板量）**：「下一個 tick 才補」係錯的。
+   > `nc_px_ring_peek()`（`nc_pixel_q.c`）每次都會把「除最新以外、所有 READY 格」
+   > 直接還原成 FREE（假消費），而 paint 係喺同一次 `content_frame_once()` 內
+   > **連續 commit 完 `ns` 格**（`nc_px_paint_task.c` 的 `for (sf…)`）。所以
+   > 4 子幀＋`frame_interval_ms=5` 之下，encode 每個 tick 只拿到最新 1 個，
+   > 另外 3 個喺下一次 peek 就被釋放，**永遠唔會補送**（`skipped` 會係 `frames×3`）。
+   > 驗法：EffectPerf／Show2400 映像跑一輪，睇 `0xF061` 的 `frames` 對
+   > `skipped` 比值 ≈ 1:3。要修就係 §5-C 的「以視覺幀為單位 commit／只拿完整
+   > group」或者「peek 只釋放 seq < last_seq 的格」。
+
 3. **三種滿了策略唔一致**：effect 等 ack、paint 重試、encode 跳過、queue fallback。
    冇一個統一的「丟幀／背壓」政策。
 4. **多後端冇 fanout**：paint 只寫 `nc_render_first_ring()`。I80 的多 lane 共用
