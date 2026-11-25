@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -222,24 +223,81 @@ def _webmaster_idf_dir(repo: Path) -> str | None:
     return None
 
 
-def idf_path_for(chip: str, cfg: dict) -> Path:
+# IDF checkout 的判準。用 tools/idf.py 而唔用 export.sh：
+#   · Windows 版 IDF 只有 export.bat／export.ps1，用 export.sh 會令 Windows 永遠
+#     找不到 IDF；
+#   · 純 git clone（未跑 install.sh）都有 tools/idf.py，所以它答的是「係唔係 IDF」
+#     而不是「裝好未」——後者由 idf.py --version 回答。
+IDF_MARKER = Path("tools") / "idf.py"
+
+
+def looks_like_idf(p: Path | None) -> bool:
+    return p is not None and (Path(p) / IDF_MARKER).exists()
+
+
+def idf_candidates(chip: str | None, cfg: dict) -> list[tuple[str, Path, bool]]:
+    """回傳 [(來源, 路徑, 是否明確指定)]，順序 = 優先級。
+
+    明確指定（環境變數、make_config、WebMaster、tenv 的 pin）即使路徑不存在都保留：
+    出錯時要指住用戶寫的那個路徑，不可以靜靜跳去另一個 IDF——否則「以為用 6.1.1
+    建置，實際用 6.0.3」正是版本記錄會騙人的原因。
+
+    自動候選（repo 內 .idf、~/esp/**）要由呼叫端用 looks_like_idf() 過濾，避免一個
+    空目錄（例如只剩 .idf/ 的空殼）遮住真正安裝好的 IDF。
+    """
     per = (cfg.get("idf") or {}).get("per_chip") or {}
     repo = Path(__file__).resolve().parents[2]
-    candidates = [
-        os.environ.get(f"IDF_{chip.upper()}"),
-        per.get(chip.upper()) or per.get(chip),
-        os.environ.get("IDF_PATH"),
-        (cfg.get("idf") or {}).get("path"),
-        os.environ.get("ESPWM_IDF_DIR"),
-        _webmaster_idf_dir(repo),
-        # WebMaster 在受限環境會裝到 repo 內（已 gitignore）
-        str(repo / ".idf" / "esp-idf"),
-        str(Path.home() / "esp" / "esp-idf"),
-    ]
-    for c in candidates:
-        if c:
-            return Path(str(c)).expanduser()
-    return Path.home() / "esp" / "esp-idf"
+    home = Path.home()
+    out: list[tuple[str, Path, bool]] = []
+
+    def add(source: str, raw, *, explicit: bool) -> None:
+        if not raw:
+            return
+        p = Path(str(raw)).expanduser()
+        if any(q == p for _, q, _ in out):
+            return
+        out.append((source, p, explicit))
+
+    if chip:
+        add(f"env IDF_{chip.upper()}", os.environ.get(f"IDF_{chip.upper()}"), explicit=True)
+        add(f"make_config idf.per_chip[{chip.upper()}]",
+            per.get(chip.upper()) or per.get(chip), explicit=True)
+    add("env IDF_PATH", os.environ.get("IDF_PATH"), explicit=True)
+    add("make_config idf.path", (cfg.get("idf") or {}).get("path"), explicit=True)
+    add("env ESPWM_IDF_DIR", os.environ.get("ESPWM_IDF_DIR"), explicit=True)
+    add("webmaster settings", _webmaster_idf_dir(repo), explicit=True)
+
+    # 自動候選：先 repo 內（受限環境），再 ~/esp，再常見安裝位置。
+    add("repo .idf/esp-idf", repo / ".idf" / "esp-idf", explicit=False)
+    add("~/esp/esp-idf", home / "esp" / "esp-idf", explicit=False)
+    esp = home / "esp"
+    if esp.is_dir():
+        for p in sorted(esp.glob("esp-idf-*")):
+            add(f"~/esp/{p.name}", p, explicit=False)
+    add("/opt/esp-idf", Path("/opt/esp-idf"), explicit=False)
+    if os.name == "nt":
+        for p in sorted(Path("C:/Espressif/frameworks").glob("esp-idf-*")):
+            add(f"C:/Espressif/frameworks/{p.name}", p, explicit=False)
+    add("~/.espressif/frameworks/esp-idf", home / ".espressif" / "frameworks" / "esp-idf",
+        explicit=False)
+    return out
+
+
+def idf_path_for(chip: str, cfg: dict) -> Path:
+    """決定這次建置用哪個 IDF。
+
+    明確指定永遠優先（就算路徑錯都照回，讓 doctor／build 大聲報錯）；否則回第一個
+    **真的存在** 的自動候選。舊版回第一個「字串」——repo 內一個空的 .idf/ 目錄就會遮住
+    ~/esp/esp-idf，令 doctor 說找不到 IDF（2026-11-26 實際發生）。
+    """
+    cands = idf_candidates(chip, cfg)
+    for _source, p, explicit in cands:
+        if explicit:
+            return p
+    for _source, p, _explicit in cands:
+        if looks_like_idf(p):
+            return p
+    return cands[0][1] if cands else Path.home() / "esp" / "esp-idf"
 
 
 def idf_version(idf: Path) -> str | None:
@@ -334,17 +392,41 @@ def git_dirty() -> bool:
     return rc == 0 and bool(out)
 
 
+def _port_sort_key(p: str) -> list[tuple[int, object]]:
+    """自然排序：COM3 < COM10（純字串排序會把 COM10 排前面）。"""
+    out: list[tuple[int, object]] = []
+    for token in re.split(r"(\d+)", p):
+        if not token:
+            continue
+        out.append((0, int(token)) if token.isdigit() else (1, token.lower()))
+    return out
+
+
 def serial_ports() -> list[str]:
-    """macOS 的 USB 序列埠。Linux 也順便支援。"""
+    """USB 序列埠。
+
+    glob 只覆蓋 POSIX 的慣例路徑；Windows 的 COM* 要靠 pyserial 的 list_ports。
+    tenv／doctor 要在三種機器上都答得出「有冇板」，所以這裡統一做一次；其餘工具
+    只拿結果，不再各自判斷平台。
+    """
     out: list[str] = []
     for pat in ("/dev/cu.usbmodem*", "/dev/tty.usbmodem*", "/dev/ttyACM*", "/dev/ttyUSB*"):
         out.extend(str(p) for p in sorted(Path("/").glob(pat.lstrip("/"))))
-    seen, uniq = set(), []
-    for p in out:
-        if p not in seen:
-            seen.add(p)
-            uniq.append(p)
-    return uniq
+    # Windows 的 COM* 唔會出現在 /dev，要靠 pyserial。POSIX 的 glob 已經夠，
+    # 而且 pyserial 會把 Bluetooth／debug console 也列出來——那些不是板，
+    # 混進來會令 flash 選錯 port、tenv 每次白等 timeout。
+    if os.name == "nt":
+        try:
+            from serial.tools import list_ports   # pyserial；冇裝就跳過
+            for info in list_ports.comports():
+                dev = getattr(info, "device", None)
+                # vid 有值 = 真 USB 序列裝置；主機板內建 COM1 沒有 vid。
+                if dev and getattr(info, "vid", None) is not None and dev not in out:
+                    out.append(str(dev))
+        except Exception:
+            pass       # 沒有 pyserial 不是致命錯：build 不需要 serial
+
+    return sorted(set(out), key=_port_sort_key)
 
 
 def pick_port(cfg: dict, explicit: str | None) -> str | None:

@@ -24,6 +24,11 @@ dependencies.lock
 # 想保留某一顆就自己複製出去；歷史不進 git
 artifacts/
 
+# ── 本機測試環境紀錄（tools/tenv.py）──
+# 每台機一份：IDF 路徑、序列埠、板 cid、板上 image。入 git 只會互相覆蓋。
+# 換電腦／clone 完跑 `python3 tools/tenv.py init` 重建；唔好 commit。
+.testenv/
+
 # ── 用戶管理的檔案系統鏡像 ──
 # 只忽略根目錄的 data/；ports/<chip>/<board>/data/ 是「出廠預置」，要進 git
 # （原因見 docs/03_notes/component-layout.md §8）

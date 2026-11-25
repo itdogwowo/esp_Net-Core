@@ -7,6 +7,11 @@
 
 ## 0. 測試環境
 
+> **快照警告**：下表是 **2026-10-31 的其中一台機**，只作歷史。同一個 repo 會在
+> macOS／Windows／WSL 之間走，IDF 版本／有冇板／板上 image 都不同。
+> 現在有效的環境用 `python3 tools/tenv.py brief`（協議見
+> [test-environment.md](test-environment.md)），不要照抄下表。
+
 | 項目 | 值 |
 |---|---|
 | 日期 | 2026-10-31 |

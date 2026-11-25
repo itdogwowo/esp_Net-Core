@@ -160,8 +160,9 @@ USB 的完整分析：[failure-policy.md §4](../03_notes/failure-policy.md)。
 | `tools/ncm.py pack / dump` | 打包 / 檢視 `.nct` / `.nce`（header + manifest + payload + 指令表） |
 | `tools/nc4_demux.py` | **NC4 協議唯一實作**：`\x1e`…`\n` = log 行；`"NC"`+VER/LEN/CRC32 才算幀，失敗只前進 1 byte |
 | `tools/nc4_log.py` | 看 log 管道（log 與幀共用 CDC） |
+| `tools/tenv.py` | **每台機的測試環境**：探測 IDF／板／image 能力，對照 `tools/testenv/policy.json` 講邊條 lane 跑得（`brief`／`plan`／`stamp`／`verify`）；紀錄在 `.testenv/`（不進 git）。協議見 [test-environment.md](../02_guides/test-environment.md) |
 | `tools/bench/cdc_tx.py` | CDC TX 壓測（log／回覆爭出口時的行為） |
-| `bash tools/hosttest/run_all.sh` | 一次跑完 8 支 host test（cfg / cfgstruct / ncd / task / router / mod / hub / plan），全綠 = 冇 error 亦冇 warning |
+| `bash tools/hosttest/run_all.sh` | 一次跑完 21 支 host test（見 §12.1／`run_all.sh` 的 `TESTS=`），全綠 = 冇 error 亦冇 warning |
 | `tools/hosttest/*/run.sh` | 單支 host 測試，不用板子也不用 IDF：hub / plan / mod / **ncd** / **task** / **cfg** / **router**。Windows 上只有 `cfg` / `ncd` / `task` / `router` 有 `run.bat` |
 | **ESP-IDF 環境** | macOS：`~/esp/esp-idf` **v6.0.3**（2026-11-24 實測 `idf.py --version`；可以直接 `make.py build` ＋ OTA）；Windows：WSL 內 v6.1／v6.1.1（Windows 本身冇 IDF；`v6.1.0` tag 不存在）。`firmware/build/` 兩邊共用，看 map 時留意是哪邊 build 的 |
 | `curl http://10.10.1.50:8080/config.json` | 讀寫設定（GET/PUT） |

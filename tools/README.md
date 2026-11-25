@@ -14,6 +14,8 @@
 - 建置／燒錄／看板：`python3 make.py`（見 `make.py --help`）
 - 對設備說話：`tools/nc4.py --port …`
 - 量測：`tools/bench/`；主機端測試：`tools/hosttest/`
+- 每台機的測試環境：`python3 tools/tenv.py brief`（見
+  [docs/02_guides/test-environment.md](../docs/02_guides/test-environment.md)）
 
 
 ```text
@@ -26,6 +28,8 @@ tools/
 ├─ board.sh                     ① 薄殼 → make.py（相容用）
 ├─ flash.sh                     ① 逃生門燒錄
 ├─ nc4.py  ota.py selftest.py nc4_test.py nc4_file.py buf_test.py matrix.py ncm.py
+├─ tenv.py                      ⑥ 測試環境：IDF／板／image／lane（每台機不同）
+├─ testenv/                     ⑥ tenv 實作（probe／plan／state＋policy.json）
 ├─ effect_bench.py              ② 純效果量測（0xF065；EffectPerf 映像）
 ├─ psram_bench.py               ② PSRAM 大緩衝／混合讀取量測（0xF067）
 ├─ pipe_bench.py                ② 9,600 值效果生成→配對→12→8（0xF069）
@@ -223,6 +227,30 @@ Windows（MSVC）用同目錄的 `run.bat`。目前 `cfg_test` / `ncd_test` / `m
 ```bash
 node tools/poc/mod_poc/host.mjs tools/poc/mod_poc/mod.wasm --frames 120
 ```
+
+---
+
+## ⑥ 測試環境（`tenv`）
+
+同一個 repo 在 macOS／Windows／WSL 之間走，**每台機的 IDF、有冇板、板上 image 都不同**。
+tenv 把「團隊政策」與「這台機的現場」分開：
+
+- 政策（進 git）：`tools/testenv/policy.json`（IDF 要求、host test 支數）
+- 本機紀錄（不進 git）：`.testenv/machine.json`＋`last-probe.json`
+- 每次探測：`status sys`／`status cmds`／`status tasks`／`status ncm`（板上能力由 image 自己講）
+
+| 命令 | 做什麼 |
+|---|---|
+| `python3 tools/tenv.py init` | 第一次在這台機建立紀錄 |
+| `python3 tools/tenv.py bind <board> [--project P]` | 用現在接着的板綁定預期（順便記 cid） |
+| `python3 tools/tenv.py brief` | **每次開工先睇**：一頁講邊條 lane 跑得 |
+| `python3 tools/tenv.py plan -v` | 每條 lane 的前置／指令／閘門／文件 |
+| `python3 tools/tenv.py stamp` | 貼入測試紀錄的一行環境戳記 |
+| `python3 tools/tenv.py verify` | 紀錄與現實有冇漂移（exit 2 = 有） |
+| `python3 tools/tenv.py selftest` | 用假事實跑盡 plan 分支（不需要板） |
+
+`blocked`／`unknown` **不等於測過**；完整協議、狀態語義與疑難排解見
+[docs/02_guides/test-environment.md](../docs/02_guides/test-environment.md)。
 
 ---
 

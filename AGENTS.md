@@ -4,7 +4,7 @@
 > 這個專案，**先由頭讀到落尾**，再開始改任何東西。細節文件在 `docs/`，但方向、鐵律、
 > 工作流程、最常踩的坑全部在這一份。
 >
-> **最後更新**：2026-11-25（版本統一提醒、鐵律 12、host test 21 支）
+> **最後更新**：2026-11-26（新增 §0.6 測試環境 `tenv`；版本統一提醒、鐵律 12、host test 21 支）
 > **維護規則**：每次架構／流程／工具改變，先改這份；過期內容直接覆蓋，唔好累積兩套講法。
 
 ---
@@ -118,6 +118,28 @@ python3 tools/effect_bench.py --port <PORT>
   - 升級／降級要**一次過升齊**；未升齊之前，每次記錄都要寫 `idf=` 同喺邊個環境跑。
     記錄格式：`idf=v6.1.1 (WSL)`。
   - `v6.1.0` 這個 tag **不存在**（只有 `v6.1`／`v6.1.1`）；以 `git describe --tags` 為準。
+
+### 0.6 測試環境：每台機唔同（開工第一件事）
+
+同一個 repo 會喺 macOS／Windows／WSL 之間走，三邊的 IDF、有冇板、板上 image／task 都
+唔同。**唔可以靠記憶或上一節的版本表當成「現在」**；先跑：
+
+```bash
+python3 tools/tenv.py brief        # 一頁：IDF／板／image＋邊條 lane 跑得
+python3 tools/tenv.py plan -v      # 每條 lane 的前置、指令、閘門
+```
+
+- 三層：`tools/testenv/policy.json`（團隊政策，進 git）／`.testenv/`（這台機的
+  `machine.json`＋`last-probe.json`，**唔進 git**）／每次 probe（IDF、serial、
+  `status cmds`、`status tasks`、`status ncm`）。
+- `runnable` 才照 `command` 跑；`blocked`／`unknown` **唔等於測過**，唔可以寫「應該得」。
+- 回報任何數字前貼 `python3 tools/tenv.py stamp`（`env=`／`idf=`／`board=`／`cid=`／
+  `fw=`／`app=`／`img=`）。跨 IDF 版本數字唔可以互相對比（鐵律 12）。
+- 第一次在這台機：`python3 tools/tenv.py init --label "…"`；接板後
+  `python3 tools/tenv.py bind <board> [--project …]`。主機型機器（WSL／CI）：
+  `python3 tools/tenv.py set absent-ok true`。
+- 完整協議（狀態語義、lane 表、`machine.json` schema、故障排查）：
+  [`docs/02_guides/test-environment.md`](docs/02_guides/test-environment.md)。
 
 ---
 
@@ -816,6 +838,9 @@ python3 tools/nc4.py --port <PORT> status mem
 
 ### 14.1 開工前
 
+> **先跑 `python3 tools/tenv.py brief`**（§0.6）：它講這台機的 IDF／板／image 同邊條
+> lane 跑得。下面第 6 步的 `make.py ports` 只是其中一項事實；`blocked` lane 唔可以當跑得。
+
 1. 讀 **`AGENTS.md`（本文件）**。
 2. 讀相關計劃：`docs/00_pm/pixel-tiers-plan.md`／`roadmap.md`／`next-steps.md`。
 3. 讀 `docs/00_pm/status.md` 最新一節，確認「現在點」。
@@ -832,6 +857,9 @@ python3 tools/nc4.py --port <PORT> status mem
 - 大 buffer 唔好放 decode stack。
 
 ### 14.3 驗證
+
+> 先 `python3 tools/tenv.py brief`；plan 說 `blocked`／`unknown` 的 lane **唔可以當驗證過**。
+> 回報時貼 `python3 tools/tenv.py stamp`。
 
 1. `bash tools/hosttest/run_all.sh` → 21/21。
 2. `make.py build ...` → rc=0。
@@ -863,6 +891,11 @@ python3 tools/nc4.py --port <PORT> status mem
 ## 15. 快速命令卡
 
 ```bash
+# 測試環境（每台機唔同；先睇這個）
+python3 tools/tenv.py brief
+python3 tools/tenv.py plan -v
+python3 tools/tenv.py stamp
+
 # 找板／建置
 python3 make.py doctor
 python3 make.py ports
@@ -936,6 +969,7 @@ commit message 說明。
 | 2026-11-25 | **IDF 版本已統一 v6.1.1**：macOS `~/esp/esp-idf` `git describe` = v6.1.1，三個環境同版；6.0.3 的對照數字保留作歷史 | lead（AI） |
 | 2026-11-25 | **數據修正（A/B 驗證後）**：P4-ETH 的 6.1.1−6.0.3 image 差由 `+30,992 B` 更正為 **`+24,688 B`**（原本係對住更舊產物）；Matrix `+9,584 B` 證實正確。另註明 25 支 `run.sh` 之中只有 21 支係測試（4 支係 bench） | lead（AI） |
 | 2026-11-26 | **新增技術進化日誌 [`pixel-evolution.md`](docs/03_notes/pixel-evolution.md)**：編碼 143 ms → 6.36 ms 的每一步（含 1.22× 失敗實驗、1-lane 回歸）、配對／環／FPS 三條主線、負結果清單、量測點警告。§3 目錄地圖、找東西次序加第 6 條、§10.4 加指針 | lead（AI） |
+| 2026-11-26 | **新增測試環境層 [`tenv`](docs/02_guides/test-environment.md)**：`tools/tenv.py`（init／bind／brief／plan／stamp／verify／selftest）＋`tools/testenv/policy.json`（IDF 要求、host test 支數）＋`.testenv/`（本機意圖／事實，唔進 git）。§0.6 新章、§14.1／§14.3 開工先跑、§15 命令卡；同時修 `ncbuild/env.py` 的空 `.idf` 遮住真 IDF、Windows COM 列舉 | lead（AI） |
 | 2026-11-26 | **再加全樹版 [`tech-evolution.md`](docs/03_notes/tech-evolution.md)**：9 條主線（NC4 收發／通道／緩衝／任務棧／效果層／配對／編碼／USB-FAT／建置）＋§11 跨主線負結果（12 條）＋§12 量測規矩；pixel 專文保留做細節。找東西第 6 條改成「全樹→專文」兩層 | lead（AI） |
 
 ---

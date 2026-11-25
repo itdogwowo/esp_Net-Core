@@ -9,7 +9,7 @@
 |---|---|---|---|
 | **00_pm** 項目管理 | 想知道「做到哪、接下來做什麼」的人 | 現況、路線圖、決策與待辦 | 9 |
 | **01_protocol** 協議層 | 對接方 / 寫 transport / 寫 PC 工具的人 | NC4 在哪些通道上跑、每個通道要自己做什麼 | 3 |
-| **02_guides** 使用教學 | 要 build / 燒錄 / 跑測試 / 選連線 / 改設定的人 | 工具怎麼用、測試怎麼跑、連線怎麼選、**設定放哪怎樣生效**、數字怎麼判讀 | 6 |
+| **02_guides** 使用教學 | 要 build / 燒錄 / 跑測試 / 選連線 / 改設定的人 | 工具怎麼用、測試怎麼跑、**每台機的測試環境怎樣識別**、連線怎麼選、**設定放哪怎樣生效**、數字怎麼判讀 | 8 |
 | **03_notes** 設計筆記 | 維護者 / 想了解設計脈絡的人 | 架構、分層、路由、任務模型、記憶體、研究、上板紀錄 | 83 |
 
 > **趕時間先看**：[00_pm/status.md](00_pm/status.md) —— 一頁涵蓋「已驗證的數字、已定案的架構、還沒做的事、要測的場景」。
@@ -48,9 +48,11 @@
 | [build_and_flash.md](02_guides/build_and_flash.md) | **建置與燒錄**：IDF v6.0.3 安裝、macOS 26 的兩個地雷（libexpat / pip truststore）、`app-flash` vs `flash`、疑難排解 |
 | [configuration.md](02_guides/configuration.md) | **配置實務**：一個設定放哪（build 層 vs runtime 層）、**WiFi 的兩道閘**、**LED 的 Kconfig／runtime 分工**、開機 B01–B11 邊一步讀它、改完怎樣驗證 |
 | [testing.md](02_guides/testing.md) | **測試方法與結果**：環境、9 個解碼器 case、benchmark 怎麼打、OTA 怎麼推、怎麼重跑、未測清單、紀錄表 |
+| [test-environment.md](02_guides/test-environment.md) | **每台機的測試環境（tenv）**：政策／本機紀錄／現場探測三層、`tenv brief`／`plan`／`stamp`／`verify`、IDF 與板 cid 漂移怎樣判、`.testenv/` 為何不進 git |
 | [measurement-method.md](02_guides/measurement-method.md) | **量測方法（可重跑）**：四條原則（含**用物理上限當參考線／達標率**）、S0–S7 流程、`buf_probe.py` 每個子命令回答什麼、尺寸公式（region/slot/slots/stack/環）、雙核＋同核隔離驗收、偶發事件追法、**十條踩過的陷阱**、紀錄模板（多了「物理上限／達標率」兩欄）、OTA-only 的安全規則 |
 | [connectivity.md](02_guides/connectivity.md) | **連線方式怎麼選**：`lan` / `wifi` / `bt` / `espnow` 的分別、每個參數的意思、能力矩陣（哪塊板支援什麼）、一起開會怎樣、藍牙專章 |
 | [esp-webmaster-test.md](02_guides/esp-webmaster-test.md) | **ESP WebMaster 上板驗收（CDC FAT）**：build/flash、COM 選擇（P4 JTAG vs OTG）、列出／上傳／pending／confirm／undo／下載／刪除／OTA 的逐步預期結果、失敗模式對照、要留低嘅證據 |
+| [fps-stability.md](02_guides/fps-stability.md) | **FPS 穩定度量測**：`nc_fps_clock` 的時間緩衝、`0xF081`／`0xF082`、四支工具（快測／ppm／長跑／夜間）的用法 |
 
 ---
 

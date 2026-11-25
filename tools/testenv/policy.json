@@ -1,0 +1,21 @@
+{
+  "schema": 1,
+  "_comment": "團隊層的測試環境政策（進 git）。每台機的事實／意圖在 .testenv/，唔喺度；呢份只放『三個環境要一致』嘅數字。",
+  "idf": {
+    "required": "v6.1.1",
+    "compare": "exact",
+    "source": "AGENTS.md §0.5／鐵律 12",
+    "note": "唔同 IDF 版本 = 唔同 image；跨機數字唔可以互相對比。記錄一定要寫 idf=。"
+  },
+  "host_tests": {
+    "runner": "tools/hosttest/run_all.sh",
+    "expected": 21
+  },
+  "probe": {
+    "baud": 115200,
+    "board_timeout_s": 2.5,
+    "status_timeout_s": 2.0,
+    "max_artifacts": 40,
+    "max_age_days": 7
+  }
+}
