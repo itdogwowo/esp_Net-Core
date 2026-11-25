@@ -128,6 +128,10 @@ static uint32_t s_last_apply_us;
 static SemaphoreHandle_t s_plan_mtx;
 static volatile uint32_t s_plan_gen;
 static uint32_t s_last_eff_seq;
+// 多子幀：同一個視覺幀可能交到一半就環滿。記住交到邊個子幀，下一輪由嗰度續，
+// 否則重試會由 sf=0 再交一次（同一個子幀重覆入環，抖動相位就亂）。
+static uint32_t s_sf_seq;                  // s_sf_done 屬於邊個 effect seq
+static uint32_t s_sf_done;                 // 已經 commit 咗幾個子幀
 static nc_pipe_effect_frame_t s_eff_frame;
 
 // 找回「效果用」的環：先問 render 實際綁到邊條（i80 後端起唔到時會係 mock.prd），
@@ -261,7 +265,11 @@ static bool content_frame_once(void)
         const uint32_t ns = (uint32_t)CONFIG_NETCORE_PIXEL_SUBFRAMES;
         uint32_t apply_us = 0, white_us = 0, commit_us = 0;
         const int64_t t_all0 = esp_timer_get_time();
-        for (uint32_t sf = 0; sf < ns; sf++) {
+        if (s_eff_frame.seq != s_sf_seq) {
+            s_sf_seq = s_eff_frame.seq;
+            s_sf_done = 0;                 // 新視覺幀：由第一個子幀開始
+        }
+        for (uint32_t sf = s_sf_done; sf < ns; sf++) {
             nc_px_hdr_t *hp = NULL;
             uint8_t *sp = nc_px_ring_begin_ex(s_content.q, &hp);
             if (sp == NULL) {
@@ -279,6 +287,7 @@ static bool content_frame_once(void)
                 nc_pipe_stats_full();
                 return false;
             }
+            s_sf_done = sf + 1;             // 環滿重試時由呢度續，唔會重交
             const int64_t t3 = esp_timer_get_time();
             apply_us += (uint32_t)(t1 - t0);
             white_us += (uint32_t)(t2 - t1);
@@ -289,6 +298,7 @@ static bool content_frame_once(void)
             }
         }
         (void)t_all0;
+        s_sf_done = 0;                     // 四個子幀交齊
         nc_pipe_stats_pair(0, apply_us, white_us, commit_us, lat_us);
 #else
         nc_px_hdr_t *hdr = NULL;
@@ -438,6 +448,8 @@ static void content_state_reset(void)
     s_content.pixel_dir[0] = '\0';
     s_plan_gen = 0;
     s_last_eff_seq = 0;
+    s_sf_seq = 0;
+    s_sf_done = 0;
     s_content.auto_play = false;
     s_content.mode_frames = 0;
     s_content.mode_limit = 500;
@@ -761,6 +773,8 @@ static esp_err_t content_swap_next(const nc_px_mode_t *mode)
     s_content.next_ready = false;
     s_content.next_mode_name[0] = '\0';
     s_last_eff_seq = 0;
+    s_sf_seq = 0;
+    s_sf_done = 0;
     s_plan_gen++;
     nc_pipe_aprog_publish(s_content.layout.aprog, s_content.layout.naprog, s_plan_gen);
     s_last_apply_us = (uint32_t)(esp_timer_get_time() - t0);
@@ -873,6 +887,8 @@ static esp_err_t content_apply_mode_locked(const nc_px_mode_t *mode)
     s_content.ready = true;
     s_content.fallback = false;
     s_last_eff_seq = 0;
+    s_sf_seq = 0;
+    s_sf_done = 0;
     s_plan_gen++;
     nc_pipe_aprog_publish(s_content.layout.aprog, s_content.layout.naprog, s_plan_gen);
     s_last_apply_us = (uint32_t)(esp_timer_get_time() - t0);

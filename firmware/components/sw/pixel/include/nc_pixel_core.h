@@ -141,6 +141,54 @@ const uint8_t *nc_px_ring_peek(nc_pixel_q_t *q, const nc_px_hdr_t **hdr, uint32_
 // 用完就還（seq = 剛才交出去的格）
 void           nc_px_ring_release(nc_pixel_q_t *q, uint32_t seq);
 
+// 取「下一個未取」的格：seq 最小而且 > after_seq 的那一格。**唔會假消費**其他格。
+// 為什麼要有第二個取法：4 子幀時間抖動（12→10 bit）要四個子幀**全部**依次送出；
+// peek 只會攞最新一格，其餘喺同一次 peek 就被釋放 → 抖動等於冇做。
+// 所以多子幀行 FIFO（送唔切就背壓 paint），單子幀維持最新優先（舊幀冇意義）。
+const uint8_t *nc_px_ring_next(nc_pixel_q_t *q, uint32_t after_seq,
+                               const nc_px_hdr_t **hdr, uint32_t *out_seq);
+
+// ── 取格政策（後端唔應該自己揀）──
+// CONFIG_NETCORE_PIXEL_SUBFRAMES > 1 → 逐格 FIFO；否則 → 最新優先。
+// host test 冇 sdkconfig，所以預設走 mailbox（同 firmware 單子幀一致）。
+static inline bool nc_px_ring_ordered(void)
+{
+#if defined(CONFIG_NETCORE_PIXEL_SUBFRAMES) && (CONFIG_NETCORE_PIXEL_SUBFRAMES > 1)
+    return true;
+#else
+    return false;
+#endif
+}
+
+static inline const uint8_t *nc_px_ring_take(nc_pixel_q_t *q, uint32_t after_seq,
+                                             const nc_px_hdr_t **hdr, uint32_t *out_seq)
+{
+    if (nc_px_ring_ordered()) {
+        return nc_px_ring_next(q, after_seq, hdr, out_seq);
+    }
+    const uint8_t *p = nc_px_ring_peek(q, hdr, out_seq);
+    if (p == NULL) {
+        return NULL;
+    }
+    if (out_seq != NULL && *out_seq == after_seq) {
+        return NULL;                       // 同一格已經交過
+    }
+    return p;
+}
+
+// 取到格但後端冇位放（全部 DMA 槽在飛）：
+//   mailbox：一定要還格，否則同一格會一直係「最新」、阻住下一格。
+//   FIFO：唔還 —— 下一輪 next() 會再攞返同一格，唔會漏子幀。
+static inline void nc_px_ring_untake(nc_pixel_q_t *q, uint32_t seq)
+{
+    if (nc_px_ring_ordered()) {
+        (void)q;
+        (void)seq;
+        return;
+    }
+    nc_px_ring_release(q, seq);
+}
+
 typedef struct {
     uint32_t puts;       // 成功交付
     uint32_t drops;      // 環滿而被拒

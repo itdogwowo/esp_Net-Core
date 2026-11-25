@@ -172,6 +172,12 @@
       <option value="p64">64 px · 1 子幀 · 20 ms（8×8）</option>
     </select>
   </label>
+  <label>取格政策
+    <select id="policy">
+      <option value="fifo" selected>逐格 FIFO（已修：4 子幀全部送）</option>
+      <option value="peek">peek 最新（舊：只送最後一個）</option>
+    </select>
+  </label>
   <label>速度
     <select id="speed">
       <option value="500">很慢（每微步 500 ms）</option>
@@ -383,7 +389,7 @@
   };
 
   const S = {
-    preset: "p9600", px: 9600, ns: 1, frameMs: 20, ringN: 3,
+    preset: "p9600", policy: "fifo", px: 9600, ns: 1, frameMs: 20, ringN: 3,
     tick: 0, msPerStep: 150, acc: 0, playing: false,
     frameSeq: 0, commitSeq: 0, wr: 0, lastSeq: 0,
     poolNext: 0, dmaNext: 0,
@@ -481,11 +487,58 @@
       yield;
     }
 
-    // ③ encode：先「讀環格」（peek + 假消費），再「寫 DMA 槽」
+    // ③ encode：按政策取格（fifo = 修好後；peek = 舊行為）
     if (qlen() >= QUEUE_MAX) {
       S.st.starved++;
       S.act = {}; S.lastEncode = "queue 滿 → 呢個 tick 唔 acquire";
       log("encode：queue 滿（16 項）→ 呢個 tick 唔 acquire");
+    } else if (S.policy === "fifo") {
+      // 逐格 FIFO：攞 seq 最細而又未交過（> lastSeq）的 READY 格；唔會假消費其他格
+      let pick = -1, pickSeq = 0;
+      const readyN = S.ring.filter((r) => r.state === "ready").length;
+      for (let i = 0; i < S.ring.length; i++) {
+        const r = S.ring[i];
+        if (r.state !== "ready" || r.seq <= S.lastSeq) continue;
+        if (pick < 0 || r.seq < pickSeq) { pick = i; pickSeq = r.seq; }
+      }
+      if (pick < 0) {
+        S.st.starved++;
+        S.act = {}; S.lastEncode = "starved：冇未送的格";
+        log("encode：環上冇「未送過」的格（等 paint 交新的）");
+      } else {
+        const rr = S.ring[pick];
+        rr.peeked = 3;
+        S.act = { encode: true };
+        S.lastEncode = `逐格取：環上 ${readyN} 格 READY → 攞最舊 = slot ${pick}（seq ${rr.seq}）`;
+        log(`encode：逐格政策（fifo）— 環上 READY 共 ${readyN} 格，攞 <b>seq 最細</b>（最舊）嗰格 → slot ${pick}（${frameLabel(rr.frame, rr.sf)}，seq ${rr.seq}）`);
+        log("encode：呢個政策唔會假消費其他格，所以四個子幀會一個一個輪住送出去");
+        yield;
+
+        let slot = -1;
+        for (let k = 0; k < S.dma.length; k++) {
+          const idx = (S.dmaNext + k) % S.dma.length;
+          if (S.dma[idx].state === "free") { slot = idx; break; }
+        }
+        S.act = { encode: true };
+        if (slot < 0) {
+          S.st.starved++;
+          S.lastEncode = "全部 DMA 槽在飛 → 下一輪再試（唔會掉格）";
+          log("encode：三個 DMA 槽都仲在飛 → 呢輪唔送，但條環格留住，下一輪再攞（唔會漏）");
+        } else {
+          S.dmaNext = (slot + 1) % S.dma.length;
+          S.dma[slot] = { state: "ready", seq: rr.seq, ring: pick, frame: rr.frame, sf: rr.sf, left: 0, justFree: 0, justWritten: 2 };
+          rr.hold = slot;
+          S.queue[S.qwr % QUEUE_MAX] = { dma: slot, seq: rr.seq, frame: rr.frame, sf: rr.sf };
+          S.qwr++;
+          S.lastSeq = rr.seq;
+          S.st.encoded++; S.st.pushed++;
+          S.st.peakQ = Math.max(S.st.peakQ, qlen());
+          S.lastEncode = `寫入 DMA ${slot}，push 索引（${frameLabel(rr.frame, rr.sf)}）`;
+          log(`encode：編成 ${frameLabel(rr.frame, rr.sf)} → 寫 DMA ${slot}（seq ${rr.seq}）；push 12 B 索引落 queue`);
+          link(cid("ring", pick), cid("dma", slot), COLORS.encode, frameLabel(rr.frame, rr.sf));
+        }
+        yield;
+      }
     } else {
       let newest = -1;
       for (let i = 0; i < S.ring.length; i++) {
@@ -501,11 +554,11 @@
         S.act = {}; S.lastEncode = "starved：最新格同上一格一樣（post_seq）";
         log("encode：最新格已經 encode 過（post_seq 一樣）→ 呢輪 skip");
       } else {
-        // 3a：掃描環上所有 READY 格，揀 seq 最大嗰格（firmware 的 peek 規則）
+        // 3a：掃描 + 揀 seq 最大
         const readyList = [];
         for (let i = 0; i < S.ring.length; i++) {
           const r = S.ring[i];
-          if (r.state === "ready") readyList.push({ i, seq: r.seq, label: frameLabel(r.frame, r.sf), hold: r.hold });
+          if (r.state === "ready") readyList.push({ i, seq: r.seq, label: frameLabel(r.frame, r.sf) });
         }
         const rr = S.ring[newest];
         rr.peeked = 3;
@@ -515,7 +568,7 @@
         log(`encode：peek 規則 = 攞 <b>seq 最大</b> 嗰格 → 揀 slot ${newest}（${frameLabel(rr.frame, rr.sf)}，seq ${rr.seq}）`);
         yield;
 
-        // 3b：其餘 READY 格「假消費」（比最新舊、又冇人攞）→ 直接釋放，唔會補播
+        // 3b：其餘 READY 格假消費
         const fakeNames = [];
         for (let i = 0; i < S.ring.length; i++) {
           if (i === newest || S.ring[i].state !== "ready" || S.ring[i].hold >= 0) continue;
@@ -532,7 +585,6 @@
           yield;
         }
 
-        // 3c：寫 DMA 槽 + push 索引
         let slot = -1;
         for (let k = 0; k < S.dma.length; k++) {
           const idx = (S.dmaNext + k) % S.dma.length;
@@ -566,7 +618,7 @@
       const p = S.effPending;
       const committed = [];
       let prev = -1, broke = false;
-      for (let sf = 0; sf < S.ns; sf++) {
+      for (let sf = (p.sfDone || 0); sf < S.ns; sf++) {
         const i = S.wr % S.ringN;
         if (S.ring[i].state !== "free") { S.st.busy++; broke = true; break; }
         let line = "paint：";
@@ -579,6 +631,7 @@
           line += `commit slot ${prev}（${frameLabel(p.id, prevSf)}）→ READY；`;
         }
         S.ring[i] = { state: "filling", seq: 0, frame: p.id, sf, hold: -1, skip: 0, prog: 1 };
+        p.sfDone = sf + 1;
         prev = i; var prevSf = sf;
         S.wr = (i + 1) % S.ringN;
         S.act = { paint: true };
@@ -790,7 +843,20 @@
     const active = ["effect", "paint", "encode", "render"].filter((k) => S.act[k]).length;
     $("headline").textContent = active ? `今個微步：${["effect", "paint", "encode", "render"].filter((k) => S.act[k]).join("、")}` : "今個微步冇動作";
 
-    $("callout").hidden = !(S.ns > 1 && S.st.skipped > 0);
+    const co = $("callout");
+    if (S.ns > 1 && S.policy === "peek" && S.st.skipped > 0) {
+      co.hidden = false;
+      co.innerHTML = `<b>而家揀咗「peek 最新」＝舊行為（會漏格）</b>：paint 一次交 4 格，encode 每次只攞 seq 最大嗰格，
+        其餘 3 格喺同一輪被假消費（睇上面假消費計數，正常會係 frames×3）。12→10 bit 抖動等於冇做 —— 所以 firmware 已改成「逐格 FIFO」。
+        切返上面「逐格 FIFO」就會見到四個子幀一個一個送出去，假消費變 0。`;
+    } else if (S.ns > 1) {
+      co.hidden = false;
+      co.innerHTML = `<b>而家揀咗「逐格 FIFO」＝修好之後</b>：encode 每次攞 <b>seq 最細（最舊）</b>嗰格，唔會假消費其他格；
+        四個子幀會一個一個依次送去 DMA，假消費應該係 <b>0</b>。代價係 paint 有機會被背壓（環滿就等），
+        換嚟四個子幀都真的送出去 —— 呢個就係 12→10 bit 時間抖動要嘅嘢。`;
+    } else {
+      co.hidden = true;
+    }
 
     $("stephint").textContent = `共 ${S.log.length} 個 tick · ${S.ns} 子幀 → paint 每次交 ${S.ns} 格（逐格做，所以會見到 ${S.ns} 步）`;
     const rowsAll = (S.cur && S.cur.lines.length) ? S.log.concat([S.cur]) : S.log;
@@ -947,6 +1013,7 @@
 
   $("reset").addEventListener("click", reset);
   $("preset").addEventListener("change", (e) => { S.preset = e.target.value; reset(); });
+  $("policy").addEventListener("change", (e) => { S.policy = e.target.value; reset(); });
   $("speed").addEventListener("change", (e) => { S.msPerStep = Number(e.target.value); S.acc = 0; });
   $("play").addEventListener("click", () => {
     S.playing = !S.playing;

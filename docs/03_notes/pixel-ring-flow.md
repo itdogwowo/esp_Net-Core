@@ -46,10 +46,17 @@ render_task push loop
 - 零拷貝：`layout apply` 直接寫 `slot_payload`；冇 canvas、冇複製。
 - 4 子幀：**一個視覺幀 commit `ns` 次**（每個子幀一個 seq／一格）。
 
-### 2.3 環 → encode
+### 2.3 環 → encode（兩種取格政策，2026-11-26 起）
 
-- 後端 `acquire()` 用 `nc_px_ring_peek()`：永遠拿**最新**一格；
+- **多子幀（`CONFIG_NETCORE_PIXEL_SUBFRAMES > 1`）→ 逐格 FIFO**：後端 `acquire()` 用
+  `nc_px_ring_next(after_seq)`，拿 **seq 最小而且 > 上次已交** 的那格；
+  **唔會假消費**其他格。四個子幀一個一個依次送去 DMA；環滿就背壓 paint
+  （`begin()` 回 NULL → paint busy++），唔會漏。
+- **單子幀 → 最新優先（mailbox）**：仍然用 `nc_px_ring_peek()`，拿**最新**一格，
   `peek` 會把「比最新舊的 READY 格」釋放（假消費），encode 記 `skipped`。
+- 兩者由 `nc_px_ring_take()` 依 `CONFIG_NETCORE_PIXEL_SUBFRAMES` 揀，後端唔自己判斷。
+- 為什麼要分開：4 子幀抖動（12→10 bit）要四個子幀**全部**送到，只交最後一個等於冇抖動；
+  單子幀時舊幀冇意義，掉舊格換低延遲反而正確。
 - 後端自己的 DMA 槽（i80：`slots` 個 internal buffer）滿了就這輪不拿。
 - encode 完成 → `px_ready_t{lane,slot,seq}` 入隊（8 格／lane 的索引，不 copy 像素）。
 
@@ -65,26 +72,29 @@ render_task push loop
 | Buffer | 誰寫 | 誰讀 | 大小／數量 | 滿了怎樣 |
 |---|---|---|---|---|
 | effect pool | effect | paint | 2 × Σ nv × 2 B（PSRAM） | effect 等 ack（背壓） |
-| prd 環 | paint | encode（peek） | N ×（64 B＋px×4） | paint 重試（busy++） |
+| prd 環 | paint | encode（多子幀 FIFO／單子幀 peek 最新） | N ×（64 B＋px×4） | paint 重試（busy++，背壓） |
 | DMA 槽 | encode | 硬件 DMA | N × units（internal） | acquire 這輪不拿 |
 | ready queue | encode | push | 16 × 12 B | fallback submit |
 
 ## 4. 現況的張力（要討論）
 
-1. **最新優先 vs 每幀必送**：`peek` 永遠拿最新，中間的格被釋放；所以 paint 快過
-   encode 時，舊幀直接消失（`skipped`），不是 FIFO。
+1. **最新優先 vs 每幀必送**（2026-11-26 已定案）：**多子幀用 FIFO**（每幀必送、背壓）、
+   **單子幀用 mailbox**（最新優先、丟舊格）。之前一律用 `peek`（最新優先），所以 4 子幀
+   只有最後一個送到 —— 見下面 §4.2 的實測。
 2. **4 子幀不是原子 group**：paint 連續 commit 4 格；如果 encode 的 tick
    刚好夾在中間，可能只 encode 到 1–3 個子幀，下一個 tick 才補。視覺上係「半個
    抖動 frame」，通常看不出，但語義上唔完整。
-   > **2026-11-25 更正（由程式碼推導，未上板量）**：「下一個 tick 才補」係錯的。
-   > `nc_px_ring_peek()`（`nc_pixel_q.c`）每次都會把「除最新以外、所有 READY 格」
-   > 直接還原成 FREE（假消費），而 paint 係喺同一次 `content_frame_once()` 內
-   > **連續 commit 完 `ns` 格**（`nc_px_paint_task.c` 的 `for (sf…)`）。所以
-   > 4 子幀＋`frame_interval_ms=5` 之下，encode 每個 tick 只拿到最新 1 個，
-   > 另外 3 個喺下一次 peek 就被釋放，**永遠唔會補送**（`skipped` 會係 `frames×3`）。
-   > 驗法：EffectPerf／Show2400 映像跑一輪，睇 `0xF061` 的 `frames` 對
-   > `skipped` 比值 ≈ 1:3。要修就係 §5-C 的「以視覺幀為單位 commit／只拿完整
-   > group」或者「peek 只釋放 seq < last_seq 的格」。
+   > **2026-11-26 已修**：`peek` 每次都會把「除最新以外、所有 READY 格」直接還原成 FREE
+   > （假消費），而 paint 係喺同一次 `content_frame_once()` 內連續 commit 完 `ns` 格 ——
+   > 所以舊行為下 encode 每 tick 只拿到最新 1 個，另外 3 個喺下一次 peek 就被釋放，
+   > **永遠唔會補送**（`skipped ≈ frames×3`）。
+   >
+   > 修法（已入 code，host test 覆蓋、未上板量）：
+   > ① `nc_px_ring_next()` 逐格取（FIFO、唔假消費）＋`nc_px_ring_take()` 依
+   > `CONFIG_NETCORE_PIXEL_SUBFRAMES` 揀政策；
+   > ② paint 的 `for (sf…)` 加 **續傳**（`s_sf_done`）：環滿停手之後由下一個子幀續，
+   > 唔會由 `sf=0` 重交（否則同一個子幀重覆入環，抖動相位亂）。
+   > 驗法：`0xF061` 的 `skipped` 應該係 **0**（4 子幀模式）；paint 會有 busy++（背壓）。
 
 3. **三種滿了策略唔一致**：effect 等 ack、paint 重試、encode 跳過、queue fallback。
    冇一個統一的「丟幀／背壓」政策。

@@ -8716,3 +8716,34 @@ docs/
 
 **驗證**：純文件搬遷，冇 code／建置影響；全 repo 相對連結＋表格欄數用腳本掃過
 （0 missing、0 mismatch）。
+
+### 7.249 2026-11-26（4 子幀抖動修好：環改成「多子幀逐格 FIFO」，paint 續傳）
+
+用家睇緩衝圖時發現：開 4 子幀（12→10 bit 時間抖動）但 encode 每次只攞環上最新一格，
+其餘 3 格喺同一輪 `peek` 被假消費 —— 即係抖動等於冇做。呢個係真 bug，唔係畫錯。
+
+**根因**：`nc_px_ring_peek()` 的合約係「最新優先、其餘即刻釋放」，而 paint 喺同一次
+`content_frame_once()` 內連續 commit `ns` 格（`for (sf…)`）。encode 每個 tick 只攞一格，
+所以 4 個子幀只有最後一個送到（`skipped ≈ frames×3`）。
+
+**修法**（兩個改動缺一不可）：
+
+1. **逐格 FIFO**：新增 `nc_px_ring_next(after_seq)`（回 seq 最小而 > 已交那一格，
+   **唔會假消費**）；`nc_px_ring_take()`／`nc_px_ring_untake()` 依
+   `CONFIG_NETCORE_PIXEL_SUBFRAMES` 揀政策：多子幀 FIFO、單子幀維持 mailbox（最新優先）。
+   三個後端（i80／spi／direct）改用 `take/untake`。
+2. **paint 續傳**：環滿停手之後，下一輪要由 `sf = s_sf_done` 續，唔可以再由 0 開始
+   （否則同一個子幀重覆入環，抖動相位亂）。
+
+**取捨**：多子幀由「丟舊幀」變成「背壓」——環滿就 paint busy++，換嚟四個子幀全部送到。
+單子幀不變（舊幀冇意義，丟咗換低延遲）。
+
+**驗證**（`idf=v6.0.3 (macOS)`；⚠ 政策要 v6.1.1，呢部機係 6.0.3，數字只作編譯／行為檢查）：
+
+- `tools/hosttest/run_all.sh` **21/21**；`pixel_test` 新增
+  `test_ring_ordered()`（next() 次序、唔改 state、唔假消費、peek 仍然最新優先）。
+- 建置：`ESP32-S3-Zero-Show2400`（subframes=4，走 FIFO 分支）✔ 696.4 KB；
+  `ESP32-S3-Matrix-Show`（subframes=1，走 mailbox 分支）✔。
+- 模擬（緩衝圖同一段 JS，2,000 ticks）：FIFO 模式 encode 1,995／假消費 **0**；
+  peek 模式 encode 499／假消費 1,497。**未上板**（本機冇板），
+  `0xF061` 的 `skipped` 應為 0 這一條要上板確認。

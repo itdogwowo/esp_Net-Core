@@ -659,11 +659,70 @@ static void test_pack_bus_clear16(void)
     }
 }
 
+
+// ── ①b 逐格取（多子幀抖動）：FIFO，唔可以假消費 ────────────────────
+static void test_ring_ordered(void)
+{
+    section("環：next() 逐格取（4 子幀要全部送出，唔可以只攞最新）");
+    static uint8_t region[4096];
+    nc_pixel_q_t q;
+    const uint32_t px = 8, slots = 5;
+    CHECK(nc_px_ring_init(&q, &(nc_px_ring_cfg_t){
+              .name = "ord", .region = region, .region_bytes = sizeof(region),
+              .px = px, .slots = slots }) == &q);
+
+    uint8_t frame[32];
+    const nc_px_hdr_t *h = NULL;
+    uint32_t seq = 0;
+
+    // ① 一次過 commit 4 格（paint 交一個視覺幀的 4 個子幀）
+    for (int i = 0; i < 4; i++) {
+        memset(frame, (uint8_t)(0x10 + i), sizeof(frame));
+        CHECK(nc_px_ring_put(&q, frame, NC_PX_SRC_BUILTIN, 1));
+    }
+    CHECK_EQ(nc_px_ring_fill(&q), 4);
+
+    // ② next() 要由舊到新逐格交，而且唔可以影響其他格（fill 要慢慢減）
+    for (uint32_t want = 1; want <= 4; want++) {
+        const uint8_t *p = nc_px_ring_next(&q, want - 1, &h, &seq);
+        CHECK(p != NULL);
+        CHECK_EQ(seq, want);                       // 次序 1,2,3,4
+        CHECK_EQ(p[0], (uint8_t)(0x10 + want - 1)); // 內容對得上（冇被假消費打亂）
+        CHECK_EQ(nc_px_ring_fill(&q), 5u - want); // next() 唔會改 state（唔假消費）
+        nc_px_ring_release(&q, seq);               // DMA 完成才還
+        CHECK_EQ(nc_px_ring_fill(&q), 4u - want);  // 還一格、少一格
+    }
+
+    // ③ 全部取完：再 next() 要 NULL（唔會回舊格）
+    CHECK(nc_px_ring_next(&q, 4, &h, &seq) == NULL);
+    CHECK_EQ(nc_px_ring_fill(&q), 0);
+
+    // ④ peek 仍然係「最新優先」：填 3 格，peek 拿第 3 格，其餘假消費
+    for (int i = 0; i < 3; i++) {
+        memset(frame, (uint8_t)(0x40 + i), sizeof(frame));
+        CHECK(nc_px_ring_put(&q, frame, NC_PX_SRC_BUILTIN, 1));
+    }
+    const uint8_t *p = nc_px_ring_peek(&q, &h, &seq);
+    CHECK(p != NULL);
+    CHECK_EQ(seq, 7u);
+    nc_px_ring_release(&q, seq);
+    CHECK_EQ(nc_px_ring_fill(&q), 0);               // 兩格被假消費
+
+    // ⑤ 逐格模式唔可以偷走「已經交咗」的格：after_seq 之後才有得拿
+    CHECK(nc_px_ring_put(&q, frame, NC_PX_SRC_BUILTIN, 1));   // seq 8
+    CHECK(nc_px_ring_put(&q, frame, NC_PX_SRC_BUILTIN, 1));   // seq 9
+    p = nc_px_ring_next(&q, 8, &h, &seq);
+    CHECK(p != NULL);
+    CHECK_EQ(seq, 9u);                              // 只回 9（8 已交過）
+    nc_px_ring_release(&q, seq);
+}
+
 // ── main ──────────────────────────────────────────────────────────
 int main(void)
 {
     printf("pixel core test（環 + 編碼器；純 C，無 IDF）\n");
     test_ring();
+    test_ring_ordered();
     test_encode_lane();
     test_dither();
     test_multilane();

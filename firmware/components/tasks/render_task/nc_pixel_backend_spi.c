@@ -43,8 +43,9 @@ static bool spi_acquire(nc_pixel_backend_t *b, uint32_t post_seq, uint32_t *slot
                         const uint8_t **payload, uint32_t *px, uint32_t *seq)
 {
     spi_be_t *d = (spi_be_t *)b->ctx;
-    const uint8_t *p = nc_px_ring_peek(b->ring, NULL, seq);
-    if (p == NULL || *seq == post_seq) {
+    // 取格政策見 nc_px_ring_take()：多子幀＝逐格 FIFO，單子幀＝最新優先。
+    const uint8_t *p = nc_px_ring_take(b->ring, post_seq, NULL, seq);
+    if (p == NULL) {
         return false;
     }
     for (uint32_t i = 0; i < d->slots; i++) {
@@ -60,7 +61,7 @@ static bool spi_acquire(nc_pixel_backend_t *b, uint32_t post_seq, uint32_t *slot
             return true;
         }
     }
-    nc_px_ring_release(b->ring, *seq);
+    nc_px_ring_untake(b->ring, *seq);
     return false;
 }
 

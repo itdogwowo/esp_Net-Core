@@ -250,6 +250,52 @@ const uint8_t *nc_px_ring_peek(nc_pixel_q_t *q, const nc_px_hdr_t **hdr, uint32_
     return slot_payload(q, i);
 }
 
+// 逐格取（FIFO）：回「seq 最小而且 > after_seq」那一格，唔會假消費其他格。
+// 為什麼唔直接 reuse peek：peek 的合約係「最新優先、其餘即刻釋放」，
+// 4 子幀抖動要四個子幀全部送出，用 peek 會掉 3/4。呢個函式唔改任何 state，
+// reader 用完照樣靠 release(seq) 還格（DMA 完成之後）。
+const uint8_t *nc_px_ring_next(nc_pixel_q_t *q, uint32_t after_seq,
+                               const nc_px_hdr_t **hdr, uint32_t *out_seq)
+{
+    if (q == NULL) {
+        return NULL;
+    }
+    const uint32_t newest = atomic_load(&q->seq);
+    if (newest == 0 || newest <= after_seq) {
+        q->stale++;
+        return NULL;
+    }
+    int      best     = -1;
+    uint32_t best_seq = 0;
+    for (uint32_t i = 0; i < q->slots; i++) {
+        if (atomic_load(&q->state[i]) != SLOT_READY) {
+            continue;
+        }
+        const uint32_t s =
+            atomic_load_explicit((const _Atomic uint32_t *)hseq(slot_hdr(q, i)),
+                                 memory_order_acquire);
+        if (s == 0 || s <= after_seq) {
+            continue;                      // 已經交過（或者仲喺 DMA 手上）
+        }
+        if (best < 0 || s < best_seq) {
+            best = (int)i;
+            best_seq = s;
+        }
+    }
+    if (best < 0) {
+        q->stale++;
+        return NULL;
+    }
+    const nc_px_hdr_t *h = slot_hdr(q, (uint32_t)best);
+    if (hdr != NULL) {
+        *hdr = h;
+    }
+    if (out_seq != NULL) {
+        *out_seq = best_seq;
+    }
+    return slot_payload(q, (uint32_t)best);
+}
+
 void nc_px_ring_release(nc_pixel_q_t *q, uint32_t seq)
 {
     if (q == NULL || seq == 0) {

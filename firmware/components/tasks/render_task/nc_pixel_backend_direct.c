@@ -42,12 +42,10 @@ static bool dir_acquire(nc_pixel_backend_t *b, uint32_t post_seq, uint32_t *slot
                         const uint8_t **payload, uint32_t *px, uint32_t *seq)
 {
     dir_t *d = (dir_t *)b->ctx;
-    const uint8_t *p = nc_px_ring_peek(d->q, NULL, seq);
+    // 取格政策見 nc_px_ring_take()：多子幀＝逐格 FIFO，單子幀＝最新優先。
+    const uint8_t *p = nc_px_ring_take(d->q, post_seq, NULL, seq);
     if (p == NULL) {
         return false;                        // 沒有新格（或已經交過同一格）
-    }
-    if (*seq == post_seq) {
-        return false;
     }
     for (int i = 0; i < DIR_SLOTS; i++) {
         if (d->seq[i] == 0) {
@@ -61,6 +59,7 @@ static bool dir_acquire(nc_pixel_backend_t *b, uint32_t post_seq, uint32_t *slot
             return true;
         }
     }
+    nc_px_ring_untake(d->q, *seq);           // mailbox：唔還格會阻住最新格
     return false;                            // 全部在飛（direct 不該發生：reclaim 每輪都清）
 }
 
