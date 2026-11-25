@@ -8747,3 +8747,41 @@ docs/
 - 模擬（緩衝圖同一段 JS，2,000 ticks）：FIFO 模式 encode 1,995／假消費 **0**；
   peek 模式 encode 499／假消費 1,497。**未上板**（本機冇板），
   `0xF061` 的 `skipped` 應為 0 這一條要上板確認。
+
+### 7.250 2026-11-26（Textkit 燈效全面 JSON 化：RGB 呼吸／彩虹循環）
+
+**目標**：`ESP32-S3-SuperMini-LED-Textkit`（6 條 WS2812 × 20 顆）的燈效完全由
+`/data/pixel` 的 JSON 決定，唔使改 C、唔使重燒。
+
+**新增**（`ports/project/S3/ESP32-S3-SuperMini-LED-Textkit/data/pixel/`）：
+
+- `effects/effects.json`：7 個效果（`breath_r/g/b`、`rainbow_r/g/b`、`breathe`）。
+  全部 `math_now`（正弦），`phi` 相隔 1365（≈120°）令三個色通道沿色環輪轉；
+  `spacing=13` 令 20 顆攤開約一個色環（彩虹）。
+- `map/textkit.json`：`full` = 全部 `ws2812`。
+- `modes/rgb_breath.json`（三相變色呼吸）、`modes/rainbow.json`（空間彩虹＋漂移）、
+  `modes/white_breath.json`（單效果 `write: rgb`，真正變光暗）。
+- `registry.json`：`auto_play` ＋ 三個 mode。
+- `README.md`：四層說明、條式（phi／spacing／step／end_Time）、想改咩對照表、
+  亮度／電流、上傳步驟。
+
+**為何要改 sdkconfig**：Textkit 原本只有輸出層（沒有生產者），加了
+`CONFIG_NETCORE_CONTENT=y`（effect＋paint）＋`ESP_MAIN_TASK_STACK_SIZE=8192`
+＋`PIXEL_PACK_PSRAM=y`；要 `--fresh` 重 build。
+
+**工具**：`tools/show_upload.py` 的 map 由寫死 `map/matrix.json` 改成掃 `map/*.json`
+（`file_list` 同 `check_tree` 兩處），同 modes 一樣可以多組。
+
+**順手修正**：`nc_px_paint_task.c` 檔頭的資料流註解仍然寫「memset(canvas) →
+show_frame」，已經係舊路徑；實際係零拷貝直寫環（`nc_px_layout_apply`）。同時註明
+「layout 只寫覆蓋到的通道」→ 一個 mode 最好寫齊 R/G/B。
+
+**驗證**（`idf=v6.0.3 (macOS)`；⚠ 政策要 v6.1.1，呢部機係 6.0.3；冇接板）：
+
+- `python3 tools/show_upload.py --src …/data/pixel --check` → **6 個檔全部 OK**
+  （7 個效果 `end_Time` 嚴格遞增、兩個 map／三個 mode 的 group／effect 引用都解析到）。
+- `tools/hosttest/run_all.sh` → **21/21**。
+- 建置 `ESP32-S3-SuperMini__ESP32-S3-SuperMini-LED-Textkit` → ✔ 696.1 KB
+  （比之前 +34,400 B＝content 管線）。
+- **未上板**：`/data/pixel` 係 runtime 資產（映像冇 embed，`strings` 0 命中），
+  要 `show_upload.py` 上傳再 reboot 才見效果。

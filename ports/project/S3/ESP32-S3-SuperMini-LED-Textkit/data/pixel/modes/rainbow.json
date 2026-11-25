@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "id": 2,
+  "name": "rainbow",
+  "index": 2,
+  "play_loop": -1,
+  "maxF": 0,
+  "mapping": "textkit",
+  "white": 0,
+  "_comment": [
+    "彩虹循環：跟 rgb_breath 同一套 120° 相位，但每顆燈多一個 spacing=13 的空間相位差，",
+    "所以 20 顆燈攤開約 1 個色環；step=1 令整個彩虹每幀向前漂 1/13 顆（約 5.1 s 一圈）。"
+  ],
+  "map": [
+    { "group": "textkit.full", "effect": "rainbow_r", "write": "r" },
+    { "group": "textkit.full", "effect": "rainbow_g", "write": "g" },
+    { "group": "textkit.full", "effect": "rainbow_b", "write": "b" }
+  ]
+}

@@ -14,10 +14,13 @@
 // 生命週期同內建效果唔同；用 CONFIG_NETCORE_CONTENT 開關，release 映像可以有、
 // 其他 project 完全唔編（同 effect_bench 一樣）。
 //
-// 資料流（每幀）：
-//   memset(canvas, 0) → nc_px_show_frame(plan, step, canvas)      // 四層解釋在 sw/pixel
-//   → white mix（mode 的 "white" 0..100，四通道 out=(out*(100-w)+255*w)/100）
-//   → nc_px_ring_begin_ex() 的 payload（4 B/px，R,G,B,W）→ commit → step++
+// 資料流（每幀，零拷貝；舊的 canvas＋memset 路徑已退役）：
+//   nc_px_ring_begin_ex() 拿環格 payload（4 B/px，R,G,B,W）
+//   → nc_px_layout_apply*() 按 layout 逐 run 直接寫該格（r/g/b/w 只寫自己通道，
+//     多個 run 疊在同一顆燈上就係「三個色通道分開寫」）
+//   → white mix（mode 的 "white" 0..100，out=(out*(100-w)+255*w)/100）→ commit → step++
+// 注意：layout 只寫它覆蓋到的通道，所以一個 mode 最好寫齊 R/G/B（或用 rgb 一次寫），
+// 否則切 mode 之後冇被寫的通道會留住上一個 mode 的值。
 // 環係 render_task 建立／登記的；這裡只負責寫。
 //
 // 失敗策略（唔好令 boot loop）：

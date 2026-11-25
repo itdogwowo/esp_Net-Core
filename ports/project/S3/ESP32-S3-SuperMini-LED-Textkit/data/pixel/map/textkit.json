@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "id": 1,
+  "name": "textkit",
+  "_comment": [
+    "Textkit：6 條 WS2812（GPIO1-6），每條 20 顆；I80 一個後端把同一格廣播去 6 條 lane。",
+    "所以 group full = 20 顆（環的事實），6 條鏈顯示同一個畫面。"
+  ],
+  "groups": [
+    { "id": 1, "name": "full", "sel": [ { "type": "ws2812", "sel": ":" } ] }
+  ]
+}

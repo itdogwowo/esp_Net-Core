@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "auto_play": true,
+  "_comment": [
+    "開機由第一個開始播；0xF06D 可手動切（01 = rgb_breath、02 = rainbow、03 = white_breath）"
+  ],
+  "list": [
+    "rgb_breath",
+    "rainbow",
+    "white_breath"
+  ]
+}

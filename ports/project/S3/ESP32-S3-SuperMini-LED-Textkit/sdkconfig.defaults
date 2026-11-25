@@ -34,6 +34,17 @@ CONFIG_NETCORE_PIXEL_ZONE_PX=8
 CONFIG_NETCORE_PIXEL_CORE=-1
 CONFIG_NETCORE_PIXEL_SPI=n
 
+# ── 內容管線（JSON 燈效）──
+# 燈效完全由 /data/pixel 的四層 JSON 決定：effects／map／modes／registry。
+# 要開 CONFIG_NETCORE_CONTENT 才有 pixel_effect_task（算值流）＋pixel_paint_task（寫環）；
+# 沒有它只有輸出層，燈不會亮。內容是 runtime 資產（開機掃 /data/pixel），
+# 改 JSON 只需重新上傳 + reboot，不用重燒 firmware。
+CONFIG_NETCORE_CONTENT=y
+# paint 的 on_start 要解析 map／mode，main task 預設 3,072 B 不夠。
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
+# Show 的 I80 packed 波形固定 PSRAM（同其他 Show project 一致）。
+CONFIG_NETCORE_PIXEL_PACK_PSRAM=y
+
 # ── Wi-Fi：預設關（build 開關在 project 層）──
 # 要開就把下面一行解除註解；執行期再有一層 network.json 的 wifi.enable。
 # CONFIG_NETCORE_WIFI=y

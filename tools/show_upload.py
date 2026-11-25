@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """show_upload.py — 上傳 8×8 Show 的 `/pixel` 內容到裝置（經 WebMaster REST）。
 
-只會 PUT 下面 5 個檔（唔會刪檔、唔會覆蓋其他 `/pixel`、`/data` 檔案）：
-    effects/effects.json   map/matrix.json   modes/white80.json
-    modes/color.json       registry.json
+只會 PUT 呢幾類檔（唔會刪檔、唔會覆蓋其他 `/pixel`、`/data` 檔案）：
+    effects/effects.json   map/*.json   modes/*.json   registry.json
+（map／modes 全部掃，唔再寫死 matrix.json／white80.json；一個 project 可以有多組 map）
 
 流程：先在本機驗 JSON（parse／`end_Time` 嚴格遞增／mode 引用的 group、effect 名存在／
 `white` 0..100），全部 OK 才逐檔 PUT，最後可選 `/api/reboot` 令 firmware 重新載入。
@@ -54,12 +54,14 @@ def file_list(src: Path) -> list[str]:
     寫死會令上傳失敗（2026-11-22）。
     """
     out: list[str] = []
-    for rel in ("effects/effects.json", "map/matrix.json"):
-        if (src / rel).is_file():
-            out.append(rel)
-    mdir = src / "modes"
-    if mdir.is_dir():
-        out.extend(str(p.relative_to(src)) for p in sorted(mdir.glob("*.json")))
+    if (src / "effects" / "effects.json").is_file():
+        out.append("effects/effects.json")
+    # map／modes：全部 *.json（唔再寫死 matrix.json／white80.json）。
+    # 一個 project 可以有多組 map（matrix／textkit／16x600…），mode 自己引用 mapping 名。
+    for sub in ("map", "modes"):
+        d = src / sub
+        if d.is_dir():
+            out.extend(str(p.relative_to(src)) for p in sorted(d.glob("*.json")))
     if (src / "registry.json").is_file():
         out.append("registry.json")
     return out
@@ -405,18 +407,22 @@ def check_tree(src: Path, files: list[str] | None = None) -> tuple[list[tuple[st
                          f"（嚴格遞增，波長 {e['_ends'][-1] if e['_ends'] else '?'} 幀）")
         reports.append((rel, f"{len(effects)} 個效果：" + "；".join(parts)))
 
-    # 2. map
-    rel = "map/matrix.json"
-    before = len(errs)
-    doc = _load_json(src / rel, rel, errs)
+    # 2. map（全部 map/*.json；一個 project 可以有多組）
     maps: list[dict] = []
-    mp = _validate_map(doc, rel, errs) if doc is not None else None
-    if mp is not None:
-        maps = [mp]
-    if len(errs) == before and mp is not None:
-        gs = "；".join(f"{g['name']}（{g['nsel']} sel）" for g in mp["groups"])
-        reports.append((rel, f"id={mp['id']} name={mp['name']}，"
-                             f"{len(mp['groups'])} 個 group：" + gs))
+    for path in sorted((src / "map").glob("*.json")):
+        rel = str(path.relative_to(src))
+        before = len(errs)
+        doc = _load_json(src / rel, rel, errs)
+        mp = _validate_map(doc, rel, errs) if doc is not None else None
+        if mp is None:
+            continue
+        maps.append(mp)
+        if len(errs) == before:
+            gs = "；".join(f"{g['name']}（{g['nsel']} sel）" for g in mp["groups"])
+            reports.append((rel, f"id={mp['id']} name={mp['name']}，"
+                                 f"{len(mp['groups'])} 個 group：" + gs))
+    if not maps:
+        errs.append("map: 冇任何 map/*.json（mode 的 mapping 會解析唔到）")
 
     # 3. modes（全部 modes/*.json；唔再寫死 white80／color）
     modes: list[dict] = []
