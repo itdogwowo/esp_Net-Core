@@ -8371,16 +8371,31 @@ git submodule update --init --recursive --depth 1
 
 **回退**（記錄用）：`git -C ~/esp/esp-idf checkout 76f5dedd && git submodule update --init --recursive`。
 
-**6.1.1 建置驗證**（真 build，唔係只編譯）：
+**6.1.1 建置驗證**（真 build，唔係只編譯；數字係 A/B 對照，見下面）：
 
-| 板 | 結果 | image | 對比 6.0.3 |
+| 板 | IDF 6.0.3 | IDF 6.1.1 | 差 |
 |---|---|---|---|
-| ESP32-S3-Matrix | 建置完成（81 s） | 675.8 KB | +9,584 B |
-| ESP32-P4-ETH | 建置完成（181 s） | 1.0 MB | +30,992 B |
+| ESP32-S3-Matrix | 682,432 B（666.4 KB） | **692,016 B（675.8 KB）** | **+9,584 B** |
+| ESP32-P4-ETH | 1,044,160 B（1019.7 KB） | **1,068,848 B（1043.8 KB）** | **+24,688 B** |
 
+- 建置時間視負載：Matrix 81–129 s、P4-ETH 181–195 s（唔係固定值）。
+- **6.1.1 的 size 可重現**：兩次獨立 `--fresh` 建置都係 692,016／1,068,848 B；
+  sha256 會唔同（`PROJECT_VER`＝`git describe --dirty` 會嵌入 image，dirty 狀態一變就變）。
+- ⚠ **更正**：本節初版寫 P4-ETH 差 `+30,992 B`，嗰個係 `previous_size()` 對住**更舊的
+  產物**（唔係 6.0.3 那顆），唔係乾淨的 A/B。下面的對照方法才是準的。
 - `make.py doctor`：`ESP-IDF /home/user/esp/esp-idf (v6.1.1)`、`idf.py ESP-IDF v6.1.1`、`esptool v5.7.0`
 - build log **冇 deprecation**；只剩兩個本來就有的 warning（`nc4_line_net.c` 的
   `ws_producer`／`s_ws_http` unused；vendor `esp_hosted` 的 `start_req` unused）
+
+**A/B 對照方法（可重現）**：同一份 code、同一部 WSL、兩個 IDF tag 各 `--fresh` 建一次，
+量 `artifacts/build/<chip>_<board>/esp_net_core.bin` 的 byte 數：
+
+```bash
+cd ~/esp/esp-idf && git checkout -f 76f5dedd && git submodule update --init --recursive
+IDF_PATH=~/esp/esp-idf python3 make.py build ESP32-S3-Matrix --fresh
+IDF_PATH=~/esp/esp-idf python3 make.py build ESP32-P4-ETH    --fresh
+# 記 size；再 git checkout -f v6.1.1、重複，兩邊相減
+```
 
 **6.1 的 breaking changes 對本專案的影響（逐項查過）**：
 

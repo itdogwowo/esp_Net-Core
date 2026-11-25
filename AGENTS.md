@@ -38,7 +38,7 @@
 - Python 3.12；建置入口 `python3 make.py`（**不要**直接跑 `idf.py`）。
 - 板子：ESP32-S3（4 MB flash／2 MB PSRAM；USB CDC）；另有 P4／C3 port。
 - ⚠ **三個地方版本唔同 = 兩個唔同的 image**（實測同一份 code：Matrix 差 9,584 B、
-  P4-ETH 差 30,992 B）。要用數字比較，先統一版本；未統一之前，每次記錄都要寫
+  P4-ETH 差 24,688 B）。要用數字比較，先統一版本；未統一之前，每次記錄都要寫
   `idf=` 同**邊個環境**（見 §0.5「版本一致性」與鐵律 12）。
 
 ```bash
@@ -111,7 +111,7 @@ python3 tools/effect_bench.py --port <PORT>
   A/B 一定要同一 image、同一板。
 - **IDF 版本以 `idf.py --version` 為準，而且三個環境要統一**（用家 2026-11-25 明確要求）：
   - 現時：macOS **v6.0.3**；Windows `.idf/` 與 WSL **v6.1.1**（見 §0.5 環境表）——**待統一**。
-  - 唔同版 = 同一份 code 出兩個 image（實測 Matrix 差 9,584 B、P4-ETH 差 30,992 B），
+  - 唔同版 = 同一份 code 出兩個 image（實測 Matrix 差 9,584 B、P4-ETH 差 24,688 B），
     **數字唔可以互相對比**。
   - 升級／降級要**一次過升齊**；未升齊之前，每次記錄都要寫 `idf=` 同喺邊個環境跑。
     記錄格式：`idf=v6.1.1 (WSL)`。
@@ -278,7 +278,7 @@ python3 tools/nc4.py --port <PORT> reboot
 - 升級／降級要**一次過升齊**；唔好長期兩版並存，更唔好一邊 6.0 一邊 6.1 去比數字。
 - 記錄任何 build／量測／OTA 之前，先寫 **`idf=`**（`idf.py --version`）同**邊個環境**：
   `idf=v6.1.1 (WSL)`。冇寫 = 呢個數字唔可以同其他數字比較。
-- 實測：同一份 code，6.0.3 vs 6.1.1 的 image 差 **Matrix +9,584 B、P4-ETH +30,992 B**。
+- 實測：同一份 code，6.0.3 vs 6.1.1 的 image 差 **Matrix +9,584 B、P4-ETH +24,688 B**。
 - 韌體版本仍然只有一個來源：`PROJECT_VER`（見 §0.5），`status`／OTA／image 三者要一樣。
 - 部機**冇板**時唔緊要（build 唔需要板），但 `idf=` 唔可以漏。
 
@@ -719,6 +719,10 @@ bash tools/hosttest/run_all.sh
   `ncm_test`、`pixel_test`、`pxEngine_test`、`pxAsset_test`、`pxProgram_test`、
   `pxLayer_test`、`pxShow_test`、`pxScan_test`、`pxLayout_test`、`fpsclock_test`。
 - 全部 `-Werror`；失敗先修，唔好選擇性跑。
+- ⚠ 數字要講清楚：`tools/hosttest/*/run.sh` 有 **25 支**，但 `run_all.sh` 只跑
+  **21 支**測試；其餘 4 支係**量測 bench**（`gamma_bench`、`program_bench`、
+  `pxMap_bench`、`sin_bench`），唔係正確性測試，所以唔入 run_all。
+  講「21/21」係指 run_all；唔好講成「全部 25 支」。
 
 ### 12.2 上板 smoke test
 
@@ -895,6 +899,7 @@ commit message 說明。
 | 2026-11-24 | 版本一致性：`status fw`／OTA／image 同一個 `PROJECT_VER`；`make.py` 每次傳 `-DPROJECT_VER`；記錄 IDF v6.1.0 不存在 | lead（AI） |
 | 2026-11-24 | 配置分層：`driver.json` 只放裝置參數（只有 `LED` 段會被讀）；`I80`／`SPI` 型別化入 `hardware.json`，`/data/config/hardware.json` 的 `I80` 由死段變真 | lead（AI） |
 | 2026-11-25 | **鐵律 12「版本要統一」**：三個環境（macOS v6.0.3／Windows `.idf` v6.1.1／WSL v6.1.1）要一致；記錄要寫 `idf=` 同環境；附 6.0.3 vs 6.1.1 的 image 差異實測。順手把 host test 由 20 支更新為 21 支（加入 `fpsclock_test`） | lead（AI） |
+| 2026-11-25 | **數據修正（A/B 驗證後）**：P4-ETH 的 6.1.1−6.0.3 image 差由 `+30,992 B` 更正為 **`+24,688 B`**（原本係對住更舊產物）；Matrix `+9,584 B` 證實正確。另註明 25 支 `run.sh` 之中只有 21 支係測試（4 支係 bench） | lead（AI） |
 
 ---
 
