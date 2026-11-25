@@ -85,6 +85,9 @@ typedef struct {
     nc_px_ljob_t  *job;             // njobs 個
     nc_px_lrun_t  *run;             // nruns 個（dst 升序）
     nc_px_flat6_t *flat;            // nflat 個（dst 升序；重疊 = 後面覆蓋前面）
+    bool           flat_psram;      // flat 表放喺 PSRAM（量測／政策用）
+    int16_t        flat_err;        // 最近一次 flatify 的結果（0=OK；非 0 = 行 runs）
+    uint8_t        flat_uniform;    // flat 表全部同一 write 時的值（0 = 混合）
 } nc_px_layout_t;
 
 // mode ＋ map ＋ assets ＋ inventory → layout（內部 malloc；用完 call free）。
@@ -117,11 +120,16 @@ esp_err_t nc_px_layout_load(nc_px_layout_t *out, const char *path, uint32_t key,
 // 真機實測放 PSRAM 會**慢過** runs（每幀 57.6 KB PSRAM 讀取頻寬），所以唔夠 internal
 // 就唔建表、行返 runs——唔會靜默降級去一條更慢的路。
 esp_err_t nc_px_layout_flatify(nc_px_layout_t *l);
+// 量測／政策用：place_psram = true 時 6 B 表放 PSRAM（預設 internal，實測較快）。
+esp_err_t nc_px_layout_flatify_place(nc_px_layout_t *l, bool place_psram);
 size_t    nc_px_layout_flat_bytes(const nc_px_layout_t *l);   // nflat × 6 B（internal）
 
 // 一幀：vals[i] = 第 i 條值流的指標（長度 aprog[i].nv），dst = canvas（px × 4）。
 // 語義逐條照 mp `pixel_layout._SCATTER`；回傳寫入咗幾多顆（有 6 B 表）或幾多段 run。
 uint32_t nc_px_layout_apply(const nc_px_layout_t *l, uint16_t *const *vals, uint8_t *dst);
+// 只套用 flat 表的一段（[from, from+count)）；給 chunk／預取 pipeline 用。
+uint32_t nc_px_layout_apply_range(const nc_px_layout_t *l, uint16_t *const *vals,
+                                  uint8_t *dst, uint32_t from, uint32_t count);
 
 // 時間抖動：一次掃描 runs，同時寫 subframes 份 8-bit 輸出。
 // 每份 = base 或 base+1，令 subframes 份平均 = 12-bit>>4（±1）。

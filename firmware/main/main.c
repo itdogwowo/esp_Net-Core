@@ -228,7 +228,6 @@ static volatile uint32_t s_rx_frames;        // 成功收到的幀數
 #define UART_TEST_RX_BUF   1024
 #define UART_TEST_TX_BUF   1024      // TX 只由測試指令用（UART 的 send 未接）；1 KB 已足夠
 #define UART_TEST_DEF_BAUD 921600
-#define FW_VERSION         "0.1.2"
 
 // ── 專屬測試域 0xFxxx（不屬於任何產品功能，可隨時刪）──
 // 0xF001 DEV_BENCH  size(u16) iters(u16) mode(u8) → 0xF002 DEV_RSP (str_u16len JSON)
@@ -603,7 +602,11 @@ static void usb_resolve(void)
     // want_msc：只睇這條 USB link 的 msc（預設 0 = 唔交碟）。
     // global system.json 的 usb.msc 已經停用 —— 舊寫法冇作用，所以明講一次，
     // 免得「我明明寫咗 msc=1」查半日。
+#if CONFIG_NETCORE_USB_MSC_FORCE_OFF
+    const bool want_msc = false;      // recovery：唔交碟，FAT 留返畀裝置
+#else
     const bool want_msc = (usb != NULL) && (usb->msc != 0);
+#endif
     if (usb != NULL && !want_msc && scfg != NULL && scfg->usb_msc != 0) {
         ESP_LOGW(TAG, "system.json 的 usb.msc=%u 已停用 → 要交碟請寫 links[].msc:1",
                  (unsigned)scfg->usb_msc);
@@ -1659,6 +1662,10 @@ static size_t status_put_cmds(char *buf, size_t cap)
 static size_t status_put_sys(char *buf, size_t cap)
 {
     size_t off = 0;
+    // 版本只有一個來源：app descriptor 的 PROJECT_VER（build 時由 git describe 注入）。
+    // 唔好再硬編 "0.1.2"——否則 status／OTA／image 三方版本會唔一致。
+    const esp_app_desc_t *app = esp_app_get_description();
+    const char *fw_ver = (app != NULL && app->version[0] != '\0') ? app->version : "?";
     jappend(buf, cap, &off,
             "\"sys\":{\"chip\":\"%s\",\"fw\":\"%s\",\"app\":\"%02x%02x%02x%02x\",\"heap\":%u,\"up_s\":%lld,"
             "\"idf\":\"%s\",\"cid\":%u,\"ndec\":%d,"
@@ -1666,7 +1673,7 @@ static size_t status_put_sys(char *buf, size_t cap)
             // 「搬去 PSRAM 到底有冇用」只能靠估。
             "\"h_int\":%u,\"h_dma\":%u,\"h_ps\":%u,\"rep_ps\":%d,\"rst\":%d}",
             CONFIG_IDF_TARGET,
-            FW_VERSION,
+            fw_ver,
             (unsigned)esp_app_get_description()->app_elf_sha256[0],
             (unsigned)esp_app_get_description()->app_elf_sha256[1],
             (unsigned)esp_app_get_description()->app_elf_sha256[2],
@@ -2363,7 +2370,11 @@ static void usb_links_audit(void)
     }
     // msc 只在「選了 OTG」時有意義：USJ 沒有 MSC。per-link 制（預設 0）。
     const nc_link_cfg_t *usb = usb_nc4_link();
+#if CONFIG_NETCORE_USB_MSC_FORCE_OFF
+    const bool want_msc = false;      // recovery：唔交碟，FAT 留返畀裝置
+#else
     const bool want_msc = (usb != NULL) && (usb->msc != 0);
+#endif
     if (want_msc && usb->kind != NC_LINK_CDC) {
         ESP_LOGW(TAG, "USB link msc=1 但 personality 不是 OTG（USJ 冇 MSC）→ 跳過");
     }

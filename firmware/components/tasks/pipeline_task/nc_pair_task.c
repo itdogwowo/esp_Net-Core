@@ -42,6 +42,7 @@
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "freertos/semphr.h"
 
 #include "nc4.h"
 #include "nc_action.h"
@@ -84,6 +85,15 @@ typedef struct {
 
     nc_px_layout_t    layout;   // 排版編譯結果（dst 順序 runs；由 nc_px_layout 擁有）
     nc_px_asset_tbl_t *assets;  // PSRAM：只收 mode 引用到的 asset（~8.4 KB，唔佔 internal）
+
+    // 下一張（playlist 預測）：layout＋flat 預建好，切換時 swap（0 ms）
+    nc_px_layout_t     next_layout;
+    nc_px_asset_tbl_t *next_assets;
+    char               next_mode_name[NC_PX_LAYER_NAME_MAX];
+    char               next_map_name[NC_PX_LAYER_NAME_MAX];
+    bool               next_ready;
+    uint32_t           next_us;
+    uint8_t            next_why;      // 診斷：0=未試、1=ok、2=冇下一個、3=asset、4=map、5=build、6=no_ready
     char              mode_name[NC_PX_LAYER_NAME_MAX];
     char              map_name[NC_PX_LAYER_NAME_MAX];
     char              pixel_dir[64];      // /data/pixel（reload 用）
@@ -162,6 +172,27 @@ static struct {
     uint32_t present, built, too_big, failed, ms;
 } s_prebuild;
 static void cache_prebuild_missing(void);
+
+#if CONFIG_NETCORE_PIXEL_APPLY_PIPE
+#define PIPE_CHUNK_KB 16u
+#define PIPE_BUFS     3u
+typedef struct {
+    const nc_px_layout_t *l;
+    uint32_t nflat;
+    uint32_t epc;
+    uint32_t bytes;
+    uint8_t *buf[PIPE_BUFS];
+    SemaphoreHandle_t kick;
+    SemaphoreHandle_t full[PIPE_BUFS];
+    SemaphoreHandle_t free_s[PIPE_BUFS];
+    volatile bool stop;
+    bool ready;
+} pipe_ctx_t;
+static pipe_ctx_t s_pipe;
+static volatile uint32_t s_pipe_ok, s_pipe_fail;
+static bool px_pipe_apply(uint8_t *dst);
+static void pipe_stop(void);
+#endif
 
 static volatile bool s_snap_wanted;   // 0xF06B 要求預覽時才由環複製一份
 
@@ -263,7 +294,14 @@ static bool content_frame_once(void)
             nc_pipe_stats_full();
             return false;                 // 環滿：下 tick 再試
         }
-        nc_px_layout_apply(&s_content.layout, s_eff_frame.vals, p);
+#if CONFIG_NETCORE_PIXEL_APPLY_PIPE
+        s_pipe.l = &s_content.layout;
+        s_pipe.nflat = s_content.layout.nflat;
+        if (!px_pipe_apply(p))
+#endif
+        {
+            nc_px_layout_apply(&s_content.layout, s_eff_frame.vals, p);
+        }
         const int64_t a1 = esp_timer_get_time();
         white_mix(p, s_content.px, s_content.white);
         const int64_t w1 = esp_timer_get_time();
@@ -305,6 +343,8 @@ static bool content_frame_once(void)
 }
 
 static esp_err_t content_apply_mode(const nc_px_mode_t *mode);static esp_err_t content_apply_mode(const nc_px_mode_t *mode);
+static void content_prepare_next(void);
+static esp_err_t content_swap_next(const nc_px_mode_t *mode);
 static esp_err_t content_reload(void);
 static void content_auto_advance(void);
 static void content_set_fallback(const char *why);
@@ -352,6 +392,7 @@ static void content_loop(void *arg)
             continue;
         }
         content_auto_advance();                   // registry auto_play（如果 list>1）
+        content_prepare_next();                   // 播放時預建下一張（playlist 次序）
         taskYIELD();                              // render（prio 更高）先跑
     }
 }
@@ -382,6 +423,9 @@ static void content_state_reset(void)
     s_content.commits = 0;
     s_content.busy = 0;
     nc_px_layout_free(&s_content.layout);
+    nc_px_layout_free(&s_content.next_layout);
+    s_content.next_ready = false;
+    s_content.next_mode_name[0] = '\0';
     if (s_content.assets != NULL) {
         s_content.assets->n = 0;          // 保留已配置的 item 緩衝，下次換場重用
     }
@@ -463,6 +507,101 @@ static esp_err_t build_asset_tbl_into(nc_px_asset_tbl_t *dst, const nc_px_mode_t
     return ESP_OK;
 }
 
+#if CONFIG_NETCORE_PIXEL_APPLY_PIPE
+// ── flat 表 chunk 預取：core0 worker 做 PSRAM→internal memcpy ──
+
+static void pipe_worker(void *arg)
+{
+    pipe_ctx_t *c = (pipe_ctx_t *)arg;
+    while (1) {
+        if (xSemaphoreTake(c->kick, portMAX_DELAY) != pdTRUE) {
+            break;
+        }
+        if (c->stop) {
+            break;
+        }
+        const uint32_t nch = (c->nflat + c->epc - 1u) / c->epc;
+        for (uint32_t i = 0; i < nch; i++) {
+            const uint32_t slot = i % PIPE_BUFS;
+            xSemaphoreTake(c->free_s[slot], portMAX_DELAY);
+            uint32_t cnt = c->epc;
+            if (i * c->epc + cnt > c->nflat) {
+                cnt = c->nflat - i * c->epc;
+            }
+            memcpy(c->buf[slot], (const uint8_t *)c->l->flat + (size_t)i * c->epc * 6u,
+                   (size_t)cnt * 6u);
+            xSemaphoreGive(c->full[slot]);
+        }
+    }
+    vTaskDelete(NULL);
+}
+
+static bool pipe_start(void)
+{
+    if (s_pipe.ready) {
+        return true;
+    }
+    memset(&s_pipe, 0, sizeof(s_pipe));
+    s_pipe.epc = (PIPE_CHUNK_KB * 1024u) / 6u;
+    s_pipe.bytes = s_pipe.epc * 6u;
+    s_pipe.kick = xSemaphoreCreateBinary();
+    if (s_pipe.kick == NULL) {
+        return false;
+    }
+    for (uint32_t i = 0; i < PIPE_BUFS; i++) {
+        s_pipe.buf[i] = (uint8_t *)heap_caps_malloc(s_pipe.bytes,
+                                                    MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+        s_pipe.full[i] = xSemaphoreCreateBinary();
+        s_pipe.free_s[i] = xSemaphoreCreateBinary();
+        if (s_pipe.buf[i] == NULL || s_pipe.full[i] == NULL || s_pipe.free_s[i] == NULL) {
+            return false;
+        }
+        xSemaphoreGive(s_pipe.free_s[i]);
+    }
+    if (xTaskCreatePinnedToCore(pipe_worker, "pxpipe", 3072, &s_pipe, 2, NULL, 1) != pdPASS) {
+        return false;
+    }
+    s_pipe.ready = true;
+    ESP_LOGI(TAG, "apply pipe：%u KB × %u 塊（internal）、worker core0",
+             (unsigned)PIPE_CHUNK_KB, (unsigned)PIPE_BUFS);
+    return true;
+}
+
+static void pipe_stop(void)
+{
+    if (s_pipe.ready) {
+        s_pipe.stop = true;
+        xSemaphoreGive(s_pipe.kick);
+        s_pipe.ready = false;
+    }
+}
+
+// 用預取 pipeline 套用目前 layout；失敗就退回直接 apply。
+static bool px_pipe_apply(uint8_t *dst)
+{
+    if (!s_pipe.ready || s_pipe.l == NULL || s_pipe.l->flat == NULL || s_pipe.nflat == 0) {
+        return false;
+    }
+    xSemaphoreGive(s_pipe.kick);
+    const uint32_t nch = (s_pipe.nflat + s_pipe.epc - 1u) / s_pipe.epc;
+    for (uint32_t i = 0; i < nch; i++) {
+        const uint32_t slot = i % PIPE_BUFS;
+        if (xSemaphoreTake(s_pipe.full[slot], pdMS_TO_TICKS(50)) != pdTRUE) {
+            s_pipe_fail++;
+            return false;                  // worker 卡住：退回直接 apply
+        }
+        uint32_t cnt = s_pipe.epc;
+        if (i * s_pipe.epc + cnt > s_pipe.nflat) {
+            cnt = s_pipe.nflat - i * s_pipe.epc;
+        }
+        (void)nc_px_layout_apply_range(s_pipe.l, s_eff_frame.vals, dst, i * s_pipe.epc, cnt);
+        xSemaphoreGive(s_pipe.free_s[slot]);
+    }
+    s_pipe_ok++;
+    return true;
+}
+#endif
+
 // 給目前的 mode 建表（s_content.assets 是這個 mode 專用的）
 static esp_err_t build_asset_tbl(const nc_px_mode_t *mode)
 {
@@ -502,10 +641,137 @@ static void ensure_pixel_dirs(const char *pixel_dir)
 }
 
 // 由 mode 建 plan（切換 mode 同開機共用）。只在 pair loop／on_start 呼叫。
+// playlist 的下一個：registry list 次序（同 auto_play 一致），跳過唔存在／同一個 mode。
+static const nc_px_mode_t *playlist_next_mode(void)
+{
+    const nc_px_show_t *reg = nc_px_show();
+    if (reg == NULL || reg->nlist < 2 || s_content.mode_name[0] == '\0') {
+        return NULL;
+    }
+    int cur = -1;
+    for (uint8_t i = 0; i < reg->nlist; i++) {
+        if (strcmp(reg->list[i], s_content.mode_name) == 0) {
+            cur = (int)i;
+            break;
+        }
+    }
+    const int start = (cur >= 0) ? (cur + 1) : 0;
+    for (uint8_t n = 0; n < reg->nlist; n++) {
+        const int idx = (start + n) % reg->nlist;
+        const nc_px_mode_t *m = nc_px_mode_find(reg->list[idx]);
+        if (m != NULL && strcmp(m->name, s_content.mode_name) != 0) {
+            return m;
+        }
+    }
+    return NULL;
+}
+
+// 播放期間預建下一個 mode 的 layout＋flat（PSRAM）。成功後 next_ready = true，
+// 切換嗰下只係 swap，唔使再 build／讀檔。
+static void content_prepare_next(void)
+{
+    if (s_content.next_ready) {
+        return;                        // 已預建好：唔好覆寫 why
+    }
+    if (!s_content.ready || s_content.px == 0) {
+        s_content.next_why = 6;
+        return;
+    }
+    const nc_px_mode_t *m = playlist_next_mode();
+    if (m == NULL) {
+        s_content.next_why = 2;
+        return;
+    }
+    if (s_content.next_assets == NULL) {
+        s_content.next_assets = (nc_px_asset_tbl_t *)heap_caps_malloc(
+            sizeof(nc_px_asset_tbl_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        if (s_content.next_assets == NULL) {
+            return;
+        }
+        memset(s_content.next_assets, 0, sizeof(*s_content.next_assets));
+    }
+    if (build_asset_tbl_into(s_content.next_assets, m) != ESP_OK) {
+        s_content.next_why = 3;
+        ESP_LOGW(TAG, "預建下一張：%s 效果表失敗", m->name);
+        return;
+    }
+    const nc_px_map_t *map = select_map(m);
+    if (map == NULL) {
+        s_content.next_why = 4;
+        ESP_LOGW(TAG, "預建下一張：%s 冇 map", m->name);
+        return;
+    }
+    const int64_t t0 = esp_timer_get_time();
+    nc_px_layout_free(&s_content.next_layout);
+    const uint32_t ckey = nc_px_layout_cache_key(m->hash, map->hash, s_content.px);
+    char cpath[96];
+    (void)snprintf(cpath, sizeof(cpath), "%s/cache/%08lx.pxlt", s_content.pixel_dir,
+                   (unsigned long)ckey);
+    esp_err_t e = nc_px_layout_load(&s_content.next_layout, cpath, ckey,
+                                    s_content.next_assets);
+    if (e != ESP_OK || s_content.next_layout.njobs == 0) {
+        if (e == ESP_OK) {
+            nc_px_layout_free(&s_content.next_layout);
+        }
+        const nc_px_hw_inv_t inv = { .hw = NC_PX_HW_WS2812, .base = 0, .px = s_content.px };
+        e = nc_px_layout_build(m, map, s_content.next_assets, &inv, 1,
+                               &s_content.next_layout);
+    }
+    if (e != ESP_OK || s_content.next_layout.njobs == 0) {
+        nc_px_layout_free(&s_content.next_layout);
+        s_content.next_why = 5;
+        ESP_LOGW(TAG, "預建下一張：%s 建表失敗（%s、jobs=%u）", m->name,
+                 esp_err_to_name(e), (unsigned)s_content.next_layout.njobs);
+        return;
+    }
+    (void)nc_px_layout_flatify(&s_content.next_layout);   // 默認 PSRAM
+    snprintf(s_content.next_mode_name, sizeof(s_content.next_mode_name), "%s", m->name);
+    snprintf(s_content.next_map_name, sizeof(s_content.next_map_name), "%s", map->name);
+    s_content.next_ready = true;
+    s_content.next_why = 1;
+    s_content.next_us = (uint32_t)(esp_timer_get_time() - t0);
+    ESP_LOGI(TAG, "預建下一張：mode=%s、runs=%u、flat=%u B、%u us",
+             m->name, (unsigned)s_content.next_layout.nruns,
+             (unsigned)nc_px_layout_flat_bytes(&s_content.next_layout),
+             (unsigned)s_content.next_us);
+}
+
+// 切換到已預建的下一張：swap layout／assets，唔重建。
+static esp_err_t content_swap_next(const nc_px_mode_t *mode)
+{
+    const int64_t t0 = esp_timer_get_time();
+    nc_px_layout_free(&s_content.layout);
+    s_content.layout = s_content.next_layout;
+    memset(&s_content.next_layout, 0, sizeof(s_content.next_layout));
+    nc_px_asset_tbl_t *tmp = s_content.assets;
+    s_content.assets = s_content.next_assets;
+    s_content.next_assets = tmp;
+    snprintf(s_content.map_name, sizeof(s_content.map_name), "%s", s_content.next_map_name);
+    snprintf(s_content.mode_name, sizeof(s_content.mode_name), "%s", mode->name);
+    s_content.white = (mode->white > 100) ? 100 : mode->white;
+    s_content.step = 0;
+    s_content.mode_frames = 0;
+    s_content.mode_limit = (mode->maxF > 0) ? mode->maxF : 500;
+    s_content.ready = true;
+    s_content.fallback = false;
+    s_content.next_ready = false;
+    s_content.next_mode_name[0] = '\0';
+    s_last_eff_seq = 0;
+    s_plan_gen++;
+    nc_pipe_aprog_publish(s_content.layout.aprog, s_content.layout.naprog, s_plan_gen);
+    s_last_apply_us = (uint32_t)(esp_timer_get_time() - t0);
+    ESP_LOGI(TAG, "換場（預建 swap）：%s、%u us、runs=%u", mode->name,
+             (unsigned)s_last_apply_us, (unsigned)s_content.layout.nruns);
+    return ESP_OK;
+}
+
 static esp_err_t content_apply_mode_locked(const nc_px_mode_t *mode)
 {
     if (mode == NULL) {
         return ESP_ERR_INVALID_ARG;
+    }
+    if (s_content.next_ready && strcmp(mode->name, s_content.next_mode_name) == 0) {
+        return content_swap_next(mode);
     }
     const int64_t t0 = esp_timer_get_time();
 
@@ -596,6 +862,10 @@ static esp_err_t content_apply_mode_locked(const nc_px_mode_t *mode)
     s_content.step = 0;
     s_content.mode_frames = 0;
     s_content.mode_limit = (mode->maxF > 0) ? mode->maxF : 500;
+    if (s_content.layout.flat_err != 0) {
+        ESP_LOGW(TAG, "6 B 表建唔到（%s）：行 runs（熱路徑會慢）",
+                 esp_err_to_name((esp_err_t)s_content.layout.flat_err));
+    }
     s_content.ready = true;
     s_content.fallback = false;
     s_last_eff_seq = 0;
@@ -818,6 +1088,9 @@ static void content_start_pipeline(void)
     }
     ESP_LOGI(TAG, "pair 就緒：%u px、prd 環 %s", (unsigned)s_content.px,
              nc_px_ring_name(s_content.q));
+#if CONFIG_NETCORE_PIXEL_APPLY_PIPE
+    (void)pipe_start();
+#endif
     cache_prebuild_missing();          // 開機檢查一次，缺的組合表補建
 }
 
@@ -906,6 +1179,9 @@ static esp_err_t content_start(const nc_task_res_view_t *res, int nres)
 
 static void content_stop(void)
 {
+#if CONFIG_NETCORE_PIXEL_APPLY_PIPE
+    pipe_stop();
+#endif
     if (s_content.canvas != NULL) {
         heap_caps_free(s_content.canvas);
         s_content.canvas = NULL;
@@ -913,6 +1189,12 @@ static void content_stop(void)
     if (s_content.assets != NULL) {
         nc_px_asset_tbl_free(s_content.assets);   // 連 item 一齊放（owned）
         s_content.assets = NULL;
+    }
+    nc_px_layout_free(&s_content.next_layout);
+    s_content.next_ready = false;
+    if (s_content.next_assets != NULL) {
+        nc_px_asset_tbl_free(s_content.next_assets);
+        s_content.next_assets = NULL;
     }
     if (s_content.last != NULL) {
         heap_caps_free(s_content.last);
@@ -1098,6 +1380,14 @@ static void on_reload(nc4_ctx_t *ctx, const nc4_frame_t *f)
 #define NC4_CMD_PIPERESET_RSP 0xF076
 #define NC4_CMD_PIXDIAG   0xF079
 #define NC4_CMD_PIXDIAG_RSP 0xF07A
+#define NC4_CMD_FLATREAD  0xF07B
+#define NC4_CMD_FLATREAD_RSP 0xF07C
+#define NC4_CMD_FLATTIME  0xF07D
+#define NC4_CMD_FLATTIME_RSP 0xF07E
+#define NC4_CMD_APPLYTIME 0xF07F
+#define NC4_CMD_APPLYTIME_RSP 0xF080
+#define NC4_CMD_FPS       0xF081
+#define NC4_CMD_FPS_RSP   0xF082
 
 static void on_pipestats(nc4_ctx_t *ctx, const nc4_frame_t *f)
 {
@@ -1163,15 +1453,19 @@ static void on_pixdiag(nc4_ctx_t *ctx, const nc4_frame_t *f)
     char j[1000];
     (void)snprintf(j, sizeof(j),
         "{\"px\":%u,\"slots\":%u,\"ring_b\":%u,\"canvas_b\":%u,"
-        "\"vals_b\":%u,\"runs_b\":%u,\"flat_n\":%u,\"flat_b\":%u,"
+        "\"vals_b\":%u,\"runs_b\":%u,\"flat_n\":%u,\"flat_b\":%u,\"flat_err\":%d,"
         "\"jobs\":%u,\"runs\":%u,\"naprog\":%u,\"skipped\":%u,"
         "\"skip\":{\"no_asset\":%u,\"no_group\":%u,\"bad_write\":%u,"
         "\"empty\":%u,\"asset_full\":%u,\"prog\":%u,\"oom\":%u},"
         "\"free_int\":%u,\"free_ps\":%u,"
         "\"prebuild\":{\"present\":%u,\"built\":%u,\"too_big\":%u,"
-        "\"failed\":%u,\"ms\":%u},\"render\":%s}",
+        "\"failed\":%u,\"ms\":%u},"
+        "\"mode\":\"%s\",\"show_nlist\":%u,\"pipe\":%d,\"pipe_ok\":%u,\"pipe_fail\":%u,"
+        "\"next\":\"%s\",\"next_ready\":%d,\"next_us\":%u,\"next_why\":%u,"
+        "\"render\":%s}",
         (unsigned)px, (unsigned)slots, (unsigned)ring_b, (unsigned)canvas_b,
         (unsigned)vals_b, (unsigned)runs_b, (unsigned)flat_n, (unsigned)flat_b,
+        (int)s_content.layout.flat_err,
         (unsigned)s_content.layout.njobs, (unsigned)s_content.layout.nruns,
         (unsigned)s_content.layout.naprog, (unsigned)s_content.layout.skipped,
         (unsigned)s_content.layout.skip_no_asset, (unsigned)s_content.layout.skip_no_group,
@@ -1183,8 +1477,171 @@ static void on_pixdiag(nc4_ctx_t *ctx, const nc4_frame_t *f)
         (unsigned)s_prebuild.present, (unsigned)s_prebuild.built,
         (unsigned)s_prebuild.too_big, (unsigned)s_prebuild.failed,
         (unsigned)s_prebuild.ms,
+        s_content.mode_name,
+        (unsigned)((nc_px_show() != NULL) ? nc_px_show()->nlist : 0u),
+#if CONFIG_NETCORE_PIXEL_APPLY_PIPE
+        s_pipe.ready ? 1 : 0, (unsigned)s_pipe_ok, (unsigned)s_pipe_fail,
+#else
+        0, 0u, 0u,
+#endif
+        s_content.next_mode_name, s_content.next_ready ? 1 : 0,
+        (unsigned)s_content.next_us, (unsigned)s_content.next_why,
         rj[0] ? rj : "{}");
     reply_json(ctx, NC4_CMD_PIXDIAG_RSP, j);
+}
+
+// 0xF07B：量 FAT 讀一張平坦表（預設 57,600 B）。payload = size(u32 LE)。
+// 用途：評估「flat 表存 Flash、換場前預讀」值唔值得；會佔用 pair 任務（播放會停一下）。
+static void on_flatread(nc4_ctx_t *ctx, const nc4_frame_t *f)
+{
+    uint32_t size = 57600;
+    if (f != NULL && f->len >= 4) {
+        memcpy(&size, f->data, 4);
+    }
+    if (size == 0 || size > (256u * 1024u)) {
+        reply_json(ctx, NC4_CMD_FLATREAD_RSP, "{\"err\":\"size\"}");
+        return;
+    }
+    const char *base = nc_store_fs_base();
+    char path[96];
+    if (f != NULL && f->len >= 4) {
+        (void)snprintf(path, sizeof(path), "%s/flat_bench.bin",
+                       (base != NULL) ? base : "/data");
+    } else {
+        // 冇 payload：讀板上已有嘅大檔（501 組 map ≈58 KB），量同一個 FAT 的讀速
+        (void)snprintf(path, sizeof(path), "%s/map/matrix.json", s_content.pixel_dir);
+        size = 0;                     // 由檔案大小決定
+    }
+    uint8_t *buf = heap_caps_malloc(size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (buf == NULL) {
+        reply_json(ctx, NC4_CMD_FLATREAD_RSP, "{\"err\":\"oom\"}");
+        return;
+    }
+    FILE *fp = fopen(path, "rb");
+    if (fp == NULL) {
+        heap_caps_free(buf);
+        reply_json(ctx, NC4_CMD_FLATREAD_RSP, "{\"err\":\"open\"}");
+        return;
+    }
+    if (size == 0) {
+        (void)fseek(fp, 0, SEEK_END);
+        size = (uint32_t)ftell(fp);
+        (void)fseek(fp, 0, SEEK_SET);
+        if (size == 0 || size > (256u * 1024u)) {
+            (void)fclose(fp);
+            heap_caps_free(buf);
+            reply_json(ctx, NC4_CMD_FLATREAD_RSP, "{\"err\":\"filesize\"}");
+            return;
+        }
+    }
+    const int64_t t0 = esp_timer_get_time();
+    const size_t got = fread(buf, 1, size, fp);
+    const int64_t t1 = esp_timer_get_time();
+    (void)fclose(fp);
+    heap_caps_free(buf);
+    char j[160];
+    (void)snprintf(j, sizeof(j), "{\"ok\":%d,\"bytes\":%u,\"us\":%u}",
+                   (got == size) ? 1 : 0, (unsigned)got, (unsigned)(t1 - t0));
+    reply_json(ctx, NC4_CMD_FLATREAD_RSP, j);
+}
+
+// 0xF07D：量「真實 layout」的 flatify 成本（runs → 6 B 表），唔係 bench 的隨機。
+static void on_flattime(nc4_ctx_t *ctx, const nc4_frame_t *f)
+{
+    (void)f;
+    if (!s_content.ready) {
+        reply_json(ctx, NC4_CMD_FLATTIME_RSP, "{\"err\":\"not_ready\"}");
+        return;
+    }
+    const uint32_t runs = s_content.layout.nruns;
+    const int64_t t0 = esp_timer_get_time();
+    const esp_err_t e = nc_px_layout_flatify_place(&s_content.layout, false);
+    const uint32_t us = (uint32_t)(esp_timer_get_time() - t0);
+    char j[192];
+    (void)snprintf(j, sizeof(j),
+                   "{\"rc\":%d,\"runs\":%u,\"nflat\":%u,\"nflat_b\":%u,\"us\":%u,\"px\":%u}",
+                   (int)e, (unsigned)runs, (unsigned)s_content.layout.nflat,
+                   (unsigned)nc_px_layout_flat_bytes(&s_content.layout),
+                   (unsigned)us, (unsigned)s_content.px);
+    reply_json(ctx, NC4_CMD_FLATTIME_RSP, j);
+}
+
+// 0xF07F：同一份真實 layout，量 internal / PSRAM flat 表的每幀 apply。
+static void on_applytime(nc4_ctx_t *ctx, const nc4_frame_t *f)
+{
+    (void)f;
+    if (!s_content.ready || s_content.layout.nflat == 0) {
+        reply_json(ctx, NC4_CMD_APPLYTIME_RSP, "{\"err\":\"not_ready\"}");
+        return;
+    }
+    const uint32_t runs = s_content.layout.nruns;
+    const uint32_t nflat = s_content.layout.nflat;
+    const uint32_t naprog = s_content.layout.naprog;
+    uint32_t total = 0;
+    for (uint32_t i = 0; i < naprog; i++) {
+        total += s_content.layout.aprog[i].nv;
+    }
+    uint32_t int_us = 0, ps_us = 0;
+    uint8_t *dst = (uint8_t *)heap_caps_malloc((size_t)s_content.px * NC_PX_BPP,
+                                               MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    uint16_t *vbuf = (uint16_t *)heap_caps_malloc((size_t)total * sizeof(uint16_t),
+                                                  MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    uint16_t **vp = (uint16_t **)heap_caps_malloc((size_t)naprog * sizeof(uint16_t *),
+                                                  MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    if (dst == NULL || vbuf == NULL || vp == NULL) {
+        heap_caps_free(dst);
+        heap_caps_free(vbuf);
+        heap_caps_free(vp);
+        reply_json(ctx, NC4_CMD_APPLYTIME_RSP, "{\"err\":\"oom\"}");
+        return;
+    }
+    uint32_t off = 0;
+    for (uint32_t i = 0; i < naprog; i++) {
+        vp[i] = vbuf + off;
+        for (uint32_t k = 0; k < s_content.layout.aprog[i].nv; k++) {
+            vbuf[off + k] = (uint16_t)((k * 37u + i * 101u) & 0x0FFFu);
+        }
+        off += s_content.layout.aprog[i].nv;
+    }
+    if (nc_px_layout_flatify_place(&s_content.layout, false) == ESP_OK) {
+        for (int r = 0; r < 5; r++) {
+            const int64_t t = esp_timer_get_time();
+            (void)nc_px_layout_apply(&s_content.layout, vp, dst);
+            const uint32_t us = (uint32_t)(esp_timer_get_time() - t);
+            if (r == 0 || us < int_us) int_us = us;
+        }
+    }
+    if (nc_px_layout_flatify_place(&s_content.layout, true) == ESP_OK) {
+        for (int r = 0; r < 5; r++) {
+            const int64_t t = esp_timer_get_time();
+            (void)nc_px_layout_apply(&s_content.layout, vp, dst);
+            const uint32_t us = (uint32_t)(esp_timer_get_time() - t);
+            if (r == 0 || us < ps_us) ps_us = us;
+        }
+    }
+    heap_caps_free(dst);
+    heap_caps_free(vbuf);
+    heap_caps_free(vp);
+    char j[192];
+    (void)snprintf(j, sizeof(j),
+                   "{\"runs\":%u,\"nflat\":%u,\"apply_int_us\":%u,\"apply_ps_us\":%u,"
+                   "\"px\":%u}", (unsigned)runs, (unsigned)nflat,
+                   (unsigned)int_us, (unsigned)ps_us, (unsigned)s_content.px);
+    reply_json(ctx, NC4_CMD_APPLYTIME_RSP, j);
+}
+
+// 0xF081：逐幀間隔統計（payload[0]=1 → 先 reset）；回 0xF082。
+static void on_fps(nc4_ctx_t *ctx, const nc4_frame_t *f)
+{
+    if (f != NULL && f->len >= 1 && f->data[0] == 1) {
+        nc_render_fps_reset();
+    }
+    static char j[900];
+    if (nc_render_fps_json(j, sizeof(j)) == 0) {
+        reply_json(ctx, NC4_CMD_FPS_RSP, "{\"err\":\"nodata\"}");
+        return;
+    }
+    reply_json(ctx, NC4_CMD_FPS_RSP, j);
 }
 
 static void on_pipeburn(nc4_ctx_t *ctx, const nc4_frame_t *f)
@@ -1214,6 +1671,10 @@ static const nc_action_t s_actions[] = {
     { NC4_CMD_PIPEBURN, on_pipeburn, "pair" },
     { NC4_CMD_PIPERESET, on_pipereset, "pair" },
     { NC4_CMD_PIXDIAG, on_pixdiag, "pair" },
+    { NC4_CMD_FLATREAD, on_flatread, "pair" },
+    { NC4_CMD_FLATTIME, on_flattime, "pair" },
+    { NC4_CMD_APPLYTIME, on_applytime, "pair" },
+    { NC4_CMD_FPS, on_fps, "pair" },
 };
 
 NC_ACTION_TABLE_DEF(nc_pair_task_table, "pair", s_actions);

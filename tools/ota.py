@@ -62,6 +62,31 @@ def begin_timeout_for(image_size: int) -> float:
     return 10.0 + image_size / _ERASE_BYTES_PER_S
 
 
+# app image：image header 0x00..0x1F，esp_app_desc_t 由 0x20 開始；
+# version 在 esp_app_desc_t + 0x10（magic 4 + secure_version 4 + reserv1 8）。
+_APP_DESC_OFF = 0x20
+_APP_DESC_MAGIC = 0xABCD5432
+_APP_VER_OFF = _APP_DESC_OFF + 0x10
+_APP_VER_LEN = 32
+
+
+def image_app_version(data: bytes) -> str:
+    """由 image 讀 PROJECT_VER；讀不到回空字串（呼叫端再 fallback）。"""
+    if len(data) < _APP_VER_OFF + _APP_VER_LEN:
+        return ""
+    magic = struct.unpack_from("<I", data, _APP_DESC_OFF)[0]
+    if magic != _APP_DESC_MAGIC:
+        return ""
+    raw = data[_APP_VER_OFF:_APP_VER_OFF + _APP_VER_LEN].split(b"\x00", 1)[0]
+    try:
+        ver = raw.decode("ascii")
+    except UnicodeDecodeError:
+        return ""
+    if not ver or any(ord(c) < 32 or ord(c) > 126 for c in ver):
+        return ""
+    return ver
+
+
 def _str16(payload: bytes, off: int) -> str:
     if len(payload) < off + 2:
         return ""
@@ -138,6 +163,8 @@ def main() -> int:
     ap.add_argument("--delay-ms", type=int, default=500)
     ap.add_argument("--abort", action="store_true",
                     help="只送 OTA_ABORT 清掉殘留 session（不讀 image、不寫 flash）")
+    ap.add_argument("--fw-ver", default=None,
+                    help="覆寫 OTA 版本字串；預設讀 image 的 app descriptor（PROJECT_VER）")
     args = ap.parse_args()
 
     if not args.abort and not args.image:
@@ -149,9 +176,11 @@ def main() -> int:
     if not args.abort:
         data = open(args.image, "rb").read()
         digest = hashlib.sha256(data).digest()
-        fw_ver = "ota-" + time.strftime("%Y%m%d-%H%M%S")
+        image_ver = image_app_version(data)
+        fw_ver = args.fw_ver or image_ver or ("ota-" + time.strftime("%Y%m%d-%H%M%S"))
         print(f"image : {args.image}  {len(data)} bytes")
         print(f"sha256: {digest.hex()}")
+        print(f"version: {fw_ver}" + ("（image app descriptor）" if fw_ver == image_ver and image_ver else ""))
 
     import serial
 

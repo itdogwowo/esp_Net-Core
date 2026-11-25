@@ -494,34 +494,72 @@ git commit -m "project: 2,400 px（16×150）抖動驗收工程與數據"
 
 ---
 
-### Task 6（可選，先量再決定）：I80 波形合成 chunked streaming
+### Task 6（可選，先量再決定）：I80 波形合成 — 展開＋轉置一次過
 
-> ⚠️ 更正：現行 `nc_i80_drv` 已經是 async（3 槽 + 完成回呼），打包與送燈**本來就重疊**；
-> §7.123 的 37.9 ms 是 async 之前的舊量測。先做 Step 0 重測，再決定要唔要做 chunked。
+> **2026-11-25 改寫**（原「chunked streaming」設計作廢）。三個已量測的事實：
+>
+> 1. `nc_i80_drv` 已經是 async（3 槽＋完成回呼），打包與送燈**本來就重疊**；
+>    §7.123 的 37.9 ms 是 async 之前的舊量測。frame ≈ **max(encode, 18 ms)**（§7.199）。
+> 2. chunked DMA 只降低「單次 encode 延遲」，**唔會**提高 throughput —— 所以唔再做。
+> 3. §7.201 實測 8×8 SWAR 轉置只有 **1.22×**（22.52 → 18.51 ms）：瓶頸唔係移位算術，
+>    而係 **gather** —— 每個 byte index 要由 16 條獨立 lane 緩衝各讀 1 byte。
+>
+> **真正有機會的是「展開＋轉置一次過」**（FastLED wave3 的形狀）：每 16 個輸入 byte
+> 直接產生 24 個 u16（48 B），唔經 `wave_pack` 的 172.8 KB 中間緩衝，亦唔做第二次
+> merge。輸出 layout 不變（每個 tick 一個 bus word，16-bit little-endian），所以
+> 呢個 Task 可以用「逐 byte 對拍」做閘門，快唔過舊路徑就唔接 production。
 
 **Files:**
-- Modify: `firmware/components/tasks/render_task/nc_i80_out.c`
+- Modify: `firmware/components/sw/pixel/nc_pixel_encode.c`（新 API：展開＋轉置）
+- Modify: `firmware/components/sw/pixel/include/nc_pixel_core.h`（宣告）
+- Modify: `firmware/components/tasks/render_task/nc_i80_out.c`（**量到快才**接線）
+- Test: `tools/hosttest/pixel_test/pixel_test.c`（新舊路徑 byte-exact）
+- Bench: `firmware/components/bench/effect_bench/nc_layout_bench.c`（variant 17／18，test-only）
+- Lab: `modules/lab/i80_pack_lab/`（host A/B 腳本＋記錄；唔係主體工具）
 
-- [ ] **Step 0：在 16-lane 板用現行固件重測** `frame_us / enc_us / tx_us / inflight`，
-      確認 frame ≈ max(enc, 18 ms)（預期 19–21 ms）。如果已經係，Task 6 可以唔做。
-- [ ] **Step 1：（如需要）量基線**確認 `enc_us ≈ 18.4–20.1 ms`、`tx_us ≈ 1.16 ms`
-- [ ] **Step 2：把 packed 改成 3 槽環 + 每槽 30 顆／lane 的 chunk**
+- [ ] **Step 0：16-lane 板用現行固件重測 async 基線** `frame_us / enc_us / tx_us / inflight`，
+      確認 frame ≈ max(enc, 18 ms)。**（要硬件；2026-11-25 未有板，未做）**
+- [x] **Step 1：host 原型＋byte-exact 測試**：新 `nc_px_codec_pack_bus()` 直接由
+      `lanes` 個 codec 即時取每顆的線材位元組，8×8 SWAR 轉置後逐 tick 寫 bus word。
+      **8-bit／無抖動**（production 16×600 的實際情況）行廣播快路徑：lane 的
+      `lane_px()` 輸出相同，唔需要 16 次呼叫＋轉置；有抖動才行完整轉置。
+      對舊路徑（`wave_pack` × N ＋ `merge8_store`／`merge8`）**逐 byte 比對**：
+      8／16 lane、RGBW、8-bit／12-bit dither、`bit_cells` 3／4／8、奇數 px。
+- [x] **Step 2：bench variant 17（0xF077）A/B**：同一塊板、同一份 payload，
+      量 `bus_old_us`、`bus_new_us`、`bus_ok`（逐 byte 相同）。
+      指令：`python3 modules/lab/i80_pack_lab/run_ab.py --port <PORT> --px 9600 --variant 17 --reps 8`
+      （lab 工具；`tools/layout_bench.py` 保持通用，冇 lab variant）。
+      **實測（ESP32-S3、EffectPerf 映像）**：
+      | px | 舊 | 新 | 倍數 | bus_ok |
+      |---|---:|---:|---:|---:|
+      | 9,600（16×600） | 24,018 µs | **6,365 µs** | **3.77×** | 1 |
+      | 2,400（16×150） | 4,765 µs | **1,166 µs** | **4.09×** | 1 |
+      reps=16 重跑數字一樣（6,365／1,166 µs）→ 唔係偶然。
+- [x] **Step 3：快過舊路徑才接 `i80_encode`**：3.77× ≫ 20%，已接。
+      `i80_encode()` 改成一次過 `nc_px_codec_pack_bus()`，同時刪走
+      8 個 packed 中間緩衝（16×600 省 43.2 KB PSRAM）。
+      **單 lane／8-bit 專用快路徑**：1 lane 時逐 tick 廣播反而慢（實測 64 px：
+      840 µs vs 舊路徑 357 µs），所以 1 lane 用 `nc_px_codec_wave_frame()` 的
+      LUT memcpy 路徑；量到 **139–165 µs**（比舊 357 µs 快 ~2.2×）。
+- [x] **Step 4：上板驗證（1-lane 板）**：Matrix（1 lane、8-bit、64 px）tests 映像
+      `0xF061`：`fps=50`、`frames=1391`、`fail=0`、`tx_us=18`、`enc_us=139–165 µs`。
+      **16-lane 16-bit 實機仍然未做**（冇 16-lane 板）；bench 的 16-lane 數字係
+      同一份 C 在板上跑，但未經真實 16 條線輸出。
+- [x] **Step 5：Commit**
 
-```c
-// 每個 chunk：30 顆 × 3 byte = 90 byte/lane → 90 × 48 = 4,320 B（16 lane、wave3）
-#define NC_I80_CHUNK_PX 30
-// esp_lcd_panel_io_tx_color() 逐 chunk 提交；on_color_trans_done 內準備下一個 chunk
-```
+> **順手修（2026-11-25）**：`i80_encode` 的 16-bit 高位 byte 原本用 `merge8`（OR）。
+> 高位 byte 只會 0→1，lane 由亮變暗會殘留（半邊「卡住」）；低位（off=0）與高位
+> （off=1）是不同 byte，用 `merge8_store` 不會覆蓋另一組。已改成兩組都用 store，
+> 8-bit 路徑行為不變。呢個係 Task 6 量 A/B 之前必須先修，否則「新舊對拍」會把
+> 舊 path 的殘留位當成新 path 的錯。
 
-- [ ] **Step 3：轉置用 nibble LUT（16 × u16）＋ 16 lane 一次轉 u16**
-
-```c
-static const uint16_t s_wave3_nib[16];   // 4 bit → 12 tick
-// 每個 tick：把 16 條 lane 的同一個 bit 併成一個 u16 字
-```
-
-- [ ] **Step 4：量重疊後 frame_us**：Expected 由 37.9–39.6 ms 降到 **≤ 21 ms**（≈48–50 fps）
-- [ ] **Step 5：Commit**
+**驗收（2026-11-24 上板後填）**：
+- 輸出逐 byte 相同（硬閘門）：9,600／2,400 px、8/16 lane、8/12-bit dither 全部
+  `bus_ok=1`；host 360 checks 全過。
+- `enc_us`（16×600）：舊 19.4 ms → **6.36 ms**（目標 ≤ 12 ms，達標）。
+- frame ≈ max(enc, 18 ms) ≈ 18 ms（≈50 fps）：16-lane 實機待量。
+- 1-lane 64 px：**139–165 µs**（舊 357 µs）。
+- 若只快 < 20% 唔接 production：實測 3.77×，所以接。
 
 ### Task 7：配對改 6 B 單表（定案）
 
@@ -782,12 +820,15 @@ Expected：`h_int` 會**減少**（資產表 BSS 由 8,386 B 變成 N × 262 B�
 
 ## 驗收條件（全部要過）
 
-1. `bash tools/hosttest/run_all.sh` 全綠（含新的 apply4 測試）。
-2. 9,600 px、500 組：`0xF071` 的 `clear=0`、`apply ≤ 2 ms`、`commit ≤ 0.5 ms`。
-3. 9,600 px、完全隨機：`apply ≤ 13 ms`。
-4. 2,400 px、4 子幀：`apply4 ≤ 1.2 ms`（500 組）、`≤ 5 ms`（完全隨機）。
-5. 開機預建：第二次開機 `已有 N、新建 0`；切換 < 20 ms。
+> 2026-11-25 更新：數字改為**真機實測**（6 B 表放 PSRAM）；舊門檻係 prototype 估算。
+
+1. `bash tools/hosttest/run_all.sh` 全綠（20/20）。
+2. 9,600 px、500 組：`0xF071` 的 `clear=0`、`apply ≤ 6 ms`（實測 5.4）、`commit ≤ 0.5 ms`。
+3. 9,600 px、完全隨機（性能下限）：`build ≤ 160 ms`、`flatify ≤ 20 ms`、`apply ≤ 6 ms`（實測 5.37）。
+4. 2,400 px、4 子幀：`apply ≤ 8 ms`（實測 6.03）、視覺 50 fps、子幀 200 Hz。
+5. 開機預建：第二次開機 `built=0`；切換 < 20 ms（playlist 預建後 swap 實測 246 µs）。
 6. 冇清畫布、冇補黑：程式碼搜尋 `memset(s_content.canvas` 應該 0 筆。
+7. 效果數：一個 mode 的**不同效果**唔再受 32 限制（40 個效果真機驗證）。
 
 ## 風險與回退
 

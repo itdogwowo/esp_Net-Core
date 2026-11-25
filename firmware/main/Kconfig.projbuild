@@ -252,6 +252,33 @@ menu "esp_Net-Core"
             硬件層已另行驗證時用：render 只建 mock lane，按 fps 消費環，
             咁 effect／pair 就可以量到真實 CPU 成本（唔受線路時間限制）。
 
+    config NETCORE_PIXEL_APPLY_PIPE
+        bool "flat 表 chunk 預取（PSRAM → internal，另一個 core）"
+        depends on NETCORE_PIXEL
+        default n
+        help
+            flat 表放 PSRAM；pair apply 時用 3 塊 internal chunk buffer，
+            由 core0 的 worker 預先 memcpy，pair 只讀 internal。
+            實測（9,600 px、1 run）可將 apply 由 ~5 ms 降到 ~1.6 ms。
+
+    config NETCORE_PIXEL_SLACK_MS
+        int "時間銀行上限（ms）：空閒時存、尖峰時釋放"
+        depends on NETCORE_PIXEL
+        default 50
+        range 0 2000
+        help
+            render 用 deadline 時鐘：早完成就存多餘時間（上限呢個值），
+            遲到就先花存下的時間頂住、下一輪追返；存唔夠就重排（唔爆追）。
+            0 = 關閉（等於固定節拍）。
+
+    config NETCORE_USB_MSC_FORCE_OFF
+        bool "強制唔交 MSC（recovery：解 FAT 鎖）"
+        depends on NETCORE_USB_OTG
+        default n
+        help
+            就算 links[].msc=1 都唔把 FAT 交畀 USB host。用來解「FAT 被 MSC 鎖住、
+            上傳／刪檔全部 err_busy」；解鎖後應改 config 的 msc=0 再關掉這個。
+
     config NETCORE_PIXEL_SUBFRAMES
         int "每個視覺幀的抖動子幀數（1=8-bit、4=10-bit）"
         depends on NETCORE_PIXEL

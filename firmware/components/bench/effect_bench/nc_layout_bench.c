@@ -28,6 +28,7 @@
 #include "nc_pixel_core.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "freertos/semphr.h"
 
 #include "nc4.h"
 #include "nc_action.h"
@@ -173,6 +174,91 @@ static inline uint64_t swar_t8(uint64_t x)
     return x;
 }
 
+// ── variant 23：PSRAM flat 表 + internal chunk prefetch（另一個 core 做 memcpy）──
+typedef struct {
+    const nc_px_flat6_t *flat;
+    uint32_t nflat;
+    uint32_t epc;                 // entries per chunk
+    uint32_t bytes;               // epc × 6
+    uint8_t *buf[3];
+    SemaphoreHandle_t full[3];
+    SemaphoreHandle_t free_sem[3];
+} pf_ctx_t;
+
+static void pf_task(void *arg)
+{
+    pf_ctx_t *c = (pf_ctx_t *)arg;
+    const uint32_t nch = (c->nflat + c->epc - 1u) / c->epc;
+    for (uint32_t i = 0; i < nch; i++) {
+        const uint32_t slot = i % 3u;
+        xSemaphoreTake(c->free_sem[slot], portMAX_DELAY);
+        uint32_t cnt = c->epc;
+        if (i * c->epc + cnt > c->nflat) {
+            cnt = c->nflat - i * c->epc;
+        }
+        memcpy(c->buf[slot], (const uint8_t *)c->flat + (size_t)i * c->epc * 6u,
+               (size_t)cnt * 6u);
+        xSemaphoreGive(c->full[slot]);
+    }
+    vTaskDelete(NULL);
+}
+
+static uint32_t run_pipe(const nc_px_layout_t *l, uint16_t *const *vp, uint8_t *dst,
+                         uint32_t chunk_kb)
+{
+    if (l->flat == NULL || l->nflat == 0) {
+        return 0;
+    }
+    pf_ctx_t c = { 0 };
+    c.flat = l->flat;
+    c.nflat = l->nflat;
+    c.epc = (chunk_kb * 1024u) / 6u;
+    if (c.epc == 0) {
+        c.epc = 1;
+    }
+    c.bytes = c.epc * 6u;
+    bool ok = true;
+    for (int i = 0; i < 3; i++) {
+        c.buf[i] = (uint8_t *)heap_caps_malloc(c.bytes, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+        c.full[i] = xSemaphoreCreateBinary();
+        c.free_sem[i] = xSemaphoreCreateBinary();
+        if (c.buf[i] == NULL || c.full[i] == NULL || c.free_sem[i] == NULL) {
+            ok = false;
+        } else {
+            xSemaphoreGive(c.free_sem[i]);
+        }
+    }
+    uint32_t us = 0;
+    if (ok) {
+        TaskHandle_t th = NULL;
+        if (xTaskCreatePinnedToCore(pf_task, "pf", 3072, &c, 1, &th, 1) == pdPASS) {
+            const uint32_t nch = (c.nflat + c.epc - 1u) / c.epc;
+            const int64_t t0 = esp_timer_get_time();
+            for (uint32_t i = 0; i < nch; i++) {
+                const uint32_t slot = i % 3u;
+                xSemaphoreTake(c.full[slot], portMAX_DELAY);
+                uint32_t cnt = c.epc;
+                if (i * c.epc + cnt > c.nflat) {
+                    cnt = c.nflat - i * c.epc;
+                }
+                (void)nc_px_layout_apply_range(l, vp, dst, i * c.epc, cnt);
+                xSemaphoreGive(c.free_sem[slot]);
+            }
+            us = (uint32_t)(esp_timer_get_time() - t0);
+        }
+    }
+    for (int i = 0; i < 3; i++) {
+        heap_caps_free(c.buf[i]);
+        if (c.full[i] != NULL) {
+            vSemaphoreDelete(c.full[i]);
+        }
+        if (c.free_sem[i] != NULL) {
+            vSemaphoreDelete(c.free_sem[i]);
+        }
+    }
+    return us;
+}
+
 static void on_layoutbench(nc4_ctx_t *ctx, const nc4_frame_t *f)
 {
     const uint8_t *p = (f != NULL) ? f->data : NULL;
@@ -238,7 +324,8 @@ static void on_layoutbench(nc4_ctx_t *ctx, const nc4_frame_t *f)
     const bool chan_layout = (variant == 4);
     const bool perm_layout = (variant == 2 || variant == 3 || chan_layout ||
         ((variant == 5 || variant == 6 || variant == 7 || variant == 8 || variant == 9 ||
-          variant == 11 || variant == 12 || variant == 13 || variant == 15) && groups_in == 0));
+          variant == 11 || variant == 12 || variant == 13 || variant == 15 ||
+          variant == 20 || variant == 21) && groups_in == 0));
     if (chan_layout) {
         // ngroups 係 uint16：4 × px 要 ≤ 65535 → px ≤ 16383。再受 entry 記憶體限制
         // （每個 entry 64 B），所以 px 會自動封頂。
@@ -442,6 +529,148 @@ static void on_layoutbench(nc4_ctx_t *ctx, const nc4_frame_t *f)
         }
     }
 
+    uint32_t flat_int_us = 0, flat_ps_us = 0, apply_flat_int_us = 0, apply_flat_ps_us = 0;
+    uint32_t flat_write_us = 0, flat_read_us = 0;
+    if (variant == 20 || variant == 21) {
+        // 同一份 layout：先 internal、再 PSRAM，各量 flatify 同 apply
+        const int64_t a0 = esp_timer_get_time();
+        if (nc_px_layout_flatify_place(&lay, false) == ESP_OK) {
+            flat_int_us = (uint32_t)(esp_timer_get_time() - a0);
+            uint32_t best = 0xFFFFFFFFu;
+            for (int r = 0; r < 5; r++) {
+                const int64_t t = esp_timer_get_time();
+                (void)nc_px_layout_apply(&lay, vptrs, c8);
+                const uint32_t us = (uint32_t)(esp_timer_get_time() - t);
+                if (us < best) best = us;
+            }
+            apply_flat_int_us = best;
+        }
+        const int64_t b0 = esp_timer_get_time();
+        if (nc_px_layout_flatify_place(&lay, true) == ESP_OK) {
+            flat_ps_us = (uint32_t)(esp_timer_get_time() - b0);
+            uint32_t best = 0xFFFFFFFFu;
+            for (int r = 0; r < 5; r++) {
+                const int64_t t = esp_timer_get_time();
+                (void)nc_px_layout_apply(&lay, vptrs, c8);
+                const uint32_t us = (uint32_t)(esp_timer_get_time() - t);
+                if (us < best) best = us;
+            }
+            apply_flat_ps_us = best;
+
+            if (variant == 21 && lay.flat != NULL && lay.nflat > 0) {
+                // 模擬「半永久化」：寫 57.6 KB 去 FAT，再讀返
+                const size_t bytes = (size_t)lay.nflat * sizeof(nc_px_flat6_t);
+                FILE *f = fopen("/data/flat_bench.bin", "wb");
+                if (f != NULL) {
+                    const int64_t w0 = esp_timer_get_time();
+                    (void)fwrite(lay.flat, 1, bytes, f);
+                    (void)fclose(f);
+                    flat_write_us = (uint32_t)(esp_timer_get_time() - w0);
+                    nc_px_flat6_t *buf = (nc_px_flat6_t *)heap_caps_malloc(
+                        bytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+                    if (buf != NULL) {
+                        FILE *rf = fopen("/data/flat_bench.bin", "rb");
+                        if (rf != NULL) {
+                            const int64_t r0 = esp_timer_get_time();
+                            const size_t got = fread(buf, 1, bytes, rf);
+                            (void)fclose(rf);
+                            flat_read_us = (uint32_t)(esp_timer_get_time() - r0);
+                            if (got == bytes) {
+                                heap_caps_free(lay.flat);
+                                lay.flat = buf;
+                                lay.flat_psram = true;
+                                uint32_t best2 = 0xFFFFFFFFu;
+                                for (int r = 0; r < 5; r++) {
+                                    const int64_t t = esp_timer_get_time();
+                                    (void)nc_px_layout_apply(&lay, vptrs, c8);
+                                    const uint32_t us = (uint32_t)(esp_timer_get_time() - t);
+                                    if (us < best2) best2 = us;
+                                }
+                                apply_flat_ps_us = best2;
+                            } else {
+                                heap_caps_free(buf);
+                            }
+                        } else {
+                            heap_caps_free(buf);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    uint32_t memcpy_ps_int_us = 0, memcpy_int_int_us = 0;
+    if (variant == 22) {
+        // 57.6 KB（9,600 px × 6 B）由 PSRAM 搬去 internal：評估「背景預讀 +
+        // 切換時 memcpy」能唔能夠代替 14.5 ms 的 flatify。
+        const size_t bytes = 9600u * 6u;
+        uint8_t *src_ps = (uint8_t *)heap_caps_malloc(bytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        uint8_t *dst_int = (uint8_t *)heap_caps_malloc(bytes, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+        if (src_ps != NULL && dst_int != NULL) {
+            memset(src_ps, 0x5A, bytes);
+            uint32_t best = 0xFFFFFFFFu;
+            for (int r = 0; r < 20; r++) {
+                const int64_t t = esp_timer_get_time();
+                memcpy(dst_int, src_ps, bytes);
+                const uint32_t us = (uint32_t)(esp_timer_get_time() - t);
+                if (us < best) best = us;
+            }
+            memcpy_ps_int_us = best;
+        }
+        if (src_ps == NULL || dst_int == NULL) {
+            memcpy_ps_int_us = 0xFFFFFFFFu;   // 配置失敗（distinguish from 0）
+        }
+        heap_caps_free(src_ps);
+        heap_caps_free(dst_int);
+    }
+
+    uint32_t pipe4_us = 0, pipe8_us = 0, pipe16_us = 0;
+    uint32_t flat4_us = 0;
+    if (variant == 24 && lay.nflat > 0 && lay.naprog == 1) {
+        // uniform RGB 的 4 B 表：dst16 + src16；write/aprog 由 layout 統一。
+        bool rgb = true;
+        for (uint32_t i = 0; i < lay.nflat; i++) {
+            if (lay.flat[i].write != NC_PX_WRITE_RGB || lay.flat[i].aprog != 0) {
+                rgb = false;
+                break;
+            }
+        }
+        if (rgb) {
+            uint16_t *f4 = (uint16_t *)heap_caps_malloc((size_t)lay.nflat * 4u,
+                                                        MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+            if (f4 != NULL) {
+                for (uint32_t i = 0; i < lay.nflat; i++) {
+                    f4[i * 2u] = lay.flat[i].dst;
+                    f4[i * 2u + 1u] = lay.flat[i].src;
+                }
+                const uint16_t *v0 = vptrs[0];
+                const uint32_t nv = lay.aprog[0].nv;
+                uint32_t best = 0xFFFFFFFFu;
+                for (int r = 0; r < 5; r++) {
+                    const int64_t t = esp_timer_get_time();
+                    for (uint32_t i = 0; i < lay.nflat; i++) {
+                        const uint32_t c = f4[i * 2u + 1u];
+                        const uint32_t c1 = (c + 1u < nv) ? (c + 1u) : (c + 1u - nv);
+                        const uint32_t c2 = (c + 2u < nv) ? (c + 2u) : (c + 2u - nv);
+                        uint8_t *o = c8 + ((size_t)f4[i * 2u] << 2);
+                        o[0] = (uint8_t)(v0[c] >> 4);
+                        o[1] = (uint8_t)(v0[c1] >> 4);
+                        o[2] = (uint8_t)(v0[c2] >> 4);
+                        o[3] = 0;
+                    }
+                    const uint32_t us = (uint32_t)(esp_timer_get_time() - t);
+                    if (us < best) best = us;
+                }
+                flat4_us = best;
+                heap_caps_free(f4);
+            }
+        }
+    }
+    if (variant == 23) {
+        pipe4_us = run_pipe(&lay, vptrs, c8, 4);
+        pipe8_us = run_pipe(&lay, vptrs, c8, 8);
+        pipe16_us = run_pipe(&lay, vptrs, c8, 16);
+    }
     uint32_t merge8_us = 0, swar_us = 0, swar_ok = 0;
     if (variant == 10) {
         const uint32_t lane_px = (px >= 16u) ? (px / 16u) : px;   // 16 條線，每條 600 px
@@ -492,6 +721,96 @@ static void on_layoutbench(nc4_ctx_t *ctx, const nc4_frame_t *f)
     }
 
     uint32_t flat_build_us = 0, flat_apply_us = 0;
+    uint32_t bus_old_us = 0, bus_new_us = 0, bus_ok = 0;
+    // ── LAB instrumentation（Task 6 I80 A/B）──
+    // 一次性量測：只存在於 test-only 的 effect_bench（EffectPerf 映像），唔入 production。
+    // host 端 orchestration 在 modules/lab/i80_pack_lab/；16-lane 驗完可移除。
+    if (variant == 17 || variant == 18) {
+        const bool dith = (variant == 18);       // 18 = 12-bit dither（走完整轉置）
+        // Task 6 原型：同一份 payload、同一批 codec，比較
+        //   (a) 舊：16 × wave_pack（每條 lane 5,400 B 中間緩衝）＋ 兩組 merge8
+        //   (b) 新：nc_px_codec_pack_bus() 每顆即時轉置、直接寫 bus word
+        // 輸出要逐 byte 相同（bus_ok），時間取 reps 的最小值。
+        const uint32_t lane_px = (px >= 16u) ? (px / 16u) : px;
+        nc_px_codec_cfg_t cc;
+        memset(&cc, 0, sizeof(cc));
+        cc.fmt = NC_PX_FMT_WS2812;
+        cc.bits = dith ? 12 : 8;
+        cc.dither_mode = dith ? 1 : 0;
+        cc.px = lane_px;
+        nc_px_wave_default(cc.fmt, &cc.wave);
+        nc_pixel_codec_t *cd[16] = { NULL };
+        uint8_t *pack[16] = { NULL };
+        uint8_t *payload = (uint8_t *)heap_caps_malloc((size_t)lane_px * NC_PX_BPP, alloc_caps);
+        bool ok = (payload != NULL);
+        for (uint32_t i = 0; ok && i < lane_px * NC_PX_BPP; i++) {
+            payload[i] = (uint8_t)((i * 37u + 11u) & 0xFFu);
+        }
+        for (int k = 0; k < 16 && ok; k++) {
+            cd[k] = nc_px_codec_init(nc_px_codec_new(), &cc);
+            ok = (cd[k] != NULL);
+        }
+        const uint32_t pack_bytes = lane_px *
+                                    ((cd[0] != NULL) ? nc_px_codec_lane_bytes(cd[0]) : 3u) *
+                                    cc.wave.bit_cells;
+        const uint32_t active = pack_bytes * 8u * 2u;
+        uint8_t *o1 = (uint8_t *)heap_caps_malloc(active, alloc_caps);
+        uint8_t *o2 = (uint8_t *)heap_caps_malloc(active, alloc_caps);
+        ok = ok && (o1 != NULL && o2 != NULL);
+        for (int k = 0; k < 16 && ok; k++) {
+            pack[k] = (uint8_t *)heap_caps_malloc(pack_bytes, alloc_caps);
+            ok = (pack[k] != NULL);
+        }
+        if (ok) {
+            for (uint8_t r = 1; r <= reps; r++) {
+                memset(o1, 0, active);          // 模擬 driver 的 calloc 槽（唔計入 encode 時間）
+                for (int k = 0; k < 16; k++) {
+                    nc_px_codec_frame(cd[k], r);
+                }
+                const int64_t a0 = esp_timer_get_time();
+                for (int k = 0; k < 16; k++) {
+                    if (nc_px_codec_wave_pack(cd[k], payload, lane_px, pack[k], pack_bytes) == 0) {
+                        ok = false;
+                    }
+                }
+                nc_px_codec_pack_merge8_store((const uint8_t **)&pack[0], pack_bytes, o1, 2, 0);
+                // 高位 byte 用 store（唔用 OR）：同修好之後的 i80_encode 一致。
+                nc_px_codec_pack_merge8_store((const uint8_t **)&pack[8], pack_bytes, o1, 2, 1);
+                const uint32_t us = (uint32_t)(esp_timer_get_time() - a0);
+                if (bus_old_us == 0 || us < bus_old_us) {
+                    bus_old_us = us;
+                }
+            }
+            // 新路徑由同一個狀態開始（bits=8 冇 dither 狀態，但照 reset 保持一致）。
+            for (int k = 0; k < 16; k++) {
+                (void)nc_px_codec_init(cd[k], &cc);
+            }
+            for (uint8_t r = 1; r <= reps; r++) {
+                for (int k = 0; k < 16; k++) {
+                    nc_px_codec_frame(cd[k], r);
+                }
+                const int64_t b0 = esp_timer_get_time();
+                const uint32_t ticks = nc_px_codec_pack_bus(cd, payload, lane_px, o2, 16, 16);
+                const uint32_t us = (uint32_t)(esp_timer_get_time() - b0);
+                if (ticks != pack_bytes * 8u) {
+                    ok = false;
+                }
+                if (bus_new_us == 0 || us < bus_new_us) {
+                    bus_new_us = us;
+                }
+            }
+            bus_ok = (ok && memcmp(o1, o2, active) == 0) ? 1u : 0u;
+            s_sink += o2[0];
+        }
+        for (int k = 0; k < 16; k++) {
+            if (pack[k] != NULL) heap_caps_free(pack[k]);
+            if (cd[k] != NULL) nc_px_codec_free(cd[k]);
+        }
+        if (payload != NULL) heap_caps_free(payload);
+        if (o1 != NULL) heap_caps_free(o1);
+        if (o2 != NULL) heap_caps_free(o2);
+    }
+
     if (variant == 9 || variant == 11 || variant == 12 || variant == 13 || variant == 15) {
         // 原型：先把每一顆的落點＋三個通道起點算成 8 B（dst16, c0, c1, c2），
         // 再跑「讀 8 B、寫 4 B」的最小白迴圈。呢個就係計劃 Task 7 的形狀。
@@ -847,7 +1166,10 @@ static void on_layoutbench(nc4_ctx_t *ctx, const nc4_frame_t *f)
         s_sink += c8[round];
     }
 
-    char j[800];
+    // 回覆 JSON 放 static：handler 跑在 decode0 任務上（4 KB stack），
+    // 1,200 B 放 stack 會同 layout build／apply 的區域一齊爆（2026-11-24 上板實測：
+    // 任何 0xF077 都 panic／重啟，連 variant 0 都中）。s_busy 已保證單一 handler。
+    static char j[1200];
     snprintf(j, sizeof(j),
              "{\"px\":%u,\"groups\":%u,\"variant\":%u,\"jobs\":%u,\"runs\":%u,"
              "\"nv\":%u,\"vals_us\":%u,\"build_us\":%u,\"apply_us\":%u,\"apply12_us\":%u,"
@@ -857,6 +1179,12 @@ static void on_layoutbench(nc4_ctx_t *ctx, const nc4_frame_t *f)
              "\"save_us\":%u,\"load_us\":%u,\"cache_bytes\":%ld,\"load_rc\":%d,"
              "\"merge8_us\":%u,\"swar_us\":%u,\"swar_ok\":%u,"
              "\"flat_build_us\":%u,\"flat_apply_us\":%u,"
+             "\"flat_int_us\":%u,\"flat_ps_us\":%u,"
+             "\"apply_flat_int_us\":%u,\"apply_flat_ps_us\":%u,"
+             "\"flat_write_us\":%u,\"flat_read_us\":%u,"
+             "\"memcpy_ps_int_us\":%u,\"memcpy_int_int_us\":%u,"
+             "\"pipe4_us\":%u,\"pipe8_us\":%u,\"pipe16_us\":%u,\"flat4_us\":%u,"
+             "\"bus_old_us\":%u,\"bus_new_us\":%u,\"bus_ok\":%u,"
              "\"canvas_path_us\":%u,\"direct_us\":%u,\"direct_noclear_us\":%u,"
              "\"direct4_us\":%u,\"batch4_us\":%u,\"batch4_1pass_us\":%u,"
              "\"batch4_1pass_noclear_us\":%u,"
@@ -874,6 +1202,13 @@ static void on_layoutbench(nc4_ctx_t *ctx, const nc4_frame_t *f)
              (unsigned)save_us, (unsigned)load_us, cache_bytes, (int)load_rc,
              (unsigned)merge8_us, (unsigned)swar_us, (unsigned)swar_ok,
              (unsigned)flat_build_us, (unsigned)flat_apply_us,
+             (unsigned)flat_int_us, (unsigned)flat_ps_us,
+             (unsigned)apply_flat_int_us, (unsigned)apply_flat_ps_us,
+             (unsigned)flat_write_us, (unsigned)flat_read_us,
+             (unsigned)memcpy_ps_int_us, (unsigned)memcpy_int_int_us,
+             (unsigned)pipe4_us, (unsigned)pipe8_us, (unsigned)pipe16_us,
+             (unsigned)flat4_us,
+             (unsigned)bus_old_us, (unsigned)bus_new_us, (unsigned)bus_ok,
              (unsigned)canvas_us, (unsigned)direct_us, (unsigned)direct_noclear_us,
              (unsigned)direct4_us,
              (unsigned)batch4_us, (unsigned)batch4_1pass_us,

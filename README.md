@@ -3,7 +3,10 @@
 ESP32-P4（另有 S3 port）上的 **NC4 通訊核心**：多條傳輸通道 → 解碼 → 指令執行，
 外加分核（RX core1 / decode core0）、零複製、可調的緩衝管理。C / ESP-IDF v6.0.3。
 
-> 這份 README 是**唯一入口**，只回答一件事：**什麼東西在哪一層、要去哪裡找。**
+> **AI／第一次接觸專案**：先讀 [AGENTS.md](AGENTS.md)（雷霆大文件）——
+> 入面有鐵律、USB NC4 OTA 流程、建置／測試／pixel 管線與 AI 工作 SOP。
+>
+> 這份 README 是**人類入口**，只回答一件事：**什麼東西在哪一層、要去哪裡找。**
 > 深入內容從 [docs/README.md](docs/README.md) 進去。
 
 ---

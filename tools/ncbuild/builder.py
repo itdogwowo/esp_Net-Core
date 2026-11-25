@@ -62,6 +62,8 @@ def _idf_args(port: env.Port, build: Path, minimal: bool, tests: bool = False,
               wifi: bool | None = None) -> list[str]:
     args = [f'-DPORT={port.hw_rel}', f'-DPROJECT={port.pj_rel}',
             f'-DIDF_TARGET={port.chip}',
+            # 每次明確傳版本：build dir 會 cache PROJECT_VER，不傳就可能沿用舊值。
+            f'-DPROJECT_VER={shlex.quote(env.project_ver())}',
             # 每個 build dir 自己的 sdkconfig：多塊板並存時不用互相切 target。
             f'-DSDKCONFIG={shlex.quote(str(build / "sdkconfig"))}']
     if minimal:

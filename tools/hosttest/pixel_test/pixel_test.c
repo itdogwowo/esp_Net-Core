@@ -486,6 +486,179 @@ static void test_backends(void)
     CHECK_EQ(nc_px_ring_fill(&q2), 0);
 }
 
+// ── ⑥ 展開＋轉置一次過（Task 6）：同舊路徑逐 byte 對拍 ─────────────
+// 舊路徑 = N × wave_pack（每條 lane 一份 packed 中間緩衝）+ 兩組 merge8_store。
+// 新路徑 = nc_px_codec_pack_bus（每顆燈即時取 16 條 lane 的位元組，8×8 轉置後直接寫）。
+// 閘門係逐 byte 相同，唔係「睇落一樣」；連抖動狀態都要一樣（所以每輪重新 init）。
+static void pack_bus_case(const char *name, nc_px_format_t fmt, uint8_t bits,
+                          uint8_t dither_mode, uint8_t bit_cells, uint32_t lanes,
+                          uint32_t bus_width, uint32_t px, uint32_t frame)
+{
+    printf("  · %s\n", name);
+    nc_px_codec_cfg_t cc;
+    memset(&cc, 0, sizeof(cc));
+    cc.fmt = fmt;
+    cc.bits = bits;
+    cc.dither_mode = dither_mode;
+    cc.px = px;
+    nc_px_wave_default(fmt, &cc.wave);
+    cc.wave.bit_cells = bit_cells;
+    if (bit_cells == 4) {
+        cc.wave.t0h = 1;
+        cc.wave.t1h = 2;
+    } else if (bit_cells == 8) {
+        cc.wave.t0h = 2;
+        cc.wave.t1h = 5;
+    }
+
+    nc_pixel_codec_t *cd[16] = { NULL };
+    uint8_t *pack[16] = { NULL };
+    uint8_t *pay = NULL, *old = NULL, *nw = NULL;
+    bool ok = true;
+    for (uint32_t k = 0; k < lanes && ok; k++) {
+        cd[k] = nc_px_codec_new();
+        ok = (cd[k] != NULL && nc_px_codec_init(cd[k], &cc) != NULL);
+    }
+    const uint32_t lb = (cd[0] != NULL) ? nc_px_codec_lane_bytes(cd[0]) : 0;
+    const uint32_t pack_bytes = px * lb * bit_cells;
+    const uint32_t active = pack_bytes * 8u * (bus_width / 8u);
+    pay = (uint8_t *)malloc((size_t)px * NC_PX_BPP);
+    old = (uint8_t *)calloc(active, 1);
+    nw = (uint8_t *)calloc(active, 1);
+    ok = ok && (pay != NULL && old != NULL && nw != NULL);
+    for (uint32_t k = 0; k < lanes && ok; k++) {
+        pack[k] = (uint8_t *)malloc(pack_bytes);
+        ok = (pack[k] != NULL);
+    }
+    for (uint32_t i = 0; ok && i < px * NC_PX_BPP; i++) {
+        // 有 0、255、漸變、重複：確保 bit 全 0／全 1／交錯都出現。
+        pay[i] = (uint8_t)((i % 7u == 0u) ? 0xFFu : ((i % 11u == 0u) ? 0u
+                                                    : ((i * 37u + 11u) & 0xFFu)));
+    }
+
+    if (ok) {
+        for (uint32_t k = 0; k < lanes; k++) {
+            (void)nc_px_codec_frame(cd[k], frame);
+            ok = ok && (nc_px_codec_wave_pack(cd[k], pay, px, pack[k], pack_bytes) == pack_bytes);
+        }
+        const uint8_t *lp[8] = { NULL };
+        for (uint32_t k = 0; k < 8; k++) {
+            lp[k] = (k < lanes) ? pack[k] : NULL;
+        }
+        nc_px_codec_pack_merge8_store(lp, pack_bytes, old, bus_width / 8u, 0);
+        if (bus_width == 16) {
+            const uint8_t *hp[8] = { NULL };
+            for (uint32_t k = 0; k < 8; k++) {
+                hp[k] = (8u + k < lanes) ? pack[8u + k] : NULL;
+            }
+            nc_px_codec_pack_merge8_store(hp, pack_bytes, old, 2, 1);
+        }
+        // 新路徑要由同一個抖動狀態開始：重新 init（memset 0）＋同一個 frame。
+        for (uint32_t k = 0; k < lanes; k++) {
+            ok = ok && (nc_px_codec_init(cd[k], &cc) != NULL);
+            (void)nc_px_codec_frame(cd[k], frame);
+        }
+        const uint32_t ticks = nc_px_codec_pack_bus(cd, pay, px, nw, lanes, bus_width);
+        CHECK_EQ(ticks, pack_bytes * 8u);
+        CHECK(memcmp(old, nw, active) == 0);
+        if (memcmp(old, nw, active) != 0) {
+            uint32_t d = 0;
+            while (d < active && old[d] == nw[d]) {
+                d++;
+            }
+            printf("    首個差異 byte %u：old=0x%02x new=0x%02x\n",
+                   (unsigned)d, (unsigned)old[d], (unsigned)nw[d]);
+        }
+    } else {
+        CHECK(0);
+    }
+
+    for (uint32_t k = 0; k < lanes; k++) {
+        if (pack[k] != NULL) free(pack[k]);
+        if (cd[k] != NULL) nc_px_codec_free(cd[k]);
+    }
+    free(pay);
+    free(old);
+    free(nw);
+}
+
+static void test_pack_bus(void)
+{
+    section("展開＋轉置一次過：新舊路徑逐 byte 對拍（8/16 lane、RGBW、dither、bc）");
+    pack_bus_case("8 lane／8-bit bus／WS2812／bc=3",
+                  NC_PX_FMT_WS2812, 8, 0, 3, 8, 8, 17, 1);
+    pack_bus_case("16 lane／16-bit bus／WS2812／bc=3",
+                  NC_PX_FMT_WS2812, 8, 0, 3, 16, 16, 17, 1);
+    pack_bus_case("16 lane／16-bit bus／WS2812W／12-bit dither／bc=3",
+                  NC_PX_FMT_WS2812W, 12, 1, 3, 16, 16, 17, 5);
+    pack_bus_case("12 lane／16-bit bus（高 4 lane 空）／bc=4",
+                  NC_PX_FMT_WS2812, 12, 1, 4, 12, 16, 9, 3);
+    pack_bus_case("16 lane／16-bit bus／bc=8（高速時序）",
+                  NC_PX_FMT_WS2812, 8, 0, 8, 16, 16, 5, 1);
+    pack_bus_case("8 lane／8-bit bus／spatial dither／bc=3",
+                  NC_PX_FMT_WS2812, 12, 2, 3, 8, 8, 7, 2);
+}
+
+// 換幀：全亮 → 全暗，16-bit 高位 byte 一定要變 0。
+// （舊 i80_encode 的高位用 OR：bit 只會 0→1，lane 變暗會殘留；呢個測試守住新路徑。）
+static void test_pack_bus_clear16(void)
+{
+    section("16-bit 換幀：全亮 → 全暗，高位 byte 要清 0（唔可以殘留）");
+    nc_px_codec_cfg_t cc;
+    memset(&cc, 0, sizeof(cc));
+    cc.fmt = NC_PX_FMT_WS2812;
+    cc.bits = 8;
+    cc.px = 2;
+    nc_px_wave_default(cc.fmt, &cc.wave);
+    nc_pixel_codec_t *cd[16] = { NULL };
+    bool ok = true;
+    for (int k = 0; k < 16 && ok; k++) {
+        cd[k] = nc_px_codec_init(nc_px_codec_new(), &cc);
+        ok = (cd[k] != NULL);
+    }
+    if (!ok) {
+        CHECK(0);
+        for (int k = 0; k < 16; k++) {
+            if (cd[k] != NULL) nc_px_codec_free(cd[k]);
+        }
+        return;
+    }
+    const uint32_t ticks = 2u * 3u * 8u * cc.wave.bit_cells;   // 144
+    const uint32_t bytes = ticks * 2u;
+    uint8_t *out = (uint8_t *)calloc(bytes, 1);
+    uint8_t *ref = (uint8_t *)calloc(bytes, 1);
+    uint8_t *pay = (uint8_t *)malloc(2u * NC_PX_BPP);
+    CHECK(out != NULL && ref != NULL && pay != NULL);
+    if (out != NULL && ref != NULL && pay != NULL) {
+        // 先用全亮跑一次（高位 byte 會被寫成 0xFF），再換全暗跑第二次。
+        memset(pay, 0xFF, 2u * NC_PX_BPP);
+        for (int k = 0; k < 16; k++) {
+            (void)nc_px_codec_frame(cd[k], 1);
+        }
+        CHECK_EQ(nc_px_codec_pack_bus(cd, pay, 2, out, 16, 16), ticks);
+        memset(pay, 0x00, 2u * NC_PX_BPP);
+        for (int k = 0; k < 16; k++) {
+            (void)nc_px_codec_frame(cd[k], 2);
+        }
+        // 同一個 out 重用（唔清 buffer）vs 全新 ref：逐 byte 一定要一樣。
+        CHECK_EQ(nc_px_codec_pack_bus(cd, pay, 2, out, 16, 16), ticks);
+        CHECK_EQ(nc_px_codec_pack_bus(cd, pay, 2, ref, 16, 16), ticks);
+        CHECK(memcmp(out, ref, bytes) == 0);
+        // 全暗仍然是「每個 bit 一個短高脈衝」：第一個 tick 16 條 lane 都是 1，
+        // 第二個 tick 是 0（T0H=1、bit_cells=3）。
+        CHECK_EQ(ref[0], 0xFF);
+        CHECK_EQ(ref[1], 0xFF);
+        CHECK_EQ(ref[2], 0x00);
+        CHECK_EQ(ref[3], 0x00);
+    }
+    free(out);
+    free(ref);
+    free(pay);
+    for (int k = 0; k < 16; k++) {
+        nc_px_codec_free(cd[k]);
+    }
+}
+
 // ── main ──────────────────────────────────────────────────────────
 int main(void)
 {
@@ -494,6 +667,8 @@ int main(void)
     test_encode_lane();
     test_dither();
     test_multilane();
+    test_pack_bus();
+    test_pack_bus_clear16();
     test_backends();
     printf("\n%d passed, %d failed\n", g_pass, g_fail);
     return (g_fail == 0) ? 0 : 1;

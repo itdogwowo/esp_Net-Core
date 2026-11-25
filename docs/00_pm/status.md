@@ -60,7 +60,7 @@ ESP32-P4（另有 S3 port）上的 **NC4 通訊核心**：多條傳輸通道 →
 
 | 項目 | 結果 |
 |---|---|
-| 工具鏈 | ESP-IDF **v6.1.0**（WSL 內），target `esp32s3` |
+| 工具鏈 | ESP-IDF **v6.1**（WSL 內；`v6.1.0` tag 不存在，見 §7.103），target `esp32s3` |
 | 結果 | **0 error、0 warning**，`esp_net_core.bin` = 408,256 B（398.7 KB） |
 | 靜態 RAM | **108,463 B（105.9 KB）**＝ DRAM 段 31.7%（清 handler static 之前是 127,583 B） |
 | 開機 heap | **233,296 B（227.8 KB）**（之前 214,176 B） |
@@ -163,7 +163,7 @@ USB 的完整分析：[failure-policy.md §4](../03_notes/failure-policy.md)。
 | `tools/bench/cdc_tx.py` | CDC TX 壓測（log／回覆爭出口時的行為） |
 | `bash tools/hosttest/run_all.sh` | 一次跑完 8 支 host test（cfg / cfgstruct / ncd / task / router / mod / hub / plan），全綠 = 冇 error 亦冇 warning |
 | `tools/hosttest/*/run.sh` | 單支 host 測試，不用板子也不用 IDF：hub / plan / mod / **ncd** / **task** / **cfg** / **router**。Windows 上只有 `cfg` / `ncd` / `task` / `router` 有 `run.bat` |
-| **ESP-IDF 環境** | macOS：`~/esp/esp-idf` **v6.0.3**（2026-11-20 實測可以直接 `make.py build` ＋ OTA）；Windows：WSL 內 v6.1.0（Windows 本身冇 IDF）。`firmware/build/` 兩邊共用，看 map 時留意是哪邊 build 的 |
+| **ESP-IDF 環境** | macOS：`~/esp/esp-idf` **v6.0.3**（2026-11-24 實測 `idf.py --version`；可以直接 `make.py build` ＋ OTA）；Windows：WSL 內 v6.1／v6.1.1（Windows 本身冇 IDF；`v6.1.0` tag 不存在）。`firmware/build/` 兩邊共用，看 map 時留意是哪邊 build 的 |
 | `curl http://10.10.1.50:8080/config.json` | 讀寫設定（GET/PUT） |
 
 ---
@@ -7794,7 +7794,457 @@ esp_err_t nc_px_show_plan(..., nc_px_plan_t *out, nc_px_job_t *jobs, uint16_t jo
 `night-report-2026-11-24.md`）；Task 6（可選、chunked DMA）保持未勾；Task 7 Step 5、
 Task 8 Step 5／7 全部完成。計劃只剩「Task 6 可選」未做。
 
-### 7.219 2026-11-24（driver 層定案：硬件先、driver 後；LED 真係由 JSON 生效）
+### 7.219 2026-11-25（Task 6 改寫：展開＋轉置一次過；host 原型逐 byte 全過）
+
+**為什麼改寫**：原 Task 6 係 chunked DMA，但 §7.199 已證 async 已經重疊（frame ≈
+max(encode, 18 ms)），chunk 只降低單次延遲；§7.201 量到 SWAR 轉置只有 1.22×
+（22.52 → 18.51 ms），瓶頸係 **gather**（每個 byte index 要由 16 條 lane 各讀 1 B），
+唔係移位算術。所以改成 FastLED wave3 的形狀：**每 16 個輸入 byte 直接產生 24 個 u16**
+（48 B），唔經每條 lane 的 packed 中間緩衝（16×600 舊路徑要寫＋讀 172.8 KB）。
+
+**新 API**（`nc_pixel_encode.c`／`nc_pixel_core.h`）：
+
+```c
+uint32_t nc_px_codec_pack_bus(nc_pixel_codec_t *const codec[], const uint8_t *rgbw,
+                              uint32_t px, uint8_t *out, uint32_t lanes, uint32_t bus_width);
+```
+
+- 每顆燈對每條 lane 呼叫一次 `nc_px_codec_lane_px()`（抖動狀態照樣逐顆推進）；
+- 每個線材 byte 做 8×8 SWAR 轉置，直接逐 tick 寫 bus word（16-bit = little-endian）；
+- 唔經 `wave_pack`、唔經 `merge8`、冇 172.8 KB 中間緩衝；只寫 active ticks
+  （reset 由呼叫端保持 0，同舊路徑一致）。
+- **8-bit／無抖動廣播快路徑**：production 16×600 的 16 條 lane 共用同一份 payload 與
+  codec 設定，`lane_px()` 對每條 lane 回同一個 byte ⇒ 只需編一次、把 mask 廣播成
+  all／0；有抖動（bits>8 或 mode≠0）才逐 lane 推進＋轉置。
+
+**Host 驗證**（`tools/hosttest/pixel_test`，新舊路徑逐 byte 對拍）：
+
+| 配置 | 結果 |
+|---|---|
+| 8 lane／8-bit bus／WS2812／bc=3 | 相同 |
+| 16 lane／16-bit bus／WS2812／bc=3 | 相同 |
+| 16 lane／16-bit bus／WS2812W／12-bit dither／bc=3 | 相同 |
+| 12 lane／16-bit bus（高 4 lane 空）／bc=4 | 相同 |
+| 16 lane／16-bit bus／bc=8（高速時序） | 相同 |
+| 8 lane／8-bit bus／spatial dither／bc=3 | 相同 |
+
+`pixel_test` **360 checks 全過**（另加「全亮→全暗、16-bit 高位 byte 要清 0」的換幀測試）；
+`bash tools/hosttest/run_all.sh` **20/20 全綠**。
+
+**順手修一個真 bug（16-bit 高位殘留）**：`i80_encode` 的高位 byte 原本用
+`nc_px_codec_pack_merge8()`（OR）。高位 byte 只會 0→1，lane 由亮變暗時會殘留
+（16-bit 板會半邊「卡住」）；低位（off=0）與高位（off=1）是不同 byte，用
+`merge8_store` 不會互相覆蓋。已改成兩組都用 store；8-bit 路徑行為不變。
+呢個必須在 A/B 之前修，否則舊 path 的殘留位會被誤認為新 path 的錯。
+
+**未做（等 16-lane 硬件）**：
+
+- Step 0：現行 async 基線（`frame_us`／`enc_us`／`tx_us`／`inflight`）。
+- Step 2：`python3 modules/lab/i80_pack_lab/run_ab.py --port <PORT> --px 9600 --variant 17 --reps 8`
+  → `bus_old_us`／`bus_new_us`／`bus_ok`。
+- Step 3：快 ≥20% 才接 production；現時 production 仍然係 `wave_pack` + `merge8`
+  （唔想未量就換路徑）。
+
+**Host 速度參考（x86，唔可外推）**：600 px × 16 lane、16-bit、bits=8，
+舊路徑 0.117 ms → 新路徑 0.043 ms（2.72×，逐 byte 相同）。真機要等 variant 17。
+
+**建置**：EffectPerf（704.2 KB）與 Zero-Show（685.8 KB）都 rc=0。
+**Bench 已備好**：`nc_layout_bench.c` variant 17（舊路徑 vs 新 API，同一份 payload、
+逐 byte 比對）；host 側 orchestration 在 `modules/lab/i80_pack_lab/run_ab.py`。
+
+### 7.220 2026-11-24（Task 6 上板：24.0 → 6.36 ms（3.77×）；production 已接；修爆棧＋單 lane 回歸）
+
+**板**：ESP32-S3（4 MB flash／2 MB PSRAM，MAC 24:ec:4a:2c:59:60），經 NC4 OTA
+（`tools/ota.py`）上 EffectPerf／Matrix-LED-Textkit，毋須 download mode。
+
+**先撞到一個爆棧（已修）**：任何 `0xF077`（連 variant 0）都會 panic 重啟。
+decode0 任務 stack 只有 **3,072 B**，而 `on_layoutbench` 在回覆 JSON 由 `j[800]`
+加到 `j[1200]` 之後，frame 係 **2,272 B**（objdump `entry a1, 0x8e0`），再加
+`snprintf`／layout build／apply 就爆。改成 `static char j[1200]` 後 frame
+**1,168 B**（`entry a1, 0x490`），variant 0 即刻正常。教訓：decode handler 的
+大緩衝一律 static／heap，唔好放 stack。
+
+**bench A/B（同一塊板、同一份 payload、逐 byte 對拍）**：
+
+| px | 舊路徑 | 新路徑 | 倍數 | bus_ok |
+|---|---:|---:|---:|---:|
+| 9,600（16×600） | 24,018 µs | **6,365 µs** | **3.77×** | 1 |
+| 2,400（16×150） | 4,765 µs | **1,166 µs** | **4.09×** | 1 |
+
+reps=16 重跑：6,365／1,166 µs，同 reps=8 一樣。
+
+**production 接線**（`i80_encode`）：
+- 一次過 `nc_px_codec_pack_bus()`；刪走 8 個 packed 中間緩衝（16×600 省 43.2 KB PSRAM）。
+- **單 lane／8-bit 專用快路徑**：1 lane 時逐 tick 廣播比舊 `merge8` 慢
+  （64 px 實測 **840 µs** vs 舊 357 µs），所以 1 lane 用
+  `nc_px_codec_wave_frame()` 的 LUT memcpy；之後 **139–165 µs**（快舊 ~2.2×）。
+- 16-bit 高位 byte 的 OR→store 修正保留（§7.219）。
+
+**上板驗證（Matrix、1 lane、8-bit、64 px、tests 映像 `0xF061`）**：
+
+| 項目 | 值 |
+|---|---|
+| render fps | 50 |
+| frames | 1,391 |
+| fail | 0 |
+| tx_us | 6–18 µs |
+| enc_us（pack_bus 廣播） | 840 µs（回歸） |
+| enc_us（單 lane 快路徑） | **139–165 µs** |
+
+**仍然未做**：16-lane × 16-bit 實機（冇板）。bench 的 16-lane 數字係同一份 C
+在板上跑，但未經真實 16 條線；Step 0 的 async 基線亦未量。
+
+**操作筆記**：
+- OTA：`python3 tools/ota.py --port <PORT> <image.bin>`；唔使 BOOT。
+  本專案 TinyUSB composite 下 esptool 的自動 reset 無效，要人手 BOOT 才會入
+  download mode。
+- 換 project 後 `/data/config/tasks.json` 會沿用舊 level（render／pixel=-1）→
+  `0x1103 STATUS_SET {"System":{"fs_format":1}}` ＋ REBOOT 重新 seed（會清 `/data`）。
+
+### 7.221 2026-11-24（版本一致性：status／OTA／image 同一個 `PROJECT_VER`；IDF 版本寫法）
+
+**問題（用家指正）**：每次測試的版本字串對不上。
+
+- `status sys.fw` 硬編 **`0.1.2`**；
+- OTA `0x2207`／image app descriptor 係 **`197e1e0-dirty`**；
+- `tools/ota.py` 的 BEGIN `fw_ver` 又係 **`ota-YYYYMMDD-HHMMSS`**（每次不同）。
+- 另外 build dir 會 cache `PROJECT_VER`：同一份 code，EffectPerf image 係
+  `197e1e0`、release image 係 `197e1e0-dirty`（configure 時間不同）。
+
+**修正**：
+
+1. `status_put_sys()` 的 `fw` 改用 `esp_app_get_description()->version`
+   （即 build 時的 `PROJECT_VER`），移除硬編 `FW_VERSION "0.1.2"`。
+2. `tools/ncbuild/env.py` 新增 `project_ver()`（`git describe --tags --always --dirty`）；
+   `builder.py` 每次 `idf.py` 都傳 `-DPROJECT_VER=...`，build dir 不會沿用舊值。
+3. `tools/ota.py` 預設由 image 的 `esp_app_desc_t`（offset 0x30，32 B）讀 version，
+   唔再用 timestamp；可用 `--fw-ver` 明確覆寫。
+4. `info`：`status sys.idf` 仍然係 `esp_get_idf_version()`，即 v6.0.3。
+
+**驗證（同一塊板、同一 image）**：
+
+| 來源 | 版本 |
+|---|---|
+| image app descriptor（`tools/ota.py` 印） | `0c37516-dirty` |
+| OTA `0x2207` | `0c37516-dirty` |
+| `status sys.fw` | `0c37516-dirty` |
+| `status sys.idf` | `v6.0.3` |
+
+**IDF 版本**：`~/esp/esp-idf` 實測 `idf.py --version` = **v6.0.3**（git `76f5dedd`）；
+`v6.1.0` tag **不存在**（只有 `v6.1`／`v6.1.1`）。文件已統一：macOS 寫 v6.0.3，
+WSL 寫 v6.1／v6.1.1，唔再寫 v6.1.0。若用家想把 macOS 升到 v6.1.x，要另開 Task
+（clone／install／rebuild，不能只改文件）。
+
+### 7.222 2026-11-24（6 B 表放 internal vs PSRAM；flatify 成本；Flash 持久化評估）
+
+真機 EffectPerf、9,600 px、0xF077 variant 20／21（min of 5）：
+
+| 佈局 | flatify（internal） | apply（internal） | flatify（PSRAM） | apply（PSRAM） |
+|---|---:|---:|---:|---:|
+| 500 組（nflat 4,500） | **0.375 ms** | **1.225 ms** | 2.077 ms | 1.746 ms |
+| 完全隨機（nflat 9,600） | **14.538 ms** | **3.006 ms** | 19.820 ms | 5.079 ms |
+
+**用語（避免誤會）**：下表 `flatify` 係**建表速度**——**換場時一次性**，唔係每幀；
+每幀只用 `apply` 那欄。同一個 mode 播放期間唔會再建表。
+
+**結論**：
+1. **flat 表放 internal 才快**：PSRAM 版 apply 慢 42%（500 組）／69%（隨機）；
+   同之前的實作量測一致。**唔應該改放 PSRAM**。
+2. **flatify 本身係換場一次性成本**：500 組 0.375 ms（可忽略）；**完全隨機 14.5 ms**
+   （大過每幀 apply 的 3 ms，但只做一次）。
+3. **Flash 半永久化唔值得**：EffectPerf 映像冇 `/data`（write/read = 0 µs，量唔到），
+   但用快取實測推算：12.5 KB → 10 ms（≈1.25 MB/s），57.6 KB ≈ **46 ms**；
+   比重新 flatify 的 14.5 ms（隨機）慢 3×，比 500 組的 0.375 ms 慢 120×。
+   → **每次換場重新 flatify 就好，唔好寫 Flash。**
+
+**pipeline 的 32 條值流**（同場確認）：係**每個 mode** 的**不同效果數**（值流條數），
+唔係 mode 數；一個 mode 有 >32 個不同效果時 `nc_pipe_aprog_publish()` 會靜默 return。
+最後一個固定上限，待改動態。
+
+### 7.223 2026-11-24（Flash 持久化量測受阻：FAT 被 MSC 鎖住）
+
+用家提出：flat 表可否半永久化存 Flash，換場前用 DMA／預讀取回，避免 14.5 ms 建表？
+
+- 新增量測指令 **0xF07B FLATREAD**（讀 `map/matrix.json` 或 `/flat_bench.bin`，回 `{ok,bytes,us}`）。
+- 上板後**讀取回 `err=open`**：`/data` 的 FAT 被 MSC 佔住（上傳／讀取都 `err_busy`），
+  連讀都開唔到檔。這是之前已記錄的裝置狀態問題（要斷電重插，或把 `system.json` 的
+  `links[].msc` 設 0）。
+- **在解鎖之前量唔到真數字**；現有推算：快取 12.5 KB → 10 ms（≈1.25 MB/s），
+  57.6 KB ≈ **46 ms**，比重新 flatify 的 14.5 ms 更慢。
+- 另外：FAT 讀取走 SPI flash／cache，唔係「DMA 繞過 flash」；播放時大量讀檔會同
+  XIP 爭 flash 頻寬，pair 任務亦會被阻塞（50 fps 下 46 ms ≈ 2–3 幀）。
+- **結論（待解鎖後覆核）**：預讀仍然慢過重建，維持「換場時 flatify」。
+
+### 7.224 2026-11-25（預讀可行性：57.6 KB 由 PSRAM 搬去 internal = 2.10 ms）
+
+用家指出：預先讀取可以用背景時間，換場時就唔佔 CPU；現場 flatify 會佔 CPU。
+呢個角度正確，所以量了「搬表」成本（EffectPerf、0xF077 variant 22）：
+
+| 動作 | 時間 |
+|---|---:|
+| flatify（隨機、internal） | **14.5 ms**（換場時 CPU） |
+| flatify（500 組） | **0.375 ms** |
+| **memcpy 57.6 KB PSRAM → internal** | **2.10 ms**（≈27 MB/s） |
+
+即係：如果表已經喺 PSRAM／flash-mmap，換場只需 **memcpy 2.1 ms**，比 flatify 隨機快 7×。
+
+**但要先有「預讀」**：
+- FAT 讀取係 CPU＋SPI flash，冇 async DMA 直入 RAM；背景讀 57.6 KB 約 46 ms（推算），
+  會同 XIP／effect 爭 flash。
+- 更好嘅做法係 **專用 raw partition ＋ `esp_partition_mmap`**：免 FAT、免 CPU 解檔，
+  換場 memcpy 2.1 ms（或直接 XIP 用，但每幀讀 flash 會慢）。
+- 真實 500 組 layout 的 flatify 只 0.375 ms，預讀只對「完全隨機 ＋ 頻繁切換」有明顯價值。
+
+### 7.225 2026-11-25（可以放幾多張 flat 表？PSRAM／Flash 實測預算）
+
+**實測基準（S3 Zero、9,600 px、1 lane）**：`free_ps = 1,763,092 B`（≈1.68 MB）、
+`free_int = 189,767 B`（≈185 KB）、FAT `free = 667,648 B`（≈652 KB，總 852 KB）。
+
+**每張表（6 B／顆）**：
+
+| px | 一張 flat 表 |
+|---:|---:|
+| 64 | 384 B |
+| 2,400 | 14,400 B（14.1 KB） |
+| 9,600 | 57,600 B（56.3 KB） |
+
+**可放張數（9,600 px）**：
+
+| 位置 | 預算 | 張數 |
+|---|---:|---:|
+| PSRAM（保留 256 KB 給其他） | 256 KB | **4** |
+| PSRAM（保留 512 KB） | 512 KB | **9** |
+| PSRAM（用盡） | 1.68 MB | **30** |
+| FAT（全部 free） | 652 KB | **11**（4 KB cluster → 實際約 10） |
+| FAT（只用一半） | 326 KB | **5** |
+| 專用 raw partition（要重分割） | 1 MB | **18** |
+
+**2,400 px 版本**（14.4 KB／張）：PSRAM 512 KB → **36 張**；FAT 652 KB → **45 張**。
+
+**實務結論**：
+- 真正需要「同時存在」的只有 **當前 ＋ 下一張**：2 × 57.6 KB ＝ **115 KB PSRAM**，
+  對 1.68 MB 的 free 係 6.5%，完全夠。
+- 「所有 mode 都預先放好」：9,600 px 最多 FAT 約 10 張／PSRAM 30 張；
+  但每張仍要 46 ms 讀（FAT）或 2.1 ms memcpy，所以張數唔係主要限制，**讀取時間才是**。
+- 建議：**雙緩衝（current＋next）放 PSRAM**，切換時 memcpy 入 internal（2.1 ms）；
+  要免 FAT 就開 1 MB raw partition（18 張）。
+
+### 7.226 2026-11-25（真實配對地圖的 flatify：0.55 ms，不是 14.5 ms）
+
+用 0xF07D 量**真實 layout**（9600 project、501 組 map、mode `full256` 覆蓋 9,600 px）：
+
+| 指標 | 值 |
+|---|---:|
+| runs | 1（`full` 一條連續段） |
+| nflat | 9,600 |
+| flat 表大小 | 57,600 B |
+| **flatify** | **537–564 µs（≈0.55 ms）** |
+
+**修正之前的講法**：14.5 ms 係 bench 的「完全隨機 permutation」（9,598 條 1 顆 run）
+worst case；**真實配對地圖係一張大表慢慢建立**，run 少而長，flatify 只 0.55 ms
+（500 組 bench 亦只 0.375 ms）。所以：
+
+- 換場 flatify **唔係問題**（<1 ms）；
+- 真正貴的是 **layout 建立／快取載入**（build 40–137 ms、cache load 10 ms）；
+- 「播放時預建下一張」仍然可行，但主要價值在 **預建 layout ＋ flat**（總共約 11 ms），
+  唔係避免 14.5 ms；
+- 一張 staging 表 57.6 KB 放 PSRAM 可以（current＋next 兩張），唔需要全部 mode 都放。
+
+**下一步設計**：模式下播放時用 idle slice 預建下一個 mode 的 layout＋flat；
+切換時 swap／memcpy（2.1 ms），達到「即時切換」。
+
+### 7.227 2026-11-25（極端情況效能下限：隨機 9,600 px 全鏈成本）
+
+用家要求「完全隨機」作為**性能下限**（唔係未來場景）。真機 EffectPerf、9,600 px：
+
+| 階段 | 時間 |
+|---|---:|
+| layout build（9,598 條 run） | **152.1 ms** |
+| flatify（runs → 6 B 表，internal） | **14.5 ms** |
+| flatify（PSRAM） | 19.8 ms |
+| 每幀 apply（6 B 表、internal） | **3.0 ms** |
+| 每幀 apply（行 runs，冇表） | **12.0 ms** |
+
+**切換下限（冇快取）＝ 152.1 ＋ 14.5 ＝ 166.6 ms**，之後每幀 3.0 ms。
+（隨機 layout 的表 >32 KB，現行快取會跳過，所以冇「快取載入」可省。）
+
+**分段可行性**：
+- **flatify 14.5 ms**：完全可分（線性掃 runs，狀態＝run index／段內 offset／cursor／c）。
+- **layout build 152 ms**：可分但複雜（bucket 填充 O(entries) + 合併 O(px)），係主要成本。
+- **apply**：每幀必須掃完全部 px，**唔可以跨幀分段**（會撕裂畫面）；只可以在幀內分 chunk 串流。
+- 串流來源如果係 FAT：57.6 KB × 50 fps ＝ 2.88 MB/s > FAT 實測 ~1.25 MB/s → 唔可行；
+  raw partition／mmap 讀速待量（SPI flash 理論較高，可能 5–8 ms/幀）。
+
+**記憶體**：apply 用 internal 最快；PSRAM 版 5.08 ms/幀仍然 <20 ms，可接受；
+所以「一定要 PSRAM」唔成立——internal 預設，PSRAM 只係 staging。
+
+### 7.228 2026-11-25（統一模型：flat 一律 PSRAM；真實 9,600 px 實測）
+
+用家定案：**唔分大小，flat 表一律放 PSRAM**（6 B/px 會隨 px 長大，internal 唔係穩定容量）。
+
+改動：`nc_px_layout_flatify()` 預設 `place_psram = true`；`flatify_place()` 留給量測／例外。
+真機（9600 project、501 組 map、mode full256、9,600 px、1 run）：
+
+| 指標 | 值 |
+|---|---:|
+| flatify | **550 µs** |
+| apply（flat in internal） | **3.07 ms** |
+| apply（flat in PSRAM） | **5.37 ms**（+2.3 ms／幀，仍然 <20 ms） |
+
+**建表／存 Flash 的結論**：
+- **唔應該開機建好全部寫 Flash**：FAT 寫 57.6 KB ≈ 1.2 s 級（12.5 KB→265 ms 推算），
+  讀 57.6 KB ≈ 46 ms，比即場 flatify 0.55 ms 慢 80×；仲有磨損同 MSC 鎖問題。
+- 需要同時存在嘅只有 **current ＋ next** 兩張：2 × 57.6 KB ＝ 115 KB（PSRAM free 的 6.8%）。
+- 切換流程：layout 由快取 10 ms（或 build）＋ flatify 0.55 ms ≈ 11 ms；要 0 ms 就播放時預建下一張。
+- map 本身開機已 scan 入 RAM，切換唔需要再讀 map 檔。
+
+### 7.229 2026-11-25（playlist 預建下一張 ＋ swap 換場：246 µs；FAT/MSC 鎖已解）
+
+**實作**：
+- pair 常駐兩份 layout＋flat：`layout`（當前）＋ `next_layout`（playlist 下一個）。
+- `content_prepare_next()`：播放時按 `registry.list` 次序預建（layout 快取／build ＋ flatify PSRAM）。
+- `content_swap_next()`：切換只 swap layout／assets 指針，唔重建。
+- 0xF079 加 `mode／show_nlist／next／next_ready／next_us／next_why`。
+- Kconfig `NETCORE_USB_MSC_FORCE_OFF`（recovery：唔交碟，解 FAT 鎖）。
+
+**真機（9,600 px、4 個 mode）**：
+
+| 動作 | 時間 |
+|---|---:|
+| 預建下一張（g500，500 runs） | **19.7 ms** |
+| 預建下一張（full9600，1 run） | **12.2 ms** |
+| **切換（swap）** | **246 µs**（原本 rebuild 40–150 ms） |
+| 每幀 apply（PSRAM flat） | 5.43 ms、fps 49.7–50.7 |
+
+**FAT 被 MSC 鎖**：`system.json` 的 `nc4.links[].msc` 原為 1；用 recovery build
+（FORCE_OFF）解鎖後上傳修正 config（`msc:0`），再回復正常映像；現時 `status storage`
+= `mode:"app"、app_ready:1`，上傳／刪檔正常。
+
+**注意**：device 上殘留舊 mode（id 撞）會令 playlist 的下一格載入失敗；已清走並重上
+9600 內容；正式 Zero-Show 只有 1 個 mode，所以 next 為空（正常）。
+
+### 7.230 2026-11-25（pipeline 去固定 32：40 個效果 mode 真機驗證）
+
+`nc_pipeline.h` 的固定陣列（`nv[32]`／`aprog[32]`，3 份 ≈52 KB）改成
+**按 naprog 配置／倍增**（PSRAM），frame 只傳 view 指標；effect 的 wave 指標陣列同樣動態。
+冇再引用 `NC_PIPE_APROG_MAX`。
+
+真機（9,600 px、43 個效果、mode `many40` 用 40 個不同效果）：
+
+| 指標 | 值 |
+|---|---:|
+| jobs／runs／naprog | 40／40／**40** |
+| effect frames | 627（有出幀） |
+| fps | 49.9 |
+| pair apply | 4.36 ms |
+| 預建下一張 full9600 | 12.2–13.4 ms |
+| 切換 full9600 | swap（jobs=1、next 已預建） |
+
+之前 >32 會 `publish` 靜默 return（唔出 frame）；現在 40 個正常。
+
+### 7.231 2026-11-25（flat chunk 預取：lab 有效、production 未見增益；Kconfig 預設關）
+
+- 新增 `nc_px_layout_apply_range()`（6 B 表分段套用）＋ host 測試 [13] 逐 byte 對拍。
+- pair 加 `NETCORE_PIXEL_APPLY_PIPE`（3 × 8 KB internal chunk、core0 worker memcpy，
+  pair 只讀 internal；預設 **n**）。
+- **bench（EffectPerf variant 23，9,600 px）**：
+
+| 佈局 | direct PSRAM | internal | pipe 4 KB | pipe 8 KB | pipe 16 KB |
+|---|---:|---:|---:|---:|---:|
+| 500 組（4,500 顆） | 1,602 µs | 1,057 µs | 1,528 | 2,388 | **1,455** |
+| 1 條 run（4,800 顆） | 5,027 µs | 2,653 µs | **1,587** | 2,526 | 1,638 |
+
+- **production（9600、mode full256、9,600 px）**：`pipe=1、pipe_ok 540、pipe_fail 0`，
+  但 apply 仍然 **4.99 ms**（同 direct 5.37 差不多），未達 bench 的 1.6 ms。
+  懷疑 worker（core0）同 effect 爭 core／PSRAM 頻寬，或 chunk 邊界效應；
+  已保留 Kconfig（預設關），未有 production 收益前不啟用。
+- `flat_err`（layout + 0xF079）已加：6 B 表建唔到會 log 原因，唔再靜默降級。
+
+### 7.232 2026-11-25（apply 優化實驗：RGB 專用／pipe core／值流 internal 全部無效）
+
+真機 9600、mode full256（9,600 px、1 run、RGB、6 B 表 PSRAM），每項獨立量測：
+
+| 實驗 | apply | 對照 |
+|---|---:|---:|
+| 基準（direct PSRAM） | 4,991–5,388 µs | — |
+| uniform-RGB 專用內圈（去掉 switch） | 5,005 µs | **無增益** |
+| pipe core0、8 KB chunk（ok 620、fail 0） | 5,422 µs | **無增益** |
+| pipe core1、16 KB chunk | 5,422 µs | **無增益** |
+| 值流 pool 放 internal（≤48 KB/塊） | 5,388 µs | **無增益**（many40 4,699） |
+
+**解讀**：
+- bench 的 pipe 1.6 ms（4,800 顆、vals 可能 internal）唔可以直接類比 production；
+- production 5.4 ms ≈ 0.56 µs/px，主要係「flat 57.6 KB PSRAM 讀 + 值流 57.6 KB 讀 +
+  環 38.4 KB PSRAM 寫」的合成成本，唔係 switch／單一指標；
+- 5.4 ms ＝ 20 ms 預算的 27%，仍然可接受。
+
+**保留的改動**：
+- `flat_uniform`＋RGB 專用內圈（混合表照行通用路徑；無害）；
+- 值流 pool：每塊 ≤48 KB 放 internal（平衡 SRAM／PSRAM，省 PSRAM；冇速度壞處）；
+- pipe（`NETCORE_PIXEL_APPLY_PIPE`）預設關，只留 lab。
+
+**下一個值得試**（未做）：uniform RGB 用 **4 B 表**（dst16＋src16，write/aprog 由 layout
+統一）→ 讀取 57.6 → 38.4 KB；或量 cache miss／PSRAM 頻寬再決定。
+
+### 7.233 2026-11-25（4 B 表 bench 潛力大；production 接線後板 USB 消失 → 已回退）
+
+**bench（EffectPerf variant 24）**：uniform RGB、單 aprog 的 4 B 表（dst16＋src16）：
+
+| 佈局 | 6 B（direct PSRAM） | 4 B | 比例 |
+|---|---:|---:|---:|
+| 500 組（4,500 顆） | 1,602 µs | **777 µs** | 2.06× |
+| 1 條 run（4,800 顆） | 5,027 µs | **923 µs** | 5.45× |
+
+→ 4 B 表值得做，但**production 接線後出事**：上板（9600、full256）後
+`/dev/cu.usbmodem*` 完全消失（OS 層都冇 USB device），懷疑 app 喺 USB 初始化前
+panic／卡住。因為冇 CDC 就冇 OTA，**要斷電重插；如果仍然冇 port，就要 BOOT＋插電
+入 download mode，再用安全映像 flash**。
+
+**處理**：
+- 已把 production 的 4 B 表改動 **回退**（`nc_px_layout`／header／host test），
+  repo 回到已驗證狀態；只保留 bench variant 24（EffectPerf 用）。
+- 已重建安全映像：`artifacts/ESP32-S3-Zero.bin`（Zero-Show，64 px）。
+- 板上前一次上傳的內容係 9600 測試集；恢復後要重新上傳 Zero-Show 內容。
+
+**教訓**：新增表格式一定要先喺 EffectPerf／lab 驗證完整 boot，再入 production；
+今次係直接上 9600 production，出事後冇遠端 recovery。
+
+### 7.234 2026-11-25（零件時間圖＋FPS 穩定度工具）
+
+- 新增 `tools/pixel_parts_time_fig.py` → `docs/assets/pixel-pairing/parts-time.png`：
+  每幀 20 ms 預算、16×600 線路 18 ms vs encode 6.4 ms、一次性成本（cache 10 ms／
+  build 40–152 ms／flatify 0.55–14.5 ms／預建 12 ms／swap 246 µs）、記憶體佔用。
+- **FPS 穩定度**：render loop 逐幀記錄 dt（µs），統計 n／avg／sd／min／max／bad
+  （|dt-target| > 20%），1 ms histogram（0–63 ms）；0xF081 讀、payload 1 清零。
+- 工具 `tools/fps_trace.py`：輪詢 0xF081，印 target／avg／sd／max／bad／hist top，
+  判 STABLE／BORDERLINE／UNSTABLE；可出 CSV 同 PNG（histogram＋fps 時間線）。
+- **未上板驗證**：板嘅 USB 仍未返（見 §7.233），tool 只做過語法／編譯檢查。
+
+### 7.235 2026-11-25（時間銀行：deadline 時鐘＋slack，吸收臨時尖峰）
+
+用家要求：「空閒時儲起多餘時間（有上限），尖峰時釋放，之後再補回；平時要追得準」。
+
+- 新模組 `nc_fps_clock`（純 C，可 host 測試）：deadline 固定在 grid；早完成 → 存
+  `slack`（上限 Kconfig `NETCORE_PIXEL_SLACK_MS`，預設 50 ms）；遲到 → 先花 slack，
+  deadline 留 grid（下一輪縮短等待追返）；存款不足 → `overrun`，deadline 重設
+  `now + period`（唔爆追）。
+- render 節拍由「固定週期 timer」改成「一次性 timer ＋ deadline 時鐘」。
+- 0xF081 新增 `slack_us／catchup／overrun`；`fps_trace.py` 會顯示。
+- Host 測試 `fpsclock_test`（5 組情境）＋全套測試 **全部通過**。
+- **未上板**：板 USB 仍未返（§7.233）。
+
+### 7.236 2026-11-25（修正：timer 仍然係設定週期；slack 只做緩衝／判定）
+
+- 依用家指示：節拍**仍然係 `esp_timer_start_periodic(frame_interval_ms)`**，
+  唔再用一次性 timer＋deadline 追趕；時間緩衝唔會改週期。
+- slack 的用途改為「吸收判定＋指標」：早完成存入（上限 `NETCORE_PIXEL_SLACK_MS`，
+  預設 50 ms，**初始就滿**）；遲到由緩衝吸收 → `catchup`；吸收唔到 → `overrun`。
+- 0xF081 顯示 `slack_us／catchup／overrun`；`fps_drift.py` 可重複量 ppm，
+  換算兩塊 ESP 的建議強制同步間隔。
+- Host tests 全綠（含 `fpsclock_test` 5 組）；Zero-Show 建置成功。
+- **未上板**：板 USB 仍未返（§7.233）。
+
+### 7.237 2026-11-24（driver 層定案：硬件先、driver 後；LED 真係由 JSON 生效）
 
 **起點**：`ports/hardware/S3/ESP32-S3-SuperMini/drivers.json`（未 track）—— 檔名多一個 `s`、
 內容係舊專案 `slave/config.json` 的 flat 寫法（SPI／I2C／UART／PIN／I80 全部帶 GPIO）。
@@ -7835,13 +8285,13 @@ Task 8 Step 5／7 全部完成。計劃只剩「Task 6 可選」未做。
 **未做**：`rmt`／`parlio` 後端（schema 已收，寫了會大聲報錯並跳過該 lane）；
 project 層 `driver.json`（外接燈具目前只能經 project sdkconfig；下一步可以收成同一份 schema）。
 
-### 7.220 2026-11-24（修正 §7.219：I80／SPI 型別化入 hardware.json，driver 層只剩裝置參數）
+### 7.238 2026-11-24（修正 §7.237：I80／SPI 型別化入 hardware.json，driver 層只剩裝置參數）
 
 **使用者指正**：「我們不是已經有 `/data/config/hardware.json` 來處理硬件的初始化嗎？」
 查證：`nc_cfg_apply_hardware()` 只有 `apply_eth / apply_sdio / apply_pin / apply_pwm /
 apply_uart`；`root_keys` 有 `I80` 所以唔會計 unknown，但**冇 `apply_i80`**
 → `/data/config/hardware.json` 的 `I80.data/wr/cs` 改了**完全冇效果、連 warning 都冇**。
-§7.219 把腳位生成入 `nc_led_cfg_t.pins[]`，等於繞過這個正路入口，而且多開一個出處。
+§7.237 把腳位生成入 `nc_led_cfg_t.pins[]`，等於繞過這個正路入口，而且多開一個出處。
 
 **改法（照舊專案原有形狀，唔發明新欄位）**：
 

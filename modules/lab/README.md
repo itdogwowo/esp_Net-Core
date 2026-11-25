@@ -12,3 +12,4 @@
 |---|---|---|
 | `bench_compare_lab/` | 50k LCG：直譯 vs 原生 C | 24.9 ms vs 1.68 ms（14.8×） |
 | `api_cost_lab/` | `nc_now_us`／`nc_gpio_read` 呼叫成本 | ≈2.0–2.4 µs/call |
+| `i80_pack_lab/` | Task 6 I80 波形合成 A/B（舊 wave_pack+merge8 vs pack_bus） | 9,600 px 24,018 → 6,365 µs（3.77×）；2,400 px 4,765 → 1,166 µs（4.09×） |

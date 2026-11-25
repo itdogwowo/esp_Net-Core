@@ -574,7 +574,7 @@ esp_err_t nc_px_layout_build(const nc_px_mode_t *mode, const nc_px_map_t *map,
     lfree(src);
     lfree(ht);
     // 6 B 單表：換場時展開一次（失敗就維持 nflat = 0，熱路徑照行 runs）
-    (void)nc_px_layout_flatify(out);
+    out->flat_err = (int16_t)nc_px_layout_flatify(out);
     return ESP_OK;
 }
 
@@ -613,11 +613,26 @@ size_t nc_px_layout_flat_bytes(const nc_px_layout_t *l)
     return (l == NULL) ? 0 : ((size_t)l->nflat * sizeof(nc_px_flat6_t));
 }
 
-esp_err_t nc_px_layout_flatify(nc_px_layout_t *l)
+static void *palloc(size_t n)
+{
+    if (n == 0) {
+        return NULL;
+    }
+#if defined(ESP_PLATFORM)
+    void *p = heap_caps_malloc(n, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (p != NULL) {
+        return p;
+    }
+#endif
+    return malloc(n);
+}
+
+esp_err_t nc_px_layout_flatify_place(nc_px_layout_t *l, bool place_psram)
 {
     if (l == NULL) {
         return ESP_ERR_INVALID_ARG;
     }
+    l->flat_err = ESP_OK;
     // 重新展開（build／load 之後叫；改名／重建時可以再叫一次）
     lfree(l->flat);
     l->flat = NULL;
@@ -650,7 +665,9 @@ esp_err_t nc_px_layout_flatify(nc_px_layout_t *l)
             return ESP_ERR_INVALID_SIZE;
         }
     }
-    nc_px_flat6_t *f = (nc_px_flat6_t *)ialloc(total * sizeof(nc_px_flat6_t));
+    nc_px_flat6_t *f = (nc_px_flat6_t *)(place_psram
+        ? palloc(total * sizeof(nc_px_flat6_t))
+        : ialloc(total * sizeof(nc_px_flat6_t)));
     if (f == NULL) {
         return ESP_ERR_NO_MEM;
     }
@@ -675,13 +692,65 @@ esp_err_t nc_px_layout_flatify(nc_px_layout_t *l)
     }
     l->flat = f;
     l->nflat = (uint32_t)k;
+    l->flat_uniform = 0;
+    if (l->nflat > 0) {
+        const uint8_t w0 = f[0].write;
+        bool same = true;
+        for (uint32_t i = 1; i < l->nflat; i++) {
+            if (f[i].write != w0) {
+                same = false;
+                break;
+            }
+        }
+        l->flat_uniform = same ? w0 : 0;
+    }
+    l->flat_psram = place_psram;
+    l->flat_err = ESP_OK;
     return ESP_OK;
 }
 
-// 6 B 表版本的 8-bit 寫入（內圈：一次乘法都冇）
-static uint32_t apply_flat(const nc_px_layout_t *l, uint16_t *const *vals, uint8_t *dst)
+esp_err_t nc_px_layout_flatify(nc_px_layout_t *l)
 {
-    for (uint32_t i = 0; i < l->nflat; i++) {
+    // 統一模型：flat 表一律放 PSRAM（6 B/px 會隨 px 長大，internal 唔係穩定容量）。
+    // 量測／例外先至用 flatify_place(l, false)。
+    return nc_px_layout_flatify_place(l, true);
+}
+
+// uniform RGB：冇 switch、冇 default；真實 map 幾乎全部係呢種。
+static uint32_t apply_flat_rgb(const nc_px_layout_t *l, uint16_t *const *vals, uint8_t *dst,
+                               uint32_t from, uint32_t end)
+{
+    for (uint32_t i = from; i < end; i++) {
+        const nc_px_flat6_t *e = &l->flat[i];
+        const uint16_t *v = vals[e->aprog];
+        const uint32_t nv = l->aprog[e->aprog].nv;
+        const uint32_t c = e->src;
+        const uint32_t c1 = (c + 1u < nv) ? (c + 1u) : (c + 1u - nv);
+        const uint32_t c2 = (c + 2u < nv) ? (c + 2u) : (c + 2u - nv);
+        uint8_t *o = dst + ((size_t)e->dst << 2);
+        o[0] = (uint8_t)(v[c] >> 4);
+        o[1] = (uint8_t)(v[c1] >> 4);
+        o[2] = (uint8_t)(v[c2] >> 4);
+        o[3] = 0;
+    }
+    return end - from;
+}
+
+// 6 B 表版本的 8-bit 寫入（內圈：一次乘法都冇）；可以只做一段。
+uint32_t nc_px_layout_apply_range(const nc_px_layout_t *l, uint16_t *const *vals,
+                                  uint8_t *dst, uint32_t from, uint32_t count)
+{
+    if (l == NULL || vals == NULL || dst == NULL || l->flat == NULL) {
+        return 0;
+    }
+    if (from >= l->nflat) {
+        return 0;
+    }
+    const uint32_t end = (count > l->nflat - from) ? l->nflat : (from + count);
+    if (l->flat_uniform == NC_PX_WRITE_RGB) {
+        return apply_flat_rgb(l, vals, dst, from, end);
+    }
+    for (uint32_t i = from; i < end; i++) {
         const nc_px_flat6_t *e = &l->flat[i];
         const uint16_t *v = vals[e->aprog];
         const uint32_t nv = l->aprog[e->aprog].nv;
@@ -742,7 +811,13 @@ static uint32_t apply_flat(const nc_px_layout_t *l, uint16_t *const *vals, uint8
             break;
         }
     }
-    return l->nflat;
+    return end - from;
+}
+
+// 6 B 表版本的 8-bit 寫入（整張）
+static uint32_t apply_flat(const nc_px_layout_t *l, uint16_t *const *vals, uint8_t *dst)
+{
+    return nc_px_layout_apply_range(l, vals, dst, 0, l->nflat);
 }
 
 // ═══════════════════════ apply ═══════════════════════
@@ -1392,6 +1467,6 @@ esp_err_t nc_px_layout_load(nc_px_layout_t *out, const char *path, uint32_t key,
     }
     lfree(buf);
     // 表唔入快取檔（衍生資料）：讀完一樣展開，行為同 build 一模一樣
-    (void)nc_px_layout_flatify(out);
+    out->flat_err = (int16_t)nc_px_layout_flatify(out);
     return ESP_OK;
 }

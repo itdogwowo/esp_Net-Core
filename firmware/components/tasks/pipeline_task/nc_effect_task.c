@@ -28,11 +28,10 @@ static const char *TAG = "effect";
 static SemaphoreHandle_t s_mtx;
 static uint32_t s_gen;                     // 目前生效的 plan gen（0 = 未取過）
 
-// aprog 副本（含 32 段編譯 program，每份 ~17 KB）**放 PSRAM**，唔佔 internal BSS。
-// 只有 wave table／值流指標留在 internal。
-static nc_pipe_aprog_set_t *s_set;         // 目前生效的 aprog 副本（PSRAM）
+// aprog 副本（每份 cap × 536 B）**放 PSRAM**，唔佔 internal。
+// 冇固定上限：按 naprog 配置／倍增；只有指標陣列留 internal。
+static nc_pipe_aprog_set_t s_set;          // 目前生效的 aprog 副本（own arrays）
 static portMUX_TYPE s_set_lock = portMUX_INITIALIZER_UNLOCKED;
-static bool s_sets_ok;
 
 // 值流 pool（兩塊交替）；pool[slot] 長度 = Σ nv
 static uint16_t *s_pool[2];
@@ -47,61 +46,68 @@ static uint32_t s_step;
 static nc_pipe_effect_frame_t s_pub_frame;
 
 // wave table（每條值流一塊；plan 變更時重建）
-static uint16_t *s_wave[NC_PIPE_APROG_MAX];
-static uint32_t s_wave_len[NC_PIPE_APROG_MAX];
+static uint16_t **s_wave;
+static uint32_t *s_wave_len;
+static uint32_t s_wave_cap;
+
+// frame 的 view 陣列（effect 擁有；pair 只讀）
+static uint16_t **s_frame_vals;
+static uint32_t *s_frame_nv;
+static uint32_t s_frame_cap;
 
 // aprog 集：pair 是唯一寫者、effect 是唯一讀者。
 // 雙緩衝＋一個 volatile 索引，publish 只係換索引（唔使鎖、唔會同效果 loop 爭）。
-static nc_pipe_aprog_set_t *s_sets;        // [2]，PSRAM
+static nc_pipe_aprog_set_t s_sets[2];      // 2 份發佈緩衝（own arrays，PSRAM）
 static volatile uint32_t   s_set_idx;
 static volatile uint32_t   s_set_seq;        // 每次 publish +1
 static uint32_t            s_set_seen;       // effect 已取到第幾個
 
-// 配置 3 份 aprog set（2 份發佈緩衝 ＋ 1 份工作副本）到 PSRAM。
-// 兩邊（pair publish／effect loop）都可能先到；用 claim flag 保證只配一次。
-static bool sets_ready(void)
+// 按需要配置／倍增一份 set 的 nv／aprog（PSRAM）。
+static bool set_reserve(nc_pipe_aprog_set_t *t, uint32_t cap)
 {
-    bool ok;
-    taskENTER_CRITICAL(&s_set_lock);
-    ok = s_sets_ok;
-    taskEXIT_CRITICAL(&s_set_lock);
-    if (ok) {
-        return true;
-    }
-    const size_t one = sizeof(nc_pipe_aprog_set_t);
-    nc_pipe_aprog_set_t *p = (nc_pipe_aprog_set_t *)heap_caps_malloc(
-        one * 3u, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    if (p == NULL) {
-        p = (nc_pipe_aprog_set_t *)heap_caps_malloc(one * 3u, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-    }
-    if (p == NULL) {
+    if (cap == 0) {
         return false;
     }
-    memset(p, 0, one * 3u);
-    taskENTER_CRITICAL(&s_set_lock);
-    if (s_sets_ok) {
-        taskEXIT_CRITICAL(&s_set_lock);
-        heap_caps_free(p);                 // 另一邊贏了
+    if (t->cap >= cap && t->nv != NULL && t->aprog != NULL) {
         return true;
     }
-    s_sets = p;
-    s_set = &p[2];
-    s_sets_ok = true;
-    taskEXIT_CRITICAL(&s_set_lock);
+    uint32_t *nv = (uint32_t *)heap_caps_malloc((size_t)cap * sizeof(uint32_t),
+                                                MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    nc_px_aprog_t *ap = (nc_px_aprog_t *)heap_caps_malloc((size_t)cap * sizeof(nc_px_aprog_t),
+                                                           MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (nv == NULL || ap == NULL) {
+        heap_caps_free(nv);
+        heap_caps_free(ap);
+        return false;
+    }
+    if (t->nv != NULL) {
+        heap_caps_free(t->nv);
+    }
+    if (t->aprog != NULL) {
+        heap_caps_free(t->aprog);
+    }
+    t->nv = nv;
+    t->aprog = ap;
+    t->cap = cap;
     return true;
 }
 
 void nc_pipe_aprog_publish(const nc_px_aprog_t *aprog, uint32_t naprog, uint32_t gen)
 {
-    if (aprog == NULL || naprog > NC_PIPE_APROG_MAX || !sets_ready()) {
+    if (aprog == NULL || naprog == 0) {
         return;
     }
     const uint32_t slot = (s_set_idx == 0u) ? 1u : 0u;
-    s_sets[slot].plan_gen = gen;
-    s_sets[slot].naprog = naprog;
+    nc_pipe_aprog_set_t *dst = &s_sets[slot];
+    if (!set_reserve(dst, naprog)) {
+        ESP_LOGE(TAG, "aprog set 配置失敗（naprog=%u）", (unsigned)naprog);
+        return;
+    }
+    dst->plan_gen = gen;
+    dst->naprog = naprog;
     for (uint32_t i = 0; i < naprog; i++) {
-        s_sets[slot].aprog[i] = aprog[i];
-        s_sets[slot].nv[i] = aprog[i].nv;
+        dst->aprog[i] = aprog[i];
+        dst->nv[i] = aprog[i].nv;
     }
     s_set_idx = slot;
     s_set_seq++;
@@ -112,22 +118,25 @@ bool nc_pipe_aprog_snapshot(nc_pipe_aprog_set_t *out)
     if (out == NULL) {
         return false;
     }
-    if (!s_sets_ok) {
-        return false;
-    }
     const uint32_t seq = s_set_seq;
     if (seq == 0 || seq == s_set_seen) {
         return false;
     }
-    const uint32_t idx = s_set_idx;
-    *out = s_sets[idx];
+    const nc_pipe_aprog_set_t *src = &s_sets[s_set_idx];
+    if (!set_reserve(out, src->naprog)) {
+        return false;
+    }
+    out->plan_gen = src->plan_gen;
+    out->naprog = src->naprog;
+    memcpy(out->nv, src->nv, (size_t)src->naprog * sizeof(uint32_t));
+    memcpy(out->aprog, src->aprog, (size_t)src->naprog * sizeof(nc_px_aprog_t));
     s_set_seen = seq;
     return true;
 }
 
 static void waves_free(void)
 {
-    for (int i = 0; i < NC_PIPE_APROG_MAX; i++) {
+    for (uint32_t i = 0; i < s_wave_cap; i++) {
         if (s_wave[i] != NULL) {
             heap_caps_free(s_wave[i]);
             s_wave[i] = NULL;
@@ -136,11 +145,44 @@ static void waves_free(void)
     }
 }
 
+// 指標陣列按 naprog 倍增（internal，細）
+static bool wave_slots_reserve(uint32_t cap)
+{
+    if (cap <= s_wave_cap) {
+        return true;
+    }
+    uint16_t **w = (uint16_t **)heap_caps_malloc((size_t)cap * sizeof(*w),
+                                                 MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    uint32_t *l = (uint32_t *)heap_caps_malloc((size_t)cap * sizeof(*l),
+                                               MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    if (w == NULL || l == NULL) {
+        heap_caps_free(w);
+        heap_caps_free(l);
+        return false;
+    }
+    memset(w, 0, (size_t)cap * sizeof(*w));
+    memset(l, 0, (size_t)cap * sizeof(*l));
+    for (uint32_t i = 0; i < s_wave_cap; i++) {
+        w[i] = s_wave[i];
+        l[i] = s_wave_len[i];
+    }
+    heap_caps_free(s_wave);
+    heap_caps_free(s_wave_len);
+    s_wave = w;
+    s_wave_len = l;
+    s_wave_cap = cap;
+    return true;
+}
+
 static bool waves_build(void)
 {
     waves_free();
-    for (uint32_t i = 0; i < s_set->naprog; i++) {
-        const uint32_t total = s_set->aprog[i].prog.total;
+    if (!wave_slots_reserve(s_set.naprog)) {
+        ESP_LOGW(TAG, "wave 指標陣列配置失敗（naprog=%u）", (unsigned)s_set.naprog);
+        return false;
+    }
+    for (uint32_t i = 0; i < s_set.naprog; i++) {
+        const uint32_t total = s_set.aprog[i].prog.total;
         if (total == 0 || total > 8192) {
             continue;
         }
@@ -152,7 +194,7 @@ static bool waves_build(void)
             continue;
         }
         for (uint32_t p = 0; p < total; p++) {
-            w[p] = nc_px_engine_program_value(&s_set->aprog[i].prog, p);
+            w[p] = nc_px_engine_program_value(&s_set.aprog[i].prog, p);
         }
         s_wave[i] = w;
         s_wave_len[i] = total;
@@ -179,13 +221,21 @@ static bool pools_alloc(uint32_t total)
     if (total == 0) {
         return false;
     }
+    // 政策：值流細（每塊 ≤48 KB）就放 internal（pair apply 讀得快）；
+    // 大過就 PSRAM。兩個 pool 都要放得落先會用 internal。
+    const size_t pool_bytes = (size_t)total * sizeof(uint16_t);
+    const bool want_internal = (pool_bytes <= 49152u);
     for (int i = 0; i < 2; i++) {
-        // 固定政策：有 PSRAM 就 PSRAM（BULK）；冇 PSRAM 的板（例如 Matrix）退 internal。
-        // 呢個係「板子能力」分支，唔係按 free heap／buffer 大細的智能選擇。
-        s_pool[i] = (uint16_t *)heap_caps_malloc((size_t)total * sizeof(uint16_t),
-                                                 MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        if (want_internal) {
+            s_pool[i] = (uint16_t *)heap_caps_malloc(pool_bytes,
+                                                     MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+        }
         if (s_pool[i] == NULL) {
-            s_pool[i] = (uint16_t *)heap_caps_malloc((size_t)total * sizeof(uint16_t),
+            s_pool[i] = (uint16_t *)heap_caps_malloc(pool_bytes,
+                                                     MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        }
+        if (s_pool[i] == NULL && !want_internal) {
+            s_pool[i] = (uint16_t *)heap_caps_malloc(pool_bytes,
                                                      MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
         }
         if (s_pool[i] == NULL) {
@@ -237,7 +287,7 @@ static bool wait_slot(uint8_t slot)
 // 用預算好的 wave table 算一條值流（同 nc_px_aprog_vals 等價）
 static uint32_t cached_vals(uint32_t i, uint32_t step, uint16_t *out, uint32_t cap)
 {
-    const nc_px_aprog_t *ap = &s_set->aprog[i];
+    const nc_px_aprog_t *ap = &s_set.aprog[i];
     const nc_px_asset_t *a = ap->asset;
     if (a == NULL || out == NULL) {
         return 0;
@@ -274,13 +324,13 @@ static void effect_loop(void *arg)
     }
     while (!nc_task_exit_requested()) {
         // snapshot 直接寫入工作副本（PSRAM；唔喺棧上開 17 KB）
-        if (sets_ready() && nc_pipe_aprog_snapshot(s_set)) {
-            s_gen = s_set->plan_gen;
+        if (nc_pipe_aprog_snapshot(&s_set)) {
+            s_gen = s_set.plan_gen;
             s_step = 0;
             waves_build();
             uint32_t total = 0;
-            for (uint32_t i = 0; i < s_set->naprog; i++) {
-                total += s_set->nv[i];
+            for (uint32_t i = 0; i < s_set.naprog; i++) {
+                total += s_set.nv[i];
             }
             if (!pools_alloc(total)) {
                 ESP_LOGE(TAG, "值流 pool 配置失敗（%u 個 uint16）", (unsigned)total);
@@ -288,7 +338,7 @@ static void effect_loop(void *arg)
                 continue;
             }
             ESP_LOGI(TAG, "plan gen=%u：%u 條值流（%u 值、pool ×2）",
-                     (unsigned)s_gen, (unsigned)s_set->naprog, (unsigned)total);
+                     (unsigned)s_gen, (unsigned)s_set.naprog, (unsigned)total);
         } else if (s_gen == 0) {
             nc_task_beat();
             vTaskDelay(pdMS_TO_TICKS(10));      // pair 未發佈 aprog
@@ -306,8 +356,8 @@ static void effect_loop(void *arg)
 
         const int64_t t0 = esp_timer_get_time();
         uint32_t off = 0;
-        for (uint32_t i = 0; i < s_set->naprog; i++) {
-            const uint32_t nv = s_set->nv[i];
+        for (uint32_t i = 0; i < s_set.naprog; i++) {
+            const uint32_t nv = s_set.nv[i];
             cached_vals(i, s_step, s_pool[slot] + off, nv);
             off += nv;
         }
@@ -320,11 +370,31 @@ static void effect_loop(void *arg)
             s_pub_frame.seq = ++s_seq;
             s_pub_frame.plan_gen = s_gen;
             s_pub_frame.t_pub_us = (uint32_t)t1;
-            s_pub_frame.naprog = s_set->naprog;
-            for (uint32_t i = 0; i < s_set->naprog; i++) {
-                s_pub_frame.nv[i] = s_set->nv[i];
-                s_pub_frame.vals[i] = s_pool[slot] + o;
-                o += s_set->nv[i];
+            if (s_set.naprog > s_frame_cap) {
+                uint32_t *nv = (uint32_t *)heap_caps_malloc(
+                    (size_t)s_set.naprog * sizeof(uint32_t),
+                    MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+                uint16_t **vv = (uint16_t **)heap_caps_malloc(
+                    (size_t)s_set.naprog * sizeof(uint16_t *),
+                    MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+                if (nv != NULL && vv != NULL) {
+                    heap_caps_free(s_frame_nv);
+                    heap_caps_free(s_frame_vals);
+                    s_frame_nv = nv;
+                    s_frame_vals = vv;
+                    s_frame_cap = s_set.naprog;
+                } else {
+                    heap_caps_free(nv);
+                    heap_caps_free(vv);
+                }
+            }
+            s_pub_frame.naprog = s_set.naprog;
+            s_pub_frame.nv = s_frame_nv;
+            s_pub_frame.vals = s_frame_vals;
+            for (uint32_t i = 0; i < s_set.naprog && i < s_frame_cap; i++) {
+                s_frame_nv[i] = s_set.nv[i];
+                s_frame_vals[i] = s_pool[slot] + o;
+                o += s_set.nv[i];
             }
             s_slot_seq[slot] = s_pub_frame.seq;
             s_next_slot = (uint8_t)(slot ^ 1u);
