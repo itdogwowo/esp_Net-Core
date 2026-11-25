@@ -775,7 +775,7 @@
         barv = 1;
         if (r.peeked > 0) {
           st = "PEEK"; cls = "peek";
-          label = `seq ${r.seq} · ◀ encode 揀咗呢格（seq 最大）`;
+          label = `seq ${r.seq} · ◀ encode 揀咗呢格（${S.policy === "fifo" ? "seq 最細＝最舊" : "seq 最大＝最新"}）`;
         } else if (r.hold >= 0) {
           st = "READY"; cls = "hold";
           const d = S.dma[r.hold];
