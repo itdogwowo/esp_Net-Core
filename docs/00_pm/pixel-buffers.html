@@ -77,8 +77,15 @@
   .card.inflight{border-color:var(--inflight); background:#171331}
   .card.busy{border-color:var(--busy); background:#0c211a}
   .card.active{opacity:1; border-color:var(--accent); box-shadow:0 0 18px color-mix(in srgb,var(--accent) 30%,transparent); background:#12233d}
+  .bar{height:4px; background:#0a1220; border-radius:3px; margin-top:5px; overflow:hidden}
+  .bar i{display:block; height:100%; width:0; background:var(--line); transition:width .45s ease, background .3s ease}
+  .card.ready .bar i{width:100%; background:var(--ready)}
+  .card.inflight .bar i{width:100%; background:var(--inflight); animation:shimmer 1.1s ease-in-out infinite}
+  .card.busy .bar i{width:100%; background:var(--busy)}
+  .card.active .bar i{width:100%; background:var(--accent); box-shadow:0 0 8px var(--accent)}
+  @keyframes shimmer{50%{opacity:.45}}
   .queue{display:grid; grid-template-columns:repeat(16,1fr); gap:3px; margin-top:2px}
-  .q{height:22px; border-radius:4px; border:1px solid var(--line); background:#0c1425; display:flex; align-items:center; justify-content:center; font-size:8px; color:var(--dim)}
+  .q{height:22px; transition:all .25s; border-radius:4px; border:1px solid var(--line); background:#0c1425; display:flex; align-items:center; justify-content:center; font-size:8px; color:var(--dim)}
   .q.f{background:#2a2110; border-color:var(--encode); color:var(--encode)}
   .queue-legend{font-size:9px; color:var(--dim); margin-top:4px}
 
@@ -268,13 +275,16 @@
   ];
 
   // 每一步：任務 → buffer group，label（W/R/push/pop…）
+  // [task, target, label, dir]
+  // dir=t o：任務 → buffer（W／push／submit／ack／free）
+  // dir=from：buffer → 任務（R／pop／done）——虛線流動方向跟讀寫方向
   const ARROWS = [
-    [["effect", "grp-pool", "W"]],
-    [["paint", "grp-pool", "R"], ["paint", "grp-ring", "W"]],
-    [["paint", "grp-pool", "ack"]],
-    [["encode", "grp-ring", "R"], ["encode", "grp-dma", "W"], ["encode", "grp-queue", "push"]],
-    [["render", "grp-queue", "pop"], ["render", "grp-dma", "submit"]],
-    [["render", "grp-dma", "done"], ["render", "grp-ring", "free"]],
+    [["effect", "grp-pool", "W", "to"]],
+    [["paint", "grp-pool", "R", "from"], ["paint", "grp-ring", "W", "to"]],
+    [["paint", "grp-pool", "ack", "to"]],
+    [["encode", "grp-ring", "R", "from"], ["encode", "grp-dma", "W", "to"], ["encode", "grp-queue", "push", "to"]],
+    [["render", "grp-queue", "pop", "from"], ["render", "grp-dma", "submit", "to"]],
+    [["render", "grp-dma", "done", "from"], ["render", "grp-ring", "free", "to"]],
   ];
 
   const TASK_EL = {
@@ -364,9 +374,9 @@
       const seq = state.poolSeq[i];
       const inUse = state.pool === i || (state.last >= 0 && state.last <= 2 && state.lastPool === i);
       const st = inUse ? "使用中" : (seq && state.ack >= seq ? "已 ack" : "待用");
-      const cls = inUse ? "active free" : (seq && state.ack >= seq ? "ready" : "free");
+      const cls = inUse ? "active" : (seq && state.ack >= seq ? "ready" : "free");
       return card(`<div class="top"><b>pool ${i === 0 ? "A" : "B"}</b><span class="st">${seq ? "seq " + seq : "空"}</span></div>
-        <div class="sub">Σnv × 2 B · ${st}</div>`, cls, inUse ? accent : null);
+        <div class="sub">Σnv × 2 B · ${st}</div><div class="bar"><i></i></div>`, cls, inUse ? accent : null);
     }).join("");
 
     // ring
@@ -374,7 +384,7 @@
       const st = s.state.toLowerCase();
       const activeRing = state.last !== -1 && (state.last === 1 || state.last === 3 || state.last === 5) && i < state.sf;
       return card(`<div class="top"><b>slot ${i}</b><span class="st">${s.state}</span></div>
-        <div class="sub">${state.sf > 1 && i < state.sf ? "sf " + (i + 1) + " · " : ""}seq ${s.seq || "—"} · 64B+${state.px * 4}B</div>`,
+        <div class="sub">${state.sf > 1 && i < state.sf ? "sf " + (i + 1) + " · " : ""}seq ${s.seq || "—"} · 64B+${state.px * 4}B</div><div class="bar"><i></i></div>`,
         st + (activeRing ? " active" : ""), activeRing ? accent : null);
     }).join("");
 
@@ -383,7 +393,7 @@
       const st = s.state.toLowerCase();
       const activeDma = state.last !== -1 && (state.last === 3 || state.last === 4 || state.last === 5) && i < state.sf;
       return card(`<div class="top"><b>DMA ${i}</b><span class="st">${s.state}</span></div>
-        <div class="sub">seq ${s.seq || "—"} · 編碼後 bus word</div>`,
+        <div class="sub">seq ${s.seq || "—"} · 編碼後 bus word</div><div class="bar"><i></i></div>`,
         st + (activeDma ? " active" : ""), activeDma ? accent : null);
     }).join("");
 
@@ -399,7 +409,7 @@
 
     // snapshot
     $("snapCards").innerHTML = card(`<div class="top"><b>snapshot</b><span class="st">0 份</span></div>
-      <div class="sub">未要求（0xF06B 預覽時才 copy）</div>`, "free");
+      <div class="sub">未要求（0xF06B 預覽時才 copy）</div><div class="bar"><i></i></div>`, "free");
 
     // task active
     for (const [k, fn] of Object.entries(TASK_EL)) fn().classList.toggle("active", active === k);
@@ -461,18 +471,24 @@
     const arrs = ARROWS[state.last];
     const accent = COLORS[activeTaskOf(state.last)];
 
-    arrs.forEach(([task, target, label], i) => {
-      const sEl = TASK_EL[task]();
-      const tEl = $(target);
-      if (!sEl || !tEl) return;
-      const sr = sEl.getBoundingClientRect();
-      const tr = tEl.getBoundingClientRect();
-      const sx = sr.right - dr.left;
-      const sy = sr.top + sr.height / 2 - dr.top + (i - (arrs.length - 1) / 2) * 8;
-      const tx = tr.left - dr.left + 4;
-      const ty = tr.top - dr.top + 22 + i * 10;
-      const dx = Math.max(36, (tx - sx) * 0.55);
-      const d = `M ${sx} ${sy} C ${sx + dx} ${sy}, ${tx - dx} ${ty}, ${tx} ${ty}`;
+    arrs.forEach(([task, target, label, dir], i) => {
+      const taskEl = TASK_EL[task]();
+      const grpEl = $(target);
+      if (!taskEl || !grpEl) return;
+      const sr = taskEl.getBoundingClientRect();
+      const gr = grpEl.getBoundingClientRect();
+      const from = dir === "from";
+      const sx = from ? (gr.left - dr.left + 4) : (sr.right - dr.left);
+      const sy = from
+        ? (gr.top - dr.top + 22 + i * 10)
+        : (sr.top + sr.height / 2 - dr.top + (i - (arrs.length - 1) / 2) * 8);
+      const tx = from ? (sr.right - dr.left) : (gr.left - dr.left + 4);
+      const ty = from
+        ? (sr.top + sr.height / 2 - dr.top + (i - (arrs.length - 1) / 2) * 8)
+        : (gr.top - dr.top + 22 + i * 10);
+      const dx = Math.max(36, Math.abs(tx - sx) * 0.55);
+      const c = (tx > sx) ? dx : -dx;
+      const d = `M ${sx} ${sy} C ${sx + c} ${sy}, ${tx - c} ${ty}, ${tx} ${ty}`;
 
       const path = document.createElementNS(NS, "path");
       path.setAttribute("d", d);
