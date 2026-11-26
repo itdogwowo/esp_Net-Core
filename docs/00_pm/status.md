@@ -10033,4 +10033,60 @@ resources 後才可以「hit 時 skip JSON parse」；`status schema` 逐 key �
 
 **未做**：板上的 firmware 仍然係 **6.0.3 建的**（fw `30895f2`、app `85694f7c`）——
 環境升級唔等於要即刻重燒；下次有 functional 改動時順手用 6.1.1 的 image 推上去即可
-（預期行為一樣，但 `fw` 會變、size +27 KB）。
+（預期行為一樣，但 `fw` 會變、size +27 KB）。→ **2026-11-27 已補，見 §7.290。**
+
+---
+
+### 7.290 2026-11-27（板上 firmware 推齊 6.1.1；macOS 側 OTA 只有 6.4 KB/s 的原因查清）
+
+**為什麼**：§7.289 只升了環境，板上仍然係 6.0.3 建的 image（`fw 30895f2`／`app 85694f7c`）——
+同一個 repo 兩顆 image 就係鐵律 12 講的情況。順手把 2026-11-25 起掛住的
+「macOS OTA 只得 6.4–6.8 KB/s，待查」查清。
+
+**做了什麼**（`idf=v6.1.1 (macOS)`、`ESP32-S3-SuperMini-LED-Textkit`、板 `/dev/cu.usbmodem1401`）：
+
+1. 重建（**唔使 `--fresh`**：build dir 已經係 6.1.1）→ `PROJECT_VER=787baa5`，
+   729.0 KB（`0xb63f0`＝746,480 B），比 00:39 那顆 **+0 B**——docs-only commit 唔會改 firmware。
+2. 驗 image descriptor（唔靠工具自己印）：`version=787baa5`、`idf_ver=v6.1.1`、
+   `sha256=6bff3bbcd1461c753932b69e50c3cdc5d1024c597230cb3a38140d250912da14`。
+3. OTA：`BEGIN` 2.9 s（抹 729 KB）→ `WRITE` 108.8 s → `END` 驗證通過 → `APPLY`，`rst=3`。
+
+**上板驗證**：
+
+| 項目 | 值 |
+|---|---|
+| `status sys` | `fw=787baa5`、`app=94d81499`（舊 `85694f7c`）、`idf=v6.1.1`、`rst=3`、`heap=194,371` |
+| `status tasks` | `render`／`pixel_encode_task`／`pixel_paint_task`／`pixel_effect_task` 四條 `level=4`、`started=1`、loop `running=1`；`nc4`／`net`／`hw_gpio` 照舊 |
+| `status mem` | `nc4.reply0`／`usb.rx`／`i80.prd`／`mock.prd` 全部 `fill=0`，冇 OOM |
+| 版本三方一致 | image descriptor `787baa5` ＝ OTA 印的 `version` ＝ `status fw` ✔ |
+
+**新發現：macOS 側 OTA 慢唔係 OTA 的問題，係這條 VCP 的吞吐**
+
+這塊板 `board.json` 的 `console = usb-serial-jtag`，NC4 的 `usb0` 亦走
+**USB-Serial-JTAG**（`nc_cfg_chip.c`：esp32s3 `.usb_link="usb_jtag0"`、`NC_LINK_USBJTAG`），
+唔係 TinyUSB CDC。macOS 上這條 VCP 實測 **~6.4 KB/s ＝ 64 B／10 ms**（同 payload 成正比）：
+
+| payload | frame | `write()` | 收到回覆為止 |
+|---:|---:|---:|---:|
+| 64 B | 79 B | 0.1 ms | 13.4 ms |
+| 1 KB | 1,039 B | 0.9 ms | 173.7 ms |
+| 2 KB | 2,063 B | 0.2 ms | 333.9 ms |
+| 4 KB | 4,111 B | 309.8 ms | 653.8 ms |
+
+→ 4 KB 一個 chunk 要 ~640 ms；746,480 B ÷ 4 KB ＝ 182 chunk × 0.6 s ≈ 109 s，
+同實測 108.8 s 對得上。
+
+**判別實驗（兩個都做齊）**：
+
+- `--window 4`（4 個 WRITE 在途、pipelining）：**113.0 s @ 6.5 KB/s**——冇改善
+  → **唔係往返延遲，係每 byte 吞吐**。
+- 細幀往返（`status sys` ×10，同一個 process 內）：median **12.9 ms**，所以 ping-pong 本身唔慢。
+
+**結論**：macOS 側 OTA 就是 **~110 s／顆**（三次量測 110.6／103.3／108.8 s，三顆唔同 firmware
+都一樣），唔關 hub／線材／firmware 事，係 macOS 對這條 USB-Serial-JTAG VCP 的排程
+（64 B／10 ms）；**Windows 同一塊板、同一條線 168–173 KB/s**。要快就 Windows 側推，
+或者改用 TCP transport。**`--window` 對這個瓶頸冇用，唔好再加 chunk。**
+
+**未做**：macOS 為何係 64 B／10 ms（`bInterval`／`AppleUSBSerial` latency timer）未查到底；
+要驗證可以將人格由 `NC_LINK_USBJTAG` 換成 TinyUSB CDC 做 A/B，但會動 USB 人格（影響
+console／MSC），留返另一次。

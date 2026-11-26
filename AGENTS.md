@@ -107,6 +107,9 @@ python3 tools/nc4.py --port /dev/cu.usbmodemXXXX status tasks
 
 - 預期：`BEGIN` 2–4 s（同步抹分區）→ `WRITE` 約 150 KB/s → `END` 驗 SHA →
   `APPLY` 重啟；`status sys` 的 `app` hash 會變、`rst=3`。
+- **速度睇主機**：Windows 側 150–174 KB/s；**macOS 側只有 ~6.4 KB/s（＝64 B／10 ms）**，
+  729 KB image 要 **~110 s**。係 macOS 對 USB-Serial-JTAG VCP 的排程，唔關 hub／線材／
+  firmware 事，`--window 4` 也幫唔到（113.0 s vs 108.8 s）。見 status §7.290。
 - OTA 失敗先 `tools/ota.py --port <PORT> --abort`，再重推。
 - **唔好**因為 `esptool` 連不上就叫用家按 BOOT；見 §1 鐵律 1。
 
@@ -201,7 +204,8 @@ python3 tools/ota.py --port /dev/cu.usbmodemXXXX \
 
 - OTA 走 **NC4 0x22xx**：`BEGIN`（同步抹目標分區）→ `WRITE`（4 KB chunk）→
   `END`（驗 SHA-256）→ `APPLY`（寫 boot 旗標＋重啟）。
-- 實測速度約 **150 KB/s**；663 KB image 的 `BEGIN` 約 2.9 s、`WRITE` 約 4.3 s。
+- 實測速度：**Windows 側 150–174 KB/s**（663 KB 的 `BEGIN` 約 2.9 s、`WRITE` 約 4.3 s）；
+  **macOS 側 ~6.4 KB/s**（729 KB 要 ~110 s，`--window` 冇用；見 status §7.290）。
   `BEGIN` 等幾秒係正常，唔係死機。
 - 推完之後 port 可能短暫消失再出現；用 `status sys` 確認 `app` hash 變了、
   `rst=3`（software reset）係正常。
@@ -586,7 +590,8 @@ python3 tools/ota.py --port /dev/cu.usbmodemXXXX \
 1. `caps`／`state`：`idle=1`、`max_chunk=4096`。
 2. `BEGIN`：裝置先 `esp_ota_begin()` **同步抹目標分區**，663 KB 約 2.9 s；
    工具 timeout = `10 s + size/100 KB`。
-3. `WRITE`：4 KB chunk，stop-and-wait；約 **150 KB/s**。
+3. `WRITE`：4 KB chunk，stop-and-wait；Windows **150–174 KB/s**、**macOS ~6.4 KB/s**
+   （差異在主機側 USB 排程，唔係 firmware；見 status §7.290）。
 4. `END`：`esp_ota_end()` 驗 SHA-256＋image；失敗回 `err_end_validate_fail`。
 5. `APPLY`：設 boot 分區＋重啟；`rst=3`。
 6. 驗證：`status sys` 的 `app` hash 變了、`up_s` 重新計、`status tasks` 正常。
@@ -1048,6 +1053,7 @@ commit message 說明。
 | 2026-11-26 | **config 行為可視化＋中央示範設定**：新增 `tools/config_diagram.py` → `docs/00_pm/config-layers.svg`（三來源→B02→cfg→消費者→state 快取→三種改法）／`schema-registry.svg`（一個 JSON→生成表／API，讀 schema 生成）；新增 `docs/02_guides/config-schema.md`（key 一覽由 `gen_state_keys.py --doc` 生成、`--check` 驗同步）；新增 `ports/presets/s3-generic-{psram,nopsram}/`＋`tools/preset_check.py`（JSON／schema 範圍／四層四任務，run_all 開頭跑） | lead（AI） |
 | 2026-11-26 | **Windows 主機的 bash 陷阱**：`make.py`／`doctor` 用 `bash -c` 傳 `C:\…` 路徑，Git Bash 同 WSL bash 都會失敗（doctor 的 board check 會假報 FAIL）。§0.5 新增一節講點判斷、建置改在 WSL 內跑（`bash -lc 'cd /mnt/c/… && IDF_PATH=/home/user/esp/esp-idf python3 make.py …'`）、OTA／NC4 留在 Windows 側。同時記錄 Matrix-LED-Textkit 全面 JSON 化（見 status §7.253） | lead（AI） |
 | 2026-11-27 | **macOS IDF 升 v6.1.1**（v6.0.3 → v6.1.1）：`fetch --tags`＋`checkout`＋**`submodule update`**＋`install.sh esp32s3 esp32p4 esp32c3`；記錄 submodule 陷阱（唔 update 會 `-dirty`）同實測 image 差 **+27,008 B**。§0.5 加「升級／重裝 IDF」段、status §7.289 | lead（AI） |
+| 2026-11-27 | **板上 firmware 推齊 6.1.1＋OTA 速度查清**：重建 `fw=787baa5`（+0 B）→ OTA → `status sys fw=787baa5／app=94d81499／rst=3`，四條 pixel 任務 `level=4`。查清 macOS 側 ~6.4 KB/s ＝ **64 B／10 ms**（payload 線性；`--window 4` 冇用 → 唔係往返延遲），係 USB-Serial-JTAG VCP 的主機側排程，唔關 hub／線材／firmware；Windows 同板同線 168–173 KB/s。§0.5／§8.1 三處速度描述改「分主機」，status §7.290 | lead（AI） |
 
 ---
 
