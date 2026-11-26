@@ -9265,3 +9265,48 @@ cycle，整數無餘，所以唔會累積漂移）。
 2. **每粒 ppm 校準欄**：`system.json` 加 `fps_ppm`，用 dither 實作 sub-ppm 修正；
    校準值由 host 量（今次方法）寫入。
 3. 兩者可以並存：先校準（拉長 resync 間隔），再用 resync 封頂。
+
+### 7.260 2026-11-26（應用硬件 device 層 runtime 化：`/data/config/devices.json`）
+
+用家：「我當初設計係像 mpy 一樣**現場改動**」——device 設定（WS2812／PCA／SD…）要喺
+裝置上改到，唔使重 build。今次落地：**新增 runtime device 層**，第一個接 LED。
+
+#### 一、新層
+
+| 層 | 檔案 | 換它要重 build？ |
+|---|---|---|
+| F.device（build-time 預設） | `ports/hardware/<board>/driver.json` → build 時生成 `preset_devices.json` | 改板級預設要 |
+| **F.device（runtime）** | **`/data/config/devices.json`** | ❌ **改完 reboot 即生效** |
+
+- 第一次開機 / FAT 冇檔時由 embedded preset seed（內容＝driver.json 鏡像＋解釋）；
+- `nc_cfg` 新 `apply_devices()` 解析（`nc_cfg_devices()` 取用）；render 的 `led_cfg()`
+  **runtime devices 優先**，冇檔／冇宣告 LED 才退回 build-time `nc_port_led()`；
+- 未支援 device（TFT／PCA9685／SD…）寫 `enable=1` → 開機 **大聲 warn**（鐵律 9），
+  唔會靜默；
+- device 只寫 `bus:{type,index}`＋型號參數，**腳位仍然只在 hardware.json**。
+
+#### 二、上板驗證（fw `75421da-dirty`、app `fd0d188d`、idf=v6.1.1 (WSL)）
+
+| 操作 | 結果 |
+|---|---|
+| 首次開機 | `/data/config/devices.json` 自動 seed（2,828 B，driver.json 鏡像） |
+| 改 `"LED".enable = 0` + reboot | 環由 `i80.prd 320B×3` → **`mock.prd 320B×3`**（燈鏈明確停用） |
+| 改回 `enable = 1` + reboot | 環回到 **`i80.prd`**；`0xF071` 49.9 fps、drops 0；`0xF06B` rainbow 64 顆 64 色 |
+
+**過程中抓到 bug**：`driver.json` 寫 `"enable": 1`（數字），但 parser 用 `cJSON_IsTrue()`
+只認 `true` → seed 出嚟即刻被當成「關」。已改成 `dev_enabled()`（`true/false` 同 `1/0`
+都收）。呢個係 runtime layer 的實戰教訓，已寫入註解。
+
+#### 三、檔案
+
+- `firmware/components/sys/config/nc_cfg_load.c`：`apply_devices()`／`nc_cfg_devices()`／boot 載入／log
+- `firmware/components/sys/config/include/nc_cfg_types.h`：`nc_devices_cfg_t`
+- `firmware/components/tasks/render_task/nc_render_task.c`：`led_cfg()` runtime 優先
+- `firmware/main/main.c`＋`firmware/main/CMakeLists.txt`：embed＋seed `devices.json`
+- `tools/ncportgen.py`：`gen_preset_devices()`（driver.json → preset_devices.json）
+
+#### 四、未做（明講）
+
+- 只有 **LED** 有 device driver；其餘 device 仍然「聲明但有 warn」。
+- 未支援 device 冇 runtime `error` 指令回報（只有開機 log）；`status cfg` 未顯示 devices 統計。
+- 未有 WebMaster 專用 device 編輯頁（用現有檔案編輯就可以）。

@@ -150,11 +150,23 @@ static const nc_led_cfg_t *led_cfg(void)
     static const nc_led_cfg_t *c;
     if (!done) {
         done = true;
-        c = nc_cfg_defaults_led();          // NULL = 冇宣告
-        if (c != NULL) {
-            ESP_LOGI(TAG, "燈鏈由 driver.json 決定：enable=%d backend=%u lanes=%u px=%u fmt=%s",
+        // runtime 的 /data/config/devices.json 優先（現場改＋reboot 即生效，唔使重 build）；
+        // 冇 devices.json 或冇宣告 LED → 退回 build-time generated 的 nc_port_led()。
+        const nc_devices_cfg_t *dev = nc_cfg_devices();
+        if (dev != NULL && dev->present && dev->led_decl) {
+            c = &dev->led;
+            ESP_LOGI(TAG, "燈鏈由 /data/config/devices.json（runtime）決定："
+                     "enable=%d backend=%u lanes=%u px=%u fmt=%s",
                      c->enable ? 1 : 0, (unsigned)c->backend, (unsigned)c->lanes,
                      (unsigned)c->px, c->fmt);
+        } else {
+            c = nc_cfg_defaults_led();      // NULL = 冇宣告
+            if (c != NULL) {
+                ESP_LOGI(TAG, "燈鏈由 driver.json（build-time）決定："
+                         "enable=%d backend=%u lanes=%u px=%u fmt=%s",
+                         c->enable ? 1 : 0, (unsigned)c->backend, (unsigned)c->lanes,
+                         (unsigned)c->px, c->fmt);
+            }
         }
     }
     return c;

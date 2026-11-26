@@ -290,6 +290,25 @@ typedef struct {
     uint8_t  t1h;
 } nc_led_cfg_t;
 
+// ── 應用硬件（device）層：`/data/config/devices.json`（runtime；driver.json 的鏡像）──
+// 用家 2026-11-26：「像 mpy 一樣現場改動」——改這個檔（上傳／USB 編輯）＋reboot 即生效，
+// 唔使重 build。腳位仍然只在 hardware 層；device 只寫 bus 引用＋型號參數。
+#define NC_CFG_MAX_UNIMPL 10
+#define NC_CFG_UNIMPL_NAME_MAX 12
+
+typedef struct {
+    char     name[NC_CFG_UNIMPL_NAME_MAX];   // 原 section 名（"TFT"／"PCA9685"…）
+    bool     enable;
+} nc_unimpl_dev_t;
+
+typedef struct {
+    bool           present;     // devices.json 存在且 parse 成功
+    bool           led_decl;    // 有宣告 LED／WS2812（present 才可信）
+    nc_led_cfg_t   led;         // 解析後的燈鏈（enable=0 = 明確唔用）
+    uint8_t        n_unimpl;    // enable=1 但 firmware 未支援的 device 數（會大聲 warn）
+    nc_unimpl_dev_t unimpl[NC_CFG_MAX_UNIMPL];
+} nc_devices_cfg_t;
+
 typedef struct {
     uint16_t       version;
     char           cid[NC_CFG_CID_MAX];    // "F5F9"；空 = 由 MAC 推導

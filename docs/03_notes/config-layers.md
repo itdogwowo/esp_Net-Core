@@ -748,3 +748,16 @@ F.live     /data/config/*.json 用戶執行期設定（最高優先）
 | SD device（掛載／slot／寬度） | 0.5–1 日（要 SDIO driver 配合） |
 | TFT／PCA9685／XL9555／GT1151Q（各自 driver） | 各 0.5–2 日 |
 | 舊 `driver.json` → `devices.json` 遷移＋host test | 0.5 日 |
+
+---
+
+## 6.6 狀態更新（2026-11-26）：runtime device 層已落地（先做 LED）
+
+上面 §6.4 的「第二步」已經開始做：`/data/config/devices.json` 已存在並生效。
+
+- 第一次開機由 `preset_devices.json`（`driver.json` 鏡像）seed；
+- 現場改 `/data/config/devices.json` → **reboot 生效**（唔使重 build）；
+- 目前只有 **LED** 被 runtime 解析；`TFT`／`PCA9685`／`SDcard`… 寫 `enable=1` 會開機 warn；
+- 改 `"LED": {"enable": 0}` → 環變 `mock.prd`（燈停）；改回 1 → 環回 `i80.prd`。
+  實測見 status §7.260。
+- 注意 `enable` 接受 `true/false` 同 `1/0`（`driver.json` 原本用數字）。

@@ -631,6 +631,7 @@ python3 tools/ota.py --port /dev/cu.usbmodemXXXX \
   `I2C`／`I2S`／`ENC`／`XL9555` 仍然未 parse。**`I80` 由 2026-11-24 起真的生效**：
   `/data/config/hardware.json` 的 `I80.list[]`（`data`／`wr`／`dc`／`cs`／`freq`；
   `bus_width` 由 `len(data)` 推出）開機由 `nc_cfg_apply_hardware()` 讀，改腳位唔使重 build。
+- **應用硬件（device）層（2026-11-26）**：`/data/config/devices.json`（runtime，改完 reboot 生效）＝`driver.json` 的鏡像；`nc_cfg_devices()` 解析，render 優先讀它；未支援 device 寫 `enable=1` 會大聲 warn。目前只有 LED 有 runtime device 支援。
 - `driver.json` **只有 `LED` 段會被讀**（build 時 `ncportgen` → `nc_led_cfg_t`）；
   其餘段（TFT／SDcard／PCA9685…）仍然冇人讀。規矩：**driver 層唔准寫腳位**，
   腳位只在 hardware 層；`driver.json` 用 `bus:{type,index}` 引用。

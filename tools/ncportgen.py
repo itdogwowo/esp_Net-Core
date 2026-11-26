@@ -610,6 +610,34 @@ def gen_preset(wiring: dict, hw_rel: str) -> dict:
     return out
 
 
+def gen_preset_devices(driver: dict | None, suppressed: list[str] | None) -> dict:
+    """driver.json → /data/config/devices.json 的出廠預置（runtime 可改）。
+
+    內容＝driver.json 的 device 段（LED／TFT／PCA9685…），但**唔含腳位**：
+    device 只寫 bus:{type,index}，腳位仍然只在 wiring.json／hardware.json。
+    project 覆寫 pixel（suppressed）時 LED 段讓位（唔宣告），render 會照舊用 Kconfig。
+    """
+    out = {
+        "version": 1,
+        "_comment": [
+            "應用硬件（device）層：呢份係 build 時由 ports/hardware/.../driver.json 產生的預置。",
+            "現場可以直接改 /data/config/devices.json（USB 或 WebMaster），**reboot 生效**，唔使重 build。",
+            "規則：device 只寫 bus:{type,index}＋型號參數；**腳位只在 hardware.json**（I80/SPI/…）。",
+            "目前 firmware 真正支援：LED（ws2812 via i80）。其餘 device 寫 enable=1 會開機大聲 warn（唔會靜默）。",
+            "呢個檔缺少都開得機：render 會退回 build-time 的 driver.json 設定。",
+        ],
+    }
+    if isinstance(driver, dict):
+        for k, v in driver.items():
+            if k in ("version", "_comment"):
+                continue
+            if suppressed and k == "LED":
+                out["_led_note"] = "project 覆寫 pixel → LED 由 Kconfig 決定（呢份唔宣告 LED）"
+                continue
+            out[k] = v
+    return out
+
+
 def gen_usb_kinds(wiring: dict) -> str:
     """USB.list index → internal link kind（NC_LINK_CDC / NC_LINK_USBJTAG）。
 
@@ -667,6 +695,7 @@ def main() -> int:
     hw_c, summary = gen_hardware(wiring)
     led_c, led_sum = gen_led(driver, wiring, project_pixel_override(project))
     preset = gen_preset(wiring, hw_rel)
+    summary["devices_preset"] = "preset_devices.json"
     summary.update({"board": hw_rel, "chip": chip, "cores": num(cap.get("cores"), 1),
                     "usb": (cap.get("usb") or {}).get("link")})
     summary["led"] = led_sum
@@ -695,6 +724,10 @@ def main() -> int:
         encoding="utf-8")
     (out / "preset_hardware.json").write_text(
         json.dumps(preset, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    # 應用硬件（device）層預置：runtime 可改；缺檔時 render 退回 build-time driver.json。
+    devices = gen_preset_devices(driver, project_pixel_override(project))
+    (out / "preset_devices.json").write_text(
+        json.dumps(devices, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     (out / "nc_port_summary.json").write_text(
         json.dumps(summary, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 

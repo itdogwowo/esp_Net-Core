@@ -209,6 +209,7 @@ static volatile uint32_t s_rx_frames;        // 成功收到的幀數
 #define PRESET_NETWORK_PATH PRESET_DIR "/network.json"
 #define PRESET_TASKS_PATH   PRESET_DIR "/tasks.json"
 #define PRESET_RESOURCES_PATH PRESET_DIR "/resources.json"
+#define PRESET_DEVICES_PATH   PRESET_DIR "/devices.json"
 // 卷標 = 品牌縮寫 + "-" + 16-bit CID（FAT 卷標上限 11 字元）：
 //   "NC-" + "A57C" → "NC-A57C"
 // 不能寫成 Net-Core_A57C（14 字元，f_setlabel 會回 FR_INVALID_NAME）。
@@ -286,6 +287,12 @@ extern const uint8_t preset_tasks_end[]     asm("_binary_preset_tasks_json_end")
 #if NETCORE_HAS_PRESET_RESOURCES
 extern const uint8_t preset_resources_start[] asm("_binary_preset_resources_json_start");
 extern const uint8_t preset_resources_end[]   asm("_binary_preset_resources_json_end");
+#endif
+// 應用硬件（device）層：generated（由 driver.json）→ 第一次開機 seed 到 FAT；
+// 之後用戶改 /data/config/devices.json 即係改 device 設定（reboot 生效）。
+#if NETCORE_HAS_PRESET_DEVICES
+extern const uint8_t preset_devices_start[] asm("_binary_preset_devices_json_start");
+extern const uint8_t preset_devices_end[]   asm("_binary_preset_devices_json_end");
 #endif
 
 
@@ -391,6 +398,9 @@ static void seed_presets(void)
     seed_file(PRESET_TASKS_PATH, preset_tasks_start, preset_tasks_end);
 #else
     seed_text(PRESET_TASKS_PATH, k_min_tasks);
+#endif
+#if NETCORE_HAS_PRESET_DEVICES
+    seed_file(PRESET_DEVICES_PATH, preset_devices_start, preset_devices_end);
 #endif
 #if NETCORE_HAS_PRESET_RESOURCES
     seed_file(PRESET_RESOURCES_PATH, preset_resources_start, preset_resources_end);

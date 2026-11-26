@@ -43,6 +43,7 @@ set(_gen_dir "${CMAKE_CURRENT_BINARY_DIR}/ncport_gen")
 set(_gen_c   "${_gen_dir}/nc_port.c")
 set(_gen_h   "${_gen_dir}/nc_port.h")
 set(_gen_hw  "${_gen_dir}/preset_hardware.json")
+set(_gen_dev "${_gen_dir}/preset_devices.json")
 set(_gen_dep "${PORT_DIR}/board.json" "${PORT_DIR}/wiring.json"
              "${CMAKE_CURRENT_LIST_DIR}/../../tools/ncportgen.py")
 # 晶片能力表（cores／USB link）也是 ncportgen 的輸入；漏了它，改 _chips/*.json
@@ -77,13 +78,13 @@ if(NOT _gen_rc EQUAL 0)
 endif()
 if(NOT CMAKE_SCRIPT_MODE_FILE)
     add_custom_command(
-        OUTPUT  "${_gen_c}" "${_gen_h}" "${_gen_hw}"
+        OUTPUT  "${_gen_c}" "${_gen_h}" "${_gen_hw}" "${_gen_dev}"
         COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_LIST_DIR}/../../tools/ncportgen.py"
                 --hardware "${PORT_DIR}" --out "${_gen_dir}" ${_gen_project_arg}
         DEPENDS ${_gen_dep}
         COMMENT "hardware JSON → firmware 預設（nc_port.c）"
         VERBATIM)
-    add_custom_target(ncport_gen DEPENDS "${_gen_c}" "${_gen_h}" "${_gen_hw}")
+    add_custom_target(ncport_gen DEPENDS "${_gen_c}" "${_gen_h}" "${_gen_hw}" "${_gen_dev}")
 endif()
 
 # hardware.json：如果 project 層有手寫／已提交的檔案，優先用它（用戶空間看得到、改得到）；
@@ -104,7 +105,7 @@ if(NC_PROJECT_DIR AND EXISTS "${NC_PROJECT_DIR}/data/config/hardware.json")
             COMMENT "預置 hardware.json → build")
     endif()
 endif()
-set(_preset_embed "${_preset_hw}")
+set(_preset_embed "${_preset_hw}" "${_gen_dev}")
 foreach(_cfg system network tasks resources)
     if(NC_PROJECT_DIR AND EXISTS "${NC_PROJECT_DIR}/data/config/${_cfg}.json")
         # 用 build-time 的 copy_if_different，而唔係 configure_file：
@@ -196,6 +197,8 @@ if(NOT CMAKE_SCRIPT_MODE_FILE)
     target_compile_definitions(${COMPONENT_LIB} PRIVATE NETCORE_HAS_PRESET_SYSTEM=${_has_system_preset})
     target_compile_definitions(${COMPONENT_LIB} PRIVATE NETCORE_HAS_PRESET_NETWORK=${_has_network_preset})
     target_compile_definitions(${COMPONENT_LIB} PRIVATE NETCORE_HAS_PRESET_RESOURCES=${_has_resources_preset})
+# 應用硬件（device）層預置：由 ncportgen 由 driver.json 生成，一定有 → 1
+target_compile_definitions(${COMPONENT_LIB} PRIVATE NETCORE_HAS_PRESET_DEVICES=1)
     if(NC_ENABLE_NCM)
         # main 直接 include ncm 標頭（nc_mod.h / nc_mod_engine.h）。
         target_include_directories(${COMPONENT_LIB} PRIVATE

@@ -37,6 +37,8 @@ static nc_cfg_stat_t   s_tasks_stat;
 static nc_cfg_stat_t   s_resources_stat;
 static nc_hardware_cfg_t s_hw;
 static nc_cfg_stat_t   s_hw_stat;
+static nc_devices_cfg_t s_dev;
+static nc_cfg_stat_t   s_dev_stat;
 static bool s_loaded;
 
 // ───────────────────────── 小工具 ─────────────────────────
@@ -1357,6 +1359,216 @@ esp_err_t nc_cfg_apply_resources(const cJSON *root, nc_resources_cfg_t *out, nc_
     return ESP_OK;
 }
 
+// ───────────────────────── 應用硬件（device）層 ─────────────────────────
+// `devices.json` = driver.json 的 runtime 鏡像。**只有 LED 已實作**；其餘 device
+// （TFT／PCA9685／SD…）仍然冇 driver，所以 enable=1 會記錄＋大聲 warn（唔靜默）。
+static bool get_u32_opt(const cJSON *o, const char *key, uint32_t *out,
+                        uint32_t lo, uint32_t hi, nc_cfg_stat_t *st)
+{
+    const cJSON *v = item(o, key);
+    if (v == NULL) {
+        return false;
+    }
+    if (!cJSON_IsNumber(v) || v->valuedouble < (double)lo || v->valuedouble > (double)hi) {
+        st->invalid++;
+        return false;
+    }
+    *out = (uint32_t)v->valuedouble;
+    return true;
+}
+
+// driver.json 的 enable 寫 1／0（數字），手寫 JSON 又可能寫 true／false；
+// 兩種都要收（cJSON_IsTrue 只認 true，唔收 1 —— 曾經因此令種子檔一落地就被當成關）。
+static bool dev_enabled(const cJSON *o)
+{
+    const cJSON *v = item(o, "enable");
+    if (cJSON_IsBool(v)) {
+        return cJSON_IsTrue(v);
+    }
+    if (cJSON_IsNumber(v)) {
+        return v->valueint != 0;
+    }
+    return false;
+}
+
+static uint8_t led_backend_of(const char *s)
+{
+    if (s == NULL) {
+        return NC_LED_BACKEND_NONE;
+    }
+    if (strcmp(s, "i80") == 0)     return NC_LED_BACKEND_I80;
+    if (strcmp(s, "spi") == 0)     return NC_LED_BACKEND_SPI;
+    if (strcmp(s, "rmt") == 0)     return NC_LED_BACKEND_RMT;
+    if (strcmp(s, "parlio") == 0)  return NC_LED_BACKEND_PARLIO;
+    if (strcmp(s, "direct") == 0)  return NC_LED_BACKEND_DIRECT;
+    if (strcmp(s, "mock") == 0)    return NC_LED_BACKEND_MOCK;
+    return NC_LED_BACKEND_NONE;
+}
+
+static bool led_fmt_known(const char *s)
+{
+    static const char *k[] = { "ws2812", "ws2812w", "ws2815", "ws2801", "apa102" };
+    for (size_t i = 0; i < sizeof(k) / sizeof(k[0]); i++) {
+        if (strcmp(s, k[i]) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static void apply_dev_led(const cJSON *o, nc_devices_cfg_t *out, nc_cfg_stat_t *st)
+{
+    nc_led_cfg_t *l = &out->led;
+    memset(l, 0, sizeof(*l));
+    l->present = true;
+    l->enable = dev_enabled(o);
+    l->bus = -1;
+
+    const cJSON *bk = item(o, "backend");
+    const uint8_t backend = led_backend_of(cJSON_IsString(bk) ? bk->valuestring : NULL);
+    if (bk == NULL) {
+        st->defaulted++;
+    } else if (backend == NC_LED_BACKEND_NONE) {
+        st->invalid++;
+        ESP_LOGW(TAG, "devices.json LED.backend 看不懂 → 這組停用");
+        l->enable = false;
+    }
+    l->backend = backend;
+
+    const cJSON *bus = item(o, "bus");
+    if (cJSON_IsObject(bus)) {
+        const cJSON *ix = item(bus, "index");
+        if (cJSON_IsNumber(ix) && ix->valueint >= -1 && ix->valueint <= 1) {
+            l->bus = (int8_t)ix->valueint;
+        } else {
+            st->invalid++;
+        }
+        const cJSON *ty = item(bus, "type");
+        const char *want = (backend == NC_LED_BACKEND_I80) ? "i80"
+                         : (backend == NC_LED_BACKEND_SPI) ? "spi" : NULL;
+        if (want != NULL &&
+            !(cJSON_IsString(ty) && strcmp(ty->valuestring, want) == 0)) {
+            st->invalid++;
+            ESP_LOGW(TAG, "devices.json LED.bus.type 要係 \"%s\"（backend 一致）→ 這組停用", want);
+            l->enable = false;
+        }
+    } else if (bus != NULL) {
+        st->invalid++;
+    }
+
+    const cJSON *lanes = item(o, "lanes");
+    if (cJSON_IsNumber(lanes)) {
+        const int v = lanes->valueint;
+        if (v >= 1 && v <= 16) {
+            l->lanes = (uint8_t)v;
+        } else {
+            st->invalid++;
+            l->lanes = 1;
+        }
+    } else {
+        l->lanes = 1;
+        st->defaulted++;
+    }
+
+    const cJSON *px = item(o, "px");
+    if (cJSON_IsNumber(px) && px->valueint >= 1 && px->valueint <= 65535) {
+        l->px = (uint16_t)px->valueint;
+    } else {
+        st->invalid++;
+    }
+
+    const cJSON *fmt = item(o, "format");
+    const char *fs = cJSON_IsString(fmt) ? fmt->valuestring : "";
+    if (fs[0] == '\0' || strlen(fs) >= NC_CFG_LED_FMT_MAX || !led_fmt_known(fs)) {
+        st->invalid++;
+        snprintf(l->fmt, sizeof(l->fmt), "ws2812");
+    } else {
+        snprintf(l->fmt, sizeof(l->fmt), "%s", fs);
+    }
+
+    const cJSON *tim = item(o, "timing");
+    if (cJSON_IsObject(tim)) {
+        uint32_t v = 0;
+        if (get_u32_opt(tim, "pclk_hz", &v, 100000, 80000000, st)) {
+            l->clk_hz = v;
+        } else if (get_u32_opt(tim, "clk_hz", &v, 100000, 80000000, st)) {
+            l->clk_hz = v;
+        }
+        if (get_u32_opt(tim, "bit_cells", &v, 0, 8, st)) {
+            l->bit_cells = (uint8_t)v;
+        }
+        if (get_u32_opt(tim, "t0h", &v, 0, 8, st)) {
+            l->t0h = (uint8_t)v;
+        }
+        if (get_u32_opt(tim, "t1h", &v, 0, 8, st)) {
+            l->t1h = (uint8_t)v;
+        }
+    }
+}
+
+// 已知但未有 driver 的 device（enable=1 要 warn，唔好靜默）。
+static const char *const k_unimpl[] = {
+    "TFT", "APA102", "PCA9685", "Audio", "PCM5102",
+    "GT1151Q", "HUSB238", "uartMotor", "XL9555", "SDcard",
+};
+
+static bool is_known_device(const char *k)
+{
+    static const char *const k_known[] = { "LED", "WS2812", "led", "version", "_comment", "SD" };
+    for (size_t i = 0; i < sizeof(k_known) / sizeof(k_known[0]); i++) {
+        if (strcmp(k, k_known[i]) == 0) {
+            return true;
+        }
+    }
+    for (size_t i = 0; i < sizeof(k_unimpl) / sizeof(k_unimpl[0]); i++) {
+        if (strcmp(k, k_unimpl[i]) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static void apply_devices(const cJSON *root, nc_devices_cfg_t *out, nc_cfg_stat_t *st)
+{
+    memset(out, 0, sizeof(*out));
+    if (!cJSON_IsObject(root)) {
+        return;
+    }
+    out->present = true;
+
+    const cJSON *led = item(root, "LED");
+    if (led == NULL) {
+        led = item(root, "WS2812");
+    }
+    if (led == NULL) {
+        led = item(root, "led");
+    }
+    if (cJSON_IsObject(led)) {
+        out->led_decl = true;
+        apply_dev_led(led, out, st);
+    }
+
+    for (size_t i = 0; i < sizeof(k_unimpl) / sizeof(k_unimpl[0]); i++) {
+        const cJSON *d = item(root, k_unimpl[i]);
+        if (!cJSON_IsObject(d)) {
+            continue;
+        }
+        if (dev_enabled(d) && out->n_unimpl < NC_CFG_MAX_UNIMPL) {
+            snprintf(out->unimpl[out->n_unimpl].name,
+                     sizeof(out->unimpl[0].name), "%s", k_unimpl[i]);
+            out->unimpl[out->n_unimpl].enable = true;
+            out->n_unimpl++;
+        }
+    }
+
+    const cJSON *it = NULL;
+    cJSON_ArrayForEach(it, root) {
+        if (it->string != NULL && !is_known_device(it->string)) {
+            st->unknown++;
+        }
+    }
+}
+
 // ───────────────────────── 存取 ─────────────────────────
 
 esp_err_t nc_cfg_boot(void)
@@ -1384,6 +1596,11 @@ const nc_hardware_cfg_t *nc_cfg_hardware(void)
     return &s_hw;
 }
 
+const nc_devices_cfg_t *nc_cfg_devices(void)
+{
+    return &s_dev;
+}
+
 const nc_cfg_stat_t *nc_cfg_stat_of(const char *layer)
 {
     if (layer == NULL) {
@@ -1400,6 +1617,9 @@ const nc_cfg_stat_t *nc_cfg_stat_of(const char *layer)
     }
     if (strcmp(layer, "hardware") == 0) {
         return &s_hw_stat;
+    }
+    if (strcmp(layer, "devices") == 0) {
+        return &s_dev_stat;
     }
     return NULL;
 }
@@ -1599,6 +1819,19 @@ esp_err_t nc_cfg_boot_ex(const char *hw_base_json, size_t hw_base_len)
         }
     }
 
+    exists = false;
+    f = nc_cfg_open_ex("devices", &exists);
+    if (f != NULL) {
+        apply_devices(nc_cfg_root(f), &s_dev, &s_dev_stat);
+        nc_cfg_close(f);
+    } else {
+        apply_devices(NULL, &s_dev, &s_dev_stat);
+        if (exists) {
+            s_dev_stat.missing = 0;
+            s_dev_stat.bad_json = 1;
+        }
+    }
+
     s_loaded = true;
 
     ESP_LOGI(TAG, "system: links=%u routes=%u%s%s%s（def=%u inv=%u unk=%u）",
@@ -1626,6 +1859,19 @@ esp_err_t nc_cfg_boot_ex(const char *hw_base_json, size_t hw_base_len)
              s_tasks_stat.bad_json ? " 壞檔" : "",
              (unsigned)s_tasks_stat.defaulted, (unsigned)s_tasks_stat.invalid,
              (unsigned)s_tasks_stat.unknown);
+    if (s_dev.present) {
+        ESP_LOGI(TAG, "devices: %s（led=%s px=%u lanes=%u backend=%s；未支援已開=%u）%s%s",
+                 "/data/config/devices.json",
+                 s_dev.led_decl ? (s_dev.led.enable ? "開" : "關") : "未宣告",
+                 (unsigned)s_dev.led.px, (unsigned)s_dev.led.lanes, s_dev.led.fmt,
+                 (unsigned)s_dev.n_unimpl,
+                 s_dev_stat.bad_json ? " 壞檔" : "",
+                 (s_dev_stat.defaulted || s_dev_stat.invalid) ? "（有欄位預設／不合法）" : "");
+        for (uint8_t i = 0; i < s_dev.n_unimpl; i++) {
+            ESP_LOGW(TAG, "devices: %s enable=1 但 firmware 未有 driver → 唔會生效"
+                          "（腳位／bus 仍可在 hardware.json）", s_dev.unimpl[i].name);
+        }
+    }
     ESP_LOGI(TAG, "resources: %u 條%s%s（def=%u inv=%u unk=%u）",
              (unsigned)s_resources.n_res,
              s_resources_stat.missing ? " 缺檔" : "",
