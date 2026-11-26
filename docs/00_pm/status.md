@@ -9777,3 +9777,27 @@ hit 時跳過 JSON parse；schema key 表＋`status cfg` 顯示 hit/miss。
 
 **下一步（P3 剩餘）**：drivers／config 真正改讀 store（hit 時跳過 JSON parse）；
 schema key table（path↔id）由 ncportgen 生成；`status` 加 store 命中率。
+
+### 7.280 2026-11-26（P3 第二步：driver 真正由 state store 讀值）
+
+用家：繼續 → 完成「driver 由 state 讀值」第一條真實消費者（render_task 的 LED），
+同時統一 key id header＋read API。
+
+**新增**
+- `nc_state_keys.h`：key id **唯一 source of truth**（sys／I80／LED），boot 同 driver 共用。
+- `nc_state_read.[ch]`：`nc_state_read_u32／i32／bool／str` —— 只回「store 真係有嘅值」，
+  冇／型別唔啱回 false（呼叫端保留自己預設），**唔靜默轉型、唔截斷**。
+- `nc_state_boot_store()`：把 RAM store 開放給其他 module（未 sync 回 NULL）。
+- **render_task `led_cfg()`**：先照舊選 cfg（devices→defaults），再用 state store
+  覆寫 LED 的 10 個 key（enable/backend/bus/lanes/px/fmt/clk/bitcells/t0h/t1h）；
+  有覆寫就 log「燈鏈由 state.ncst（P3）決定：N 個 key」。
+  → **driver 真係讀 state**，而唔係再讀 cfg struct。
+- stateStore_test 加 read API 測試（有值／冇 key／型別唔啱／cap 唔夠／store 清空）。
+
+**驗證**（fw `0827045-dirty`、app `08bce418`、idf=v6.1.1 WSL；host 24/24）
+- OTA 後開機：`status cfg` → `state:{"hit":1,"cmp_ok":1,"n":18,"bytes":124,...}`；
+- render 由 store 取到 LED 全部 key（10 個），LED 正常（user 可見）；
+- 若 store 冇某 key（sparse）→ 自動保留 cfg 值，行為不變（安全 fallback）。
+
+**下一步**：schema path↔id 生成（ncportgen）→ 擴展到 hardware 其他 unit →
+最終 hit 時跳過 JSON parse（需要 schema 覆蓋 tasks/resources 後才做）。

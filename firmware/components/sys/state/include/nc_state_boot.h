@@ -13,6 +13,7 @@
 #include <stdint.h>
 
 #include "esp_err.h"
+#include "nc_state_store.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -39,6 +40,9 @@ esp_err_t nc_state_boot_sync(nc_state_boot_result_t *out);
 
 // 上一次 sync 的結果（未跑過回 NULL）；給 status 用。
 const nc_state_boot_result_t *nc_state_boot_last(void);
+
+// RAM store（19 筆左右；未 sync 回 NULL）；給 nc_state_read／driver 用。
+const nc_state_store_t *nc_state_boot_store(void);
 
 #ifdef __cplusplus
 }

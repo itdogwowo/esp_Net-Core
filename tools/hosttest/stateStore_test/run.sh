@@ -11,5 +11,6 @@ cc -std=c17 -Wall -Wextra -Werror -O2 \
    -I"$SHIM" \
    "$ROOT/firmware/components/sys/state/nc_state_blob.c" \
    "$ROOT/firmware/components/sys/state/nc_state_store.c" \
+   "$ROOT/firmware/components/sys/state/nc_state_read.c" \
    "$T/stateStore_test.c" -o "$OUT/stateStore_test"
 "$OUT/stateStore_test"

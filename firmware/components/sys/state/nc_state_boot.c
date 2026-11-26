@@ -18,6 +18,7 @@
 #include "nc_cfg.h"
 #include "nc_state_blob.h"
 #include "nc_state_file.h"
+#include "nc_state_keys.h"
 #include "nc_state_store.h"
 
 static const char *TAG = "state";
@@ -29,28 +30,6 @@ static const char *const k_src_paths[] = {
     "/data/config/system.json",
     "/data/config/tasks.json",
     "/data/config/resources.json",
-};
-
-// key id（同 docs/03_notes/state-storage-format.md 登記）
-enum {
-    K_SYS_FRAME_MS   = 0x0002,
-    K_SYS_NUM_PIXELS = 0x0003,
-    K_SYS_LOG_DEBUG  = 0x0004,
-    K_I80_COUNT      = 0x0701,
-    K_I80_WR         = 0x0702,
-    K_I80_DC         = 0x0703,
-    K_I80_CS         = 0x0704,
-    K_I80_FREQ       = 0x0705,
-    K_LED_ENABLE     = 0x0C01,
-    K_LED_BACKEND    = 0x0C02,
-    K_LED_BUS        = 0x0C03,
-    K_LED_LANES      = 0x0C04,
-    K_LED_PX         = 0x0C05,
-    K_LED_FMT        = 0x0C06,
-    K_LED_CLK        = 0x0C07,
-    K_LED_BIT_CELLS  = 0x0C08,
-    K_LED_T0H        = 0x0C09,
-    K_LED_T1H        = 0x0C0A,
 };
 
 static nc_state_rec_t s_recs[32];
@@ -90,37 +69,37 @@ static size_t build_records(void)
 
     const nc_system_cfg_t *sys = nc_cfg_system();
     if (sys != NULL) {
-        n = put_u(n, K_SYS_FRAME_MS, sys->frame_interval_ms);
-        n = put_u(n, K_SYS_NUM_PIXELS, sys->num_pixels);
-        n = put_u(n, K_SYS_LOG_DEBUG, sys->log_debug_mode);
+        n = put_u(n, NC_KEY_SYS_FRAME_MS, sys->frame_interval_ms);
+        n = put_u(n, NC_KEY_SYS_NUM_PIXELS, sys->num_pixels);
+        n = put_u(n, NC_KEY_SYS_LOG_DEBUG, sys->log_debug_mode);
     }
 
     const nc_hardware_cfg_t *hw = nc_cfg_hardware();
     if (hw != NULL && hw->n_i80 > 0) {
         const nc_i80_cfg_t *b = &hw->i80[0];
-        n = put_u(n, K_I80_COUNT, b->n_used);
-        n = put_i(n, K_I80_WR, b->wr);
-        n = put_i(n, K_I80_DC, b->dc);
-        n = put_i(n, K_I80_CS, b->cs);
-        n = put_u(n, K_I80_FREQ, b->freq_hz);
+        n = put_u(n, NC_KEY_I80_COUNT, b->n_used);
+        n = put_i(n, NC_KEY_I80_WR, b->wr);
+        n = put_i(n, NC_KEY_I80_DC, b->dc);
+        n = put_i(n, NC_KEY_I80_CS, b->cs);
+        n = put_u(n, NC_KEY_I80_FREQ, b->freq_hz);
     }
 
     const nc_devices_cfg_t *dv = nc_cfg_devices();
     if (dv != NULL && dv->present) {
         const nc_led_cfg_t *led = &dv->led;
-        n = put_b(n, K_LED_ENABLE, led->enable);
-        n = put_u(n, K_LED_BACKEND, led->backend);
+        n = put_b(n, NC_KEY_LED_ENABLE, led->enable);
+        n = put_u(n, NC_KEY_LED_BACKEND, led->backend);
         if (dv->led_decl) {
-            n = put_i(n, K_LED_BUS, led->bus);
-            n = put_u(n, K_LED_LANES, led->lanes);
-            n = put_u(n, K_LED_PX, led->px);
+            n = put_i(n, NC_KEY_LED_BUS, led->bus);
+            n = put_u(n, NC_KEY_LED_LANES, led->lanes);
+            n = put_u(n, NC_KEY_LED_PX, led->px);
             if (led->fmt[0] != '\0') {
-                n = put_s(n, K_LED_FMT, led->fmt);
+                n = put_s(n, NC_KEY_LED_FMT, led->fmt);
             }
-            n = put_u(n, K_LED_CLK, led->clk_hz);
-            n = put_u(n, K_LED_BIT_CELLS, led->bit_cells);
-            n = put_u(n, K_LED_T0H, led->t0h);
-            n = put_u(n, K_LED_T1H, led->t1h);
+            n = put_u(n, NC_KEY_LED_CLK, led->clk_hz);
+            n = put_u(n, NC_KEY_LED_BIT_CELLS, led->bit_cells);
+            n = put_u(n, NC_KEY_LED_T0H, led->t0h);
+            n = put_u(n, NC_KEY_LED_T1H, led->t1h);
         }
     }
     return n;
@@ -228,4 +207,9 @@ esp_err_t nc_state_boot_sync(nc_state_boot_result_t *out)
 const nc_state_boot_result_t *nc_state_boot_last(void)
 {
     return s_result_valid ? &s_result : NULL;
+}
+
+const nc_state_store_t *nc_state_boot_store(void)
+{
+    return (s_store.n > 0) ? &s_store : NULL;
 }

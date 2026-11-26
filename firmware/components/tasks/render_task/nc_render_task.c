@@ -35,6 +35,9 @@
 #include "freertos/queue.h"
 #include "freertos/task.h"
 #include "nc_cfg.h"
+#include "nc_state_boot.h"
+#include "nc_state_keys.h"
+#include "nc_state_read.h"
 #include "nc_prio.h"
 #include "nc_task.h"
 #include "sdkconfig.h"
@@ -166,6 +169,55 @@ static const nc_led_cfg_t *led_cfg(void)
                          "enable=%d backend=%u lanes=%u px=%u fmt=%s",
                          c->enable ? 1 : 0, (unsigned)c->backend, (unsigned)c->lanes,
                          (unsigned)c->px, c->fmt);
+            }
+        }
+        // P3：driver 真正由 state store 讀值（state.ncst hit／重建後都同 cfg 一致）。
+        // 只覆寫 store 真係有嘅 key；冇（sparse／未 sync）就保留上面 cfg 的值。
+        const nc_state_store_t *st = nc_state_boot_store();
+        if (c != NULL && st != NULL) {
+            static nc_led_cfg_t s_led_from_state;
+            s_led_from_state = *c;
+            uint32_t u;
+            int32_t iv;
+            bool bv;
+            uint8_t hits = 0;
+            if (nc_state_read_bool(NC_KEY_LED_ENABLE, &bv)) {
+                s_led_from_state.enable = bv; hits++;
+            }
+            if (nc_state_read_u32(NC_KEY_LED_BACKEND, &u)) {
+                s_led_from_state.backend = (uint8_t)u; hits++;
+            }
+            if (nc_state_read_i32(NC_KEY_LED_BUS, &iv)) {
+                s_led_from_state.bus = (int8_t)iv; hits++;
+            }
+            if (nc_state_read_u32(NC_KEY_LED_LANES, &u)) {
+                s_led_from_state.lanes = (uint8_t)u; hits++;
+            }
+            if (nc_state_read_u32(NC_KEY_LED_PX, &u)) {
+                s_led_from_state.px = (uint16_t)u; hits++;
+            }
+            if (nc_state_read_str(NC_KEY_LED_FMT, s_led_from_state.fmt,
+                                  sizeof(s_led_from_state.fmt))) {
+                hits++;
+            }
+            if (nc_state_read_u32(NC_KEY_LED_CLK, &u)) {
+                s_led_from_state.clk_hz = u; hits++;
+            }
+            if (nc_state_read_u32(NC_KEY_LED_BIT_CELLS, &u)) {
+                s_led_from_state.bit_cells = (uint8_t)u; hits++;
+            }
+            if (nc_state_read_u32(NC_KEY_LED_T0H, &u)) {
+                s_led_from_state.t0h = (uint8_t)u; hits++;
+            }
+            if (nc_state_read_u32(NC_KEY_LED_T1H, &u)) {
+                s_led_from_state.t1h = (uint8_t)u; hits++;
+            }
+            if (hits > 0) {
+                c = &s_led_from_state;
+                ESP_LOGI(TAG, "燈鏈由 state.ncst（P3）決定：%u 個 key、"
+                         "enable=%d backend=%u lanes=%u px=%u fmt=%s",
+                         (unsigned)hits, c->enable ? 1 : 0, (unsigned)c->backend,
+                         (unsigned)c->lanes, (unsigned)c->px, c->fmt);
             }
         }
     }

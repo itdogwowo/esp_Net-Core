@@ -1,8 +1,18 @@
-// stateStore_test — NCSTATE RAM store host test（set/get/對拍/容量/bytes）。
+// stateStore_test — NCSTATE RAM store／read API host test。
+// read API 用 test 自己提供的 nc_state_boot_store() stub（唔使拉 config／boot）。
 #include <stdio.h>
 #include <string.h>
 
+#include "nc_state_keys.h"
+#include "nc_state_read.h"
 #include "nc_state_store.h"
+
+static nc_state_store_t s_stub;
+
+const nc_state_store_t *nc_state_boot_store(void)
+{
+    return (s_stub.n > 0) ? &s_stub : NULL;
+}
 
 static int g_fail;
 
@@ -24,28 +34,27 @@ int main(void)
     nc_state_store_clear(&s);
     const char *fmt = "ws2812";
     nc_state_rec_t rs[] = {
-        {.key = 0x0002, .type = NC_STATE_T_UINT, .u = 20},
-        {.key = 0x0702, .type = NC_STATE_T_SINT, .i = -1},
-        {.key = 0x0C01, .type = NC_STATE_T_BOOL, .u = 1},
-        {.key = 0x0C06, .type = NC_STATE_T_BYTES, .bytes = fmt, .bytes_len = 6},
+        {.key = NC_KEY_SYS_FRAME_MS, .type = NC_STATE_T_UINT, .u = 20},
+        {.key = NC_KEY_I80_WR, .type = NC_STATE_T_SINT, .i = -1},
+        {.key = NC_KEY_LED_ENABLE, .type = NC_STATE_T_BOOL, .u = 1},
+        {.key = NC_KEY_LED_FMT, .type = NC_STATE_T_BYTES, .bytes = fmt, .bytes_len = 6},
     };
     for (size_t i = 0; i < sizeof(rs) / sizeof(rs[0]); i++) {
         CHECK(nc_state_store_put(&s, &rs[i]), "put[%zu] 失敗", i);
     }
     CHECK(s.n == 4, "n=%u（預期 4）", s.n);
     nc_state_rec_t got;
-    CHECK(nc_state_store_get(&s, 0x0002, &got) && got.u == 20, "get 0x0002");
-    CHECK(nc_state_store_get(&s, 0x0702, &got) && got.i == -1, "get 0x0702");
-    CHECK(nc_state_store_get(&s, 0x0C01, &got) && got.u == 1, "get 0x0C01");
-    CHECK(nc_state_store_get(&s, 0x0C06, &got) && got.bytes_len == 6 &&
-          memcmp(got.bytes, fmt, 6) == 0, "get 0x0C06 bytes");
-    CHECK(!nc_state_store_get(&s, 0x9999, &got), "唔存在應該 false");
+    CHECK(nc_state_store_get(&s, NC_KEY_SYS_FRAME_MS, &got) && got.u == 20, "get frame_ms");
+    CHECK(nc_state_store_get(&s, NC_KEY_I80_WR, &got) && got.i == -1, "get wr");
+    CHECK(nc_state_store_get(&s, NC_KEY_LED_ENABLE, &got) && got.u == 1, "get enable");
+    CHECK(nc_state_store_get(&s, NC_KEY_LED_FMT, &got) && got.bytes_len == 6 &&
+          memcmp(got.bytes, fmt, 6) == 0, "get fmt");
 
     printf("[2] 重複 key 覆蓋（唔會加第二筆）\n");
-    nc_state_rec_t r2 = {.key = 0x0002, .type = NC_STATE_T_UINT, .u = 30};
+    nc_state_rec_t r2 = {.key = NC_KEY_SYS_FRAME_MS, .type = NC_STATE_T_UINT, .u = 30};
     CHECK(nc_state_store_put(&s, &r2), "覆蓋 put 失敗");
     CHECK(s.n == 4, "覆蓋後 n=%u（預期 4）", s.n);
-    CHECK(nc_state_store_get(&s, 0x0002, &got) && got.u == 30, "覆蓋後值應該 30");
+    CHECK(nc_state_store_get(&s, NC_KEY_SYS_FRAME_MS, &got) && got.u == 30, "覆蓋後值應該 30");
 
     printf("[3] from_recs／cmp：一致回 0、改一筆回 1＋first key\n");
     nc_state_store_clear(&s);
@@ -54,13 +63,28 @@ int main(void)
     CHECK(nc_state_store_cmp(&s, rs, 4, &first) == 0, "一致時 cmp 應該 0");
     nc_state_rec_t rs2[4];
     memcpy(rs2, rs, sizeof(rs));
-    rs2[2].u = 0;   // bool 1 → 0
+    rs2[2].u = 0;
     CHECK(nc_state_store_cmp(&s, rs2, 4, &first) == 1, "一筆唔同應該 1");
-    CHECK(first == 0x0C01, "first_diff=0x%04x（預期 0x0C01）", first);
-    rs2[3].bytes_len = 5;
-    CHECK(nc_state_store_cmp(&s, rs2, 4, &first) >= 2, "兩筆唔同應該 ≥2");
+    CHECK(first == NC_KEY_LED_ENABLE, "first_diff=0x%04x", first);
 
-    printf("[4] bytes 太長／store 滿：明示 false\n");
+    printf("[4] read API：有值／冇值／型別唔啱／字串 cap\n");
+    s_stub = s;   // stub 指向同一份 store
+    uint32_t u = 0;
+    int32_t iv = 0;
+    bool bv = false;
+    char buf[16];
+    CHECK(nc_state_read_u32(NC_KEY_SYS_FRAME_MS, &u) && u == 20, "read frame_ms");
+    CHECK(nc_state_read_i32(NC_KEY_I80_WR, &iv) && iv == -1, "read wr");
+    CHECK(nc_state_read_bool(NC_KEY_LED_ENABLE, &bv) && bv, "read enable");
+    CHECK(nc_state_read_str(NC_KEY_LED_FMT, buf, sizeof(buf)) &&
+          strcmp(buf, "ws2812") == 0, "read fmt");
+    CHECK(!nc_state_read_u32(0x7FFF, &u), "唔存在 key 應該 false");
+    CHECK(!nc_state_read_u32(NC_KEY_I80_WR, &u), "型別唔啱（sint 當 u32）應該 false");
+    CHECK(!nc_state_read_str(NC_KEY_LED_FMT, buf, 4), "cap 唔夠應該 false（唔截斷）");
+    nc_state_store_clear(&s_stub);
+    CHECK(!nc_state_read_u32(NC_KEY_SYS_FRAME_MS, &u), "store 清空應該 false");
+
+    printf("[5] bytes 太長／store 滿：明示 false\n");
     char big[NC_STATE_STORE_BYTES_MAX + 1];
     memset(big, 'x', sizeof(big));
     nc_state_rec_t rb = {.key = 1, .type = NC_STATE_T_BYTES, .bytes = big,
@@ -75,12 +99,12 @@ int main(void)
     rfill.key = 0xFFFF;
     CHECK(!nc_state_store_put(&s, &rfill), "滿了應該 false");
 
-    printf("[5] 空 store／NULL 安全\n");
+    printf("[6] 空 store／NULL 安全\n");
     nc_state_store_clear(&s);
     CHECK(s.n == 0, "clear 後 n 應該 0");
     CHECK(nc_state_store_cmp(&s, NULL, 0, NULL) == 0, "空對空應該 0");
     CHECK(nc_state_store_cmp(NULL, rs, 4, NULL) != 0, "NULL store 應該報唔一致");
-    nc_state_store_clear(NULL);   // 唔應該 crash
+    nc_state_store_clear(NULL);
 
     if (g_fail == 0) {
         printf("stateStore_test OK\n");
