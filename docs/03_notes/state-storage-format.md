@@ -12,7 +12,7 @@
 
 | 用途 | 檔案 | magic（8 byte ASCII） | 內容 |
 |---|---|---|---|
-| **狀態／設定值**（state manager 唯一） | `/data/config/state.bin` | `"NCSTATE"`＋`\0` | 所有 unit／裝置嘅值（sparse、self-describing） |
+| **狀態／設定值**（state manager 唯一） | `/data/config/state.NCSTATE` | `"NCSTATE"`＋`\0` | 所有 unit／裝置嘅值（sparse、self-describing） |
 | **pixel layout 快取**（例外） | `/pixel/cache/<key>.layout` | `"NCLAYOUT"` | 編譯後嘅大 binary 表（aprog／job／runs） |
 
 - **冇第三個格式**。之前提過嘅 `NCB2`／`NCC2`／`PXA2`／`NCS1`／`NCLT` **全部作廢**，
@@ -87,8 +87,8 @@ value  ...     （varint／zigzag／raw bytes）
 
 ```text
 讀 FAT JSON（hardware/driver/system/tasks/resources，固定次序）→ 算 src_hash
-├─ state.bin 存在 && ver 夾 && src_hash 同 && blob_crc 過 → 【hit】直接載入
-└─ 否則 → parse JSON → 重新生成 state.bin（atomic：.tmp → rename）→ log【miss old→new】
+├─ state.NCSTATE 存在 && ver 夾 && src_hash 同 && blob_crc 過 → 【hit】直接載入
+└─ 否則 → parse JSON → 重新生成 state.NCSTATE（atomic：.tmp → rename）→ log【miss old→new】
              └─ JSON 壞 → 回 L0 出廠預設（大聲 warn）
 ```
 
@@ -124,5 +124,41 @@ layout 係「編譯後大表」（aprog／job／runs，幾百 B 到 32 KB），�
 
 **命名規矩**：
 1. magic 用 ASCII 全名、**唔加版本數字**（版本喺 header `ver`）。
-2. 檔案名講用途（`state.bin`、`<key>.layout`）。
+2. 檔案名講用途（`state.NCSTATE`、`<key>.layout`）。
 3. 新格式先登記呢張表。
+
+---
+
+## 10. RAM／PSRAM 佔用（唔係 flash 空間）
+
+用戶 2026-11-26 問「82 B 係 flash，我講嘅係 PSRAM」——以下係實測（host `sizeof` 同估算）：
+
+| 記憶體 | 舊路徑（JSON） | NCSTATE 之後 |
+|---|---|---|
+| **flash（FAT）** | config JSON 13.1 KB（文字） | JSON 保留＋`state.NCSTATE` ~124 B（＋`.bak` 一份） |
+| **internal RAM（常駐）** | 解析後 struct：hardware 800＋devices 164＋system 1,020＋tasks 604＋resources 964 = **3,552 B** | `val[380]` 1,520 B＋bitmap 48 B = **1,568 B**（可取代上面 3,552 B） |
+| **internal RAM（開機暫態）** | cJSON tree（13 KB 文字 → 約 20–35 KB） | decode buffer ≈124 B（讀檔一次） |
+| **PSRAM** | **0 B**（config 唔用 PSRAM） | **0 B** |
+
+- PSRAM 只係 pixel 環／值流用（Matrix 64 px 極細；9,600 px 才 ~115–230 KB），同 state 無關。
+- sparse 只影響「快取副本」；**出廠預設仍然喺 flash（L0 const）**，唔會因為 sparse 而少。
+- RAM 只存「有改過嘅值」（bitmap 標明）；冇 bitmap 的 key 讀 schema default（flash）。
+- 完成 P3（driver／config 讀值改讀 state）後，才真正省返 3,552 − 1,568 ≈ **2 KB internal RAM**
+  同「唔使起 cJSON」（20–35 KB 暫態）。
+
+## 11. 保護層（失敗退還，唔會比以前少）
+
+| 層 | 位置 | 失效時 |
+|---|---|---|
+| **L0 出廠預設** | firmware const（`nc_port.c`／schema default） | 永遠存在，唔會失 |
+| **L1 FAT JSON** | `/data/config/*.json`（完整、非 sparse、人手改） | 壞／失 → 回 L0（同以前一樣） |
+| **L2 state.NCSTATE** | FAT（派生快取、CRC＋src_hash） | 壞／版本唔夾 → 由 L1 重生 |
+| **L2b state.NCSTATE.bak** | FAT（每次寫新檔前保留上一份） | last-known-good，可手動還原 |
+| **預設值唔變** | schema default 喺 flash；bitmap 未 set = 用 default | 讀到的永遠係有效值，唔會「零」 |
+
+上板實測（fw `b455bd1-dirty`、app `2bc43408`、idf=v6.1.1 WSL）：
+- 首次開機：生成 `/config/state.NCSTATE` **124 B**、magic `"NCSTATE\0"`、ver=1、
+  count=18 筆（hardware／driver／system 的 I80＋LED＋sys 值）。
+- 寫 19 B 垃圾入去 → reboot：檔案自動重生 124 B（magic 正確），舊垃圾保留做
+  `state.NCSTATE.bak`（last-known-good 機制證實可運作）。
+- manifest：**19 個檔**（scan 之後見到 `/config/state.NCSTATE`）。

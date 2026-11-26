@@ -148,6 +148,7 @@ static uint8_t (*const s_usb_kind_lookup)(uint8_t) = nc_port_usb_kind;
 #include "nc_boot.h"
 #include "nc_log.h"
 #include "nc_state.h"
+#include "nc_state_boot.h"
 #include "nc_file_action.h"
 #ifdef NC_ENABLE_TESTS
 #include "nc_mod.h"
@@ -4027,6 +4028,8 @@ static esp_err_t ph_storage(void)
     // 硬體預設（nc_port.c）已經是這塊板的 wiring 編譯結果；用戶 hardware.json
     // 只覆蓋差異。沒有 wiring 檔或舊板的 host test 會自動退回內建預設。
     (void)nc_cfg_boot();    // 永遠成功：最差 = 全部用預設
+    // 派生狀態快取：hash 對得上就 hit；唔對就由 config 重建（舊檔 → .bak）。
+    (void)nc_state_boot_sync(NULL);
     // system.json 的 "log_debug_mode"：
     //   0 = 正常（INFO、2 KB、USB 起來之後開始記 → 看到服務/bus 啟動）
     //   1 = 除錯（全部等級、8 KB、第一行開始）

@@ -10,14 +10,14 @@
 
 ## 1. 三種形態（同一個事實，三種表示）
 
-> 定案補充（2026-11-26）：**state manager 只有一個持久格式 `NCSTATE`（`state.bin`）**，
+> 定案補充（2026-11-26）：**state manager 只有一個持久格式 `NCSTATE`（`state.NCSTATE`）**，
 > 內部自描述（type/len/key）；pixel layout 快取係唯一例外（`.layout`）。
 > 詳見 [`state-storage-format.md`](state-storage-format.md)。
 
 | 形態 | 位置 | 內容 | 誰用 |
 |---|---|---|---|
 | **A. JSON** | FAT `/data/config/*.json` | key **路徑名**＋完整值（人改） | 用戶／WebMaster |
-| **B. NCSTATE** | FAT `/data/config/state.bin` 或 NVS blob | sparse `(id varint, 值 varint)`＋CRC | 開機快速載入／落盤 |
+| **B. NCSTATE** | FAT `/data/config/state.NCSTATE` 或 NVS blob | sparse `(id varint, 值 varint)`＋CRC | 開機快速載入／落盤 |
 | **C. RAM** | **internal RAM**（唔係 PSRAM） | `uint32_t val[NC_KEY_MAX]` ＋ valid bitmap | state manager／driver |
 
 ### 為什麼 C 放 internal 而唔係 PSRAM？

@@ -9,7 +9,7 @@
   },
   "host_tests": {
     "runner": "tools/hosttest/run_all.sh",
-    "expected": 22
+    "expected": 23
   },
   "probe": {
     "baud": 115200,
