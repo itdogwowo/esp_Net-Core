@@ -23,7 +23,7 @@ MATRIX = [
     ("hw.pin",      48,  3),   # 48 個 GPIO 位置（GPIO 矩陣）
     ("hw.pwm",       8,  2),
     ("hw.uart",      3,  6),
-    ("hw.spi",       2,  7),
+    ("hw.spi",       2, 17),   # 舊專案特別：id/baud/phase/pol/sck/miso/mosi/force/lines + data0..7（多線 SPI）
     ("hw.i2c",       2,  3),
     ("hw.i2s",       1,  5),
     ("hw.sdio",      1,  8),

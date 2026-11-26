@@ -9477,3 +9477,22 @@ layout 打包器）——字頭太似，容易混淆。
 
 原型：`modules/lab/state_schema_lab/hw_matrix_preview.py`（實跑：356 keys、
 worst 2,504 B、template 5,082 B、bitmap 衝突檢查 OK）。
+
+### 7.267 2026-11-26（SPI schema 定案：照舊專案補多線／force_machine）
+
+用家提醒「SPI 有點特別麻煩，睇舊項目點設定」。查舊 repo `slave/driver/spi_drv.py`：
+
+- **兩條路**：`lcd_bus.SPIBus`（DMA、多線：`data_pins` 1/2/4/8 條，QSPI／octal 都得；
+  單線＝`data_pins[0]` 或 `GPIO.mosi`）／`machine.SPI`（單線同步；`force_machine=1`
+  或 lcd_bus 失敗時用，`data_pins[0]` fallback 當 `mosi`）。
+- `data_pins: []`／`null`／缺省 **三者等效**；`force_machine` 用嚟避 DMA 撕裂（APA102）。
+- claim：`sck`／`mosi`／`miso`＋每條 data 線（label `spi{id}_d{i}`）。
+- S3 Octal PSRAM：GPIO33–37 不可用（板級 reserved mask 已有）。
+
+**矩陣更新**：`hw.spi` 由 7 → **17 欄位／通道**（id、baud、phase、polarity、sck、
+miso、mosi、force_machine、lines、data0..data7），2 通道＝34 keys。
+全矩陣 356 → **376 keys**；NCS1 worst 2,504 → **2,644 B**（仍 <4 KB，餘裕 35%）。
+
+已更新 [hw-matrix.md §1.1](docs/03_notes/hw-matrix.md)（含 ESP-IDF C 對應：
+`spi_bus_config_t.data0..data7`、`spi_device_polling_transmit`），原型
+`hw_matrix_preview.py` 亦改 17 欄位重跑。
