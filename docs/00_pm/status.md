@@ -10220,3 +10220,45 @@ commit 路徑（STATUS_SET 的 persist 位＋reboot 前 flush）；大表補齊 
 
 **未做**：store 64→96（S4）；如果真的需要用戶自訂字串（SSID／裝置名），另設小字串池，
 唔好再回到「每筆預留 16 B」。
+
+---
+
+### 7.294 2026-11-27（把「只用一次的 768 B」搬去 PSRAM；store 上限 64→96；state 佔 SRAM 2,820→1,160 B）
+
+**為什麼**：用家要求「字典表可以放 PSRAM，不要浪費寶貴的 SRAM，容量亦要鬆動一點」。
+
+**先講事實（ELF 量到）**：
+
+| 東西 | 大小 | 位置 | 佔 SRAM |
+|---|---:|---|---:|
+| 字典表 `nc_state_schema_keys`＋字串 | 900 B（565 key 約 12 KB） | `.flash.rodata`（0x3c0a31e8） | **0 B**（flash XIP，唔使搬） |
+| 值 store `s_store` | 772 B → **1,156 B** | `.dram0.bss` | 1,156 B（熱路徑） |
+| 開機暫存 `s_recs`（32 筆 record） | **768 B → 4 B** | `.dram0.bss` → **PSRAM** | 4 B（pointer） |
+
+真正浪費的不是表，是 `s_recs`：只在 B02 sync 用一次，之後永久閒置。
+
+**做法**：
+
+- `nc_state_boot.c`：`s_recs` 改成 `heap_caps_malloc(MALLOC_CAP_SPIRAM)`（開機一次）；
+  冇 PSRAM 的板（C3）用 `#if CONFIG_SPIRAM` compile-time 回 internal 靜態陣列；
+  PSRAM 分配失敗 → **明示 log＋跳過 state sync**（cfg／JSON 仍然權威，唔會靜默）。
+- `NC_STATE_STORE_MAX` **64 → 96**：Matrix 典型 70 筆，64 會截斷。
+
+**量測（`nm`＋上板）**：
+
+| 項目 | 之前 | 之後 |
+|---|---:|---:|
+| `s_store` | `0x304`＝772 B | **`0x484`＝1,156 B**（96 筆） |
+| `s_recs` | `0x300`＝768 B | **`0x4`＝4 B**（768 B 在 PSRAM） |
+| **state 佔 SRAM 合計** | **2,820 B** | **1,160 B（−1,660 B，−59%）** |
+| 字典表 | 900 B flash | 900 B flash（不變） |
+| image | 747,296 B | 747,440 B（+144 B） |
+| 上板 `h_ps` | 2,067,388 | **2,066,628（−760 B ≈ 768 B PSRAM 被用）** |
+| 上板 state | hit=1、n=5、bytes=50 | 一樣（hit=1、n=5、bad=0、t=24.2/8.7 ms） |
+
+**結論**：唔需要把字典表搬去 PSRAM（它已經 0 RAM）；要搬的是「只用一次的暫存」。
+SRAM 由 2,820 → 1,160 B，同時容量由 64 → 96 筆（更寬鬆）。
+
+**未做**：如果將來有「runtime 可改的表」（例如動態 device 清單），才用
+`EXT_RAM_BSS_ATTR`（要開 `CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY`）或 PSRAM heap；
+現時字典是 const，放 flash 最省。

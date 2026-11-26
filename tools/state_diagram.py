@@ -27,8 +27,8 @@ KEY_MATRIX = 380             # hw-matrix.md 的大表
 KEY_TARGET = 565             # 大表＋9 類缺失資源
 STORE_ENTRY = 32             # 舊 entry（u32 key＋bytes[16]＋u/i 分開）
 ENTRY_SLIM = 12              # 2026-11-27 瘦身後（key4＋type1＋pad3＋union4）
-STORE_MAX = 64               # 現時 NC_STATE_STORE_MAX
-STORE_MAX_NEW = 96           # 建議（70 筆 + 餘裕）
+STORE_MAX = 96               # 現時 NC_STATE_STORE_MAX（2026-11-27：64→96）
+STORE_MAX_OLD = 64           # 舊值（圖上做對照）
 # 典型啟動（Matrix 真實 config）：sys 12 + PIN 6×3=18 + I80 22 + LED 10
 #                              + UART 6 + PWM 2 = 70
 TYPICAL_ACTIVE = 70
@@ -147,18 +147,19 @@ def panel_cache(y: int) -> str:
         return "".join(out)
 
     s.append(text(x + 18, y + 120, f"現時上限：{STORE_MAX} 筆 × {ENTRY_SLIM} B = {STORE_MAX*ENTRY_SLIM:,} B"
-                                   f"（s_store 實測 {STORE_MAX*ENTRY_SLIM+4:,} B）", 10.5, INK, 700))
+                                   f"（s_store 實測 {STORE_MAX*ENTRY_SLIM+4:,} B；舊 {STORE_MAX_OLD} 筆）",
+                  10.5, INK, 700))
     s.append(row(y + 132, "過濾後（70 筆）", TYPICAL_ACTIVE, STORE_ENTRY, F_BAD, S_BAD,
                  "S4 只做過濾仍然爆：2,240 B > 772 B，而且 70 > 64 筆", 0.25,
                  limit="← 超上限"))
     s.append(row(y + 196, "瘦身後（70 筆）", TYPICAL_ACTIVE, ENTRY_SLIM, F_OK, S_OK,
-                 f"要 {STORE_MAX_NEW} 筆 = {STORE_MAX_NEW*ENTRY_SLIM+4:,} B，餘 {STORE_MAX_NEW-TYPICAL_ACTIVE} 筆", 0.55))
+                 f"入 {STORE_MAX} 筆上限（{STORE_MAX*ENTRY_SLIM+4:,} B），餘 {STORE_MAX-TYPICAL_ACTIVE} 筆", 0.55))
     s.append(row(y + 252, "板上實測（5 筆）", 5, ENTRY_SLIM, F_INFO, S_INFO,
                  "SuperMini 現時真正有值的 key（sys 3 ＋ device 2）", 0.85))
 
-    # 上限虛線（772 B）＋ 建議上限（96 筆）
-    for val, lab, col in ((STORE_MAX*ENTRY_SLIM, f"{STORE_MAX*ENTRY_SLIM} B", S_BAD),
-                          (STORE_MAX_NEW*ENTRY_SLIM+4, f"{STORE_MAX_NEW*ENTRY_SLIM+4:,} B", S_OK)):
+    # 上限虛線（舊 64 筆＋新 96 筆）
+    for val, lab, col in ((STORE_MAX_OLD*ENTRY_SLIM, f"舊 {STORE_MAX_OLD*ENTRY_SLIM} B", S_BAD),
+                          (STORE_MAX*ENTRY_SLIM+4, f"新 {STORE_MAX*ENTRY_SLIM+4:,} B", S_OK)):
         lx = bx + val * scale
         s.append(f'<line x1="{lx:.1f}" y1="{y+128}" x2="{lx:.1f}" y2="{y+286}" '
                  f'stroke="{col}" stroke-width="1.3" stroke-dasharray="5 4">'
@@ -166,7 +167,8 @@ def panel_cache(y: int) -> str:
         s.append(text(lx + 4, y + 126, lab, 9, col))
 
     # FAT blob
-    s.append(text(x + 18, y + 316, "FAT blob（state.ncst，只存 override）：現在 50 B；典型 ~480 B（LED_FMT 由 6 B 字串變 1 B index）",
+    s.append(text(x + 18, y + 316, "FAT blob（state.ncst）：現在 50 B；LED_FMT 由 6 B 字串變 1 B index", 9.5, MUTED))
+    s.append(text(x + 18, y + 332, "開機暫存 s_recs 768 B → PSRAM（s_recs 只剩 4 B pointer）；state 佔 SRAM 2,820→1,160 B",
                   9.5, MUTED))
     return "".join(s)
 
@@ -312,8 +314,8 @@ def build() -> str:
     # 底部一句
     s.append(text(M, 860,
                   f"現時 schema {KEY_NOW} key（4 unit）；大表 {KEY_MATRIX}；補齊 {KEY_TARGET}。"
-                  f" entry {STORE_ENTRY}→{ENTRY_SLIM} B（s_store 2,052→772 B）；"
-                  f"典型 {TYPICAL_ACTIVE} 筆需 {STORE_MAX_NEW} 筆容量＝{STORE_MAX_NEW*ENTRY_SLIM+4:,} B。",
+                  f" entry {STORE_ENTRY}→{ENTRY_SLIM} B；s_store 2,052→{STORE_MAX*ENTRY_SLIM+4:,} B（{STORE_MAX} 筆）；"
+                  f"開機暫存搬 PSRAM → state 佔 SRAM 2,820→{STORE_MAX*ENTRY_SLIM+4+4:,} B。",
                   11, INK2))
     s.append("</svg>")
     return "\n".join(s)

@@ -19,7 +19,7 @@
 extern "C" {
 #endif
 
-#define NC_STATE_STORE_MAX        64
+#define NC_STATE_STORE_MAX        96   // 2026-11-27：64→96（Matrix 典型 70 筆；64 會截斷）
 
 // 12 B／筆（2026-11-27）：state 只存**數值**。
 //   - key 4 + type 1 + pad 3 + union 4
