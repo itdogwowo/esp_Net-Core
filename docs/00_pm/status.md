@@ -9601,3 +9601,22 @@ magic | ver u16 | flags u16 | src_hash u32 | payload_len u32 | blob_crc u32
 `src_hash: 0x014323ff`＋逐檔 `crc32`（wiring.json 0xa6490d8f、driver.json 0x7043699a）；
 Matrix 實跑驗證。日後 compile 成 `nc_port_act[]` 時一併帶 ver/src_hash，
 boot log／`status hw` 可核對。
+
+### 7.273 2026-11-26（簡化：真正只有兩個格式——NCS1 狀態檔、NCLT layout 快取）
+
+用家：「NCS1／NCC2／NCLT 有那麼多東西嗎？很多簡稱我實際上不知道是什麼。」
+→ 係我哋之前列多咗。已簡化並寫入對照表（`state-storage-format.md §6.5`）：
+
+| 簡稱 | 意思 | 狀態 |
+|---|---|---|
+| **NCS1** | 設定值嘅機讀檔（`state.ncs`，sparse id＋值＋CRC） | ✅ **唯一新格式，要做** |
+| **NCLT** | layout 編譯快取（`.nclt`，原 `.pxlt`） | ✅ **已經有**，firmware 自己寫 |
+| NCB2 | 通用自描述 blob | ⏸ 暫緩（冇需要） |
+| NCC2 | config 派生快取 | ❌ **取消**（NCS1 已做到同一件事） |
+| PXA2 | pixel assets 編譯快取 | ⏸ 暫緩（parse 唔慢） |
+
+**結論**：真正要記嘅只有 **NCS1**（設定值機讀檔）同 **NCLT**（layout 快取，已有）；
+其餘係「將來有需要再算」，唔會而家做。文件保留只為防再撞名。
+
+**下一步**維持：A1（firmware 讀 activation 表、只裝 enabled）＋P1（NCS1 codec）——
+而 P1 就係實現嗰「唯一新格式」。
