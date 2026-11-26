@@ -24,7 +24,7 @@
 
 ## 2. `NCSTATE` 佈局（內部自描述）
 
-### Header（24 B，固定）
+### Header（26 B，固定）
 
 ```text
 offset  size  field
@@ -71,11 +71,11 @@ value  ...     （varint／zigzag／raw bytes）
 | 項目 | 大小 |
 |---|---:|
 | Matrix hardware.json＋driver.json | 8,822 B |
-| **NCSTATE blob（統一格式）** | **80 B**（24 header＋56 records／9 筆） |
-| 每筆平均 | 6.2 B（type 1＋key 1–2＋len 1＋value 1–5） |
+| **NCSTATE blob（統一格式）** | **80 B**（26 header＋54 records／9 筆） |
+| 每筆平均 | 6.0 B（type 1＋key 1–2＋len 1＋value 1–5） |
 | 舊構想（id＋值，無 type/len） | ~52 B |
 | **統一格式代價** | +28 B（換嚟自描述＋可跳過未知欄位） |
-| worst-case（380 key 全寫） | **≈ 24 + 380×8 ≈ 3.1 KB**（NVS 4 KB blob OK） |
+| worst-case（380 key 全寫） | **≈ 26 + 380×8 ≈ 3.1 KB**（NVS 4 KB blob OK） |
 | 典型（只開 i80＋led） | ~100–150 B |
 
 > 80 B vs 8,822 B = **省 99.1%**；而且因為 sparse（只存同預設唔同嘅值），

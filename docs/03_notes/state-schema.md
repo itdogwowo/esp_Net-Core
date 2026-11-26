@@ -43,7 +43,7 @@ driver.led.px        = 0x2_0_0_5   （driver domain=2、unit=led=0）
 ```text
 統一格式：NCSTATE（state manager 唯一格式，內部自描述）——詳見 state-storage-format.md
 
-header 24 B: "NCSTATE\0" | ver u16 | flags u16 | count u16 |
+header 26 B: "NCSTATE\0" | ver u16 | flags u16 | count u16 |
              src_hash u32 | payload_len u32 | blob_crc u32
 record:      type u8 | key varint | len varint | value
              （type 1=uint 2=sint 3=bytes 4=bool；len 令 reader 可以跳過唔識嘅）
