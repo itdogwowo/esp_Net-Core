@@ -340,3 +340,71 @@ pixel 只是其中一個使用者。**2026-11-19：已更名為 `nc_i80_out.c`�
 - PARLIO DMA buffer 都要 internal；16×600 一幀 bus word ≈ 29 KB（2 B/tick），
   3 槽 ≈ 87 KB。
 - 腳位要入 hardware 層；過渡期 Kconfig pins 只可以當「未遷移板」。
+
+---
+
+## 16. 2026-11-26：FPS ppm 校正（`fps_ppm`）——先寫計劃，做唔做睇工時
+
+> 用家模型：**每塊 ESP 自己管理自己**，靠穩定 fps 令兩塊板保持同步（mode 切換做錨點）。
+> 問題只剩 XTAL 頻率差（兩塊典型相對 10–20 ppm）→ 10 分鐘差 0.3–0.6 幀。
+> 曾經討論「每塊板 ppm 校準」：出廠量一次、寫落 config、firmware 用 dither 補償。
+> **用家決定（2026-11-26）：功能可以寫，但用不用到時再算；如果太花時間就押後，先入計劃。**
+
+### 16.1 決策閘門（先量，後做）
+
+| 步驟 | 內容 | 需時 |
+|---|---|---|
+| G0 | **兩塊板對量**（同時讀兩個 COM 的 `0xF081`，20–30 分鐘） | 20–30 min，**0 firmware 改動** |
+| G1 | 真實相對 ppm ≤5 ppm | → **唔做**（現有 mode 切換 resync 已夠） |
+| G2 | ≥15 ppm 而且有實際需求（mode 要跑 >20–30 min 而唔想 resync） | → 才排期做 |
+
+### 16.2 設計（三個選項）
+
+| 選項 | 做法 | 好處 | 代價／風險 |
+|---|---|---|---|
+| **A（推薦）** | 保留 `esp_timer_start_periodic(20,000)`；每 N 幀 `stop→start_periodic` 改為 20,001（或 19,999）µs，用誤差累加器決定 pattern | 改動細、週期 timer 仍然係主人；平均可到 sub-ppm | 每 N 幀一次 re-arm（相位唔變，但開銷 µs 級）；要更新 slack 銀行語義文件 |
+| B | 改成「絕對 deadline 鏈」：每幀 `esp_timer_start_once_at(deadline)`，deadline += 20,000×(1+ppm) | 可連續微調、長期最準 | **動到節拍器核心**（現時 STABLE 的來源）；work 時間會影響下一次 arm，要小心 |
+| C | 唔改節拍器，只喺 mode 切換時重設 frame 相位 | 零風險 | 只係 resync，唔係校準（本來已經有） |
+
+**選 A 的理由**：現時 `fps_trace` STABLE（sd 52 µs）係「固定週期 timer」帶來的；
+A 保留同一個結構，只係偶爾改 ±1 µs，回歸風險最低。
+
+### 16.3 工作量估算（單塊板、單一 config 欄）
+
+| 工作 | 估時 |
+|---|---|
+| config 讀取＋欄位（`system.json` → `fps_ppm`，範圍 ±100，預設 0） | 0.5 h |
+| dither 實作（誤差累加器＋每 N 幀 re-arm） | 2–3 h |
+| host test（dither pattern 純函數＋fpsclock 擴充） | 0.5–1 h |
+| 上板驗證：內部 `sum_us/n` 應等於 `20,000×(1+ppm)`（可驗到 0.01 ppm）；再對 host 量方向 | 0.5–1 h |
+| 文件（guide／status／出廠流程／老化重校週期） | 0.5 h |
+| **合計** | **4–6 h（半日至一日）** |
+
+**風險**：動到節拍器核心（現時 50.000 fps 穩定嘅來源）；回歸要靠 `fps_trace`＋
+`fps_drift --precise` 全套重跑；1 µs 粒度 = 50 ppm，dither pattern 要計清楚
+（例如 7 ppm → 每 142,857 幀一次 +1 µs）。
+
+### 16.4 驗證方法（唔需要第二塊板都驗到「功能正確」）
+
+1. 設 `fps_ppm=+28` → 板上 `sum_us/n` 應該變 **20,000.56 µs**（設備內部時間基準，
+   可以精確驗 dither pattern 對唔對，唔受外部參考限制）；
+2. 再對 host NTP 量 10–30 分鐘，確認絕對方向（會受 host 不確定性 ±5–9 ppm 限制）；
+3. `fps_trace` 重跑確認 sd／max 冇變差（dither 唔應該增加 jitter）。
+
+### 16.5 未拍板
+
+- 校準值放 `system.json`（runtime 可改）定 build-time？→ 建議 runtime（唔使重 flash）。
+- ppm 範圍／精度：建議 ±100 ppm、1 ppm 解析度。
+- 老化／溫度重校：建議一年一次或換環境時重校（晶振 aging 1–5 ppm/年）。
+- 要不要「master/slave」概念（slave 對 master 校正）？→ 建議唔要，保持每塊板獨立。
+
+### 16.6 狀態
+
+| # | 項目 | 狀態 |
+|---|---|---|
+| 16.1 | 兩塊板對量工具（G0） | ⏸ 未做（等第二塊板） |
+| 16.2 | `fps_ppm` config 欄＋dither（A） | ⏸ 未做（押後，估 4–6 h） |
+| 16.3 | 出廠校準流程＋aging 重校 | ⏸ 未做 |
+
+**決定**：2026-11-26 用家：先寫計劃，做唔做睇工作量；現階段**唔投入**，
+現有做法（各板自管 + mode 切換 resync）已足夠應付 10–30 分鐘級同步。
