@@ -355,7 +355,7 @@ static bool parse_i80_pins(int out[18], int width)
 //     runtime 可以由 /data/config/hardware.json 覆蓋 —— 唔使重 build）
 //   · 冇 → Kconfig 字串（未遷移的板子，行為不變）
 // 回 false = 這道 i80 lane 唔應該起。
-static bool i80_src(int out[18], int *width_out, int *lanes_out)
+static bool i80_src(int out[18], int *width_out, int *lanes_out, int *cs_out)
 {
     const nc_led_cfg_t *led = led_active();
     if (led != NULL) {
@@ -400,6 +400,7 @@ static bool i80_src(int out[18], int *width_out, int *lanes_out)
         }
         *width_out = w;
         *lanes_out = lanes;
+        *cs_out = (int)b->cs;          // -1 = 冇登記（面板才有）
         return true;
     }
     const int w = (CONFIG_NETCORE_PIXEL_I80_BUS_WIDTH == 16) ? 16 : 8;
@@ -408,6 +409,7 @@ static bool i80_src(int out[18], int *width_out, int *lanes_out)
     }
     *width_out = w;
     *lanes_out = CONFIG_NETCORE_PIXEL_I80_LANES;
+    *cs_out = -1;                      // Kconfig 路徑冇 CS
     return true;
 }
 #endif  // CONFIG_NETCORE_PIXEL_I80
@@ -424,7 +426,8 @@ static esp_err_t setup_backends(void)
             static int s_i80_pins[18];
             int width = 8;
             int lanes = 1;
-            if (!i80_src(s_i80_pins, &width, &lanes)) {
+            int cs_pin = -1;
+            if (!i80_src(s_i80_pins, &width, &lanes, &cs_pin)) {
                 ESP_LOGE(TAG, "I80 腳位設定壞了 → 這道 lane 停用");
                 continue;
             }
@@ -432,6 +435,10 @@ static esp_err_t setup_backends(void)
                 .pins = s_i80_pins,
                 .lanes = (uint8_t)lanes,
                 .bus_width = (uint8_t)width,
+                // 可選控制腳：有登記（>=0）才生效；DIRECT 版只 route 呢幾支。
+                .wr = s_i80_pins[width],
+                .dc = s_i80_pins[width + 1],
+                .cs = cs_pin,
                 .pclk_hz = cc.wave.clk_hz,
                 .px = pl->px,
                 .fmt = cc.fmt,

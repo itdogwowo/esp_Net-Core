@@ -76,6 +76,12 @@ typedef struct {
     const int     *pins;
     uint8_t        lanes;     // 1..width：前幾個 D 真的接燈
     uint8_t        bus_width; // 8 或 16（16 一個 PCLK 出兩條 lane 組，時間同 8-bit）
+    // 可選的控制腳（-1 = 冇登記）。DIRECT 版「有登記才 route」：
+    //   wr = i80 的 WR／PCLK、dc = 面板 D/C、cs = chip select。
+    //   LED lane 模式三個都係 -1，唔會用；面板就填幾多生效幾多。
+    int            wr;
+    int            dc;
+    int            cs;
     uint32_t       pclk_hz;
     uint32_t       px;
     nc_px_format_t fmt;

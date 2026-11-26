@@ -903,10 +903,9 @@ static void apply_i80(const cJSON *root, nc_hardware_cfg_t *out, nc_cfg_stat_t *
         e.wr = get_pin_opt(it, "wr", st);
         e.dc = get_pin_opt(it, "dc", st);
         e.cs = get_pin_opt(it, "cs", st);
-        if (e.wr < 0 || e.dc < 0) {
-            st->defaulted++;     // WR／DC 未填 → 這條不建立（唔好拿 -1 去 init）
-            continue;
-        }
+        // WR／DC 由 2026-11-26 起**可選**：直驅版「有登記（>=0）才 route」，
+        // 同 cs 一樣。esp_lcd 版仍然需要兩支（缺就會在 install 時大聲報錯），
+        // 但唔再在解析層靜靜丟掉整條 entry —— 咁樣 LED lane 模式就可以唔寫 wr／dc。
         e.enable = true;
         e.freq_hz = (uint32_t)get_int(it, "freq", 80000000, 1000000, 80000000, st);
         out->i80[out->n_i80++] = e;

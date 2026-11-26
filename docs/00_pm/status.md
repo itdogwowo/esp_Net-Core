@@ -8993,3 +8993,43 @@ LED lane 同 LCD 面板**；esp_lcd 版只做對照／回退。
 - 未驗證：cmd phase／DC 電平／CS 時序（要真面板＋示波器）；文件已明講。
 
 **下一步**：階段② config 稀疏化（`data:[14]`、`-1`＝未用、自動 8↔16-bit、`wr`/`dc` 消失）。
+
+### 7.256 2026-11-26（wr／dc 改成「有登記才生效」，同 cs 一樣）
+
+用家：`wr:1`／`dc:2` 應該同 `cs` 一樣——**有登記（>=0）才生效**，冇寫就唔用；
+然後要再對比兩條驅動的「成品」，分清係寫法、緩衝使用、定其他問題。
+
+**改動**
+- `nc_cfg_load.c apply_i80()`：**唔再**因為 `wr`／`dc` 缺就丟棄整條 I80 entry
+  （原本 `e.wr<0 || e.dc<0` → `continue`）；三個控制腳一律「有就記住、冇就 -1」。
+- `nc_render.h` `nc_px_i80_cfg_t` 加 `.wr`／`.dc`／`.cs`（-1 = 冇登記）；
+  `nc_render_task.c i80_src()` 多一個 `cs_out`，`setup_backends()` 把三支帶入。
+- `nc_i80_out.c`（DIRECT）：只 route／claim **有登記**的三支；有登記就照樣做
+  「有效腳、唔重複、非保留腳」檢查。冇寫就完全唔理，唔會像 esp_lcd 缺一就整條唔建立。
+- esp_lcd 版行為不變（API 本身要求 pins[] 齊 data＋WR＋DC；缺會在 install 大聲報錯）。
+
+**注意（語義變了）**：現在 `/data/config/hardware.json` 仍然寫了 `wr:1`／`dc:2`
+→ 佢哋**會生效**（route＋claim），所以實際佔用由 1 支變 **3 支（GPIO14＋1＋2）**。
+想「只用一支腳」就唔好寫 `wr`／`dc`（階段② 會順手示範）。
+
+**上板驗證**（fw `e9c69a4-dirty`、app `615ad3f4`、rst=3、idf=v6.1.1 (WSL)）
+- `0xF071`：**50.0 fps**、**drops=0**、`frame_us` 20,004、`enc_us` 216、`tx_us` 15
+- `0xF06B`：rainbow 64 顆 64 色（`000f1400`/`00101300`/`00111200`…）
+- host test 21/21、build rc=0
+
+**兩條驅動「成品」對比（同一板、同一 project、同一 config）**
+
+| 項目 | esp_lcd 版 | 直驅版 | 差異來源 |
+|---|---|---|---|
+| 內容（0xF06B） | rainbow 64 色 | 同 | **一致**：環由 pixel_paint 寫，兩版共用 |
+| fps／drops | 50／0 | 50／0 | 一致 |
+| 環槽 | 320 B × 3 | 同 | **緩衝由 `nc_i80_out` 分配**，兩版共用同一段 code → 大小一樣 |
+| DMA 槽 | 320 B × 3（我們自己分配） | 同 | 同上；esp_lcd 另有 trans pool／queue（多幾百 B internal） |
+| `enc_us` | 159 | 186–216 | **寫法**：直驅 submit 內有 msync 判斷＋phase 快取判斷 |
+| `tx_us` | 11 | 15–38 | **寫法**：esp_lcd 只入 queue；直驅即刻 mount＋`gdma_start`＋4 µs 等 FIFO |
+| 佔用 GPIO | 10 | 1（現時 3：config 有登記 wr／dc） | **設定**：唔寫 wr／dc 就 1 支 |
+| flash | 730,448 B | 724,592 B | esp_lcd 依賴 |
+
+→ **內容／緩衝語義兩版一樣**；差別全部係「提交方式（寫法）」同「flash／腳位」。
+殘留 W 值（`0xF06B` 見到 `…3f`）係已知 **mode 冇寫 w 通道** 的內容問題
+（status §7.251 未做），唔關驅動／緩衝事。

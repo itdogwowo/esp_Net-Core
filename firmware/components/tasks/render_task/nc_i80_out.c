@@ -239,6 +239,42 @@ nc_pixel_backend_t *nc_px_backend_i80(const nc_px_i80_cfg_t *cfg)
             }
         }
     }
+#if CONFIG_NETCORE_PIXEL_I80_DIRECT
+    // 「有登記才生效」：wr／dc／cs 三個選填控制腳，>=0 就同 lane 腳一樣要檢查＋claim；
+    // 冇寫（-1）就完全唔理。唔會像 esp_lcd 那樣「缺 wr／dc 就整條 lane 唔建立」。
+    for (int k = 0; k < 3; k++) {
+        const int pin = (k == 0) ? cfg->wr : ((k == 1) ? cfg->dc : cfg->cs);
+        if (pin < 0) {
+            continue;
+        }
+        if (pin > 48) {
+            ESP_LOGE(TAG, "控制腳（%s）= %d 不是有效 GPIO",
+                     (k == 0) ? "wr" : ((k == 1) ? "dc" : "cs"), pin);
+            i80_be_free(d);
+            return NULL;
+        }
+        if (nc_hw_reserved(pin)) {
+            ESP_LOGE(TAG, "GPIO%d 是保留腳（PSRAM／flash／USB／console／strapping）→ 換腳", pin);
+            i80_be_free(d);
+            return NULL;
+        }
+        for (int i = 0; i < (int)d->lanes; i++) {
+            if (cfg->pins[i] == pin) {
+                ESP_LOGE(TAG, "GPIO%d 重複（已用作 lane）", pin);
+                i80_be_free(d);
+                return NULL;
+            }
+        }
+        for (int j = 0; j < k; j++) {
+            const int prev = (j == 0) ? cfg->wr : ((j == 1) ? cfg->dc : cfg->cs);
+            if (prev == pin) {
+                ESP_LOGE(TAG, "GPIO%d 重複（控制腳之間）", pin);
+                i80_be_free(d);
+                return NULL;
+            }
+        }
+    }
+#endif
     for (int i = 0; i < pin_n; i++) {
         const bool is_wr = (i == d->bus_width);
         const bool is_dc = (i == d->bus_width + 1);
@@ -253,25 +289,43 @@ nc_pixel_backend_t *nc_px_backend_i80(const nc_px_i80_cfg_t *cfg)
             }
         }
     }
+#if CONFIG_NETCORE_PIXEL_I80_DIRECT
+    // 有登記的控制腳才 claim（冇寫 = 唔用，唔 claim）
+    {
+        const int pins3[3] = { cfg->wr, cfg->dc, cfg->cs };
+        const char *labels[3] = { "i80_wr", "i80_dc", "i80_cs" };
+        for (int k = 0; k < 3; k++) {
+            if (pins3[k] < 0) {
+                continue;
+            }
+            if (nc_hw_claim(pins3[k], "pixel", labels[k], NC_HW_CLAIM_WRITE) != ESP_OK) {
+                ESP_LOGW(TAG, "GPIO%d（%s）已被其他 owner 佔用", pins3[k], labels[k]);
+            }
+        }
+    }
+#endif
 
     // ② 硬體交給 driver：bus／PCLK／DMA 槽／完成回呼都在那一層。
 #if CONFIG_NETCORE_PIXEL_I80_DIRECT
-    // 直驅：只給 lane_pins（lanes 支）；WR／DC／dummy 由驅動層完全忽略。
-    // wr／dc／cs 一律 -1（純 LED lane 模式）；將來面板輸出才填（見 nc_i80_drv.h）。
+    // 直驅：只給 lane_pins（lanes 支）；wr／dc／cs **有登記（>=0）才 route**。
+    // LED lane 模式三個都係 -1（唔寫就唔用）；面板就填幾多生效幾多。
     const nc_i80_drv_cfg_t dc = {
         .pins = NULL,
         .lane_pins = cfg->pins,
         .lanes = d->lanes,
-        .wr_pin = -1,
-        .dc_pin = -1,
-        .cs_pin = -1,
+        .wr_pin = cfg->wr,
+        .dc_pin = cfg->dc,
+        .cs_pin = cfg->cs,
+        .cs_active_high = false,
         .pclk_hz = cc.wave.clk_hz,
 #else
+    // esp_lcd 版：pins[] 已經係 data＋WR＋DC（API 要求齊）；cfg->wr／dc 由 pins 帶入
     const nc_i80_drv_cfg_t dc = {
         .pins = cfg->pins,
         .wr_pin = -1,
         .dc_pin = -1,
-        .cs_pin = -1,
+        .cs_pin = cfg->cs,
+        .cs_active_high = false,
         .pclk_hz = cc.wave.clk_hz,
 #endif
         .slot_bytes = d->units * (uint32_t)(d->bus_width / 8),
