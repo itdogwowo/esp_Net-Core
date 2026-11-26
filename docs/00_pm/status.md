@@ -8820,3 +8820,27 @@ show_frame」，已經係舊路徑；實際係零拷貝直寫環（`nc_px_layout
 
 **未做**：mode 冇寫 `w` 通道時，環裡的 W 會殘留舊值（WS2812 3 B/px 唔受影響；
 RGBW 才要處理）；README 已提醒「一個 mode 要寫齊 R/G/B」。
+
+### 7.252 2026-11-26（reload 第三個坑：效果表唔清 → 改 JSON 要 reboot）
+
+**症狀**：每次 `0xF06F` reload 都見到 `撞名：breath_r（保留第一個）`，而且
+`pixel 樹：effects=10`（當時真正只有 7 個，另 3 個係已刪的測試效果）。
+
+**根因**：`nc_px_layer_clear()` 只清 maps／modes／show，**唔清效果表**；
+之後 `nc_px_asset_scan()` 重讀 `effects.json`，同名效果被當重複丟掉 → 舊的留在 RAM。
+後果：改 `effects.json`（最常見的改法）**要 reboot 才生效**；刪走的效果仍然存在。
+
+**修法**：`nc_px_layer_clear()` 開頭 `nc_px_asset_clear()`。
+
+**測試**：`pxLayer_test` 新增 `[6] reload 清表`（加 1 個效果 → `layer_clear` →
+`count == 0`），`run.sh` 補 link `nc_px_asset.c`／`nc_px_asset_scan.c`／`nc_px_layer_scan.c`。
+
+**上板驗證**（fw `30895f2` = HEAD、app `85694f7c`、`idf=v6.0.3`）：
+
+- reload log：`effects=7`、**冇撞名**；`pixel 樹 → effects=7 maps=1 modes=3 list=3` ✅
+- `0xF071`：50.0 fps、`apply` 34 µs、`drops=0`、`frame_max_us` 20,671
+- `0xF06B`：rainbow 每幀／每顆燈都唔同（`14000f` / `100013` / `0d0115` / `090317`）
+- OTA 103.3 s @ 6.8 KB/s（兩次都係 ~6.8，懷疑 hub／線材，未深究）
+
+**「改 JSON → 0xF06F → 即刻見效」三個坑已全部修齊**：
+① 正弦表冇 init（7.251）、② cache key 唔認 effects（7.251）、③ reload 唔清效果表（本節）。
