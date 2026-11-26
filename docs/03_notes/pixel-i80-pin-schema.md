@@ -159,20 +159,57 @@ I80[0]：data 有效 1 支（GPIO14，lane 0）；LED.lanes=1 → bus 8-bit；
 | dummy 池用完（補唔夠） | **錯誤** | 整條不建立（**唔會**偷偷降成 8-bit 少 lane） |
 | dummy 腳被其他 owner 佔用 | **警告** | 換池內下一支；池全滿才錯 |
 
-## 8. 跟 FastLED 的對照（用家提問）
+## 8. 跟 FastLED 的對照（用家提問；2026-11-26 對過原始碼）
 
-| FastLED 後端 | 外設 | 腳位 | 我們 |
+| FastLED 後端 | 實際外設 | 腳位 | 我們 |
 |---|---|---|---|
 | **RMT**（S3 預設） | RMT TX | **任意 1 支 GPIO，冇 dummy** | ❌ 未實作（見 [pixel-output-backends.md](pixel-output-backends.md) §4） |
-| LCD driver（I80） | LCD_CAM i80，3-word/bit | 8／16 data＋WR＋DC（**仍要 dummy**） | ✅ 就是本設計的後端 |
-| I2S parallel | I2S0 平行 | 16 lane（S3 限 GPIO 8–23） | ❌ |
+| **「I2S」driver（S3）** | **LCD_CAM（i80）** | 1–16 lane，**冇 dummy data 腳**（見 §8.1） | ⚠️ 同一個外設，但我們走 `esp_lcd`，要 8／16＋WR＋DC |
+| LCD driver（新版，S3） | LCD_CAM i80，3-word/bit（6 B/bit） | 同上（1–16 lane） | ⚠️ 同上 |
+| I2S1 parallel（**classic ESP32 才有**） | 真 I2S1 平行模式 | 24 lane（GPIO 0–39 窗） | ❌ 不適用（S3 冇這個模式） |
 | PARLIO | PARLIO | P4／C5／C6／H2（**S3 冇**） | ❌ |
 
-- 「FastLED 直接一支腳」= **RMT**。GPIO 可以是任何腳（包括 GPIO0；strapping 只管開機一刻）。
-- FastLED 的 LCD（I80）driver 一樣要 8／16 條 data＋clock，只是它用 3-word-per-bit
-  編碼（本專案是 3 bit-cells）。
-- 結論：本設計是 **I80 的語義糖衣**；要真正「零 dummy」一定要做 RMT 後端。
-  RMT 完成之後，`data` 的稀疏語義可以原封不動沿用（有效腳 = lane 腳）。
+> **更正（2026-11-26）**：之前把「S3 限 GPIO 8–23」寫進這份稿係錯的 —— 那是
+> **classic ESP32 的 I2S 平行腳位窗**。S3 的 LCD_CAM 走 GPIO matrix，腳位有彈性
+> （我們 Matrix 用 14＋38–48＋1／2 就係證明）。
+
+### 8.1 FastLED 為何可以「1 支腳、冇 dummy」——它不用 `esp_lcd`
+
+FastLED 的 S3 實作在 `src/platforms/esp/32/drivers/i2s/channel_driver_i2s.h`，檔頭寫得很清楚：
+
+```text
+/// @brief I2S LCD_CAM implementation of ChannelEngine for ESP32-S3
+/// uses ESP32-S3's LCD_CAM peripheral (via I2S mode) ...
+/// - 1-16 WS2812/WS2812B LED strips (parallel output via data bus)
+struct I2sChannelEngineConfig {
+    int data_gpios[16];      ///< GPIO numbers for data lanes D0-D15
+    int num_lanes = 0;       ///< Active lane count (1-16)
+    u32 pclk_hz = 2400000;   ///< Pixel clock
+};
+```
+
+- 它是 **自己寫 LCD_CAM 寄存器**（`i2s_lcd_cam_peripheral_esp`、transpose16x1），
+  **只用 `data_gpios[0..num_lanes-1]` 真的 route GPIO**，未用的 data lane 唔 route，
+  所以**冇 dummy 腳**；DC 也不需要（它不經 `esp_lcd` 的 panel IO）。
+- 我們現在的 `drv_i80` 走 **`esp_lcd_new_panel_io_i80()`**：`data_gpio_nums[8/16]`、
+  `wr_gpio_num`、`dc_gpio_num` **全部都要真腳**，所以才有 7 支 dummy＋WR＋DC。
+- 兩個實作**用的是同一個硬件**（LCD_CAM i80，每個 PCLK 打一個 bus word），差別只在
+  驅動層：**`esp_lcd` 幫你管好但要求齊腳；直接寄存器可以只 route 用到的 lane**。
+
+### 8.2 所以「1 支腳」在 S3 有三條路（本設計只是第 3 條的一半）
+
+| 路線 | 腳位 | 改動 | 風險／限制 |
+|---|---|---|---|
+| **(a) RMT 後端** | 任意 1 支｜S3 只有 **4 個 TX channel**（>4 條鏈要時分／fallback） | 新 `drv_rmt`＋adapter（[pixel-output-backends.md](pixel-output-backends.md) §4 已排） | IDF 官方 API、最成熟 |
+| **(b) 自寫 LCD_CAM 驅動**（FastLED 路線） | 1–16 lane、**冇 dummy**、可重用現有 bus-word codec | 新 `drv_lcd_cam`（直接寫 `LCD_CAM` 寄存器）＋`nc_i80_out` 換底層 | 工作量最大、要自己處理时序／DMA／中斷；但保留 16 lane |
+| **(c) `esp_lcd` I80 自動補 dummy**（本設計稿） | 仍要 8／16＋WR＋DC（自動揀） | 只改 config 層 | 最小、零回歸；**唔會**減少實際佔用腳位 |
+
+- 結論：本設計是 **I80 的語義糖衣**（讓你寫 `[14]` 就搞定），**唔會**令佔用腳位變少。
+  要真正「零 dummy」→ (a) 或 (b)。(a) 完成後 `data` 的稀疏語義可以原封不動沿用
+  （有效腳 = lane 腳；`data:[14]` 就係 1 條 RMT 鏈）。
+- 用家的直覺（「FastLED 好像直接一支腳、背後其實是 I80」）**兩半都對**：
+  S3 上 FastLED 那個驅動確實是 LCD_CAM（＝我們的 I80）；它做到單腳是**繞過 esp_lcd**，
+  不是硬件有 1-bit I80 模式。
 
 ## 9. 待拍板（實作前要答）
 
@@ -184,6 +221,10 @@ I80[0]：data 有效 1 支（GPIO14，lane 0）；LED.lanes=1 → bus 8-bit；
    的例外（FastLED 可以，我們現時擋）？
 5. **16-bit 觸發**：`lanes > 8`（提案）還是「`data` 寫滿 16 個槽就 16-bit」？
    （後者會令「寫 16 個 -1」意外變成 16-bit，我唔建議）
+6. **要唔要順便排 §8.2 路線 (b)（自己寫 LCD_CAM 驅動，1–16 lane 零 dummy）**？
+   它是唯一同時做到「多鏈」＋「冇 dummy」的路，但要直接操作 LCD_CAM 寄存器
+   （FastLED 用 `i2s_lcd_cam_peripheral_esp` 那套）。若只做 (a) RMT，S3 只 4 個 TX
+   channel 就係上限。
 
 ## 10. 實作影響面（未開工，供估工作量）
 
@@ -196,6 +237,10 @@ I80[0]：data 有效 1 支（GPIO14，lane 0）；LED.lanes=1 → bus 8-bit；
 | `tools/ncportgen.py` ＋ `ports/hardware/*/wiring.json` | 預置可以寫稀疏；`sync_hardware_presets.py` 重生成 |
 | `tools/hosttest/cfg_test`（或 `pxScan_test`） | 新 case：`[14]`／`[14,-1…]`／`[]`／`wr` 省略／16-bit 邊界 |
 | `docs/02_guides/configuration.md`、`status.md` | schema 文件＋實測數字 |
+
+> 路線 §8.2 (b)（自寫 LCD_CAM）另計：新 `firmware/components/driver/drv_lcd_cam/`＋
+> `nc_i80_out.c` 換底層（`esp_lcd` → 直接寄存器），並要自己處理 DMA／中斷／reset。
+> 它與本表**不衝突**：本表的 config 語義（稀疏 `data`、自動寬度）在 (b) 之後仍然適用。
 
 **上板驗證計劃**（Matrix，release 映像）：live `hardware.json` 改 `"data":[14]`（其餘省）
 → reboot → 睇 log「I80[0]：有效 1 支…8-bit」→ `status tasks` 四任務 running →
