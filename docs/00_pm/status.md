@@ -8921,3 +8921,45 @@ RGBW 才要處理）；README 已提醒「一個 mode 要寫齊 R/G/B」。
 - `tenv` 的 `build` lane 仍然印 Windows `.idf` 的命令（在這台機行不通）；
   實際做法已寫入 AGENTS §0.5 與 `machine.json.notes`，tenv 未自動判斷「bash 是 WSL」。
 - 8×8 的視覺確認（人眼）由用家做；上面的 `0xF06B` 只證明環裡的值正確。
+
+### 7.254 2026-11-26（階段①：I80 直接驅動——只 route 1 支腳，零 dummy）
+
+用家決定先換驅動（保留介面）、之後才做稀疏 config。做完之後 Matrix 的 I80 輸出
+**只需要 GPIO14 一支真腳**；WR／DC／未接燈的 7 支 data 線（38–42／47／48）唔再需要
+真 GPIO —— 等於 FastLED 在 S3 用 LCD_CAM 的做法。
+
+**關鍵認知**（見 [pixel-i80-pin-schema.md](../03_notes/pixel-i80-pin-schema.md) §8.1）：
+LCD_CAM 的 i80 硬件仍然係 8／16-bit 並列；「要齊 10 支腳」是 **esp_lcd panel IO 的封裝
+要求**。直接寫寄存器時可以只 route 用到的 data lane，word 數只由 DMA buffer／EOF 決定
+（`lcd_always_out_en`），所以 1 lane 出得。FastLED 的 S3「I2S」driver 其實就係
+LCD_CAM（唔經 esp_lcd），佢做到單腳係同一原理。
+
+**改動**（fw `58a7196`）
+- 新增 `nc_i80_drv_direct.c`：LL（`hal/lcd_ll.h`）＋ AHB GDMA（trigger 5）直寫 LCD_CAM。
+  時鐘：PLL_F160M 160 MHz → 群除頻 2 → LCD_CLK 80 MHz → prescale 32 ＝ **2.5 MHz**。
+  只 route `lane_pins`；完成中斷用 LCD_CAM 自己的 level interrupt（唔用 GDMA EOF，
+  因為 FIFO 仲可以有 ≤16 word 未出）；PSRAM 槽自己 `esp_cache_msync`。
+  同一時間只跑一筆（64 px 線路 1.84 ms vs 幀距 20 ms，唔需要管線化）。
+- `nc_i80_drv.h` cfg 加 `lane_pins`／`lanes`；`nc_i80_drv.c`（esp_lcd 版）保留做回退。
+- `CMakeLists.txt`：`CONFIG_NETCORE_PIXEL_I80_DIRECT` 二選一。
+- `nc_i80_out.c`／`nc_render_task.c`：DIRECT 時只驗證／claim `lanes` 支腳，唔要求 wr／dc。
+- Matrix-LED-Textkit `sdkconfig.defaults`：開 DIRECT=y。
+
+**上板驗證**（idf=v6.1.1 (WSL)、fw `adc72b0-dirty`、app `9bcb9247`、rst=3、cid 0x54EC）
+
+| 項目 | esp_lcd 版（7.253） | 直驅版（本節） |
+|---|---|---|
+| 四任務 running | ✅ | ✅（render push 有跑 = install 成功） |
+| `0xF071` fps | 50.0 | **50.0** |
+| `drops` | 0 | **0** |
+| `enc_us` | 159 | 209 |
+| `tx_us` | 11 | **38**（多了 4 µs FIFO 等待＋mount） |
+| `frame_us` | 19,992 | 20,001 |
+| `0xF06B` rainbow | 64 色 | **64 色**（正常） |
+| 實際佔用 GPIO | 10（D0–D7＋WR＋DC） | **1（GPIO14）** |
+| image 大小 | 730,448 B | **724,432 B**（唔再 link esp_lcd i80 panel IO） |
+
+host test 21/21。回退：`CONFIG_NETCORE_PIXEL_I80_DIRECT=n` 重 build（一分鐘）。
+
+**之後（階段②）**：config 稀疏化 `data:[14]`／`-1`＝未用／自動 8↔16-bit／`wr`、`dc` 消失；
+屆時「寫一支腳」就同實際使用一致。

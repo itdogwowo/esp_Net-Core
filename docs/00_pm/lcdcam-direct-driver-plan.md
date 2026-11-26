@@ -1,4 +1,4 @@
-# LCD_CAM 直接驅動（階段①）＋ 稀疏 I80 schema（階段②）實作計劃
+# LCD_CAM 直接驅動（階段① **已完成 2026-11-26**）＋ 稀疏 I80 schema（階段②）實作計劃
 
 > **給 agentic worker**：用 checkbox 追蹤；每個 Task 完成後 commit。硬件驗證的閘門唔可以跳。
 >
@@ -170,115 +170,110 @@ const nc_i80_drv_cfg_t dc = {
 
 ---
 
-## 附錄 A：IDF 6.1.1 LCD_CAM i80 底層要點（已對過原始碼）
+## 附錄 A：IDF 6.1.1 LCD_CAM i80 底層要點（v2：已由 subagent 對原始碼核實）
 
-> 主要參考：`/home/user/esp/esp-idf/components/esp_lcd/i80/esp_lcd_panel_io_i80.c`（935 行；
-> WSL 路徑）。**不要抄整份**，只抄「建立 bus＋送一筆 DMA」的最小序列。
+> 來源：`$IDF`=repo `.idf/esp-idf`（v6.1.1）、`$HL`=`components/esp_hal_lcd`、
+> `$E`=`components/esp_lcd`（主要係 `$E/i80/esp_lcd_panel_io_i80.c`）。
+> **S3 冇 LCD 專用 DMA**：LCD_CAM 只有 16-deep FIFO（`$HL/esp32s3/include/hal/lcd_ll.h:41`），
+> 資料一定要由 **AHB GDMA（trigger id 5）** 餵。
 
-### A1. 時鐘（`esp_lcd_new_i80_bus` L122-166、per-device L357-379、L817）
+### A0. 三個命名校正（同舊文／TRM 唔一致）
 
-```c
-lcd_ll_enable_bus_clock(bus_id, true);
-lcd_ll_reset_register(bus_id);
-lcd_ll_select_core_clk_src(bus_id, LCD_CORE_CLK_SRC_DEFAULT);
-lcd_ll_set_core_clock_divider(bus_id, 2, 0, 0);      // 先當固定
-// per transaction/device：
-uint32_t prescale = bus->resolution_hz / 2500000;     // resolution_hz = 選定 clk source 的頻率
-ESP_GOTO_ON_FALSE(prescale > 0 && prescale <= LCD_LL_PCLK_DIV_MAX, ...);
-lcd_ll_set_pixel_clock_prescale(dev, prescale);
-lcd_ll_set_clock_idle_level(dev, !pclk_idle_low);     // 我們要 idle low
-lcd_ll_set_pixel_clock_edge(dev, pclk_active_neg);    // 我們要 active low=0 → false
-```
+1. `LCD_CAM.i80_ctrl` 在 6.1.1 **已改名** `LCD_CAM.lcd_user`（`soc/lcd_cam_reg.h:422-425`）：
+   `lcd_8bits_order`(bit19)、`lcd_dout_cyclelen`[12:0]、`lcd_2byte_en`(bit23)、
+   `lcd_start`(bit27)、`lcd_always_out_en`(bit13)。
+2. **冇 `hal/lcd_cam_ll.h`**；S3 的 LL 是 `$HL/esp32s3/include/hal/lcd_ll.h`（component
+   `esp_hal_lcd`，include 係 public）。`LCD_LL_GET_HW(0) == &LCD_CAM`。
+3. 6.1.1 的 i80 **唔再用 `esp_async_memcpy`**（M2M 冇 peripheral trigger）；用 AHB GDMA。
 
-- `pclk_hz` 我們固定 2.5 MHz（同現時 `driver.json` 的 `timing.pclk_hz`）。
-- `resolution_hz` 由 `bus->hal`／clk source 決定，IDF 用 `lcd_hal_get_clock_resolution()`；
-  實作時照抄 L350-360 那段就算。
+### A1. 時鐘：2.5 MHz PCLK（精確、零 jitter）
 
-### A2. i80 模式（bus 初始化 L225-236、L769、L795-796）
+| 步 | 動作 |
+|---|---|
+| a | `PERIPH_RCC_ACQUIRE_ATOMIC(PERIPH_LCD_CAM_MODULE, rc){ if(rc==0){ lcd_ll_enable_bus_clock(0,true); lcd_ll_reset_register(0);} }`（i80.c:157-167） |
+| b | `lcd_ll_enable_clock(dev,true)`（i80.c:195-197） |
+| c | `esp_clk_tree_enable_src(LCD_CLK_SRC_DEFAULT,true)` + `lcd_ll_select_clk_src(0,src)`；**S3 = PLL_F160M 160 MHz**（i80.c:199-205,652-661） |
+| d | `lcd_ll_set_group_clock_coeff(0, LCD_PERIPH_CLOCK_PRE_SCALE=2, 0, 0)` → **LCD_CLK = 80 MHz**（i80.c:662-667） |
+| e | `prescale = resolution_hz / pclk_hz`（**整數 1..64**）→ `lcd_ll_set_pixel_clock_prescale(dev,N)`；**2.5 MHz = 80/32 → N=32**（i80.c:358-360,378-379,817） |
+| f | 選完 clk src 才 `lcd_ll_reset()` + `lcd_ll_fifo_reset()`（i80.c:206-208） |
 
-```c
-lcd_ll_enable_rgb_mode(dev, false);          // i80 模式
-lcd_ll_enable_color_convert(dev, false);
-lcd_ll_set_dma_read_stride(dev, width);      // 8 或 16（bytes per bus word）
-lcd_ll_set_swizzle_mode(dev, LCD_LL_SWIZZLE_AB2BA);
-lcd_ll_enable_output_always_on(dev, true);
-lcd_ll_set_data_wire_width(dev, width);
-lcd_ll_reset(dev); lcd_ll_fifo_reset(dev);
-lcd_ll_set_phase_cycles(dev, 0, 1, 0);       // 對「只有 data」的 transaction
-lcd_ll_set_blank_cycles(dev, 1, 1);
-```
+- 唔用分數除頻（`lcd_clkm_div_a/b`）避免 jitter（i80.c:662-663）；2.5 MHz 整除，唔需要。
+- ⚠ 1 MHz 會 `ESP_ERR_NOT_SUPPORTED`（80/1=80>64）——所以 prescale 要檢查。
 
-> 我們**沒有 cmd phase**（現在 esp_lcd 版是 `lcd_cmd=-1`），所以 cmd_cycles=0，
-> `data_cycles = color_size / (width/8)`。`lcd_ll_set_command()` 唔使叫。
+### A2. i80 bus 寄存器
 
-### A3. GPIO route（`lcd_i80_bus_configure_gpio` L735-762）
+- **8/16-bit**：`lcd_ll_set_dma_read_stride(dev,width)` → 8 ⇒ `lcd_2byte_en=0`（1 B/PCLK）；
+  16 ⇒ `=1`。S3 的 `lcd_ll_set_data_wire_width()` 係 **no-op**（i80.c:229,747）。
+- **只有 DOUT phase**：`lcd_ll_set_phase_cycles(dev,0,0,1)` + `lcd_ll_enable_output_always_on(dev,true)`
+  → `lcd_dout=1`、`lcd_dout_cyclelen=0`，**有幾多 word 由 DMA buffer／EOF 決定**（i80.c:232-233,790-791）。
+- **位元組序全 0**：`lcd_8bits_order=0`、`lcd_bit_order=0`、`lcd_byte_order=0`（i80.c:231,534,576,896）。
+- `lcd_ll_enable_rgb_mode(false)`、`lcd_ll_enable_color_convert(false)`。
+- **DC／CS 可以完全唔要**（唔 route 就冇 pin）；DC level 由 `lcd_ll_set_dc_level()` 控制。
+- blank cycles：esp_lcd 每筆 `lcd_ll_set_blank_cycles(dev,1,1)`（前後各多 1 PCLK）；
+  decoder driver 可以試 (0,0) 慳 2 PCLK，但要先確認最後一個 word 的 hold。
 
-```c
-for (i = 0; i < lanes; i++) {                        // ← 關鍵：只 loop 真正 lane！
-    gpio_func_sel(lane_pins[i], PIN_FUNC_GPIO);
-    esp_rom_gpio_connect_out_signal(lane_pins[i],
-        soc_lcd_i80_signals[bus_id].data_sigs[i], false, false);
-}
-// dc/wr 唔 route（i80 的 WR 唔接都得；FastLED 在 S3 就是咁）
-```
+### A3. GPIO matrix（只 route lane + PCLK）
 
-- `soc_lcd_i80_signals` 由 `hal/lcd_ll.h`／`hal/lcd_hal.h` 一帶引入（IDF 檔本身冇直接
-  include 它，係 transitively 拿到；實作時用同一個 include 組合）。
-- IDF 的 `valid_gpio` 檢查（L739-743）只在「齊唔齊」時決定要唔要 route；我們**直接跳過
-  DC／WR**，只需要 lane 腳有效、唔重複、非保留腳。
+- 訊號 index（`soc/gpio_sig_map.h:234-276`）：`LCD_DATA_OUT0..15` = **133..148**、
+  `LCD_PCLK_IDX` = **154**（WR 同 PCLK 同一個）、`LCD_DC_IDX`=153、`LCD_CS_IDX`=132。
+- 官方 mapping：`$HL/esp32s3/lcd_periph.c:10-34`（`soc_lcd_i80_signals[0]`，`irq_id=ETS_LCD_CAM_INTR_SOURCE`）。
+- Route：`gpio_func_sel(pin,PIN_FUNC_GPIO)` + `esp_rom_gpio_connect_out_signal(pin,sig,false,false)`（i80.c:750-760）。
+- **我們只 loop `lanes` 次**（data_sigs[i]），唔 route DC／WR → 就係「零 dummy」的關鍵。
 
-### A4. DMA（`lcd_i80_init_dma_link` L46／L122-222、tx_color L578-620、L785-833）
+### A4. DMA（AHB GDMA + link list）
 
-IDF 用 **GDMA channel＋link list**，一筆 transaction 一個 descriptor：
+1. `gdma_new_ahb_channel(&cfg,&tx,NULL)`（i80.c:686）；S3 trigger =
+   `SOC_GDMA_TRIG_PERIPH_LCD0`=5、bus=AHB。
+2. `gdma_connect(chan, GDMA_MAKE_TRIGGER(GDMA_TRIG_PERIPH_LCD,0))`（i80.c:688）。
+3. `gdma_apply_strategy({auto_update_desc=true, owner_check=true})`（i80.c:689-693）。
+4. `gdma_config_transfer({max_data_burst_size=32, access_ext_mem=true})`（i80.c:695-699）。
+5. Link list：`gdma_new_link_list({num_items=esp_dma_calculate_node_count(...), item_alignment=4})`
+   （單 node 上限 4095 B）；buffer 對齊 `gdma_get_buffer_alignment_constraint()`。
+6. **發動一筆**（i80.c:785-809）：phase/blank → `lcd_ll_reset`+`fifo_reset` →
+   `gdma_link_mount_buffers(list,0,{buf,len,mark_eof=true,mark_final=GDMA_FINAL_LINK_TO_NULL},1,NULL)`
+   → `gdma_start(chan, head_addr)` → `esp_rom_delay_us(4)` → `lcd_ll_start(dev)`。
+7. ⚠ **GDMA EOF ≠ wire 出完**（FIFO 仲可以有 ≤16 word）——「還格」要用 LCD `trans_done`
+   （即 A5），唔可以靠 GDMA EOF。
 
-```c
-gdma_new_ahb_channel(...)  // 或 axi（P4）；S3 用 ahb
-gdma_link_list_create(...) // 或 gdma_new_link_list
-gdma_get_buffer_alignment_constraint(chan, buf)
-gdma_buffer_mount_config_t mc = { .buffer=buf, .buffer_alignment=align,
-    .length=bytes, .flags={ .mark_eof=true, .mark_final=GDMA_FINAL_LINK_TO_NULL } };
-gdma_link_mount_buffers(link, 0, &mc, 1, NULL);
-lcd_start_transaction(bus, trans_desc);   // L785-833：set phase cycles + gdma start
-```
+### A5. 完成中斷（LCD_CAM 自己，唔係 GDMA）
 
-- **階段①可以簡化**：同一時間只跑一筆（64 px × 24 bit × 3 cells = 4,608 tick @2.5 MHz
-  ＝ **1.84 ms** 線路時間，而幀距 20 ms），所以「submit → 開 DMA → 完成中斷 → 下一筆」
-  就夠，唔需要 IDF 的 queue／`done_queue` 兩層。
-- 但要保留我們現有的 **`done_order` 對槽機制**（槽唔係 FIFO）。
+- `ETS_LCD_CAM_INTR_SOURCE = 24`（**level**，同 camera 共用）。
+- `esp_intr_alloc_intrstatus(24, DISABLED|SHARED|LOWMED, (uint32_t)lcd_ll_get_interrupt_status_reg(dev),
+  LCD_LL_EVENT_I80, isr, arg, &intr)`（i80.c:211-215）；status = `lc_dma_int_st` bit1。
+- `lc_dma_int_st` 係 **masked**（ena=0 ⇒ 讀到 0），所以 CPU 側用 `esp_intr_enable/disable()` gating。
+- ISR：讀 status → 標記完成／開下一筆 → `lcd_ll_clear_interrupt_status(dev, LCD_LL_EVENT_TRANS_DONE)`
+  （寫 `lc_dma_int_clr`）。level 唔 clear 會 storm。
 
-### A5. 完成中斷（L212-219、L527-534、L834-880）
+### A6. Cache（S3）
 
-```c
-esp_intr_alloc_intrstatus(irq_id, ESP_INTR_FLAG_IRAM,
-    (uint32_t)lcd_ll_get_interrupt_status_reg(dev),
-    LCD_LL_EVENT_TRANS_DONE, isr, ctx, &intr);
-// ISR：
-uint32_t st = lcd_ll_get_interrupt_status(dev);
-lcd_ll_clear_interrupt_status(dev, st);
-if (st & LCD_LL_EVENT_TRANS_DONE) { /* 標記這一筆完成 + 開下一筆 */ }
-```
+- PSRAM buffer：submit 前一定要
+  `esp_cache_msync(buf,len, ESP_CACHE_MSYNC_FLAG_DIR_C2M|ESP_CACHE_MSYNC_FLAG_UNALIGNED)`，
+  先 `esp_cache_get_line_size_by_addr(buf)>0` 才做（i80.c:585-588）。
+- **internal SRAM 唔經 cache**（`SOC_CACHE_INTERNAL_MEM_VIA_L1CACHE` 未定義）→ 64 px 的
+  Matrix 槽（internal）唔使做；但 code 要寫對，因為 16×600 那類會用 PSRAM。
 
-- ISR 要 `IRAM_ATTR`；入面**唔可以** log 大字串（鐵律 8 同理）。
-- IDF 在 ISR 內 `esp_intr_disable()`，有下一筆才 `lcd_ll_enable_interrupt()+esp_intr_enable()`。
+### A7. LL API（可直接用，include `hal/lcd_ll.h`）
 
-### A6. Cache（tx_color L585-588）
+`lcd_ll_enable_bus_clock`／`reset_register`／`enable_clock`／`select_clk_src`／
+`set_group_clock_coeff`／`set_pixel_clock_prescale`／`set_clock_idle_level`／
+`set_pixel_clock_edge`／`set_phase_cycles`／`set_blank_cycles`／`set_dma_read_stride`／
+`enable_output_always_on`／`start`／`stop`／`reset`／`fifo_reset`／`enable_rgb_mode`／
+`set_dc_level`／`enable_interrupt`／`get_interrupt_status`／`clear_interrupt_status`／
+`get_interrupt_status_reg`。
 
-```c
-if (esp_cache_get_line_size_by_addr(color) > 0) {
-    esp_cache_msync((void *)color, size,
-        ESP_CACHE_MSYNC_FLAG_DIR_C2M | ESP_CACHE_MSYNC_FLAG_UNALIGNED);
-}
-```
+**Component 需要**：`REQUIRES esp_hal_lcd esp_driver_dma soc hal esp_hw_support`
+（`esp_hal_lcd` include 係 public；`esp_private/gdma.h` 屬 private 但可用 API）。
 
-- 我們現時的 PSRAM 槽靠 esp_lcd 做；**直接驅動要自己叫這兩行**（internal 槽會回 0，唔會做）。
-- 64 px 的 Matrix 槽是 internal（≤48 KB），所以階段①其實唔會踩到 cache 路；但仍要寫對。
+### A8. 可以簡化（esp_lcd 有、我們唔需要）
 
-### A7. 風險清單（實作時逐項打勾）
+唔使 bus slot 仲裁、DC／CS、`lcd_cmd_bits`/`lcd_param_bits`、cmd/dummy phase、
+format buffer／byte 反轉、multi-device switch、PM lock、sleep retention、
+trans/done queue；PCLK 設定一次就夠。
 
-- [ ] 8-bit 模式 `lcd_ll_set_dma_read_stride(dev, 8)`＋`set_data_wire_width(dev, 8)` 同時做
-- [ ] `phase_cycles(0,1,0)` 對應「只有 data phase」，`data_cycles > 0`
-- [ ] 完成中斷有冇 `LCD_LL_EVENT_UNDERRUN` 情況（DMA 追唔上）→ 要有 count
-- [ ] PSRAM 槽 msync
-- [ ] `bus_id`：S3 只有 0（`soc_lcd_i80_signals[0]`）
-- [ ] 如果 2.5 MHz prescale 除唔盡（resolution/2.5M 有餘數）→ 先試最近值，log 實際 PCLK
+### A9. 三個陷阱
+
+1. `lcd_always_out_en=1` 之後 word 數只由 DMA 決定；`lcd_dout_cyclelen=0` 唔係「0 個 cycle」。
+2. `lcd_ll_start()` 前必須 `lcd_update=1`（LL 已代做）；改 prescale／phase 後要再 update。
+3. 中斷 level+masked：`st` 讀到 0 唔代表冇事件；clear 一定要寫 `lc_dma_int_clr`。
+
 

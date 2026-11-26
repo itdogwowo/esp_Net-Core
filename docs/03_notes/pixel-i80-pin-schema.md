@@ -211,7 +211,7 @@ struct I2sChannelEngineConfig {
   S3 上 FastLED 那個驅動確實是 LCD_CAM（＝我們的 I80）；它做到單腳是**繞過 esp_lcd**，
   不是硬件有 1-bit I80 模式。
 
-### 8.3 換成 (b) 要改幾多？**畫波（codec）唔使改**
+### 8.3 換成 (b) 要改幾多？**畫波（codec）唔使改**（✅ 2026-11-26 已實作，見 status §7.254）
 
 答案：**畫波／配對／環／任務全部唔使改**，因為 buffer 契約冇變——codec 出的是
 「每個 tick 一個 bus word」的連續 byte stream，`drv_i80` 只是把這段交給硬件：
