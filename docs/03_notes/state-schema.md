@@ -139,11 +139,11 @@ array 索引固定（通道上限寫死）——但硬件本身就有限，正�
 
 | magic | 用途 | 位置 |
 |---|---|---|
-| `NCB2` | 通用／動態狀態 blob（自描述，字典＋TLV） | NVS／FAT |
-| `NCS1` | **schema 化狀態 blob**（id＋varint，最省） | NVS／FAT |
+| `NCB2` | 通用／動態狀態 blob（自描述，字典＋TLV）——⏸ 暫緩 | NVS／FAT |
+| `NCS1` | **schema 化狀態 blob**（id＋varint，最省）——✅ **唯一要做** | NVS／FAT |
 | `NCC2` | config 派生 cache（cfg_hash 綁 JSON） | FAT |
-| `PXA2` | pixel assets 編譯 cache | FAT |
-| `NCLT` | layout 編譯 cache（原 PXLT，已改名） | FAT |
+| `PXA2` | pixel assets 編譯 cache——⏸ 暫緩 | FAT |
+| `NCLT` | layout 編譯 cache（原 PXLT，已改名）——✅ 現有 | FAT |
 | `NCB1`… | 舊版／保留 | — |
 
 新格式一律 **`NC` 字頭**，並先在此表登記。

@@ -183,3 +183,26 @@ magic 4 B | ver u16 | flags u16 | src_hash u32 | payload_len u32 | blob_crc u32
 `.nclt` header 本身已有 `key`（FNV-1a over mode_hash/map_hash/px/assets_hash/ver）＋
 `crc`；**key 就係來源哈希**，所以開機載入前比較 `key` 已等同「JSON hash 一樣嗎」。
 唔另加 `src_hash` 欄位（避免重複），但 header 註解會寫明呢個等價關係。
+
+---
+
+## 9. 名詞對照：其實只有兩個格式要記
+
+用家 2026-11-26：「NCS1／NCC2／NCLT 有那麼多東西嗎？很多簡稱我實際不知道是什麼。」
+→ 之前列多咗；以下係**現行**（其他一律「將來有需要再算」）：
+
+| 名 | 全稱／意思 | 做咩 | 而家要唔要？ |
+|---|---|---|---|
+| **JSON** | 普通設定檔 | 人改（硬體／driver／system…） | ✅ 一直都要 |
+| **NCS1** | NetCore State v1（`state.ncs`） | 設定值嘅**機讀檔**（sparse id＋值＋CRC） | ✅ **唯一新格式，要做** |
+| **NCLT** | NetCore Layout Table（`.nclt`） | layout 編譯**快取**（原本 `.pxlt`） | ✅ **已經有**（firmware 自己寫） |
+| NCB2 | NetCore Blob v2 | 通用自描述 blob（schema 以外嘅動態資料） | ⏸ 暫緩（冇需要） |
+| NCC2 | NetCore Config Cache v2 | config 派生快取 | ❌ **取消**（NCS1 已做到同一件事） |
+| PXA2 | Pixel Assets v2 | pixel assets 編譯快取 | ⏸ 暫緩（開機 parse 唔慢） |
+
+**結論**：
+1. **NCS1**＝「設定值嘅機讀檔」——要實作（P1）。
+2. **NCLT**＝「layout 嘅快取」——已經有，唔使理（刪咗會自動重建）。
+3. 其他 NCxx 唔會而家做；文件保留只係防再撞名。
+
+> 命名規矩：新格式一律 `NC` 字頭（NetCore），並先喺 `state-schema.md §7` 登記。
