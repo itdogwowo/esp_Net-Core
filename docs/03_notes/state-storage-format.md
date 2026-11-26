@@ -101,7 +101,7 @@ assets_hash u32 | payload_len u32 | crc32 u32 | payload…
 
 - `payload`：direct mode 用「aprog 指令流 + 參數表 + 每節點邊界」；
   mode 用「節點樹＋參數」（同現時 JSON 等價但完全數值化）。
-- layout 已經有 `.pxlt`（binary、6 B/px flat）——**唔重做**，PXA2 只補 program/mode。
+- layout 已經有 `.nclt`（binary、6 B/px flat）——**唔重做**，PXA2 只補 program/mode。
 - 開機：hash 夾 → 直接載入；唔夾／壞 → 由 JSON 重建（現有流程）→ 寫回 cache。
 - 刪 cache＝只係慢一次；JSON 仍然係唯一人改來源。
 
@@ -127,7 +127,7 @@ assets_hash u32 | payload_len u32 | crc32 u32 | payload…
 |---|---|
 | `nc_state` 用 raw struct 落 NVS（size 一變就 drop） | 改用 `NCB2`（自描述、版本化、可加減欄位） |
 | config 每次開機 parse JSON | `NCC2` cache；JSON 只做人改輸入 |
-| pixel 每次開機 parse＋compile | `PXA2` cache；`.pxlt` 已存在唔動 |
+| pixel 每次開機 parse＋compile | `PXA2` cache；`.nclt` 已存在唔動 |
 | 壞檔只靜默回預設 | 一律 warn＋status 顯示（L3 last-known-good） |
 
 > **一句話**：JSON 係「人機介面」，二進位係「機機介面」；兩者都由同一套

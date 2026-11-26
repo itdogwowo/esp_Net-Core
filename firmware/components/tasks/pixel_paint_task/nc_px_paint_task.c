@@ -760,7 +760,7 @@ static void content_prepare_next(void)
     const uint32_t ckey = nc_px_layout_cache_key(m->hash, map->hash, s_content.px,
                                                    assets_hash(s_content.assets));
     char cpath[96];
-    (void)snprintf(cpath, sizeof(cpath), "%s/cache/%08lx.pxlt", s_content.pixel_dir,
+    (void)snprintf(cpath, sizeof(cpath), "%s/cache/%08lx.nclt", s_content.pixel_dir,
                    (unsigned long)ckey);
     esp_err_t e = nc_px_layout_load(&s_content.next_layout, cpath, ckey,
                                     s_content.next_assets);
@@ -863,7 +863,7 @@ static esp_err_t content_apply_mode_locked(const nc_px_mode_t *mode)
     const uint32_t ckey = nc_px_layout_cache_key(mode->hash, map->hash, s_content.px,
                                                       assets_hash(s_content.assets));
     char cpath[96];
-    (void)snprintf(cpath, sizeof(cpath), "%s/cache/%08lx.pxlt", s_content.pixel_dir,
+    (void)snprintf(cpath, sizeof(cpath), "%s/cache/%08lx.nclt", s_content.pixel_dir,
                    (unsigned long)ckey);
     const int64_t t_load0 = esp_timer_get_time();
     esp_err_t pe = nc_px_layout_load(&s_content.layout, cpath, ckey, s_content.assets);
@@ -1188,7 +1188,7 @@ static void cache_prebuild_missing(void)
         const uint32_t key = nc_px_layout_cache_key(m->hash, map->hash, s_content.px,
                                                    assets_hash(s_content.assets));
         char path[96];
-        (void)snprintf(path, sizeof(path), "%s/cache/%08lx.pxlt", s_content.pixel_dir,
+        (void)snprintf(path, sizeof(path), "%s/cache/%08lx.nclt", s_content.pixel_dir,
                        (unsigned long)key);
         nc_px_layout_t probe;
         if (nc_px_layout_load(&probe, path, key, tmp) == ESP_OK) {

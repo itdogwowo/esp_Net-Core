@@ -1618,7 +1618,7 @@ const nc_cfg_stat_t *nc_cfg_stat_of(const char *layer)
     if (strcmp(layer, "hardware") == 0) {
         return &s_hw_stat;
     }
-    if (strcmp(layer, "devices") == 0) {
+    if (strcmp(layer, "driver") == 0 || strcmp(layer, "devices") == 0) {
         return &s_dev_stat;
     }
     return NULL;
@@ -1819,8 +1819,13 @@ esp_err_t nc_cfg_boot_ex(const char *hw_base_json, size_t hw_base_len)
         }
     }
 
+    // runtime device 層：/data/config/driver.json（FAT 最高權威）。
+    // 舊名 devices.json 仍然接受（2026-11-26 之前產生的機）；兩個都冇 → 回 build-time 預設。
     exists = false;
-    f = nc_cfg_open_ex("devices", &exists);
+    f = nc_cfg_open_ex("driver", &exists);
+    if (f == NULL && !exists) {
+        f = nc_cfg_open_ex("devices", &exists);
+    }
     if (f != NULL) {
         apply_devices(nc_cfg_root(f), &s_dev, &s_dev_stat);
         nc_cfg_close(f);
@@ -1859,9 +1864,13 @@ esp_err_t nc_cfg_boot_ex(const char *hw_base_json, size_t hw_base_len)
              s_tasks_stat.bad_json ? " 壞檔" : "",
              (unsigned)s_tasks_stat.defaulted, (unsigned)s_tasks_stat.invalid,
              (unsigned)s_tasks_stat.unknown);
+    if (!s_dev.present && s_dev_stat.bad_json) {
+        // 壞檔 -> 回 build-time 預設；唔可以靜默（鐵律 9）。
+        ESP_LOGW(TAG, "/data/config/driver.json 壞檔／讀唔到 → 回 build-time driver.json 預設");
+    }
     if (s_dev.present) {
         ESP_LOGI(TAG, "devices: %s（led=%s px=%u lanes=%u backend=%s；未支援已開=%u）%s%s",
-                 "/data/config/devices.json",
+                 "/data/config/driver.json",
                  s_dev.led_decl ? (s_dev.led.enable ? "開" : "關") : "未宣告",
                  (unsigned)s_dev.led.px, (unsigned)s_dev.led.lanes, s_dev.led.fmt,
                  (unsigned)s_dev.n_unimpl,

@@ -1047,7 +1047,7 @@ static void on_layoutbench(nc4_ctx_t *ctx, const nc4_frame_t *f)
     esp_err_t load_rc = ESP_OK;
     if (variant == 5) {
         const uint32_t key = nc_px_layout_cache_key(0x1234u, 0x5678u, px, 0u);
-        const char *cpath = "/data/bench_layout.pxlt";
+        const char *cpath = "/data/bench_layout.nclt";
         const int64_t q0 = esp_timer_get_time();
         const esp_err_t s_rc = nc_px_layout_save(&lay, cpath, key);
         save_us = (uint32_t)(esp_timer_get_time() - q0);

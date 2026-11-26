@@ -1271,7 +1271,9 @@ typedef struct {
     uint32_t crc;
 } pxlt_hdr_t;
 
-#define PXLT_MAGIC 0x544C5850u   // "PXLT"
+#define NCLT_MAGIC 0x544C434Eu   // "NCLT"（NetCore Layout Table；2026-11-26 由 PXLT 改名，
+//  避免同舊專案 mp_Net-Core tools/PC/PXLDv3Splitter.py 的 PXLD 字頭混淆。
+//  magic 一改，舊 .pxlt 自動當壞檔重建；純快取，刪咗只係慢一次。）
 
 static uint32_t crc32_bytes(const uint8_t *p, size_t n)
 {
@@ -1363,7 +1365,7 @@ esp_err_t nc_px_layout_save(const nc_px_layout_t *l, const char *path, uint32_t 
     }
     pxlt_hdr_t h;
     memset(&h, 0, sizeof(h));
-    h.magic = PXLT_MAGIC;
+    h.magic = NCLT_MAGIC;
     h.ver = NC_PX_LAYOUT_CACHE_VER;
     h.key = key;
     h.px = l->px;
@@ -1396,7 +1398,7 @@ esp_err_t nc_px_layout_load(nc_px_layout_t *out, const char *path, uint32_t key,
         return ESP_ERR_NOT_FOUND;
     }
     pxlt_hdr_t h;
-    if (fread(&h, sizeof(h), 1, f) != 1 || h.magic != PXLT_MAGIC ||
+    if (fread(&h, sizeof(h), 1, f) != 1 || h.magic != NCLT_MAGIC ||
         h.ver != NC_PX_LAYOUT_CACHE_VER || h.key != key || h.payload_bytes == 0 ||
         h.payload_bytes > (1u << 20)) {
         fclose(f);

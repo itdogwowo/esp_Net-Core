@@ -9398,3 +9398,30 @@ build-time driver.json 生成 `ports/project/<chip>/<board>/data/config/driver.j
 
 **原型量測**（`modules/lab/state_format_lab/ncb2_preview.py`）：通用 JSON→NCB2 在
 Matrix 7 個 config/asset 檔由 13,971 B → **8,788 B（省 37.1%）**；固定 schema 預計再細 50%+。
+
+### 7.264 2026-11-26（layout 快取改名：`.pxlt` → `.nclt`；避免同舊專案撞名）
+
+用家問「`.pxlt` 係咩？好似同舊專案撞名」+ 提供舊 repo `tools/PC/`（有 `PXLDv3Splitter.py`）。
+
+**`.pxlt` 係咩**：firmware 自己生成嘅 **layout 二進位快取**（magic `PXLT`），
+放喺裝置 `/data/pixel/cache/<key>.pxlt`；內容係「mode＋map＋px＋assets」編譯後嘅
+aprog／job／runs 表。**唔係 repo 資產**（git 冇），純快取：刪咗只會下次重建、慢一次。
+舊專案冇 `.pxlt`，但有 `tools/PC/PXLDv3Splitter.py`（**PXLD** v3，MicroPython 年代的
+layout 打包器）——字頭太似，容易混淆。
+
+**改名**（避免撞名）：
+- 副檔名 `.pxlt` → **`.nclt`**（NetCore Layout Table）
+- magic `"PXLT"`(0x544C5850) → **`"NCLT"`**(0x544C434E)
+- bench 路徑 `/data/bench_layout.pxlt` → `.nclt`
+- 舊 `.pxlt` 會因為 magic 唔夾自動當壞檔重建；已喺板上刪除舊檔。
+
+**上板驗證**（fw `6322f7c-dirty`、app `2b3f0c35`、idf=v6.1.1 (WSL)）
+- 刪 6 個舊 `.pxlt`＋reboot＋`FILE_SCAN`：manifest **18 個檔**、冇 `.pxlt`
+- 新 `.nclt` 自動出現：`7c46854b.nclt`、`b953219b.nclt`、`db1a33bf.nclt`
+  → 即係 firmware 寫入新格式、舊檔唔再用
+- host test 21/21 全綠；LED 正常（i80.prd、49.9 fps／drops=0）
+
+**舊專案工具對照（避免重複）**：`tools/PC/` 嘅工具係 MicroPython/WebREPL 年代
+（`NetBusMaster`、`storage_tool`、`PXLDv3Splitter`、`upload_pixel_lab`…）；
+本 repo `tools/` 係 ESP NC4 協議專用（`nc4.py`、`ota.py`、`tenv.py`、`ncportgen.py`…），
+**冇直接重複**。唯一概念重疊係「上傳檔案」——但協議唔同（NC4 vs WebREPL），所以保留。
