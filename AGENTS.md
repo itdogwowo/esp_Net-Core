@@ -398,7 +398,9 @@ esp_Net-Core/
 
 1. 想知「現在點」→ `docs/00_pm/status.md`
 2. 想知「下一個 Task」→ `docs/00_pm/pixel-tiers-plan.md`（或 `roadmap.md`／`next-steps.md`）
-3. 想知「協議」→ `docs/01_protocol/commands.md`、`frame.md`
+3. 想知「協議」→ `docs/01_protocol/commands.md`、`frame.md`；
+   狀態系統（NCSTATE）→ `docs/03_notes/state-system.md`（總結）
+   規格 → `docs/03_notes/state-storage-format.md`
 4. 想知「點 build／flash／test」→ `docs/02_guides/`
 5. 想知「為什麼這樣設計」→ `docs/03_notes/`
 6. 想知「為什麼變快／每一步試過什麼／失敗過什麼」→ `docs/04_evolution/`

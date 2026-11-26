@@ -9905,3 +9905,22 @@ config 改咗同 state 無關嘅內容（comment／tasks／links…），值其�
   "src":4038124483,"n":18,"bytes":124}`；
   **state.ncst sha256 前後完全相同** → 真係冇寫盤（唔係 762 ms）；
 - 還原 system.json → reboot：hit=1（正常）。
+
+### 7.286 2026-11-26（統一狀態系統：階段總結文件）
+
+用家：「先停低，將目前成果寫成總結／文件。」→ 已寫成
+[`docs/03_notes/state-system.md`](docs/03_notes/state-system.md)，內容：
+
+- 資料流（JSON→cfg→state.ncst→RAM store→driver）、四層保護＋`.bak`；
+- NCSTATE 格式（26 B header、自描述 record、sparse、src_hash）；
+- 已實作模組清單（codec／file／boot／store／read／schema 生成器／cfg hash／
+  render 讀 state／activation const 表／status 欄位）；
+- 激活（生成期決定）＋`status act` 語義（src/n/en/units/fat/match）；
+- 量測：cfg_us 30.1 ms、state hit 8.2 ms、值有變寫檔 762 ms、值一樣 8.3 ms；
+- 記憶體：state.ncst 124 B、RAM store ~430 B、**PSRAM 0**；
+- 操作／驗證方法、測試 24/24、未做／已知限制（skip JSON parse、762 ms 寫檔、
+  schema 覆蓋 links/tasks/resources 等）、主要 commits；
+- 名詞對照（NCSTATE／NCLAYOUT；NCB2/NCC2/PXA2 已取消／暫緩）。
+
+狀態：P2 完成（開機生成＋hit/miss＋self-heal＋值一樣唔寫）；
+P3 進行中（RAM store＋driver 讀 state 已完成第一條；cfg 真正被取代仍未做）。
