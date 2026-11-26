@@ -148,8 +148,10 @@ static uint8_t (*const s_usb_kind_lookup)(uint8_t) = nc_port_usb_kind;
 #include "nc_boot.h"
 #include "nc_log.h"
 #include "nc_state.h"
+#include "nc_state_api.h"
 #include "nc_state_boot.h"
 #include "nc_state_file.h"
+#include "nc_state_schema.h"
 #include "nc_file_action.h"
 #ifdef NC_ENABLE_TESTS
 #include "nc_mod.h"
@@ -1589,6 +1591,16 @@ static size_t status_put_cfg(char *buf, size_t cap)
                 (unsigned)((nc_state_boot_store() != NULL)
                                ? nc_state_boot_store()->n : 0u));
     }
+    // schema registry：一份宣告（schema/state-keys.json）→ 生成的表。
+    //   ver／crc 同 build 對數；bad = 由 cfg 造的 record 同 schema 唔一致（要修）；
+    //   dirty = 今次開機經 nc_state_set_* 改過幾個 key（只改 RAM，reboot 會重算）。
+    jappend(buf, cap, &off,
+            ",\"schema\":{\"ver\":%u,\"crc\":%u,\"keys\":%u,\"units\":%u,"
+            "\"bad\":%u,\"dirty\":%u}",
+            (unsigned)nc_state_schema_version(), (unsigned)nc_state_schema_crc(),
+            (unsigned)nc_state_key_count(), (unsigned)nc_state_unit_count(),
+            (unsigned)((st != NULL) ? st->n_schema_bad : 0u),
+            (unsigned)nc_state_dirty_count());
     return off;
 }
 

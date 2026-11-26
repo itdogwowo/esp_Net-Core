@@ -37,7 +37,7 @@
 #include "nc_cfg.h"
 #include "nc_state_boot.h"
 #include "nc_state_keys.h"
-#include "nc_state_read.h"
+#include "nc_state_api.h"
 #include "nc_prio.h"
 #include "nc_task.h"
 #include "sdkconfig.h"
@@ -181,35 +181,35 @@ static const nc_led_cfg_t *led_cfg(void)
             int32_t iv;
             bool bv;
             uint8_t hits = 0;
-            if (nc_state_read_bool(NC_KEY_LED_ENABLE, &bv)) {
+            if (nc_state_get_bool(NC_KEY_LED_ENABLE, &bv)) {
                 s_led_from_state.enable = bv; hits++;
             }
-            if (nc_state_read_u32(NC_KEY_LED_BACKEND, &u)) {
+            if (nc_state_get_u32(NC_KEY_LED_BACKEND, &u)) {
                 s_led_from_state.backend = (uint8_t)u; hits++;
             }
-            if (nc_state_read_i32(NC_KEY_LED_BUS, &iv)) {
+            if (nc_state_get_i32(NC_KEY_LED_BUS, &iv)) {
                 s_led_from_state.bus = (int8_t)iv; hits++;
             }
-            if (nc_state_read_u32(NC_KEY_LED_LANES, &u)) {
+            if (nc_state_get_u32(NC_KEY_LED_LANES, &u)) {
                 s_led_from_state.lanes = (uint8_t)u; hits++;
             }
-            if (nc_state_read_u32(NC_KEY_LED_PX, &u)) {
+            if (nc_state_get_u32(NC_KEY_LED_PX, &u)) {
                 s_led_from_state.px = (uint16_t)u; hits++;
             }
-            if (nc_state_read_str(NC_KEY_LED_FMT, s_led_from_state.fmt,
+            if (nc_state_get_str(NC_KEY_LED_FMT, s_led_from_state.fmt,
                                   sizeof(s_led_from_state.fmt))) {
                 hits++;
             }
-            if (nc_state_read_u32(NC_KEY_LED_CLK, &u)) {
+            if (nc_state_get_u32(NC_KEY_LED_CLK, &u)) {
                 s_led_from_state.clk_hz = u; hits++;
             }
-            if (nc_state_read_u32(NC_KEY_LED_BIT_CELLS, &u)) {
+            if (nc_state_get_u32(NC_KEY_LED_BIT_CELLS, &u)) {
                 s_led_from_state.bit_cells = (uint8_t)u; hits++;
             }
-            if (nc_state_read_u32(NC_KEY_LED_T0H, &u)) {
+            if (nc_state_get_u32(NC_KEY_LED_T0H, &u)) {
                 s_led_from_state.t0h = (uint8_t)u; hits++;
             }
-            if (nc_state_read_u32(NC_KEY_LED_T1H, &u)) {
+            if (nc_state_get_u32(NC_KEY_LED_T1H, &u)) {
                 s_led_from_state.t1h = (uint8_t)u; hits++;
             }
             if (hits > 0) {

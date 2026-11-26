@@ -4,7 +4,7 @@
 > 這個專案，**先由頭讀到落尾**，再開始改任何東西。細節文件在 `docs/`，但方向、鐵律、
 > 工作流程、最常踩的坑全部在這一份。
 >
-> **最後更新**：2026-11-26（新增 §0.6 測試環境 `tenv`；版本統一提醒、鐵律 12、host test 24 支）
+> **最後更新**：2026-11-26（schema registry：加／減能力改一個 JSON；host test 25 支；OTA 後唔開機要先查 `--fresh`）
 > **維護規則**：每次架構／流程／工具改變，先改這份；過期內容直接覆蓋，唔好累積兩套講法。
 
 ---
@@ -97,7 +97,7 @@ python3 tools/nc4.py --port /dev/cu.usbmodemXXXX status tasks
 ### 做測試
 
 ```bash
-# 主機測試（唔需要板；24 支，全部 -Werror）
+# 主機測試（唔需要板；25 支，全部 -Werror）
 bash tools/hosttest/run_all.sh
 
 # 上板 smoke
@@ -226,7 +226,7 @@ python3 tools/ota.py --port /dev/cu.usbmodemXXXX \
 bash tools/hosttest/run_all.sh
 ```
 
-- 24 支測試（`cfg_test` … `fpsclock_test`；最新加入 `stateBlob_test`／`stateFile_test`／`stateStore_test`），全部 `-Wall -Wextra -Werror`。
+- 25 支測試（`cfg_test` … `fpsclock_test`；最新加入 `stateSchema_test`），全部 `-Wall -Wextra -Werror`。
 - 每次跑之前會 `rm -rf <test>/build`，所以 header 改動唔會被舊 binary 遮住。
 - **唔好只跑你改的那一支**；共用 header／codec／config 的影響經常在別處爆。
 - 測試失敗先修，唔好「先 commit 再算」。
@@ -634,6 +634,10 @@ python3 tools/ota.py --port /dev/cu.usbmodemXXXX \
   `/data/config/hardware.json` 的 `I80.list[]`（`data`／`wr`／`dc`／`cs`／`freq`；
   `bus_width` 由 `len(data)` 推出）開機由 `nc_cfg_apply_hardware()` 讀，改腳位唔使重 build。
 - **應用硬件（device）層（2026-11-26）**：`/data/config/driver.json`（runtime **最高權威**，改完 reboot 生效；壞檔／缺檔才回 build-time `driver.json`）；`nc_cfg_devices()` 解析，render 優先讀它；未支援 device 寫 `enable=1` 會大聲 warn。目前只有 LED 有 runtime device 支援。
+- **設定值的 key 名單／型別／範圍只有一份**：`schema/state-keys.json`（schema registry，
+  2026-11-26）。加／減能力＝改呢個 JSON＋跑 `python3 tools/gen_state_keys.py`；
+  firmware 經 `nc_state_schema`／`nc_state_api` 查表、驗證、讀寫，見
+  [`state-schema.md`](docs/03_notes/state-schema.md) §8。
 - `driver.json` **只有 `LED` 段會被讀**（build 時 `ncportgen` → `nc_led_cfg_t`）；
   其餘段（TFT／SDcard／PCA9685…）仍然冇人讀。規矩：**driver 層唔准寫腳位**，
   腳位只在 hardware 層；`driver.json` 用 `bus:{type,index}` 引用。
@@ -803,15 +807,16 @@ render_task（公用輸出層；core1，order 10；環／lane／節拍的主人�
 bash tools/hosttest/run_all.sh
 ```
 
-- 24 支：`cfg_test`、`cfgstruct_test`、`ncd_test`、`task_test`、`router_test`、
+- 25 支：`cfg_test`、`cfgstruct_test`、`ncd_test`、`task_test`、`router_test`、
   `link_test`、`mod_test`、`hub_test`、`plan_test`、`buf_test`、`portgen_test`、
   `ncm_test`、`pixel_test`、`pxEngine_test`、`pxAsset_test`、`pxProgram_test`、
-  `pxLayer_test`、`pxShow_test`、`pxScan_test`、`pxLayout_test`、`stateBlob_test`、`stateFile_test`、`stateStore_test`、`fpsclock_test`。
+  `pxLayer_test`、`pxShow_test`、`pxScan_test`、`pxLayout_test`、`stateBlob_test`、
+  `stateFile_test`、`stateSchema_test`、`stateStore_test`、`fpsclock_test`。
 - 全部 `-Werror`；失敗先修，唔好選擇性跑。
-- ⚠ 數字要講清楚：`tools/hosttest/*/run.sh` 有 **25 支**，但 `run_all.sh` 只跑
-  **24 支**測試；其餘 4 支係**量測 bench**（`gamma_bench`、`program_bench`、
+- ⚠ 數字要講清楚：`tools/hosttest/*/run.sh` 有 **29 支**，但 `run_all.sh` 只跑
+  **25 支**測試；其餘 4 支係**量測 bench**（`gamma_bench`、`program_bench`、
   `pxMap_bench`、`sin_bench`），唔係正確性測試，所以唔入 run_all。
-  講「24/24」係指 run_all；唔好講成「全部 25 支」。
+  講「25/25」係指 run_all；唔好講成「全部 29 支」。
 
 ### 12.2 上板 smoke test
 
@@ -864,6 +869,7 @@ python3 tools/nc4.py --port <PORT> status mem
 | 板起但唔點燈 | render 未跑／腳位錯／I80 未 enable | `status tasks`、`0xF061`、hardware config |
 | 換 project 後行為舊 | `/data` 仍是舊 preset | `fs_format`；確認 `status tasks` |
 | 改了 sdkconfig 冇效 | build dir 的 sdkconfig 已存在 | `make.py build ... --fresh` |
+| **OTA 後板子完全冇 USB、燈全黑** | build 重用舊 build dir 的 sdkconfig（例：`ESP_MAIN_TASK_STACK_SIZE` 仍 3,072 → main task 爆棧 reboot loop；正常開機高水位 4,980 B） | `--fresh` 重建再推；image size 差幾十 B 唔代表 config 一樣 |
 | 建置 target 不符 | 殘留 `firmware/sdkconfig` | `make.py clean` 或刪舊檔 |
 | 0xF077 任何 variant 都 panic | decode stack 爆（j[1200]） | 大 buffer 改 static（已修，見 §1 鐵律 8） |
 | OTA 後 image 冇變 | 推錯 `.bin`（tests/release 同名） | 確認 `artifacts/<board>__<project>.bin` 時間／hash |
@@ -899,7 +905,7 @@ python3 tools/nc4.py --port <PORT> status mem
 > 先 `python3 tools/tenv.py brief`；plan 說 `blocked`／`unknown` 的 lane **唔可以當驗證過**。
 > 回報時貼 `python3 tools/tenv.py stamp`。
 
-1. `bash tools/hosttest/run_all.sh` → 24/24。
+1. `bash tools/hosttest/run_all.sh` → 25/25。
 2. `make.py build ...` → rc=0。
 3. `tools/ota.py` → 推上板（唔使 BOOT）。
 4. `status sys`／`status tasks`／相關 0xF0xx → 數字＋正確性閘門。
@@ -916,7 +922,7 @@ python3 tools/nc4.py --port <PORT> status mem
 ### 14.5 Definition of Done
 
 - [ ] 功能／修正符合原 Task 的驗收條件。
-- [ ] Host tests 全綠（24/24）。
+- [ ] Host tests 全綠（25/25）。
 - [ ] 目標 board／project 建置成功。
 - [ ] 有上板驗證（或明确標示未上板）。
 - [ ] 逐 byte／checksum 類正確性閘門有過。
@@ -1016,6 +1022,7 @@ commit message 說明。
 | 2026-11-26 | **跑分全面重跑＋出圖**：`modules/lab/bench_lab/`（`bench_rerun.py` 抽 0xF071×10／0xF06B×3 mode／status，`draw_bench.py` 用 Pillow 畫圖，唔需要 matplotlib）。現況：fw `a7aad43`、50.0 fps、drops=0、一幀 CPU 256 µs（1.3%）、線路 1.84 ms（9.2%）、idle 89.5%；圖 [`bench-2026-11-26.png`](docs/assets/bench-2026-11-26.png)，完整記錄 status §7.258 | lead（AI） |
 | 2026-11-26 | **狀態格式統一 [`NCSTATE`](docs/03_notes/state-storage-format.md)**：唯一狀態格式（header 26 B＋自描述 record type/key/len/value）＋pixel 例外 `.layout`（magic `NCLAYOUT`）；新增 host test `stateBlob_test`（round-trip、CRC、未知 type 跳過），host test 21→22 支 | lead（AI） |
 | 2026-11-26 | **統一狀態系統（NCSTATE）整理＋總結**：`state.ncst`（唯一狀態格式、自描述、sparse、src_hash／CRC、`.bak`）、RAM store＋對拍 self-heal、render LED 由 state 讀值、生成期 activation const 表、FAT config hash 比對、開機量測（cfg 30.1 ms／state hit 8.2 ms／寫檔 762 ms→值一樣唔寫）；總結見 [`state-system.md`](docs/03_notes/state-system.md) | lead（AI） |
+| 2026-11-26 | **schema registry（一個位置讀寫 schema）**：`schema/state-keys.json` v2（units＋type／min／max／enum／max_len）→ 生成器出 `nc_state_keys.h`／`nc_state_schema_data.[ch]`；新增 `nc_state_schema`（查表／驗證）／`nc_state_api`（get／set，取代 `nc_state_read`）；boot 對 schema 驗 records（`status cfg.schema.bad`）；host test 25 支。實測 `schema {ver:2,crc:4062868727,keys:25,units:4,bad:0}`。同一日撞到「舊 sdkconfig → main stack 3,072 → 爆棧唔開機」，排查表加一行 | lead（AI） |
 | 2026-11-26 | **Windows 主機的 bash 陷阱**：`make.py`／`doctor` 用 `bash -c` 傳 `C:\…` 路徑，Git Bash 同 WSL bash 都會失敗（doctor 的 board check 會假報 FAIL）。§0.5 新增一節講點判斷、建置改在 WSL 內跑（`bash -lc 'cd /mnt/c/… && IDF_PATH=/home/user/esp/esp-idf python3 make.py …'`）、OTA／NC4 留在 Windows 側。同時記錄 Matrix-LED-Textkit 全面 JSON 化（見 status §7.253） | lead（AI） |
 
 ---

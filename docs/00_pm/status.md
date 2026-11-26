@@ -9924,3 +9924,43 @@ config 改咗同 state 無關嘅內容（comment／tasks／links…），值其�
 
 狀態：P2 完成（開機生成＋hit/miss＋self-heal＋值一樣唔寫）；
 P3 進行中（RAM store＋driver 讀 state 已完成第一條；cfg 真正被取代仍未做）。
+
+### 7.287 2026-11-26（schema registry：加／減能力只改一個地方；讀寫都經同一個 API）
+
+用家：「我想要更系統化地有一個位置獲取讀寫 schema，讓更新添加減少能力更有系統。」
+→ 把「key 名單」由散落的 C 常數變成 **schema registry**：一份 JSON 宣告，生成 runtime 表，
+   boot／driver／工具全部經同一組查表＋驗證＋讀寫 API。
+
+**改動**
+- `schema/state-keys.json` v2：加 `units[]`（能力群組）＋每個 key 的 `unit`／`min`／`max`／
+  `enum values[]`／`str max_len`；生成器驗「key 的 unit nibble == unit id」、範圍、enum 連續。
+- `tools/gen_state_keys.py` 生成三份（`--check` 驗三份同步，`run_all.sh` 開頭跑）：
+  `nc_state_keys.h`（id＋`NC_UNIT_*`）、`nc_state_schema_data.h`（型別／counts／CRC）、
+  `nc_state_schema_data.c`（表：id／unit／type／min／max／enum／path）。
+- 新增 `nc_state_schema.[ch]`：`nc_state_key()`／`nc_state_key_name()`／`nc_state_unit()`、
+  `nc_state_key_in_range()`、`nc_state_schema_check()`（boot 同 set 共用同一條規則）。
+- 新增 `nc_state_api.[ch]`（取代 `nc_state_read.[ch]`）：`nc_state_get_u32/i32/bool/str`
+  （型別由 schema 決定）、`nc_state_set_u32/i32/bool/str`（驗型別＋範圍，失敗回
+  `unknown_key`／`wrong_type`／`out_of_range`／`not_ready`／`no_space`）、`dirty` 計唔同 key。
+- `nc_state_boot.c`：由 cfg 造完 records 後逐筆對 schema（`bad` 計數＋逐筆 log），
+  防「code 加咗 key、schema 未加」的靜默 drift；同時開放可寫 store 給 `set`。
+- `main.c` `status cfg` 加 `"schema":{"ver","crc","keys","units","bad","dirty"}`。
+- 新增 host test `stateSchema_test`（查表／型別／範圍／enum／check／讀寫／dirty）；
+  `stateFile_test` 在 macOS 要 `-D_DARWIN_C_SOURCE` 才有 `mkdtemp`（host 側修正）。
+
+**驗證**（fw `6a5358a-dirty`、app `93c055d9`、idf=v6.1.1 macOS；host **25/25**）
+- `status cfg` → `"schema":{"ver":2,"crc":4062868727,"keys":25,"units":4,"bad":0,"dirty":0}`；
+- `state` 仍然 `hit=1, cmp_ok=1, rebuilt=0, n=18, bytes=124`（值冇變 → 冇重寫）；
+- `t={"cfg_us":30354,"state_us":8297}`；`act.match=1`、四條 pixel 任務 `level=4 running=1`；
+- reboot 後再查：`state hit=1`、schema 不變（持久性 OK）。
+
+**過程中撞到的坑（重要，已寫入 AGENTS 排查表）**
+- 第一次建置（冇 `--fresh`）重用咗 11/25 的舊 build dir `sdkconfig`：
+  `CONFIG_ESP_MAIN_TASK_STACK_SIZE` 仍然係 **3,072**（11/26 `61293b7` 才改成 8,192），
+  而正常開機實測 main stack 高水位 **4,980 B** → main task 爆棧 → panic 重開 loop，
+  **USB 完全唔 enumerate、LED 全黑**（OTA 本身成功）。
+- 用 `--fresh` 重建後即正常；`--fresh` 前後的 image 只差 32 B，所以「size 差唔多」唔代表
+  config 一樣 —— 改過 `sdkconfig.defaults` 一律 `--fresh`，唔好靠增量 build。
+
+**未做**：`set` 只改 RAM（reboot 仍以 JSON 為權威）；schema 覆蓋 links／routes／tasks／
+resources 後才可以「hit 時 skip JSON parse」；`status schema` 逐 key 列表（工具用）未做。

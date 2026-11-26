@@ -32,6 +32,7 @@ typedef struct {
     bool     rebuilt;    // 今次有重新生成並寫檔
     uint32_t n_mismatch; // 對拍唔中筆數（hit 但 cache 舊）
     uint16_t first_diff; // 第一筆對拍唔中的 key
+    uint32_t n_schema_bad;  // 由 cfg 造出的 record 同 schema 對唔上的筆數（防 drift）
     const char *why;     // miss 原因（靜態字串；hit 時 NULL）
 } nc_state_boot_result_t;
 
@@ -41,8 +42,12 @@ esp_err_t nc_state_boot_sync(nc_state_boot_result_t *out);
 // 上一次 sync 的結果（未跑過回 NULL）；給 status 用。
 const nc_state_boot_result_t *nc_state_boot_last(void);
 
-// RAM store（19 筆左右；未 sync 回 NULL）；給 nc_state_read／driver 用。
+// RAM store（19 筆左右；未 sync 回 NULL）；給 nc_state_api／driver 用（唯讀）。
 const nc_state_store_t *nc_state_boot_store(void);
+
+// 同一個 store 的可寫版本（nc_state_set_* 用）。未 sync 回 NULL。
+// 寫入只改 RAM；下次開機仍以 /data/config/*.json 為權威（見 nc_state_api.h）。
+nc_state_store_t *nc_state_boot_store_mut(void);
 
 #ifdef __cplusplus
 }

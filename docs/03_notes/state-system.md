@@ -79,12 +79,13 @@ Record（自描述，逐筆）：
 | **檔案層** | `sys/state/nc_state_file.c/h` | FAT 讀寫；atomic（`.tmp`→舊檔 `.bak`→rename）；hash helpers |
 | **開機同步** | `sys/state/nc_state_boot.c/h` | 由 cfg 造 records → 對拍 → hit／重建；結果俾 status |
 | **RAM store** | `sys/state/nc_state_store.c/h` | 固定陣列（64 筆、bytes≤16）＋對拍 cmp；internal RAM ~430 B（18 筆） |
-| **讀取 API** | `sys/state/nc_state_read.c/h` | `read_u32/i32/bool/str`；只回真有嘅值，冇／型別唔啱回 false |
-| **key schema** | `schema/state-keys.json`＋`tools/gen_state_keys.py` | key id 生成＋同步檢查 |
+| **讀寫 API** | `sys/state/nc_state_api.c/h` | `get_u32/i32/bool/str`＋`set_u32/i32/bool/str`；型別／範圍由 schema 決定；set 只改 RAM＋dirty |
+| **schema registry** | `sys/state/nc_state_schema.c/h`＋`nc_state_schema_data.[ch]` | 查表（id↔name↔unit）、驗型別／範圍／enum、boot drift 檢查 |
+| **key schema** | `schema/state-keys.json`＋`tools/gen_state_keys.py` | **唯一 source of truth**：id／unit／型別／範圍／enum → 生成三份 C 檔＋同步檢查 |
 | **cfg hash** | `sys/config/nc_cfg.c/h` | boot 讀 JSON 時順便累計原始 hash（表驅動 CRC）；state／FAT 比對共用 |
 | **driver 讀 state** | `tasks/render_task/nc_render_task.c` | LED 10 個 key 由 state store 覆寫（冇就用 cfg，安全 fallback） |
 | **activation** | `tools/ncportgen.py` → `nc_port.c/h` | 生成期表 `s_act[]`（unit／level／enabled）＋src_hash＋config hash |
-| **status** | `main.c` `status_put_cfg` | `"t"`（cfg_us／state_us）、`"state"`（hit／cmp／mism／n／bytes／store）、`"act"`（src／n／en／units／fat／match） |
+| **status** | `main.c` `status_put_cfg` | `"t"`（cfg_us／state_us）、`"state"`（hit／cmp／mism／n／bytes／store）、`"act"`（src／n／en／units／fat／match）、`"schema"`（ver／crc／keys／units／bad／dirty） |
 
 ### 現時 key（18 筆＝Matrix 實際有值）
 
@@ -105,7 +106,10 @@ SPI 7：schema 有，但 Matrix SPI `enable=0` → 唔寫（sparse 正確）
   `fat`（FAT 上 hardware＋driver 的 hash）、`match`（同 build 預置一唔一致）。
 - 語義：`enabled=0` → 零 GPIO／零 buffer；activation 係 build-time，
   **改 enable 要 rebuild**；其他值改完 reboot 生效（FAT 仍然最高權威）。
-- Matrix 現況：`{"src":2718329389,"n":22,"en":4,"units":"usb,i2c,i80,led","match":1}`。
+- Matrix 現況（2026-11-26 21:30）：`{"src":4015395272,"n":22,"en":4,
+  "units":"usb,i2c,i80,led","fat":2960301093,"match":1}`。
+  （`src` 係 ncportgen 輸入的 hash：wiring／driver／project sdkconfig.defaults；
+  改預設就會變，屬正常。）
 
 ---
 
@@ -172,8 +176,8 @@ python3 tools/nc4file.py …（或 WebMaster → IDE 刪 /config/state.ncst）�
 
 ## 10. 測試
 
-- Host test：**24/24**（新增 `stateBlob_test`、`stateFile_test`、`stateStore_test`；
-  run_all 開頭另跑 key schema `--check`）。
+- Host test：**25/25**（`stateBlob_test`、`stateFile_test`、`stateSchema_test`、`stateStore_test`；
+  run_all 開頭另跑 schema 三份生成檔 `--check`）。
 - 上板驗證（本輪）：
   * hit：`state:{"hit":1,"cmp_ok":1,"n":18,"bytes":124,"store":18}`；
   * self-heal：改 `0x0C01` 值＋合法 CRC → miss（mism=1、first=0x0C01）→ 重生；
@@ -188,6 +192,8 @@ python3 tools/nc4file.py …（或 WebMaster → IDE 刪 /config/state.ncst）�
 | 項目 | 狀態 | 備註 |
 |---|---|---|
 | hit 時跳過 JSON parse | ⏸ 未做 | 已量到最多省 ~30 ms；要補齊 schema＋setter，優先度低 |
+| schema registry（查表／驗證／讀寫 API） | ✅ 完成 2026-11-26 | 25 key／4 unit；`status cfg.schema`；host test 25/25 |
+| schema 覆蓋寫入落盤（set → JSON） | ⏸ 未做 | 現時 set 只改 RAM；永久改仍然改 JSON（避免半權威路徑） |
 | state 真正取代 cfg struct | ⏸ 部分 | 目前 driver 開始讀 state（render LED）；system／tasks 未接 |
 | schema 覆蓋 links／routes／tasks／resources | ⏸ 未做 | 做齊才可 skip parse |
 | 真正改值時的 762 ms 寫檔 | ⚠ 已知 | 值一樣已避免；可再考慮延後到 boot 後寫 |

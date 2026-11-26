@@ -203,6 +203,25 @@ hardware／project 之後（後者勝）。例：`artifacts/16x600.defaults`。
 > - 所以「省」有兩種省法：唔要這個能力 → 唔好編（省 526 KB flash ＋ 54 KB SRAM）；
 >   要能力但今次唔用 → `enable:0`（省 runtime heap／stack，flash 同靜態照付）。
 
+### 6.1b 加一個新的設定值（schema registry，2026-11-26）
+
+設定值的 key 名單／型別／範圍**只有一份**：`schema/state-keys.json`。加／減一個值：
+
+```bash
+# 1) 改 schema json（加一行 key：id／name／unit／type／min／max／path）
+# 2) 生成 C 表（三份檔，唔准手改）
+python3 tools/gen_state_keys.py
+# 3) 如果要在開機寫入，nc_state_boot.c 的 build_records() 加一行由 cfg 取值
+# 4) rebuild（改過 sdkconfig.defaults 要 --fresh）
+```
+
+- 查／讀／寫一律經 `nc_state_schema.*`（`nc_state_key*`、驗範圍）同 `nc_state_api.*`
+  （`nc_state_get_*`／`nc_state_set_*`），driver 唔再自己記 key 的型別。
+- `status cfg` 的 `schema` 見到 `ver`／`crc`／`keys`／`units`／`bad`（drift）／`dirty`。
+- 改 schema 之後舊 `state.ncst` 的未知 key 會自動跳過（向前兼容）；
+  三份生成檔同 schema 不同步 → `run_all.sh` 直接失敗。
+- 詳細契約：[`state-schema.md`](../03_notes/state-schema.md) §8。
+
 ### 6.2 「唔啟用就唔佔資源」— 四種開關
 
 | 開關 | 關掉之後 | 驗證方式 |

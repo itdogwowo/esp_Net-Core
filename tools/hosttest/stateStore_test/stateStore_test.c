@@ -1,10 +1,10 @@
 // stateStore_test — NCSTATE RAM store／read API host test。
-// read API 用 test 自己提供的 nc_state_boot_store() stub（唔使拉 config／boot）。
+// read／write API 用 test 自己提供的 nc_state_boot_store[_mut]() stub（唔使拉 config／boot）。
 #include <stdio.h>
 #include <string.h>
 
 #include "nc_state_keys.h"
-#include "nc_state_read.h"
+#include "nc_state_api.h"
 #include "nc_state_store.h"
 
 static nc_state_store_t s_stub;
@@ -12,6 +12,11 @@ static nc_state_store_t s_stub;
 const nc_state_store_t *nc_state_boot_store(void)
 {
     return (s_stub.n > 0) ? &s_stub : NULL;
+}
+
+nc_state_store_t *nc_state_boot_store_mut(void)
+{
+    return &s_stub;
 }
 
 static int g_fail;
@@ -73,16 +78,16 @@ int main(void)
     int32_t iv = 0;
     bool bv = false;
     char buf[16];
-    CHECK(nc_state_read_u32(NC_KEY_SYS_FRAME_MS, &u) && u == 20, "read frame_ms");
-    CHECK(nc_state_read_i32(NC_KEY_I80_WR, &iv) && iv == -1, "read wr");
-    CHECK(nc_state_read_bool(NC_KEY_LED_ENABLE, &bv) && bv, "read enable");
-    CHECK(nc_state_read_str(NC_KEY_LED_FMT, buf, sizeof(buf)) &&
+    CHECK(nc_state_get_u32(NC_KEY_SYS_FRAME_MS, &u) && u == 20, "read frame_ms");
+    CHECK(nc_state_get_i32(NC_KEY_I80_WR, &iv) && iv == -1, "read wr");
+    CHECK(nc_state_get_bool(NC_KEY_LED_ENABLE, &bv) && bv, "read enable");
+    CHECK(nc_state_get_str(NC_KEY_LED_FMT, buf, sizeof(buf)) &&
           strcmp(buf, "ws2812") == 0, "read fmt");
-    CHECK(!nc_state_read_u32(0x7FFF, &u), "唔存在 key 應該 false");
-    CHECK(!nc_state_read_u32(NC_KEY_I80_WR, &u), "型別唔啱（sint 當 u32）應該 false");
-    CHECK(!nc_state_read_str(NC_KEY_LED_FMT, buf, 4), "cap 唔夠應該 false（唔截斷）");
+    CHECK(!nc_state_get_u32(0x7FFF, &u), "唔存在 key 應該 false");
+    CHECK(!nc_state_get_u32(NC_KEY_I80_WR, &u), "型別唔啱（sint 當 u32）應該 false");
+    CHECK(!nc_state_get_str(NC_KEY_LED_FMT, buf, 4), "cap 唔夠應該 false（唔截斷）");
     nc_state_store_clear(&s_stub);
-    CHECK(!nc_state_read_u32(NC_KEY_SYS_FRAME_MS, &u), "store 清空應該 false");
+    CHECK(!nc_state_get_u32(NC_KEY_SYS_FRAME_MS, &u), "store 清空應該 false");
 
     printf("[5] bytes 太長／store 滿：明示 false\n");
     char big[NC_STATE_STORE_BYTES_MAX + 1];

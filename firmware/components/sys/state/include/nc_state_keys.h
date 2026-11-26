@@ -1,13 +1,20 @@
-// NCSTATE key id：全專案唯一 source of truth。
+// NCSTATE key id／unit id：全專案唯一 source of truth。
 //
-// **本檔由 tools/gen_state_keys.py 生成，唔好手改**：改 schema/state-keys.json，
-// 然後跑 `python3 tools/gen_state_keys.py`；run_all.sh 會用 --check 驗同步。
-// 命名規矩：key id = domain(4b) | unit(4b) | index(4b) | field(4b)。
+// **本檔由 tools/gen_state_keys.py 生成，唔好手改**：改 schema/state-keys.json 再跑工具。
+// run_all.sh 會用 --check 驗同步；命名規矩：key id = domain(4b)|unit(4b)|index(4b)|field(4b)。
 #pragma once
 
 #include <stdint.h>
 
-#define NC_STATE_KEYS_VERSION 1u
+#define NC_STATE_KEYS_VERSION 2u
+
+// unit = 能力群組；key id 的 unit nibble 一定要等於呢個值（生成器已驗）。
+enum {
+    NC_UNIT_SYS = 0,  /* 0x0 系統層（system.json） */
+    NC_UNIT_I80 = 7,  /* 0x7 I80／LCD_CAM 匯流排（hardware.json） */
+    NC_UNIT_SPI = 8,  /* 0x8 SPI 匯流排（hardware.json） */
+    NC_UNIT_LED = 12,  /* 0xc 燈鏈（driver.json 的 LED 段） */
+};
 
 enum {
     /* 0x0002 節拍間隔 ms（system.json:frame_interval_ms） */
@@ -42,7 +49,7 @@ enum {
     NC_KEY_SPI_MISO = 0x0807,
     /* 0x0c01 燈鏈啟用（driver.json:LED.enable） */
     NC_KEY_LED_ENABLE = 0x0c01,
-    /* 0x0c02 i80/spi/rmt/parlio/direct/mock（driver.json:LED.backend） */
+    /* 0x0c02 nc_led_backend_t（driver.json:LED.backend） */
     NC_KEY_LED_BACKEND = 0x0c02,
     /* 0x0c03 引用 hardware 同類 list 的 index（driver.json:LED.bus.index） */
     NC_KEY_LED_BUS = 0x0c03,

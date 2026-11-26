@@ -1,0 +1,212 @@
+// NCSTATE 讀寫 API 實作：schema 查表 → RAM store。
+//
+// 呢個檔刻意保持純 C（唔 include esp_log／esp_timer），方便 host test 直接編。
+// 讀寫都只經 nc_state_schema（表）＋nc_state_store（值），冇第三份名單。
+#include "nc_state_api.h"
+
+#include <string.h>
+
+#include "nc_state_blob.h"
+#include "nc_state_boot.h"
+#include "nc_state_schema.h"
+#include "nc_state_store.h"
+
+// ── store（boot 建立；未 sync 前 NULL） ─────────────────────────
+static const nc_state_store_t *store_ro(void)
+{
+    const nc_state_store_t *st = nc_state_boot_store();
+    return (st != NULL && st->n > 0) ? st : NULL;
+}
+
+// ── dirty：今次開機改過邊幾個 key（固定陣列，無 heap） ────────────
+static uint16_t s_dirty_keys[NC_STATE_STORE_MAX];
+static uint16_t s_dirty_n;
+
+static void dirty_mark(uint16_t key)
+{
+    for (uint16_t i = 0; i < s_dirty_n; i++) {
+        if (s_dirty_keys[i] == key) {
+            return;
+        }
+    }
+    if (s_dirty_n < NC_STATE_STORE_MAX) {
+        s_dirty_keys[s_dirty_n++] = key;
+    }
+}
+
+uint16_t nc_state_dirty_count(void)
+{
+    return s_dirty_n;
+}
+
+void nc_state_dirty_reset(void)
+{
+    s_dirty_n = 0;
+}
+
+// ── 讀 ─────────────────────────────────────────────────────────
+bool nc_state_get_u32(uint16_t key, uint32_t *out)
+{
+    const nc_state_keydef_t *def = nc_state_key(key);
+    if (def == NULL || out == NULL || def->type != NC_STATE_T_UINT) {
+        return false;
+    }
+    nc_state_rec_t r;
+    if (!nc_state_store_get(store_ro(), key, &r) || r.type != NC_STATE_T_UINT) {
+        return false;
+    }
+    *out = r.u;
+    return true;
+}
+
+bool nc_state_get_i32(uint16_t key, int32_t *out)
+{
+    const nc_state_keydef_t *def = nc_state_key(key);
+    if (def == NULL || out == NULL || def->type != NC_STATE_T_SINT) {
+        return false;
+    }
+    nc_state_rec_t r;
+    if (!nc_state_store_get(store_ro(), key, &r) || r.type != NC_STATE_T_SINT) {
+        return false;
+    }
+    *out = r.i;
+    return true;
+}
+
+bool nc_state_get_bool(uint16_t key, bool *out)
+{
+    const nc_state_keydef_t *def = nc_state_key(key);
+    if (def == NULL || out == NULL || def->type != NC_STATE_T_BOOL) {
+        return false;
+    }
+    nc_state_rec_t r;
+    if (!nc_state_store_get(store_ro(), key, &r) || r.type != NC_STATE_T_BOOL) {
+        return false;
+    }
+    *out = (r.u != 0);
+    return true;
+}
+
+bool nc_state_get_str(uint16_t key, char *buf, size_t cap)
+{
+    const nc_state_keydef_t *def = nc_state_key(key);
+    if (def == NULL || buf == NULL || cap == 0 || def->type != NC_STATE_T_BYTES) {
+        return false;
+    }
+    nc_state_rec_t r;
+    if (!nc_state_store_get(store_ro(), key, &r) || r.type != NC_STATE_T_BYTES) {
+        return false;
+    }
+    if ((size_t)r.bytes_len >= cap) {
+        return false;   // 唔截斷
+    }
+    if (r.bytes_len > 0 && r.bytes != NULL) {
+        memcpy(buf, r.bytes, r.bytes_len);
+    }
+    buf[r.bytes_len] = '\0';
+    return true;
+}
+
+// ── 寫 ─────────────────────────────────────────────────────────
+const char *nc_state_set_res_name(nc_state_set_res_t r)
+{
+    switch (r) {
+    case NC_STATE_SET_OK:           return "ok";
+    case NC_STATE_SET_UNKNOWN_KEY:  return "unknown_key";
+    case NC_STATE_SET_WRONG_TYPE:   return "wrong_type";
+    case NC_STATE_SET_OUT_OF_RANGE: return "out_of_range";
+    case NC_STATE_SET_NOT_READY:    return "not_ready";
+    case NC_STATE_SET_NO_SPACE:     return "no_space";
+    default:                        return "?";
+    }
+}
+
+static nc_state_store_t *store_rw(void)
+{
+    return nc_state_boot_store_mut();
+}
+
+static nc_state_set_res_t put_rec(const nc_state_keydef_t *def, const nc_state_rec_t *r)
+{
+    nc_state_store_t *st = store_rw();
+    if (st == NULL) {
+        return NC_STATE_SET_NOT_READY;
+    }
+    if (!nc_state_store_put(st, r)) {
+        return NC_STATE_SET_NO_SPACE;
+    }
+    dirty_mark(def->id);
+    return NC_STATE_SET_OK;
+}
+
+nc_state_set_res_t nc_state_set_u32(uint16_t key, uint32_t v)
+{
+    const nc_state_keydef_t *def = nc_state_key(key);
+    if (def == NULL) {
+        return NC_STATE_SET_UNKNOWN_KEY;
+    }
+    if (def->type != NC_STATE_T_UINT) {
+        return NC_STATE_SET_WRONG_TYPE;
+    }
+    if (!nc_state_key_in_range(def, (int64_t)v)) {
+        return NC_STATE_SET_OUT_OF_RANGE;
+    }
+    const nc_state_rec_t r = { .key = key, .type = NC_STATE_T_UINT, .u = v };
+    return put_rec(def, &r);
+}
+
+nc_state_set_res_t nc_state_set_i32(uint16_t key, int32_t v)
+{
+    const nc_state_keydef_t *def = nc_state_key(key);
+    if (def == NULL) {
+        return NC_STATE_SET_UNKNOWN_KEY;
+    }
+    if (def->type != NC_STATE_T_SINT) {
+        return NC_STATE_SET_WRONG_TYPE;
+    }
+    if (!nc_state_key_in_range(def, (int64_t)v)) {
+        return NC_STATE_SET_OUT_OF_RANGE;
+    }
+    const nc_state_rec_t r = { .key = key, .type = NC_STATE_T_SINT, .i = v };
+    return put_rec(def, &r);
+}
+
+nc_state_set_res_t nc_state_set_bool(uint16_t key, bool v)
+{
+    const nc_state_keydef_t *def = nc_state_key(key);
+    if (def == NULL) {
+        return NC_STATE_SET_UNKNOWN_KEY;
+    }
+    if (def->type != NC_STATE_T_BOOL) {
+        return NC_STATE_SET_WRONG_TYPE;
+    }
+    if (!nc_state_key_in_range(def, v ? 1 : 0)) {
+        return NC_STATE_SET_OUT_OF_RANGE;
+    }
+    const nc_state_rec_t r = { .key = key, .type = NC_STATE_T_BOOL, .u = v ? 1u : 0u };
+    return put_rec(def, &r);
+}
+
+nc_state_set_res_t nc_state_set_str(uint16_t key, const char *s)
+{
+    const nc_state_keydef_t *def = nc_state_key(key);
+    if (def == NULL) {
+        return NC_STATE_SET_UNKNOWN_KEY;
+    }
+    if (def->type != NC_STATE_T_BYTES) {
+        return NC_STATE_SET_WRONG_TYPE;
+    }
+    if (s == NULL) {
+        return NC_STATE_SET_OUT_OF_RANGE;
+    }
+    const size_t len = strlen(s);
+    if (!nc_state_key_str_ok(def, len)) {
+        return NC_STATE_SET_OUT_OF_RANGE;   // schema 上限
+    }
+    if (len > NC_STATE_STORE_BYTES_MAX) {
+        return NC_STATE_SET_NO_SPACE;       // store 字串容量
+    }
+    const nc_state_rec_t r = { .key = key, .type = NC_STATE_T_BYTES,
+                               .bytes = s, .bytes_len = (uint16_t)len };
+    return put_rec(def, &r);
+}

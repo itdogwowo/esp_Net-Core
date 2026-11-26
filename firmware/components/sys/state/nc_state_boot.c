@@ -19,6 +19,7 @@
 #include "nc_state_blob.h"
 #include "nc_state_file.h"
 #include "nc_state_keys.h"
+#include "nc_state_schema.h"
 #include "nc_state_store.h"
 
 static const char *TAG = "state";
@@ -148,6 +149,17 @@ esp_err_t nc_state_boot_sync(nc_state_boot_result_t *out)
     s_result.src_hash = src_hash;
     s_result.n_records = (uint32_t)build_records();
 
+    // schema 係唯一名單：由 cfg 造出的 record 一定要同 schema 對得上（型別／範圍）。
+    // 對唔上唔會靜靜收貨：計數＋逐筆 log（最常見 = 加咗 key 但 schema 未加）。
+    for (uint32_t i = 0; i < s_result.n_records; i++) {
+        const uint8_t chk = nc_state_schema_check(&s_recs[i]);
+        if (chk != NC_STATE_CHK_OK) {
+            s_result.n_schema_bad++;
+            ESP_LOGW(TAG, "state record 0x%04x 同 schema 唔一致（%s）",
+                     (unsigned)s_recs[i].key, nc_state_schema_check_name(chk));
+        }
+    }
+
     const nc_state_meta_t meta = {
         .ver = NC_STATE_BLOB_VER,
         .flags = 0,
@@ -223,4 +235,11 @@ const nc_state_boot_result_t *nc_state_boot_last(void)
 const nc_state_store_t *nc_state_boot_store(void)
 {
     return (s_store.n > 0) ? &s_store : NULL;
+}
+
+nc_state_store_t *nc_state_boot_store_mut(void)
+{
+    // 用 s_result_valid 而唔係 n：sync 跑過但 0 筆（全部用預設）都算「準備好」，
+    // 之後 nc_state_set_* 仍然可以寫入。
+    return s_result_valid ? &s_store : NULL;
 }

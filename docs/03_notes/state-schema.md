@@ -56,7 +56,8 @@ src_hash = 來源 JSON（config layers）嘅 CRC32；開機：
 - **唔存 key 字串、唔存型別、唔存 default**：型別喺 schema 表；default 喺 L0 出廠。
 - **sparse**：只存「同 default 唔同」嘅值；大部分 config 只改幾項 → blob 好細。
 - 讀：`id → schema[index] → 型別/範圍`；未知 id 跳過（向前兼容）。
-- 寫：`nc_state_set(id, value)` 累積 dirty → `nc_state_commit()` 一次編碼寫入。
+- 寫：`nc_state_set_*()` 先驗 schema（型別／範圍）→ 改 RAM store → 計 dirty；
+  持久化仍然係「JSON → NCSTATE（boot 時重算）」，冇第二條半權威路徑。
 
 ### 實測（`modules/lab/state_schema_lab/schema_preview.py`）
 
@@ -72,37 +73,28 @@ src_hash = 來源 JSON（config layers）嘅 CRC32；開機：
 
 ---
 
-## 4. schema 點寫（草案）
+## 4. schema 實際長什麼樣（v2）
+
+單一檔案 `schema/state-keys.json`：`units[]`（能力群組）＋ `keys[]`（每個 key 一行）。
 
 ```json
 {
-  "version": 1,
-  "domains": {
-    "sys":    { "id": 0, "units": [
-        { "name": "system", "id": 0, "fields": [
-            { "name": "frame_interval_ms", "id": 2, "type": "u16", "min": 1, "max": 1000, "default": 20 },
-            { "name": "num_pixels", "id": 3, "type": "u16", "min": 0, "max": 65535, "default": 0 }
-        ]}
-    ]},
-    "hw":     { "id": 1, "units": [
-        { "name": "spi", "id": 1, "max_index": 2, "fields": [
-            { "name": "sck",  "id": 2, "type": "i8", "min": -1, "max": 48, "default": -1 },
-            { "name": "mosi", "id": 3, "type": "i8", "min": -1, "max": 48, "default": -1 }
-        ]}
-    ]},
-    "driver": { "id": 2, "units": [
-        { "name": "led", "id": 0, "fields": [
-            { "name": "enable", "id": 1, "type": "bool", "default": 0 },
-            { "name": "px",     "id": 5, "type": "u16", "min": 1, "max": 65535, "default": 0 }
-        ]}
-    ]}
-  }
+  "version": 2,
+  "units": [
+    { "id": 12, "name": "led", "desc": "燈鏈（driver.json 的 LED 段）" }
+  ],
+  "keys": [
+    { "id": "0x0C05", "name": "NC_KEY_LED_PX", "unit": "led", "type": "u16",
+      "min": 1, "max": 65535, "path": "driver.json:LED.px", "desc": "每條 lane 幾顆" }
+  ]
 }
 ```
 
-- `type`：`bool`／`u8`／`u16`／`u32`／`i8`／`i16`／`i32`／`enum`（附 `values[]`）／`str`（固定長）。
-- `min/max`：parse 時驗；超出＝invalid（明示，唔截斷）。
-- `default`：同 L0 出廠對齊；**儲存只寫「同 default 唔同」嘅**。
+- `unit` 一定要等於 key id 的 unit nibble（生成器驗），「key 屬邊個能力」唔會同 id 打架。
+- `type`：`u8`／`u16`／`u32`／`i8`／`i32`／`bool`／`enum`／`str`；`str` 要寫 `max_len`（唔含 NUL）。
+- `enum` 要寫 `values[]`（由 0 連續排列），例如 LED backend：`none/i80/spi/rmt/parlio/direct/mock`。
+- `min/max`：`nc_state_set_*()` 同 `nc_state_schema_check()` 共用同一條規則；超出＝明示失敗。
+- **唔寫 `default`**：出廠值仍然只有一份（C 的 `nc_cfg_defaults_*`／Kconfig），避免第二個真相。
 
 ---
 
@@ -125,17 +117,17 @@ state：  nc_state（RAM：id → value；schema 表查型別/範圍）
 
 ---
 
-## 6. 落地（估時）
+## 6. 落地狀態（2026-11-26）
 
-| 階段 | 工作 | 估時 |
-|---|---|---|
-| **P1** | `state-schema.json`（skeleton：sys/hw/driver 三 domain，~60 key）＋ncportgen 編 C 表＋`NCSTATE` encode/decode＋host test（round-trip、範圍、未知 id） | 1 日 |
-| **P2** | `nc_state` v2：`nc_state_set_id()`、dirty→commit、NVS blob「NCSTATE」＋版本／CRC；開機 JSON→NCSTATE 遷移，壞檔回退 | 1 日 |
-| P3 | JSON parser 改為「路徑 → id」寫入 state（hardware 先行，driver／system 跟） | 1 日 |
-| P4 | `status cfg` 顯示 blob size／key 數／命中率；schema 版本唔夾即拒讀 | 0.5 日 |
+| 階段 | 狀態 |
+|---|---|
+| **P1** schema json＋生成器＋`NCSTATE` codec／host test | ✅ 完成 |
+| **P2** 開機 JSON→`state.ncst`、hit／miss／self-heal、`.bak` | ✅ 完成 |
+| **P3** driver 讀 state（render LED 第一條）＋**schema registry API** | ✅ 進行中（system／tasks／links 未接） |
+| **P4** `status cfg` 顯示 `state`／`schema`／`act` | ✅ 完成 |
 
-**風險**：schema id 一改就要 bump schema ver（NCSTATE header 有 ver，舊 blob 自動拒讀）；
-array 索引固定（通道上限寫死）——但硬件本身就有限，正好利用。
+**風險**：schema 加／減 key 唔使改 code，但「由 cfg 造 record」仍然要 `nc_state_boot.c`
+的一行（值從哪個 struct 來，schema 表達唔到）；漏咗唔會爆，只會係 sparse 冇寫。
 
 ---
 
@@ -154,14 +146,35 @@ array 索引固定（通道上限寫死）——但硬件本身就有限，正�
 
 ---
 
-## 8. key schema（唯一 source of truth）
+## 8. 唯一入口：schema registry（2026-11-26）
 
-- 檔案：**`schema/state-keys.json`**（id／name／type／path／desc）
-- 生成器：**`tools/gen_state_keys.py`**
-  - `python3 tools/gen_state_keys.py` → 生成
-    `firmware/components/sys/state/include/nc_state_keys.h`（**唔好手改**）
-  - `--check` → 確認 header 同 schema 同步；**`tools/hosttest/run_all.sh` 一開始會跑**，
-    唔同步就成個 test suite 失敗（防止 id 漂移）
-- 驗證：重複 id／name、型別唔識、id 超出 u16 → 生成器即刻報錯。
-- 現時覆蓋：sys（3）／I80（5）／SPI（7）／LED（10）＝ **25 個 key**；
-  `boot_sync` 由 cfg 造同樣數量的 records（Matrix `state.ncst` 約 150 B）。
+**加／減能力只改一個地方**：`schema/state-keys.json`。
+
+```text
+schema/state-keys.json
+   │  python3 tools/gen_state_keys.py
+   ├─→ include/nc_state_keys.h          key id＋NC_UNIT_*（C 名）
+   ├─→ include/nc_state_schema_data.h   runtime 表的型別／counts／CRC
+   └─→ nc_state_schema_data.c           表：id／unit／type／min／max／enum／path
+        │
+        ├─ nc_state_schema.c   查表／驗型別／驗範圍（boot 同 set 共用）
+        └─ nc_state_api.c      讀寫唯一入口（nc_state_get_*／nc_state_set_*）
+```
+
+| 想做的事 | 只需要改 |
+|---|---|
+| 加一個設定值 | schema json 加一行 → 跑生成器 → rebuild；（要 boot 寫入的話）`nc_state_boot.c` 的 `build_records()` 加一行由 cfg 取值 |
+| 加一個能力群組（unit） | schema json 的 `units[]` 加一項＋key 引用它 |
+| 減一個能力 | schema json 刪 key（或整個 unit）→ 生成器 → rebuild；舊 blob 的未知 key 自動跳過（向前兼容） |
+| 查某個 key | `nc_state_key(id)`／`nc_state_key_name("NC_KEY_LED_PX")` |
+| 讀值 | `nc_state_get_u32/i32/bool/str()`（型別由 schema 決定，用錯函式回 false） |
+| 寫值 | `nc_state_set_u32/i32/bool/str()`（schema 驗型別＋範圍；只改 RAM，見下） |
+
+- `run_all.sh` 開頭跑 `gen_state_keys.py --check`：三份生成檔任何一份同 schema 唔同步 →
+  測試直接失敗（防止 id 漂移）。
+- `status cfg` 的 `schema`：`{"ver":2,"crc":4062868727,"keys":25,"units":4,"bad":0,"dirty":0}`；
+  `bad` = boot 由 cfg 造出的 record 同 schema 唔一致（code／schema drift，會 log 出嚟）。
+- **寫入語義**：`nc_state_set_*()` 只改 RAM store（`dirty` 計唔同 key 數）；
+  reboot 仍然以 `/data/config/*.json` 為權威，永久改要改 JSON。
+- 現時覆蓋：sys（3）／I80（5）／SPI（7）／LED（10）＝ **25 個 key、4 個 unit**；
+  Matrix 的 `state.ncst` 18 筆／124 B。
