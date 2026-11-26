@@ -170,3 +170,13 @@ pin ─┬─ spi ─┬─ tft
 **風險**：現時 B05 假設「全部 driver 一早裝好」；改成分階段要逐個 unit 檢查
 `on_start()` 依賴（例如 render 要 i80 已 ready）。用 feature flag 分階段切換，
 每切一個 unit 上板驗證。
+
+---
+
+## 4.6 config hash 比對（FAT vs build-time）
+
+- ncportgen 寫入 `nc_port_config_hash()`＝crc32(`hardware.json\0`+bytes) →`n  crc32(`driver.json\0`+bytes)，同 `nc_state_file_hash_files()` 同一條規則。
+- 開機 `cfg_fat_hash_sync()` 讀 FAT 同一個 hash：唔同就 warn（activation 表係舊 build；
+  改 enable 要 rebuild），`status cfg.act.fat / match` 睇得到。
+- 實測：FAT 係舊 preset → match=0；換成 build preset → match=1。
+

@@ -787,7 +787,19 @@ def main() -> int:
     src_hash = 0
     for name, data in src_files:
         src_hash = zlib.crc32(name.encode("utf-8") + b"\0" + data, src_hash)
-    activation_c = gen_activation_c(activation, src_hash)
+    # 預置 JSON 文字先產生（同一份 bytes 既寫檔又計 hash）：
+    # firmware 開機用同一條 hashing 規則（檔名+NUL+內容，逐檔累加）比對 FAT；
+    # 唔同 = FAT 改過（用戶現場微調）→ activation 表係 build-time，enable 變更要 rebuild。
+    hw_text = json.dumps(preset, ensure_ascii=False, indent=2) + "\n"
+    devices = gen_preset_devices(driver, project_pixel_override(project))
+    drv_text = json.dumps(devices, ensure_ascii=False, indent=2) + "\n"
+    cfg_hash = zlib.crc32(b"hardware.json\x00" + hw_text.encode("utf-8"))
+    cfg_hash = zlib.crc32(b"driver.json\x00" + drv_text.encode("utf-8"), cfg_hash)
+    activation_c = gen_activation_c(activation, src_hash) + (
+        "// FAT 上的 hardware.json／driver.json（如果同 build-time 預置一樣）應得的 hash。\n"
+        "// 開機比對：唔同 = 用戶現場改過 config → activation 表係舊 build。\n"
+        f"uint32_t nc_port_config_hash(void) {{ return 0x{cfg_hash & 0xFFFFFFFF:08x}u; }}\n"
+    )
 
     out.mkdir(parents=True, exist_ok=True)
     (out / "nc_port.h").write_text(
@@ -805,7 +817,8 @@ def main() -> int:
         "    uint8_t enabled;\n"
         "} nc_port_act_t;\n"
         "const nc_port_act_t *nc_port_activation(size_t *n);\n"
-        "uint32_t nc_port_activation_src_hash(void);\n\n"
+        "uint32_t nc_port_activation_src_hash(void);\n"
+        "uint32_t nc_port_config_hash(void);   // build-time 預置 hardware+driver 的 hash\n\n"
         "const nc_cfg_chip_t *nc_port_chip(void);\n"
         "const nc_hardware_cfg_t *nc_port_hw_defaults(void);\n"
         "uint8_t nc_port_usb_kind(uint8_t idx);\n"
@@ -821,13 +834,10 @@ def main() -> int:
         "const nc_hardware_cfg_t *nc_port_hw_defaults(void) { return &s_hw; }\n\n"
         + gen_usb_kinds(wiring) + "\n" + activation_c + "\n",
         encoding="utf-8")
-    (out / "preset_hardware.json").write_text(
-        json.dumps(preset, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    (out / "preset_hardware.json").write_text(hw_text, encoding="utf-8")
     # 應用硬件（device）層預置：runtime /data/config/driver.json 可改；
     # 缺檔／壞檔時 render 退回 build-time 的 nc_port_led()。
-    devices = gen_preset_devices(driver, project_pixel_override(project))
-    (out / "preset_driver.json").write_text(
-        json.dumps(devices, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    (out / "preset_driver.json").write_text(drv_text, encoding="utf-8")
     # 人睇的鏡像（同 nc_port.c 的 const 表同源；src_hash 相同）
     (out / "preset_activation.json").write_text(
         json.dumps({"version": 1,

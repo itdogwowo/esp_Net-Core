@@ -149,6 +149,7 @@ static uint8_t (*const s_usb_kind_lookup)(uint8_t) = nc_port_usb_kind;
 #include "nc_log.h"
 #include "nc_state.h"
 #include "nc_state_boot.h"
+#include "nc_state_file.h"
 #include "nc_file_action.h"
 #ifdef NC_ENABLE_TESTS
 #include "nc_mod.h"
@@ -1536,6 +1537,10 @@ static size_t status_put_storage(char *buf, size_t cap)
 
 // config 的載入結果（哪一層用咗預設、有冇壞檔、有幾多不合法）——呢啲數字
 // 以前只係「睇 code 推」；現在每次開機都答得出來。
+// build-time 預置 vs FAT 的 hash 比對（定義喺 ph_storage 前；status 先用）。
+static uint32_t s_cfg_fat_hash;
+static int s_cfg_fat_match = -1;   // -1 = 未計／讀唔到
+
 static size_t status_put_cfg(char *buf, size_t cap)
 {
     size_t off = 0;
@@ -1560,9 +1565,10 @@ static size_t status_put_cfg(char *buf, size_t cap)
             }
         }
         jappend(buf, cap, &off,
-                ",\"act\":{\"src\":%u,\"n\":%u,\"en\":%u,\"units\":\"%s\"}",
+                ",\"act\":{\"src\":%u,\"n\":%u,\"en\":%u,\"units\":\"%s\","
+                "\"fat\":%u,\"match\":%d}",
                 (unsigned)nc_port_activation_src_hash(), (unsigned)act_n,
-                (unsigned)en, units);
+                (unsigned)en, units, (unsigned)s_cfg_fat_hash, s_cfg_fat_match);
     }
     const nc_state_boot_result_t *st = nc_state_boot_last();
     if (st != NULL) {
@@ -4051,6 +4057,30 @@ static esp_err_t ph_boot(void)
     return ESP_OK;
 }
 
+// build-time 預置（hardware.json＋driver.json）同 FAT 上實際 JSON 的 hash 比對。
+// 唔同 = 用戶現場改過 config：activation 表（生成期決定）唔會跟住變；
+// 要改 enable 就要 rebuild。呢個結果喺 status cfg 的 act.fat / act.match 見到。
+static void cfg_fat_hash_sync(void)
+{
+    static const char *const paths[] = {
+        "/data/config/hardware.json",
+        "/data/config/driver.json",
+    };
+    uint32_t h = 0;
+    if (nc_state_file_hash_files(paths, sizeof(paths) / sizeof(paths[0]), &h) != ESP_OK) {
+        s_cfg_fat_match = -1;
+        return;
+    }
+    s_cfg_fat_hash = h;
+    s_cfg_fat_match = (h == nc_port_config_hash()) ? 1 : 0;
+    if (s_cfg_fat_match == 0) {
+        ESP_LOGW(TAG, "config：FAT 的 hardware/driver.json 同 build-time 預置唔同"
+                      "（fat=0x%08x build=0x%08x）→ activation 表係舊 build；"
+                      "改 enable 要重 build，其餘值改完 reboot 生效",
+                 (unsigned)h, (unsigned)nc_port_config_hash());
+    }
+}
+
 // 開機階段：storage+cfg
 static esp_err_t ph_storage(void)
 {
@@ -4065,6 +4095,7 @@ static esp_err_t ph_storage(void)
     (void)nc_cfg_boot();    // 永遠成功：最差 = 全部用預設
     // 派生狀態快取：hash 對得上就 hit；唔對就由 config 重建（舊檔 → .bak）。
     (void)nc_state_boot_sync(NULL);
+    cfg_fat_hash_sync();
     // system.json 的 "log_debug_mode"：
     //   0 = 正常（INFO、2 KB、USB 起來之後開始記 → 看到服務/bus 啟動）
     //   1 = 除錯（全部等級、8 KB、第一行開始）

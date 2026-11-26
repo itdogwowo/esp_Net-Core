@@ -9844,3 +9844,24 @@ ncportgen 生成的 activation 表**直接編成 `nc_port.c` 的 const 表**，f
   ncportgen（0x014323ff）唔同——正常，兩者輸入唔同）；
   enabled units 一樣：`usb,i2c,i80,led`。
 - 同時 `state` 仍 hit=1（n=18、bytes=124）→ activation 表同 state 機制並存無衝突。
+
+### 7.283 2026-11-26（config hash 比對：FAT 同 build-time 預置一致性；status act.fat/match）
+
+用家：可以自己驗證的就繼續 → 加「FAT JSON 同 build-time 預置 hash 比對」，
+一眼睇到 activation 表係唔係對應目前 config（生成期 vs 現場改動）。
+
+**改動**
+- `ncportgen`：預置 JSON 文字先產生（同一份 bytes 寫檔＋計 hash）；
+  新增 `nc_port_config_hash()`（crc32("hardware.json\\0"+bytes) →
+  crc32("driver.json\\0"+bytes)，同 state 檔案層用同一條規則）。
+- `main.c`：B02 之後 `cfg_fat_hash_sync()` 用同一 hashing 讀 FAT 的
+  hardware.json／driver.json；唔同就 **大聲 warn**（activation 表係舊 build，
+  改 enable 要 rebuild；其他值改完 reboot 生效）。
+- `status cfg` 的 `act` 加 `"fat":<hash>,"match":0/1`。
+
+**驗證**（fw `e29ebbf-dirty`、app `edceb8aa`、idf=v6.1.1 WSL；host 24/24）
+- 未對齊時：`act.match=0`（fat≠build hash）→ 證實**發現到** FAT 係舊 preset；
+- 將 FAT 的 hardware.json（5,763 B）／driver.json（2,703 B）換成 build-time
+  preset 後 reboot：`act.match=1`（fat=2960301093）；
+- 之後 `state` 因 config 改變 miss→重建（正常）；再 reboot：hit=1。
+- 即係「FAT 最高權威」同「activation 生成期決定」兩件事都睇得到、唔會靜靜打架。
