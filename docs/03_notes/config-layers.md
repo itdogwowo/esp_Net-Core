@@ -669,3 +669,82 @@ DMA 大小（1600）與環數（16/16）**不在 config**——那是 build-time
 
 **每一層只讀自己的檔案、只用自己懂的欄位、缺檔就用預設。**
 中央不解析、不轉發、不幫別人驗證 —— 這樣任何一個檔壞掉，都只是那一層退化。
+
+---
+
+## 6. F.device 應用硬件層：舊 `mp_Net-Core/slave/config.json` 的裝置段搬去邊（2026-11-26）
+
+用家問題：「我只見到硬件（初次硬件），見唔到用硬件嘅嘢，例如 WS2812／PCA／SD。」
+答案：**嗰層已經存在**，叫 **F.device**（`ports/hardware/<chip>/<board>/driver.json`），
+入面已經有 TFT／APA102／PCA9685／PCM5102／GT1151Q／HUSB238／uartMotor／LED／USB；
+但**只有 `LED` 一段 firmware 真的有讀**（其餘聲明但未接 driver）。SD 則在 F.wiring 的
+`SDIO`／`SPI` 巴士上，未有獨立 device 段。
+
+### 6.1 舊 `slave/config.json` 24 個 section → 新位置（實測對照）
+
+| 舊 section（mp_Net-Core） | 新位置 | 現況 |
+|---|---|---|
+| `System`／`Buffer`／`CircuitDecode`／`Router` | `config/system.json`（F.live／F.preset） | ✅ 已 typed |
+| `Network` | `config/network.json` | ⚠️ 分段讀（wifi／net lines／raw／bt） |
+| `PIN`／`SPI`／`I2C`／`UART`／`PWM`／`I2S`／`I80`／`ENC` | `wiring.json`（F.wiring）→ `hardware.json` snapshot | ✅ PIN／SPI／UART／PWM／I80 已 typed；I2C／I2S／ENC 未型別化 |
+| `SDcard` | `wiring.json` 的 `SDIO`（bus）＋ **未有 sd device 段** | ⚠️ bus 有，device 未有 |
+| `TFT` | `driver.json` → `TFT`（`bus:{type:spi,i80}`＋`profile`＋`pins` label／xl9555 IO） | ❌ 聲明未實作 |
+| `WS2812`／`APA102` | `driver.json` → `LED`（backend／bus／lanes／px／format／timing） | ✅ **LED 已讀**（WS2812 via I80）；APA102 未實作 |
+| `PCA9685` | `driver.json` → `PCA9685`（`bus:{type:i2c}`＋`profile`） | ❌ 聲明未實作 |
+| `XL9555` | `driver.json` → TFT 的 `xl9555:{rst,bl}`（IO 編號） | ❌ 未實作 |
+| `GT1151Q`／`HUSB238`／`PCM5102`／`uartMotor` | `driver.json` 同名段 | ❌ 聲明未實作 |
+| `Audio` | `driver.json` → `Audio:{mode}` | ❌ 未實作 |
+
+### 6.2 三層設計語言（現時定案，維持）
+
+```text
+F.spec     board.json          硬件事實：chip/flash/PSRAM/CPU/console
+F.wiring   wiring.json         匯流排與腳位：SPI/I2C/UART/PWM/I2S/I80/SDIO/PIN/USB…
+F.device   driver.json         應用硬件（device）：WS2812/APA102/PCA9685/TFT/SD/XL9555/…
+                                每個 device 只寫 bus:{type,index}＋profile＋參數，
+                                **唔准寫腳位**（腳位只在 F.wiring）
+F.preset   data/config/*.json  出廠執行期設定（hardware/system/tasks/resources/network）
+F.live     /data/config/*.json 用戶執行期設定（最高優先）
+```
+
+規則（沿用 AGENTS §9）：**換咗要唔要重 build？** 要 → F.spec／F.wiring／F.device；
+唔要 → F.preset／F.live。
+
+### 6.3 現時缺口（用家見到「冇裝置」的真正原因）
+
+1. `hardware.json`（runtime）只 seed 匯流排段；**device 段唔會出現在 `/data/config`**，
+   所以由 USB 睇只見到「硬件」，見唔到 WS2812／PCA／SD。
+2. `driver.json` 其餘段冇 parser、冇 driver：**改了不會生效**（目前冇 log 提醒，
+   呢個係缺口——應該「明示未支援」而唔係靜靜唔理）。
+3. SDcard 只有 SDIO 巴士定義，未有 `sd` device 段（slot／寬度／掛載點／freq）。
+4. I2C／I2S／ENC／XL9555 四個 bus 段仍未 typed。
+
+### 6.4 建議（分兩步，第一步細）
+
+**第一步（建議即刻做，~0.5–1 h）**：唔改架構，只做兩件事——
+- `driver.json` 讀取時，對「聲明瞭 enable=1 但未有 driver」的 device **大聲 warn**（鐵律 9）；
+- `driver.json` 未實作段（TFT/PCA9685/…）在文件／`status` 明確標示「宣告 ≠ 生效」。
+
+**第二步（等硬件／等需要，估 1–2 日）**：新增 **runtime device 層**
+`/data/config/devices.json`（F.live）＋ `data/config/devices.json`（F.preset）：
+- 內容＝現時 `driver.json` 的 device 段（同名 schema，加 `version`）；
+- 由 `nc_cfg` 新 parser 讀（device registry），每個 device 按 `type` 找已註冊 driver；
+- 未實作 type → **明示失敗**（`err_device_unsupported`），唔會靜默；
+- 先接 `led`（WS2812 I80）做第一個 runtime device，再逐個接（SD／TFT／PCA9685…）；
+- `driver.json` 保留做 build-time 出廠預置（seed 一次），runtime 可覆蓋。
+
+**關鍵決定（要用家拍板）**：
+- (A) device 設定要唔要 runtime 可改？（要 → 做 `devices.json`；唔要 → 維持 `driver.json` build-time，只補 warn）
+- (B) `SD` 段寫在 device 層（建議）定維持只有 SDIO bus？
+- (C) device 命名跟舊專案（`WS2812`／`PCA9685`／`SDcard`）定新名（`led`／`pwm_io`／`sd`）？
+  建議：**舊名做 alias、新名做 canonical**（同 `effect`/`pair` 的 alias 做法一致）。
+
+### 6.5 工作量（若做第二步）
+
+| 工作 | 估時 |
+|---|---|
+| `devices.json` parser＋device registry skeleton＋status 顯示 | 3–4 h |
+| LED 由 build-time 搬去 runtime（render 讀 devices） | 1–2 h |
+| SD device（掛載／slot／寬度） | 0.5–1 日（要 SDIO driver 配合） |
+| TFT／PCA9685／XL9555／GT1151Q（各自 driver） | 各 0.5–2 日 |
+| 舊 `driver.json` → `devices.json` 遷移＋host test | 0.5 日 |
