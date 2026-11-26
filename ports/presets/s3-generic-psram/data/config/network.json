@@ -1,0 +1,15 @@
+{
+  "_comment": [
+    "中央示範（S3 通用）：network.json 只有 Wi-Fi（S3 沒有內建 ETH）。",
+    "build 閘：project 的 sdkconfig.defaults 要有 CONFIG_NETCORE_WIFI=y；冇編就只會 warn。",
+    "runtime 閘：enable=0 → 唔 esp_wifi_init、唔佔 runtime heap（flash／靜態照付）。"
+  ],
+  "version": 1,
+  "wifi": {
+    "enable": 0,
+    "ssid": "",
+    "ssid_pw": "",
+    "timeout_s": 60,
+    "mode": "sta"
+  }
+}

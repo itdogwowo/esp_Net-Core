@@ -149,6 +149,8 @@ state：  nc_state（RAM：id → value；schema 表查型別/範圍）
 ## 8. 唯一入口：schema registry（2026-11-26）
 
 **加／減能力只改一個地方**：`schema/state-keys.json`。
+（圖：[schema-registry.svg](../00_pm/schema-registry.svg)，由 `python3 tools/config_diagram.py` 生成；
+逐 key 一覽：[config-schema.md §1](../02_guides/config-schema.md)。）
 
 ```text
 schema/state-keys.json

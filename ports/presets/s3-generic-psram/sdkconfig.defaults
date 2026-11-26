@@ -1,0 +1,37 @@
+# 中央示範：ESP32-S3 通用（有 PSRAM）
+#
+# 這份是 **project 層**覆寫；硬體事實（flash 大小／CPU／crystal）仍然在
+# ports/hardware/<chip>/<board>/sdkconfig.defaults。用法見 README。
+#
+# 2026-11-26：改完這份一定要 `make.py build ... --fresh`；
+# 唔 --fresh 會沿用舊 sdkconfig（實際撞過：main stack 仍然 3,072 → 爆棧、USB 唔 enumerate）。
+
+# ── PSRAM：S3 模組最常見是 quad 80 MHz；N16R8 類請改 octal ──
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_QUAD=y
+CONFIG_SPIRAM_SPEED_80M=y
+
+# ── pixel 輸出（示範：2 lane × 256 px，WS2812 800 kHz）──
+# 腳位只在 hardware.json（I80.list[]）；這裡是「編進 firmware 的預設」，
+# runtime 可以用 /data/config/hardware.json 覆蓋。
+CONFIG_NETCORE_PIXEL=y
+CONFIG_NETCORE_PIXEL_LEDS=512
+CONFIG_NETCORE_PIXEL_FORMAT="ws2812"
+CONFIG_NETCORE_PIXEL_I80=y
+CONFIG_NETCORE_PIXEL_I80_DIRECT=y
+CONFIG_NETCORE_PIXEL_I80_PINS="14,15"
+CONFIG_NETCORE_PIXEL_I80_LANES=2
+CONFIG_NETCORE_PIXEL_PCLK_HZ=2500000
+CONFIG_NETCORE_PIXEL_BIT_CELLS=3
+CONFIG_NETCORE_PIXEL_T0H=1
+CONFIG_NETCORE_PIXEL_T1H=2
+CONFIG_NETCORE_PIXEL_DITHER=1
+CONFIG_NETCORE_PIXEL_DITHER_BITS=12
+
+# ── 大 buffer 放 PSRAM（冇 PSRAM 的板改 n；見姊妹版）──
+CONFIG_NETCORE_PIXEL_RING_PSRAM=y
+CONFIG_NETCORE_PIXEL_PACK_PSRAM=y
+
+# ── 生產者／內容管線（四層四任務）──
+# 冇 CONFIG_NETCORE_CONTENT 就只有輸出層，冇人生產值流 → 燈唔會更新。
+CONFIG_NETCORE_CONTENT=y

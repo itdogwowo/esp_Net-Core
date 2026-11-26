@@ -4,6 +4,8 @@
 > **放邊個檔 → 要 rebuild 定 reboot → 開機邊一步讀它 → 用咩驗證**。
 > 設計理由見 [config-layers.md](../03_notes/config-layers.md)；極限與代價見
 > [pixel-renderer.md §13](../03_notes/pixel-renderer.md)。
+> **可以設定什麼、範圍幾多、三種設定路徑** → [config-schema.md](config-schema.md)；
+> 開新 project 的起點 → [ports/presets/](../../ports/presets/README.md)。
 
 ---
 

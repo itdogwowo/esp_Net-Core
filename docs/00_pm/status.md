@@ -9964,3 +9964,42 @@ P3 進行中（RAM store＋driver 讀 state 已完成第一條；cfg 真正被�
 
 **未做**：`set` 只改 RAM（reboot 仍以 JSON 為權威）；schema 覆蓋 links／routes／tasks／
 resources 後才可以「hit 時 skip JSON parse」；`status schema` 逐 key 列表（工具用）未做。
+
+### 7.288 2026-11-26（config 行為圖＋「可以設定什麼」一頁＋中央示範設定 S3×2）
+
+用家：「畫圖或概念圖像我們的緩衝一樣描述現在的 config 行為，還有什麼 schema 可以設定什麼？
+怎樣設定？順便建立一個中央的示範設定，暫時只有 S3 所以 S3 通用的有 PSRAM 和沒有 PSRAM 兩個版本。」
+
+**做咗**
+- 兩張生成圖（`tools/config_diagram.py`，數字／key 由程式讀，改 code 重跑即可）：
+  * `docs/00_pm/config-layers.svg`：三來源（L0 硬體事實／build 預置／FAT live）→ B02
+    型別化 → cfg struct → 4 個消費者 → `state.ncst`＋RAM store＋`nc_state_api` →
+    底部「三種改法」（FAT／build／runtime set）＋權威鏈。
+  * `docs/00_pm/schema-registry.svg`：`schema/state-keys.json` → 生成器 → 三份 C 檔 →
+    查表／API；中間四個 unit 的 key 與範圍（直接由 schema 讀）＋讀寫語義／失敗碼；
+    底部三種設定路徑＋未入 schema 清單。
+  * PNG 版：`docs/assets/config-layers.png`、`docs/assets/schema-registry.png`。
+- 新指南 `docs/02_guides/config-schema.md`：
+  * §1 schema 覆蓋的 25 個 key（**由 `gen_state_keys.py --doc` 生成**，`--check` 驗同步；
+    run_all 會檢查，所以唔會同 schema 漂移）；
+  * §2 未入 schema 但可設的欄位（links／routes／tasks／resources／network／hardware 其餘段）；
+  * §3 三種設定路徑（FAT live／build 預置＋Kconfig／runtime API）同生效時機；
+  * §4 驗證清單（`status cfg` 的 state／act／schema 欄位）。
+- 中央示範設定 `ports/presets/`（唔綁板、唔參與 make.py 掃描）：
+  * `s3-generic-psram/`：2 lane × 256 px，環／packed 放 PSRAM；
+  * `s3-generic-nopsram/`：1 lane × 64 px，全部 internal（**未上板**：手頭冇冇-PSRAM S3 板）；
+  * 每個有 `sdkconfig.defaults`＋6 個 `data/config/*.json`＋README；頂層 README 有用法、
+    差異表、驗證步驟、登記表。
+- `tools/preset_check.py`：JSON 結構／version、schema 範圍（含 enum 寫名／index 兩種）、
+  四層四任務（level=4、affinity 剛好一個 1）、兩版差異；`run_all.sh` 開頭跑。
+- 文件：`docs/README.md`、`README.md`、`AGENTS.md` §3／§9／§17 加指針。
+
+**驗證**
+- `python3 tools/gen_state_keys.py --check` → schema／三份生成檔／doc 表同步（v2、25 key、4 unit、crc `0xf22a74f7`）。
+- `python3 tools/preset_check.py` → `preset_check OK：2 個 preset、25 個 schema key 對過範圍`；
+  兩版差異只有 4 個值（I80 data、num_pixels、LED.lanes、LED.px）。
+- `bash tools/hosttest/run_all.sh` → **25/25**（開頭兩個靜態 check 都過）。
+- 圖用 headless Chrome 出 PNG 目視檢查（兩張都冇截斷／重疊）。
+
+**未做**：兩份 preset 都未逐項上板（psram 版可套落現有 Matrix 驗，但會蓋走現有 project 設定）；
+`status schema` 逐 key 列表；schema 覆蓋 links／routes／tasks／resources。

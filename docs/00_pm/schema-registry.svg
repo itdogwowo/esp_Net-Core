@@ -1,0 +1,119 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1680" height="900" viewBox="0 0 1680 900" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif">
+<rect x="0.0" y="0.0" width="1680.0" height="900.0" rx="0" fill="#FBFAF6" stroke="#FBFAF6" stroke-width="0"/>
+<text x="44.0" y="52.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="25" font-weight="600" fill="#17191C" text-anchor="start">schema registry：一份 JSON 決定「可以設定什麼」，生成的表＋API 負責讀寫</text>
+<text x="44.0" y="78.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="12.5" font-weight="400" fill="#6E747B" text-anchor="start">schema/state-keys.json v2：25 個 key、4 個 unit。改能力只改這個檔 → 跑生成器 → rebuild；firmware 冇第二份名單。</text>
+<rect x="44.0" y="92.0" width="13.0" height="11.0" rx="3" fill="#F3EFF8" stroke="#B79BC9" stroke-width="1"/>
+<text x="63.0" y="102.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="10.5" font-weight="400" fill="#6E747B" text-anchor="start">schema 來源／生成物</text>
+<rect x="191.7" y="92.0" width="13.0" height="11.0" rx="3" fill="#EDF4EF" stroke="#94B7A2" stroke-width="1"/>
+<text x="210.7" y="102.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="10.5" font-weight="400" fill="#6E747B" text-anchor="start">runtime 表／API</text>
+<rect x="318.8" y="92.0" width="13.0" height="11.0" rx="3" fill="#F5F4EF" stroke="#BEB8A8" stroke-width="1"/>
+<text x="337.8" y="102.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="10.5" font-weight="400" fill="#6E747B" text-anchor="start">消費者</text>
+<rect x="395.3" y="92.0" width="13.0" height="11.0" rx="3" fill="#FBF3E6" stroke="#C9A227" stroke-width="1"/>
+<text x="414.3" y="102.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="10.5" font-weight="400" fill="#6E747B" text-anchor="start">未入 schema（仍然係 cfg struct）</text>
+<text x="44.0" y="120.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11.5" font-weight="600" fill="#6E747B" text-anchor="start">① 唯一來源 → 生成三份 C 檔</text>
+<rect x="44.0" y="132.0" width="420.0" height="104.0" rx="6" fill="#F3EFF8" stroke="#B79BC9" stroke-width="1.3"/>
+<text x="58.0" y="155.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="12.5" font-weight="700" fill="#17191C" text-anchor="start">schema/state-keys.json</text>
+<text x="58.0" y="176.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="10.5" font-weight="400" fill="#3D4247" text-anchor="start">每個 key：id／unit／type／min／max／enum／path</text>
+<text x="58.0" y="191.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="10.5" font-weight="400" fill="#3D4247" text-anchor="start">生成器驗：unit nibble、範圍、enum 連續、id／名重複</text>
+<line x1="254.0" y1="236.0" x2="254.0" y2="266.0" stroke="#9AA0A6" stroke-width="1.4"/>
+<path d="M 250.0 265.0 L 254.0 271.0 L 258.0 265.0" fill="none" stroke="#9AA0A6" stroke-width="1.4"/>
+<rect x="44.0" y="272.0" width="420.0" height="84.0" rx="6" fill="#F3EFF8" stroke="#B79BC9" stroke-width="1.3"/>
+<text x="58.0" y="295.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="12.5" font-weight="700" fill="#17191C" text-anchor="start">tools/gen_state_keys.py</text>
+<text x="58.0" y="316.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="10.5" font-weight="400" fill="#3D4247" text-anchor="start">無參數 → 寫三份檔；--check → 驗同步（run_all 開頭跑）</text>
+<line x1="254.0" y1="356.0" x2="254.0" y2="386.0" stroke="#9AA0A6" stroke-width="1.4"/>
+<path d="M 250.0 385.0 L 254.0 391.0 L 258.0 385.0" fill="none" stroke="#9AA0A6" stroke-width="1.4"/>
+<rect x="44.0" y="392.0" width="420.0" height="70.0" rx="6" fill="#F3EFF8" stroke="#B79BC9" stroke-width="1.3"/>
+<text x="58.0" y="415.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="12.5" font-weight="700" fill="#17191C" text-anchor="start">nc_state_keys.h</text>
+<text x="58.0" y="436.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="10.5" font-weight="400" fill="#3D4247" text-anchor="start">id ＋ NC_UNIT_*（C 名）</text>
+<rect x="44.0" y="474.0" width="420.0" height="70.0" rx="6" fill="#F3EFF8" stroke="#B79BC9" stroke-width="1.3"/>
+<text x="58.0" y="497.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="12.5" font-weight="700" fill="#17191C" text-anchor="start">nc_state_schema_data.[ch]</text>
+<text x="58.0" y="518.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="10.5" font-weight="400" fill="#3D4247" text-anchor="start">runtime 表：型別／min／max／enum／path</text>
+<rect x="44.0" y="556.0" width="420.0" height="70.0" rx="6" fill="#EDF4EF" stroke="#94B7A2" stroke-width="1.3"/>
+<text x="58.0" y="579.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="12.5" font-weight="700" fill="#17191C" text-anchor="start">nc_state_schema + nc_state_api</text>
+<text x="58.0" y="600.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="10.5" font-weight="400" fill="#3D4247" text-anchor="start">查表／驗範圍；get_*／set_*</text>
+<text x="504.0" y="120.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11.5" font-weight="600" fill="#6E747B" text-anchor="start">② 可以設定什麼（直接由 schema 生成，唔會漂移）</text>
+<rect x="504.0" y="132.0" width="372.0" height="150.0" rx="6" fill="#FFFFFF" stroke="#BEB8A8" stroke-width="1.2"/>
+<text x="516.0" y="154.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="12.5" font-weight="700" fill="#17191C" text-anchor="start">sys（3 key）</text>
+<text x="516.0" y="172.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="10" font-weight="400" fill="#6E747B" text-anchor="start">系統層（system.json）</text>
+<text x="516.0" y="192.0" font-family="'Cascadia Mono','Consolas','SF Mono',monospace" font-size="10.5" font-weight="600" fill="#3D4247" text-anchor="start">SYS_FRAME_MS</text>
+<text x="706.0" y="192.0" font-family="'Cascadia Mono','Consolas','SF Mono',monospace" font-size="10" font-weight="400" fill="#6E747B" text-anchor="start">1..1000</text>
+<text x="516.0" y="209.0" font-family="'Cascadia Mono','Consolas','SF Mono',monospace" font-size="10.5" font-weight="600" fill="#3D4247" text-anchor="start">SYS_NUM_PIXELS</text>
+<text x="706.0" y="209.0" font-family="'Cascadia Mono','Consolas','SF Mono',monospace" font-size="10" font-weight="400" fill="#6E747B" text-anchor="start">0..65535</text>
+<text x="516.0" y="226.0" font-family="'Cascadia Mono','Consolas','SF Mono',monospace" font-size="10.5" font-weight="600" fill="#3D4247" text-anchor="start">SYS_LOG_DEBUG</text>
+<text x="706.0" y="226.0" font-family="'Cascadia Mono','Consolas','SF Mono',monospace" font-size="10" font-weight="400" fill="#6E747B" text-anchor="start">0..1</text>
+<rect x="892.0" y="132.0" width="372.0" height="150.0" rx="6" fill="#FFFFFF" stroke="#BEB8A8" stroke-width="1.2"/>
+<text x="904.0" y="154.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="12.5" font-weight="700" fill="#17191C" text-anchor="start">i80（5 key）</text>
+<text x="904.0" y="172.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="10" font-weight="400" fill="#6E747B" text-anchor="start">I80／LCD_CAM 匯流排（hardware.json）</text>
+<text x="904.0" y="192.0" font-family="'Cascadia Mono','Consolas','SF Mono',monospace" font-size="10.5" font-weight="600" fill="#3D4247" text-anchor="start">I80_COUNT</text>
+<text x="1094.0" y="192.0" font-family="'Cascadia Mono','Consolas','SF Mono',monospace" font-size="10" font-weight="400" fill="#6E747B" text-anchor="start">0..16</text>
+<text x="904.0" y="209.0" font-family="'Cascadia Mono','Consolas','SF Mono',monospace" font-size="10.5" font-weight="600" fill="#3D4247" text-anchor="start">I80_WR</text>
+<text x="1094.0" y="209.0" font-family="'Cascadia Mono','Consolas','SF Mono',monospace" font-size="10" font-weight="400" fill="#6E747B" text-anchor="start">-1..54</text>
+<text x="904.0" y="226.0" font-family="'Cascadia Mono','Consolas','SF Mono',monospace" font-size="10.5" font-weight="600" fill="#3D4247" text-anchor="start">I80_DC</text>
+<text x="1094.0" y="226.0" font-family="'Cascadia Mono','Consolas','SF Mono',monospace" font-size="10" font-weight="400" fill="#6E747B" text-anchor="start">-1..54</text>
+<text x="904.0" y="243.0" font-family="'Cascadia Mono','Consolas','SF Mono',monospace" font-size="10.5" font-weight="600" fill="#3D4247" text-anchor="start">I80_CS</text>
+<text x="1094.0" y="243.0" font-family="'Cascadia Mono','Consolas','SF Mono',monospace" font-size="10" font-weight="400" fill="#6E747B" text-anchor="start">-1..54</text>
+<text x="904.0" y="260.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="10" font-weight="400" fill="#9AA0A6" text-anchor="start">… 其餘 1 個</text>
+<rect x="504.0" y="298.0" width="372.0" height="150.0" rx="6" fill="#FFFFFF" stroke="#BEB8A8" stroke-width="1.2"/>
+<text x="516.0" y="320.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="12.5" font-weight="700" fill="#17191C" text-anchor="start">spi（7 key）</text>
+<text x="516.0" y="338.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="10" font-weight="400" fill="#6E747B" text-anchor="start">SPI 匯流排（hardware.json）</text>
+<text x="516.0" y="358.0" font-family="'Cascadia Mono','Consolas','SF Mono',monospace" font-size="10.5" font-weight="600" fill="#3D4247" text-anchor="start">SPI_ENABLE</text>
+<text x="706.0" y="358.0" font-family="'Cascadia Mono','Consolas','SF Mono',monospace" font-size="10" font-weight="400" fill="#6E747B" text-anchor="start">0..1</text>
+<text x="516.0" y="375.0" font-family="'Cascadia Mono','Consolas','SF Mono',monospace" font-size="10.5" font-weight="600" fill="#3D4247" text-anchor="start">SPI_BAUD</text>
+<text x="706.0" y="375.0" font-family="'Cascadia Mono','Consolas','SF Mono',monospace" font-size="10" font-weight="400" fill="#6E747B" text-anchor="start">100000..80000000</text>
+<text x="516.0" y="392.0" font-family="'Cascadia Mono','Consolas','SF Mono',monospace" font-size="10.5" font-weight="600" fill="#3D4247" text-anchor="start">SPI_PHASE</text>
+<text x="706.0" y="392.0" font-family="'Cascadia Mono','Consolas','SF Mono',monospace" font-size="10" font-weight="400" fill="#6E747B" text-anchor="start">0..1</text>
+<text x="516.0" y="409.0" font-family="'Cascadia Mono','Consolas','SF Mono',monospace" font-size="10.5" font-weight="600" fill="#3D4247" text-anchor="start">SPI_POL</text>
+<text x="706.0" y="409.0" font-family="'Cascadia Mono','Consolas','SF Mono',monospace" font-size="10" font-weight="400" fill="#6E747B" text-anchor="start">0..1</text>
+<text x="516.0" y="426.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="10" font-weight="400" fill="#9AA0A6" text-anchor="start">… 其餘 3 個</text>
+<rect x="892.0" y="298.0" width="372.0" height="150.0" rx="6" fill="#FFFFFF" stroke="#BEB8A8" stroke-width="1.2"/>
+<text x="904.0" y="320.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="12.5" font-weight="700" fill="#17191C" text-anchor="start">led（10 key）</text>
+<text x="904.0" y="338.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="10" font-weight="400" fill="#6E747B" text-anchor="start">燈鏈（driver.json 的 LED 段）</text>
+<text x="904.0" y="358.0" font-family="'Cascadia Mono','Consolas','SF Mono',monospace" font-size="10.5" font-weight="600" fill="#3D4247" text-anchor="start">LED_ENABLE</text>
+<text x="1094.0" y="358.0" font-family="'Cascadia Mono','Consolas','SF Mono',monospace" font-size="10" font-weight="400" fill="#6E747B" text-anchor="start">0..1</text>
+<text x="904.0" y="375.0" font-family="'Cascadia Mono','Consolas','SF Mono',monospace" font-size="10.5" font-weight="600" fill="#3D4247" text-anchor="start">LED_BACKEND</text>
+<text x="1094.0" y="375.0" font-family="'Cascadia Mono','Consolas','SF Mono',monospace" font-size="10" font-weight="400" fill="#6E747B" text-anchor="start">enum 7 值（none…mock）</text>
+<text x="904.0" y="392.0" font-family="'Cascadia Mono','Consolas','SF Mono',monospace" font-size="10.5" font-weight="600" fill="#3D4247" text-anchor="start">LED_BUS</text>
+<text x="1094.0" y="392.0" font-family="'Cascadia Mono','Consolas','SF Mono',monospace" font-size="10" font-weight="400" fill="#6E747B" text-anchor="start">-1..15</text>
+<text x="904.0" y="409.0" font-family="'Cascadia Mono','Consolas','SF Mono',monospace" font-size="10.5" font-weight="600" fill="#3D4247" text-anchor="start">LED_LANES</text>
+<text x="1094.0" y="409.0" font-family="'Cascadia Mono','Consolas','SF Mono',monospace" font-size="10" font-weight="400" fill="#6E747B" text-anchor="start">1..16</text>
+<text x="904.0" y="426.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="10" font-weight="400" fill="#9AA0A6" text-anchor="start">… 其餘 6 個</text>
+<text x="1304.0" y="120.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11.5" font-weight="600" fill="#6E747B" text-anchor="start">③ 誰在讀寫</text>
+<rect x="1304.0" y="132.0" width="332.0" height="76.0" rx="6" fill="#F5F4EF" stroke="#BEB8A8" stroke-width="1.3"/>
+<text x="1318.0" y="155.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="12.5" font-weight="700" fill="#17191C" text-anchor="start">render_task（LED）</text>
+<text x="1318.0" y="176.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="10.5" font-weight="400" fill="#3D4247" text-anchor="start">10 個 LED key：先 cfg，再用 state 覆寫</text>
+<rect x="1304.0" y="220.0" width="332.0" height="76.0" rx="6" fill="#F5F4EF" stroke="#BEB8A8" stroke-width="1.3"/>
+<text x="1318.0" y="243.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="12.5" font-weight="700" fill="#17191C" text-anchor="start">boot 對拍</text>
+<text x="1318.0" y="264.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="10.5" font-weight="400" fill="#3D4247" text-anchor="start">每筆 record 對 schema；bad≠0 = code／schema drift</text>
+<rect x="1304.0" y="308.0" width="332.0" height="76.0" rx="6" fill="#F5F4EF" stroke="#BEB8A8" stroke-width="1.3"/>
+<text x="1318.0" y="331.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="12.5" font-weight="700" fill="#17191C" text-anchor="start">status cfg</text>
+<text x="1318.0" y="352.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="10.5" font-weight="400" fill="#3D4247" text-anchor="start">{ver,crc,keys:25,units:4,bad,dirty}</text>
+<rect x="1304.0" y="396.0" width="332.0" height="76.0" rx="6" fill="#F5F4EF" stroke="#BEB8A8" stroke-width="1.3"/>
+<text x="1318.0" y="419.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="12.5" font-weight="700" fill="#17191C" text-anchor="start">host test</text>
+<text x="1318.0" y="440.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="10.5" font-weight="400" fill="#3D4247" text-anchor="start">stateSchema_test：查表／型別／範圍／enum／讀寫</text>
+<rect x="1304.0" y="484.0" width="332.0" height="76.0" rx="6" fill="#F5F4EF" stroke="#BEB8A8" stroke-width="1.3"/>
+<text x="1318.0" y="507.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="12.5" font-weight="700" fill="#17191C" text-anchor="start">config UI（未來）</text>
+<text x="1318.0" y="528.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="10.5" font-weight="400" fill="#3D4247" text-anchor="start">查 nc_state_key(id) 拿型別／範圍再顯示</text>
+<rect x="504.0" y="470.0" width="760.0" height="168.0" rx="6" fill="#FFFFFF" stroke="#94B7A2" stroke-width="1.2"/>
+<text x="518.0" y="496.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="12.5" font-weight="700" fill="#17191C" text-anchor="start">nc_state_api：讀寫的唯一入口（型別／範圍由 schema 決定）</text>
+<text x="518.0" y="518.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="10.5" font-weight="400" fill="#3D4247" text-anchor="start">get_u32／i32／bool／str：schema 型別對唔上、sparse 冇值 → false（呼叫端保留自己的預設）</text>
+<text x="518.0" y="538.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="10.5" font-weight="400" fill="#3D4247" text-anchor="start">set_u32／i32／bool／str：先驗型別＋範圍＋enum＋str 長度；成功改 RAM store＋dirty</text>
+<text x="518.0" y="558.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="10.5" font-weight="400" fill="#3D4247" text-anchor="start">失敗碼（明示，唔靜默截斷）：unknown_key／wrong_type／out_of_range／not_ready／no_space</text>
+<text x="518.0" y="578.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="10.5" font-weight="400" fill="#6E747B" text-anchor="start">持久化：唔會自動寫盤；reboot 由 /data/config/*.json 重算（L1 仍然最高權威）</text>
+<rect x="518.0" y="598.0" width="486.0" height="26.0" rx="6" fill="#EDF4EF" stroke="#94B7A2" stroke-width="1"/>
+<text x="528.0" y="615.0" font-family="'Cascadia Mono','Consolas','SF Mono',monospace" font-size="10" font-weight="600" fill="#3D4247" text-anchor="start">status cfg → "schema":{"ver":2,"crc":…,"keys":25,"units":4,"bad":0,"dirty":0}</text>
+<text x="44.0" y="690.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11.5" font-weight="600" fill="#6E747B" text-anchor="start">④ 怎樣設定（同圖 A 對應）</text>
+<rect x="44.0" y="700.0" width="517.3" height="92.0" rx="6" fill="#EAF1F7" stroke="#8FB0CB" stroke-width="1.3"/>
+<text x="58.0" y="723.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="12.5" font-weight="700" fill="#17191C" text-anchor="start">FAT JSON（最高權威）</text>
+<text x="58.0" y="744.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="10.5" font-weight="400" fill="#3D4247" text-anchor="start">/data/config/*.json 改值 → reboot</text>
+<text x="58.0" y="759.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="10.5" font-weight="400" fill="#3D4247" text-anchor="start">driver 由 state 讀，cfg 由 JSON 來</text>
+<rect x="581.3" y="700.0" width="517.3" height="92.0" rx="6" fill="#FBF3E6" stroke="#C9A227" stroke-width="1.3"/>
+<text x="595.3" y="723.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="12.5" font-weight="700" fill="#17191C" text-anchor="start">build 預置／Kconfig</text>
+<text x="595.3" y="744.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="10.5" font-weight="400" fill="#3D4247" text-anchor="start">ports/project/.../data/config／sdkconfig.defaults</text>
+<text x="595.3" y="759.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="10.5" font-weight="400" fill="#3D4247" text-anchor="start">rebuild（--fresh）；再 seed 才上板</text>
+<rect x="1118.7" y="700.0" width="517.3" height="92.0" rx="6" fill="#EDF4EF" stroke="#94B7A2" stroke-width="1.3"/>
+<text x="1132.7" y="723.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="12.5" font-weight="700" fill="#17191C" text-anchor="start">runtime API（RAM）</text>
+<text x="1132.7" y="744.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="10.5" font-weight="400" fill="#3D4247" text-anchor="start">nc_state_set_*：驗 schema、改 RAM＋dirty</text>
+<text x="1132.7" y="759.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="10.5" font-weight="400" fill="#3D4247" text-anchor="start">reboot 仍然以 JSON 為權威</text>
+<text x="44.0" y="812.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="10.5" font-weight="400" fill="#6E747B" text-anchor="start">schema 未覆蓋（仍然係 cfg struct，改完 reboot 生效）：links／routes（system.json）、tasks level／affinity（tasks.json）、resources、ETH／SDIO／PIN／PWM／UART（hardware.json）。</text>
+<text x="44.0" y="834.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="10.5" font-weight="400" fill="#6E747B" text-anchor="start">加一個 key：schema json 加一行 → gen_state_keys.py → rebuild；boot 要寫入就 nc_state_boot.c 的 build_records() 加一行取值。</text>
+</svg>

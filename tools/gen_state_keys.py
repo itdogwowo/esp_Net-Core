@@ -29,6 +29,9 @@ SRC = ROOT / "firmware/components/sys/state"
 F_KEYS = INC / "nc_state_keys.h"
 F_DATA_H = INC / "nc_state_schema_data.h"
 F_DATA_C = SRC / "nc_state_schema_data.c"
+DOC = ROOT / "docs/02_guides/config-schema.md"
+DOC_BEGIN = "<!-- BEGIN GENERATED: schema -->"
+DOC_END = "<!-- END GENERATED: schema -->"
 
 # schema type → (blob type, C 型別範圍, 預設 min/max)
 # blob type 要同 nc_state_blob.h 的 nc_state_type_t 一致。
@@ -299,9 +302,56 @@ def render_data_c(schema: dict) -> str:
     return "\n".join(lines)
 
 
+def _value_text(k: dict) -> str:
+    typ = k["type"]
+    if typ == "enum":
+        return "enum：" + "／".join(k["values"])
+    if typ == "str":
+        return f"≤ {k['max_len']} 字"
+    if k["min"] == k["max"]:
+        return str(k["min"])
+    return f"{k['min']}..{k['max']}"
+
+
+def render_doc_block(schema: dict) -> str:
+    """docs/02_guides/config-schema.md 的生成區塊（key 一覽表）。"""
+    units = {u["id"]: u["name"] for u in schema["units"]}
+    per: dict[str, int] = {}
+    for k in schema["keys"]:
+        per[units[k["unit"]]] = per.get(units[k["unit"]], 0) + 1
+    summary = "／".join(f"{name} {per.get(name, 0)}" for name in units.values())
+    lines = [
+        DOC_BEGIN,
+        f"**現時：schema v{schema['version']}、{len(schema['keys'])} 個 key、"
+        f"{len(schema['units'])} 個 unit（{summary}）**",
+        "",
+        "| unit | key（C 名） | type | 可接受值 | config 路徑（人讀） | 生效 |",
+        "|---|---|---|---|---|---|",
+    ]
+    for k in schema["keys"]:
+        path = f"`{k['path']}`" if k["path"] else "—"
+        lines.append(
+            f"| {units[k['unit']]} | `{k['name']}` | {k['type']} | {_value_text(k)} | {path} | reboot |"
+        )
+    lines += ["", "> 「生效」全部係 reboot：B02 由 JSON 重算 cfg → state.ncst；"
+                  "runtime `nc_state_set_*` 只改 RAM（見 §3）。", DOC_END]
+    return "\n".join(lines)
+
+
+def apply_doc_block(text: str, block: str) -> str:
+    i = text.find(DOC_BEGIN)
+    j = text.find(DOC_END)
+    if i < 0 or j < 0 or j < i:
+        raise SystemExit(f"{DOC.relative_to(ROOT)} 缺少生成區塊標記 "
+                         f"（{DOC_BEGIN} … {DOC_END}）")
+    return text[:i] + block + text[j + len(DOC_END):]
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--check", action="store_true")
+    ap.add_argument("--doc", action="store_true",
+                    help="只更新 docs/02_guides/config-schema.md 的生成區塊")
     args = ap.parse_args()
 
     schema = load_schema()
@@ -312,6 +362,8 @@ def main() -> int:
         F_DATA_C: render_data_c(schema),
     }
 
+    doc_block = render_doc_block(schema) if DOC.is_file() else None
+
     if args.check:
         bad = 0
         for path, text in outs.items():
@@ -320,15 +372,34 @@ def main() -> int:
                 print(f"✘ {path.relative_to(ROOT)} 同 schema 唔同步；"
                       f"跑 python3 tools/gen_state_keys.py", file=sys.stderr)
                 bad += 1
+        if DOC.is_file():
+            want = apply_doc_block(DOC.read_text(encoding="utf-8"), doc_block)
+            if DOC.read_text(encoding="utf-8").replace("\r\n", "\n") != want:
+                print(f"✘ {DOC.relative_to(ROOT)} 的生成區塊同 schema 唔同步；"
+                      f"跑 python3 tools/gen_state_keys.py --doc", file=sys.stderr)
+                bad += 1
         if bad:
             return 1
         print(f"state schema OK（v{schema['version']}、{len(schema['keys'])} key、"
-              f"{len(schema['units'])} unit、crc=0x{crc:08x}）")
+              f"{len(schema['units'])} unit、crc=0x{crc:08x}、doc 同步）")
+        return 0
+
+    if args.doc:
+        if doc_block is None:
+            print(f"✘ 找唔到 {DOC.relative_to(ROOT)}", file=sys.stderr)
+            return 1
+        cur = DOC.read_text(encoding="utf-8")
+        DOC.write_text(apply_doc_block(cur, doc_block), encoding="utf-8", newline="\n")
+        print(f"wrote {DOC.relative_to(ROOT)}（生成區塊）")
         return 0
 
     for path, text in outs.items():
         path.write_text(text, encoding="utf-8", newline="\n")
-    print(f"wrote 3 files（v{schema['version']}、{len(schema['keys'])} key、"
+    if doc_block is not None:
+        cur = DOC.read_text(encoding="utf-8")
+        DOC.write_text(apply_doc_block(cur, doc_block), encoding="utf-8", newline="\n")
+    print(f"wrote 3 files{' + doc' if doc_block else ''}"
+          f"（v{schema['version']}、{len(schema['keys'])} key、"
           f"{len(schema['units'])} unit、crc=0x{crc:08x}）")
     return 0
 

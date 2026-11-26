@@ -4,7 +4,7 @@
 > 這個專案，**先由頭讀到落尾**，再開始改任何東西。細節文件在 `docs/`，但方向、鐵律、
 > 工作流程、最常踩的坑全部在這一份。
 >
-> **最後更新**：2026-11-26（schema registry：加／減能力改一個 JSON；host test 25 支；OTA 後唔開機要先查 `--fresh`）
+> **最後更新**：2026-11-26（schema registry＋config 圖／示範設定 `ports/presets`；host test 25 支；`--fresh` 陷阱）
 > **維護規則**：每次架構／流程／工具改變，先改這份；過期內容直接覆蓋，唔好累積兩套講法。
 
 ---
@@ -387,6 +387,7 @@ esp_Net-Core/
 ├─ ports/
 │  ├─ hardware/<chip>/<board>/   board.json／wiring.json／driver.json／sdkconfig
 │  ├─ project/<chip>/<board>/    project.json＋data/config＋data/pixel
+│  ├─ presets/                   中央示範設定（唔綁板；暫時 S3 有／冇 PSRAM 兩版）
 │  └─ _profiles/                 能力碎片（eth-rmii、nc4-ws…）
 ├─ tools/                    主機工具（nc4.py、ota.py、layout_bench.py、hosttest/…）
 ├─ web_tools/                ESP WebMaster（REST／WS／檔案／OTA）
@@ -638,6 +639,11 @@ python3 tools/ota.py --port /dev/cu.usbmodemXXXX \
   2026-11-26）。加／減能力＝改呢個 JSON＋跑 `python3 tools/gen_state_keys.py`；
   firmware 經 `nc_state_schema`／`nc_state_api` 查表、驗證、讀寫，見
   [`state-schema.md`](docs/03_notes/state-schema.md) §8。
+- **可以設定什麼＝一份表**：`docs/02_guides/config-schema.md`（key 一覽由
+  `schema/state-keys.json` 生成）＋圖 [`config-layers.svg`](docs/00_pm/config-layers.svg)／
+  [`schema-registry.svg`](docs/00_pm/schema-registry.svg)（`python3 tools/config_diagram.py`）。
+  開新 project 由 [`ports/presets/`](ports/presets/README.md) 起步；
+  `python3 tools/preset_check.py` 驗 JSON／schema 範圍（run_all 開頭也跑）。
 - `driver.json` **只有 `LED` 段會被讀**（build 時 `ncportgen` → `nc_led_cfg_t`）；
   其餘段（TFT／SDcard／PCA9685…）仍然冇人讀。規矩：**driver 層唔准寫腳位**，
   腳位只在 hardware 層；`driver.json` 用 `bus:{type,index}` 引用。
@@ -1023,6 +1029,7 @@ commit message 說明。
 | 2026-11-26 | **狀態格式統一 [`NCSTATE`](docs/03_notes/state-storage-format.md)**：唯一狀態格式（header 26 B＋自描述 record type/key/len/value）＋pixel 例外 `.layout`（magic `NCLAYOUT`）；新增 host test `stateBlob_test`（round-trip、CRC、未知 type 跳過），host test 21→22 支 | lead（AI） |
 | 2026-11-26 | **統一狀態系統（NCSTATE）整理＋總結**：`state.ncst`（唯一狀態格式、自描述、sparse、src_hash／CRC、`.bak`）、RAM store＋對拍 self-heal、render LED 由 state 讀值、生成期 activation const 表、FAT config hash 比對、開機量測（cfg 30.1 ms／state hit 8.2 ms／寫檔 762 ms→值一樣唔寫）；總結見 [`state-system.md`](docs/03_notes/state-system.md) | lead（AI） |
 | 2026-11-26 | **schema registry（一個位置讀寫 schema）**：`schema/state-keys.json` v2（units＋type／min／max／enum／max_len）→ 生成器出 `nc_state_keys.h`／`nc_state_schema_data.[ch]`；新增 `nc_state_schema`（查表／驗證）／`nc_state_api`（get／set，取代 `nc_state_read`）；boot 對 schema 驗 records（`status cfg.schema.bad`）；host test 25 支。實測 `schema {ver:2,crc:4062868727,keys:25,units:4,bad:0}`。同一日撞到「舊 sdkconfig → main stack 3,072 → 爆棧唔開機」，排查表加一行 | lead（AI） |
+| 2026-11-26 | **config 行為可視化＋中央示範設定**：新增 `tools/config_diagram.py` → `docs/00_pm/config-layers.svg`（三來源→B02→cfg→消費者→state 快取→三種改法）／`schema-registry.svg`（一個 JSON→生成表／API，讀 schema 生成）；新增 `docs/02_guides/config-schema.md`（key 一覽由 `gen_state_keys.py --doc` 生成、`--check` 驗同步）；新增 `ports/presets/s3-generic-{psram,nopsram}/`＋`tools/preset_check.py`（JSON／schema 範圍／四層四任務，run_all 開頭跑） | lead（AI） |
 | 2026-11-26 | **Windows 主機的 bash 陷阱**：`make.py`／`doctor` 用 `bash -c` 傳 `C:\…` 路徑，Git Bash 同 WSL bash 都會失敗（doctor 的 board check 會假報 FAIL）。§0.5 新增一節講點判斷、建置改在 WSL 內跑（`bash -lc 'cd /mnt/c/… && IDF_PATH=/home/user/esp/esp-idf python3 make.py …'`）、OTA／NC4 留在 Windows 側。同時記錄 Matrix-LED-Textkit 全面 JSON 化（見 status §7.253） | lead（AI） |
 
 ---

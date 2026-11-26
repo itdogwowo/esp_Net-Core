@@ -1,0 +1,76 @@
+{
+  "_comment": [
+    "中央示範（S3 通用，冇 PSRAM）：hardware.json = 腳位與週邊事實。",
+    "這份是 **runtime 可改** 的鏡像；build 時真正的出廠預設是 ncport.c（由 wiring.json 生成）。",
+    "示範用 1 lane × 64 px、資料腳 GPIO14 —— 換你的板就改 I80.list[0].data。",
+    "未 typed 的段（I2C／I2S／ENC／XL9555）改咗唔會生效，先問 driver 實作。"
+  ],
+  "version": 1,
+  "_gpio_convention": "-1 = 未設定／不啟用；null = 沒接這條線（寫 -1 會變成 Pin(-1)）。",
+  "ETH": {
+    "enable": 0,
+    "driver": "rmii",
+    "phy_type": "IP101",
+    "phy_addr": 1,
+    "GPIO": {
+      "mdc": -1,
+      "mdio": -1,
+      "ref_clk": -1,
+      "spi": -1,
+      "cs": -1,
+      "rst": -1,
+      "int": -1
+    }
+  },
+  "PIN": {
+    "enable": 0,
+    "list": []
+  },
+  "PWM": {
+    "enable": 0,
+    "list": []
+  },
+  "UART": {
+    "enable": 0,
+    "list": []
+  },
+  "SDIO": {
+    "enable": 0,
+    "list": []
+  },
+  "SPI": {
+    "enable": 0,
+    "list": []
+  },
+  "I80": {
+    "_comment": [
+      "送燈走 LCD_CAM（8080）。data 元素 >=0 = 真的接燈；-1 或省略 = 未用。",
+      "直驅版（CONFIG_NETCORE_PIXEL_I80_DIRECT=y）只 route 有效腳；",
+      "esp_lcd 版需要 8/16 data＋wr＋dc，解析層會由安全池補。",
+      "freq 是面板意義的 PCLK；送燈 PCLK 由 driver.json 的 LED.timing 給。"
+    ],
+    "enable": 1,
+    "list": [
+      {
+        "data": [
+          14
+        ],
+        "freq": 80000000
+      }
+    ]
+  },
+  "USB": {
+    "_comment": "S3：USB D-/D+ = GPIO19/20；phy 二選一（otg-fs / usj-fs）。",
+    "enable": 1,
+    "list": [
+      {
+        "phy": "otg-fs",
+        "enable": 1,
+        "GPIO": {
+          "dm": 19,
+          "dp": 20
+        }
+      }
+    ]
+  }
+}

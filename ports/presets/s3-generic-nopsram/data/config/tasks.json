@@ -1,0 +1,44 @@
+{
+  "_comment": [
+    "中央示範（S3 通用，冇 PSRAM）：tasks.json 只管租戶（核心任務唔受管）。",
+    "四層四任務：pixel_effect（core0）→ paint（core1）→ encode（core1）→ render（core1）。",
+    "render 係公用輸出層，order 10 先 on_start（建立環／lane／節拍）。",
+    "level=-1 = 唔開；affinity [0,0] = on_start 照跑、loop 唔開。",
+    "少一條都唔會點燈（環／解碼／推送三段斷一截）。"
+  ],
+  "version": 1,
+  "tasks": [
+    {
+      "name": "render",
+      "level": 4,
+      "affinity": [
+        0,
+        1
+      ]
+    },
+    {
+      "name": "pixel_encode_task",
+      "level": 4,
+      "affinity": [
+        0,
+        1
+      ]
+    },
+    {
+      "name": "pixel_paint_task",
+      "level": 4,
+      "affinity": [
+        0,
+        1
+      ]
+    },
+    {
+      "name": "pixel_effect_task",
+      "level": 4,
+      "affinity": [
+        1,
+        0
+      ]
+    }
+  ]
+}

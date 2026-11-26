@@ -1,0 +1,154 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1680" height="1030" viewBox="0 0 1680 1030" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif">
+<rect x="0.0" y="0.0" width="1680.0" height="1030.0" rx="0" fill="#FBFAF6" stroke="#FBFAF6" stroke-width="0"/>
+<text x="44.0" y="52.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="25" font-weight="600" fill="#17191C" text-anchor="start">設定從哪裡來、哪一步生效：build 事實 → 預置 → FAT live → cfg → state 快取</text>
+<text x="44.0" y="78.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="12.5" font-weight="400" fill="#6E747B" text-anchor="start">顏色 = 這層幾時定；箭頭 = 資料流；虛線 = 只在某個條件下走。最右的 FAT live 永遠最高權威，state.ncst 只是快取。</text>
+<rect x="44.0" y="92.0" width="13.0" height="11.0" rx="3" fill="#F3EFF8" stroke="#B79BC9" stroke-width="1"/>
+<text x="63.0" y="102.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="10.5" font-weight="400" fill="#6E747B" text-anchor="start">build 層（L0：改它要 rebuild）</text>
+<rect x="237.7" y="92.0" width="13.0" height="11.0" rx="3" fill="#EAF1F7" stroke="#8FB0CB" stroke-width="1"/>
+<text x="256.7" y="102.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="10.5" font-weight="400" fill="#6E747B" text-anchor="start">FAT live（L1：改完 reboot）</text>
+<rect x="422.3" y="92.0" width="13.0" height="11.0" rx="3" fill="#EDF4EF" stroke="#94B7A2" stroke-width="1"/>
+<text x="441.3" y="102.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="10.5" font-weight="400" fill="#6E747B" text-anchor="start">state 快取（可重建）</text>
+<rect x="571.6" y="92.0" width="13.0" height="11.0" rx="3" fill="#F5F4EF" stroke="#BEB8A8" stroke-width="1"/>
+<text x="590.6" y="102.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="10.5" font-weight="400" fill="#6E747B" text-anchor="start">cfg struct／消費者</text>
+<rect x="711.6" y="92.0" width="13.0" height="11.0" rx="3" fill="#FBF3E6" stroke="#C9A227" stroke-width="1"/>
+<text x="730.6" y="102.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="10.5" font-weight="400" fill="#6E747B" text-anchor="start">要 rebuild 才生效</text>
+<text x="44.0" y="138.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11.5" font-weight="600" fill="#6E747B" text-anchor="start">① 三個來源（權威由右至左：FAT live &gt; build 預置 &gt; 出廠 const）</text>
+<rect x="44.0" y="150.0" width="470.0" height="112.0" rx="6" fill="#F3EFF8" stroke="#B79BC9" stroke-width="1.3"/>
+<text x="58.0" y="173.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="12.5" font-weight="700" fill="#17191C" text-anchor="start">硬體事實（L0）</text>
+<rect x="457.1" y="160.0" width="44.9" height="17.0" rx="8" fill="#FFFFFF" stroke="#B79BC9" stroke-width="1"/>
+<text x="464.1" y="172.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="9.5" font-weight="600" fill="#B79BC9" text-anchor="start">rebuild</text>
+<text x="58.0" y="194.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="10.5" font-weight="400" fill="#3D4247" text-anchor="start">board.json（flash／PSRAM／CPU／console）＋sdkconfig.defaults</text>
+<text x="58.0" y="209.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="10.5" font-weight="400" fill="#3D4247" text-anchor="start">wiring.json（腳位）＋driver.json（LED device）</text>
+<text x="58.0" y="224.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="10.5" font-weight="400" fill="#3D4247" text-anchor="start">→ ncportgen → nc_port.c（wiring／LED／activation const 表）</text>
+<rect x="534.0" y="150.0" width="470.0" height="112.0" rx="6" fill="#F3EFF8" stroke="#B79BC9" stroke-width="1.3"/>
+<text x="548.0" y="173.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="12.5" font-weight="700" fill="#17191C" text-anchor="start">build 預置（嵌進固件）</text>
+<rect x="947.1" y="160.0" width="44.9" height="17.0" rx="8" fill="#FFFFFF" stroke="#B79BC9" stroke-width="1"/>
+<text x="954.1" y="172.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="9.5" font-weight="600" fill="#B79BC9" text-anchor="start">rebuild</text>
+<text x="548.0" y="194.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="10.5" font-weight="400" fill="#3D4247" text-anchor="start">ports/project/&lt;chip&gt;/&lt;board&gt;/data/config/*.json</text>
+<text x="548.0" y="209.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="10.5" font-weight="400" fill="#3D4247" text-anchor="start">project.json 的 seed[]：hardware／system／network／tasks（＋driver／resources）</text>
+<text x="548.0" y="224.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="10.5" font-weight="400" fill="#3D4247" text-anchor="start">只在裝置缺檔時寫入；已有檔案唔會被覆蓋</text>
+<rect x="1024.0" y="150.0" width="612.0" height="112.0" rx="6" fill="#EAF1F7" stroke="#8FB0CB" stroke-width="1.3"/>
+<text x="1038.0" y="173.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="12.5" font-weight="700" fill="#17191C" text-anchor="start">FAT live（/data/config/*.json，最高權威）</text>
+<rect x="1558.1" y="160.0" width="65.9" height="17.0" rx="8" fill="#FFFFFF" stroke="#8FB0CB" stroke-width="1"/>
+<text x="1565.1" y="172.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="9.5" font-weight="600" fill="#8FB0CB" text-anchor="start">reboot 生效</text>
+<text x="1038.0" y="194.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="10.5" font-weight="400" fill="#3D4247" text-anchor="start">USB MSC／WebMaster／NC4 FILE 改；檔案存在就用它，缺欄位才回預設</text>
+<text x="1038.0" y="209.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="10.5" font-weight="400" fill="#3D4247" text-anchor="start">改完 reboot 生效（目前全部設定都係「重啟後生效」）</text>
+<text x="1038.0" y="224.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="10.5" font-weight="400" fill="#3D4247" text-anchor="start">壞檔 → 整層用預設（RAM）＋warn，**唔會改你嘅檔案**</text>
+<line x1="279.0" y1="262.0" x2="279.0" y2="286.0" stroke="#9AA0A6" stroke-width="1.4"/>
+<path d="M 275.0 285.0 L 279.0 291.0 L 283.0 285.0" fill="none" stroke="#9AA0A6" stroke-width="1.4"/>
+<line x1="769.0" y1="262.0" x2="769.0" y2="286.0" stroke="#9AA0A6" stroke-width="1.4"/>
+<path d="M 765.0 285.0 L 769.0 291.0 L 773.0 285.0" fill="none" stroke="#9AA0A6" stroke-width="1.4"/>
+<line x1="1330.0" y1="262.0" x2="1330.0" y2="286.0" stroke="#9AA0A6" stroke-width="1.4"/>
+<path d="M 1326.0 285.0 L 1330.0 291.0 L 1334.0 285.0" fill="none" stroke="#9AA0A6" stroke-width="1.4"/>
+<rect x="44.0" y="292.0" width="1592.0" height="112.0" rx="6" fill="#F5F4EF" stroke="#BEB8A8" stroke-width="1.3"/>
+<text x="58.0" y="315.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="12.5" font-weight="700" fill="#17191C" text-anchor="start">B02 nc_cfg_boot()：一次讀齊、型別化，之後全系統只讀 struct</text>
+<text x="58.0" y="336.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="10.5" font-weight="400" fill="#3D4247" text-anchor="start">開檔（system → hardware → tasks → resources → driver）→ cJSON → 型別化 struct；缺檔重建骨架、壞檔整層預設、缺欄位用預設（計 miss／bad／inv／unk）</text>
+<text x="58.0" y="351.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="10.5" font-weight="400" fill="#3D4247" text-anchor="start">讀檔同時計 src_hash（表驅動 CRC）——state.ncst 用它判斷「config 有冇改過」</text>
+<text x="58.0" y="366.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="10.5" font-weight="400" fill="#3D4247" text-anchor="start">實測 Matrix：5 個 JSON＋型別化＋hash ≈ 30.1 ms（B02 總共 64.6 ms）</text>
+<text x="44.0" y="420.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11.5" font-weight="600" fill="#6E747B" text-anchor="start">② cfg struct（RAM）：之後所有人只讀呢層，唔再碰 JSON</text>
+<rect x="44.0" y="432.0" width="305.6" height="96.0" rx="6" fill="#F5F4EF" stroke="#BEB8A8" stroke-width="1.3"/>
+<text x="58.0" y="455.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="12.5" font-weight="700" fill="#17191C" text-anchor="start">nc_system_cfg_t</text>
+<text x="58.0" y="476.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="10.5" font-weight="400" fill="#3D4247" text-anchor="start">links[]：kind／enable／port／rx</text>
+<text x="58.0" y="491.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="10.5" font-weight="400" fill="#3D4247" text-anchor="start">routes[]：in → decodeN</text>
+<text x="58.0" y="506.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="10.5" font-weight="400" fill="#3D4247" text-anchor="start">frame_interval_ms、num_pixels</text>
+<rect x="365.6" y="432.0" width="305.6" height="96.0" rx="6" fill="#F5F4EF" stroke="#BEB8A8" stroke-width="1.3"/>
+<text x="379.6" y="455.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="12.5" font-weight="700" fill="#17191C" text-anchor="start">nc_tasks_cfg_t</text>
+<text x="379.6" y="476.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="10.5" font-weight="400" fill="#3D4247" text-anchor="start">每個租戶的 level／affinity</text>
+<text x="379.6" y="491.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="10.5" font-weight="400" fill="#3D4247" text-anchor="start">缺席自動補 [0,0]</text>
+<text x="379.6" y="506.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="10.5" font-weight="400" fill="#3D4247" text-anchor="start">核心任務唔受管</text>
+<line x1="347.6" y1="480.0" x2="357.6" y2="480.0" stroke="#3D4247" stroke-width="1.4"/>
+<path d="M 356.6 476.0 L 362.6 480.0 L 356.6 484.0" fill="none" stroke="#3D4247" stroke-width="1.4"/>
+<rect x="687.2" y="432.0" width="305.6" height="96.0" rx="6" fill="#F5F4EF" stroke="#BEB8A8" stroke-width="1.3"/>
+<text x="701.2" y="455.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="12.5" font-weight="700" fill="#17191C" text-anchor="start">nc_resources_cfg_t</text>
+<text x="701.2" y="476.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="10.5" font-weight="400" fill="#3D4247" text-anchor="start">buf／cmd／hw 的提供與需求</text>
+<text x="701.2" y="491.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="10.5" font-weight="400" fill="#3D4247" text-anchor="start">缺檔 → 固件預設</text>
+<text x="701.2" y="506.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="10.5" font-weight="400" fill="#3D4247" text-anchor="start">模組 provides 會合併</text>
+<line x1="669.2" y1="480.0" x2="679.2" y2="480.0" stroke="#3D4247" stroke-width="1.4"/>
+<path d="M 678.2 476.0 L 684.2 480.0 L 678.2 484.0" fill="none" stroke="#3D4247" stroke-width="1.4"/>
+<rect x="1008.8" y="432.0" width="305.6" height="96.0" rx="6" fill="#F5F4EF" stroke="#BEB8A8" stroke-width="1.3"/>
+<text x="1022.8" y="455.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="12.5" font-weight="700" fill="#17191C" text-anchor="start">nc_hardware_cfg_t</text>
+<text x="1022.8" y="476.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="10.5" font-weight="400" fill="#3D4247" text-anchor="start">ETH／SDIO／PIN／PWM／UART</text>
+<text x="1022.8" y="491.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="10.5" font-weight="400" fill="#3D4247" text-anchor="start">I80／SPI（typed）</text>
+<text x="1022.8" y="506.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="10.5" font-weight="400" fill="#3D4247" text-anchor="start">I2C／I2S／ENC 未 typed</text>
+<line x1="990.8" y1="480.0" x2="1000.8" y2="480.0" stroke="#3D4247" stroke-width="1.4"/>
+<path d="M 999.8 476.0 L 1005.8 480.0 L 999.8 484.0" fill="none" stroke="#3D4247" stroke-width="1.4"/>
+<rect x="1330.4" y="432.0" width="305.6" height="96.0" rx="6" fill="#F5F4EF" stroke="#BEB8A8" stroke-width="1.3"/>
+<text x="1344.4" y="455.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="12.5" font-weight="700" fill="#17191C" text-anchor="start">nc_devices_cfg_t</text>
+<text x="1344.4" y="476.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="10.5" font-weight="400" fill="#3D4247" text-anchor="start">driver.json 的 LED 段</text>
+<text x="1344.4" y="491.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="10.5" font-weight="400" fill="#3D4247" text-anchor="start">enable／backend／lanes／px／fmt</text>
+<text x="1344.4" y="506.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="10.5" font-weight="400" fill="#3D4247" text-anchor="start">其餘 device 未實作</text>
+<line x1="1312.4" y1="480.0" x2="1322.4" y2="480.0" stroke="#3D4247" stroke-width="1.4"/>
+<path d="M 1321.4 476.0 L 1327.4 480.0 L 1321.4 484.0" fill="none" stroke="#3D4247" stroke-width="1.4"/>
+<text x="44.0" y="548.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11.5" font-weight="600" fill="#6E747B" text-anchor="start">③ 消費者：cfg 決定「有咩、幾大」；state 可以覆寫「值」</text>
+<rect x="44.0" y="560.0" width="305.6" height="96.0" rx="6" fill="#F5F4EF" stroke="#BEB8A8" stroke-width="1.3"/>
+<text x="58.0" y="583.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="12.5" font-weight="700" fill="#17191C" text-anchor="start">nc_net_lines</text>
+<text x="58.0" y="604.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="10.5" font-weight="400" fill="#3D4247" text-anchor="start">links[].enable=0 → 唔宣告緩衝、唔建 bus</text>
+<text x="58.0" y="619.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="10.5" font-weight="400" fill="#3D4247" text-anchor="start">iface 對唔上 → 跳過＋warn</text>
+<rect x="365.6" y="560.0" width="305.6" height="96.0" rx="6" fill="#F5F4EF" stroke="#BEB8A8" stroke-width="1.3"/>
+<text x="379.6" y="583.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="12.5" font-weight="700" fill="#17191C" text-anchor="start">nc_task</text>
+<text x="379.6" y="604.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="10.5" font-weight="400" fill="#3D4247" text-anchor="start">level=-1 → 唔 declare／唔開 loop</text>
+<text x="379.6" y="619.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="10.5" font-weight="400" fill="#3D4247" text-anchor="start">affinity [0,0] → 同上</text>
+<rect x="687.2" y="560.0" width="305.6" height="96.0" rx="6" fill="#F5F4EF" stroke="#BEB8A8" stroke-width="1.3"/>
+<text x="701.2" y="583.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="12.5" font-weight="700" fill="#17191C" text-anchor="start">render_task（LED）</text>
+<text x="701.2" y="604.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="10.5" font-weight="400" fill="#3D4247" text-anchor="start">先 cfg／driver 預設，再用 state store 覆寫</text>
+<text x="701.2" y="619.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="10.5" font-weight="400" fill="#3D4247" text-anchor="start">10 個 LED key；冇 key 就保留 cfg</text>
+<rect x="1008.8" y="560.0" width="305.6" height="96.0" rx="6" fill="#F5F4EF" stroke="#BEB8A8" stroke-width="1.3"/>
+<text x="1022.8" y="583.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="12.5" font-weight="700" fill="#17191C" text-anchor="start">activation（build）</text>
+<text x="1022.8" y="604.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="10.5" font-weight="400" fill="#3D4247" text-anchor="start">nc_port.c 的 const 表：邊個 unit enabled</text>
+<text x="1022.8" y="619.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="10.5" font-weight="400" fill="#3D4247" text-anchor="start">改 enable 一定要 rebuild</text>
+<rect x="1330.4" y="560.0" width="305.6" height="96.0" rx="6" fill="#F5F4EF" stroke="#BEB8A8" stroke-width="1.3"/>
+<text x="1344.4" y="583.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="12.5" font-weight="700" fill="#17191C" text-anchor="start">status cfg</text>
+<text x="1344.4" y="604.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="10.5" font-weight="400" fill="#3D4247" text-anchor="start">miss／bad／inv／unk、t{cfg_us,state_us}</text>
+<text x="1344.4" y="619.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="10.5" font-weight="400" fill="#3D4247" text-anchor="start">act{fat,match}、state{hit...}、schema</text>
+<line x1="196.8" y1="528.0" x2="196.8" y2="554.0" stroke="#DCD8CE" stroke-width="1.4"/>
+<path d="M 192.8 553.0 L 196.8 559.0 L 200.8 553.0" fill="none" stroke="#DCD8CE" stroke-width="1.4"/>
+<line x1="518.4" y1="528.0" x2="518.4" y2="554.0" stroke="#DCD8CE" stroke-width="1.4"/>
+<path d="M 514.4 553.0 L 518.4 559.0 L 522.4 553.0" fill="none" stroke="#DCD8CE" stroke-width="1.4"/>
+<line x1="840.0" y1="528.0" x2="840.0" y2="554.0" stroke="#DCD8CE" stroke-width="1.4"/>
+<path d="M 836.0 553.0 L 840.0 559.0 L 844.0 553.0" fill="none" stroke="#DCD8CE" stroke-width="1.4"/>
+<line x1="1161.6" y1="528.0" x2="1161.6" y2="554.0" stroke="#DCD8CE" stroke-width="1.4"/>
+<path d="M 1157.6 553.0 L 1161.6 559.0 L 1165.6 553.0" fill="none" stroke="#DCD8CE" stroke-width="1.4"/>
+<line x1="1483.2" y1="528.0" x2="1483.2" y2="554.0" stroke="#DCD8CE" stroke-width="1.4"/>
+<path d="M 1479.2 553.0 L 1483.2 559.0 L 1487.2 553.0" fill="none" stroke="#DCD8CE" stroke-width="1.4"/>
+<rect x="44.0" y="690.0" width="1592.0" height="162.0" rx="6" fill="#FFFFFF" stroke="#DCD8CE" stroke-width="1"/>
+<text x="60.0" y="716.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="12.5" font-weight="700" fill="#17191C" text-anchor="start">B02 之後：nc_state_boot_sync() —— 把 config 派生值寫成 state.ncst（快取）</text>
+<rect x="60.0" y="730.0" width="360.0" height="84.0" rx="6" fill="#EDF4EF" stroke="#94B7A2" stroke-width="1.3"/>
+<text x="74.0" y="753.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="12.5" font-weight="700" fill="#17191C" text-anchor="start">state.ncst（NCSTATE）</text>
+<text x="74.0" y="774.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="10.5" font-weight="400" fill="#3D4247" text-anchor="start">sparse：只存同預設唔同的 key（Matrix 18 筆／124 B）</text>
+<text x="74.0" y="789.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="10.5" font-weight="400" fill="#3D4247" text-anchor="start">header 26 B＋自描述 record；有 CRC／src_hash／.bak</text>
+<line x1="426.0" y1="778.0" x2="474.0" y2="778.0" stroke="#3D4247" stroke-width="1.4"/>
+<path d="M 473.0 774.0 L 479.0 778.0 L 473.0 782.0" fill="none" stroke="#3D4247" stroke-width="1.4"/>
+<rect x="480.0" y="730.0" width="360.0" height="84.0" rx="6" fill="#EDF4EF" stroke="#94B7A2" stroke-width="1.3"/>
+<text x="494.0" y="753.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="12.5" font-weight="700" fill="#17191C" text-anchor="start">RAM store（開機後常駐）</text>
+<text x="494.0" y="774.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="10.5" font-weight="400" fill="#3D4247" text-anchor="start">固定陣列 64 筆（~430 B internal、PSRAM 0）</text>
+<text x="494.0" y="789.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="10.5" font-weight="400" fill="#3D4247" text-anchor="start">driver 經 nc_state_api 讀寫；set 只改這裡＋dirty</text>
+<line x1="846.0" y1="778.0" x2="894.0" y2="778.0" stroke="#3D4247" stroke-width="1.4"/>
+<path d="M 893.0 774.0 L 899.0 778.0 L 893.0 782.0" fill="none" stroke="#3D4247" stroke-width="1.4"/>
+<rect x="900.0" y="730.0" width="720.0" height="84.0" rx="6" fill="#EDF4EF" stroke="#94B7A2" stroke-width="1.3"/>
+<text x="914.0" y="753.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="12.5" font-weight="700" fill="#17191C" text-anchor="start">nc_state_api／schema（讀寫唯一入口）</text>
+<text x="914.0" y="774.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="10.5" font-weight="400" fill="#3D4247" text-anchor="start">get_u32/i32/bool/str、set_*（schema 驗型別＋範圍）</text>
+<text x="914.0" y="789.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="10.5" font-weight="400" fill="#3D4247" text-anchor="start">查表：nc_state_key(id)／nc_state_key_name()</text>
+<rect x="60.0" y="828.0" width="197.7" height="20.0" rx="10" fill="#FFFFFF" stroke="#94B7A2" stroke-width="1"/>
+<text x="69.0" y="842.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="10" font-weight="600" fill="#94B7A2" text-anchor="start">hit：hash 對＋值全中 → 唔寫（8.2 ms）</text>
+<rect x="269.7" y="828.0" width="176.9" height="20.0" rx="10" fill="#FFFFFF" stroke="#94B7A2" stroke-width="1"/>
+<text x="278.7" y="842.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="10" font-weight="600" fill="#94B7A2" text-anchor="start">值一樣但 hash 變 → 唔寫（8.3 ms）</text>
+<rect x="458.6" y="828.0" width="202.9" height="20.0" rx="10" fill="#FFFFFF" stroke="#C9A227" stroke-width="1"/>
+<text x="467.6" y="842.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="10" font-weight="600" fill="#C9A227" text-anchor="start">值有變／壞檔 → 重建（762 ms，一次性）</text>
+<text x="44.0" y="874.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11.5" font-weight="600" fill="#6E747B" text-anchor="start">④ 三種改法（選錯層 = 改完唔生效）</text>
+<rect x="44.0" y="884.0" width="517.3" height="104.0" rx="6" fill="#EAF1F7" stroke="#8FB0CB" stroke-width="1.3"/>
+<text x="58.0" y="907.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="12.5" font-weight="700" fill="#17191C" text-anchor="start">改 FAT live</text>
+<text x="58.0" y="928.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="10.5" font-weight="400" fill="#3D4247" text-anchor="start">USB／WebMaster 改 /data/config/*.json</text>
+<text x="58.0" y="943.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="10.5" font-weight="400" fill="#3D4247" text-anchor="start">→ reboot；最高權威</text>
+<text x="58.0" y="958.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="10.5" font-weight="400" fill="#3D4247" text-anchor="start">驗證：status cfg／status tasks</text>
+<rect x="581.3" y="884.0" width="517.3" height="104.0" rx="6" fill="#FBF3E6" stroke="#C9A227" stroke-width="1.3"/>
+<text x="595.3" y="907.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="12.5" font-weight="700" fill="#17191C" text-anchor="start">改 build 預置</text>
+<text x="595.3" y="928.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="10.5" font-weight="400" fill="#3D4247" text-anchor="start">ports/project/.../data/config 或 sdkconfig.defaults</text>
+<text x="595.3" y="943.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="10.5" font-weight="400" fill="#3D4247" text-anchor="start">→ rebuild（改 defaults 要 --fresh）</text>
+<text x="595.3" y="958.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="10.5" font-weight="400" fill="#3D4247" text-anchor="start">→ OTA；再 fs_format 才會重新 seed</text>
+<rect x="1118.7" y="884.0" width="517.3" height="104.0" rx="6" fill="#EDF4EF" stroke="#94B7A2" stroke-width="1.3"/>
+<text x="1132.7" y="907.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="12.5" font-weight="700" fill="#17191C" text-anchor="start">runtime set（API）</text>
+<text x="1132.7" y="928.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="10.5" font-weight="400" fill="#3D4247" text-anchor="start">nc_state_set_u32/i32/bool/str</text>
+<text x="1132.7" y="943.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="10.5" font-weight="400" fill="#3D4247" text-anchor="start">只改 RAM＋dirty；reboot 由 JSON 重算</text>
+<text x="1132.7" y="958.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="10.5" font-weight="400" fill="#3D4247" text-anchor="start">永久改仍然要改 JSON</text>
+<text x="44.0" y="1006.0" font-family="'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif" font-size="11" font-weight="400" fill="#6E747B" text-anchor="start">權威鏈：FAT live（L1）&gt; build 預置 &gt; 出廠 const（L0）；state.ncst 係派生快取，任何時候都可以由前兩者重建。</text>
+</svg>

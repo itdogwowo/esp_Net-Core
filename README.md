@@ -98,6 +98,8 @@ esp_Net-Core/
 | 有哪些通道、各自要實作什麼 | [docs/01_protocol/transports.md](docs/01_protocol/transports.md) |
 | 怎麼建置、怎麼燒、踩過哪些雷 | [docs/02_guides/build_and_flash.md](docs/02_guides/build_and_flash.md) |
 | 某個設定放哪、改完怎樣生效（WiFi／燈／幀率） | [docs/02_guides/configuration.md](docs/02_guides/configuration.md) |
+| 可以設定什麼、範圍幾多、怎樣設定（schema） | [docs/02_guides/config-schema.md](docs/02_guides/config-schema.md) |
+| 開新 project 的中央示範設定（S3 有／冇 PSRAM） | [ports/presets/README.md](ports/presets/README.md) |
 | 怎麼跑測試、數字怎麼判讀 | [docs/02_guides/testing.md](docs/02_guides/testing.md) |
 | 要調緩衝／棧、要證明「沒變慢」 | [docs/02_guides/measurement-method.md](docs/02_guides/measurement-method.md) |
 | 有線／無線／藍牙／ESP-NOW 怎麼選 | [docs/02_guides/connectivity.md](docs/02_guides/connectivity.md) |

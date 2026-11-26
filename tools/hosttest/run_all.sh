@@ -12,6 +12,11 @@ if ! python3 "$ROOT/tools/gen_state_keys.py" --check; then
     echo "—— state key schema 唔同步"
     exit 1
 fi
+# 中央示範設定（ports/presets/）：JSON 結構、schema 範圍、四層四任務
+if ! python3 "$ROOT/tools/preset_check.py" --quiet; then
+    echo "—— ports/presets 檢查失敗"
+    exit 1
+fi
 TESTS="cfg_test cfgstruct_test ncd_test task_test router_test link_test mod_test hub_test plan_test buf_test portgen_test ncm_test pixel_test pxEngine_test pxAsset_test pxProgram_test pxLayer_test pxShow_test pxScan_test pxLayout_test stateBlob_test stateFile_test stateSchema_test stateStore_test fpsclock_test"
 fail=0
 for t in $TESTS; do

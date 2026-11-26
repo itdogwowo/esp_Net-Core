@@ -1,0 +1,34 @@
+# 中央示範：ESP32-S3 通用（冇 PSRAM）
+#
+# 這份是 **project 層**覆寫；用法見 README。
+# 同有 PSRAM 版的分別只有三處：SPIRAM／RING_PSRAM／PACK_PSRAM，以及 pixel 幾何。
+#
+# 改完一定要 `--fresh`（唔 --fresh 會沿用舊 sdkconfig；實際撞過 main stack 仍然
+# 3,072 → 爆棧、USB 唔 enumerate、燈全黑）。
+
+# ── 冇 PSRAM ──
+# board 層若是 PSRAM 模組，這裡明確覆寫成 n；確認你真的是冇 PSRAM 的模組才用。
+CONFIG_SPIRAM=n
+
+# ── pixel 輸出（示範：1 lane × 64 px，WS2812 800 kHz）──
+# 腳位只在 hardware.json（I80.list[]）。
+CONFIG_NETCORE_PIXEL=y
+CONFIG_NETCORE_PIXEL_LEDS=64
+CONFIG_NETCORE_PIXEL_FORMAT="ws2812"
+CONFIG_NETCORE_PIXEL_I80=y
+CONFIG_NETCORE_PIXEL_I80_DIRECT=y
+CONFIG_NETCORE_PIXEL_I80_PINS="14"
+CONFIG_NETCORE_PIXEL_I80_LANES=1
+CONFIG_NETCORE_PIXEL_PCLK_HZ=2500000
+CONFIG_NETCORE_PIXEL_BIT_CELLS=3
+CONFIG_NETCORE_PIXEL_T0H=1
+CONFIG_NETCORE_PIXEL_T1H=2
+CONFIG_NETCORE_PIXEL_DITHER=1
+CONFIG_NETCORE_PIXEL_DITHER_BITS=12
+
+# ── 大 buffer 冇得放 PSRAM：留 internal（depends on SPIRAM，明確寫 n）──
+CONFIG_NETCORE_PIXEL_RING_PSRAM=n
+CONFIG_NETCORE_PIXEL_PACK_PSRAM=n
+
+# ── 生產者／內容管線（四層四任務）──
+CONFIG_NETCORE_CONTENT=y
