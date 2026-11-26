@@ -55,6 +55,11 @@
   `make.py` 的 bash 指令帶 `C:\` 一律失敗）。建置記錄一樣要寫 `idf=v6.1.1 (WSL)`。
 - 判斷方法：`bash -c 'uname -a'`（見到 `microsoft-standard-WSL2` 就是 WSL）＋
   `(Get-Command bash).Source`。
+- **版本要小心 `-dirty`**：Windows 的 git 通常 `core.autocrlf=true`（checkout 成 CRLF）；
+  WSL 的 git 預設冇設，會把整棵樹當成「改過」→ WSL 內 build 的 `PROJECT_VER` 永遠帶
+  `-dirty`（2026-11-26 實際撞到：乾淨樹出 `fw=61293b7-dirty`）。
+  修法：在 repo 內 `git config core.autocrlf true`（Windows／WSL 共用同一份 `.git/config`），
+  之後 `git describe --dirty` 在兩邊一致。
 - 這台機的實際值記在 `.testenv/machine.json` 的 `notes`（`tenv set notes …`），
   不進 git。
 

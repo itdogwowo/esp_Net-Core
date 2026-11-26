@@ -8851,7 +8851,8 @@ RGBW 才要處理）；README 已提醒「一個 mode 要寫齊 R/G/B」。
 8×8 RGB 輸出（期望「現在的版本可以透過 JSON 設定」）。
 
 **環境**：`idf=v6.1.1 (WSL)` 建置；Windows 側 OTA／NC4（COM24）；板 ESP32-S3-Matrix
-`cid=0x54EC`；`fw=4cae17f-dirty`、`app=d2f6a635`、`rst=3`。
+`cid=0x54EC`；最終板上 `fw=61293b7`、`app=d21227fc`、`rst=3`
+（中途幾次 OTA 是 `4cae17f-dirty`，見下面第 4 個坑）。
 
 **做咗咩**
 
@@ -8888,6 +8889,12 @@ RGBW 才要處理）；README 已提醒「一個 mode 要寫齊 R/G/B」。
    （改 preset 之外，live `/config/system.json` 也要改，否則 OTA／重啟後照舊。）
 3. **`show_upload.py` 在 Windows 會出壞路徑**：`str(Path)` 用反斜線 → PUT
    `/pixel/map%5Cmatrix.json`（裝置當成另一個檔名）。已改成 `relative_to(src).as_posix()`。
+4. **WSL 的 git 令乾淨樹也變 `-dirty`**：Windows 側 `core.autocrlf=true`（checkout 成
+   CRLF），WSL 側預設冇 → WSL 的 `git describe --dirty` 見到成個 repo 都「改過」，
+   `PROJECT_VER` 永遠帶 `-dirty`（第一次 OTA 就是 `fw=4cae17f-dirty`，其實工作樹是乾淨的）。
+   已在 repo 的 `.git/config` 設 `core.autocrlf true`（兩個 host 共用同一份 `.git/config`），
+   `git describe` 由 `61293b7-dirty` 變回 **`61293b7`**；重 build＋OTA 後板上
+   `fw=61293b7`、`app=d21227fc`。
 
 **上板驗證（`0xF071`／`0xF06B`、三種 mode）**
 
