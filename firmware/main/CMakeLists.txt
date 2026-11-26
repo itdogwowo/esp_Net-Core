@@ -105,7 +105,24 @@ if(NC_PROJECT_DIR AND EXISTS "${NC_PROJECT_DIR}/data/config/hardware.json")
             COMMENT "預置 hardware.json → build")
     endif()
 endif()
-set(_preset_embed "${_preset_hw}" "${_gen_dev}")
+# devices.json：同 hardware.json 一樣，project 有鏡像就優先嵌入
+# （repo 鏡像由 tools/sync_devices_presets.py 生成；冇就用 ncportgen 即時產生）。
+set(_preset_dev "${_gen_dev}")
+if(NC_PROJECT_DIR AND EXISTS "${NC_PROJECT_DIR}/data/config/devices.json")
+    set(_preset_dev "${CMAKE_CURRENT_BINARY_DIR}/preset_devices.json")
+    execute_process(
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${NC_PROJECT_DIR}/data/config/devices.json" "${_preset_dev}")
+    if(NOT CMAKE_SCRIPT_MODE_FILE)
+        add_custom_command(
+            OUTPUT  "${_preset_dev}"
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                    "${NC_PROJECT_DIR}/data/config/devices.json" "${_preset_dev}"
+            DEPENDS "${NC_PROJECT_DIR}/data/config/devices.json"
+            COMMENT "預置 devices.json → build")
+    endif()
+endif()
+set(_preset_embed "${_preset_hw}" "${_preset_dev}")
 foreach(_cfg system network tasks resources)
     if(NC_PROJECT_DIR AND EXISTS "${NC_PROJECT_DIR}/data/config/${_cfg}.json")
         # 用 build-time 的 copy_if_different，而唔係 configure_file：

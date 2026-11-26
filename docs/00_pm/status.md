@@ -9310,3 +9310,34 @@ cycle，整數無餘，所以唔會累積漂移）。
 - 只有 **LED** 有 device driver；其餘 device 仍然「聲明但有 warn」。
 - 未支援 device 冇 runtime `error` 指令回報（只有開機 log）；`status cfg` 未顯示 devices 統計。
 - 未有 WebMaster 專用 device 編輯頁（用現有檔案編輯就可以）。
+
+### 7.261 2026-11-26（devices 預置補返 repo 鏡像：同 hardware.json 對稱）
+
+用家睇完之後問「係咪失衡？我見唔到 driver.json」。查證：
+- `driver.json` **仍然存在**（`ports/hardware/<chip>/<board>/driver.json`，5 塊板，git 追蹤）；
+  佢係 **build-time 板級設定**，照設計**唔會**出現在裝置 `/data/config`。
+- 但 `devices.json` 之前**只有裝置上有**（build 時生成、開機 seed），repo 睇唔到 →
+  同 `hardware.json`（有 `ports/project/.../data/config/hardware.json` 鏡像）**唔對稱**。
+  呢個就係「失衡」嘅真正來源。
+
+**補齊**
+- 新 `tools/sync_devices_presets.py`：由 driver.json 生成預置，鏡像到
+  `ports/project/<chip>/<board>/data/config/devices.json`（default project），
+  `--check` 可驗同步；同 `sync_hardware_presets.py` 一個做法。
+- `firmware/main/CMakeLists.txt`：project 有 `data/config/devices.json` 就優先嵌入
+  （同 hardware.json 一樣）；冇就用 ncportgen 即時生成。
+- 已生成 5 個鏡像：P4-ETH、S3-Matrix、S3-N16R8、S3-SuperMini、S3-Zero-Show。
+
+**兩個檔嘅分工（唔會打架）**
+
+| 檔案 | 層 | 邊個睇 | 幾時用 |
+|---|---|---|---|
+| `ports/hardware/<board>/driver.json` | build-time 板級 | ncportgen／build | 產生預設；改完要重 build |
+| `ports/project/.../data/config/devices.json` | project 預置（repo 鏡像） | build 時嵌入 | 給人睇／改；改完重 build 只影響**新 seed** 的裝置 |
+| `/data/config/devices.json` | runtime（F.live） | nc_cfg | 開機讀；**改完 reboot 即生效** |
+
+**Seed 語意（重要）**：`seed_file()` 只喺檔案**唔存在**時寫入 → 已經有
+`/data/config/devices.json` 的板，OTA 新 firmware **唔會**覆蓋它。要套用新預置：
+刪 `devices.json`＋reboot（或 `fs_format`）。換 project 亦一樣。
+
+**驗證**：fw `ac3555c-dirty`、app `a0bb64d0`；環 `i80.prd 320B×3`、`0xF071` 49.9 fps／drops=0。

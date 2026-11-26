@@ -761,3 +761,15 @@ F.live     /data/config/*.json 用戶執行期設定（最高優先）
 - 改 `"LED": {"enable": 0}` → 環變 `mock.prd`（燈停）；改回 1 → 環回 `i80.prd`。
   實測見 status §7.260。
 - 注意 `enable` 接受 `true/false` 同 `1/0`（`driver.json` 原本用數字）。
+
+---
+
+## 6.7 repo 鏡像與 seed 語意（2026-11-26 補）
+
+- `devices.json` 同 `hardware.json` 一樣有 **repo 鏡像**：
+  `ports/project/<chip>/<board>/data/config/devices.json`（由
+  `tools/sync_devices_presets.py` 生成；`--check` 驗同步）。改 `driver.json` 後要跑一次。
+- 三份關係：`driver.json`（build-time 板級）→ 生成／鏡像 → `project .../devices.json`
+  （repo 預置）→ seed → `/data/config/devices.json`（runtime，最高優先）。
+- **seed 只會補缺**：裝置已有 `/data/config/devices.json` 時，OTA **唔會**覆蓋；
+  要套用新預置就刪檔＋reboot（或 `fs_format`）。
