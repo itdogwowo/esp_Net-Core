@@ -211,6 +211,46 @@ struct I2sChannelEngineConfig {
   S3 上 FastLED 那個驅動確實是 LCD_CAM（＝我們的 I80）；它做到單腳是**繞過 esp_lcd**，
   不是硬件有 1-bit I80 模式。
 
+### 8.3 換成 (b) 要改幾多？**畫波（codec）唔使改**
+
+答案：**畫波／配對／環／任務全部唔使改**，因為 buffer 契約冇變——codec 出的是
+「每個 tick 一個 bus word」的連續 byte stream，`drv_i80` 只是把這段交給硬件：
+
+```text
+pixel_encode_task → nc_px_codec_* → 一格 = units × (bus_width/8) bytes（已轉置）
+        │
+nc_i80_out.c  submit(slot)          ← 只改「腳位怎麼接」這一段
+        │
+drv_i80（要換的就是這一層）            ← esp_lcd → 直接寫 LCD_CAM 寄存器
+        │
+DMA → D0.. 資料線（只 route 有用途的 lane）→ WS2812
+```
+
+要動的三處：
+
+| # | 位置 | 改什麼 |
+|---|---|---|
+| 1 | `firmware/components/driver/drv_i80/nc_i80_drv.c`（或新 `drv_lcd_cam/`） | 換底層：`esp_lcd_new_i80_bus`／`esp_lcd_new_panel_io_i80`／`esp_lcd_panel_io_tx_color` → 自己設 LCD_CAM 時鐘分頻、`lcd_ctrl`、GPIO matrix（**只 route 有效 lane**）、DMA 描述符、完成中斷。**介面 `install/submit/done/pclk` 保持不變**，上層唔知換了 |
+| 2 | `nc_i80_out.c` | 腳位接駁：`pins[width+2]`（data＋DC＋WR 全部要真腳）→ `lane_pins[lanes]`（只列真正接燈的腳）；claim 也只 claim 這幾支。`bus_width` 8／16 照舊（≤8 lane → 8-bit；9–16 → 16-bit） |
+| 3 | config 層（本設計稿 §3–§4） | 稀疏 `data`、`-1`＝未用、`lanes`、自動寬度；`wr`／`dc` 消失（新驅動不需要） |
+
+**唔使改**：`nc_px_codec_*`（12-bit→8-bit→波形→轉置）、`nc_px_layout_*`、
+環（`nc_buf` slot_bytes 照舊）、`pixel_*_task`、`render` 節拍、`0xF06B`／`0xF071` 統計。
+
+**但唔係零風險**，要自己補返 esp_lcd 本來幫我們做的四件事：
+
+1. **PSRAM 槽的 cache writeback**（現時靠 `esp_lcd` 的 `tx_color`；新 driver 要自己
+   `esp_cache_msync()`。internal 槽不受影響）
+2. **完成中斷**：esp_lcd callback → 自己開 LCD_CAM interrupt（`done_order` 那段邏輯可保留）
+3. **PCLK 分頻**：esp_lcd 由 `pclk_hz` 算；新 driver 要自己算（FastLED 有對應
+   `solveI2sClockDivider()` 可參考），Matrix 要 2.5 MHz
+4. **`lcd_ctrl` 的 8／16-bit 設定與 WR**：i80 模式的 WR（PCLK）可以**唔 route**
+   （FastLED 就是咁），但要在板上證實資料線照樣按 PCLK 更新
+
+驗證方式：host test 只能覆蓋 config 層；**硬件路徑一定要上板**（`0xF06B` 逐 px hex
+＋肉眼／示波器睇 T0H／T1H）。建議分兩階段落：**① 1 lane、8-bit、2.5 MHz（Matrix 64 px）
+先通** → **② 才做 8／16 lane 與多條鏈**。
+
 ## 9. 待拍板（實作前要答）
 
 1. **`lanes` 的來源**：`min(n_used, LED.lanes)`（提案）還是「`data` 有效腳數就是 lanes，
