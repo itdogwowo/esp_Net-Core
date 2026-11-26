@@ -306,3 +306,36 @@ DMA → D0.. 資料線（只 route 有用途的 lane）→ WS2812
 **上板驗證計劃**（Matrix，release 映像）：live `hardware.json` 改 `"data":[14]`（其餘省）
 → reboot → 睇 log「I80[0]：有效 1 支…8-bit」→ `status tasks` 四任務 running →
 `0xF06B` 有 frame、`0xF071` 50 fps／drops=0 → 再試 `wr`/`dc` 都省。
+
+### 8.5 「用舊驅動邏輯驗證」（冇面板的做法）＋對照結果（2026-11-26）
+
+用家問：冇 LCD 面板，可唔可以直接看舊驅動（IDF `esp_lcd` i80）的邏輯來驗證？
+可以，而且照做之後**真的找出兩個差異並修正**。逐項對照（來源：
+`$IDF/components/esp_lcd/i80/esp_lcd_panel_io_i80.c`）：
+
+| 環節 | IDF `esp_lcd` | 我們直驅 | 判定 |
+|---|---|---|---|
+| bus clock／reset | `PERIPH_RCC_ACQUIRE_ATOMIC` + `lcd_ll_enable_bus_clock/reset_register` | 相同 | ✅ |
+| clk source／分頻 | `esp_clk_tree_enable_src` + `esp_clk_tree_src_get_freq_hz` + 群除頻 `LCD_PERIPH_CLOCK_PRE_SCALE(2)` | **今次已改成照 IDF 由 clk tree 讀頻率**（原本硬編 80 MHz） | ✅ 修正 1 |
+| PCLK prescale | `resolution / pclk`，1..`LCD_LL_PCLK_DIV_MAX`(64) | 相同（80 MHz / 32 = 2.5 MHz） | ✅ |
+| idle／edge | `set_clock_idle_level(!idle_low)`、`set_pixel_clock_edge(active_neg)` | 相同（false／false） | ✅ |
+| 8/16-bit | `set_dma_read_stride(bus_width)` | 相同 | ✅ |
+| RGB off／color convert off／always_out | 三個都有 | 三個都有 | ✅ |
+| byte swizzle | `set_swizzle_mode(AB2BA)`，逐 device `enable_swizzle(param_bits>bus_width)` | **今次補**：明確 `enable_swizzle(false)`（原始 byte 流唔要 swap） | ✅ 修正 2 |
+| phase cycles | `(cmd_cycles, 0, data?1:0)`；`cmd_cycles=ceil(cmd_bits/bus_width)` | 相同算法；另加 phase 形狀快取（只省重寫次數，值不變） | ✅ |
+| blank cycles | `(1,1)` | 相同 | ✅ |
+| reset + FIFO reset | 每筆做 | 每筆做 | ✅ |
+| 啟動次序 | `gdma_start` → `esp_rom_delay_us(4)` → `lcd_ll_start` | 相同 | ✅ |
+| DC 電平 | 由 io_config，切 device 時重設 | install 時一次設定（未有切 device） | ⚠ 單面板等價 |
+| CS | 多 device 接 peripheral signal；單 device 無 CS | 軟件 GPIO：start assert、完成 ISR de-assert | ⚠ 行為等價，實作不同（要示波器驗） |
+| 完成中斷 | `esp_intr_alloc_intrstatus` + level + clear | 同一 pattern（另用 `esp_intr_enable` gating） | ✅ |
+| 多筆 async | `trans_queue`＋`done_queue`（真 pipelining） | 自己 ring queue＋單筆 in-flight | ⚠ 簡化（LED 幀距 20 ms 夠用；面板高刷新率會少咗管線） |
+| PSRAM cache | `tx_color` 做 C2M msync | `submit` 自己做 | ✅ |
+| 多 device 切換 | 有 | 未有（明講，唔靜默） | ❌ |
+
+**結論**：LED 路徑（= 已上板驗證那條）與 IDF 的序列**逐項等價**；面板專屬部分
+（cmd phase 公式、DC 電平、CS 語義）**靜態對照一致**，但實際時序仍要真面板＋示波器才算「驗證過」。
+今次對照直接促成兩個修正（clk tree 讀頻率、明確關 swizzle），上板回歸：49.9 fps、drops=0、
+rainbow 64 色（fw 3e55192-dirty、app 6567ee93）。
+
+**仍然未做**：多 device 切換、真 pipelining（面板高刷新率才需要）、示波器量 cmd/DC/CS。

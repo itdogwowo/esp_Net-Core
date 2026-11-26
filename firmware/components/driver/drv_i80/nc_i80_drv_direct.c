@@ -30,6 +30,7 @@ static const char *TAG = "drv_i80";
 #if SOC_LCD_I80_SUPPORTED
 
 #include "esp_cache.h"
+#include "esp_clk_tree.h"
 #include "esp_private/esp_clk_tree_common.h"
 #include "esp_heap_caps.h"
 #include "esp_intr_alloc.h"
@@ -310,7 +311,17 @@ esp_err_t nc_i80_drv_install(const nc_i80_drv_cfg_t *cfg)
     lcd_ll_select_clk_src(I80_BUS_ID, LCD_CLK_SRC_DEFAULT);
     lcd_ll_set_group_clock_coeff(I80_BUS_ID, 2, 0, 0);     // LCD_CLK = 160/2 = 80 MHz
 
-    const uint32_t lcd_clk_hz = 80000000u;                 // S3：PLL_F160M / 2
+    // 照 IDF esp_lcd 的做法：由 clk tree 讀來源頻率，再除 LCD_PERIPH_CLOCK_PRE_SCALE(2)。
+    // （唔 hardcode 80 MHz：來源或 pre-scale 一變，prescale 自動跟，唔會靜默錯頻。）
+    uint32_t src_hz = 0;
+    err = esp_clk_tree_src_get_freq_hz((soc_module_clk_t)LCD_CLK_SRC_DEFAULT,
+                                       ESP_CLK_TREE_SRC_FREQ_PRECISION_CACHED, &src_hz);
+    if (err != ESP_OK || src_hz == 0) {
+        ESP_LOGE(TAG, "clk tree 讀頻率失敗（0x%x）", err);
+        free_all(d);
+        return ESP_FAIL;
+    }
+    const uint32_t lcd_clk_hz = src_hz / 2u;               // 同 IDF 的 LCD_PERIPH_CLOCK_PRE_SCALE
     uint32_t prescale = (d->pclk_hz != 0) ? (lcd_clk_hz / d->pclk_hz) : 32u;
     if (prescale == 0) {
         prescale = 1;
@@ -334,6 +345,7 @@ esp_err_t nc_i80_drv_install(const nc_i80_drv_cfg_t *cfg)
     lcd_ll_enable_color_convert(d->dev, false);
 #endif
     lcd_ll_set_dma_read_stride(d->dev, d->bus_width);        // 8 ⇒ lcd_2byte_en=0
+    lcd_ll_enable_swizzle(d->dev, false);                    // 原始 byte 流：唔要 byte swap
     lcd_ll_enable_output_always_on(d->dev, true);            // word 數由 DMA 決定
     lcd_ll_set_dc_level(d->dev, d->dc_levels[0] != 0, d->dc_levels[1] != 0,
                         d->dc_levels[2] != 0, d->dc_levels[3] != 0);
