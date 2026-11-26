@@ -38,31 +38,57 @@ def ask(port, reset=False, timeout=5.0):
         return None
 
 
+def sum_avg(base, d):
+    """精確平均間隔：用 (sum_us, n) 差分，避開 avg_us 只有整數 µs 的 ±50 ppm 量化。"""
+    dn = int(d.get("n", 0)) - int(base.get("n", 0))
+    ds = int(d.get("sum_us", 0)) - int(base.get("sum_us", 0))
+    if dn <= 0 or ds <= 0:
+        return None
+    return ds / dn
+
+
 def main():
     ap = argparse.ArgumentParser(description="重複量測 esp_timer/render 漂移（ppm）")
     ap.add_argument("--port", required=True)
     ap.add_argument("--windows", type=int, default=6, help="重複幾輪（預設 6）")
     ap.add_argument("--window", type=float, default=30.0, help="每輪秒數（預設 30 s）")
+    ap.add_argument("--precise", action="store_true",
+                    help="用 sum_us/n 差分計 ppm（sub-ppm；唔 reset，適合兩 IC 對齊）")
     ap.add_argument("--csv")
     args = ap.parse_args()
 
     rows = []
     for i in range(args.windows):
-        if ask(args.port, reset=True) is None:
-            print("！ reset 失敗")
+        base = ask(args.port) if args.precise else None
+        if args.precise and base is None:
+            print("！ 基準讀取失敗")
             return 1
+        if not args.precise:
+            if ask(args.port, reset=True) is None:
+                print("！ reset 失敗")
+                return 1
+        t0 = time.monotonic()
         time.sleep(args.window)
         d = ask(args.port)
         if d is None:
             print("！ 讀取失敗")
             return 1
         target = d.get("target_us", 0)
-        avg = d.get("avg_us", 0)
+        if args.precise:
+            avg = sum_avg(base, d)
+            if avg is None:
+                print("！ 樣本不足（sum_us/n 差分為 0）")
+                return 1
+            elapsed = time.monotonic() - t0
+        else:
+            avg = d.get("avg_us", 0)
+            elapsed = args.window
         ppm = ((avg - target) / target * 1e6) if target else 0.0
         row = {
             "round": i + 1,
             "target_us": target,
             "avg_us": avg,
+            "elapsed_s": elapsed,
             "ppm": ppm,
             "sd_us": d.get("sd_us", 0),
             "max_us": d.get("max_us", 0),
@@ -72,7 +98,7 @@ def main():
             "frames": d.get("n", 0),
         }
         rows.append(row)
-        print(f"round {i+1:2d}: target {target} avg {avg:.1f} ppm {ppm:+.2f} "
+        print(f"round {i+1:2d}: target {target} avg {avg:.4f} ppm {ppm:+.3f} "
               f"sd {row['sd_us']} max {row['max_us']} bad {row['bad']} "
               f"catchup {row['catchup']} overrun {row['overrun']} frames {row['frames']}")
 

@@ -150,3 +150,57 @@ python3 tools/fps_longrun.py --port auto --hours 4 --interval 60 \
 - **板嘅 USB 未返**（2026-11-25 01:24 之後），所以工具**未上板驗證**。
 - 恢復步驟見 `status.md` §7.233：斷電重插 → 仍無 port 就 BOOT＋插電入 download mode，
   用 `artifacts/ESP32-S3-Zero.bin` 重燒。
+
+---
+
+## 2.7 精確 ppm：兩粒 IC 要對齊（2026-11-26 新增）
+
+`fps_trace`／`fps_drift` 舊版用 `avg_us`（整數 µs），解像度只有 **±50 ppm**
+（19,999 vs 20,000 就差 50 ppm）——唔夠睇兩粒 IC 的漂移。`0xF081` 另外有
+`sum_us`（累計間隔 µs）同 `n`（幀數），用**差分**就拿到 sub-ppm：
+
+```text
+avg = (sum_us_end − sum_us_start) / (n_end − n_start)
+ppm = (avg − target) / target × 1e6
+```
+
+```bash
+python tools/fps_drift.py --port <PORT> --windows 5 --window 60 --precise
+```
+
+**2026-11-26 Matrix 實測**（fw `a7aad43`、idf=v6.1.1 (WSL)、5 輪 ×60 s）：
+
+| 輪 | avg（µs） | ppm |
+|---|---:|---:|
+| 1 | 19,999.9907 | −0.47 |
+| 2 | 20,000.0343 | +1.72 |
+| 3 | 19,999.9663 | −1.68 |
+| 4 | 20,000.0756 | +3.78 |
+| 5 | 19,999.9243 | −3.78 |
+| **平均** | **≈20,000.000** | **−0.09（sd 2.63、worst 3.78）** |
+
+### 兩個重要區別（唔好混淆）
+
+1. **設備內部一致度**（上面呢個）：只證明 `esp_timer` 週期一致、冇漂移。
+   `sum_us` 同 framing 用同一個時基，所以**永遠接近 0 ppm**，唔代表絕對 50 Hz。
+2. **絕對頻率誤差**：只由 **XTAL** 決定（S3 用 40 MHz XTAL，典型 ±10 ppm、
+   最差 ±30 ppm）。要量它就要對**外部參考**（host NTP 時鐘、另一塊板、或 GPS PPS）。
+   量法：`Δframes / Δhost_time` 對 50 Hz 取 ppm。
+
+### 兩粒 IC 要同步（用家要求「平均值 50」）
+
+- 兩塊板**各自內部**平均值都係 50.000（同一份 code、同一個 timer 設定）。
+- 兩塊之間的漂移 ≈ **2 × XTAL ppm**（保守）；resync 間隔 = `tolerance / (relative ppm × 1e-6)`：
+
+| 相對漂移 | 1 ms | 5 ms | 20 ms |
+|---|---|---|---|
+| 10 ppm | 100 s | 500 s | 2,000 s |
+| 20 ppm | 50 s | 250 s | 1,000 s |
+| 50 ppm | 20 s | 100 s | 400 s |
+
+- 想要「長期唔使理」：要（a）定期 resync（master 廣播 frame index／tick）；
+  （b）或者每部機用外部參考校正自己的 ppm（寫入 config，例如 `frame_interval_us`
+  或 ppm 修正欄），但 **1 µs 的 timer 粒度 = 50 ppm**，要 sub-ppm 要用 dither
+  （20,000／20,001 µs 交替 N 幀）。
+- **唔好**用「調快一啲」去追幀——會令 jitter 變差；現時節拍器係固定週期 +
+  slack 銀行，唔追趕（見 §2.5）。

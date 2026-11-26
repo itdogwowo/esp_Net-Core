@@ -9174,3 +9174,94 @@ cmd/DC/CS）→ `3e55192`（AGENTS）→ `e9c69a4`（照 IDF 對照修正 clk／
 - **驅動 idle gap／underrun 上報**：內部有計數但未入 `0xF071`（想量「誰等誰」要加）。
 - **深睡／重啟後 DMA 狀況**：未有專門測試。
 - **push**：等用家明示。
+
+### 7.259 2026-11-26（FPS 精度：照標準重跑＋「平均要準確 50.000」）
+
+用家要求：照過去標準跑測試；而且**平均 fps 要非常準確、盡量平均 50**（兩粒 IC 要同步，
+平均值偏了會慢慢走位）。→ 照做，並**升級量測工具**（舊法量化極限 ±50 ppm，睇唔到細節）。
+
+#### 一、標準測試（原封不動，照 `docs/02_guides/fps-stability.md`）
+
+`fps_trace --seconds 60 --reset`（fw a7aad43、idf=v6.1.1 (WSL)）：
+
+| 指標 | 值 |
+|---|---|
+| frames | 2,983 |
+| avg | **20,000 µs（50.00 fps）** |
+| sd | **52 µs（0.26% of target）** |
+| min / max | 19,582 / 20,484 µs（max deviation 484 µs） |
+| bad | **0** |
+| starved / late | 3 / 0 |
+| slack / catchup / overrun | 50,000 µs（滿）/ 205 / 2 |
+| verdict | **STABLE** |
+
+`fps_drift`（舊法，5×20 s）：mean **−30 ppm**、sd 24.5、worst 50 —— 但呢個係
+`avg_us` 整數 µs 的 **±50 ppm 量化極限**，唔可以當真。
+
+#### 二、工具升級：`fps_drift.py --precise`（sub-ppm）
+
+`0xF081` 本身有 `sum_us`（累計間隔）＋`n`（幀數），用差分就避開量化：
+
+```text
+avg = (sum_us_end − sum_us_start) / (n_end − n_start)
+ppm = (avg − target) / target × 1e6
+```
+
+5 輪 ×60 s（`--windows 5 --window 60 --precise`）：
+
+| 輪 | avg（µs） | ppm |
+|---|---:|---:|
+| 1 | 19,999.9907 | −0.47 |
+| 2 | 20,000.0343 | +1.72 |
+| 3 | 19,999.9663 | −1.68 |
+| 4 | 20,000.0756 | +3.78 |
+| 5 | 19,999.9243 | −3.78 |
+| **平均** | **≈20,000.000** | **−0.09（sd 2.63、worst 3.78）** |
+
+→ **設備內部時間基準 = 50.000 fps**（`esp_timer` 週期 20,000 µs = 1,600,000 個 80 MHz
+cycle，整數無餘，所以唔會累積漂移）。
+
+#### 三、絕對頻率：對外部參考（host NTP）量 600 s
+
+設備內部「自己量自己」永遠≈0 ppm；真正嘅絕對誤差只來自 **XTAL**。用
+`Δframes / Δhost_time` 對 host NTP 時鐘量 10 分鐘（30,001 幀）：
+
+- 絕對 fps = 50.0014（+28 ppm，600 s 端點法；量化 33 ppm/幀）
+- 90–600 s 線性回歸：**−4.9 ±8.7 ppm**（σ 8.7 ppm；前 90 s 有 host 時鐘調整暫態）
+- 設備內部：−0.29 ppm
+- → **純 XTAL 誤差在 ±10 ppm 量級**（S3 40 MHz XTAL 典型 ±10 ppm）
+
+**量測極限**：host NTP root dispersion 0.168 s、poll 4,096 s；要 <5 ppm 要 GPS PPS 或
+第二塊板對量。另註：`sum_us` 係 32-bit µs，**~71.6 min 會 wrap**，precise 窗口要 <60 min。
+
+#### 四、兩粒 IC 要同步（結論）
+
+- 兩塊板**各自內部**平均值都係 50.000，唔會靠自己漂。
+- 兩塊之間只剩 **XTAL 差異 ≈ 2×XTAL ppm（10–30 ppm 量級）**；resync 間隔：
+
+| 相對漂移 | 1 ms | 5 ms | 20 ms |
+|---|---|---|---|
+| 10 ppm | 100 s | 8 min | 33 min |
+| 20 ppm | 50 s | 4 min | 17 min |
+| 30 ppm | 33 s | 3 min | 11 min |
+| 50 ppm | 20 s | 2 min | 7 min |
+
+- 想「長期唔使理」：需要（a）定期 resync（master 廣播 frame index／tick）或
+  （b）每粒用外部參考校準 ppm。注意 **esp_timer 粒度 1 µs = 50 ppm**，要 sub-ppm
+  修正要用 dither（20,000／20,001 µs 交替 N 幀）。
+- 呢兩樣**未做**（等用家決定要唔要；見下面建議）。
+
+#### 五、圖／檔案
+
+- 圖：[`fps-precision-2026-11-26.png`](docs/assets/fps-precision-2026-11-26.png)
+  （A 內部 5 輪 ppm、B 絕對 600 s、C 兩 IC resync 表、D 標準測試摘要）
+- 工具：`tools/fps_drift.py --precise`（新）；`tools/fps_trace.py`（不變）
+- 原法數據：CSV `artifacts/_tmp/fps_drift_precise.csv`、絕對量測 `artifacts/_tmp/abs_fps.json`
+
+#### 六、下一步建議（兩個 IC 長期同步）
+
+1. **resync 機制**：master 每 N 秒廣播 frame index／tick，slave 對齊（最直接，
+   容許 drift 越大就 resync 越密；已有 resync 表可定 N）。
+2. **每粒 ppm 校準欄**：`system.json` 加 `fps_ppm`，用 dither 實作 sub-ppm 修正；
+   校準值由 host 量（今次方法）寫入。
+3. 兩者可以並存：先校準（拉長 resync 間隔），再用 resync 封頂。
