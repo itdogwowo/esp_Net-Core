@@ -132,3 +132,54 @@ assets_hash u32 | payload_len u32 | crc32 u32 | payload…
 
 > **一句話**：JSON 係「人機介面」，二進位係「機機介面」；兩者都由同一套
 > 「出廠 → FAT → 回退」規則管，格式由 magic／ver／hash／crc 保證唔會亂讀。
+
+---
+
+## 8. 哈希規則（所有中間產物一律照呢條）
+
+**用家定案（2026-11-26）**：中間產物要寫入來源 JSON 哈希，開機對哈希：
+一樣＝直接載入；唔一樣＝重新生成。
+
+### 8.1 每個中間物嘅 header（固定佈局）
+
+```text
+magic 4 B | ver u16 | flags u16 | src_hash u32 | payload_len u32 | blob_crc u32
+                                 ^^^^^^^^^^        ^^^^^^^^^        ^^^^^^^^^
+                                 來源 JSON 哈希    長度             自身 CRC
+```
+
+- **`src_hash`**：來源 JSON 嘅 CRC32（IEEE，zlib），按**固定次序**累加：
+  `hash = crc32(hash, "<檔名>\0" + raw_bytes)`；檔名用相對路徑，例如
+  `wiring.json`、`driver.json`、`project/sdkconfig.defaults`。
+  用 **raw bytes**（FAT 上實際內容），唔做 normalization。
+- **`blob_crc`**：header 之後 payload 嘅 CRC32（防讀取／寫入半截）。
+- **`ver`**：格式版本（schema 一改就 bump；舊 blob 直接拒讀）。
+
+### 8.2 開機流程（統一）
+
+```text
+讀 FAT JSON bytes → 算 src_hash
+  ├─ 中間物存在 且 ver 夾 且 src_hash 相同 且 blob_crc 過 → 直接載入（hit）
+  └─ 否則 → 由 JSON 重新生成 → 寫回（atomic：.tmp → rename）→ log miss（old→new）
+```
+
+- **hit**：開機唔使 parse JSON（最快）；log `ncs hit src=0x…`
+- **miss**：parse JSON；若 JSON 壞 → 回 L0 出廠；log `ncs miss old=0x… new=0x…`
+- **CRC 撞車**（人為）唔喺威脅模型內；意外改動 8 KB 內容撞 CRC 機率 ~1/2³²，
+  而且撞車都只會「用舊值一次」，下次改動即 miss。
+
+### 8.3 各中間物嘅 `src_hash` 範圍
+
+| 中間物 | src_hash 來源 |
+|---|---|
+| **NCS1**（`state.ncs`／NVS） | 所有 config layer 嘅 JSON（固定次序：hardware、driver、system、tasks、resources） |
+| **NCC2**（config 派生 cache） | 該 layer 嘅 JSON（單一檔） |
+| **PXA2**（pixel assets 編譯 cache） | effects.json＋mode／map／registry 所在嗰批 JSON |
+| **NCLT**（layout cache） | `key` 已經係 mode/map/assets 內容 hash 嘅 FNV；等同 src_hash（見 §8.4） |
+| **preset_activation.json**（生成期激活表） | `wiring.json`＋`driver.json`＋project `sdkconfig.defaults`（ncportgen 已輸出 `src_hash`＋逐檔 crc） |
+
+### 8.4 NCLT 補充
+
+`.nclt` header 本身已有 `key`（FNV-1a over mode_hash/map_hash/px/assets_hash/ver）＋
+`crc`；**key 就係來源哈希**，所以開機載入前比較 `key` 已等同「JSON hash 一樣嗎」。
+唔另加 `src_hash` 欄位（避免重複），但 header 註解會寫明呢個等價關係。

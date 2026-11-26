@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import zlib
 import sys
 from pathlib import Path
 
@@ -779,11 +780,27 @@ def main() -> int:
     devices = gen_preset_devices(driver, project_pixel_override(project))
     (out / "preset_driver.json").write_text(
         json.dumps(devices, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    # 生成期激活表：邊個 unit 會激活、次序、依賴（firmware 開機照表執行）
+    # 生成期激活表：邊個 unit 會激活、次序、依賴（firmware 開機照表執行）。
+    # 來源哈希：開機時可以核對「中間產物 vs 來源 JSON」版本（一樣＝直接載入）。
     activation = gen_activation(wiring, driver, led_sum)
+    src_files = []
+    for name in ("wiring.json", "driver.json"):
+        fp = hw / name
+        if fp.is_file():
+            src_files.append((name, fp.read_bytes()))
+    if project is not None and (project / "sdkconfig.defaults").is_file():
+        src_files.append((project.name + "/sdkconfig.defaults",
+                          (project / "sdkconfig.defaults").read_bytes()))
+    src_hash = 0
+    for name, data in src_files:
+        src_hash = zlib.crc32(name.encode("utf-8") + b"\0" + data, src_hash)
     (out / "preset_activation.json").write_text(
-        json.dumps({"version": 1, "units": activation}, ensure_ascii=False, indent=2) + "\n",
-        encoding="utf-8")
+        json.dumps({"version": 1,
+                    "src_hash": "0x%08x" % (src_hash & 0xFFFFFFFF),
+                    "src_files": [{"name": n, "crc32": "0x%08x" % (zlib.crc32(d) & 0xFFFFFFFF)}
+                                  for n, d in src_files],
+                    "units": activation},
+                   ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     (out / "nc_port_summary.json").write_text(
         json.dumps(summary, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 

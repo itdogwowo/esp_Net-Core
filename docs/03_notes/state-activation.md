@@ -129,6 +129,31 @@ pin ─┬─ spi ─┬─ tft
 
 ---
 
+## 4.5 生成期產物嘅哈希（版本確認）
+
+`preset_activation.json` 由 ncportgen 生成時會寫入：
+
+```json
+{
+  "version": 1,
+  "src_hash": "0x014323ff",
+  "src_files": [
+    { "name": "wiring.json", "crc32": "0xa6490d8f" },
+    { "name": "driver.json", "crc32": "0x7043699a" }
+  ],
+  "units": [ … ]
+}
+```
+
+- **`src_hash`**：`crc32("wiring.json\0"+bytes)` → `crc32(…, "driver.json\0"+bytes)`
+  →（有 project 覆寫）`crc32(…, "project/sdkconfig.defaults\0"+bytes)`；
+- **用途**：日後 compile 成 `const nc_act_desc_t nc_port_act[]` 時，同時帶
+  `src_hash`／`ver`；boot log／`status hw` 可以印「激活表係由邊份 JSON 生成」，
+  同 FAT 上嘅 JSON 對唔對得上，一眼睇到；
+- **注意**：activation 係 **build-time 決定**；FAT 上改 JSON 只會改「值」，
+  **唔會**新增／移除 unit。要改 activation → 重 build（或 reboot 但表唔變，
+  boot log 會提示 JSON 同表唔一致）。
+
 ## 5. 落地（併入 state-schema 計劃）
 
 | 階段 | 內容 | 估時 |

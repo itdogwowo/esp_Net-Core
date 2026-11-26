@@ -41,8 +41,12 @@ driver.led.px        = 0x2_0_0_5   （driver domain=2、unit=led=0）
 ## 3. 儲存格式 `NCS1`（schema 版，最省）
 
 ```text
-header 12 B: "NCS1" | ver u16 | count u16 | crc32 u32
+header 16 B: "NCS1" | ver u16 | count u16 | src_hash u32 | blob_crc u32
 body:  count × ( id varint , value zigzag-varint )   ← 按 id 升序
+
+src_hash = 來源 JSON（config layers）嘅 CRC32；開機：
+  file 存在 && ver 夾 && src_hash == 現時 JSON hash && blob_crc 過 → 直接載入
+  否則 → parse JSON → 重新生成（atomic 替換）→ log miss（old→new）
 ```
 
 - **唔存 key 字串、唔存型別、唔存 default**：型別喺 schema 表；default 喺 L0 出廠。

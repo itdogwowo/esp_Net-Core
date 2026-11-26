@@ -9577,3 +9577,27 @@ A3 `status hw`（0.5 日）→ A4 runtime 指令（1–2 日，可選）。
 nc_port_act[]`（連 `nc_port.c`），B05-act 只按 `enabled=1`＋`level` 次序 install；
 `enable=0` 永遠唔郁（零 GPIO／零 buffer）。runtime `activate` 指令**唔做**
 （改 config → 重 build 或 reboot 生效，可預測、唔探測硬件）。
+
+### 7.272 2026-11-26（中間產物必帶來源哈希：開機比對，一樣直接載入）
+
+用家定案：中間產物（NCS1／NCC2／PXA2／activation）要寫入**來源 JSON 哈希**；
+開機對哈希：**一樣＝直接載入，唔一樣＝重新生成**。
+
+**統一 header**（`state-storage-format.md §8`）：
+
+```text
+magic | ver u16 | flags u16 | src_hash u32 | payload_len u32 | blob_crc u32
+```
+
+- `src_hash`：來源 JSON 嘅 CRC32（IEEE），按固定次序
+  `crc32(hash, "<檔名>\0" + raw_bytes)`；用 FAT 上 raw bytes，唔做 normalization。
+- `blob_crc`：payload CRC32；`ver`：格式版本（一改即拒讀舊 blob）。
+- 開機：`file && ver 夾 && src_hash 同 && blob_crc 過` → 直接載入（hit）；
+  否則 parse JSON 重新生成、atomic 替換、log miss（old→new）。
+- **NCS1 header 由 12 B → 16 B**（加 `src_hash`）；NCC2／PXA2 同樣；
+  NCLT 本身 `key` 已係來源內容 hash，唔重複加（文件寫明等價關係）。
+
+**生成期激活表**（ncportgen）已即時加：`preset_activation.json` 有
+`src_hash: 0x014323ff`＋逐檔 `crc32`（wiring.json 0xa6490d8f、driver.json 0x7043699a）；
+Matrix 實跑驗證。日後 compile 成 `nc_port_act[]` 時一併帶 ver/src_hash，
+boot log／`status hw` 可核對。
