@@ -9496,3 +9496,28 @@ miso、mosi、force_machine、lines、data0..data7），2 通道＝34 keys。
 已更新 [hw-matrix.md §1.1](docs/03_notes/hw-matrix.md)（含 ESP-IDF C 對應：
 `spi_bus_config_t.data0..data7`、`spi_device_polling_transmit`），原型
 `hw_matrix_preview.py` 亦改 17 欄位重跑。
+
+### 7.268 2026-11-26（SPI 模式由 `data_pins` 長度決定——照 `mp_lcd_bus` 源碼確認）
+
+用家：想**繼續用舊 JSON 形狀**，內部點轉化冇所謂；`data_pins: [14]` 會**部分決定模式**。
+查 `C:\Users\bl24847\Documents\code\git\mp_lcd_bus\esp32_src\spi_bus.c`：
+
+| `data_pins` 有效數 n | 模式 | `spi_bus_config_t` |
+|---:|---|---|
+| 0／缺省／`[]`／`null` | 未設定多線 | lcd_bus 用 `(mosi,)`；machine 用 `sck+mosi` |
+| **1** | 單線（TX only） | `mosi_io_num = data[0]`（APA102／WS2801） |
+| 2 | 半雙工 | `mosi=data[0]`、`miso=data[1]`、`SPI_DEVICE_HALFDUPLEX` |
+| 3 | quad（含 WP） | `quadwp=data[2]` |
+| 4 | quad（QIO） | `quadwp=data[2]`、`quadhd=data[3]` |
+| 5–8 | octal | 再加 `data4..data7`；要 `SPICOMMON_BUSFLAG_OCTAL`（lcd_bus 冇設、C 版會設） |
+
+其他源碼事實：`data=[...]`＋`clk`（n 1..8）或 `sck`＋`mosi` 兩種寫法；`host` 有效
+`1..SOC_SPI_PERIPH_NUM-1`；`freq`＝舊 `baudrate`；`phase`／`polarity` machine 版才有；
+`queue_depth`、`dc` 係 lcd_bus 參數；`force_machine=1` 走同步唔用 DMA（APA102）。
+
+**schema 更新**：每 SPI 通道 17 → **19 keys**（加 `queue_depth`、`dc`），2 通道 38 keys；
+全矩陣 376 → **380 keys**；NCS1 worst 2,504…2,672 → **2,672 B**（NVS 4 KB 仍 OK）。
+**模式係衍生值**（parse 時由 data0..7 有效數算出，唔存）；n>4 而芯片唔支援 octal →
+明示 error，唔靜默降級。
+
+文件：hw-matrix.md §1.1 已重寫（含源碼對照）；原型重跑。
