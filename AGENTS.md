@@ -4,7 +4,7 @@
 > 這個專案，**先由頭讀到落尾**，再開始改任何東西。細節文件在 `docs/`，但方向、鐵律、
 > 工作流程、最常踩的坑全部在這一份。
 >
-> **最後更新**：2026-11-26（新增 §0.6 測試環境 `tenv`；版本統一提醒、鐵律 12、host test 21 支）
+> **最後更新**：2026-11-26（新增 §0.6 測試環境 `tenv`；版本統一提醒、鐵律 12、host test 22 支）
 > **維護規則**：每次架構／流程／工具改變，先改這份；過期內容直接覆蓋，唔好累積兩套講法。
 
 ---
@@ -97,7 +97,7 @@ python3 tools/nc4.py --port /dev/cu.usbmodemXXXX status tasks
 ### 做測試
 
 ```bash
-# 主機測試（唔需要板；21 支，全部 -Werror）
+# 主機測試（唔需要板；22 支，全部 -Werror）
 bash tools/hosttest/run_all.sh
 
 # 上板 smoke
@@ -226,7 +226,7 @@ python3 tools/ota.py --port /dev/cu.usbmodemXXXX \
 bash tools/hosttest/run_all.sh
 ```
 
-- 21 支測試（`cfg_test` … `fpsclock_test`），全部 `-Wall -Wextra -Werror`。
+- 22 支測試（`cfg_test` … `fpsclock_test`；最新加入 `stateBlob_test`），全部 `-Wall -Wextra -Werror`。
 - 每次跑之前會 `rm -rf <test>/build`，所以 header 改動唔會被舊 binary 遮住。
 - **唔好只跑你改的那一支**；共用 header／codec／config 的影響經常在別處爆。
 - 測試失敗先修，唔好「先 commit 再算」。
@@ -801,15 +801,15 @@ render_task（公用輸出層；core1，order 10；環／lane／節拍的主人�
 bash tools/hosttest/run_all.sh
 ```
 
-- 21 支：`cfg_test`、`cfgstruct_test`、`ncd_test`、`task_test`、`router_test`、
+- 22 支：`cfg_test`、`cfgstruct_test`、`ncd_test`、`task_test`、`router_test`、
   `link_test`、`mod_test`、`hub_test`、`plan_test`、`buf_test`、`portgen_test`、
   `ncm_test`、`pixel_test`、`pxEngine_test`、`pxAsset_test`、`pxProgram_test`、
-  `pxLayer_test`、`pxShow_test`、`pxScan_test`、`pxLayout_test`、`fpsclock_test`。
+  `pxLayer_test`、`pxShow_test`、`pxScan_test`、`pxLayout_test`、`stateBlob_test`、`fpsclock_test`。
 - 全部 `-Werror`；失敗先修，唔好選擇性跑。
 - ⚠ 數字要講清楚：`tools/hosttest/*/run.sh` 有 **25 支**，但 `run_all.sh` 只跑
-  **21 支**測試；其餘 4 支係**量測 bench**（`gamma_bench`、`program_bench`、
+  **22 支**測試；其餘 4 支係**量測 bench**（`gamma_bench`、`program_bench`、
   `pxMap_bench`、`sin_bench`），唔係正確性測試，所以唔入 run_all。
-  講「21/21」係指 run_all；唔好講成「全部 25 支」。
+  講「22/22」係指 run_all；唔好講成「全部 25 支」。
 
 ### 12.2 上板 smoke test
 
@@ -897,7 +897,7 @@ python3 tools/nc4.py --port <PORT> status mem
 > 先 `python3 tools/tenv.py brief`；plan 說 `blocked`／`unknown` 的 lane **唔可以當驗證過**。
 > 回報時貼 `python3 tools/tenv.py stamp`。
 
-1. `bash tools/hosttest/run_all.sh` → 21/21。
+1. `bash tools/hosttest/run_all.sh` → 22/22。
 2. `make.py build ...` → rc=0。
 3. `tools/ota.py` → 推上板（唔使 BOOT）。
 4. `status sys`／`status tasks`／相關 0xF0xx → 數字＋正確性閘門。
@@ -914,7 +914,7 @@ python3 tools/nc4.py --port <PORT> status mem
 ### 14.5 Definition of Done
 
 - [ ] 功能／修正符合原 Task 的驗收條件。
-- [ ] Host tests 全綠（21/21）。
+- [ ] Host tests 全綠（22/22）。
 - [ ] 目標 board／project 建置成功。
 - [ ] 有上板驗證（或明确標示未上板）。
 - [ ] 逐 byte／checksum 類正確性閘門有過。
@@ -1012,6 +1012,7 @@ commit message 說明。
 | 2026-11-26 | **I80 兩個實作（esp_lcd／直驅）＋設計紅線**：直驅只 route 真正接燈的 lane（Matrix 由 10 支腳變 1 支，50 fps／drops=0），但**不得異化成只for燈**——cfg 保留 `wr_pin`／`dc_pin`／`cs_pin`，真熒幕仍走 esp_lcd；直驅的 cmd phase／多 device 未做且明講（見 pixel-i80-pin-schema.md §8.4、status §7.254） | lead（AI） |
 | 2026-11-26 | **我們自己的 I80 驅動完整 LCD 化**：`nc_i80_drv_submit_cmd()`（cmd phase＋param phase）、`cmd_bits`、DC 四段電平、CS assert／de-assert；`wr`／`dc`／`cs` **全部可選**（唔填 -1 唔影響 LED），唔會像 esp_lcd 缺一就整條 lane 唔建立。LED 快路徑加 phase 形狀快取：enc_us 209→186、tx_us 38→32，50 fps／drops=0。面板未上板（冇硬件）。status §7.255 | lead（AI） |
 | 2026-11-26 | **跑分全面重跑＋出圖**：`modules/lab/bench_lab/`（`bench_rerun.py` 抽 0xF071×10／0xF06B×3 mode／status，`draw_bench.py` 用 Pillow 畫圖，唔需要 matplotlib）。現況：fw `a7aad43`、50.0 fps、drops=0、一幀 CPU 256 µs（1.3%）、線路 1.84 ms（9.2%）、idle 89.5%；圖 [`bench-2026-11-26.png`](docs/assets/bench-2026-11-26.png)，完整記錄 status §7.258 | lead（AI） |
+| 2026-11-26 | **狀態格式統一 [`NCSTATE`](docs/03_notes/state-storage-format.md)**：唯一狀態格式（header 26 B＋自描述 record type/key/len/value）＋pixel 例外 `.layout`（magic `NCLAYOUT`）；新增 host test `stateBlob_test`（round-trip、CRC、未知 type 跳過），host test 21→22 支 | lead（AI） |
 | 2026-11-26 | **Windows 主機的 bash 陷阱**：`make.py`／`doctor` 用 `bash -c` 傳 `C:\…` 路徑，Git Bash 同 WSL bash 都會失敗（doctor 的 board check 會假報 FAIL）。§0.5 新增一節講點判斷、建置改在 WSL 內跑（`bash -lc 'cd /mnt/c/… && IDF_PATH=/home/user/esp/esp-idf python3 make.py …'`）、OTA／NC4 留在 Windows 側。同時記錄 Matrix-LED-Textkit 全面 JSON 化（見 status §7.253） | lead（AI） |
 
 ---

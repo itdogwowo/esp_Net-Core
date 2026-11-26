@@ -9674,3 +9674,29 @@ worst-case 380 key ≈ 3.1 KB（NVS 4 KB OK）。
 
 **命名規矩**：magic 用 ASCII 全名、**唔加版本數字**（version 喺 header `ver`）；
 檔案名講用途；新格式先喺 magic 表登記。
+
+### 7.276 2026-11-26（P1 開始：NCSTATE codec＋host test 22/22；未接 runtime）
+
+用家：「正可以執行測試了」→ 開始 P1（統一狀態格式實作第一步）。
+
+**已實作（純 C codec，未接 runtime）**
+- `firmware/components/sys/state/include/nc_state_blob.h`＋`nc_state_blob.c`：
+  * header 26 B：`"NCSTATE\0"`（8）＋ver u16＋flags u16＋count u16＋
+    src_hash u32＋payload_len u32＋blob_crc u32；
+  * record：`type u8 | key varint | len varint | value`（type 1=uint 2=sint
+    3=bytes 4=bool）；**未知 type 靠 len 跳過**（向前兼容）；
+  * encode（size/cap 檢查、u16 count 上限）、decode（magic／ver／len／CRC 檢查、
+    callback、n_skipped 統計）；錯誤明示唔靜默。
+- 加入 `sys/state` component SRCS（IDF build 成功，image 0xb2ef0，partition 剩 53%）。
+
+**Host test（新增 `stateBlob_test`，run_all 21→22 支）**
+- round-trip：uint 0/127/128/0xFFFFFFFF、sint -1/INT32_MAX/INT32_MIN、bool、
+  bytes（含空 bytes）；
+- 壞 magic／ver／CRC／payload_len／截斷／NULL；
+- **未知 type 跳過**（改 type 0x7F、重算 CRC → skipped=1，其餘照收）；
+- bool 非法值（2）→ INVALID_SIZE；encode cap 不足 → 0；size() 與實際一致。
+- `bash tools/hosttest/run_all.sh` → **22/22 全部通過**。
+
+**上板**（fw `bd70185-dirty`、app `40a4f819`、idf=v6.1.1 (WSL)）：OTA 成功、
+`rst=3`、`up_s` 正常；codec 未接 runtime，行為同之前一樣（LED 正常）。
+**未做**：JSON→NCSTATE 生成、開機 hit/miss、`state.bin` 落 FAT（下一步 P2）。
