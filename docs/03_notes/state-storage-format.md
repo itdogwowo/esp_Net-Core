@@ -163,3 +163,23 @@ layout 係「編譯後大表」（aprog／job／runs，幾百 B 到 32 KB），�
 - 寫 19 B 垃圾入去 → reboot：檔案自動重生 124 B（magic 正確），舊垃圾保留做
   `state.ncst.bak`（last-known-good 機制證實可運作）。
 - manifest：**19 個檔**（scan 之後見到 `/config/state.ncst`）。
+
+---
+
+## 12. src_hash 的算法、次序同開機成本（2026-11-26 實測）
+
+- `src_hash = crc32("<檔名>.json\0" + raw_bytes)`，按**cfg boot 開檔次序**累加：
+  `system` → `hardware` → `tasks` → `resources` → `driver`。
+  * 由 `nc_cfg_boot()` 讀檔時**順便計**（表驅動 CRC，唔重讀）；
+  * `ncportgen` 的 `nc_port_config_hash()` 只計 `hardware`、`driver`（同格式、同次序），
+    用嚟比對 FAT 同 build-time 預置（`status cfg.act.fat/match`）。
+
+| 階段 | 優化前 | 現在 | 備註 |
+|---|---:|---:|---|
+| `cfg_us`（5 個 JSON parse＋型別化＋hash） | 29.1 ms | **30.1 ms** | 加 raw hash（表驅動 CRC）＋~1 ms |
+| `state_us`（hit） | 24.4 ms | **8.2 ms** | 原本重讀 13 KB JSON → 改成共享 hash，**−16.2 ms** |
+| `state_us`（config 改動後第一 boot，miss 寫檔） | — | **762 ms** | WL FAT 寫 124 B＋commit（一次性） |
+
+> 量度方法：B02 用 `esp_timer_get_time()` 包住兩個 call，`status cfg.t = {cfg_us, state_us}`。
+> 結論：skip JSON parse 最多省 ~30 ms（但要 schema 覆蓋 links/routes/tasks/resources，
+> 工作量大）；**miss 寫檔 762 ms** 反而更值得處理（可延後到 boot 後 idle 才寫）。

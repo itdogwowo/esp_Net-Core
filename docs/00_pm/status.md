@@ -9865,3 +9865,25 @@ ncportgen 生成的 activation 表**直接編成 `nc_port.c` 的 const 表**，f
   preset 後 reboot：`act.match=1`（fat=2960301093）；
 - 之後 `state` 因 config 改變 miss→重建（正常）；再 reboot：hit=1。
 - 即係「FAT 最高權威」同「activation 生成期決定」兩件事都睇得到、唔會靜靜打架。
+
+### 7.284 2026-11-26（開機分段量度：cfg 30.1 ms、state hit 8.2 ms、miss 寫檔 762 ms）
+
+用家：可以自己驗證的就繼續 → 先量成本再決定「hit 時 skip JSON parse」。
+
+**做法**：B02 包 `esp_timer_get_time()` 量 `nc_cfg_boot()`／`nc_state_boot_sync()`；
+`status cfg` 加 `"t":{"cfg_us","state_us"}`。同時把 src_hash 改成
+**parse 時順便計**（表驅動 CRC；檔名 `<layer>.json`，同 ncportgen 一致），
+state sync 唔再重讀 13 KB JSON。
+
+**實測**（Matrix、fw `5110f1a-dirty`、app `158f17f3`、idf=v6.1.1 WSL；3 次開機穩定）
+
+| 階段 | 優化前 | 現在 |
+|---|---:|---:|
+| `cfg_us`（5 JSON parse＋型別化＋hash） | 29.1 ms | **30.1 ms**（+1 ms hash） |
+| `state_us`（hit） | 24.4 ms | **8.2 ms**（−16.2 ms） |
+| `state_us`（miss 寫檔） | — | **762 ms**（一次性；WL FAT） |
+
+- 修正檔名後 `act.match=1`（FAT 同 build-time 預置一致）。
+- 結論：skip JSON parse 最多省 ~30 ms，但要做齊 schema＋setter，風險高；
+  **miss 寫檔 762 ms** 更值得先處理（延後到 boot 後寫；斷電只會下次再 miss）。
+
