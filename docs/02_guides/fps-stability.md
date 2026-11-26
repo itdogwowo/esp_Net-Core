@@ -204,3 +204,48 @@ python tools/fps_drift.py --port <PORT> --windows 5 --window 60 --precise
   （20,000／20,001 µs 交替 N 幀）。
 - **唔好**用「調快一啲」去追幀——會令 jitter 變差；現時節拍器係固定週期 +
   slack 銀行，唔追趕（見 §2.5）。
+
+---
+
+## 2.8 最終讀數方法＋10 分鐘會偏幾多幀（2026-11-26）
+
+### 三種讀法（由粗到精）
+
+| 想要 | 點讀 | 解讀 |
+|---|---|---|
+| **即時** 一眼睇 | `python tools/nc4.py --port COM24 raw 0xF081 00`（或 WebMaster `POST /api/cmd {"cmd":"0xF081"}`） | 讀 `avg_us`／`sd_us`／`max_us`／`bad`／`starved`／`overrun` |
+| **精確平均**（單塊） | 隔 W 秒讀兩次，`avg = Δsum_us / Δn`；`ppm = (avg − target)/target × 1e6` | `tools/fps_drift.py --port COM24 --windows 5 --window 60 --precise` 一鍵做 |
+| **絕對／兩塊對量** | 同一 host 時鐘下量 `Δframes / Δhost_time` 對 50 Hz 取 ppm（`artifacts/_tmp/abs_fps.py` 係今次的一次性版） | 單塊絕對值要外部參考；兩塊要**同一部 host、同一段時間**各量一次 |
+
+設備回的 `0xF081` JSON 關鍵欄位：
+
+```text
+target_us=20000   n=幀數      avg_us=平均間隔   sum_us=累計間隔（精確法用）
+sd_us / min_us / max_us / bad / starved / late / frames / slack_us / catchup / overrun / hist[]
+```
+
+> `avg_us` 只有整數 µs（±50 ppm 量化）→ **唔好**用它判兩塊漂移；用 `sum_us/n`。
+> `sum_us` 係 32-bit µs：**~71.6 min 會 wrap**，差分窗口要 <60 min。
+
+### 10 分鐘會偏幾多幀？
+
+兩塊板之間：`Δt = T × Δppm × 1e-6`；`幀偏移 = Δfps × T = 50 MHz... = 0.03 × Δppm`（T = 600 s）。
+
+| 兩塊相對漂移 | 10 分鐘時間偏移 | **10 分鐘幀偏移**（20 ms/幀） | 累積到 1 幀要 |
+|---:|---:|---:|---:|
+| 5 ppm | 3 ms | 0.15 幀 | 67 min |
+| 10 ppm | 6 ms | 0.30 幀 | 33 min |
+| **20 ppm**（兩塊各 ±10 ppm 典型） | **12 ms** | **0.60 幀** | **16.7 min** |
+| 30 ppm | 18 ms | 0.90 幀 | 11 min |
+| 50 ppm | 30 ms | 1.50 幀 | 6.7 min |
+
+**今次實測（單塊 vs host NTP）**：90–600 s 回歸 **−4.9 ±8.7 ppm** →
+10 分鐘偏移 **≈ 2.9 ms ≈ 0.15 幀**（95% 上限取 ±17 ppm → 10.2 ms ≈ 0.5 幀）。
+
+**實務結論**：
+- 兩塊用同一份 code、同一個 20,000 µs 週期 → **10 分鐘以內通常只差 0.3–1 幀**，
+  肉眼基本睇唔出（但要睇你嘅容忍度）。
+- 如果要「任何時候都 ≤1 幀」：20 ppm 情況下 **每 ~17 分鐘 resync 一次**；
+  要 ≤5 ms 偏差就每 ~4 分鐘；要 ≤1 ms 就每 ~50 秒。
+- 要完全唔 resync：需要每塊板 ppm 校準（用比 10 分鐘更長、對 GPS PPS 的量測），
+  現階段未做。
