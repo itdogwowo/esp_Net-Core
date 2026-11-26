@@ -1,7 +1,7 @@
 // 開機 sync state.ncst：由 config 派生＋對拍（P3 第一步）。
 //
 // 流程（定案：開機對哈希；一樣＝直接載入；唔一樣＝重新生成）：
-//   1. 算 config JSON 的 src_hash（hardware／driver／system／tasks／resources）
+//   1. 由 cfg 造 records，算**值**的 src_hash（nc_state_blob_rec_crc）
 //   2. peek state.ncst：ver／magic／CRC／src_hash 全中 → 載入 RAM store
 //   3. 同「由已 parse 的 cfg 造出的 records」**對拍**：
 //        - 全中 → hit（log: 一致 n/n）
@@ -29,25 +29,25 @@ static nc_state_store_t s_store;          // 常駐 RAM：blob 載入後的值�
 static nc_state_boot_result_t s_result;
 static bool s_result_valid;
 
-static size_t put_u(size_t n, uint16_t key, uint32_t v)
+static size_t put_u(size_t n, uint32_t key, uint32_t v)
 {
     s_recs[n] = (nc_state_rec_t){ .key = key, .type = NC_STATE_T_UINT, .u = v };
     return n + 1;
 }
 
-static size_t put_i(size_t n, uint16_t key, int32_t v)
+static size_t put_i(size_t n, uint32_t key, int32_t v)
 {
     s_recs[n] = (nc_state_rec_t){ .key = key, .type = NC_STATE_T_SINT, .i = v };
     return n + 1;
 }
 
-static size_t put_b(size_t n, uint16_t key, bool v)
+static size_t put_b(size_t n, uint32_t key, bool v)
 {
     s_recs[n] = (nc_state_rec_t){ .key = key, .type = NC_STATE_T_BOOL, .u = v ? 1u : 0u };
     return n + 1;
 }
 
-static size_t put_s(size_t n, uint16_t key, const char *s)
+static size_t put_s(size_t n, uint32_t key, const char *s)
 {
     s_recs[n] = (nc_state_rec_t){ .key = key, .type = NC_STATE_T_BYTES,
                                   .bytes = s, .bytes_len = (uint16_t)strlen(s) };
@@ -136,9 +136,6 @@ esp_err_t nc_state_boot_sync(nc_state_boot_result_t *out)
     memset(&s_result, 0, sizeof(s_result));
     memset(&s_store, 0, sizeof(s_store));
 
-    // src_hash 由 nc_cfg_boot() 讀檔時順便計（唔再重讀 13 KB；曾量到 24 ms）。
-    // 次序 = cfg boot 開檔次序：system、hardware、tasks、resources、driver。
-    uint32_t src_hash = nc_cfg_raw_hash();
     if (nc_cfg_raw_hash_files() == 0) {
         ESP_LOGW(TAG, "NCSTATE：cfg 未 boot（冇 hash）→ 跳過 state sync");
         if (out != NULL) {
@@ -146,8 +143,20 @@ esp_err_t nc_state_boot_sync(nc_state_boot_result_t *out)
         }
         return ESP_ERR_INVALID_STATE;
     }
-    s_result.src_hash = src_hash;
     s_result.n_records = (uint32_t)build_records();
+
+    // src_hash = **值**的 CRC（2026-11-27 由「JSON 檔案 bytes 的 hash」改過來）：
+    // 改一句 _comment／排版／唔關事嘅檔，唔應該令所有回寫值失效。
+    // 真係改咗值 → hash 變 → 重建（呢個正是 cache 失效的條件）。
+    const uint32_t src_hash = nc_state_blob_rec_crc(s_recs, s_result.n_records);
+    if (src_hash == 0) {
+        ESP_LOGW(TAG, "NCSTATE：由 cfg 造出的 record 值唔合法 → 跳過 state sync");
+        if (out != NULL) {
+            *out = s_result;
+        }
+        return ESP_ERR_INVALID_STATE;
+    }
+    s_result.src_hash = src_hash;
 
     // schema 係唯一名單：由 cfg 造出的 record 一定要同 schema 對得上（型別／範圍）。
     // 對唔上唔會靜靜收貨：計數＋逐筆 log（最常見 = 加咗 key 但 schema 未加）。
@@ -155,7 +164,7 @@ esp_err_t nc_state_boot_sync(nc_state_boot_result_t *out)
         const uint8_t chk = nc_state_schema_check(&s_recs[i]);
         if (chk != NC_STATE_CHK_OK) {
             s_result.n_schema_bad++;
-            ESP_LOGW(TAG, "state record 0x%04x 同 schema 唔一致（%s）",
+            ESP_LOGW(TAG, "state record 0x%08x 同 schema 唔一致（%s）",
                      (unsigned)s_recs[i].key, nc_state_schema_check_name(chk));
         }
     }
@@ -176,7 +185,7 @@ esp_err_t nc_state_boot_sync(nc_state_boot_result_t *out)
     //   - 值有唔同／舊檔壞 → 先寫（唯一必要的一次性成本）。
     bool cache_ok = false;
     uint32_t diff = 0xFFFFFFFFu;
-    uint16_t first = 0;
+    uint32_t first = 0;
     if (pe == ESP_OK) {
         nc_state_info_t li;
         memset(&s_store, 0, sizeof(s_store));
@@ -189,23 +198,22 @@ esp_err_t nc_state_boot_sync(nc_state_boot_result_t *out)
         }
     }
 
-    bool matched = false;
-    if (hash_match && cache_ok && diff == 0) {
-        matched = true;
+    // 判定只看「值」：src_hash 係診斷用的版本戳，唔做閘門。
+    // 為什麼：hash 一改語義（例如 2026-11-27 由 bytes-hash 改成值-hash）就會永遠
+    // 對唔上，但值其實一樣 —— 若以 hash 做閘門，hit 會永遠 0，冇人信個指標。
+    if (cache_ok && diff == 0) {
         s_result.cmp_ok = true;
         s_result.hit = true;
         s_result.bytes = nc_state_file_size(NC_STATE_PATH);
-        ESP_LOGI(TAG, "NCSTATE hit：src=0x%08x、%u 筆、%u B（同 cfg 完全一致）",
-                 (unsigned)src_hash, (unsigned)s_result.n_records, (unsigned)s_result.bytes);
-    } else if (cache_ok && diff == 0) {
-        // hash 變咗（例如改 comment／tasks 等唔關 state 嘅內容）但 state 值冇變：
-        // 保留舊檔、唔寫盤。status: hit=0, cmp_ok=1, rebuilt=0（值一致，版本戳過時）。
-        matched = true;      // 「值」已經正確，唔使重建
-        s_result.cmp_ok = true;
-        s_result.why = "config hash 改咗但 state 值一樣";
-        s_result.bytes = nc_state_file_size(NC_STATE_PATH);
-        ESP_LOGW(TAG, "NCSTATE miss（%s）→ 值一樣，唔重寫（省 WL 寫盤）",
-                 s_result.why);
+        if (!hash_match) {
+            s_result.why = "值一樣、src_hash 過時（唔重寫，省 WL 寫盤）";
+            ESP_LOGW(TAG, "NCSTATE hit（%s）：src=0x%08x／file=0x%08x、%u 筆、%u B",
+                     s_result.why, (unsigned)src_hash, (unsigned)info.src_hash,
+                     (unsigned)s_result.n_records, (unsigned)s_result.bytes);
+        } else {
+            ESP_LOGI(TAG, "NCSTATE hit：src=0x%08x、%u 筆、%u B（同 cfg 完全一致）",
+                     (unsigned)src_hash, (unsigned)s_result.n_records, (unsigned)s_result.bytes);
+        }
     } else {
         s_result.n_mismatch = diff;
         s_result.first_diff = first;
@@ -218,7 +226,6 @@ esp_err_t nc_state_boot_sync(nc_state_boot_result_t *out)
                      (unsigned)s_result.bytes);
         }
     }
-    (void)matched;
 
     s_result_valid = true;
     if (out != NULL) {

@@ -31,7 +31,7 @@ typedef struct {
     bool     cmp_ok;     // hit 時同 cfg 對拍完全一致（=真 hit）
     bool     rebuilt;    // 今次有重新生成並寫檔
     uint32_t n_mismatch; // 對拍唔中筆數（hit 但 cache 舊）
-    uint16_t first_diff; // 第一筆對拍唔中的 key
+    uint32_t first_diff; // 第一筆對拍唔中的 key
     uint32_t n_schema_bad;  // 由 cfg 造出的 record 同 schema 對唔上的筆數（防 drift）
     const char *why;     // miss 原因（靜態字串；hit 時 NULL）
 } nc_state_boot_result_t;

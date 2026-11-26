@@ -33,7 +33,7 @@ uint16_t nc_state_key_count(void)
     return NC_STATE_KEY_COUNT;
 }
 
-const nc_state_keydef_t *nc_state_key(uint16_t id)
+const nc_state_keydef_t *nc_state_key(uint32_t id)
 {
     // 25 個 key、線性搜尋已足夠；表按 id 升序（生成器排序），可以早停。
     for (uint16_t i = 0; i < NC_STATE_KEY_COUNT; i++) {

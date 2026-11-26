@@ -23,7 +23,7 @@ extern "C" {
 #define NC_STATE_STORE_BYTES_MAX  16   // 短字串（led fmt 最多 12）
 
 typedef struct {
-    uint16_t key;
+    uint32_t key;
     uint8_t  type;
     uint8_t  bytes_len;
     uint32_t u;
@@ -47,13 +47,13 @@ esp_err_t nc_state_store_cb(void *ud, const nc_state_rec_t *r);
 // 由 records 一次過填；回成功放入筆數。
 uint16_t nc_state_store_from_recs(nc_state_store_t *s, const nc_state_rec_t *recs, size_t n);
 
-const nc_state_ent_t *nc_state_store_find(const nc_state_store_t *s, uint16_t key);
-bool nc_state_store_get(const nc_state_store_t *s, uint16_t key, nc_state_rec_t *out);
+const nc_state_ent_t *nc_state_store_find(const nc_state_store_t *s, uint32_t key);
+bool nc_state_store_get(const nc_state_store_t *s, uint32_t key, nc_state_rec_t *out);
 
 // 同「期望的 records」對拍：回唔一致筆數（0 = 全中）；first_diff 回第一筆唔同的 key。
 // store 有多出嚟的 key（舊 blob 遺留）唔算唔一致（向前兼容）。
 uint32_t nc_state_store_cmp(const nc_state_store_t *s, const nc_state_rec_t *recs, size_t n,
-                            uint16_t *first_diff);
+                            uint32_t *first_diff);
 
 #ifdef __cplusplus
 }

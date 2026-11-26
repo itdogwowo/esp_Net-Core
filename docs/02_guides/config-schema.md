@@ -72,14 +72,14 @@ state.ncst（稀疏快取，可重建）← nc_state_boot_sync() ← 派生自�
 ### 1.1 怎樣加／減一個 key
 
 ```bash
-# 1) 改 schema/state-keys.json（跟 id 的 unit nibble；填 type／min／max／enum）
+# 1) 改 schema/state-keys.json（id = domain|unit|index|field，各 8 bit；填 type／min／max／enum）
 # 2) 生成 C 表＋本表
 python3 tools/gen_state_keys.py --doc
 # 3) 如果開機要寫入：nc_state_boot.c 的 build_records() 加一行由 cfg 取值
 # 4) rebuild（改過 sdkconfig.defaults 要 --fresh）
 ```
 
-- 生成器會驗：unit nibble 一致、id／name 唔重複、範圍在型別內、enum 由 0 連續。
+- 生成器會驗：id 的 unit byte 同 unit id 一致、id 唔可以係 0、id／name 唔重複、範圍在型別內、enum 由 0 連續。
 - 刪 key 之後，舊 `state.ncst` 的未知 key 會自動跳過（向前兼容），唔使清檔。
 - `status cfg` 的 `schema.bad` 會發現「code 加咗 key、schema 未加」的 drift。
 

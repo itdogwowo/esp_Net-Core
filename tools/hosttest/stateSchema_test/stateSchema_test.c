@@ -45,21 +45,21 @@ int main(void)
     printf("[1] 查表：id／name／unit 一致、每個 key 有 path\n");
     CHECK(nc_state_key_count() == NC_STATE_KEY_COUNT, "count=%u", nc_state_key_count());
     CHECK(nc_state_unit_count() == NC_STATE_UNIT_COUNT, "units=%u", nc_state_unit_count());
-    for (uint16_t i = 0; i < nc_state_key_count(); i++) {
+    for (uint32_t i = 0; i < nc_state_key_count(); i++) {
         const nc_state_keydef_t *d = nc_state_key_at(i);
         CHECK(d != NULL, "key_at(%u) NULL", i);
         if (d == NULL) {
             continue;
         }
-        CHECK(nc_state_key(d->id) == d, "0x%04x 用 id 查唔返", d->id);
+        CHECK(nc_state_key(d->id) == d, "0x%08x 用 id 查唔返", d->id);
         CHECK(nc_state_key_name(d->name) == d, "%s 用名查唔返", d->name);
         CHECK(nc_state_unit(d->unit) != NULL, "%s 的 unit %u 唔存在", d->name, d->unit);
-        CHECK(((d->id >> 8) & 0x0F) == d->unit,
-              "0x%04x 的 unit nibble 同 unit %u 唔一致", d->id, d->unit);
+        CHECK(((d->id >> 16) & 0xFF) == d->unit,
+              "0x%08x 的 unit byte 同 unit %u 唔一致", d->id, d->unit);
         CHECK(d->path[0] != '\0', "%s 冇 path", d->name);
         CHECK(d->min <= d->max, "%s min %d > max %d", d->name, d->min, d->max);
     }
-    CHECK(nc_state_key(0xFFFF) == NULL, "未知 id 應該 NULL");
+    CHECK(nc_state_key(0xFFFFFFFFu) == NULL, "未知 id 應該 NULL");
     CHECK(nc_state_key_name("NC_KEY_NOPE") == NULL, "未知名應該 NULL");
     CHECK(nc_state_key_name(NULL) == NULL, "NULL 名應該 NULL");
     CHECK(nc_state_key_at(NC_STATE_KEY_COUNT) == NULL, "越界應該 NULL");

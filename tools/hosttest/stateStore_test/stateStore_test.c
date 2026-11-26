@@ -64,13 +64,13 @@ int main(void)
     printf("[3] from_recs／cmp：一致回 0、改一筆回 1＋first key\n");
     nc_state_store_clear(&s);
     CHECK(nc_state_store_from_recs(&s, rs, 4) == 4, "from_recs 應該 4 筆");
-    uint16_t first = 0;
+    uint32_t first = 0;
     CHECK(nc_state_store_cmp(&s, rs, 4, &first) == 0, "一致時 cmp 應該 0");
     nc_state_rec_t rs2[4];
     memcpy(rs2, rs, sizeof(rs));
     rs2[2].u = 0;
     CHECK(nc_state_store_cmp(&s, rs2, 4, &first) == 1, "一筆唔同應該 1");
-    CHECK(first == NC_KEY_LED_ENABLE, "first_diff=0x%04x", first);
+    CHECK(first == NC_KEY_LED_ENABLE, "first_diff=0x%08x", first);
 
     printf("[4] read API：有值／冇值／型別唔啱／字串 cap\n");
     s_stub = s;   // stub 指向同一份 store
@@ -98,7 +98,7 @@ int main(void)
     nc_state_store_clear(&s);
     nc_state_rec_t rfill = {.type = NC_STATE_T_UINT, .u = 1};
     for (int i = 0; i < NC_STATE_STORE_MAX; i++) {
-        rfill.key = (uint16_t)(0x100 + i);
+        rfill.key = 0x100u + i;
         CHECK(nc_state_store_put(&s, &rfill), "fill[%d] 失敗", i);
     }
     rfill.key = 0xFFFF;
@@ -110,6 +110,37 @@ int main(void)
     CHECK(nc_state_store_cmp(&s, NULL, 0, NULL) == 0, "空對空應該 0");
     CHECK(nc_state_store_cmp(NULL, rs, 4, NULL) != 0, "NULL store 應該報唔一致");
     nc_state_store_clear(NULL);
+
+    printf("[7] bind：攞到 stable 位址，set 之後同一個位置見到新值\n");
+    {
+        nc_state_store_clear(&s_stub);
+        const char *fmt2 = "ws2812";
+        nc_state_rec_t brs[] = {
+            {.key = NC_KEY_LED_PX, .type = NC_STATE_T_UINT, .u = 64},
+            {.key = NC_KEY_I80_WR, .type = NC_STATE_T_SINT, .i = 14},
+            {.key = NC_KEY_LED_FMT, .type = NC_STATE_T_BYTES, .bytes = fmt2, .bytes_len = 6},
+        };
+        CHECK(nc_state_store_from_recs(&s_stub, brs, 3) == 3, "from_recs 失敗");
+
+        const uint32_t *px = NULL;
+        CHECK(nc_state_bind_u32(NC_KEY_LED_PX, &px), "bind px 應該成功");
+        CHECK(px != NULL && *px == 64, "px=%u（預期 64）", px ? *px : 0u);
+
+        const int32_t *wr = NULL;
+        CHECK(nc_state_bind_i32(NC_KEY_I80_WR, &wr), "bind wr 應該成功");
+        CHECK(wr != NULL && *wr == 14, "wr=%d", wr ? (int)*wr : 0);
+
+        CHECK(nc_state_set_u32(NC_KEY_LED_PX, 128) == NC_STATE_SET_OK, "set px");
+        const uint32_t *px2 = NULL;
+        CHECK(nc_state_bind_u32(NC_KEY_LED_PX, &px2), "re-bind px");
+        CHECK(px2 == px, "同一個 key 位址應該 stable");
+        CHECK(px != NULL && *px == 128, "同一個 pointer 應該見到新值 128");
+
+        const uint32_t *bad = NULL;
+        CHECK(!nc_state_bind_u32(NC_KEY_LED_FMT, &bad), "bind 型別唔對應該 false");
+        CHECK(!nc_state_bind_u32(0x00FF00FFu, &bad), "bind 未知 key 應該 false");
+        CHECK(!nc_state_bind_u32(NC_KEY_LED_PX, NULL), "out=NULL 應該 false");
+    }
 
     if (g_fail == 0) {
         printf("stateStore_test OK\n");

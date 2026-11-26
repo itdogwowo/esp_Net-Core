@@ -57,10 +57,10 @@ int main(void)
     printf("[2] save → peek／load\n");
     const char *fmt = "ws2812";
     nc_state_rec_t recs[] = {
-        {.key = 0x0002, .type = NC_STATE_T_UINT, .u = 20},
-        {.key = 0x0702, .type = NC_STATE_T_SINT, .i = -1},
-        {.key = 0x0C01, .type = NC_STATE_T_BOOL, .u = 1},
-        {.key = 0x0C06, .type = NC_STATE_T_BYTES, .bytes = fmt, .bytes_len = 6},
+        {.key = 0x00000002, .type = NC_STATE_T_UINT, .u = 20},
+        {.key = 0x00070002, .type = NC_STATE_T_SINT, .i = -1},
+        {.key = 0x000C0001, .type = NC_STATE_T_BOOL, .u = 1},
+        {.key = 0x000C0006, .type = NC_STATE_T_BYTES, .bytes = fmt, .bytes_len = 6},
     };
     const nc_state_meta_t meta = {.ver = NC_STATE_BLOB_VER, .flags = 0, .src_hash = h3};
     CHECK(nc_state_file_save(pst, &meta, recs, 4) == ESP_OK, "save 失敗");

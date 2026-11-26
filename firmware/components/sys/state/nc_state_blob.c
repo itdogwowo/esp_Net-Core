@@ -85,6 +85,64 @@ static size_t rec_value_len(const nc_state_rec_t *r)
     }
 }
 
+// ── 值的 CRC（cache 失效判斷用）────────────────────────────────
+// 同 blob payload 的 record 編碼一致（type＋key＋len＋value），但唔含 header。
+// 為什麼唔用 JSON 檔案 bytes：改一句 _comment 就會令 hash 變 → 白白清掉回寫值。
+static uint32_t crc32_upd(uint32_t crc, const uint8_t *p, size_t n)
+{
+    for (size_t i = 0; i < n; i++) {
+        crc ^= p[i];
+        for (int b = 0; b < 8; b++) {
+            crc = (crc >> 1) ^ (0xEDB88320u & (uint32_t)(-(int32_t)(crc & 1u)));
+        }
+    }
+    return crc;
+}
+
+uint32_t nc_state_blob_rec_crc(const nc_state_rec_t *recs, size_t nrec)
+{
+    if (nrec > 0 && recs == NULL) {
+        return 0;
+    }
+    uint32_t crc = 0xFFFFFFFFu;
+    for (size_t i = 0; i < nrec; i++) {
+        const nc_state_rec_t *r = &recs[i];
+        const size_t vlen = rec_value_len(r);
+        if (vlen == 0 && r->type != NC_STATE_T_BYTES) {
+            return 0;   // 非法值 → 0（呼叫端要當錯，唔好當「相同」）
+        }
+        uint8_t pre[1 + 5 + 5];   // type＋key varint（≤5）＋len varint（≤5）
+        size_t n = 0;
+        pre[n++] = r->type;
+        n += put_varint(&pre[n], r->key);
+        n += put_varint(&pre[n], (uint32_t)vlen);
+        crc = crc32_upd(crc, pre, n);
+
+        uint8_t vb[5];
+        switch (r->type) {
+        case NC_STATE_T_UINT:
+            crc = crc32_upd(crc, vb, put_varint(vb, r->u));
+            break;
+        case NC_STATE_T_SINT:
+            crc = crc32_upd(crc, vb, put_varint(vb, zigzag(r->i)));
+            break;
+        case NC_STATE_T_BOOL: {
+            const uint8_t b = (uint8_t)(r->u ? 1u : 0u);
+            crc = crc32_upd(crc, &b, 1);
+            break;
+        }
+        case NC_STATE_T_BYTES:
+            if (r->bytes_len > 0 && r->bytes != NULL) {
+                crc = crc32_upd(crc, (const uint8_t *)r->bytes, r->bytes_len);
+            }
+            break;
+        default:
+            return 0;
+        }
+    }
+    return ~crc;
+}
+
 size_t nc_state_blob_size(const nc_state_rec_t *recs, size_t nrec)
 {
     if (nrec > 0xFFFFu || (nrec > 0 && recs == NULL)) {
@@ -225,7 +283,7 @@ esp_err_t nc_state_blob_decode(const uint8_t *buf, size_t len,
         }
         nc_state_rec_t rec;
         memset(&rec, 0, sizeof(rec));
-        rec.key = (uint16_t)key;
+        rec.key = key;
         rec.type = type;
         switch (type) {
         case NC_STATE_T_UINT: {

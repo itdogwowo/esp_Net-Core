@@ -19,10 +19,10 @@ static const nc_state_store_t *store_ro(void)
 }
 
 // ── dirty：今次開機改過邊幾個 key（固定陣列，無 heap） ────────────
-static uint16_t s_dirty_keys[NC_STATE_STORE_MAX];
+static uint32_t s_dirty_keys[NC_STATE_STORE_MAX];
 static uint16_t s_dirty_n;
 
-static void dirty_mark(uint16_t key)
+static void dirty_mark(uint32_t key)
 {
     for (uint16_t i = 0; i < s_dirty_n; i++) {
         if (s_dirty_keys[i] == key) {
@@ -45,7 +45,7 @@ void nc_state_dirty_reset(void)
 }
 
 // ── 讀 ─────────────────────────────────────────────────────────
-bool nc_state_get_u32(uint16_t key, uint32_t *out)
+bool nc_state_get_u32(uint32_t key, uint32_t *out)
 {
     const nc_state_keydef_t *def = nc_state_key(key);
     if (def == NULL || out == NULL || def->type != NC_STATE_T_UINT) {
@@ -59,7 +59,7 @@ bool nc_state_get_u32(uint16_t key, uint32_t *out)
     return true;
 }
 
-bool nc_state_get_i32(uint16_t key, int32_t *out)
+bool nc_state_get_i32(uint32_t key, int32_t *out)
 {
     const nc_state_keydef_t *def = nc_state_key(key);
     if (def == NULL || out == NULL || def->type != NC_STATE_T_SINT) {
@@ -73,7 +73,7 @@ bool nc_state_get_i32(uint16_t key, int32_t *out)
     return true;
 }
 
-bool nc_state_get_bool(uint16_t key, bool *out)
+bool nc_state_get_bool(uint32_t key, bool *out)
 {
     const nc_state_keydef_t *def = nc_state_key(key);
     if (def == NULL || out == NULL || def->type != NC_STATE_T_BOOL) {
@@ -87,7 +87,7 @@ bool nc_state_get_bool(uint16_t key, bool *out)
     return true;
 }
 
-bool nc_state_get_str(uint16_t key, char *buf, size_t cap)
+bool nc_state_get_str(uint32_t key, char *buf, size_t cap)
 {
     const nc_state_keydef_t *def = nc_state_key(key);
     if (def == NULL || buf == NULL || cap == 0 || def->type != NC_STATE_T_BYTES) {
@@ -104,6 +104,37 @@ bool nc_state_get_str(uint16_t key, char *buf, size_t cap)
         memcpy(buf, r.bytes, r.bytes_len);
     }
     buf[r.bytes_len] = '\0';
+    return true;
+}
+
+// ── 熱路徑綁定 ─────────────────────────────────────────────────
+bool nc_state_bind_u32(uint32_t key, const uint32_t **out)
+{
+    const nc_state_keydef_t *def = nc_state_key(key);
+    const nc_state_store_t *st = store_ro();
+    if (def == NULL || out == NULL || st == NULL || def->type != NC_STATE_T_UINT) {
+        return false;
+    }
+    const nc_state_ent_t *e = nc_state_store_find(st, key);
+    if (e == NULL || e->type != NC_STATE_T_UINT) {
+        return false;
+    }
+    *out = &e->u;
+    return true;
+}
+
+bool nc_state_bind_i32(uint32_t key, const int32_t **out)
+{
+    const nc_state_keydef_t *def = nc_state_key(key);
+    const nc_state_store_t *st = store_ro();
+    if (def == NULL || out == NULL || st == NULL || def->type != NC_STATE_T_SINT) {
+        return false;
+    }
+    const nc_state_ent_t *e = nc_state_store_find(st, key);
+    if (e == NULL || e->type != NC_STATE_T_SINT) {
+        return false;
+    }
+    *out = &e->i;
     return true;
 }
 
@@ -139,7 +170,7 @@ static nc_state_set_res_t put_rec(const nc_state_keydef_t *def, const nc_state_r
     return NC_STATE_SET_OK;
 }
 
-nc_state_set_res_t nc_state_set_u32(uint16_t key, uint32_t v)
+nc_state_set_res_t nc_state_set_u32(uint32_t key, uint32_t v)
 {
     const nc_state_keydef_t *def = nc_state_key(key);
     if (def == NULL) {
@@ -155,7 +186,7 @@ nc_state_set_res_t nc_state_set_u32(uint16_t key, uint32_t v)
     return put_rec(def, &r);
 }
 
-nc_state_set_res_t nc_state_set_i32(uint16_t key, int32_t v)
+nc_state_set_res_t nc_state_set_i32(uint32_t key, int32_t v)
 {
     const nc_state_keydef_t *def = nc_state_key(key);
     if (def == NULL) {
@@ -171,7 +202,7 @@ nc_state_set_res_t nc_state_set_i32(uint16_t key, int32_t v)
     return put_rec(def, &r);
 }
 
-nc_state_set_res_t nc_state_set_bool(uint16_t key, bool v)
+nc_state_set_res_t nc_state_set_bool(uint32_t key, bool v)
 {
     const nc_state_keydef_t *def = nc_state_key(key);
     if (def == NULL) {
@@ -187,7 +218,7 @@ nc_state_set_res_t nc_state_set_bool(uint16_t key, bool v)
     return put_rec(def, &r);
 }
 
-nc_state_set_res_t nc_state_set_str(uint16_t key, const char *s)
+nc_state_set_res_t nc_state_set_str(uint32_t key, const char *s)
 {
     const nc_state_keydef_t *def = nc_state_key(key);
     if (def == NULL) {

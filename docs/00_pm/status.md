@@ -9435,7 +9435,7 @@ layout 打包器）——字頭太似，容易混淆。
 
 **已寫入**：[`state-schema.md`](docs/03_notes/state-schema.md)
 
-- key id：`domain(4b)|unit(4b)|index(4b)|field(4b)`（u16，總共 65,536 個 key）。
+- key id：`domain(4b)|unit(4b)|index(4b)|field(4b)`（u16，總共 65,536 個 key）——**2026-11-27 已改 u32 8/8/8/8，見 §7.291**。
 - 格式 `NCSTATE`：header 12 B（magic/ver/count/crc）＋ `(id varint, value zigzag varint)`
   按 id 升序；**sparse，只存同 default 唔同嘅值**。
 - 型別／範圍／預設全部喺 schema；超出＝parse error（唔截斷）；schema ver 一改，
@@ -10090,3 +10090,57 @@ resources 後才可以「hit 時 skip JSON parse」；`status schema` 逐 key �
 **未做**：macOS 為何係 64 B／10 ms（`bInterval`／`AppleUSBSerial` latency timer）未查到底；
 要驗證可以將人格由 `NC_LINK_USBJTAG` 換成 TinyUSB CDC 做 A/B，但會動 USB 人格（影響
 console／MSC），留返另一次。
+
+---
+
+### 7.291 2026-11-27（key id 改 u32；cache 失效改用「值」；熱路徑綁定位址；硬件覆蓋率對照）
+
+**為什麼**：三件事一起做，因為都係同一個設計的前置：
+
+1. PIN 有 48 支（P4 55）——4-bit index（0..15）根本放唔落，而且 P4／C3 的 I2S／I80
+   數量同 S3 唔同，唔想再綁死。
+2. `src_hash` 用「JSON 檔案 bytes」算 → 改一句 `_comment` 就清掉所有回寫值（而且
+   `hit` 會永遠 0，因為 hash 一改語義就永遠對唔上）。
+3. 用家要求「真正需要快速讀寫的可以直接攞位址，唔使每次查 key」。
+
+**做了什麼**：
+
+| 改動 | 檔案 | 內容 |
+|---|---|---|
+| key id u16→u32 | `schema/state-keys.json`＋`tools/gen_state_keys.py` | `domain(8)｜unit(8)｜index(8)｜field(8)`；25 個 key 重編（`0x00000002`…`0x000C000A`）；生成器驗 `id≠0`＋unit byte 對齊 |
+| 型別放寬 | `nc_state_blob.h`／`store.h`／`schema*`／`api*`／`boot*` | `rec.key`／`ent.key`／`keydef.id`／所有 API 參數 → u32；blob decode 的 `(uint16_t)key` 截斷移除 |
+| 值 hash | `nc_state_blob.c`＋`nc_state_boot.c` | 新增 `nc_state_blob_rec_crc()`；`src_hash` 改由「值集」算，唔再係 JSON bytes |
+| hit 語義 | `nc_state_boot.c` | 判定只看值（`cache_ok && diff==0` → hit）；`src_hash` 降級為診斷／版本戳 |
+| 熱路徑 | `nc_state_api.c/h` | `nc_state_bind_u32/i32()`：回傳 store 內值的 stable 位址 |
+| 覆蓋率 | 新增 [`hw-coverage.md`](../03_notes/hw-coverage.md) | 三顆晶片真實資源 vs 380-key 大表；缺口＋成本 |
+
+**驗證（host，25/25 全綠）**：
+
+- `stateBlob_test` 加 `[9] rec_crc`（同值同 CRC、改值／改字串要變）
+- `stateStore_test` 加 `[7] bind`（位址 stable、set 之後同一個 pointer 見到新值、
+  型別唔對／未知 key／`out=NULL` 回 false）
+- `stateSchema_test` 改驗 `(id>>16)&0xFF == unit`、未知 id 用 `0xFFFFFFFF`
+
+**驗證（上板、`idf=v6.1.1`／`/dev/cu.usbmodem1401`／SuperMini-LED-Textkit）**：
+
+| 階段 | 結果 | 意義 |
+|---|---|---|
+| S0 image（u32 id） | `rebuilt=1`、`mism=2`、`first=0x000C0001`（LED_ENABLE）、`bytes 48→50` | 舊 blob（u16 id）**自動重建**，冇靜默沿用；+1 B/key 同預估一致 |
+| S1 image boot A | `hit=1`、`cmp_ok=1`、`src=769474519`、`bytes=50` | 值一樣 → hit（就算 blob 的 hash 係舊語義） |
+| S1 image boot B | `hit=1`、`src` 一樣 | 重開機 hit 穩定；`schema crc=0x3A650CAA`、`bad=0` |
+| 開機時間 | `cfg_us=24.3–24.5 ms`、`state_us=8.4–8.7 ms` | 同改動前一樣（state 仍然要讀檔對拍） |
+| image size | 746,480 → 746,624（S0，+144 B）→ 747,264（S1，+640 B） | u32 key＋新函式；分區剩 52% |
+
+**硬件覆蓋率（新發現，詳細見 hw-coverage.md）**：
+
+- 大表（380 key）有 **4 個 unit 的通道上限寫錯**：`hw.i80` 2→**1**、`hw.i2s` 1→**2/3/1**、
+  `hw.uart` 3→3/**6**/2、`hw.i2c` 2→2/**3**/1；`hw.pin` 48 只啱 S3（S3 45／P4 55／C3 22）。
+- **真 bug 級**：`ports/project/S3/*/hardware.json` 有 `"ETH": {"driver": "rmii"}`，
+  但 **S3 冇內建 MAC**（只有 P4 有）——enable 咗會 build／開機失敗。現時 `enable=0` 所以未爆。
+- 大表**缺 9 類資源**：RMT／PCNT／MCPWM／ADC／TWAI／PARLIO／LCD(RGB)／touch／camera，
+  合計 **+185 key**（380→565）；worst-case blob ≈ 5.1 KB（FAT 冇問題）。
+- store 只載已啟動 unit（典型 30–60 key），但現時上限 64 筆**冇餘裕** → 建議四步內提到 96–128。
+
+**未做**：activation 由 build-time 搬 boot-time（S4a/S4b，含 `not_active` 錯誤碼）；
+commit 路徑（STATUS_SET 的 persist 位＋reboot 前 flush）；大表補齊 9 類；
+`nc_state_apply_to_cfg()`（overrides 要在 B05 之前套入 cfg，否則 pin／freq 類 override 靜默失效）。

@@ -33,7 +33,7 @@ offset  size  field
 8       2     ver        （=1；格式版本，改 schema 就 bump）
 10      2     flags      （保留；bit0=有 src_hash）
 12      2     count      （record 數）
-14      4     src_hash   （來源 JSON 嘅 CRC32；版本確認用）
+14      4     src_hash   （值集的 CRC32，唔係 JSON bytes；版本確認用）
 18      4     payload_len
 22      4     blob_crc   （payload CRC32）
 ```
@@ -51,7 +51,7 @@ value  ...     （varint／zigzag／raw bytes）
 - reader 淨係靠 `type + len` 就知點解讀同**跳過唔識嘅欄位**（向前兼容）；
 - schema 表（id→名／型別／範圍／預設）只係**加速同驗證**，唔係唯一解讀途徑；
   schema 版本舊咗都唔會讀錯，只會「唔識就跳過」；
-- 唔存長路徑名（`"hardware.i80.0.wr"`），只存 `u16 id`，慳位。
+- 唔存長路徑名（`"hardware.i80.0.wr"`），只存 `u32 id`（varint 3 B），慳位。
 
 ### 例：Matrix 的 9 筆 record（hexdump）
 
@@ -87,7 +87,7 @@ value  ...     （varint／zigzag／raw bytes）
 ## 4. 開機流程（版本確認）
 
 ```text
-讀 FAT JSON（hardware/driver/system/tasks/resources，固定次序）→ 算 src_hash
+讀 FAT JSON → 由 cfg 造 records → 對 records 算 src_hash（值的 CRC）
 ├─ state.ncst 存在 && ver 夾 && src_hash 同 && blob_crc 過 → 【hit】直接載入
 └─ 否則 → parse JSON → 重新生成 state.ncst（atomic：.tmp → rename）→ log【miss old→new】
              └─ JSON 壞 → 回 L0 出廠預設（大聲 warn）

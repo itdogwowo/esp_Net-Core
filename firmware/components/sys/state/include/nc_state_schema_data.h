@@ -9,14 +9,14 @@
 #include "nc_state_keys.h"   // NC_UNIT_*／NC_KEY_*
 
 #define NC_STATE_SCHEMA_VERSION 2u
-#define NC_STATE_SCHEMA_CRC     0xf22a74f7u
+#define NC_STATE_SCHEMA_CRC     0x3a650caau
 #define NC_STATE_KEY_COUNT      25u
 #define NC_STATE_UNIT_COUNT     4u
 
 // 一筆 key 的完整描述（id／能力群組／型別／可接受範圍／人讀資料）。
 // type 用 nc_state_blob.h 的 NC_STATE_T_*；str 的長度上限在 max_len。
 typedef struct {
-    uint16_t id;
+    uint32_t id;        // u32：domain(8)｜unit(8)｜index(8)｜field(8)
     uint8_t  unit;        // NC_UNIT_*
     uint8_t  type;        // NC_STATE_T_UINT／SINT／BOOL／BYTES
     int32_t  min;         // 數值範圍（str 用 0..max_len）

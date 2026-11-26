@@ -2,7 +2,7 @@
 
 > 2026-11-26。用家提出：舊專案 `mp_Net-Core/slave/schema/` 已經有「schema 做資料」嘅做法；
 > 硬件有上限（SPI≤2、I2C≤2、UART≤3、I80≤2、GPIO≤48…），所以狀態 key 係**有限集合**。
-> 與其存 JSON／存 key 字串，不如 **schema 定義「路徑 → u16 id ＋ 型別 ＋ 範圍 ＋ 預設」**，
+> 與其存 JSON／存 key 字串，不如 **schema 定義「路徑 → u32 id ＋ 型別 ＋ 範圍 ＋ 預設」**，
 > 儲存只寫 `(id, 值)`。ESP 硬件就咁多，id 空間綽綽有餘。
 
 ---
@@ -19,22 +19,26 @@
 
 ---
 
-## 2. Key id 佈局（u16）
+## 2. Key id 佈局（u32，8/8/8/8）
 
 ```text
-bit 15..12  domain   (sys/hw/driver/pixel/task…)
-bit 11..8   unit      (spi=1, i2c=2, uart=3, i80=4, pin=5, eth=6, sdio=7…)
-bit  7..4   index     (0..15：通道／lane／項次)
-bit  3..0   field     (每 unit 最多 16 個欄位)
+bit 31..24  domain   (sys／hw／driver／pixel／task…)
+bit 23..16  unit      (0=sys、7=i80、8=spi、12=led…)
+bit 15..8   index     (0..255：通道／lane／pin 編號)
+bit  7..0   field     (每 unit 最多 256 個欄位)
 
-例：spi[0].gpio.sck  = 0x1_1_0_2
-system.frame_interval_ms = 0x0_0_0_2
-driver.led.px        = 0x2_0_0_5   （driver domain=2、unit=led=0）
+例：0x00070005 = domain 0／unit 7（i80）／index 0／field 5（freq）
+    0x00000002 = system.frame_interval_ms
+    0x000C0005 = driver.led.px
+    PIN 47     = 0x0002_2F_01（unit=pin、index=47、field=1）← 4-bit index 放唔落
 ```
 
-- 上限寫入 schema（`max_units`／`max_index`）；超出直接 parse error，唔會跌出 id 空間。
-- 一個 domain 16 unit × 16 index × 16 field = 4096 個 key，總共 16 domain → 65,536。
-  ESP 實際用唔到 1%（Matrix 全 config 約 60–100 個 key）。
+- **2026-11-27 由 u16（4/4/4/4）改成 u32（8/8/8/8）**：原因是 PIN 有 48 支，4-bit
+  index（0..15）根本放唔落；另外 P4／C3 的 I2S／I80／PARLIO 數量都唔同，唔想再綁死。
+- 成本（實測）：blob 每筆 key 由 2 B varint → 3 B（id < 2^21），18 筆 = **+18 B**；
+  store entry 由 28 B → 32 B，64 筆 = 2 KB（`h_int` 194 KB，冇壓力）。
+- 一個 domain 256 unit × 256 index × 256 field ≈ 16.7M 個 key，實際用 < 0.01%。
+- 生成器驗兩件事：`id != 0`（0 = 未設定／未啟動）＋ `(id >> 16) & 0xFF == unit id`。
 
 ---
 
@@ -48,7 +52,7 @@ header 26 B: "NCSTATE\0" | ver u16 | flags u16 | count u16 |
 record:      type u8 | key varint | len varint | value
              （type 1=uint 2=sint 3=bytes 4=bool；len 令 reader 可以跳過唔識嘅）
 
-src_hash = 來源 JSON（config layers）嘅 CRC32；開機：
+src_hash = **值集**（將寫入的 records）嘅 CRC32；開機：
   file 存在 && ver 夾 && src_hash == 現時 JSON hash && blob_crc 過 → 直接載入
   否則 → parse JSON → 重新生成（atomic 替換）→ log miss（old→new）
 ```
@@ -90,7 +94,7 @@ src_hash = 來源 JSON（config layers）嘅 CRC32；開機：
 }
 ```
 
-- `unit` 一定要等於 key id 的 unit nibble（生成器驗），「key 屬邊個能力」唔會同 id 打架。
+- `unit` 一定要等於 key id 的 unit byte（生成器驗），「key 屬邊個能力」唔會同 id 打架。
 - `type`：`u8`／`u16`／`u32`／`i8`／`i32`／`bool`／`enum`／`str`；`str` 要寫 `max_len`（唔含 NUL）。
 - `enum` 要寫 `values[]`（由 0 連續排列），例如 LED backend：`none/i80/spi/rmt/parlio/direct/mock`。
 - `min/max`：`nc_state_set_*()` 同 `nc_state_schema_check()` 共用同一條規則；超出＝明示失敗。

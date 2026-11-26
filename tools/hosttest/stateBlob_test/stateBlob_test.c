@@ -64,16 +64,16 @@ static void test_roundtrip(void)
     const char *fmt = "ws2812";
     const char *empty = "";
     nc_state_rec_t recs[] = {
-        {.key = 0x0002, .type = NC_STATE_T_UINT, .u = 0},
-        {.key = 0x0003, .type = NC_STATE_T_UINT, .u = 127},
-        {.key = 0x0004, .type = NC_STATE_T_UINT, .u = 128},
-        {.key = 0x0005, .type = NC_STATE_T_UINT, .u = 0xFFFFFFFFu},
-        {.key = 0x0702, .type = NC_STATE_T_SINT, .i = -1},
-        {.key = 0x0703, .type = NC_STATE_T_SINT, .i = 2147483647},
-        {.key = 0x0704, .type = NC_STATE_T_SINT, .i = -2147483647 - 1},
-        {.key = 0x0C01, .type = NC_STATE_T_BOOL, .u = 1},
-        {.key = 0x0C06, .type = NC_STATE_T_BYTES, .bytes = fmt, .bytes_len = 6},
-        {.key = 0x0C07, .type = NC_STATE_T_BYTES, .bytes = empty, .bytes_len = 0},
+        {.key = 0x00000002, .type = NC_STATE_T_UINT, .u = 0},
+        {.key = 0x00000003, .type = NC_STATE_T_UINT, .u = 127},
+        {.key = 0x00000004, .type = NC_STATE_T_UINT, .u = 128},
+        {.key = 0x00000005, .type = NC_STATE_T_UINT, .u = 0xFFFFFFFFu},
+        {.key = 0x00070002, .type = NC_STATE_T_SINT, .i = -1},
+        {.key = 0x00070003, .type = NC_STATE_T_SINT, .i = 2147483647},
+        {.key = 0x00070004, .type = NC_STATE_T_SINT, .i = -2147483647 - 1},
+        {.key = 0x000C0001, .type = NC_STATE_T_BOOL, .u = 1},
+        {.key = 0x000C0006, .type = NC_STATE_T_BYTES, .bytes = fmt, .bytes_len = 6},
+        {.key = 0x000C0007, .type = NC_STATE_T_BYTES, .bytes = empty, .bytes_len = 0},
     };
     const size_t nrec = sizeof(recs) / sizeof(recs[0]);
     const nc_state_meta_t meta = {.ver = NC_STATE_BLOB_VER, .flags = 0, .src_hash = 0xDEADBEEFu};
@@ -180,7 +180,7 @@ static void test_unknown_type_skip(void)
 
 static void test_bool_invalid(void)
 {
-    nc_state_rec_t rec = {.key = 0x0C01, .type = NC_STATE_T_BOOL, .u = 1};
+    nc_state_rec_t rec = {.key = 0x000C0001, .type = NC_STATE_T_BOOL, .u = 1};
     const nc_state_meta_t meta = {.ver = NC_STATE_BLOB_VER, .flags = 0, .src_hash = 0};
     uint8_t buf[32];
     const size_t got = nc_state_blob_encode(buf, sizeof(buf), &meta, &rec, 1);
@@ -201,6 +201,25 @@ static void test_cap(void)
     CHECK(nc_state_blob_size(NULL, 1) == 0, "NULL recs 應該回 0");
 }
 
+static void test_rec_crc(void) {
+    puts("[9] rec_crc：值集 CRC（cache 失效判斷）");
+    const nc_state_rec_t a[] = {
+        {.key = 0x00000002, .type = NC_STATE_T_UINT, .u = 20},
+        {.key = 0x000C0005, .type = NC_STATE_T_UINT, .u = 64},
+        {.key = 0x000C0006, .type = NC_STATE_T_BYTES, .bytes = "ws2812", .bytes_len = 6},
+    };
+    nc_state_rec_t b[3];
+    memcpy(b, a, sizeof(a));
+    const uint32_t h1 = nc_state_blob_rec_crc(a, 3);
+    CHECK(h1 != 0, "rec_crc 回 0（非法？）");
+    CHECK(nc_state_blob_rec_crc(b, 3) == h1, "同值應該同 CRC");
+    b[0].u = 21;
+    CHECK(nc_state_blob_rec_crc(b, 3) != h1, "改一個值，CRC 要變");
+    memcpy(b, a, sizeof(a));
+    b[2].bytes = "ws2813";
+    CHECK(nc_state_blob_rec_crc(b, 3) != h1, "改字串，CRC 要變");
+}
+
 int main(void)
 {
     printf("[1] round-trip（uint/sint 邊界、bool、bytes）\n");
@@ -215,6 +234,7 @@ int main(void)
     test_bool_invalid();
     printf("[6] encode cap／size\n");
     test_cap();
+    test_rec_crc();
     if (g_fail == 0) {
         printf("stateBlob_test OK\n");
         return 0;

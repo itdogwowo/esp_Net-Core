@@ -79,8 +79,8 @@ def load_schema() -> dict:
     for u in units_raw:
         uid = int(u["id"])
         name = str(u.get("name", ""))
-        if not (0 <= uid <= 15):
-            die(f"unit id 要 0..15（key id 的 unit nibble）：{u}")
+        if not (0 <= uid <= 255):
+            die(f"unit id 要 0..255（key id 的 unit byte）：{u}")
         if uid in unit_by_id:
             die(f"unit id 重複：{uid}")
         if not C_IDENT.match(name):
@@ -98,10 +98,12 @@ def load_schema() -> dict:
     names: set[str] = set()
     for k in data.get("keys") or []:
         kid = int(str(k["id"]), 0)
-        if not (0 <= kid <= 0xFFFF):
-            die(f"id 超出 u16：{k}")
+        if not (0 <= kid <= 0xFFFFFFFF):
+            die(f"id 超出 u32：{k}")
+        if kid == 0:
+            die(f"id 0 唔准用（0 = 未設定／未啟動）：{k.get('name')}")
         if kid in ids:
-            die(f"id 重複：0x{kid:04x}（{ids[kid]}／{k.get('name')}）")
+            die(f"id 重複：0x{kid:08x}（{ids[kid]}／{k.get('name')}）")
         name = str(k["name"])
         if not KEY_NAME.match(name):
             die(f"key name 要 NC_KEY_ 開頭、大寫：{name!r}")
@@ -114,9 +116,9 @@ def load_schema() -> dict:
         if uname not in unit_by_name:
             die(f"key {name} 引用了未知 unit：{uname!r}")
         unit = unit_by_name[uname]
-        if ((kid >> 8) & 0x0F) != unit["id"]:
-            die(f"key {name}（0x{kid:04x}）的 unit nibble="
-                f"{(kid >> 8) & 0x0F} 同 unit {uname}（{unit['id']}）唔一致")
+        if ((kid >> 16) & 0xFF) != unit["id"]:
+            die(f"key {name}（0x{kid:08x}）的 unit byte="
+                f"{(kid >> 16) & 0xFF} 同 unit {uname}（{unit['id']}）唔一致")
 
         t = TYPES[typ]
         values = k.get("values")
@@ -197,14 +199,17 @@ def render_keys(schema: dict) -> str:
         "// NCSTATE key id／unit id：全專案唯一 source of truth。",
         "//",
         BANNER,
-        "// run_all.sh 會用 --check 驗同步；命名規矩：key id = domain(4b)|unit(4b)|index(4b)|field(4b)。",
+        "// run_all.sh 會用 --check 驗同步；命名規矩：",
+        "//   key id(u32) = domain(8b) | unit(8b) | index(8b) | field(8b)",
+        "//   例：0x00070005 = domain 0（hw）／unit 7（i80）／index 0／field 5（freq）",
+        "//   index 用嚟分通道／lane／pin 編號（0..255），所以 PIN 48 支、P4 多 bus 都放得落。",
         "#pragma once",
         "",
         "#include <stdint.h>",
         "",
         f'#define NC_STATE_KEYS_VERSION {schema["version"]}u',
         "",
-        "// unit = 能力群組；key id 的 unit nibble 一定要等於呢個值（生成器已驗）。",
+        "// unit = 能力群組；key id 的 unit byte 一定要等於呢個值（生成器已驗）。",
         "enum {",
     ]
     for u in units:
@@ -213,8 +218,8 @@ def render_keys(schema: dict) -> str:
     lines += ["};", "", "enum {"]
     for k in keys:
         note = k["desc"] + (f"（{k['path']}）" if k["path"] else "")
-        lines.append(f"    /* 0x{k['id']:04x} {note} */")
-        lines.append(f"    {k['name']} = 0x{k['id']:04x},")
+        lines.append(f"    /* 0x{k['id']:08x} {note} */")
+        lines.append(f"    {k['name']} = 0x{k['id']:08x}u,")
     lines += ["};", ""]
     return "\n".join(lines)
 
@@ -239,7 +244,7 @@ def render_data_h(schema: dict, crc: int) -> str:
         "// 一筆 key 的完整描述（id／能力群組／型別／可接受範圍／人讀資料）。",
         "// type 用 nc_state_blob.h 的 NC_STATE_T_*；str 的長度上限在 max_len。",
         "typedef struct {",
-        "    uint16_t id;",
+        "    uint32_t id;        // u32：domain(8)｜unit(8)｜index(8)｜field(8)",
         "    uint8_t  unit;        // NC_UNIT_*",
         "    uint8_t  type;        // NC_STATE_T_UINT／SINT／BOOL／BYTES",
         "    int32_t  min;         // 數值範圍（str 用 0..max_len）",
@@ -283,7 +288,7 @@ def render_data_c(schema: dict) -> str:
         enum_ref = (f"s_enum_{k['name'].lower()}" if k["values"] else "NULL")
         lines += [
             "    {",
-            f"        .id = 0x{k['id']:04x}, .unit = NC_UNIT_{k['unit_name'].upper()},",
+            f"        .id = 0x{k['id']:08x}u, .unit = NC_UNIT_{k['unit_name'].upper()},",
             f"        .type = {k['blob']}, .min = {k['min']}, .max = {k['max']},",
             f"        .max_len = {k['max_len']}, .n_enum = {len(k['values'])},",
             f"        .enum_names = {enum_ref},",

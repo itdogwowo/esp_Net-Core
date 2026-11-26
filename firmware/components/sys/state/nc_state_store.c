@@ -10,7 +10,7 @@ void nc_state_store_clear(nc_state_store_t *s)
     }
 }
 
-static nc_state_ent_t *find_mut(nc_state_store_t *s, uint16_t key)
+static nc_state_ent_t *find_mut(nc_state_store_t *s, uint32_t key)
 {
     for (uint16_t i = 0; i < s->n; i++) {
         if (s->e[i].key == key) {
@@ -75,7 +75,7 @@ uint16_t nc_state_store_from_recs(nc_state_store_t *s, const nc_state_rec_t *rec
     return ok;
 }
 
-const nc_state_ent_t *nc_state_store_find(const nc_state_store_t *s, uint16_t key)
+const nc_state_ent_t *nc_state_store_find(const nc_state_store_t *s, uint32_t key)
 {
     if (s == NULL) {
         return NULL;
@@ -88,7 +88,7 @@ const nc_state_ent_t *nc_state_store_find(const nc_state_store_t *s, uint16_t ke
     return NULL;
 }
 
-bool nc_state_store_get(const nc_state_store_t *s, uint16_t key, nc_state_rec_t *out)
+bool nc_state_store_get(const nc_state_store_t *s, uint32_t key, nc_state_rec_t *out)
 {
     const nc_state_ent_t *e = nc_state_store_find(s, key);
     if (e == NULL || out == NULL) {
@@ -127,7 +127,7 @@ static bool ent_same(const nc_state_ent_t *e, const nc_state_rec_t *r)
 }
 
 uint32_t nc_state_store_cmp(const nc_state_store_t *s, const nc_state_rec_t *recs, size_t n,
-                            uint16_t *first_diff)
+                            uint32_t *first_diff)
 {
     if (first_diff != NULL) {
         *first_diff = 0;

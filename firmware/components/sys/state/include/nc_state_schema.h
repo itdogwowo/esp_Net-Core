@@ -24,7 +24,7 @@ extern "C" {
 #endif
 
 // ── 查表 ──────────────────────────────────────────────────────
-const nc_state_keydef_t *nc_state_key(uint16_t id);            // 未知 → NULL
+const nc_state_keydef_t *nc_state_key(uint32_t id);            // 未知 → NULL
 const nc_state_keydef_t *nc_state_key_name(const char *name);  // "NC_KEY_LED_PX"
 const nc_state_keydef_t *nc_state_key_at(uint16_t i);          // 逐筆列舉（工具／status）
 uint16_t nc_state_key_count(void);

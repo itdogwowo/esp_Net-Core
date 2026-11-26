@@ -656,6 +656,12 @@ python3 tools/ota.py --port /dev/cu.usbmodemXXXX \
   `/data/config/hardware.json` 的 `I80.list[]`（`data`／`wr`／`dc`／`cs`／`freq`；
   `bus_width` 由 `len(data)` 推出）開機由 `nc_cfg_apply_hardware()` 讀，改腳位唔使重 build。
 - **應用硬件（device）層（2026-11-26）**：`/data/config/driver.json`（runtime **最高權威**，改完 reboot 生效；壞檔／缺檔才回 build-time `driver.json`）；`nc_cfg_devices()` 解析，render 優先讀它；未支援 device 寫 `enable=1` 會大聲 warn。目前只有 LED 有 runtime device 支援。
+- **硬件能力要 per-chip**：大表（[`hw-matrix.md`](docs/03_notes/hw-matrix.md)）＋真實資源對照
+  （[`hw-coverage.md`](docs/03_notes/hw-coverage.md)）；S3 冇 ETH MAC（只可 SPI PHY）、C3 冇
+  PCNT／MCPWM／SDIO／LCD／PARLIO／touch，RMT 只有 4；用單一最大值會靜默越界。
+- **key id 佈局（2026-11-27）**：u32 = `domain(8b)｜unit(8b)｜index(8b)｜field(8b)`；
+  例 `0x00070005`＝i80 的 freq、`0x000C0005`＝LED 的 px。PIN 48 支、P4 多 bus 都放得落；
+  id 0 保留＝未設定／未啟動。生成器驗「id≠0」＋「unit byte 對齊」。
 - **設定值的 key 名單／型別／範圍只有一份**：`schema/state-keys.json`（schema registry，
   2026-11-26）。加／減能力＝改呢個 JSON＋跑 `python3 tools/gen_state_keys.py`；
   firmware 經 `nc_state_schema`／`nc_state_api` 查表、驗證、讀寫，見
@@ -1054,6 +1060,7 @@ commit message 說明。
 | 2026-11-26 | **Windows 主機的 bash 陷阱**：`make.py`／`doctor` 用 `bash -c` 傳 `C:\…` 路徑，Git Bash 同 WSL bash 都會失敗（doctor 的 board check 會假報 FAIL）。§0.5 新增一節講點判斷、建置改在 WSL 內跑（`bash -lc 'cd /mnt/c/… && IDF_PATH=/home/user/esp/esp-idf python3 make.py …'`）、OTA／NC4 留在 Windows 側。同時記錄 Matrix-LED-Textkit 全面 JSON 化（見 status §7.253） | lead（AI） |
 | 2026-11-27 | **macOS IDF 升 v6.1.1**（v6.0.3 → v6.1.1）：`fetch --tags`＋`checkout`＋**`submodule update`**＋`install.sh esp32s3 esp32p4 esp32c3`；記錄 submodule 陷阱（唔 update 會 `-dirty`）同實測 image 差 **+27,008 B**。§0.5 加「升級／重裝 IDF」段、status §7.289 | lead（AI） |
 | 2026-11-27 | **板上 firmware 推齊 6.1.1＋OTA 速度查清**：重建 `fw=787baa5`（+0 B）→ OTA → `status sys fw=787baa5／app=94d81499／rst=3`，四條 pixel 任務 `level=4`。查清 macOS 側 ~6.4 KB/s ＝ **64 B／10 ms**（payload 線性；`--window 4` 冇用 → 唔係往返延遲），係 USB-Serial-JTAG VCP 的主機側排程，唔關 hub／線材／firmware；Windows 同板同線 168–173 KB/s。§0.5／§8.1 三處速度描述改「分主機」，status §7.290 | lead（AI） |
+| 2026-11-27 | **state 地基三改＋硬件覆蓋率**：key id u16→u32（8/8/8/8，PIN 48／P4 55 放得落）；`src_hash` 由 JSON bytes 改成**值集** CRC（改註解唔再清回寫值）；hit 只看值（hash 降級診斷）；新增 `nc_state_bind_u32/i32()`（熱路徑直接位址）。上板：舊 blob `mism=2` 自動重建、`bytes 48→50`、兩次開機 `hit=1`。新增 [`hw-coverage.md`](docs/03_notes/hw-coverage.md)：三顆晶片真實資源 vs 380-key 大表（4 個 unit 上限寫錯、S3 ETH rmii 無效、缺 9 類資源 +185 key）。status §7.291 | lead（AI） |
 
 ---
 

@@ -40,7 +40,7 @@ typedef struct {
 } nc_state_meta_t;
 
 typedef struct {
-    uint16_t    key;        // schema key id（u16）
+    uint32_t    key;        // schema key id（u32：domain|unit|index|field）
     uint8_t     type;       // NC_STATE_T_*
     uint32_t    u;          // UINT／BOOL
     int32_t     i;          // SINT
@@ -57,6 +57,11 @@ typedef struct {
     uint32_t n_records;     // header 寫的 record 數
     uint32_t n_skipped;     // 唔識 type、跳過嘅 record 數（向前兼容）
 } nc_state_info_t;
+
+// 值的 CRC32（record 序列的 canonical 編碼，唔含 header）。
+// 用途：cache 失效判斷（src_hash）。改 JSON 的註解／排版唔會令它變。
+// invalid input 回 0 —— 呼叫端要當「唔同」，唔可以當「相同」。
+uint32_t nc_state_blob_rec_crc(const nc_state_rec_t *recs, size_t nrec);
 
 // 計 encode 出嚟會幾大（唔含 cap 檢查）。有 invalid input 回 0。
 size_t nc_state_blob_size(const nc_state_rec_t *recs, size_t nrec);

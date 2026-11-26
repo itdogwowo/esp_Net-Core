@@ -75,11 +75,11 @@ Record（自描述，逐筆）：
 
 | 模組 | 檔案 | 做咩 |
 |---|---|---|
-| **codec** | `sys/state/nc_state_blob.c/h` | 統一格式 encode／decode；CRC／magic／ver／截斷檢查；未知 type 跳過 |
+| **codec** | `sys/state/nc_state_blob.c/h` | 統一格式 encode／decode；CRC／magic／ver／截斷檢查；未知 type 跳過；`nc_state_blob_rec_crc()`＝值集 CRC（cache 失效判斷） |
 | **檔案層** | `sys/state/nc_state_file.c/h` | FAT 讀寫；atomic（`.tmp`→舊檔 `.bak`→rename）；hash helpers |
 | **開機同步** | `sys/state/nc_state_boot.c/h` | 由 cfg 造 records → 對拍 → hit／重建；結果俾 status |
 | **RAM store** | `sys/state/nc_state_store.c/h` | 固定陣列（64 筆、bytes≤16）＋對拍 cmp；internal RAM ~430 B（18 筆） |
-| **讀寫 API** | `sys/state/nc_state_api.c/h` | `get_u32/i32/bool/str`＋`set_u32/i32/bool/str`；型別／範圍由 schema 決定；set 只改 RAM＋dirty |
+| **讀寫 API** | `sys/state/nc_state_api.c/h` | `get_u32/i32/bool/str`＋`set_*`（set 只改 RAM＋dirty）；`bind_u32/i32()` 回傳 stable 位址給熱路徑（唔使每次查 key） |
 | **schema registry** | `sys/state/nc_state_schema.c/h`＋`nc_state_schema_data.[ch]` | 查表（id↔name↔unit）、驗型別／範圍／enum、boot drift 檢查 |
 | **key schema** | `schema/state-keys.json`＋`tools/gen_state_keys.py` | **唯一 source of truth**：id／unit／型別／範圍／enum → 生成三份 C 檔＋同步檢查 |
 | **cfg hash** | `sys/config/nc_cfg.c/h` | boot 讀 JSON 時順便累計原始 hash（表驅動 CRC）；state／FAT 比對共用 |

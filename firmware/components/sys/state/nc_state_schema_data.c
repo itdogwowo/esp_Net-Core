@@ -7,7 +7,7 @@ static const char *const s_enum_nc_key_led_backend[] = { "none", "i80", "spi", "
 
 const nc_state_keydef_t nc_state_schema_keys[NC_STATE_KEY_COUNT] = {
     {
-        .id = 0x0002, .unit = NC_UNIT_SYS,
+        .id = 0x00000002u, .unit = NC_UNIT_SYS,
         .type = NC_STATE_T_UINT, .min = 1, .max = 1000,
         .max_len = 0, .n_enum = 0,
         .enum_names = NULL,
@@ -15,7 +15,7 @@ const nc_state_keydef_t nc_state_schema_keys[NC_STATE_KEY_COUNT] = {
         .desc = "節拍間隔 ms",
     },
     {
-        .id = 0x0003, .unit = NC_UNIT_SYS,
+        .id = 0x00000003u, .unit = NC_UNIT_SYS,
         .type = NC_STATE_T_UINT, .min = 0, .max = 65535,
         .max_len = 0, .n_enum = 0,
         .enum_names = NULL,
@@ -23,7 +23,7 @@ const nc_state_keydef_t nc_state_schema_keys[NC_STATE_KEY_COUNT] = {
         .desc = "總像素數（資訊用）",
     },
     {
-        .id = 0x0004, .unit = NC_UNIT_SYS,
+        .id = 0x00000004u, .unit = NC_UNIT_SYS,
         .type = NC_STATE_T_UINT, .min = 0, .max = 1,
         .max_len = 0, .n_enum = 0,
         .enum_names = NULL,
@@ -31,7 +31,7 @@ const nc_state_keydef_t nc_state_schema_keys[NC_STATE_KEY_COUNT] = {
         .desc = "log 除錯模式",
     },
     {
-        .id = 0x0701, .unit = NC_UNIT_I80,
+        .id = 0x00070001u, .unit = NC_UNIT_I80,
         .type = NC_STATE_T_UINT, .min = 0, .max = 16,
         .max_len = 0, .n_enum = 0,
         .enum_names = NULL,
@@ -39,7 +39,7 @@ const nc_state_keydef_t nc_state_schema_keys[NC_STATE_KEY_COUNT] = {
         .desc = "真正接燈的資料腳數（稀疏非 -1）",
     },
     {
-        .id = 0x0702, .unit = NC_UNIT_I80,
+        .id = 0x00070002u, .unit = NC_UNIT_I80,
         .type = NC_STATE_T_SINT, .min = -1, .max = 54,
         .max_len = 0, .n_enum = 0,
         .enum_names = NULL,
@@ -47,7 +47,7 @@ const nc_state_keydef_t nc_state_schema_keys[NC_STATE_KEY_COUNT] = {
         .desc = "WR pin（-1 = 未用）",
     },
     {
-        .id = 0x0703, .unit = NC_UNIT_I80,
+        .id = 0x00070003u, .unit = NC_UNIT_I80,
         .type = NC_STATE_T_SINT, .min = -1, .max = 54,
         .max_len = 0, .n_enum = 0,
         .enum_names = NULL,
@@ -55,7 +55,7 @@ const nc_state_keydef_t nc_state_schema_keys[NC_STATE_KEY_COUNT] = {
         .desc = "DC pin（-1 = 未用）",
     },
     {
-        .id = 0x0704, .unit = NC_UNIT_I80,
+        .id = 0x00070004u, .unit = NC_UNIT_I80,
         .type = NC_STATE_T_SINT, .min = -1, .max = 54,
         .max_len = 0, .n_enum = 0,
         .enum_names = NULL,
@@ -63,7 +63,7 @@ const nc_state_keydef_t nc_state_schema_keys[NC_STATE_KEY_COUNT] = {
         .desc = "CS pin（-1 = 未用）",
     },
     {
-        .id = 0x0705, .unit = NC_UNIT_I80,
+        .id = 0x00070005u, .unit = NC_UNIT_I80,
         .type = NC_STATE_T_UINT, .min = 1000000, .max = 80000000,
         .max_len = 0, .n_enum = 0,
         .enum_names = NULL,
@@ -71,7 +71,7 @@ const nc_state_keydef_t nc_state_schema_keys[NC_STATE_KEY_COUNT] = {
         .desc = "LCD PCLK Hz",
     },
     {
-        .id = 0x0801, .unit = NC_UNIT_SPI,
+        .id = 0x00080001u, .unit = NC_UNIT_SPI,
         .type = NC_STATE_T_BOOL, .min = 0, .max = 1,
         .max_len = 0, .n_enum = 0,
         .enum_names = NULL,
@@ -79,7 +79,7 @@ const nc_state_keydef_t nc_state_schema_keys[NC_STATE_KEY_COUNT] = {
         .desc = "SPI 是否啟用",
     },
     {
-        .id = 0x0802, .unit = NC_UNIT_SPI,
+        .id = 0x00080002u, .unit = NC_UNIT_SPI,
         .type = NC_STATE_T_UINT, .min = 100000, .max = 80000000,
         .max_len = 0, .n_enum = 0,
         .enum_names = NULL,
@@ -87,7 +87,7 @@ const nc_state_keydef_t nc_state_schema_keys[NC_STATE_KEY_COUNT] = {
         .desc = "SPI 時鐘",
     },
     {
-        .id = 0x0803, .unit = NC_UNIT_SPI,
+        .id = 0x00080003u, .unit = NC_UNIT_SPI,
         .type = NC_STATE_T_UINT, .min = 0, .max = 1,
         .max_len = 0, .n_enum = 0,
         .enum_names = NULL,
@@ -95,7 +95,7 @@ const nc_state_keydef_t nc_state_schema_keys[NC_STATE_KEY_COUNT] = {
         .desc = "phase（0/1）",
     },
     {
-        .id = 0x0804, .unit = NC_UNIT_SPI,
+        .id = 0x00080004u, .unit = NC_UNIT_SPI,
         .type = NC_STATE_T_UINT, .min = 0, .max = 1,
         .max_len = 0, .n_enum = 0,
         .enum_names = NULL,
@@ -103,7 +103,7 @@ const nc_state_keydef_t nc_state_schema_keys[NC_STATE_KEY_COUNT] = {
         .desc = "polarity（0/1）",
     },
     {
-        .id = 0x0805, .unit = NC_UNIT_SPI,
+        .id = 0x00080005u, .unit = NC_UNIT_SPI,
         .type = NC_STATE_T_SINT, .min = -1, .max = 54,
         .max_len = 0, .n_enum = 0,
         .enum_names = NULL,
@@ -111,7 +111,7 @@ const nc_state_keydef_t nc_state_schema_keys[NC_STATE_KEY_COUNT] = {
         .desc = "SCLK pin",
     },
     {
-        .id = 0x0806, .unit = NC_UNIT_SPI,
+        .id = 0x00080006u, .unit = NC_UNIT_SPI,
         .type = NC_STATE_T_SINT, .min = -1, .max = 54,
         .max_len = 0, .n_enum = 0,
         .enum_names = NULL,
@@ -119,7 +119,7 @@ const nc_state_keydef_t nc_state_schema_keys[NC_STATE_KEY_COUNT] = {
         .desc = "MOSI（單線 / data0）",
     },
     {
-        .id = 0x0807, .unit = NC_UNIT_SPI,
+        .id = 0x00080007u, .unit = NC_UNIT_SPI,
         .type = NC_STATE_T_SINT, .min = -1, .max = 54,
         .max_len = 0, .n_enum = 0,
         .enum_names = NULL,
@@ -127,7 +127,7 @@ const nc_state_keydef_t nc_state_schema_keys[NC_STATE_KEY_COUNT] = {
         .desc = "MISO（-1 = 冇）",
     },
     {
-        .id = 0x0c01, .unit = NC_UNIT_LED,
+        .id = 0x000c0001u, .unit = NC_UNIT_LED,
         .type = NC_STATE_T_BOOL, .min = 0, .max = 1,
         .max_len = 0, .n_enum = 0,
         .enum_names = NULL,
@@ -135,7 +135,7 @@ const nc_state_keydef_t nc_state_schema_keys[NC_STATE_KEY_COUNT] = {
         .desc = "燈鏈啟用",
     },
     {
-        .id = 0x0c02, .unit = NC_UNIT_LED,
+        .id = 0x000c0002u, .unit = NC_UNIT_LED,
         .type = NC_STATE_T_UINT, .min = 0, .max = 6,
         .max_len = 0, .n_enum = 7,
         .enum_names = s_enum_nc_key_led_backend,
@@ -143,7 +143,7 @@ const nc_state_keydef_t nc_state_schema_keys[NC_STATE_KEY_COUNT] = {
         .desc = "nc_led_backend_t",
     },
     {
-        .id = 0x0c03, .unit = NC_UNIT_LED,
+        .id = 0x000c0003u, .unit = NC_UNIT_LED,
         .type = NC_STATE_T_SINT, .min = -1, .max = 15,
         .max_len = 0, .n_enum = 0,
         .enum_names = NULL,
@@ -151,7 +151,7 @@ const nc_state_keydef_t nc_state_schema_keys[NC_STATE_KEY_COUNT] = {
         .desc = "引用 hardware 同類 list 的 index",
     },
     {
-        .id = 0x0c04, .unit = NC_UNIT_LED,
+        .id = 0x000c0004u, .unit = NC_UNIT_LED,
         .type = NC_STATE_T_UINT, .min = 1, .max = 16,
         .max_len = 0, .n_enum = 0,
         .enum_names = NULL,
@@ -159,7 +159,7 @@ const nc_state_keydef_t nc_state_schema_keys[NC_STATE_KEY_COUNT] = {
         .desc = "真的接燈的 lane 數",
     },
     {
-        .id = 0x0c05, .unit = NC_UNIT_LED,
+        .id = 0x000c0005u, .unit = NC_UNIT_LED,
         .type = NC_STATE_T_UINT, .min = 1, .max = 65535,
         .max_len = 0, .n_enum = 0,
         .enum_names = NULL,
@@ -167,7 +167,7 @@ const nc_state_keydef_t nc_state_schema_keys[NC_STATE_KEY_COUNT] = {
         .desc = "每條 lane 幾顆",
     },
     {
-        .id = 0x0c06, .unit = NC_UNIT_LED,
+        .id = 0x000c0006u, .unit = NC_UNIT_LED,
         .type = NC_STATE_T_BYTES, .min = 0, .max = 11,
         .max_len = 11, .n_enum = 0,
         .enum_names = NULL,
@@ -175,7 +175,7 @@ const nc_state_keydef_t nc_state_schema_keys[NC_STATE_KEY_COUNT] = {
         .desc = "ws2812/ws2812w/apa102…",
     },
     {
-        .id = 0x0c07, .unit = NC_UNIT_LED,
+        .id = 0x000c0007u, .unit = NC_UNIT_LED,
         .type = NC_STATE_T_UINT, .min = 1000000, .max = 80000000,
         .max_len = 0, .n_enum = 0,
         .enum_names = NULL,
@@ -183,7 +183,7 @@ const nc_state_keydef_t nc_state_schema_keys[NC_STATE_KEY_COUNT] = {
         .desc = "I80 PCLK / SPI 時鐘",
     },
     {
-        .id = 0x0c08, .unit = NC_UNIT_LED,
+        .id = 0x000c0008u, .unit = NC_UNIT_LED,
         .type = NC_STATE_T_UINT, .min = 1, .max = 64,
         .max_len = 0, .n_enum = 0,
         .enum_names = NULL,
@@ -191,7 +191,7 @@ const nc_state_keydef_t nc_state_schema_keys[NC_STATE_KEY_COUNT] = {
         .desc = "每 bit 幾個 cell",
     },
     {
-        .id = 0x0c09, .unit = NC_UNIT_LED,
+        .id = 0x000c0009u, .unit = NC_UNIT_LED,
         .type = NC_STATE_T_UINT, .min = 0, .max = 64,
         .max_len = 0, .n_enum = 0,
         .enum_names = NULL,
@@ -199,7 +199,7 @@ const nc_state_keydef_t nc_state_schema_keys[NC_STATE_KEY_COUNT] = {
         .desc = "0 的高電平 cell 數",
     },
     {
-        .id = 0x0c0a, .unit = NC_UNIT_LED,
+        .id = 0x000c000au, .unit = NC_UNIT_LED,
         .type = NC_STATE_T_UINT, .min = 0, .max = 64,
         .max_len = 0, .n_enum = 0,
         .enum_names = NULL,
