@@ -64,6 +64,22 @@
   不進 git。
 
 
+**升級／重裝 IDF（2026-11-27 macOS 實做過 v6.0.3 → v6.1.1）**：
+
+```bash
+git -C ~/esp/esp-idf fetch --tags
+git -C ~/esp/esp-idf checkout v6.1.1
+git -C ~/esp/esp-idf submodule update --init --recursive   # ★ 一定要
+cd ~/esp/esp-idf && ./install.sh esp32s3 esp32p4 esp32c3
+```
+
+- **`checkout` tag 唔會更新 submodule**（lib_esp32／nimble／openthread…11 個）→
+  `idf.py --version` 會變成 **`v6.1.1-dirty`**、lib 版本同 tag 對唔上。跑完
+  `submodule update` 就乾淨。
+- 換 IDF 版本之後，舊 build dir 的 sdkconfig 一律當失效 → 建置加 `--fresh`。
+- 實測版本差（2026-11-27，同一份 code、`--fresh`）：`SuperMini-LED-Textkit`
+  **702.6 KB → 729.0 KB（+27,008 B）**。所以跨版本 build size 唔可以當「有冇改到 code」用。
+
 ```bash
 python3 make.py doctor          # IDF／esptool／板子／磁碟
 python3 make.py ports           # /dev/cu.usbmodem*
@@ -1031,6 +1047,7 @@ commit message 說明。
 | 2026-11-26 | **schema registry（一個位置讀寫 schema）**：`schema/state-keys.json` v2（units＋type／min／max／enum／max_len）→ 生成器出 `nc_state_keys.h`／`nc_state_schema_data.[ch]`；新增 `nc_state_schema`（查表／驗證）／`nc_state_api`（get／set，取代 `nc_state_read`）；boot 對 schema 驗 records（`status cfg.schema.bad`）；host test 25 支。實測 `schema {ver:2,crc:4062868727,keys:25,units:4,bad:0}`。同一日撞到「舊 sdkconfig → main stack 3,072 → 爆棧唔開機」，排查表加一行 | lead（AI） |
 | 2026-11-26 | **config 行為可視化＋中央示範設定**：新增 `tools/config_diagram.py` → `docs/00_pm/config-layers.svg`（三來源→B02→cfg→消費者→state 快取→三種改法）／`schema-registry.svg`（一個 JSON→生成表／API，讀 schema 生成）；新增 `docs/02_guides/config-schema.md`（key 一覽由 `gen_state_keys.py --doc` 生成、`--check` 驗同步）；新增 `ports/presets/s3-generic-{psram,nopsram}/`＋`tools/preset_check.py`（JSON／schema 範圍／四層四任務，run_all 開頭跑） | lead（AI） |
 | 2026-11-26 | **Windows 主機的 bash 陷阱**：`make.py`／`doctor` 用 `bash -c` 傳 `C:\…` 路徑，Git Bash 同 WSL bash 都會失敗（doctor 的 board check 會假報 FAIL）。§0.5 新增一節講點判斷、建置改在 WSL 內跑（`bash -lc 'cd /mnt/c/… && IDF_PATH=/home/user/esp/esp-idf python3 make.py …'`）、OTA／NC4 留在 Windows 側。同時記錄 Matrix-LED-Textkit 全面 JSON 化（見 status §7.253） | lead（AI） |
+| 2026-11-27 | **macOS IDF 升 v6.1.1**（v6.0.3 → v6.1.1）：`fetch --tags`＋`checkout`＋**`submodule update`**＋`install.sh esp32s3 esp32p4 esp32c3`；記錄 submodule 陷阱（唔 update 會 `-dirty`）同實測 image 差 **+27,008 B**。§0.5 加「升級／重裝 IDF」段、status §7.289 | lead（AI） |
 
 ---
 

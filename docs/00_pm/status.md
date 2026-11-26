@@ -10003,3 +10003,34 @@ resources 後才可以「hit 時 skip JSON parse」；`status schema` 逐 key �
 
 **未做**：兩份 preset 都未逐項上板（psram 版可套落現有 Matrix 驗，但會蓋走現有 project 設定）；
 `status schema` 逐 key 列表；schema 覆蓋 links／routes／tasks／resources。
+
+### 7.289 2026-11-27（macOS 開發環境：IDF v6.0.3 → v6.1.1）
+
+**為什麼**：`tools/testenv/policy.json` 要求 `v6.1.1`（compare=exact），而 macOS 一直
+停在 v6.0.3（Windows `.idf`／WSL 早已是 v6.1.1）→ 同一份 code 兩個 image，數字唔可以互通。
+
+**做了什麼**（`~/esp/esp-idf`）：
+
+1. `git fetch --tags` → `git checkout v6.1.1`
+2. **`git submodule update --init --recursive`**（關鍵；見下面陷阱）
+3. `./install.sh esp32s3 esp32p4 esp32c3`（v6.1.x 的 Python venv 同工具鏈，esptool 5.7.0）
+
+**陷阱（新，值得記）**：`git checkout` tag **唔會**更新 submodule 指標（`lib_esp32`／
+`nimble`／`openthread`…共 11 個）→ `idf.py --version` 會報 **`v6.1.1-dirty`**，
+而且 lib 版本同 tag 對唔上。跑完 `submodule update` 之後變回乾淨 `v6.1.1`。
+
+**驗證**（macOS、`idf=v6.1.1`）：
+
+- `idf.py --version` → `ESP-IDF v6.1.1`（無 `-dirty`）
+- `python3 make.py doctor` → ✔（v6.1.1／esptool 5.7.0／pyserial 3.5／板 `/dev/cu.usbmodem1401`）；
+  提示 3 個舊 build dir 的 sdkconfig 比 defaults 舊 → 要 `--fresh`
+- `python3 tools/tenv.py brief` → `IDF：v6.1.1`，政策警告消失；`tenv verify` ✔
+- `bash tools/hosttest/run_all.sh` → **25/25**
+- **實測版本差**（同一份 code、同一 project、`--fresh`）：
+  `ESP32-S3-SuperMini-LED-Textkit` **702.6 KB（6.0.3）→ 729.0 KB（6.1.1）＝ +27,008 B**，
+  建置 54 s。歷史上的 Matrix +9,584 B／P4-ETH +24,688 B 仍然係 6.0.3→6.1.1 的參考值，
+  但唔同 image 唔可以互相比。
+
+**未做**：板上的 firmware 仍然係 **6.0.3 建的**（fw `30895f2`、app `85694f7c`）——
+環境升級唔等於要即刻重燒；下次有 functional 改動時順手用 6.1.1 的 image 推上去即可
+（預期行為一樣，但 `fw` 會變、size +27 KB）。
