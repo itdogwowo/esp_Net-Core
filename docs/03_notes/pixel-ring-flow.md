@@ -137,3 +137,55 @@ render_task push loop
 5. 節拍主人：render timer（現在）定 encode／paint 自己？
 6. effect→paint 的 ack 要唔要 timeout／丟幀 policy（現在無限等）？
 7. 環深度：固定 3／5，定按 `subframes` 自動計？
+
+## 7. 背壓與 frame 邊界（2026-11-26 用家提問）
+
+用家的心智模型：**一個 render 任務；另一邊不斷供格；render 埋頭苦幹，冇格就停。**
+現況完全就是這樣——「停」係靠**唔 submit**，唔係靠 FIFO。
+
+### 7.1 三層背壓（由上游到硬件）
+
+| 層 | 容量 | 「滿了」會點 | 程式位置 |
+|---|---|---|---|
+| 環（prd） | 3 格 | 生產者（paint）拿唔到空格 → **等**（多子幀＝逐格 FIFO）或**最新優先**（單子幀，舊格被覆蓋） | `nc_px_ring_begin()`／`nc_px_ring_take()` |
+| render 的「格索引」隊列 | 8 | `xQueueSend` 失敗 → 直接 submit（唔會漏格） | `nc_render_task.c` |
+| 驅動 DMA 槽 | 3（1 筆在飛） | 槽忙 → `submit` 排隊；三格都忙 → 不可能（在飛只有 1 筆） | `nc_i80_drv_direct.c` |
+
+- **環滿** = 唯一真正阻塞生產者的地方 → 呢個就係「冇緩衝就停」的正式機制。
+- **render 冇新格**：`nc_px_ring_take()` 回 NULL → `starved++`、**唔 submit**、等下一個節拍。
+  燈的硬件就**idle**（PCLK 停），直到下一筆 submit。
+
+### 7.2 Frame 邊界：天然存在，唔使額外做
+
+- **一筆 submit = 一幀**：`slot_bytes` 固定 → DMA buffer 長度固定 → LCD 打固定幾個 word 就出
+  `TRANS_DONE` → `trans_done` 就是「幀結束」。
+- 之後 render **唔會自動再送**；要等下一次 `lane_submit()`。所以每幀之間一定有 idle gap
+  （現在的 gap = submit 開銷 ≈ 8–20 µs），呢個 gap 就係 frame 分隔點。
+- `0xF06B` 的 `seq`、環的 `seq`、`driver` 的 `done_order` 都用同一組幀序號，唔會混淆。
+
+### 7.3 FIFO 可不可以「冇緩衝就停」？——**唔可以，亦唔應該**
+
+- LCD_CAM 只有 **16-deep FIFO**（DMA → 外設的彈性緩衝），佢**唔識**「buffer 有冇新格」；
+  FIFO 空只會 underrun（波形斷）——係錯誤狀態，唔係停止機制。
+- 正確做法就係我們現在咁：**冇格就唔 submit**（軟件層 stop）；硬件保持在 idle。
+- 唯一「硬件停止」係 `lcd_ll_stop()` 停 PCLK —— 但會**截斷當前幀**，所以只用於關機，
+  唔可以當 frame 邊界控制。
+- 另外：**GDMA EOF ≠ 幀出完**（FIFO 仲可以有 ≤16 word）。所以我們用 LCD 的 `trans_done`
+  做還格時機，唔用 GDMA 中斷（見 §4.7 的提醒）。
+
+### 7.4 「埋頭苦幹」要不要做得更徹底？（可選，現階段唔建議）
+
+| 方案 | 好處 | 代價 |
+|---|---|---|
+| **現狀**：一幀一 submit，完成中斷再開下一幀 | 簡單、錯誤語義清楚（submit 可回報失敗）、幀邊界硬 | 幀之間有 8–20 µs gap（相對 20 ms 可忽略） |
+| 2 筆在飛（DMA pipeline，學 esp_lcd 的 trans queue） | gap 變細 | 要處理「兩幀同時在飛」的還格順序；錯誤回報變複雜 |
+| 環形 link list 連續流（owner bit 交棒，FastLED 式） | 理論上零 gap | frame 邊界變模糊（要靠 EOF 標記重建）；PSRAM cache/owner 同步複雜；**現階段完全冇需要**（傳輸 1.84 ms vs 幀距 20 ms） |
+
+**判斷**：現時 50 fps、drops=0、frame_us 誤差 <0.02%，未見任何 starvation／gap 引起的問題；
+如將來真係要追 gap，先做「2 筆在飛」，唔好一步跳到環形連續流。
+
+### 7.5 想量「誰等誰」可以加什麼（未做）
+
+- 驅動側：`idle_gap_us`（完成到下一次 start 的時間）、`underrun` 計數（已有內部計數但未上報）。
+- 環側：`ring_full` 次數（paint 等格）。
+- 有這兩個數字，就可以判斷「係生產者慢、render 慢、定硬件慢」，而唔係靠估。
