@@ -374,17 +374,31 @@ static bool i80_src(int out[18], int *width_out, int *lanes_out, int *cs_out)
             return false;
         }
         const int w = (b->bus_width == 16) ? 16 : 8;
-        if (b->n_data < w || b->wr < 0 || b->dc < 0) {
 #if CONFIG_NETCORE_PIXEL_I80_DIRECT
-            // 直驅只需 data lane；WR／DC 唔會 route，所以未填都可以
-            if (b->n_data < w) {
-#endif
+        // 直驅：稀疏 data 合法（n_used 支有效）；WR／DC／CS 有登記才用。
+        const int n_used = (b->n_used > 0) ? (int)b->n_used : (int)b->n_data;
+        if (n_used < 1 || n_used > w) {
+            ESP_LOGE(TAG, "I80[%d] 有效 lane 數 %d 不合理（bus %d-bit）→ 這道 lane 停用",
+                     (int)led->bus, n_used, w);
+            return false;
+        }
+        for (int i = 0; i < n_used; i++) {
+            out[i] = b->data[i];
+        }
+        out[w] = b->wr;
+        out[w + 1] = b->dc;
+        int lanes = (int)led->lanes;
+        if (lanes < 1) {
+            lanes = 1;
+        }
+        if (lanes > n_used) {
+            lanes = n_used;                  // 冇登記咁多條 lane 就用返有效腳數
+        }
+#else
+        if (b->n_data < w || b->wr < 0 || b->dc < 0) {
             ESP_LOGE(TAG, "I80[%d] 腳位不完整（n_data=%u wr=%d dc=%d）→ 這道 lane 停用",
                      (int)led->bus, (unsigned)b->n_data, (int)b->wr, (int)b->dc);
             return false;
-#if CONFIG_NETCORE_PIXEL_I80_DIRECT
-            }
-#endif
         }
         for (int i = 0; i < w; i++) {
             out[i] = b->data[i];
@@ -398,6 +412,7 @@ static bool i80_src(int out[18], int *width_out, int *lanes_out, int *cs_out)
         if (lanes > w) {
             lanes = w;
         }
+#endif
         *width_out = w;
         *lanes_out = lanes;
         *cs_out = (int)b->cs;          // -1 = 冇登記（面板才有）

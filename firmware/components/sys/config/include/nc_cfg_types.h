@@ -218,6 +218,7 @@ typedef struct {
     bool     enable;
     uint8_t  bus_width;      // 8／16（由 n_data 推出；json 寫錯會被糾正）
     uint8_t  n_data;
+    uint8_t  n_used;         // data 中 >=0 的真腳數（稀疏：-1＝未用；DIRECT 只用這幾支）
     int8_t   data[NC_CFG_I80_DATA_MAX];   // D0..D(n-1)
     int8_t   wr;             // WR（dummy 但要有）
     int8_t   dc;             // D/C（esp_lcd 必要）

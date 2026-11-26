@@ -17,6 +17,14 @@
 #include <string.h>
 #include <strings.h>
 
+// host test（cfgstruct_test）直接編這個檔，冇 sdkconfig.h：要有 guard。
+#if __has_include("sdkconfig.h")
+#include "sdkconfig.h"
+#endif
+#ifndef CONFIG_NETCORE_PIXEL_I80_DIRECT
+#define CONFIG_NETCORE_PIXEL_I80_DIRECT 0   // host 編譯當 esp_lcd 路徑（會自動補 dummy）
+#endif
+
 #include "esp_log.h"
 
 static const char *TAG = "cfg";
@@ -842,8 +850,32 @@ static void apply_uart(const cJSON *root, nc_hardware_cfg_t *out, nc_cfg_stat_t 
 
 // I80（LCD_CAM 8080）：腳位的唯一 runtime 出處。
 // 原形狀 {enable, list:[{data[],wr,cs,freq}]}；dc 是 esp_lcd 必要（舊專案 LCD 由 PIN 的
-// tft_dc 提供，燈鏈直接寫這裡）。**bus_width 由 data 的長度推出**（8／16）——
-// 唔加第三個欄位，因為第三個欄位一定會同另外兩個漂移。
+// esp_lcd 版走 panel IO，硬件要求 width 支 data＋WR＋DC 全部真腳；
+// 直驅版唔需要（只 route n_used 支）。所以只在 esp_lcd 版自動由安全池補腳。
+// 池：S3 上避開 flash/PSRAM(26–37)、USB(19/20)、console(43/44)、strapping(0/3/45/46)。
+#if !CONFIG_NETCORE_PIXEL_I80_DIRECT
+static int i80_pick_pin(const int *used, int n_used, int avoid_a, int avoid_b)
+{
+    static const int pool[] = { 38, 39, 40, 41, 42, 47, 48, 4, 5, 6, 7, 8, 9, 10,
+                                13, 15, 16, 17, 18, 21, 22 };
+    for (size_t k = 0; k < sizeof(pool) / sizeof(pool[0]); k++) {
+        const int v = pool[k];
+        bool busy = (v == avoid_a) || (v == avoid_b);
+        for (int i = 0; i < n_used && !busy; i++) {
+            if (used[i] == v) {
+                busy = true;
+            }
+        }
+        if (!busy) {
+            return v;
+        }
+    }
+    return -1;
+}
+#endif
+
+// I80：燈鏈也是用這個（兩者都是 8／16 條 data＋WR＋DC）。esp_lcd 的 i80 bus 一定要齊，
+// tft_dc 提供，燈鏈直接寫這裡）。**bus_width 由有效腳數推出**（8／16）——
 static void apply_i80(const cJSON *root, nc_hardware_cfg_t *out, nc_cfg_stat_t *st)
 {
     const cJSON *i80 = item(root, "I80");
@@ -878,9 +910,13 @@ static void apply_i80(const cJSON *root, nc_hardware_cfg_t *out, nc_cfg_stat_t *
         }
         nc_i80_cfg_t e;
         memset(&e, 0, sizeof(e));
+        // 稀疏語義（2026-11-26）：元素 >=0 = 真的接燈；<0（-1）= 未用。
+        // `[14]`、`[14,-1,-1,…]`、`[14,38,39,…]` 都受理。
+        int used[NC_CFG_I80_DATA_MAX];
+        int n_used = 0;
         const cJSON *d = NULL;
         cJSON_ArrayForEach(d, data) {
-            if (e.n_data >= NC_CFG_I80_DATA_MAX) {
+            if (n_used >= NC_CFG_I80_DATA_MAX) {
                 st->invalid++;
                 break;
             }
@@ -889,20 +925,52 @@ static void apply_i80(const cJSON *root, nc_hardware_cfg_t *out, nc_cfg_stat_t *
                 continue;
             }
             const int v = d->valueint;
-            if (v < 0 || v > NC_CFG_GPIO_MAX) {
+            if (v < 0) {
+                continue;                    // -1（或任何負數）= 未用，唔算錯
+            }
+            if (v > NC_CFG_GPIO_MAX) {
                 st->invalid++;
                 continue;
             }
-            e.data[e.n_data++] = (int8_t)v;
+            used[n_used++] = v;
         }
-        if (e.n_data != 8 && e.n_data != 16) {
-            st->invalid++;       // 只可以 8 或 16 條資料線
+        if (n_used == 0) {
+            st->invalid++;                   // 一支有效腳都冇 → 唔建立
             continue;
         }
-        e.bus_width = e.n_data;  // 由 data 長度決定，不是另一個欄位
+        // 自動決定寬度：<=8 條有效線 → 8-bit；9..16 → 16-bit。
+        const uint8_t width = (n_used <= 8) ? 8u : 16u;
+        e.bus_width = width;
+        e.n_data = width;
+        e.n_used = (uint8_t)n_used;
+        for (uint8_t i = 0; i < width; i++) {
+            e.data[i] = (i < n_used) ? (int8_t)used[i] : (int8_t)-1;
+        }
         e.wr = get_pin_opt(it, "wr", st);
         e.dc = get_pin_opt(it, "dc", st);
         e.cs = get_pin_opt(it, "cs", st);
+#if !CONFIG_NETCORE_PIXEL_I80_DIRECT
+        // esp_lcd 版：補齊 width 支 data＋WR＋DC（唔強制用戶寫；自動揀安全池）
+        for (uint8_t i = e.n_used; i < width; i++) {
+            const int v = i80_pick_pin(used, n_used, (int)e.wr, (int)e.dc);
+            if (v < 0) {
+                st->invalid++;
+                break;
+            }
+            e.data[i] = (int8_t)v;
+        }
+        if (e.wr < 0) {
+            e.wr = (int8_t)i80_pick_pin(used, n_used, (int)e.dc, -99);
+        }
+        if (e.dc < 0) {
+            e.dc = (int8_t)i80_pick_pin(used, n_used, (int)e.wr, -99);
+        }
+        if (e.wr < 0 || e.dc < 0) {
+            st->invalid++;
+            continue;
+        }
+#endif
+        // 直驅版：data 保持稀疏（>=n_used 是 -1），wr／dc／cs「有登記才生效」。
         // WR／DC 由 2026-11-26 起**可選**：直驅版「有登記（>=0）才 route」，
         // 同 cs 一樣。esp_lcd 版仍然需要兩支（缺就會在 install 時大聲報錯），
         // 但唔再在解析層靜靜丟掉整條 entry —— 咁樣 LED lane 模式就可以唔寫 wr／dc。

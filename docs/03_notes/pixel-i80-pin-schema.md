@@ -272,7 +272,19 @@ DMA → D0.. 資料線（只 route 有用途的 lane）→ WS2812
 換句話講：直驅係 I80 的**第二個實作**（為咗只 route 用到的 lane），唔係「LED 專用驅動」；
 將來面板要走直驅時，補 cmd phase／CS 就係同一個檔案加分支，唔使另起一套。
 
-## 9. 待拍板（實作前要答）
+## 9. 已拍板（2026-11-26 實作完成，見 status §7.257）
+
+> 用家決定：**先做階段②**（稀疏 config），面板模式已同時具備（§8.4）。
+>
+> 1. `lanes = min(n_used, LED.lanes)`；`n_used < LED.lanes` 只 WARN。✅
+> 2. `wr`／`dc` 可以完全省略：直驅「有登記才 route」；esp_lcd 版解析層自動補。✅
+> 3. 內建池：esp_lcd 版補腳用 `38,39,40,41,42,47,48,4,5,6,7,8,9,10,13,15,16,17,18,21,22`
+>    （直驅版唔用池）。✅
+> 4. GPIO0／45／46 strapping：仍然保留腳，未開例外（要用再議）。⏸
+> 5. 16-bit 觸發＝**有效腳 >8**；寫 16 個槽但 1 支有效仍然 8-bit。✅
+>
+> 實作驗證：Matrix `data:[14]` → 板上真正 1 支腳、50 fps／drops=0／rainbow 64 色；
+> host test 21/21（cfgstruct 178 項、portgen 全 OK）。
 
 1. **`lanes` 的來源**：`min(n_used, LED.lanes)`（提案）還是「`data` 有效腳數就是 lanes，
    完全忽略 `LED.lanes`」？（前者對 SuperMini 這類「寫齊 8 支但只有 6 lane」最安全）

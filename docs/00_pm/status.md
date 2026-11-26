@@ -9033,3 +9033,38 @@ LED lane 同 LCD 面板**；esp_lcd 版只做對照／回退。
 → **內容／緩衝語義兩版一樣**；差別全部係「提交方式（寫法）」同「flash／腳位」。
 殘留 W 值（`0xF06B` 見到 `…3f`）係已知 **mode 冇寫 w 通道** 的內容問題
 （status §7.251 未做），唔關驅動／緩衝事。
+
+### 7.257 2026-11-26（階段②：稀疏 I80 data；Matrix 真正變回 1 支腳）
+
+用家批准落階段②：`data:[14]`／`-1`＝未用／自動 8↔16-bit；順手把 Matrix preset 改成
+單腳，驗證「寫一支腳就等於用一支腳」。
+
+**改動**
+- `nc_cfg_load.c apply_i80()`：`data` 元素 `<0`（-1／省略）＝**未用**（唔再算錯）；
+  有效腳數自動決定寬度：**<=8 → 8-bit；9..16 → 16-bit**；>16 → 錯；0 支 → 錯。
+  `nc_i80_cfg_t` 加 `n_used`（真腳數；`data[0..n_used-1]` 才是真的）。
+  直驅版保持稀疏；**esp_lcd 版**解析時會由安全池自動補齊 width 支 data＋WR＋DC。
+  `#include "sdkconfig.h"` 加 host-test guard（cfgstruct_test 直接編這個檔）。
+- `nc_render_task.c i80_src()`：直驅版用 `n_used`（`lanes = min(LED.lanes, n_used)`），
+  esp_lcd 版照舊要齊 width 支。
+- `tools/ncportgen.py`：I80 生成支援稀疏（`n_used`、`data = used + -1`、wr/dc 可選）；
+  預置 JSON 直接鏡像 wiring（所以 `data:[14]`）。
+- `tools/board.py`：check 接受稀疏；冇 wr/dc 只 **warn**（直驅唔需要），
+  有登記才一齊回 pins 做 esp_lcd 對照。
+- Matrix 硬體層：`wiring.json` I80 `data:[14]`、刪 wr/dc；`sdkconfig.defaults` 的
+  `CONFIG_NETCORE_PIXEL_I80_PINS="14"`；四個 Matrix project 的 `hardware.json` 重新生成。
+- host test：`portgen_test` 對齊新 schema（3 個 check 更新）；`run_all.sh` **21/21 全綠**
+  （cfgstruct 178/178 項、portgen 全 OK）。
+
+**上板驗證**（fw `0ed60f6-dirty`、app `d2215077`、rst=3、idf=v6.1.1 (WSL)）
+- 板上 `/config/hardware.json` 上傳稀疏版（5992 B，sha256 `8109d02b…`）→ reboot
+- `0xF071`：**49.9 fps、drops=0**、`frame_us` 20,013
+- `0xF06B`：rainbow **64 顆 64 色**（`16010c00`/`15000d00`/`14000e00`…）
+- 有效資料腳 = **1 支（GPIO14）**；冇 WR／DC／dummy —— 寫一支腳就等於用一支腳。
+- 註：boot 行（`I80 直驅就緒…`）在 USB CDC 起來之前印，log ring 抓唔到；
+  但 render 有 `started=1` 而且 `0xF06B` 有正常畫面 = 驅動確實用稀疏設定安裝成功。
+
+**留意**
+- esp_lcd 版（`DIRECT=n`）用同一份稀疏 JSON 都會 work（解析層自動補 dummy＋wr／dc），
+  但實際佔用會變 10 支（補出來的），唔會同直驅一樣 1 支。
+- 16-bit 門檻：**>8 條有效腳**；寫 16 個槽但只有 1 支有效仍然係 8-bit（設計如此）。

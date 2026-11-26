@@ -344,24 +344,26 @@ def gen_hardware(wiring: dict) -> tuple[str, dict]:
     for i80_idx, it in enumerate(lst):
         if not isinstance(it, dict):
             raise GenError(f"wiring.json I80.list[{i80_idx}] 唔係物件")
-        data = [pin(x) for x in (it.get("data") or [])]
-        if any(d < 0 for d in data) or len(data) not in (8, 16):
-            raise GenError(f"wiring.json I80.list[{i80_idx}].data 有 {len(data)} 支／含有未接腳位"
-                           "（要 8 或 16 支有效 GPIO：D0..D7／D0..D15）")
-        wr, dc = pin(it.get("wr")), pin(it.get("dc"))
-        if wr < 0 or dc < 0:
-            raise GenError(f"wiring.json I80.list[{i80_idx}] 的 wr／dc 未填"
-                           "（I80 硬性要求；送燈時是 dummy）")
-        bw = num(it.get("bus_width"), len(data))
-        if bw != len(data):
-            raise GenError(f"wiring.json I80.list[{i80_idx}].bus_width={bw} 與 data 的 "
-                           f"{len(data)} 支唔一致（bus_width 由 data 長度決定，可以唔寫）")
-        pad = ", ".join(str(x) for x in data)
+        # 稀疏語義（2026-11-26）：元素 >=0 = 真的接燈；-1（或 null／省略）= 未用。
+        # 有效腳數自動決定 bus 寬度：<=8 → 8-bit；9..16 → 16-bit。
+        # wr／dc 唔再強制（直驅版「有登記才 route」；esp_lcd 版解析時自動由安全池補）。
+        used = [x for x in (pin(v) for v in (it.get("data") or [])) if x >= 0]
+        if not used:
+            raise GenError(f"wiring.json I80.list[{i80_idx}].data 冇一支有效 GPIO")
+        if len(used) > 16:
+            raise GenError(f"wiring.json I80.list[{i80_idx}].data 有 {len(used)} 支有效腳"
+                           "（上限 16：D0..D15）")
+        width = 8 if len(used) <= 8 else 16
+        bw = num(it.get("bus_width"), width)
+        if bw != width:
+            raise GenError(f"wiring.json I80.list[{i80_idx}].bus_width={bw} 與有效腳數 "
+                           f"{len(used)} 推出的 {width} 唔一致（可以唔寫）")
+        pad = ", ".join(str(x) for x in (used + [-1] * (width - len(used))))
         items.append(
             "        { "
-            f".enable = true, .bus_width = {bw}, .n_data = {len(data)}, "
+            f".enable = true, .bus_width = {width}, .n_data = {width}, .n_used = {len(used)}, "
             f".data = {{ {pad} }}, "
-            f".wr = {wr}, .dc = {dc}, .cs = {pin(it.get('cs'))}, "
+            f".wr = {pin(it.get('wr'))}, .dc = {pin(it.get('dc'))}, .cs = {pin(it.get('cs'))}, "
             f".freq_hz = {num(it.get('freq'), 80000000)}u }},")
     if len(lst) > MAX["i80"]:
         raise GenError(f"I80 list 有 {len(lst)} 條，上限 {MAX['i80']}")
@@ -503,15 +505,16 @@ def gen_led(driver: dict | None, wiring: dict,
         b = _wiring_bus(wiring, kind, bus_idx)
         if backend_s == "i80":
             # 腳位本身由 gen_hardware 編成 nc_i80_cfg_t；這裡只驗「引用得到、lanes 合理」。
-            data = [num(x, -1) for x in (b.get("data") or [])]
-            width = len(data)
-            if width not in (8, 16):
-                raise GenError(f"wiring.json I80[{bus_idx}].data 有 {width} 支（要 8 或 16）")
+            used = [x for x in (num(v, -1) for v in (b.get("data") or [])) if x >= 0]
+            if not (1 <= len(used) <= 16):
+                raise GenError(f"wiring.json I80[{bus_idx}].data 有效腳 {len(used)} 支"
+                               "（要 1..16；-1／null＝未用）")
+            width = 8 if len(used) <= 8 else 16
             if lanes == 0:
                 lanes = 1
-            if lanes < 1 or lanes > width:
-                raise GenError(f"LED.lanes={lanes} 超出 wiring.json I80[{bus_idx}] 的 "
-                               f"bus_width={width}（最多 {width} 條）")
+            if lanes < 1 or lanes > len(used):
+                raise GenError(f"LED.lanes={lanes} 超出 wiring.json I80[{bus_idx}] 的有效腳數 "
+                               f"{len(used)}（最多 {len(used)} 條）")
         else:   # spi
             if lanes not in (0, 1):
                 raise GenError(f"LED.lanes={lanes}：SPI 只有一條 MOSI，只可以 1 條 lane")

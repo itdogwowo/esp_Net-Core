@@ -96,14 +96,21 @@
     ]
   },
   "I80": {
-    "_comment": "板載 64 顆 WS2812B 用 I80（LCD_CAM 8080）當 8 條 lane 的動機。data = D0..D7（長度就是 bus_width，唔另外寫）；只有 D0 = GPIO14 真的接燈，D1..D7／WR／DC 是 I80 硬性要求的 dummy。dc 是 esp_lcd 必要的 D/C 腳。freq 是 LCD 面板的意義；送燈的 PCLK 由 driver.json 的 LED.timing 給。runtime 可以用 /data/config/hardware.json 的同一段覆蓋（唔使重 build）。",
+    "_comment": [
+      "板載 64 顆 WS2812B 用 I80（LCD_CAM 8080）送燈；只有 D0 = GPIO14 真的接燈。",
+      "2026-11-26 起支援**稀疏寫法**：data 元素 >=0 = 真的接燈，-1（或省略）= 未用。",
+      "  8-bit／16-bit 由有效腳數自動決定（<=8 → 8-bit；9..16 → 16-bit）。",
+      "  直驅驅動（CONFIG_NETCORE_PIXEL_I80_DIRECT=y）只 route 有效腳，所以呢塊板",
+      "  而家**一支腳（GPIO14）**就夠；唔使再寫 D1..D7／wr／dc 那堆 dummy。",
+      "  esp_lcd 版（DIRECT=n）仍然需要 8/16 支 data＋wr＋dc：解析層會由安全池自動補，",
+      "  所以同一份 JSON 兩邊都跑得；但直驅版「有登記（>=0）才 route」，唔想用就唔好寫。",
+      "freq 是 LCD 面板的意義；送燈的 PCLK 由 driver.json 的 LED.timing 給。",
+      "runtime 可以用 /data/config/hardware.json 的同一段覆蓋（唔使重 build）。"
+    ],
     "enable": 1,
     "list": [
       {
-        "data": [14, 38, 39, 40, 41, 42, 47, 48],
-        "wr": 1,
-        "dc": 2,
-        "cs": -1,
+        "data": [14],
         "freq": 80000000
       }
     ]

@@ -513,23 +513,29 @@ def _check_led_i80(wiring: dict | None, bus, led: dict, label: str,
     b = _resolve_bus(wiring, "I80", idx, f"{label}.bus", r)
     if b is None:
         return None
-    data = [x for x in (b.get("data") or []) if isinstance(x, int)]
-    width = len(data)
-    if width not in (8, 16):
-        r.err(f"{label}: wiring.json I80[{idx}].data 有 {width} 支（要 8 或 16：D0..D7／D0..D15）")
+    # 稀疏語義（2026-11-26）：data 元素 >=0 才是真腳；-1／null＝未用。
+    used = [x for x in (b.get("data") or []) if isinstance(x, int) and x >= 0]
+    n_used = len(used)
+    if not (1 <= n_used <= 16):
+        r.err(f"{label}: wiring.json I80[{idx}].data 有效腳 {n_used} 支"
+              "（要 1..16；-1／null＝未用）")
         return None
+    width = 8 if n_used <= 8 else 16
     if "bus_width" in b and _int_of(b.get("bus_width")) != width:
-        r.err(f"{label}: wiring.json I80[{idx}] 有 bus_width，但 data 有 {width} 支 —— "
-              "bus_width 由 data 長度決定，請刪掉那個欄位")
+        r.err(f"{label}: wiring.json I80[{idx}] 有 bus_width，但有效腳 {n_used} 支推出 "
+              f"{width} —— bus_width 由有效腳數決定，請刪掉那個欄位")
     wr, dc = _int_of(b.get("wr"), -1), _int_of(b.get("dc"), -1)
     if wr is None or dc is None or wr < 0 or dc < 0:
-        r.err(f"{label}: wiring.json I80[{idx}] 的 wr／dc 未填（I80 硬性要求，送燈時是 dummy）")
-        return None
+        r.warn(f"{label}: wiring.json I80[{idx}] 冇登記 wr／dc——直驅版唔需要"
+               "（有登記才 route）；esp_lcd 版（DIRECT=n）解析時會自動由安全池補")
     lanes = _int_of(led.get("lanes"), 1)
-    if lanes is None or not (1 <= lanes <= width):
-        r.err(f"{label}.lanes={led.get('lanes')} 超出 wiring.json I80[{idx}] 的 "
-              f"{width} 條資料線（最多 {width} 條）")
-    return {"pins": data + [wr, dc], "width": width, "lanes": lanes, "index": idx}
+    if lanes is None or not (1 <= lanes <= n_used):
+        r.err(f"{label}.lanes={led.get('lanes')} 超出 wiring.json I80[{idx}] 的有效腳數 "
+              f"{n_used}（最多 {n_used} 條）")
+                # 有登記 wr／dc 就一齊回（esp_lcd 對照用）；冇就只回有效 data 腳（直驅）
+    extra = ([wr] if isinstance(wr, int) and wr >= 0 else []) + \
+            ([dc] if isinstance(dc, int) and dc >= 0 else [])
+    return {"pins": used + extra, "width": width, "lanes": lanes, "index": idx}
 
 
 def _led_vs_kconfig(cfg_port: dict, info: dict, label: str, r: Report) -> None:

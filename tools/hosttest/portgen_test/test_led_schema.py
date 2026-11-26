@@ -82,10 +82,11 @@ def main() -> int:
         ok("Matrix 生成成功", p.returncode == 0, p.stderr.strip())
         c = (tmp / "matrix" / "nc_port.c").read_text(encoding="utf-8")
         ok("硬件層有 n_i80 = 1", ".n_i80 = 1" in c)
-        ok("data（D0..D7）在 hardware 層",
-           ".data = { 14, 38, 39, 40, 41, 42, 47, 48 }" in c)
-        ok("wr／dc 在 hardware 層", ".wr = 1, .dc = 2" in c)
-        ok("bus_width 由 data 長度推出", ".bus_width = 8, .n_data = 8" in c)
+        # 2026-11-26 稀疏 schema：Matrix 只登記 GPIO14；未用槽 = -1，n_used 記錄真腳數
+        ok("稀疏 data：只 1 支有效（GPIO14），其餘 -1",
+           ".data = { 14, -1, -1, -1, -1, -1, -1, -1 }" in c)
+        ok("n_used = 1、bus 寬度自動 = 8", ".bus_width = 8, .n_data = 8, .n_used = 1" in c)
+        ok("冇登記 wr／dc（直驅唔需要；有登記才 route）", ".wr = -1, .dc = -1" in c)
         ok("driver 層只引用 bus", ".backend = NC_LED_BACKEND_I80" in c and ".bus = 0" in c)
         ok("driver 層冇再寫 pins", ".pins" not in c)
         ok("px = 64（per lane）", ".px = 64" in c)
@@ -95,8 +96,8 @@ def main() -> int:
         # 同一份值也寫在 sdkconfig：兩邊要一致，否則「改咗唔生效」
         kv = ncboard.parse_kconfig(MATRIX_DIR / "sdkconfig.defaults")
         want = [int(x) for x in kv["NETCORE_PIXEL_I80_PINS"].strip('"').split(",")]
-        ok("wiring.json 與 sdkconfig 的腳位一致",
-           want == [14, 38, 39, 40, 41, 42, 47, 48, 1, 2], str(want))
+        # 稀疏 schema：Kconfig 字串只放真正接燈的腳（Matrix 只有 14）
+        ok("wiring.json 與 sdkconfig 的腳位一致（只真腳）", want == [14], str(want))
 
         # ── 2. project 覆寫 pixel → board 的 LED 段讓位 ──
         print("ncportgen：project 覆寫 pixel（Show2400）")
@@ -110,9 +111,9 @@ def main() -> int:
         print("ncportgen：project 冇覆寫 pixel（Zero-Show）")
         p = gen("S3/ESP32-S3-Zero", tmp / "zshow", "S3/ESP32-S3-Zero-Show")
         c = (tmp / "zshow" / "nc_port.c").read_text(encoding="utf-8")
-        ok("Zero 的 D0..D7 = 1,38,39,40,41,42,47,48",
+        ok("Zero 的 8 支有效腳 = 1,38,39,40,41,42,47,48",
            ".data = { 1, 38, 39, 40, 41, 42, 47, 48 }" in c)
-        ok("Zero 的 wr／dc = 2／4", ".wr = 2, .dc = 4" in c)
+        ok("Zero 有登記 wr／dc = 2／4（esp_lcd 板）", ".wr = 2, .dc = 4" in c)
 
         # ── 3b. board 冇燈（enable=0）但 project 有燈 → 讓位要贏過「明確關閉」 ──
         # 迴歸：SuperMini 的 board LED 係 enable=0，textkit 用 project sdkconfig 開燈。
