@@ -1,0 +1,40 @@
+{
+  "version": 1,
+  "_comment": [
+    "NCSTATE key schema：key id 的唯一 source of truth。",
+    "由 tools/gen_state_keys.py 生成 firmware/components/sys/state/include/nc_state_keys.h；",
+    "run_all.sh 會用 --check 確認 header 同呢份 schema 同步（唔同步 = 測試失敗）。",
+    "type：u8/u16/u32/i8/i32/bool/enum/str；path 係 config JSON 的路徑（將來 hit 時",
+    "跳過 parse 用），index 由 id 的 unit/index bits 表示。"
+  ],
+  "keys": [
+    { "id": "0x0002", "name": "NC_KEY_SYS_FRAME_MS",  "type": "u16", "path": "system.json:frame_interval_ms", "desc": "節拍間隔 ms" },
+    { "id": "0x0003", "name": "NC_KEY_SYS_NUM_PIXELS", "type": "u16", "path": "system.json:num_pixels", "desc": "總像素數（資訊用）" },
+    { "id": "0x0004", "name": "NC_KEY_SYS_LOG_DEBUG",  "type": "u8",  "path": "system.json:log_debug_mode", "desc": "log 除錯模式" },
+
+    { "id": "0x0701", "name": "NC_KEY_I80_COUNT", "type": "u8",  "path": "hardware.json:I80.list[0].data", "desc": "真正接燈的資料腳數（稀疏非 -1）" },
+    { "id": "0x0702", "name": "NC_KEY_I80_WR",    "type": "i8",  "path": "hardware.json:I80.list[0].wr", "desc": "WR pin（-1 = 未用）" },
+    { "id": "0x0703", "name": "NC_KEY_I80_DC",    "type": "i8",  "path": "hardware.json:I80.list[0].dc", "desc": "DC pin（-1 = 未用）" },
+    { "id": "0x0704", "name": "NC_KEY_I80_CS",    "type": "i8",  "path": "hardware.json:I80.list[0].cs", "desc": "CS pin（-1 = 未用）" },
+    { "id": "0x0705", "name": "NC_KEY_I80_FREQ",  "type": "u32", "path": "hardware.json:I80.list[0].freq", "desc": "LCD PCLK Hz" },
+
+    { "id": "0x0801", "name": "NC_KEY_SPI_ENABLE", "type": "bool", "path": "hardware.json:SPI.enable", "desc": "SPI 是否啟用" },
+    { "id": "0x0802", "name": "NC_KEY_SPI_BAUD",   "type": "u32",  "path": "hardware.json:SPI.list[0].baudrate", "desc": "SPI 時鐘" },
+    { "id": "0x0803", "name": "NC_KEY_SPI_PHASE",  "type": "u8",   "path": "hardware.json:SPI.list[0].phase", "desc": "phase（0/1）" },
+    { "id": "0x0804", "name": "NC_KEY_SPI_POL",    "type": "u8",   "path": "hardware.json:SPI.list[0].polarity", "desc": "polarity（0/1）" },
+    { "id": "0x0805", "name": "NC_KEY_SPI_SCK",    "type": "i8",   "path": "hardware.json:SPI.list[0].GPIO.sck", "desc": "SCLK pin" },
+    { "id": "0x0806", "name": "NC_KEY_SPI_MOSI",   "type": "i8",   "path": "hardware.json:SPI.list[0].GPIO.mosi", "desc": "MOSI（單線 / data0）" },
+    { "id": "0x0807", "name": "NC_KEY_SPI_MISO",   "type": "i8",   "path": "hardware.json:SPI.list[0].GPIO.miso", "desc": "MISO（-1 = 冇）" },
+
+    { "id": "0x0C01", "name": "NC_KEY_LED_ENABLE",    "type": "bool", "path": "driver.json:LED.enable", "desc": "燈鏈啟用" },
+    { "id": "0x0C02", "name": "NC_KEY_LED_BACKEND",   "type": "enum", "path": "driver.json:LED.backend", "desc": "i80/spi/rmt/parlio/direct/mock" },
+    { "id": "0x0C03", "name": "NC_KEY_LED_BUS",       "type": "i8",   "path": "driver.json:LED.bus.index", "desc": "引用 hardware 同類 list 的 index" },
+    { "id": "0x0C04", "name": "NC_KEY_LED_LANES",     "type": "u8",   "path": "driver.json:LED.lanes", "desc": "真的接燈的 lane 數" },
+    { "id": "0x0C05", "name": "NC_KEY_LED_PX",        "type": "u16",  "path": "driver.json:LED.px", "desc": "每條 lane 幾顆" },
+    { "id": "0x0C06", "name": "NC_KEY_LED_FMT",       "type": "str",  "path": "driver.json:LED.format", "desc": "ws2812/ws2812w/apa102…" },
+    { "id": "0x0C07", "name": "NC_KEY_LED_CLK",       "type": "u32",  "path": "driver.json:LED.timing.pclk_hz", "desc": "I80 PCLK / SPI 時鐘" },
+    { "id": "0x0C08", "name": "NC_KEY_LED_BIT_CELLS", "type": "u8",   "path": "driver.json:LED.timing.bit_cells", "desc": "每 bit 幾個 cell" },
+    { "id": "0x0C09", "name": "NC_KEY_LED_T0H",       "type": "u8",   "path": "driver.json:LED.timing.t0h", "desc": "0 的高電平 cell 數" },
+    { "id": "0x0C0A", "name": "NC_KEY_LED_T1H",       "type": "u8",   "path": "driver.json:LED.timing.t1h", "desc": "1 的高電平 cell 數" }
+  ]
+}

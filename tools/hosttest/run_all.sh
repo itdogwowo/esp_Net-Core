@@ -7,6 +7,11 @@
 # 全部都用 -Wall -Wextra -Werror，所以「跑得過」同時等於「冇警告」。
 set -u
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# 先確認 state key header 同 schema/state-keys.json 同步（唔同步＝直接失敗）
+if ! python3 "$ROOT/tools/gen_state_keys.py" --check; then
+    echo "—— state key schema 唔同步"
+    exit 1
+fi
 TESTS="cfg_test cfgstruct_test ncd_test task_test router_test link_test mod_test hub_test plan_test buf_test portgen_test ncm_test pixel_test pxEngine_test pxAsset_test pxProgram_test pxLayer_test pxShow_test pxScan_test pxLayout_test stateBlob_test stateFile_test stateStore_test fpsclock_test"
 fail=0
 for t in $TESTS; do

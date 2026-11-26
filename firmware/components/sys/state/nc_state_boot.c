@@ -83,6 +83,16 @@ static size_t build_records(void)
         n = put_i(n, NC_KEY_I80_CS, b->cs);
         n = put_u(n, NC_KEY_I80_FREQ, b->freq_hz);
     }
+    if (hw != NULL && hw->n_spi > 0) {
+        const nc_spi_cfg_t *s = &hw->spi[0];
+        n = put_b(n, NC_KEY_SPI_ENABLE, s->enable);
+        n = put_u(n, NC_KEY_SPI_BAUD, s->baud);
+        n = put_u(n, NC_KEY_SPI_PHASE, s->phase);
+        n = put_u(n, NC_KEY_SPI_POL, s->polarity);
+        n = put_i(n, NC_KEY_SPI_SCK, s->sck);
+        n = put_i(n, NC_KEY_SPI_MOSI, s->mosi);
+        n = put_i(n, NC_KEY_SPI_MISO, s->miso);
+    }
 
     const nc_devices_cfg_t *dv = nc_cfg_devices();
     if (dv != NULL && dv->present) {

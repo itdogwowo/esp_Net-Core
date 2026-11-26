@@ -1546,11 +1546,14 @@ static size_t status_put_cfg(char *buf, size_t cap)
     if (st != NULL) {
         jappend(buf, cap, &off,
                 ",\"state\":{\"hit\":%u,\"cmp_ok\":%u,\"rebuilt\":%u,"
-                "\"src\":%u,\"n\":%u,\"bytes\":%u,\"mism\":%u,\"first\":%u}",
+                "\"src\":%u,\"n\":%u,\"bytes\":%u,\"mism\":%u,\"first\":%u,"
+                "\"store\":%u}",
                 st->hit ? 1u : 0u, st->cmp_ok ? 1u : 0u, st->rebuilt ? 1u : 0u,
                 (unsigned)st->src_hash, (unsigned)st->n_records,
                 (unsigned)st->bytes, (unsigned)st->n_mismatch,
-                (unsigned)st->first_diff);
+                (unsigned)st->first_diff,
+                (unsigned)((nc_state_boot_store() != NULL)
+                               ? nc_state_boot_store()->n : 0u));
     }
     return off;
 }

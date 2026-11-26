@@ -9801,3 +9801,25 @@ schema key table（path↔id）由 ncportgen 生成；`status` 加 store 命中�
 
 **下一步**：schema path↔id 生成（ncportgen）→ 擴展到 hardware 其他 unit →
 最終 hit 時跳過 JSON parse（需要 schema 覆蓋 tasks/resources 後才做）。
+
+### 7.281 2026-11-26（key schema 生成器＋SPI 擴充；run_all 驗 header 同步）
+
+用家：可以自己驗證的就繼續 → 做 schema path↔id 生成器＋擴充 SPI／status store 數。
+
+**新增**
+- `schema/state-keys.json`：key **唯一 source of truth**（id／name／type／path／desc），
+  現時 25 個：sys 3、I80 5、SPI 7、LED 10。
+- `tools/gen_state_keys.py`：
+  * 生成 `firmware/components/sys/state/include/nc_state_keys.h`（唔好手改）；
+  * `--check` 驗 header 同 schema 同步；**`run_all.sh` 一開始就跑**，唔同步直接失敗；
+  * 驗重複 id／name、未知 type、id 超出 u16。
+- `nc_state_boot.c`：加 SPI records（enable／baud／phase／polarity／sck／mosi／miso）；
+  SPI `enable=0` 時 cfg 的 `n_spi=0` → **唔會寫入**（sparse 語義：唔用就 0 byte）。
+- `status cfg` 的 `state` 加 `"store":N`（RAM store 實際筆數）。
+
+**驗證**（fw `708c6cb-dirty`、app `8dee95c5`、idf=v6.1.1 WSL；host 24/24）
+- run_all 開頭 `state keys OK（25 個 key、schema v1）`；
+- OTA 後開機：`state:{"hit":1,"cmp_ok":1,"n":18,"bytes":124,"store":18}`，
+  `state.ncst` 仍 124 B —— Matrix 的 SPI `enable=0`，所以 SPI 7 個 key 唔會寫入
+  （sparse 正確：schema 有 25 個 key ≠ 實際要存 25 筆）；
+- reboot 後仍然 hit=1（冇無謂重寫）。

@@ -151,3 +151,17 @@ array 索引固定（通道上限寫死）——但硬件本身就有限，正�
 | `NCB1`… | 舊版／保留 | — |
 
 新格式一律 **`NC` 字頭**，並先在此表登記。
+
+---
+
+## 8. key schema（唯一 source of truth）
+
+- 檔案：**`schema/state-keys.json`**（id／name／type／path／desc）
+- 生成器：**`tools/gen_state_keys.py`**
+  - `python3 tools/gen_state_keys.py` → 生成
+    `firmware/components/sys/state/include/nc_state_keys.h`（**唔好手改**）
+  - `--check` → 確認 header 同 schema 同步；**`tools/hosttest/run_all.sh` 一開始會跑**，
+    唔同步就成個 test suite 失敗（防止 id 漂移）
+- 驗證：重複 id／name、型別唔識、id 超出 u16 → 生成器即刻報錯。
+- 現時覆蓋：sys（3）／I80（5）／SPI（7）／LED（10）＝ **25 個 key**；
+  `boot_sync` 由 cfg 造同樣數量的 records（Matrix `state.ncst` 約 150 B）。
