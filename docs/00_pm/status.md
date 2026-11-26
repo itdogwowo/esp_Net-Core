@@ -9456,3 +9456,24 @@ layout 打包器）——字頭太似，容易混淆。
 （1 日）→ P3 JSON parser 改「路徑→id」（1 日）→ P4 status 顯示（0.5 日）。
 
 **magic 登記表**已加入文件：NCB2／NCS1／NCC2／PXA2／NCLT，新格式一律 `NC` 字頭。
+
+### 7.266 2026-11-26（硬件矩陣：列出所有硬件／IO 位置 → 儲存上限可算）
+
+用家提出：JSON 列出所有支援硬件（預設 `enable: 0`），裏面填 GPIO＋少量數值，
+令快速選配＆儲存上限明確（唔好唔知幾時爆）。→ 已設計＋原型計數。
+
+**已寫入**：[`hw-matrix.md`](docs/03_notes/hw-matrix.md)
+
+- 矩陣：**356 keys** 覆蓋所有支援硬件（pin 48 位置 × 3＝144 最大項；i80 2×22；
+  led 2×10…）；加硬件＝加 unit，加欄位＝+7 B worst/key。
+- NCS1 上限公式：`12 + N×7` → **worst 2,504 B**、典型（i80+led）**236 B**、
+  Matrix 實際 ~160 B；NVS 4 KB blob 內 OK（餘裕 36%）。
+- 未來增長：`N ≤ 583`；超過就拆 blob 或用前綴壓縮。
+- **GPIO 48-bit bitmap**（`uint64_t`）：enable 時佔 bit，衝突 O(1)；
+  reserved mask 預載（flash 26–37、USB 19/20、console 43/44、strapping 0/3/45/46）。
+- 模板 JSON（全 enable=0）約 5.1 KB，只係人睇模板；儲存用 NCS1 sparse。
+- 編譯期不變量：`static_assert(12 + NC_HW_MATRIX_KEYS*7 <= 4096)` —— 加硬件時
+  一超出就 **build 失敗**（唔會 runtime 先爆）。
+
+原型：`modules/lab/state_schema_lab/hw_matrix_preview.py`（實跑：356 keys、
+worst 2,504 B、template 5,082 B、bitmap 衝突檢查 OK）。
