@@ -9823,3 +9823,24 @@ schema key table（path↔id）由 ncportgen 生成；`status` 加 store 命中�
   `state.ncst` 仍 124 B —— Matrix 的 SPI `enable=0`，所以 SPI 7 個 key 唔會寫入
   （sparse 正確：schema 有 25 個 key ≠ 實際要存 25 筆）；
 - reboot 後仍然 hit=1（冇無謂重寫）。
+
+### 7.282 2026-11-26（生成期激活表編入 firmware；`status cfg` 見到 act）
+
+用家：「你可以自己驗證的就直接繼續」→ 完成 2026-11-26 定案的「激活在生成期決定」：
+ncportgen 生成的 activation 表**直接編成 `nc_port.c` 的 const 表**，firmware 讀它；
+`preset_activation.json` 只係人睇的鏡像（同源、同 `src_hash`）。
+
+**改動**
+- `tools/ncportgen.py`：新增 `gen_activation_c()`——由同一份 activation 產生
+  `nc_port_act_t s_act[]`（unit／level／enabled）＋`nc_port_activation()`、
+  `nc_port_activation_src_hash()`；寫入 `nc_port.c`／`nc_port.h`。
+- `main.c` `status cfg`：新增 `"act":{"src","n","en","units"}`（生成期決定、唔使開機猜）。
+- 文件：state-activation.md 更新為「表由 ncportgen 編入 nc_port.c」。
+
+**驗證**（fw `65fde01-dirty`、app `a7f02868`、idf=v6.1.1 WSL；host 24/24）
+- `status cfg` → `"act":{"src":2718329389,"n":22,"en":4,"units":"usb,i2c,i80,led"}`
+- 同 build 目錄的 `ncport_gen/preset_activation.json` 對數：
+  `src_hash` 相同（2718329389；**build 有 project sdkconfig** 所以同手動跑
+  ncportgen（0x014323ff）唔同——正常，兩者輸入唔同）；
+  enabled units 一樣：`usb,i2c,i80,led`。
+- 同時 `state` 仍 hit=1（n=18、bytes=124）→ activation 表同 state 機制並存無衝突。

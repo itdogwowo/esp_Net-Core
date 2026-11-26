@@ -688,6 +688,28 @@ def gen_activation(wiring: dict, driver: dict | None, led_sum: dict) -> list[dic
     return act
 
 
+def gen_activation_c(activation: list[dict], src_hash: int) -> str:
+    """生成期激活表 → nc_port.c 的 const 表（firmware 開機照表；src_hash 版本核對）。"""
+    rows = []
+    for i, a in enumerate(activation):
+        if i >= 24:
+            raise GenError("activation 超過 NC_PORT_ACT_MAX=24")
+        rows.append('    { "%s", %d, %d },' % (a["unit"], a["level"], 1 if a["enabled"] else 0))
+    body = "\n".join(rows)
+    return (
+        "// 生成期激活表：邊個 unit 會激活、level（0 平台／1 bus／2 device）、enabled。\n"
+        "// firmware 開機只照呢張表；enable=0 → 零 GPIO／零 buffer。\n"
+        "// src_hash = crc32(名稱+內容) 逐個來源檔累加；跑 tools/ncportgen.py 時寫死。\n"
+        f"static const nc_port_act_t s_act[] = {{\n{body}\n}};\n"
+        "const nc_port_act_t *nc_port_activation(size_t *n)\n"
+        "{\n"
+        f"    if (n != NULL) *n = {len(activation)}u;\n"
+        "    return s_act;\n"
+        "}\n\n"
+        f"uint32_t nc_port_activation_src_hash(void) {{ return 0x{src_hash & 0xFFFFFFFF:08x}u; }}\n"
+    )
+
+
 def gen_usb_kinds(wiring: dict) -> str:
     """USB.list index → internal link kind（NC_LINK_CDC / NC_LINK_USBJTAG）。
 
@@ -751,6 +773,22 @@ def main() -> int:
                     "usb": (cap.get("usb") or {}).get("link")})
     summary["led"] = led_sum
 
+    # 生成期激活表：同一份資料 → preset_activation.json（人睇）＋ nc_port.c 的 const 表
+    # （firmware 開機照表執行；src_hash 核對表同來源 JSON 係唔係同一版本）。
+    activation = gen_activation(wiring, driver, led_sum)
+    src_files = []
+    for name in ("wiring.json", "driver.json"):
+        fp = hw / name
+        if fp.is_file():
+            src_files.append((name, fp.read_bytes()))
+    if project is not None and (project / "sdkconfig.defaults").is_file():
+        src_files.append((project.name + "/sdkconfig.defaults",
+                          (project / "sdkconfig.defaults").read_bytes()))
+    src_hash = 0
+    for name, data in src_files:
+        src_hash = zlib.crc32(name.encode("utf-8") + b"\0" + data, src_hash)
+    activation_c = gen_activation_c(activation, src_hash)
+
     out.mkdir(parents=True, exist_ok=True)
     (out / "nc_port.h").write_text(
         "// 由 tools/ncportgen.py 產生，不要手改。\n"
@@ -758,6 +796,16 @@ def main() -> int:
         "#pragma once\n\n"
         "#include \"nc_cfg.h\"\n\n"
         "#ifdef __cplusplus\nextern \"C\" {\n#endif\n\n"
+        "#include <stddef.h>\n\n"
+        "// 生成期激活表（nc_port.c 內 const；級別：0 平台／1 bus／2 device）。\n"
+        "#define NC_PORT_ACT_MAX 24\n"
+        "typedef struct {\n"
+        "    const char *unit;\n"
+        "    uint8_t level;\n"
+        "    uint8_t enabled;\n"
+        "} nc_port_act_t;\n"
+        "const nc_port_act_t *nc_port_activation(size_t *n);\n"
+        "uint32_t nc_port_activation_src_hash(void);\n\n"
         "const nc_cfg_chip_t *nc_port_chip(void);\n"
         "const nc_hardware_cfg_t *nc_port_hw_defaults(void);\n"
         "uint8_t nc_port_usb_kind(uint8_t idx);\n"
@@ -771,7 +819,7 @@ def main() -> int:
         + chip_c + "\n\n" + hw_c + "\n\n" + led_c + "\n"
         "const nc_cfg_chip_t *nc_port_chip(void) { return &s_chip; }\n"
         "const nc_hardware_cfg_t *nc_port_hw_defaults(void) { return &s_hw; }\n\n"
-        + gen_usb_kinds(wiring) + "\n",
+        + gen_usb_kinds(wiring) + "\n" + activation_c + "\n",
         encoding="utf-8")
     (out / "preset_hardware.json").write_text(
         json.dumps(preset, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
@@ -780,20 +828,7 @@ def main() -> int:
     devices = gen_preset_devices(driver, project_pixel_override(project))
     (out / "preset_driver.json").write_text(
         json.dumps(devices, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    # 生成期激活表：邊個 unit 會激活、次序、依賴（firmware 開機照表執行）。
-    # 來源哈希：開機時可以核對「中間產物 vs 來源 JSON」版本（一樣＝直接載入）。
-    activation = gen_activation(wiring, driver, led_sum)
-    src_files = []
-    for name in ("wiring.json", "driver.json"):
-        fp = hw / name
-        if fp.is_file():
-            src_files.append((name, fp.read_bytes()))
-    if project is not None and (project / "sdkconfig.defaults").is_file():
-        src_files.append((project.name + "/sdkconfig.defaults",
-                          (project / "sdkconfig.defaults").read_bytes()))
-    src_hash = 0
-    for name, data in src_files:
-        src_hash = zlib.crc32(name.encode("utf-8") + b"\0" + data, src_hash)
+    # 人睇的鏡像（同 nc_port.c 的 const 表同源；src_hash 相同）
     (out / "preset_activation.json").write_text(
         json.dumps({"version": 1,
                     "src_hash": "0x%08x" % (src_hash & 0xFFFFFFFF),

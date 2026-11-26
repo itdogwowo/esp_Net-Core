@@ -1542,6 +1542,28 @@ static size_t status_put_cfg(char *buf, size_t cap)
     char cj[288];
     nc_cfg_json(cj, sizeof(cj));
     jappend(buf, cap, &off, "\"cfg\":%s", cj);
+    {
+        size_t act_n = 0;
+        const nc_port_act_t *act = nc_port_activation(&act_n);
+        size_t en = 0;
+        char units[96] = {0};
+        size_t ul = 0;
+        for (size_t i = 0; act != NULL && i < act_n; i++) {
+            if (!act[i].enabled) {
+                continue;
+            }
+            en++;
+            const int w = snprintf(units + ul, sizeof(units) - ul, "%s%s",
+                                   (ul > 0) ? "," : "", act[i].unit);
+            if (w > 0 && (size_t)w < sizeof(units) - ul) {
+                ul += (size_t)w;
+            }
+        }
+        jappend(buf, cap, &off,
+                ",\"act\":{\"src\":%u,\"n\":%u,\"en\":%u,\"units\":\"%s\"}",
+                (unsigned)nc_port_activation_src_hash(), (unsigned)act_n,
+                (unsigned)en, units);
+    }
     const nc_state_boot_result_t *st = nc_state_boot_last();
     if (st != NULL) {
         jappend(buf, cap, &off,
