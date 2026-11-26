@@ -18,3 +18,8 @@ CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
 
 # Show 的 I80 packed 波形固定 PSRAM（同其他 Show／Textkit project 一致）。
 CONFIG_NETCORE_PIXEL_PACK_PSRAM=y
+
+# ── I80 直接驅動（階段①，2026-11-26）──
+# 只 route 真正接燈的 lane（這塊板 = GPIO14 一支），WR／DC／未接燈的 data 線唔再需要
+# 真 GPIO（等於 FastLED 在 S3 用 LCD_CAM 的做法）。壞掉改 n 即回退 esp_lcd 版。
+CONFIG_NETCORE_PIXEL_I80_DIRECT=y

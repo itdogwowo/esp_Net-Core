@@ -202,11 +202,19 @@ nc_pixel_backend_t *nc_px_backend_i80(const nc_px_i80_cfg_t *cfg)
              (unsigned)d->px, (unsigned)d->lanes, (unsigned)d->bus_width,
              (unsigned)(d->units * (uint32_t)(d->bus_width / 8)), (unsigned)d->slots);
 
-    // ① 政策：10 個腳位都要有效、唔可以重複、唔可以踩保留腳。
+    // ① 政策：要用的腳都要有效、唔可以重複、唔可以踩保留腳。
     //    GPIO3 在 S3 是 strapping（JTAG signal source），但 boot 之後當 WS2812 資料線
     //    冇問題（LED 的 DIN 是高阻抗輸入）；LED Textkit（GPIO1–5）要用它，所以只准
     //    這一個例外，其餘保留腳照樣擋。
-    for (int i = 0; i < (int)d->bus_width + 2; i++) {
+    //
+    //    DIRECT 版只 route 真正接燈的 lane → 只需要檢查／claim lanes 支；
+    //    esp_lcd 版仍然要 bus_width+2 支（data＋WR＋DC）。
+#if CONFIG_NETCORE_PIXEL_I80_DIRECT
+    const int pin_n = (int)d->lanes;
+#else
+    const int pin_n = (int)d->bus_width + 2;
+#endif
+    for (int i = 0; i < pin_n; i++) {
         if (cfg->pins[i] < 0 || cfg->pins[i] > 48) {
             ESP_LOGE(TAG, "I80 腳位第 %d 個 = %d 不是有效 GPIO", i + 1, cfg->pins[i]);
             i80_be_free(d);
@@ -231,7 +239,7 @@ nc_pixel_backend_t *nc_px_backend_i80(const nc_px_i80_cfg_t *cfg)
             }
         }
     }
-    for (int i = 0; i < (int)d->bus_width + 2; i++) {
+    for (int i = 0; i < pin_n; i++) {
         const bool is_wr = (i == d->bus_width);
         const bool is_dc = (i == d->bus_width + 1);
         const char *label = is_wr ? "i80_wr" : (is_dc ? "i80_dc" : "i80_d");
@@ -247,9 +255,18 @@ nc_pixel_backend_t *nc_px_backend_i80(const nc_px_i80_cfg_t *cfg)
     }
 
     // ② 硬體交給 driver：bus／PCLK／DMA 槽／完成回呼都在那一層。
+#if CONFIG_NETCORE_PIXEL_I80_DIRECT
+    // 直驅：只給 lane_pins（lanes 支）；WR／DC／dummy 由驅動層完全忽略
+    const nc_i80_drv_cfg_t dc = {
+        .pins = NULL,
+        .lane_pins = cfg->pins,
+        .lanes = d->lanes,
+        .pclk_hz = cc.wave.clk_hz,
+#else
     const nc_i80_drv_cfg_t dc = {
         .pins = cfg->pins,
         .pclk_hz = cc.wave.clk_hz,
+#endif
         .slot_bytes = d->units * (uint32_t)(d->bus_width / 8),
         .slots = cfg->slots,
         .bus_width = d->bus_width,

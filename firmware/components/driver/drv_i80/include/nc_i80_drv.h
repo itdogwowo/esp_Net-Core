@@ -23,9 +23,14 @@ extern "C" {
 #define NC_I80_DRV_SLOTS_MAX 3
 
 typedef struct {
-    // pins = D0..D(width-1)、WR、DC（width=8 → 10 個；width=16 → 18 個）。
+    // esp_lcd 版：D0..D(width-1)、WR、DC（width=8 → 10 個；16 → 18 個）。
     // 全部要有效 GPIO；16-bit 模式的資料線次序 = D0..D15。
+    // DIRECT 版唔用呢個（可以 NULL）。
     const int *pins;
+    // DIRECT 版：真正接燈的 lane 腳（lanes 個）。只會 route 這幾支，
+    // 所以 WR／DC／未接燈的 data 線都唔需要真 GPIO。
+    const int *lane_pins;
+    uint8_t    lanes;       // DIRECT 版用；0 當 1
     uint32_t   pclk_hz;     // PCLK（WS2812 的 bit 寬度靠它 × bit_cells 湊出來）
     uint32_t   slot_bytes;  // 每一筆固定送幾個 byte（16-bit 模式 = units × 2）
     uint8_t    slots;       // 2..NC_I80_DRV_SLOTS_MAX（3 = 三緩衝）

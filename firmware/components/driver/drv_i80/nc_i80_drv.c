@@ -89,7 +89,13 @@ static void i80_free(i80_drv_t *d)
 
 esp_err_t nc_i80_drv_install(const nc_i80_drv_cfg_t *cfg)
 {
-    if (cfg == NULL || cfg->pins == NULL || cfg->slot_bytes == 0) {
+    if (cfg == NULL || cfg->slot_bytes == 0) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    // 這個檔是 esp_lcd 版：一定要齊 pins（D0..D、WR、DC）。
+    // 想只給 lane_pins（唔要 WR／DC／dummy）就開 CONFIG_NETCORE_PIXEL_I80_DIRECT。
+    if (cfg->pins == NULL) {
+        ESP_LOGE(TAG, "esp_lcd 版需要 pins[]（DIRECT 版才只需 lane_pins[]）");
         return ESP_ERR_INVALID_ARG;
     }
     if (s_i80.ready) {

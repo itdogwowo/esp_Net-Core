@@ -375,9 +375,16 @@ static bool i80_src(int out[18], int *width_out, int *lanes_out)
         }
         const int w = (b->bus_width == 16) ? 16 : 8;
         if (b->n_data < w || b->wr < 0 || b->dc < 0) {
+#if CONFIG_NETCORE_PIXEL_I80_DIRECT
+            // 直驅只需 data lane；WR／DC 唔會 route，所以未填都可以
+            if (b->n_data < w) {
+#endif
             ESP_LOGE(TAG, "I80[%d] 腳位不完整（n_data=%u wr=%d dc=%d）→ 這道 lane 停用",
                      (int)led->bus, (unsigned)b->n_data, (int)b->wr, (int)b->dc);
             return false;
+#if CONFIG_NETCORE_PIXEL_I80_DIRECT
+            }
+#endif
         }
         for (int i = 0; i < w; i++) {
             out[i] = b->data[i];

@@ -370,6 +370,22 @@ menu "esp_Net-Core"
             **不影響 DMA 時間**（那只看 px）；「4 條 600、其他 0」不會更快。
             實測見 docs/03_notes/pixel-renderer.md §13。
 
+    config NETCORE_PIXEL_I80_DIRECT
+        bool "I80：直接寫 LCD_CAM 寄存器（唔經 esp_lcd，只 route 用到的 lane）"
+        depends on NETCORE_PIXEL_I80
+        default n
+        help
+            階段①（2026-11-26）：S3 專用。同 esp_lcd 版共用同一個 nc_i80_drv_* 介面，
+            buffer 契約不變（每個 PCLK 一個 bus word），所以畫波（codec）／配對／環／
+            任務零改動。
+
+            好處：只 route 真正接燈的 lane，**WR／DC／未接燈的 data 線都唔需要真 GPIO**
+            （＝ FastLED 在 S3 的做法）。Matrix 板因此只需 GPIO14 一支腳。
+
+            代價：cache writeback（PSRAM 槽）、完成中斷、PCLK 分頻要自己補
+            （見 docs/00_pm/lcdcam-direct-driver-plan.md 附錄 A）。
+            壞掉就改回 n 一分鐘回退 esp_lcd 版。
+
     config NETCORE_PIXEL_PACK_PSRAM
         bool "I80 packed 波形固定放 PSRAM（大資料；不做 internal fallback）"
         depends on NETCORE_PIXEL_I80
