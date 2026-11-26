@@ -9,7 +9,12 @@
     "sdkconfig.defaults 提供 —— 這裡只選擇 project 與執行期預置。",
     "",
     "執行期預置（data/config）：system.json 的 frame_interval_ms＝20（50 fps）、",
-    "tasks.json 開 pixel_encode_task／render（level 4、core1）。舊內建效果生產者\n    pixel_task 已退役；這個 project 現在只有輸出層（冇生產者寫環）。要改行為改這些檔。"
+    "tasks.json 開四層四任務（pixel_effect／pixel_paint／pixel_encode／render，level 4）。",
+    "",
+    "2026-11-26 起燈效 100% JSON 化（同 SuperMini-LED-Textkit 同一套四層）：",
+    "sdkconfig.defaults 加 CONFIG_NETCORE_CONTENT=y 才有生產者；effects／map／modes／",
+    "registry 在 data/pixel（runtime 資產，用 show_upload.py 上傳，唔會 embed 入 firmware）。",
+    "改燈效只改 JSON＋重新上傳＋reboot／0xF06F，唔使重燒。"
   ],
   "version": 1,
   "name": "ESP32-S3-Matrix-LED-Textkit",

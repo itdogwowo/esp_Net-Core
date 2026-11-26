@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "id": 1,
+  "name": "rgb_breath",
+  "index": 1,
+  "play_loop": -1,
+  "maxF": 0,
+  "mapping": "matrix",
+  "white": 0,
+  "_comment": [
+    "RGB 呼吸：三個通道各自一條正弦（phi 相隔 120°），所以顏色繞色環、亮度唔會爆閃。",
+    "write 只寫自己嗰個通道（r/g/b），三項疊在同一組 group 上，各寫各的。"
+  ],
+  "map": [
+    { "group": "matrix.full", "effect": "breath_r", "write": "r" },
+    { "group": "matrix.full", "effect": "breath_g", "write": "g" },
+    { "group": "matrix.full", "effect": "breath_b", "write": "b" }
+  ]
+}

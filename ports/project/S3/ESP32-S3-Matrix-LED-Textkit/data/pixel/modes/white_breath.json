@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "id": 3,
+  "name": "white_breath",
+  "index": 3,
+  "play_loop": -1,
+  "maxF": 0,
+  "mapping": "matrix",
+  "white": 0,
+  "_comment": [
+    "亮度呼吸（真正變光暗）：一個效果、一條正弦、write=rgb 一次過寫三個通道，",
+    "所以 R=G=B，亮度 0 → 23/255 → 0（l_max=384），160 幀（50 fps 約 3.2 s）一個循環。",
+    "如果要染色（例如暖橙）：把 write 拆成 r/g/b 三項、三項用同一個 effect、各自改 l_max。"
+  ],
+  "map": [
+    {
+      "group": "matrix.full",
+      "effect": "breathe",
+      "write": "rgb"
+    }
+  ]
+}

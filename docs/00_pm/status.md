@@ -8844,3 +8844,73 @@ RGBW 才要處理）；README 已提醒「一個 mode 要寫齊 R/G/B」。
 
 **「改 JSON → 0xF06F → 即刻見效」三個坑已全部修齊**：
 ① 正弦表冇 init（7.251）、② cache key 唔認 effects（7.251）、③ reload 唔清效果表（本節）。
+
+### 7.253 2026-11-26（Matrix-LED-Textkit 8×8 全面 JSON 化＋三個環境／配置坑）
+
+用家：先設定這台機（Windows＋WSL）的測試環境，然後測 ESP32-S3-Matrix-LED-Textkit 的
+8×8 RGB 輸出（期望「現在的版本可以透過 JSON 設定」）。
+
+**環境**：`idf=v6.1.1 (WSL)` 建置；Windows 側 OTA／NC4（COM24）；板 ESP32-S3-Matrix
+`cid=0x54EC`；`fw=4cae17f-dirty`、`app=d2f6a635`、`rst=3`。
+
+**做咗咩**
+
+1. **tenv 首次建立**（這台 Windows 機）：`tenv init --label "Windows .idf"`＋
+   `tenv bind ESP32-S3-Matrix --project ESP32-S3-Matrix-LED-Textkit`（cid 0x54EC）。
+   機器特性寫入 `machine.json` 的 `notes`：**PATH 上的 `bash` 是 WSL bash**，所以
+   `make.py`／host test 要用 `bash -lc 'cd /mnt/c/… && IDF_PATH=/home/user/esp/esp-idf
+   python3 make.py …'` 在 WSL 內跑；Windows 側只做 OTA／NC4。**Windows 側直接跑
+   `make.py` 一定失敗**（bash 收到 `C:\…`），`make.py doctor` 的 board check 還會
+   誤報「0 個錯誤」的 FAIL。
+2. **Matrix-LED-Textkit 加內容管線**：`sdkconfig.defaults` 加 `CONFIG_NETCORE_CONTENT=y`、
+   `ESP_MAIN_TASK_STACK_SIZE=8192`、`PIXEL_PACK_PSRAM=y`；`tasks.json` 開四層四任務；
+   `data/pixel/` 新增四層 JSON（7 個 math_now 效果、map `matrix`（64 px full）、
+   modes `rgb_breath`／`rainbow`／`white_breath`、registry，＋README）。
+   8×8 = 64 顆 → rainbow 的 `spacing=4`（256/64＝1 個色環）。
+3. **建置**：713.3 KB（`0xb2550`），分區剩 54%；`--fresh` 後再增量 15 s。
+4. **OTA**：730,448 B／4.2 s ＝ **168.8–173.7 KB/s**（同一塊板、同一條線；
+   之前 macOS 記錄的 6.8 KB/s 應該是 hub／線材，這次無此問題）。
+
+**三個坑（都係「板起咗但唔點燈／JSON 唔生效」）**
+
+1. **`render` `started=0`（完全唔點燈）**：`/data/config/hardware.json` 的 `I80.enable=0`
+   → `i80_src()` 回 false → 這道 lane 停用 → render 拿不到後端，整個渲染器不啟動。
+   根因是 `ports/project/*/data/config/hardware.json`（wiring.json 的鏡子）**過期**：
+   `tools/sync_hardware_presets.py --check` 顯示 **9 塊板全部 DRIFT**（Matrix 的鏡子
+   仍然 `"I80":{"enable":0,"data":[]}`，生成的預置應該是 enable=1＋
+   `data=[14,38,39,40,41,42,47,48] wr=1 dc=2`）。已用 `ncportgen` 重新生成並寫回
+   Matrix 的四個 project（Matrix／Matrix-LED-Textkit／Matrix-Show／Matrix-EffectPerf）。
+   **其餘 C3／P4／S3 其他板仍未修**（跑 `tools/sync_hardware_presets.py` 一次搞定）。
+2. **`msc=1` 令「改 JSON 即刻生效」失效**：MSC 把 FAT 交給 USB host 之後，裝置讀唔到
+   `/data/pixel` → `0xF06F` reload 會話「掃唔到 /data/pixel/effects」→ fallback 每幀填黑；
+   WebMaster 上傳也會 `err_busy`。`system.json` 的 `links[].msc` 改 **0** 之後：
+   上傳 6/6 OK、reload log `effects=7 maps=1 modes=3 list=3`、畫面正常。
+   （改 preset 之外，live `/config/system.json` 也要改，否則 OTA／重啟後照舊。）
+3. **`show_upload.py` 在 Windows 會出壞路徑**：`str(Path)` 用反斜線 → PUT
+   `/pixel/map%5Cmatrix.json`（裝置當成另一個檔名）。已改成 `relative_to(src).as_posix()`。
+
+**上板驗證（`0xF071`／`0xF06B`、三種 mode）**
+
+- `status tasks`：`render`（push）／`pixel_encode_task`（encode）／`pixel_paint_task`（paint）／
+  `pixel_effect_task`（effect）全部 `level=4`、`started=1`、`running=1`。
+- `0xF071`：**50.0 fps**、`apply` 40–51 µs、`pair`／`eff` n 同步增長、**`drops=0`**、
+  `frame_us` 20,004、`frame_max_us` 20,203、`enc_us` 154、`tx_us` 9、`starved` 2–3；
+  環 `i80.prd` 3 格。
+- `0xF06B`（64 px、4 B/px）：
+  - `rainbow`：**64 顆 64 種顏色**（R／G／B 各自 0..23），幀間向前漂
+    （`17090300`→`17020900`…）；
+  - `rgb_breath`：64 顆同色，顏色隨時間繞色環（`16020a`→`120011`→`0c0115`）；
+  - `white_breath`：64 顆同色、R=G=B，亮度 22→12 漸暗（`161616`→`0c0c0c`）。
+- **JSON 迴路實測**：把 `effects.json` 的 `breathe.l_max` 由 384 改成 768 →
+  `show_upload.py` 上傳 → `0xF06F` reload → `white_breath` 峰值 **23 → 46（2×）**；
+  還原 384 再 reload → 回到 23。**證明「改 JSON → reload → 即刻見效」，不用重燒。**
+- 附帶：`0xF06D` 反應的是「切換前」的 mode（切換在下一幀邊界），所以切完 1 s 後再讀
+  `0xF06B` 才準；剛切換的一兩幀可能仍然是舊 mode 的畫面。
+
+**未做**
+
+- 其餘 8 塊板的 hardware.json 鏡子仍然是舊版（同一類潛在「唔點燈」）；
+  跑 `python3 tools/sync_hardware_presets.py` 可一次修齊（未跑，避免動到不在測的板）。
+- `tenv` 的 `build` lane 仍然印 Windows `.idf` 的命令（在這台機行不通）；
+  實際做法已寫入 AGENTS §0.5 與 `machine.json.notes`，tenv 未自動判斷「bash 是 WSL」。
+- 8×8 的視覺確認（人眼）由用家做；上面的 `0xF06B` 只證明環裡的值正確。

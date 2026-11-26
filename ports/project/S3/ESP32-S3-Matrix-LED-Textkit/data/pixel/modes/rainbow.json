@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "id": 2,
+  "name": "rainbow",
+  "index": 2,
+  "play_loop": -1,
+  "maxF": 0,
+  "mapping": "matrix",
+  "white": 0,
+  "_comment": [
+    "彩虹循環：跟 rgb_breath 同一套 120° 相位，但每顆燈多一個 spacing=4 的空間相位差，",
+    "所以 64 顆攤開剛好 1 個色環（256/64=4）；step=1 令彩虹每幀漂 1/4 顆（256 幀 ≈ 5.1 s 一圈）。"
+  ],
+  "map": [
+    { "group": "matrix.full", "effect": "rainbow_r", "write": "r" },
+    { "group": "matrix.full", "effect": "rainbow_g", "write": "g" },
+    { "group": "matrix.full", "effect": "rainbow_b", "write": "b" }
+  ]
+}

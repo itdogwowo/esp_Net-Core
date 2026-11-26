@@ -1,0 +1,20 @@
+# ESP32-S3-Matrix-LED-Textkit — production 8×8（64 顆 WS2812、1 lane、GPIO14）輸出映像。
+#
+# 硬體事實（flash／PSRAM／CPU／console／分區表／I80 腳位／顆數／格式）一律留在
+# ports/hardware/S3/ESP32-S3-Matrix/sdkconfig.defaults；project 只覆寫
+# 「這個映像多編哪個功能」。
+#
+# 沒有 CONFIG_NETCORE_CONTENT 就只有輸出層（render／encode），**冇生產者寫環 → 燈唔會亮**。
+# 開了它才有 pixel_effect_task（算值流）＋ pixel_paint_task（抖動＋配對寫環），
+# 燈效由 /data/pixel 的四層 JSON 決定（effects／map／modes／registry），
+# 改 JSON 只需重新上傳＋reboot／0xF06F reload，不用重燒 firmware。
+CONFIG_NETCORE_CONTENT=y
+
+# 這不是吞吐量映像；PXBENCH 屬 test_action，本來就不會進來，這裡明確關掉。
+CONFIG_NETCORE_PXBENCH=n
+
+# paint 的 on_start 要解析 map／mode；main task 預設 3,072 B 不夠。
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
+
+# Show 的 I80 packed 波形固定 PSRAM（同其他 Show／Textkit project 一致）。
+CONFIG_NETCORE_PIXEL_PACK_PSRAM=y

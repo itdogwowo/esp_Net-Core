@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "id": 1,
+  "name": "matrix",
+  "_comment": [
+    "Matrix 8×8：板載 64 顆 WS2812B 串成一條鏈（資料腳 GPIO14），8×8 = 64 px。",
+    "I80 只有 D0（GPIO14）真的接燈，其餘 7 條資料線＋WR＋DC 是 I80 硬性要求的 dummy。",
+    "所以環的事實是 64 顆、1 條 lane；group full = 全部 64 顆。"
+  ],
+  "groups": [
+    { "id": 1, "name": "full", "sel": [ { "type": "ws2812", "sel": ":" } ] }
+  ]
+}

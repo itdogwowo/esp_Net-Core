@@ -226,6 +226,8 @@ python3 tools/tenv.py stamp
 | `board_cid` warning | 接着的板 cid 與紀錄不同 | 接錯板，或接受新板：`tenv set cid <新 cid>` |
 | `idf_policy` warning | 本機 IDF ≠ 政策 | 不要跨機比數字；記錄寫 `idf=`；要統一就三台一起換 |
 | `host` lane `blocked: 冇 bash` | Windows 沒 Git Bash／WSL | 裝 Git Bash／用 WSL；或逐支跑 `run.bat` |
+| Windows 主機照 `build` lane 的命令跑一定失敗 | PATH 上的 `bash` 是 **WSL bash**（或 Git Bash），bash 收 `C:\…` 會當成檔名；`doctor` 的 board check 會**假報**「0 個錯誤」的 FAIL | 建置／host test 改在 WSL 內跑：`bash -lc 'cd /mnt/c/<repo> && IDF_PATH=/home/user/esp/esp-idf python3 make.py build …'`；OTA／NC4／board 留在 Windows（`python3 tools/…`＋`COM*`）。詳見 `AGENTS.md` §0.5 |
+| `board` lane `unknown: PermissionError` | 另一個程式（WebMaster／monitor）持有 COM port | 關掉它，或 `POST /api/port/release`；測完 `POST /api/port/reclaim` |
 | `pixel` lane `blocked: 任務未齊` | `/data/config/tasks.json` 舊／換 project | `fs_format` 重 seed（鐵律 6）再 reboot |
 | `tests` lane `blocked: 冇 0xF061` | 板上是 release／EffectPerf image | 用 `--tests` build 再 OTA；EffectPerf 用 `0xF065` |
 | `state dir 屬於另一台機` | 同步了 `.testenv/` 或兩個 OS 共用 repo | 用 `--state-dir` 指去本機專用目錄；確定要覆蓋才 `init --force` |

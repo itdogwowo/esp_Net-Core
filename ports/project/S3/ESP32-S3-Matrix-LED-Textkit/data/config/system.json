@@ -18,7 +18,7 @@
         "name": "usb0",
         "kind": "usb",
         "index": 0,
-        "msc": 1
+        "msc": 0
       },
       {
         "name": "wifi_tcp0",

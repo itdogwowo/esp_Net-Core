@@ -1,0 +1,154 @@
+{
+  "version": 1,
+  "_comment": [
+    "Matrix 8×8 燈效（全部純 JSON，唔使改 C）。",
+    "12-bit 值域 0..4095；l_range = l_max - l_lim；math_now 是正弦：value = l_lim + (sin01 * l_range) >> 12。",
+    "phi 是 12-bit 相位：4096 = 360°，所以 1365 ≈ 120°、2730 ≈ 240°。",
+    "三條通道（r/g/b）用同一個波形、phi 相差 120° → 顏色沿色環轉，亮度總和恆定（唔會狂閃）。",
+    "spacing = 相鄰兩顆燈的相位差（以 g 為單位，total = end_Time）；0 = 全部同色。",
+    "8×8 = 64 顆：total=256、spacing=4 時 64 顆 = 1.0 個彩虹（256/64）。",
+    "step = 每幀 g 前進幾格；spacing=4、step=1 時 256 幀（50 fps 約 5.1 s）漂完一圈。"
+  ],
+  "effects": [
+    {
+      "id": 1,
+      "name": "breath_r",
+      "pixel_n": 64,
+      "program": [
+        {
+          "type": "math_now",
+          "F": 10,
+          "l_max": 384,
+          "l_lim": 0,
+          "phi": 0,
+          "end_Time": 160
+        }
+      ],
+      "step": 1,
+      "spacing": 0,
+      "offset": 0,
+      "speed": 1,
+      "reverse": false
+    },
+    {
+      "id": 2,
+      "name": "breath_g",
+      "pixel_n": 64,
+      "program": [
+        {
+          "type": "math_now",
+          "F": 10,
+          "l_max": 384,
+          "l_lim": 0,
+          "phi": 1365,
+          "end_Time": 160
+        }
+      ],
+      "step": 1,
+      "spacing": 0,
+      "offset": 0,
+      "speed": 1,
+      "reverse": false
+    },
+    {
+      "id": 3,
+      "name": "breath_b",
+      "pixel_n": 64,
+      "program": [
+        {
+          "type": "math_now",
+          "F": 10,
+          "l_max": 384,
+          "l_lim": 0,
+          "phi": 2730,
+          "end_Time": 160
+        }
+      ],
+      "step": 1,
+      "spacing": 0,
+      "offset": 0,
+      "speed": 1,
+      "reverse": false
+    },
+    {
+      "id": 4,
+      "name": "rainbow_r",
+      "pixel_n": 64,
+      "program": [
+        {
+          "type": "math_now",
+          "F": 10,
+          "l_max": 384,
+          "l_lim": 0,
+          "phi": 0,
+          "end_Time": 256
+        }
+      ],
+      "step": 1,
+      "spacing": 4,
+      "offset": 0,
+      "speed": 1,
+      "reverse": false
+    },
+    {
+      "id": 5,
+      "name": "rainbow_g",
+      "pixel_n": 64,
+      "program": [
+        {
+          "type": "math_now",
+          "F": 10,
+          "l_max": 384,
+          "l_lim": 0,
+          "phi": 1365,
+          "end_Time": 256
+        }
+      ],
+      "step": 1,
+      "spacing": 4,
+      "offset": 0,
+      "speed": 1,
+      "reverse": false
+    },
+    {
+      "id": 6,
+      "name": "rainbow_b",
+      "pixel_n": 64,
+      "program": [
+        {
+          "type": "math_now",
+          "F": 10,
+          "l_max": 384,
+          "l_lim": 0,
+          "phi": 2730,
+          "end_Time": 256
+        }
+      ],
+      "step": 1,
+      "spacing": 4,
+      "offset": 0,
+      "speed": 1,
+      "reverse": false
+    },
+    {
+      "id": 7,
+      "name": "breathe",
+      "pixel_n": 64,
+      "program": [
+        {
+          "type": "math_now",
+          "F": 10,
+          "l_max": 384,
+          "l_lim": 0,
+          "phi": 0,
+          "end_Time": 160
+        }
+      ],
+      "step": 1,
+      "spacing": 0,
+      "offset": 0,
+      "speed": 1,
+      "reverse": false
+    }
+  ]
+}

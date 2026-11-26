@@ -41,6 +41,24 @@
   P4-ETH 差 24,688 B）。2026-11-25 起三個環境都係 **v6.1.1**；記錄仍然要寫
   `idf=` 同**邊個環境**（見 §0.5「版本一致性」與鐵律 12）。
 
+### Windows 主機：先確認 PATH 上的 `bash` 係邊個
+
+`make.py`／`doctor`／host test 全部用 `bash -c` 跑，而且會傳 **Windows 絕對路徑**
+（`cd "<repo>\firmware"`、`-B "<repo>\artifacts\build\…"`）。所以：
+
+| PATH 上的 bash | 會發生咩 | 點做 |
+|---|---|---|
+| **Git Bash**（MSYS） | bash 讀唔到 `C:\…`（會當成檔名）→ build 前置就失敗；`doctor` 的 board check 會**誤報 FAIL**（顯示「0 個錯誤」）、pyserial 也讀不到 | 改用 WSL：見下一行 |
+| **WSL 的 bash**（`C:\Windows\system32\bash.exe`） | Windows 側下指令傳 `C:\` 進去一樣失敗 | 建置／host test **在 WSL 內跑**：<br>`bash -lc 'cd /mnt/c/<repo> && IDF_PATH=/home/user/esp/esp-idf python3 make.py build …'`<br>OTA／NC4／board 用 Windows 側 `python3 tools/…` ＋ `COM*` |
+
+- 2026-11-26 實測：這台 Windows 機是後者（repo `.idf/esp-idf` 也是 v6.1.1，但 Windows 側
+  `make.py` 的 bash 指令帶 `C:\` 一律失敗）。建置記錄一樣要寫 `idf=v6.1.1 (WSL)`。
+- 判斷方法：`bash -c 'uname -a'`（見到 `microsoft-standard-WSL2` 就是 WSL）＋
+  `(Get-Command bash).Source`。
+- 這台機的實際值記在 `.testenv/machine.json` 的 `notes`（`tenv set notes …`），
+  不進 git。
+
+
 ```bash
 python3 make.py doctor          # IDF／esptool／板子／磁碟
 python3 make.py ports           # /dev/cu.usbmodem*
@@ -976,6 +994,7 @@ commit message 說明。
 | 2026-11-26 | **新增測試環境層 [`tenv`](docs/02_guides/test-environment.md)**：`tools/tenv.py`（init／bind／brief／plan／stamp／verify／selftest）＋`tools/testenv/policy.json`（IDF 要求、host test 支數）＋`.testenv/`（本機意圖／事實，唔進 git）。§0.6 新章、§14.1／§14.3 開工先跑、§15 命令卡；同時修 `ncbuild/env.py` 的空 `.idf` 遮住真 IDF、Windows COM 列舉 | lead（AI） |
 | 2026-11-26 | **再加全樹版 [`tech-evolution.md`](docs/04_evolution/tech-evolution.md)**：9 條主線（NC4 收發／通道／緩衝／任務棧／效果層／配對／編碼／USB-FAT／建置）＋§11 跨主線負結果（12 條）＋§12 量測規矩；pixel 專文保留做細節。找東西第 6 條改成「全樹→專文」兩層 | lead（AI） |
 | 2026-11-26 | **進化日誌獨立成層 `docs/04_evolution/`**：`tech-evolution.md`＋`pixel-evolution.md` 由 `03_notes` 搬入（`git mv`，歷史保留），新增 [`04_evolution/README.md`](docs/04_evolution/README.md)（判準／導航／維護規則／新主線骨架）。§3 目錄地圖、找東西第 6 條、§10.4、§16 權威順序、§17 一齊改 | lead（AI） |
+| 2026-11-26 | **Windows 主機的 bash 陷阱**：`make.py`／`doctor` 用 `bash -c` 傳 `C:\…` 路徑，Git Bash 同 WSL bash 都會失敗（doctor 的 board check 會假報 FAIL）。§0.5 新增一節講點判斷、建置改在 WSL 內跑（`bash -lc 'cd /mnt/c/… && IDF_PATH=/home/user/esp/esp-idf python3 make.py …'`）、OTA／NC4 留在 Windows 側。同時記錄 Matrix-LED-Textkit 全面 JSON 化（見 status §7.253） | lead（AI） |
 
 ---
 

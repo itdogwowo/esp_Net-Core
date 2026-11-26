@@ -61,7 +61,9 @@ def file_list(src: Path) -> list[str]:
     for sub in ("map", "modes"):
         d = src / sub
         if d.is_dir():
-            out.extend(str(p.relative_to(src)) for p in sorted(d.glob("*.json")))
+            # 一定要 as_posix()：Windows 的 str(Path) 用反斜線，PUT 出去會變成
+            # /pixel/map%5Cmatrix.json（裝置會當成另一個檔名，唔會覆蓋舊 map）。
+            out.extend(p.relative_to(src).as_posix() for p in sorted(d.glob("*.json")))
     if (src / "registry.json").is_file():
         out.append("registry.json")
     return out
