@@ -1259,7 +1259,7 @@ uint32_t nc_px_aprog_vals(const nc_px_aprog_t *ap, uint32_t step, uint16_t *out,
 // 唔可以靠「攤分」去當佢免費。所以編譯一次就寫成檔案，下次直接讀（固定時間）。
 // 格式：header（magic/ver/key/各表長度/crc）＋ aprog* ＋ job* ＋ run*。
 typedef struct {
-    uint32_t magic;
+    char     magic[8];       // "NCLAYOUT"（ASCII：hexdump 一眼睇得出係咩）
     uint32_t ver;
     uint32_t key;
     uint32_t px;
@@ -1271,9 +1271,10 @@ typedef struct {
     uint32_t crc;
 } pxlt_hdr_t;
 
-#define NCLT_MAGIC 0x544C434Eu   // "NCLT"（NetCore Layout Table；2026-11-26 由 PXLT 改名，
-//  避免同舊專案 mp_Net-Core tools/PC/PXLDv3Splitter.py 的 PXLD 字頭混淆。
-//  magic 一改，舊 .pxlt 自動當壞檔重建；純快取，刪咗只係慢一次。）
+// 格式名：NCLAYOUT（NetCore Layout）；檔案：<key>.layout
+// magic 用 8 byte ASCII，唔使用代號。舊 .pxlt／.nclt 會自動當壞檔重建
+// （純快取，刪咗只係慢一次，唔影響資料）。
+static const char NC_LAYOUT_MAGIC[8] = {'N', 'C', 'L', 'A', 'Y', 'O', 'U', 'T'};
 
 static uint32_t crc32_bytes(const uint8_t *p, size_t n)
 {
@@ -1365,7 +1366,7 @@ esp_err_t nc_px_layout_save(const nc_px_layout_t *l, const char *path, uint32_t 
     }
     pxlt_hdr_t h;
     memset(&h, 0, sizeof(h));
-    h.magic = NCLT_MAGIC;
+    memcpy(h.magic, NC_LAYOUT_MAGIC, sizeof(h.magic));
     h.ver = NC_PX_LAYOUT_CACHE_VER;
     h.key = key;
     h.px = l->px;
@@ -1398,7 +1399,7 @@ esp_err_t nc_px_layout_load(nc_px_layout_t *out, const char *path, uint32_t key,
         return ESP_ERR_NOT_FOUND;
     }
     pxlt_hdr_t h;
-    if (fread(&h, sizeof(h), 1, f) != 1 || h.magic != NCLT_MAGIC ||
+    if (fread(&h, sizeof(h), 1, f) != 1 || memcmp(h.magic, NC_LAYOUT_MAGIC, sizeof(h.magic)) != 0 ||
         h.ver != NC_PX_LAYOUT_CACHE_VER || h.key != key || h.payload_bytes == 0 ||
         h.payload_bytes > (1u << 20)) {
         fclose(f);

@@ -773,3 +773,14 @@ F.live     /data/config/*.json 用戶執行期設定（最高優先）
   （repo 預置）→ seed → `/data/config/devices.json`（runtime，最高優先）。
 - **seed 只會補缺**：裝置已有 `/data/config/devices.json` 時，OTA **唔會**覆蓋；
   要套用新預置就刪檔＋reboot（或 `fs_format`）。
+
+---
+
+## 6.8 正名（2026-11-26 晚）：`/data/config/driver.json`（覆蓋 §6.6／§6.7 的 `devices.json` 講法）
+
+- runtime device 層檔名＝**`/data/config/driver.json`**（舊 `devices.json` 仍接受，兼容）。
+- **FAT 最高權威**：存在且合法 → 用 FAT；缺檔或**壞檔** → 回 build-time
+  `ports/hardware/<board>/driver.json`（generated `nc_port_led()`），壞檔會 warn。
+- repo 鏡像：`tools/sync_driver_presets.py` → `project/<chip>/<board>/data/config/driver.json`。
+- 5 個 project 已生成；CMake 優先嵌入 project 鏡像。
+- IDE 見唔到檔時：reboot 後先 reconnect，再 refresh manifest（或者用 nc4 直接 `0x200B`）。

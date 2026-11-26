@@ -38,10 +38,10 @@ driver.led.px        = 0x2_0_0_5   （driver domain=2、unit=led=0）
 
 ---
 
-## 3. 儲存格式 `NCS1`（schema 版，最省）
+## 3. 儲存格式 `NCSTATE`（schema 版，最省）
 
 ```text
-header 16 B: "NCS1" | ver u16 | count u16 | src_hash u32 | blob_crc u32
+header 16 B: "NCSTATE" | ver u16 | count u16 | src_hash u32 | blob_crc u32
 body:  count × ( id varint , value zigzag-varint )   ← 按 id 升序
 
 src_hash = 來源 JSON（config layers）嘅 CRC32；開機：
@@ -56,7 +56,7 @@ src_hash = 來源 JSON（config layers）嘅 CRC32；開機：
 
 ### 實測（`modules/lab/state_schema_lab/schema_preview.py`）
 
-| 檔案 | JSON | 通用 NCB2（有 key 字典） | **NCS1（schema id）** |
+| 檔案 | JSON | 通用 NCB2（有 key 字典） | **NCSTATE（schema id）** |
 |---|---:|---:|---:|
 | hardware.json | 5,992 B | 3,462 B | — |
 | driver.json | 2,830 B | 1,618 B | — |
@@ -64,7 +64,7 @@ src_hash = 來源 JSON（config layers）嘅 CRC32；開機：
 
 > 85 B 係「Matrix 實際有改嘅 21 個 key」；schema 條目 25 個。全 config（含 PIN/PWM/UART/
 > ETH/SDIO/tasks）估計 **150–400 B**，仍然比 JSON 省 95%+。
-> 注意：NCS1 唔適合 pixel assets（陣列大、數量動態）——那些繼續用 NCB2／PXA2。
+> 注意：NCSTATE 唔適合 pixel assets（陣列大、數量動態）——那些繼續用 NCB2／PXA2。
 
 ---
 
@@ -109,15 +109,15 @@ src_hash = 來源 JSON（config layers）嘅 CRC32；開機：
           │  parser 用 schema 將路徑 → key id
           ▼
 state：  nc_state（RAM：id → value；schema 表查型別/範圍）
-          │  commit：只 encode dirty → NCS1 blob
+          │  commit：只 encode dirty → NCSTATE blob
           ▼
-落盤：  NVS blob（或 /data/config/state.ncs；header+id/值，sparse）
+落盤：  NVS blob（或 /data/config/state.bin；header+id/值，sparse）
           │  開機：blob 優先；壞／版本唔夾 → 由 JSON（再壞 → L0 出廠）
 ```
 
-- 三層套路不變：**L0 出廠 → L1 FAT JSON → L2 NCS1 狀態 blob → 壞了回退**。
-- JSON 係唯一人讀格式；NCS1 係機讀格式；兩者由**同一份 schema** 對應。
-- 冇 JSON 改動唔使重寫 NCS1（hash 對得上就跳過）。
+- 三層套路不變：**L0 出廠 → L1 FAT JSON → L2 NCSTATE 狀態 blob → 壞了回退**。
+- JSON 係唯一人讀格式；NCSTATE 係機讀格式；兩者由**同一份 schema** 對應。
+- 冇 JSON 改動唔使重寫 NCSTATE（hash 對得上就跳過）。
 
 ---
 
@@ -125,12 +125,12 @@ state：  nc_state（RAM：id → value；schema 表查型別/範圍）
 
 | 階段 | 工作 | 估時 |
 |---|---|---|
-| **P1** | `state-schema.json`（skeleton：sys/hw/driver 三 domain，~60 key）＋ncportgen 編 C 表＋`NCS1` encode/decode＋host test（round-trip、範圍、未知 id） | 1 日 |
-| **P2** | `nc_state` v2：`nc_state_set_id()`、dirty→commit、NVS blob「NCS1」＋版本／CRC；開機 JSON→NCS1 遷移，壞檔回退 | 1 日 |
+| **P1** | `state-schema.json`（skeleton：sys/hw/driver 三 domain，~60 key）＋ncportgen 編 C 表＋`NCSTATE` encode/decode＋host test（round-trip、範圍、未知 id） | 1 日 |
+| **P2** | `nc_state` v2：`nc_state_set_id()`、dirty→commit、NVS blob「NCSTATE」＋版本／CRC；開機 JSON→NCSTATE 遷移，壞檔回退 | 1 日 |
 | P3 | JSON parser 改為「路徑 → id」寫入 state（hardware 先行，driver／system 跟） | 1 日 |
 | P4 | `status cfg` 顯示 blob size／key 數／命中率；schema 版本唔夾即拒讀 | 0.5 日 |
 
-**風險**：schema id 一改就要 bump schema ver（NCS1 header 有 ver，舊 blob 自動拒讀）；
+**風險**：schema id 一改就要 bump schema ver（NCSTATE header 有 ver，舊 blob 自動拒讀）；
 array 索引固定（通道上限寫死）——但硬件本身就有限，正好利用。
 
 ---
@@ -140,10 +140,10 @@ array 索引固定（通道上限寫死）——但硬件本身就有限，正�
 | magic | 用途 | 位置 |
 |---|---|---|
 | `NCB2` | 通用／動態狀態 blob（自描述，字典＋TLV）——⏸ 暫緩 | NVS／FAT |
-| `NCS1` | **schema 化狀態 blob**（id＋varint，最省）——✅ **唯一要做** | NVS／FAT |
+| `NCSTATE` | **schema 化狀態 blob**（id＋varint，最省）——✅ **唯一要做** | NVS／FAT |
 | `NCC2` | config 派生 cache（cfg_hash 綁 JSON） | FAT |
 | `PXA2` | pixel assets 編譯 cache——⏸ 暫緩 | FAT |
-| `NCLT` | layout 編譯 cache（原 PXLT，已改名）——✅ 現有 | FAT |
+| `NCLAYOUT` | layout 編譯 cache（原 PXLT，已改名）——✅ 現有 | FAT |
 | `NCB1`… | 舊版／保留 | — |
 
 新格式一律 **`NC` 字頭**，並先在此表登記。

@@ -691,7 +691,7 @@ render_task（公用輸出層；core1，order 10；環／lane／節拍的主人�
 - 9,600 px 的 6 B 表 57.6 KB；`flat_int` 可查位置。
 - `apply`（8-bit）／`apply12`（12-bit）／`apply4`（4 子幀一次掃）／`apply_dither`（單子幀）。
 - 重疊語義：dst 升序、後寫覆蓋先寫；唔可以按 write 分組（會改畫面語義）。
-- 快取：`/pixel/cache/<key>.nclt`（NetCore Layout Table；2026-11-26 由 `.pxlt` 改名，避免同舊專案 PXLD 撞名），≤32 KB 才存；開機補建缺的。
+- 快取：`/pixel/cache/<key>.layout`（NetCore Layout Table；2026-11-26 由 `.pxlt` 改名，避免同舊專案 PXLD 撞名），≤32 KB 才存；開機補建缺的。
 
 ### 10.4 I80 波形合成（Task 6，已接 production）
 

@@ -11,7 +11,7 @@
 
 **Goal:** 把「效果層 12-bit → 抖動層（1 或 4 子幀）→ 配對層（直接寫硬件讀取的緩衝區）」落成生產程式碼，做到零拷貝、無清畫布、無隱藏行為，並在 9,600 px（16×600、8-bit）與 2,400 px（16×150、10-bit 抖動）兩種配置上驗收。
 
-**Architecture:** 配對層用 `nc_px_ring_begin()` 取得硬件即將讀取的槽，`nc_px_layout_apply()` 直接寫入該槽，`nc_px_ring_commit()` 交棒——沒有畫布、沒有複製、沒有 memset。抖動層把 12-bit 值換成 8-bit：`subframes=1` 時四捨五入，`subframes=4` 時一次掃描同時寫 4 個槽（時間抖動，等效 10-bit）。組合編譯結果以 `/pixel/cache/<key>.nclt` 永久保存，開機補建缺的（表 ≤32 KB 才存）。
+**Architecture:** 配對層用 `nc_px_ring_begin()` 取得硬件即將讀取的槽，`nc_px_layout_apply()` 直接寫入該槽，`nc_px_ring_commit()` 交棒——沒有畫布、沒有複製、沒有 memset。抖動層把 12-bit 值換成 8-bit：`subframes=1` 時四捨五入，`subframes=4` 時一次掃描同時寫 4 個槽（時間抖動，等效 10-bit）。組合編譯結果以 `/pixel/cache/<key>.layout` 永久保存，開機補建缺的（表 ≤32 KB 才存）。
 
 **Tech Stack:** ESP-IDF 6.0.3、C17、`nc_px_layout`（組合編譯）、`nc_pixel_q`（環）、`nc4` 命令（0xF06B/0xF071/0xF077）、host 測試 `tools/hosttest/`。
 
@@ -209,7 +209,7 @@ static void cache_prebuild_missing(void)
         build_asset_tbl_into(tmp, m);
         const uint32_t key = nc_px_layout_cache_key(m->hash, map->hash, s_content.px);
         char path[96];
-        (void)snprintf(path, sizeof(path), "%s/cache/%08lx.nclt",
+        (void)snprintf(path, sizeof(path), "%s/cache/%08lx.layout",
                        s_content.pixel_dir, (unsigned long)key);
         nc_px_layout_t probe;
         if (nc_px_layout_load(&probe, path, key, tmp) == ESP_OK) {
@@ -243,7 +243,7 @@ static void cache_prebuild_missing(void)
 
 - [x] **Step 3：真機驗證**
 
-1. 刪 `ports` 專案的 `/pixel/cache/*.nclt`（WebMaster `POST /api/file/delete`）
+1. 刪 `ports` 專案的 `/pixel/cache/*.layout`（WebMaster `POST /api/file/delete`）
 2. 重開板子，看 log：Expected `開機預建組合表：已有 0、新建 N、太大跳過 0、失敗 0（N×~300 ms）`
 3. 再重開一次：Expected `已有 N、新建 0`
 

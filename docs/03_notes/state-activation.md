@@ -13,7 +13,7 @@
 | 形態 | 位置 | 內容 | 誰用 |
 |---|---|---|---|
 | **A. JSON** | FAT `/data/config/*.json` | key **路徑名**＋完整值（人改） | 用戶／WebMaster |
-| **B. NCS1** | FAT `/data/config/state.ncs` 或 NVS blob | sparse `(id varint, 值 varint)`＋CRC | 開機快速載入／落盤 |
+| **B. NCSTATE** | FAT `/data/config/state.bin` 或 NVS blob | sparse `(id varint, 值 varint)`＋CRC | 開機快速載入／落盤 |
 | **C. RAM** | **internal RAM**（唔係 PSRAM） | `uint32_t val[NC_KEY_MAX]` ＋ valid bitmap | state manager／driver |
 
 ### 為什麼 C 放 internal 而唔係 PSRAM？
@@ -28,7 +28,7 @@
 （PSRAM 讀取 ~10× 慢，仲要 cache 同步）。**PSRAM 只留俾「已激活 unit 嘅大 buffer」**
 （環、DMA 槽、canvas），唔關狀態值事。
 
-> 對比：JSON 8.8 KB（FAT）、NCS1 ~160 B（sparse）、RAM 1.6 KB（固定、全 key 預留）。
+> 對比：JSON 8.8 KB（FAT）、NCSTATE ~160 B（sparse）、RAM 1.6 KB（固定、全 key 預留）。
 > 三者用途唔同，唔係「同一份嘢搬三次」。
 
 ---
@@ -68,7 +68,7 @@ release ←── 用戶 disable／reboot
 | 階段 | 做咩 | 激活邊個 |
 |---|---|---|
 | B05-core | console／USB／flash／FAT | 固定核心（永遠） |
-| B05-cfg | parse JSON → NCS1 → `val[]` | 全部 declared（只填值，**唔裝 driver**） |
+| B05-cfg | parse JSON → NCSTATE → `val[]` | 全部 declared（只填值，**唔裝 driver**） |
 | B05-act | 掃 `enabled=1` 嘅 unit，按 topo 排序 | 只 activate 呢批 |
 | B05-defer | `enable=0`（或 `auto=0`） | **唔郁**，等 runtime 指令 |
 

@@ -131,7 +131,7 @@
 ## 2. 儲存上限（唔使估，算式如下）
 
 ```text
-NCS1 header = 12 B
+NCSTATE header = 12 B
 per key     = varint(id ≤2 B) + varint(value ≤5 B) = ≤7 B
 worst       = 12 + N_keys × 7
 ```
@@ -144,7 +144,7 @@ worst       = 12 + N_keys × 7
 
 - NVS 單 blob 上限 4 KB → **2,672 B OK**（仲有 35% 餘裕）。
 - 未來增長規則：`N_keys ≤ (4096 − 12) / 7 ≈ 583`。超過就拆兩個 blob（hw／dev）或
-  用 NCS1 的「同值壓縮」（連續同 id 前綴）。
+  用 NCSTATE 的「同值壓縮」（連續同 id 前綴）。
 - **sparse 只存改動值**：enable=0 嘅硬件完全唔寫 → 通常 <300 B。
 
 原型：`modules/lab/state_schema_lab/hw_matrix_preview.py`（實跑數字同上）。
@@ -172,7 +172,7 @@ worst       = 12 + N_keys × 7
 ```
 
 - 生成大小約 **5.1 KB**（380 keys 全部列出、enable=0）——放 FAT 只係模板，
-  人睇／改；**儲存唔用呢個**（用 NCS1 sparse blob）。
+  人睇／改；**儲存唔用呢個**（用 NCSTATE sparse blob）。
 - 用戶流程：開模板 → 將要用嘅 unit `enable` 改 1 → 填 GPIO／少數值 → reboot。
 - 未知／未支援 unit 名 → parse 明示 warn（唔靜默）。
 
@@ -198,13 +198,13 @@ uint64_t gpio_reserved; // flash 26..37、USB 19/20、console 43/44、strapping 
 ```text
 L0 出廠：schema 表（380 key，型別/範圍/default）＋ 模板（enable=0）
 L1 FAT： hardware.json／driver.json（人改；路徑名 → schema id）
-L2 狀態： NCS1 blob（sparse，只存改動 key）
+L2 狀態： NCSTATE blob（sparse，只存改動 key）
 壞檔：   明示 warn → 回 L0（唔會靜靜降級）
 ```
 
 - 儲存**上限已知**（2,672 B worst、236 B typical）→ 可以預先配置 NVS／RAM，唔會
   「唔知幾時爆」。
-- schema ver 一改 → 舊 NCS1 blob 拒讀、由 JSON／L0 重建。
+- schema ver 一改 → 舊 NCSTATE blob 拒讀、由 JSON／L0 重建。
 
 ---
 
@@ -213,7 +213,7 @@ L2 狀態： NCS1 blob（sparse，只存改動 key）
 | 階段 | 內容 | 估時 |
 |---|---|---|
 | P1 | `hw-matrix.json`（380 key）＋ncportgen 編 `nc_hw_matrix.c`（表＋容量）＋模板生成 | +0.5 日 |
-| P2 | NCS1 codec＋`nc_state` v2(含 worst-case 靜態檢查：380×7+12 ≤ 4 KB assert) | 1 日 |
+| P2 | NCSTATE codec＋`nc_state` v2(含 worst-case 靜態檢查：380×7+12 ≤ 4 KB assert) | 1 日 |
 | P3 | JSON parser 用矩陣（路徑→id）＋GPIO bitmap claim | 1 日 |
 | P4 | `status cfg`：blob size／key 數／bitmap／schema ver | 0.5 日 |
 

@@ -9399,7 +9399,7 @@ build-time driver.json 生成 `ports/project/<chip>/<board>/data/config/driver.j
 **原型量測**（`modules/lab/state_format_lab/ncb2_preview.py`）：通用 JSON→NCB2 在
 Matrix 7 個 config/asset 檔由 13,971 B → **8,788 B（省 37.1%）**；固定 schema 預計再細 50%+。
 
-### 7.264 2026-11-26（layout 快取改名：`.pxlt` → `.nclt`；避免同舊專案撞名）
+### 7.264 2026-11-26（layout 快取改名：`.pxlt` → `.layout`；避免同舊專案撞名）
 
 用家問「`.pxlt` 係咩？好似同舊專案撞名」+ 提供舊 repo `tools/PC/`（有 `PXLDv3Splitter.py`）。
 
@@ -9410,14 +9410,14 @@ aprog／job／runs 表。**唔係 repo 資產**（git 冇），純快取：刪�
 layout 打包器）——字頭太似，容易混淆。
 
 **改名**（避免撞名）：
-- 副檔名 `.pxlt` → **`.nclt`**（NetCore Layout Table）
-- magic `"PXLT"`(0x544C5850) → **`"NCLT"`**(0x544C434E)
-- bench 路徑 `/data/bench_layout.pxlt` → `.nclt`
+- 副檔名 `.pxlt` → **`.layout`**（NetCore Layout Table）
+- magic `"PXLT"`(0x544C5850) → **`"NCLAYOUT"`**(0x544C434E)
+- bench 路徑 `/data/bench_layout.pxlt` → `.layout`
 - 舊 `.pxlt` 會因為 magic 唔夾自動當壞檔重建；已喺板上刪除舊檔。
 
 **上板驗證**（fw `6322f7c-dirty`、app `2b3f0c35`、idf=v6.1.1 (WSL)）
 - 刪 6 個舊 `.pxlt`＋reboot＋`FILE_SCAN`：manifest **18 個檔**、冇 `.pxlt`
-- 新 `.nclt` 自動出現：`7c46854b.nclt`、`b953219b.nclt`、`db1a33bf.nclt`
+- 新 `.layout` 自動出現：`7c46854b.layout`、`b953219b.layout`、`db1a33bf.layout`
   → 即係 firmware 寫入新格式、舊檔唔再用
 - host test 21/21 全綠；LED 正常（i80.prd、49.9 fps／drops=0）
 
@@ -9436,26 +9436,26 @@ layout 打包器）——字頭太似，容易混淆。
 **已寫入**：[`state-schema.md`](docs/03_notes/state-schema.md)
 
 - key id：`domain(4b)|unit(4b)|index(4b)|field(4b)`（u16，總共 65,536 個 key）。
-- 格式 `NCS1`：header 12 B（magic/ver/count/crc）＋ `(id varint, value zigzag varint)`
+- 格式 `NCSTATE`：header 12 B（magic/ver/count/crc）＋ `(id varint, value zigzag varint)`
   按 id 升序；**sparse，只存同 default 唔同嘅值**。
 - 型別／範圍／預設全部喺 schema；超出＝parse error（唔截斷）；schema ver 一改，
   舊 blob 自動拒讀。
-- 同 NCB2 分工：NCS1＝固定 schema（最省）；NCB2＝動態／自描述（pixel assets 等）。
+- 同 NCB2 分工：NCSTATE＝固定 schema（最省）；NCB2＝動態／自描述（pixel assets 等）。
 - 舊專案對照：`slave/schema/*.json` 係 **command schema**（cmd+payload 型別，
   `schema_codec.py` 編 dispatch 表）——同一哲學；我哋而家補 **state schema**。
 
 **原型實測**（`modules/lab/state_schema_lab/schema_preview.py`）：
 
-| | JSON | NCS1 |
+| | JSON | NCSTATE |
 |---|---:|---:|
 | hardware.json＋driver.json 合計 | 8,822 B | **85 B（省 99.0%）** |
 
 85 B = Matrix 實際改咗嘅 21 個 key（schema 25 條）；全 config 估 150–400 B。
 
-**落地計劃**：P1 schema 編譯＋NCS1 codec＋host test（1 日）→ P2 `nc_state` v2 用 NCS1
+**落地計劃**：P1 schema 編譯＋NCSTATE codec＋host test（1 日）→ P2 `nc_state` v2 用 NCSTATE
 （1 日）→ P3 JSON parser 改「路徑→id」（1 日）→ P4 status 顯示（0.5 日）。
 
-**magic 登記表**已加入文件：NCB2／NCS1／NCC2／PXA2／NCLT，新格式一律 `NC` 字頭。
+**magic 登記表**已加入文件：NCB2／NCSTATE／NCC2／PXA2／NCLAYOUT，新格式一律 `NC` 字頭。
 
 ### 7.266 2026-11-26（硬件矩陣：列出所有硬件／IO 位置 → 儲存上限可算）
 
@@ -9466,12 +9466,12 @@ layout 打包器）——字頭太似，容易混淆。
 
 - 矩陣：**356 keys** 覆蓋所有支援硬件（pin 48 位置 × 3＝144 最大項；i80 2×22；
   led 2×10…）；加硬件＝加 unit，加欄位＝+7 B worst/key。
-- NCS1 上限公式：`12 + N×7` → **worst 2,504 B**、典型（i80+led）**236 B**、
+- NCSTATE 上限公式：`12 + N×7` → **worst 2,504 B**、典型（i80+led）**236 B**、
   Matrix 實際 ~160 B；NVS 4 KB blob 內 OK（餘裕 36%）。
 - 未來增長：`N ≤ 583`；超過就拆 blob 或用前綴壓縮。
 - **GPIO 48-bit bitmap**（`uint64_t`）：enable 時佔 bit，衝突 O(1)；
   reserved mask 預載（flash 26–37、USB 19/20、console 43/44、strapping 0/3/45/46）。
-- 模板 JSON（全 enable=0）約 5.1 KB，只係人睇模板；儲存用 NCS1 sparse。
+- 模板 JSON（全 enable=0）約 5.1 KB，只係人睇模板；儲存用 NCSTATE sparse。
 - 編譯期不變量：`static_assert(12 + NC_HW_MATRIX_KEYS*7 <= 4096)` —— 加硬件時
   一超出就 **build 失敗**（唔會 runtime 先爆）。
 
@@ -9491,7 +9491,7 @@ worst 2,504 B、template 5,082 B、bitmap 衝突檢查 OK）。
 
 **矩陣更新**：`hw.spi` 由 7 → **17 欄位／通道**（id、baud、phase、polarity、sck、
 miso、mosi、force_machine、lines、data0..data7），2 通道＝34 keys。
-全矩陣 356 → **376 keys**；NCS1 worst 2,504 → **2,644 B**（仍 <4 KB，餘裕 35%）。
+全矩陣 356 → **376 keys**；NCSTATE worst 2,504 → **2,644 B**（仍 <4 KB，餘裕 35%）。
 
 已更新 [hw-matrix.md §1.1](docs/03_notes/hw-matrix.md)（含 ESP-IDF C 對應：
 `spi_bus_config_t.data0..data7`、`spi_device_polling_transmit`），原型
@@ -9516,7 +9516,7 @@ miso、mosi、force_machine、lines、data0..data7），2 通道＝34 keys。
 `queue_depth`、`dc` 係 lcd_bus 參數；`force_machine=1` 走同步唔用 DMA（APA102）。
 
 **schema 更新**：每 SPI 通道 17 → **19 keys**（加 `queue_depth`、`dc`），2 通道 38 keys；
-全矩陣 376 → **380 keys**；NCS1 worst 2,504…2,672 → **2,672 B**（NVS 4 KB 仍 OK）。
+全矩陣 376 → **380 keys**；NCSTATE worst 2,504…2,672 → **2,672 B**（NVS 4 KB 仍 OK）。
 **模式係衍生值**（parse 時由 data0..7 有效數算出，唔存）；n>4 而芯片唔支援 octal →
 明示 error，唔靜默降級。
 
@@ -9529,7 +9529,7 @@ miso、mosi、force_machine、lines、data0..data7），2 通道＝34 keys。
 
 **三種形態（同一個事實，三種表示）**
 - A. **FAT JSON**：路徑名＋完整值（人改；8.8 KB）
-- B. **FAT／NVS NCS1**：sparse `(id, 值)`＋CRC（~160 B–2.7 KB）
+- B. **FAT／NVS NCSTATE**：sparse `(id, 值)`＋CRC（~160 B–2.7 KB）
 - C. **RAM**：`uint32_t val[380]`（1,520 B）＋valid bitmap（48 B）＝**~1.6 KB，放 internal
   RAM 而唔係 PSRAM**（PSRAM 讀取慢 ~10×；只留俾已激活 unit 嘅大 buffer）。
 
@@ -9537,7 +9537,7 @@ miso、mosi、force_machine、lines、data0..data7），2 通道＝34 keys。
 - `declared`（schema 有 entry）→ `enabled`（config enable=1）→ `activated`（driver 裝好、
   GPIO claim、buffer allocate、任務接上）；`activated ⊆ enabled ⊆ declared`。
 - `enable=0`：**零 GPIO、零 buffer、零 driver**，只佔 `val[]` 4 B＋bitmap 1 bit。
-- 開機分階段：B05-core（固定核心）→ B05-cfg（parse→NCS1→`val[]`，唔裝 driver）
+- 開機分階段：B05-core（固定核心）→ B05-cfg（parse→NCSTATE→`val[]`，唔裝 driver）
   → B05-act（只 activate enabled=1，按依賴圖 topo 排序）→ B05-defer（enable=0 唔郁）。
 - 激活狀態機：`off→requested→resources→ready→running`，失敗入 error 但唔拖死 boot；
   依賴圖（pin→spi→tft/apa102、i2c→pca9685/xl9555/gt1151q/husb238、i80→led…）。
@@ -9580,7 +9580,7 @@ nc_port_act[]`（連 `nc_port.c`），B05-act 只按 `enabled=1`＋`level` 次�
 
 ### 7.272 2026-11-26（中間產物必帶來源哈希：開機比對，一樣直接載入）
 
-用家定案：中間產物（NCS1／NCC2／PXA2／activation）要寫入**來源 JSON 哈希**；
+用家定案：中間產物（NCSTATE／NCC2／PXA2／activation）要寫入**來源 JSON 哈希**；
 開機對哈希：**一樣＝直接載入，唔一樣＝重新生成**。
 
 **統一 header**（`state-storage-format.md §8`）：
@@ -9594,29 +9594,58 @@ magic | ver u16 | flags u16 | src_hash u32 | payload_len u32 | blob_crc u32
 - `blob_crc`：payload CRC32；`ver`：格式版本（一改即拒讀舊 blob）。
 - 開機：`file && ver 夾 && src_hash 同 && blob_crc 過` → 直接載入（hit）；
   否則 parse JSON 重新生成、atomic 替換、log miss（old→new）。
-- **NCS1 header 由 12 B → 16 B**（加 `src_hash`）；NCC2／PXA2 同樣；
-  NCLT 本身 `key` 已係來源內容 hash，唔重複加（文件寫明等價關係）。
+- **NCSTATE header 由 12 B → 16 B**（加 `src_hash`）；NCC2／PXA2 同樣；
+  NCLAYOUT 本身 `key` 已係來源內容 hash，唔重複加（文件寫明等價關係）。
 
 **生成期激活表**（ncportgen）已即時加：`preset_activation.json` 有
 `src_hash: 0x014323ff`＋逐檔 `crc32`（wiring.json 0xa6490d8f、driver.json 0x7043699a）；
 Matrix 實跑驗證。日後 compile 成 `nc_port_act[]` 時一併帶 ver/src_hash，
 boot log／`status hw` 可核對。
 
-### 7.273 2026-11-26（簡化：真正只有兩個格式——NCS1 狀態檔、NCLT layout 快取）
+### 7.273 2026-11-26（簡化：真正只有兩個格式——NCSTATE 狀態檔、NCLAYOUT layout 快取）
 
-用家：「NCS1／NCC2／NCLT 有那麼多東西嗎？很多簡稱我實際上不知道是什麼。」
+用家：「NCSTATE／NCC2／NCLAYOUT 有那麼多東西嗎？很多簡稱我實際上不知道是什麼。」
 → 係我哋之前列多咗。已簡化並寫入對照表（`state-storage-format.md §6.5`）：
 
 | 簡稱 | 意思 | 狀態 |
 |---|---|---|
-| **NCS1** | 設定值嘅機讀檔（`state.ncs`，sparse id＋值＋CRC） | ✅ **唯一新格式，要做** |
-| **NCLT** | layout 編譯快取（`.nclt`，原 `.pxlt`） | ✅ **已經有**，firmware 自己寫 |
+| **NCSTATE** | 設定值嘅機讀檔（`state.bin`，sparse id＋值＋CRC） | ✅ **唯一新格式，要做** |
+| **NCLAYOUT** | layout 編譯快取（`.layout`，原 `.pxlt`） | ✅ **已經有**，firmware 自己寫 |
 | NCB2 | 通用自描述 blob | ⏸ 暫緩（冇需要） |
-| NCC2 | config 派生快取 | ❌ **取消**（NCS1 已做到同一件事） |
+| NCC2 | config 派生快取 | ❌ **取消**（NCSTATE 已做到同一件事） |
 | PXA2 | pixel assets 編譯快取 | ⏸ 暫緩（parse 唔慢） |
 
-**結論**：真正要記嘅只有 **NCS1**（設定值機讀檔）同 **NCLT**（layout 快取，已有）；
+**結論**：真正要記嘅只有 **NCSTATE**（設定值機讀檔）同 **NCLAYOUT**（layout 快取，已有）；
 其餘係「將來有需要再算」，唔會而家做。文件保留只為防再撞名。
 
-**下一步**維持：A1（firmware 讀 activation 表、只裝 enabled）＋P1（NCS1 codec）——
+**下一步**維持：A1（firmware 讀 activation 表、只裝 enabled）＋P1（NCSTATE codec）——
 而 P1 就係實現嗰「唯一新格式」。
+
+### 7.274 2026-11-26（命名清楚化：`state.bin` 與 `<key>.layout`；唔再用代號）
+
+用家：「NCS1／NCLT 不一定要四個字，但一定要描述清楚，現在根本不清不楚。」
+→ 全部改成**自述式命名**，magic 直接用 ASCII 全名。
+
+**最終只兩個格式**
+
+| 檔案 | 格式 magic | 做咩 | 狀態 |
+|---|---|---|---|
+| `/data/config/state.bin` | `"NCSTATE1"` | 設定值嘅機器版（sparse id＋值＋CRC） | ✅ 唯一新格式（未做，P1） |
+| `/pixel/cache/<key>.layout` | `"NCLAYOUT"` | layout 計算結果快取 | ✅ **已改好、上板驗證** |
+
+**改動（code）**
+- `nc_px_layout.c`：header magic 由 `uint32_t "NCLT"` → **8-byte ASCII `"NCLAYOUT"`**；
+  macro 改為 `NC_LAYOUT_MAGIC[]`（char 陣列，避免 GCC15 的
+  `-Werror=unterminated-string-initialization`：`"NCLAYOUT"` 9 B 放唔落 char[8]）。
+- paint task 三個 cache 路徑 `.nclt` → `.layout`；bench 路徑改 `bench_layout.layout`。
+- 舊 `.pxlt`／`.nclt` 都會因 magic/路徑唔夾而自動重建（純快取）。
+
+**上板驗證**（fw `a2e85c0-dirty`、app `0278b169`、idf=v6.1.1 (WSL)）
+- 刪除 3 個舊 `.nclt` → reboot → `FILE_SCAN`：manifest **18 檔**；
+- 新檔案出現：`7c46854b.layout`、`b953219b.layout`、`db1a33bf.layout`
+  → firmware 真係寫 `"NCLAYOUT"` 格式；
+- host test 21/21；LED 正常。
+
+**取消／暫緩嘅代號**（文件已寫明）：`NCB2` ⏸、`NCC2` ❌ 取消、`PXA2` ⏸；
+`state.bin` 係唯一會新增嘅格式。命名規矩：**檔案名講用途、magic 用 ASCII 全名**，
+唔再用要查表嘅代號。

@@ -101,7 +101,7 @@ assets_hash u32 | payload_len u32 | crc32 u32 | payload…
 
 - `payload`：direct mode 用「aprog 指令流 + 參數表 + 每節點邊界」；
   mode 用「節點樹＋參數」（同現時 JSON 等價但完全數值化）。
-- layout 已經有 `.nclt`（binary、6 B/px flat）——**唔重做**，PXA2 只補 program/mode。
+- layout 已經有 `.layout`（binary、6 B/px flat）——**唔重做**，PXA2 只補 program/mode。
 - 開機：hash 夾 → 直接載入；唔夾／壞 → 由 JSON 重建（現有流程）→ 寫回 cache。
 - 刪 cache＝只係慢一次；JSON 仍然係唯一人改來源。
 
@@ -127,7 +127,7 @@ assets_hash u32 | payload_len u32 | crc32 u32 | payload…
 |---|---|
 | `nc_state` 用 raw struct 落 NVS（size 一變就 drop） | 改用 `NCB2`（自描述、版本化、可加減欄位） |
 | config 每次開機 parse JSON | `NCC2` cache；JSON 只做人改輸入 |
-| pixel 每次開機 parse＋compile | `PXA2` cache；`.nclt` 已存在唔動 |
+| pixel 每次開機 parse＋compile | `PXA2` cache；`.layout` 已存在唔動 |
 | 壞檔只靜默回預設 | 一律 warn＋status 顯示（L3 last-known-good） |
 
 > **一句話**：JSON 係「人機介面」，二進位係「機機介面」；兩者都由同一套
@@ -172,37 +172,43 @@ magic 4 B | ver u16 | flags u16 | src_hash u32 | payload_len u32 | blob_crc u32
 
 | 中間物 | src_hash 來源 |
 |---|---|
-| **NCS1**（`state.ncs`／NVS） | 所有 config layer 嘅 JSON（固定次序：hardware、driver、system、tasks、resources） |
+| **NCSTATE**（`state.bin`／NVS） | 所有 config layer 嘅 JSON（固定次序：hardware、driver、system、tasks、resources） |
 | **NCC2**（config 派生 cache） | 該 layer 嘅 JSON（單一檔） |
 | **PXA2**（pixel assets 編譯 cache） | effects.json＋mode／map／registry 所在嗰批 JSON |
-| **NCLT**（layout cache） | `key` 已經係 mode/map/assets 內容 hash 嘅 FNV；等同 src_hash（見 §8.4） |
+| **NCLAYOUT**（layout cache） | `key` 已經係 mode/map/assets 內容 hash 嘅 FNV；等同 src_hash（見 §8.4） |
 | **preset_activation.json**（生成期激活表） | `wiring.json`＋`driver.json`＋project `sdkconfig.defaults`（ncportgen 已輸出 `src_hash`＋逐檔 crc） |
 
-### 8.4 NCLT 補充
+### 8.4 NCLAYOUT 補充
 
-`.nclt` header 本身已有 `key`（FNV-1a over mode_hash/map_hash/px/assets_hash/ver）＋
+`.layout` header 本身已有 `key`（FNV-1a over mode_hash/map_hash/px/assets_hash/ver）＋
 `crc`；**key 就係來源哈希**，所以開機載入前比較 `key` 已等同「JSON hash 一樣嗎」。
 唔另加 `src_hash` 欄位（避免重複），但 header 註解會寫明呢個等價關係。
 
 ---
 
-## 9. 名詞對照：其實只有兩個格式要記
+## 9. 名詞對照（名字自己講清楚，冇代號）
 
-用家 2026-11-26：「NCS1／NCC2／NCLT 有那麼多東西嗎？很多簡稱我實際不知道是什麼。」
-→ 之前列多咗；以下係**現行**（其他一律「將來有需要再算」）：
+用家 2026-11-26：「簡稱我實際唔知係咩，一定要描述清楚。」
+→ 全部改成**自述式命名**（magic 直接用 ASCII 字串，hexdump 都睇得明）：
 
-| 名 | 全稱／意思 | 做咩 | 而家要唔要？ |
+| 名（檔案） | 格式 magic | 做咩 | 而家要唔要？ |
 |---|---|---|---|
-| **JSON** | 普通設定檔 | 人改（硬體／driver／system…） | ✅ 一直都要 |
-| **NCS1** | NetCore State v1（`state.ncs`） | 設定值嘅**機讀檔**（sparse id＋值＋CRC） | ✅ **唯一新格式，要做** |
-| **NCLT** | NetCore Layout Table（`.nclt`） | layout 編譯**快取**（原本 `.pxlt`） | ✅ **已經有**（firmware 自己寫） |
-| NCB2 | NetCore Blob v2 | 通用自描述 blob（schema 以外嘅動態資料） | ⏸ 暫緩（冇需要） |
-| NCC2 | NetCore Config Cache v2 | config 派生快取 | ❌ **取消**（NCS1 已做到同一件事） |
-| PXA2 | Pixel Assets v2 | pixel assets 編譯快取 | ⏸ 暫緩（開機 parse 唔慢） |
+| `/data/config/*.json` | — | 人手改嘅設定（原文、易讀） | ✅ 一直用 |
+| **`/data/config/state.bin`** | **`"NCSTATE1"`** | 設定值嘅**機器版**（只存改過嘅值＋CRC；開機直接載入） | ✅ **唯一新格式，會做** |
+| **`/pixel/cache/<key>.layout`** | **`"NCLAYOUT"`** | layout 計算結果嘅**快取**（刪咗自動重建） | ✅ **已有**（firmware 自己寫） |
 
-**結論**：
-1. **NCS1**＝「設定值嘅機讀檔」——要實作（P1）。
-2. **NCLT**＝「layout 嘅快取」——已經有，唔使理（刪咗會自動重建）。
-3. 其他 NCxx 唔會而家做；文件保留只係防再撞名。
+**取消／暫緩（唔會做，保留名只為防撞）**：
 
-> 命名規矩：新格式一律 `NC` 字頭（NetCore），並先喺 `state-schema.md §7` 登記。
+| 名 | 原本想做咩 | 狀態 |
+|---|---|---|
+| `NCB2` | 通用自描述 blob | ⏸ 暫緩（冇需要） |
+| `NCC2` | config 派生快取 | ❌ 取消（`state.bin` 已做到） |
+| `PXA2` | pixel assets 編譯快取 | ⏸ 暫緩（開機 parse 唔慢） |
+
+**一句話**：
+- `state.bin` ＝「設定的機器版」（快、省、有指紋）
+- `<key>.layout` ＝「layout 答案紙」（已有，唔使理）
+- 其他一律唔做。
+
+> 命名規矩：新格式用**自述名**（檔案名講用途、magic 用 ASCII 全名），
+> 唔再用 `PX*`／`NCxx` 呢類要查表嘅代號。
