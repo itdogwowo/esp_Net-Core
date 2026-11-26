@@ -133,6 +133,10 @@ static char *read_all(const char *path, size_t *len)
 
 void nc_px_layer_clear(void)
 {
+    // ★ 效果表都要清：唔清就係「reload 之後仍然用舊效果」——
+    //   nc_px_asset_scan() 會把同名效果當重複丟掉（log「撞名：…（保留第一個）」），
+    //   結果改咗 effects.json 之後要 reboot 才生效，刪走的效果亦仍然留在 RAM。
+    nc_px_asset_clear();
     memset(&s_maps, 0, sizeof(s_maps));
     memset(&s_modes, 0, sizeof(s_modes));
     memset(&s_show, 0, sizeof(s_show));

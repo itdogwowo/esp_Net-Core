@@ -7,6 +7,8 @@
 #include <string.h>
 
 #include "nc_px_layer.h"
+#include "nc_px_layer_scan.h"
+#include "nc_px_asset.h"
 
 static int g_fail;
 
@@ -154,6 +156,21 @@ static void test_show(void)
           "auto_play=true、list[0]=demo_eyes（數字項跳過）");
 }
 
+// [6] reload 語義：nc_px_layer_clear() 一定要連效果表一齊清。
+// 唔清的話 nc_px_asset_scan() 會把同名效果當重複丟掉（「撞名：…（保留第一個）」），
+// 結果改 effects.json 之後要 reboot 才生效，刪走的效果仍然留在 RAM。
+static void test_reload_clears(void)
+{
+    printf("[6] reload 清表\n");
+    const char *eff = "{\"effects\":[{\"name\":\"e1\",\"program\":["
+                      "{\"type\":\"math_now\",\"F\":10,\"l_max\":100,\"end_Time\":32}]}]}";
+    nc_px_asset_tbl_alloc(8);
+    check(nc_px_asset_add_json(eff, strlen(eff), "effects.json") == ESP_OK, "加入 1 個效果");
+    check(nc_px_asset_count() == 1, "效果表 = 1");
+    nc_px_layer_clear();
+    check(nc_px_asset_count() == 0, "layer_clear 亦清效果表（唔會殘留舊效果）");
+}
+
 static void test_negative(void)
 {
     printf("[5] 拒絕／跳過\n");
@@ -197,6 +214,7 @@ int main(void)
     test_mode_motor();
     test_show();
     test_negative();
+    test_reload_clears();
     printf("\n%s（%d 個失敗）\n", g_fail ? "FAILED" : "ALL PASS", g_fail);
     return g_fail ? 1 : 0;
 }
