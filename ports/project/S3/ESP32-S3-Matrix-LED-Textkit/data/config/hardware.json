@@ -3,6 +3,7 @@
     "這份是 build 時由 ports/hardware/S3/ESP32-S3-Matrix/wiring.json 產生的出廠預置（鏡子）。",
     "它會被 build 嵌入、並在 /data/config/hardware.json 缺失時 seed 到裝置；**唔係** firmware 內建預設本身：真正的內建預設是 nc_port.c（同樣由 wiring.json 生成）。",
     "所以改這份只會改「用戶看到的值」；要改行為就改 wiring.json 再 rebuild（目前 typed 解析：ETH／SDIO／PIN／PWM／UART；SPI／I2C／I80／I2S／ENC／XL9555 未 parse）。",
+    "燈鏈（LED）不在這份：它是 driver 層，寫在該板的 driver.json，build 時生成 nc_led_cfg_t（見 nc_port.c）。",
     "硬度事實（flash/psram/CPU）在 board.json，不在這裡。"
   ],
   "version": 1,
@@ -82,23 +83,35 @@
     ]
   },
   "I2C": {
-    "enable": 0,
+    "enable": 1,
     "list": [
       {
+        "_comment": "板載 QMI8658 IMU：SDA=11／SCL=12（vendor demo WS_QMI8658.cpp）；nc_cfg 未 parse I2C，現時只是文件影子。見同一目錄的 README.md",
         "freq": 400000,
         "GPIO": {
-          "scl": null,
-          "sda": null
+          "scl": 12,
+          "sda": 11
         }
       }
     ]
   },
   "I80": {
-    "enable": 0,
+    "_comment": "板載 64 顆 WS2812B 用 I80（LCD_CAM 8080）當 8 條 lane 的動機。data = D0..D7（長度就是 bus_width，唔另外寫）；只有 D0 = GPIO14 真的接燈，D1..D7／WR／DC 是 I80 硬性要求的 dummy。dc 是 esp_lcd 必要的 D/C 腳。freq 是 LCD 面板的意義；送燈的 PCLK 由 driver.json 的 LED.timing 給。runtime 可以用 /data/config/hardware.json 的同一段覆蓋（唔使重 build）。",
+    "enable": 1,
     "list": [
       {
-        "data": [],
-        "wr": -1,
+        "data": [
+          14,
+          38,
+          39,
+          40,
+          41,
+          42,
+          47,
+          48
+        ],
+        "wr": 1,
+        "dc": 2,
         "cs": -1,
         "freq": 80000000
       }
