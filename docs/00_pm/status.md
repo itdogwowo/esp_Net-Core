@@ -9341,3 +9341,60 @@ cycle，整數無餘，所以唔會累積漂移）。
 刪 `devices.json`＋reboot（或 `fs_format`）。換 project 亦一樣。
 
 **驗證**：fw `ac3555c-dirty`、app `a0bb64d0`；環 `i80.prd 320B×3`、`0xF071` 49.9 fps／drops=0。
+
+### 7.262 2026-11-26（runtime device 層正名：`/data/config/driver.json`；FAT 最高權威）
+
+用家要求：「想它存在於 FAT，FAT 權限高過 `ports/hardware/<chip>/<board>/driver.json`，
+壞了才返回過去。」→ 照做，runtime 檔名由 `devices.json` **正名為 `driver.json`**
+（舊名仍然接受，兼容今日之前產生的機）。
+
+**優先次序（三層）**
+
+| 次序 | 來源 | 何時用 |
+|---|---|---|
+| ① **FAT `/data/config/driver.json`** | 用戶／現場改 | 存在且 JSON 合法 → **最高權威**（重啟即生效） |
+| ② 舊名 `/data/config/devices.json` | 今日之前 seed 落去的機 | ① 唔存在時讀（兼容） |
+| ③ build-time `ports/hardware/<board>/driver.json` | 板級 generated `nc_port_led()` | ①② 都冇、或者**壞檔** → 自動回退 |
+
+- **壞檔行為**：JSON parse 失敗 → `present=false` → 回 build-time 預設，並且**大聲 warn**
+  （`/data/config/driver.json 壞檔／讀唔到 → 回 build-time driver.json 預設`，鐵律 9）。
+- 腳位仍然只在 `hardware.json`（FAT）／`wiring.json`（build-time）；device 只寫 bus 引用。
+
+**repo 鏡像**：`tools/sync_driver_presets.py`（原 `sync_devices_presets.py` 改名）由
+build-time driver.json 生成 `ports/project/<chip>/<board>/data/config/driver.json`
+（5 個 project：P4-ETH／S3-Matrix／N16R8／SuperMini／Zero-Show）。
+`firmware/main/CMakeLists.txt`：project 有鏡像就優先嵌入，冇就用 ncportgen 生成。
+
+**上板實測**（fw `1b802f5-dirty`、app `3bff73ea`、idf=v6.1.1 (WSL)）
+
+| 操作 | 環 | 結論 |
+|---|---|---|
+| 首次開機 seed `/config/driver.json` | `i80.prd` | FAT 檔出現、正常跑 |
+| FAT 改 `LED.enable=0` + reboot | **`mock.prd`** | **FAT 權威 > build-time** |
+| FAT 寫壞 JSON（`{ this is not json`）+ reboot | **`i80.prd`** | **壞檔自動回 build-time** |
+| 還原合法 JSON（enable=1）+ reboot | `i80.prd`；49.9 fps／drops=0 | 正常 |
+
+**WebMaster／IDE 注意（未修）**：reboot 之後 WebMaster 條 link 會斷，要重新 connect；
+`POST /api/scan` 有時會令 link 斷（manifest 409）。繞路：先 release port →
+`python tools/nc4.py --port COM24 raw 0x200B 00` → reclaim → reconnect → refresh。
+而家 manifest 21 個檔，包括 `/config/driver.json`。**TODO**：WebMaster reboot 後自動重連＋自動 scan。
+
+### 7.263 2026-11-26（狀態儲存格式：JSON 只做人機介面，機存緊湊二進位）
+
+用家定案：設定系統一律「**出廠 → FAT 微調 → 壞了回退**」；而且值會登記入
+**state manager**，所以要有**緊湊、版本化、可校驗**的二進位格式，**唔好直接存 JSON**。
+效果同樣：JSON 只做輸入，讀完即刻轉 runtime 緊湊形態。
+
+**已寫入設計文件**：[`state-storage-format.md`](docs/03_notes/state-storage-format.md)
+
+- **統一四層**：L0 出廠（embedded）→ L1 FAT JSON（人手改）→ L2 派生二進位 cache
+  → L3 壞檔回退（last-known-good／L0），全部有 magic＋ver＋crc32。
+- **`NCB2`**：state manager 通用狀態 blob（字典＋TLV＋zigzag varint＋CRC）。
+  取代現時 `nc_state` 嘅 raw struct（raw struct 一改 size 就 drop 值）。
+- **`NCC2`**：config 派生 cache（`cfg_hash` 綁 L1 JSON；正常開機唔使 cJSON）。
+- **`PXA2`**：pixel assets 編譯 cache（mode／effect program）；layout 已有 `.pxlt`，唔重做。
+- 落地次序 P1（NCB2+state）→ P2（NCC2 hardware/driver）→ P3（PXA2）→ P4（status 顯示），
+  合計約 3–4.5 日。
+
+**原型量測**（`modules/lab/state_format_lab/ncb2_preview.py`）：通用 JSON→NCB2 在
+Matrix 7 個 config/asset 檔由 13,971 B → **8,788 B（省 37.1%）**；固定 schema 預計再細 50%+。
