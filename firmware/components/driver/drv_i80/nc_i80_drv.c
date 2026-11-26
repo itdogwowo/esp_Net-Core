@@ -243,6 +243,34 @@ bool nc_i80_drv_submit(int slot)
     return true;
 }
 
+// 面板交易：esp_lcd 版本本身支援 lcd_cmd（cmd phase）——同 direct 版語義一致。
+bool nc_i80_drv_submit_cmd(int slot, int lcd_cmd, size_t bytes)
+{
+    i80_drv_t *d = &s_i80;
+    if (!d->ready || slot < 0 || slot >= (int)d->slots || d->tx[slot] == NULL) {
+        return false;
+    }
+    if (d->order[slot] != 0) {
+        return false;
+    }
+    uint32_t len = (bytes == 0) ? d->slot_bytes : (uint32_t)bytes;
+    if (len > d->slot_bytes) {
+        return false;
+    }
+    const uint32_t ord = d->submit_order + 1u;
+    d->order[slot] = ord;
+    const esp_err_t e = esp_lcd_panel_io_tx_color(d->io, lcd_cmd, d->tx[slot], len);
+    if (e != ESP_OK) {
+        d->order[slot] = 0;
+        d->fail++;
+        return false;
+    }
+    d->submit_order = ord;
+    d->submitted++;
+    d->inflight++;
+    return true;
+}
+
 bool nc_i80_drv_slot_done(int slot)
 {
     i80_drv_t *d = &s_i80;
@@ -276,6 +304,8 @@ int       nc_i80_drv_slots(void) { return 0; }
 uint32_t  nc_i80_drv_slot_bytes(void) { return 0; }
 uint8_t  *nc_i80_drv_slot_buf(int slot) { (void)slot; return NULL; }
 bool      nc_i80_drv_submit(int slot) { (void)slot; return false; }
+bool      nc_i80_drv_submit_cmd(int slot, int lcd_cmd, size_t bytes)
+{ (void)slot; (void)lcd_cmd; (void)bytes; return false; }
 bool      nc_i80_drv_slot_done(int slot) { (void)slot; return false; }
 uint32_t  nc_i80_drv_submitted(void) { return 0; }
 uint32_t  nc_i80_drv_done_count(void) { return 0; }

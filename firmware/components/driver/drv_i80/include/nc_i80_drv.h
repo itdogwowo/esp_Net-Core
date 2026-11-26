@@ -37,10 +37,18 @@ typedef struct {
     //   · wr_pin：i80 的 WR／PCLK（LED 模式唔 route；面板要）
     //   · dc_pin：LCD 的 DC（LED 模式唔需要；esp_lcd 版必須）
     //   · cs_pin：>=0 才拉（純軟件 GPIO，同 esp_lcd 一樣）；-1 = 無 CS
+    //   ⚠ 全部可選：LED 模式唔填（-1）完全冇問題；面板模式填幾多就用幾多，
+    //     唔會像 esp_lcd 那樣「wr／dc 缺一就整條 lane 唔建立」。
     int        wr_pin;
     int        dc_pin;
     int        cs_pin;
     bool       cs_active_high;
+    // 面板 cmd phase：cmd_bits = 一個命令幾 bit（0 當 8）；DC 四段電平（0/1）
+    uint8_t    cmd_bits;
+    uint8_t    dc_idle_level;
+    uint8_t    dc_cmd_level;
+    uint8_t    dc_dummy_level;
+    uint8_t    dc_data_level;
     uint32_t   pclk_hz;     // PCLK（WS2812 的 bit 寬度靠它 × bit_cells 湊出來）
     uint32_t   slot_bytes;  // 每一筆固定送幾個 byte（16-bit 模式 = units × 2）
     uint8_t    slots;       // 2..NC_I80_DRV_SLOTS_MAX（3 = 三緩衝）
@@ -57,6 +65,9 @@ uint8_t  *nc_i80_drv_slot_buf(int slot);      // DMA-capable internal；NULL = �
 
 // 把 slot 的 slot_bytes 交去 I80。成功回 true（完成會記在 driver 內部）。
 bool      nc_i80_drv_submit(int slot);
+// 面板交易：lcd_cmd >= 0 → cmd phase＋param phase；lcd_cmd < 0 → 純資料（同 submit 等價）。
+// bytes > 0 時用 bytes，0 用 slot_bytes。
+bool      nc_i80_drv_submit_cmd(int slot, int lcd_cmd, size_t bytes);
 // DMA 完成了嗎？回 true 時順便清掉「完成」標記（呼叫端可以重用 slot）。
 bool      nc_i80_drv_slot_done(int slot);
 

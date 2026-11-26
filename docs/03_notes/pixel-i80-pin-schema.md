@@ -253,6 +253,12 @@ DMA → D0.. 資料線（只 route 有用途的 lane）→ WS2812
 
 ### 8.4 設計紅線：I80／LCD_CAM 唔可以「異化」成只for燈（2026-11-26 用家指示）
 
+> **2026-11-26 更新（階段①b 已完成）**：我們自己的驅動已經**完整 LCD 化**——
+> `nc_i80_drv_submit_cmd(slot, lcd_cmd, bytes)`（cmd phase＋param phase）、
+> `cmd_bits`、DC 四段電平、CS assert／de-assert；`wr`／`dc`／`cs` 全部**可選**
+> （≥0 才 route，唔填 -1 唔影響 LED 模式），唔會像 esp_lcd 那樣缺一就整條唔建立。
+> 面板**未有硬件驗證**（未上板），文件明講。見 status §7.255。
+
 用家明確要求：**這個驅動要具備真熒幕（LCD 面板）顯示能力，不要把它異化；兩邊的驅動要
 互相參考、可合成。** 所以：
 

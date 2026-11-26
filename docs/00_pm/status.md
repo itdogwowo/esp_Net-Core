@@ -8963,3 +8963,33 @@ host test 21/21。回退：`CONFIG_NETCORE_PIXEL_I80_DIRECT=n` 重 build（一�
 
 **之後（階段②）**：config 稀疏化 `data:[14]`／`-1`＝未用／自動 8↔16-bit／`wr`、`dc` 消失；
 屆時「寫一支腳」就同實際使用一致。
+
+### 7.255 2026-11-26（階段①b：我們自己的驅動完整 LCD 化；wr／dc 唔再強制）
+
+用家：把我們自己的 I80 驅動做成「夠完整 LCD 化」，同時**不強行要求輸入 `wr`／`dc`**，
+要更彈性，但性能要拿捏。做完之後，**同一個驅動（`nc_i80_drv_direct.c`）同時支援
+LED lane 同 LCD 面板**；esp_lcd 版只做對照／回退。
+
+**改動**（`nc_i80_drv.h`／`nc_i80_drv_direct.c`／`nc_i80_drv.c`）
+- 新增面板交易 API：`nc_i80_drv_submit_cmd(slot, lcd_cmd, bytes)`
+  - `lcd_cmd >= 0` → cmd phase（`lcd_ll_set_command`，`cmd_bits` 預設 8）＋ param phase
+  - `lcd_cmd < 0` → 純資料（同 `nc_i80_drv_submit()` 等價，LED 走這條）
+- cfg 新增可選：`cmd_bits`、`dc_idle_level`／`dc_cmd_level`／`dc_dummy_level`／
+  `dc_data_level`（`lcd_ll_set_dc_level` 一次設定）
+- **`wr`／`dc`／`cs` 全部可選**：`>=0` 才 route（`wr`→`LCD_PCLK_IDX`、`dc`→`LCD_DC_IDX`、
+  `cs` 軟件 GPIO 逐筆 assert／完成中斷 de-assert）；唔填=`-1` 完全唔影響 LED 模式。
+  **唔會**像 esp_lcd 那樣「wr／dc 缺一就整條 lane 唔建立」。
+- 性能：LED 快路徑加 **phase 形狀快取**（只有 cmd/data 形狀變才重寫 `lcd_ll_set_phase_cycles`
+  ＋`blank_cycles`）；cmd 值本身每筆照寫。實測 `enc_us` 209→**186**、`tx_us` 38→**32**。
+- esp_lcd 版同步實作 `nc_i80_drv_submit_cmd()`（用 `esp_lcd_panel_io_tx_color()` 的
+  `lcd_cmd`），所以面板換底層時語義一致。
+- 兩條 Kconfig 路徑都編得過（DIRECT=y 45 s／=n 81 s，兩個都 rc=0）。
+
+**上板驗證（LED 回歸；面板未上板——冇面板）**
+- fw `2cd136e-dirty`、app `0fd4709b`、rst=3、idf=v6.1.1 (WSL)
+- `0xF071`：**50.0 fps**、**drops=0**、`starved=2`、`late=0`、`frame_us` 20,019、
+  `enc_us` **186**、`tx_us` **32**
+- `0xF06B`：rainbow 64 顆 64 色（`00101300`/`00111200`/`00121100`…）
+- 未驗證：cmd phase／DC 電平／CS 時序（要真面板＋示波器）；文件已明講。
+
+**下一步**：階段② config 稀疏化（`data:[14]`、`-1`＝未用、自動 8↔16-bit、`wr`/`dc` 消失）。

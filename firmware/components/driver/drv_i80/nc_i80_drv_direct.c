@@ -69,9 +69,19 @@ typedef struct {
 
     // 同一時間只跑一筆（64 px = 1.84 ms 線路時間，幀距 20 ms，唔需要管線化）
     volatile int cur;                        // 正在送的槽；-1 = 閒
-    int          q[NC_I80_DRV_SLOTS_MAX];    // 等送
+    int          q[NC_I80_DRV_SLOTS_MAX];    // 等送：槽
+    int          q_cmd[NC_I80_DRV_SLOTS_MAX];   //       lcd_cmd（-1 = 純資料）
+    uint32_t     q_bytes[NC_I80_DRV_SLOTS_MAX]; //       這一筆幾個 byte（0 = slot_bytes）
     int          q_head;
     int          q_count;
+
+    // 面板支援（LED 模式全部 -1／0，唔會多花時間）
+    int          cs_pin;
+    bool         cs_active_high;
+    uint8_t      width_bytes;                 // bus_width/8（1 或 2）
+    uint8_t      cmd_bits;
+    uint8_t      dc_levels[4];                // idle／cmd／dummy／data
+    uint32_t     phase_sig;                   // 快取：上次設過的 phase 組合
 
     portMUX_TYPE mux;
     uint32_t submitted;
@@ -84,24 +94,46 @@ typedef struct {
 static i80_drv_t s_i80;
 
 // ── 一筆：phase/blank → reset FIFO → mount → start DMA → 4 µs → start LCD ──
-static bool start_slot_locked(int slot)
+// cmd >= 0 → 先 cmd phase 再 param phase（面板）；cmd < 0 → 純資料（LED 快路徑）。
+// bytes == 0 → 用 slot_bytes。
+static bool start_slot_locked(int slot, int cmd, uint32_t bytes)
 {
     i80_drv_t *d = &s_i80;
     uint8_t *buf = d->tx[slot];
     if (buf == NULL) {
         return false;
     }
-    // 只有 data phase：word 數由 DMA buffer 長度（EOF）決定
-    lcd_ll_set_phase_cycles(d->dev, 0, 0, 1);
-    lcd_ll_set_blank_cycles(d->dev, 1, 1);
+    if (bytes == 0 || bytes > d->slot_bytes) {
+        bytes = d->slot_bytes;
+    }
+    const uint32_t w = d->bus_width;
+    const uint32_t cmd_cycles = (cmd >= 0)
+        ? ((d->cmd_bits == 0 ? 8u : d->cmd_bits) + w - 1u) / w
+        : 0u;
+    const uint32_t data_cycles = (bytes > 0) ? 1u : 0u;
+
+    // 性能：LED 路徑的 phase 永遠一樣，快取住就唔用每幀重寫寄存器。
+    // （cmd 值本身每筆都可能不同，所以只快取「phase 形狀」，command 照每次寫。）
+    const uint32_t sig = (cmd_cycles << 8) | data_cycles;
+    if (sig != d->phase_sig) {
+        lcd_ll_set_phase_cycles(d->dev, cmd_cycles, 0, data_cycles);
+        lcd_ll_set_blank_cycles(d->dev, 1, 1);
+        d->phase_sig = sig;
+    }
+    if (cmd >= 0) {
+        lcd_ll_set_command(d->dev, w, cmd);
+    }
     lcd_ll_reset(d->dev);
     lcd_ll_fifo_reset(d->dev);
+    if (d->cs_pin >= 0) {
+        gpio_set_level((gpio_num_t)d->cs_pin, d->cs_active_high ? 1 : 0);   // assert
+    }
 
     const size_t align = gdma_get_buffer_alignment_constraint(d->chan, buf);
     gdma_buffer_mount_config_t mc = {
         .buffer = buf,
         .buffer_alignment = align,
-        .length = d->slot_bytes,
+        .length = bytes,
         .flags = {
             .mark_eof = true,
             .mark_final = GDMA_FINAL_LINK_TO_NULL,
@@ -109,6 +141,9 @@ static bool start_slot_locked(int slot)
     };
     if (gdma_link_mount_buffers(d->link, 0, &mc, 1, NULL) != ESP_OK) {
         ESP_LOGE(TAG, "mount DMA buffer 失敗（slot %d）", slot);
+        if (d->cs_pin >= 0) {
+            gpio_set_level((gpio_num_t)d->cs_pin, d->cs_active_high ? 0 : 1);
+        }
         return false;
     }
     gdma_start(d->chan, gdma_link_get_head_addr(d->link));
@@ -125,9 +160,11 @@ static void kick_locked(void)
     i80_drv_t *d = &s_i80;
     while (d->cur < 0 && d->q_count > 0) {
         const int slot = d->q[d->q_head];
+        const int cmd = d->q_cmd[d->q_head];
+        const uint32_t bytes = d->q_bytes[d->q_head];
         d->q_head = (d->q_head + 1) % d->slots;
         d->q_count--;
-        if (start_slot_locked(slot)) {
+        if (start_slot_locked(slot, cmd, bytes)) {
             d->cur = slot;
             return;
         }
@@ -155,6 +192,10 @@ static void IRAM_ATTR i80_isr(void *arg)
             d->done[slot] = true;
             d->cur = -1;
             d->done_count++;
+            if (d->cs_pin >= 0) {
+                // 完成才 de-assert CS（後面仲可能排住下一筆）
+                gpio_set_level((gpio_num_t)d->cs_pin, d->cs_active_high ? 0 : 1);
+            }
         }
         kick_locked();      // 仲有嘢排隊就即刻開下一筆（會再 enable intr）
         portEXIT_CRITICAL_ISR(&d->mux);
@@ -215,6 +256,15 @@ esp_err_t nc_i80_drv_install(const nc_i80_drv_cfg_t *cfg)
     d->pclk_hz = cfg->pclk_hz;
     d->lanes = cfg->lanes;
     d->bus_width = (cfg->bus_width == 16) ? 16u : 8u;
+    d->width_bytes = (uint8_t)(d->bus_width / 8u);
+    // 面板支援：全部可選。LED 模式 cs=-1、cmd_bits 0、DC 全 0 → 完全唔會用。
+    d->cs_pin = cfg->cs_pin;
+    d->cs_active_high = cfg->cs_active_high;
+    d->cmd_bits = (cfg->cmd_bits == 0) ? 8u : cfg->cmd_bits;
+    d->dc_levels[0] = cfg->dc_idle_level;
+    d->dc_levels[1] = cfg->dc_cmd_level;
+    d->dc_levels[2] = cfg->dc_dummy_level;
+    d->dc_levels[3] = cfg->dc_data_level;
     if (d->lanes > d->bus_width) {
         ESP_LOGE(TAG, "lanes=%u 大過 bus_width=%u", d->lanes, d->bus_width);
         return ESP_ERR_INVALID_ARG;
@@ -285,7 +335,8 @@ esp_err_t nc_i80_drv_install(const nc_i80_drv_cfg_t *cfg)
 #endif
     lcd_ll_set_dma_read_stride(d->dev, d->bus_width);        // 8 ⇒ lcd_2byte_en=0
     lcd_ll_enable_output_always_on(d->dev, true);            // word 數由 DMA 決定
-    lcd_ll_set_dc_level(d->dev, false, false, false, false);
+    lcd_ll_set_dc_level(d->dev, d->dc_levels[0] != 0, d->dc_levels[1] != 0,
+                        d->dc_levels[2] != 0, d->dc_levels[3] != 0);
 
     // ③ GPIO：只 route 真正接燈的 lane（呢個就係「零 dummy」）
     for (int i = 0; i < (int)d->lanes; i++) {
@@ -409,7 +460,7 @@ uint8_t *nc_i80_drv_slot_buf(int slot)
     return s_i80.tx[slot];
 }
 
-bool nc_i80_drv_submit(int slot)
+static bool submit_impl(int slot, int lcd_cmd, uint32_t bytes)
 {
     i80_drv_t *d = &s_i80;
     if (!d->ready || slot < 0 || slot >= (int)d->slots || d->tx[slot] == NULL) {
@@ -418,9 +469,13 @@ bool nc_i80_drv_submit(int slot)
     if (d->busy[slot] || d->done[slot]) {
         return false;                       // 這一格仲未交回，不可以重用
     }
+    uint32_t len = (bytes == 0) ? d->slot_bytes : bytes;
+    if (len > d->slot_bytes) {
+        return false;
+    }
     // PSRAM 槽：DMA 讀之前要把 cache 寫回實體記憶體（internal 槽不會有 cache line）
     if (d->tx_ext[slot] && esp_cache_get_line_size_by_addr(d->tx[slot]) > 0) {
-        if (esp_cache_msync(d->tx[slot], d->slot_bytes,
+        if (esp_cache_msync(d->tx[slot], len,
                             ESP_CACHE_MSYNC_FLAG_DIR_C2M | ESP_CACHE_MSYNC_FLAG_UNALIGNED)
             != ESP_OK) {
             ESP_LOGE(TAG, "cache msync 失敗（slot %d）", slot);
@@ -430,13 +485,27 @@ bool nc_i80_drv_submit(int slot)
     }
     portENTER_CRITICAL(&d->mux);
     d->busy[slot] = true;
-    d->q[(d->q_head + d->q_count) % d->slots] = slot;
+    const int tail = (d->q_head + d->q_count) % d->slots;
+    d->q[tail] = slot;
+    d->q_cmd[tail] = lcd_cmd;
+    d->q_bytes[tail] = len;
     d->q_count++;
     d->submitted++;
     d->inflight++;
     kick_locked();
     portEXIT_CRITICAL(&d->mux);
     return true;
+}
+
+bool nc_i80_drv_submit(int slot)
+{
+    return submit_impl(slot, -1, 0);
+}
+
+bool nc_i80_drv_submit_cmd(int slot, int lcd_cmd, size_t bytes)
+{
+    // cmd >= 0 → cmd phase＋param phase（面板）；cmd < 0 → 同 submit() 一樣純資料。
+    return submit_impl(slot, (lcd_cmd < 0) ? -1 : lcd_cmd, (uint32_t)bytes);
 }
 
 bool nc_i80_drv_slot_done(int slot)
