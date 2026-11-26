@@ -43,7 +43,7 @@ set(_gen_dir "${CMAKE_CURRENT_BINARY_DIR}/ncport_gen")
 set(_gen_c   "${_gen_dir}/nc_port.c")
 set(_gen_h   "${_gen_dir}/nc_port.h")
 set(_gen_hw  "${_gen_dir}/preset_hardware.json")
-set(_gen_dev "${_gen_dir}/preset_devices.json")
+set(_gen_dev "${_gen_dir}/preset_driver.json")
 set(_gen_dep "${PORT_DIR}/board.json" "${PORT_DIR}/wiring.json"
              "${CMAKE_CURRENT_LIST_DIR}/../../tools/ncportgen.py")
 # 晶片能力表（cores／USB link）也是 ncportgen 的輸入；漏了它，改 _chips/*.json
@@ -105,21 +105,22 @@ if(NC_PROJECT_DIR AND EXISTS "${NC_PROJECT_DIR}/data/config/hardware.json")
             COMMENT "預置 hardware.json → build")
     endif()
 endif()
-# devices.json：同 hardware.json 一樣，project 有鏡像就優先嵌入
-# （repo 鏡像由 tools/sync_devices_presets.py 生成；冇就用 ncportgen 即時產生）。
+# driver.json：同 hardware.json 一樣，project 有鏡像就優先嵌入
+# （repo 鏡像由 tools/sync_driver_presets.py 生成；冇就用 ncportgen 即時產生）。
+# FAT 上的 /data/config/driver.json 係 runtime 最高權威；build-time 只做回退。
 set(_preset_dev "${_gen_dev}")
-if(NC_PROJECT_DIR AND EXISTS "${NC_PROJECT_DIR}/data/config/devices.json")
-    set(_preset_dev "${CMAKE_CURRENT_BINARY_DIR}/preset_devices.json")
+if(NC_PROJECT_DIR AND EXISTS "${NC_PROJECT_DIR}/data/config/driver.json")
+    set(_preset_dev "${CMAKE_CURRENT_BINARY_DIR}/preset_driver.json")
     execute_process(
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                "${NC_PROJECT_DIR}/data/config/devices.json" "${_preset_dev}")
+                "${NC_PROJECT_DIR}/data/config/driver.json" "${_preset_dev}")
     if(NOT CMAKE_SCRIPT_MODE_FILE)
         add_custom_command(
             OUTPUT  "${_preset_dev}"
             COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                    "${NC_PROJECT_DIR}/data/config/devices.json" "${_preset_dev}"
-            DEPENDS "${NC_PROJECT_DIR}/data/config/devices.json"
-            COMMENT "預置 devices.json → build")
+                    "${NC_PROJECT_DIR}/data/config/driver.json" "${_preset_dev}"
+            DEPENDS "${NC_PROJECT_DIR}/data/config/driver.json"
+            COMMENT "預置 driver.json → build")
     endif()
 endif()
 set(_preset_embed "${_preset_hw}" "${_preset_dev}")
@@ -215,7 +216,7 @@ if(NOT CMAKE_SCRIPT_MODE_FILE)
     target_compile_definitions(${COMPONENT_LIB} PRIVATE NETCORE_HAS_PRESET_NETWORK=${_has_network_preset})
     target_compile_definitions(${COMPONENT_LIB} PRIVATE NETCORE_HAS_PRESET_RESOURCES=${_has_resources_preset})
 # 應用硬件（device）層預置：由 ncportgen 由 driver.json 生成，一定有 → 1
-target_compile_definitions(${COMPONENT_LIB} PRIVATE NETCORE_HAS_PRESET_DEVICES=1)
+target_compile_definitions(${COMPONENT_LIB} PRIVATE NETCORE_HAS_PRESET_DRIVER=1)
     if(NC_ENABLE_NCM)
         # main 直接 include ncm 標頭（nc_mod.h / nc_mod_engine.h）。
         target_include_directories(${COMPONENT_LIB} PRIVATE

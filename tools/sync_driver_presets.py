@@ -4,13 +4,13 @@
 為什麼要有這個檔：
   driver.json（build-time 板級）只有 firmware 睇；用戶插上 USB 後想喺 /data/config
   見到一份**具體、可改**的 devices.json（runtime device 層）。
-  ncportgen 會產生它；這裡把它鏡像到 ports/project/<chip>/<board>/data/config/devices.json
+  ncportgen 會產生它；這裡把它鏡像到 ports/project/<chip>/<board>/data/config/driver.json
   （同 hardware.json 一樣的做法），build 時 CMake 優先嵌入 project 版。
 
 用法：
-  python3 tools/sync_devices_presets.py            # 全部有 driver.json 的板（default project）
-  python3 tools/sync_devices_presets.py S3         # 只做 chip=S3
-  python3 tools/sync_devices_presets.py --check    # 只檢查，不寫檔
+  python3 tools/sync_driver_presets.py            # 全部有 driver.json 的板（default project）
+  python3 tools/sync_driver_presets.py S3         # 只做 chip=S3
+  python3 tools/sync_driver_presets.py --check    # 只檢查，不寫檔
 """
 from __future__ import annotations
 
@@ -58,20 +58,20 @@ def main() -> int:
                 unlike += 1
                 print(f"✘ {chip}/{board}: ncportgen 失敗：{(r.stderr or '').strip()[:160]}")
                 continue
-            src = Path(td) / "preset_devices.json"
+            src = Path(td) / "preset_driver.json"
             if not src.is_file():
                 unlike += 1
-                print(f"✘ {chip}/{board}: 冇 preset_devices.json")
+                print(f"✘ {chip}/{board}: 冇 preset_driver.json")
                 continue
             want = json.loads(src.read_text(encoding="utf-8"))
-            dst = proj / "data" / "config" / "devices.json"
+            dst = proj / "data" / "config" / "driver.json"
             have = json.loads(dst.read_text(encoding="utf-8")) if dst.is_file() else None
             if have == want:
-                print(f"  = {proj.relative_to(ROOT)}/data/config/devices.json（已同步）")
+                print(f"  = {proj.relative_to(ROOT)}/data/config/driver.json（已同步）")
                 continue
             if args.check:
                 unlike += 1
-                print(f"  ≠ {proj.relative_to(ROOT)}/data/config/devices.json 需要同步")
+                print(f"  ≠ {proj.relative_to(ROOT)}/data/config/driver.json 需要同步")
                 continue
             dst.parent.mkdir(parents=True, exist_ok=True)
             dst.write_text(json.dumps(want, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
