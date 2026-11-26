@@ -9747,3 +9747,33 @@ hit 時跳過 JSON parse；schema key 表＋`status cfg` 顯示 hit/miss。
   * 舊 `/config/state.NCSTATE` 及其 `.bak` 已刪（GET 確認 404）；
   * manifest 已修正（清走舊檔的 stale entry），`/config/state.ncst` 可見。
 - 命名：**格式 NCSTATE（magic）、檔案 `state.ncst`、備份 `state.ncst.bak`**。
+
+### 7.279 2026-11-26（P3 第一步：RAM store＋hit 對拍＋self-heal；status 見到）
+
+用家：「繼續繼續」→ P3：state 載入 RAM store，hit 一定要同 JSON parse 結果**對拍**，
+唔一致就當 miss 重寫（防舊 cache 靜默生效），並喺 status 顯示。
+
+**新增**
+- `nc_state_store.[ch]`：固定陣列 store（`NC_STATE_ENT`×64、bytes≤16）——
+  put/get/find、`state_store_cb`（blob decode 直接入 store）、`from_recs`、
+  **`cmp` 對拍**（回唔一致筆數＋first key；store 多出的舊 key 唔算）。
+  全部 internal RAM：64×~24 B ≈ **1.5 KB 上限**（實際 18 筆 ≈ 430 B）。
+- `nc_state_boot.c`：hit 時 load blob → store → `cmp`：
+  * 全中 → hit，log「同 cfg 完全一致」；
+  * 有唔同 → 當 miss，明示 `first key`、重寫（self-heal）。
+- `status cfg`：新增 `"state":{"hit","cmp_ok","rebuilt","src","n","bytes","mism","first"}`。
+- 新 host test `stateStore_test`（set/get/覆蓋/對拍/bytes 太長/store 滿/NULL），
+  run_all **24/24 全綠**。
+
+**上板驗證**（fw `87b13a0-dirty`、app `1c481edc`、idf=v6.1.1 WSL）
+- 正常開機：`status cfg` → `state:{"hit":1,"cmp_ok":1,"rebuilt":0,"src":1910502425,
+  "n":18,"bytes":124,"mism":0,"first":0}` → **18/18 完全一致**。
+- **self-heal 測試**：下載 124 B state.ncst，將 `0x0C01`（LED enable）反轉並**重算
+  正確 CRC**（格式合法、內容錯）→ PUT → reboot：
+  * `state:{"hit":0,"cmp_ok":0,"rebuilt":1,"n":18,"bytes":124,"mism":1,"first":3073}`
+    （first=0x0C01，即係改咗嗰個 key）→ 檔案自動重生，同原本 good 檔**逐 byte 一樣**；
+  * 再開機 → 回 `hit:1, cmp_ok:1`。
+- 證明：舊 cache 唔會靜默生效；壞檔／內容唔一致都會自動修復並大聲報。
+
+**下一步（P3 剩餘）**：drivers／config 真正改讀 store（hit 時跳過 JSON parse）；
+schema key table（path↔id）由 ncportgen 生成；`status` 加 store 命中率。

@@ -1,4 +1,15 @@
-// 開機 sync state.NCSTATE：由 config 派生（P2 第一步）。
+// 開機 sync state.ncst：由 config 派生＋對拍（P3 第一步）。
+//
+// 流程（定案：開機對哈希；一樣＝直接載入；唔一樣＝重新生成）：
+//   1. 算 config JSON 的 src_hash（hardware／driver／system／tasks／resources）
+//   2. peek state.ncst：ver／magic／CRC／src_hash 全中 → 載入 RAM store
+//   3. 同「由已 parse 的 cfg 造出的 records」**對拍**：
+//        - 全中 → hit（log: 一致 n/n）
+//        - 有唔同 → 當 miss（log: 唔一致 first key）→ 重寫（self-heal，防舊 cache 靜默生效）
+//   4. 檔案唔存在／壞／版本唔夾 → 由 cfg 造 records → atomic 寫檔（舊檔 → .bak）
+//
+// 保護層：L0 出廠預設（firmware const）／L1 JSON（權威）／L2 state.ncst（快取）／
+//         L2b .bak（last-known-good）。任何一層壞都唔會令設定「靜靜變零」。
 #include "nc_state_boot.h"
 
 #include <string.h>
@@ -7,6 +18,7 @@
 #include "nc_cfg.h"
 #include "nc_state_blob.h"
 #include "nc_state_file.h"
+#include "nc_state_store.h"
 
 static const char *TAG = "state";
 
@@ -42,6 +54,9 @@ enum {
 };
 
 static nc_state_rec_t s_recs[32];
+static nc_state_store_t s_store;          // 常駐 RAM：blob 載入後的值（~576 B internal）
+static nc_state_boot_result_t s_result;
+static bool s_result_valid;
 
 static size_t put_u(size_t n, uint16_t key, uint32_t v)
 {
@@ -123,10 +138,22 @@ static const char *miss_reason(esp_err_t e)
     }
 }
 
+static bool save_records(const nc_state_meta_t *meta, size_t nrec)
+{
+    const esp_err_t se = nc_state_file_save(NC_STATE_PATH, meta, s_recs, nrec);
+    if (se != ESP_OK) {
+        ESP_LOGE(TAG, "NCSTATE 寫檔失敗（%s）；L1 JSON／L0 預設仍然有效",
+                 esp_err_to_name(se));
+        return false;
+    }
+    (void)nc_state_store_from_recs(&s_store, s_recs, nrec);
+    return true;
+}
+
 esp_err_t nc_state_boot_sync(nc_state_boot_result_t *out)
 {
-    nc_state_boot_result_t r;
-    memset(&r, 0, sizeof(r));
+    memset(&s_result, 0, sizeof(s_result));
+    memset(&s_store, 0, sizeof(s_store));
 
     uint32_t src_hash = 0;
     const esp_err_t he = nc_state_file_hash_files(k_src_paths,
@@ -134,40 +161,71 @@ esp_err_t nc_state_boot_sync(nc_state_boot_result_t *out)
     if (he != ESP_OK) {
         ESP_LOGW(TAG, "NCSTATE：算 src_hash 失敗（%s）", esp_err_to_name(he));
         if (out != NULL) {
-            *out = r;
+            *out = s_result;
         }
         return he;
     }
-    r.src_hash = src_hash;
-    r.n_records = (uint32_t)build_records();
+    s_result.src_hash = src_hash;
+    s_result.n_records = (uint32_t)build_records();
+
+    const nc_state_meta_t meta = {
+        .ver = NC_STATE_BLOB_VER,
+        .flags = 0,
+        .src_hash = src_hash,
+    };
 
     nc_state_info_t info;
     const esp_err_t pe = nc_state_file_peek(NC_STATE_PATH, &info);
+    bool matched = false;
+
     if (pe == ESP_OK && info.src_hash == src_hash) {
-        r.hit = true;
-        r.bytes = nc_state_file_size(NC_STATE_PATH);
-        ESP_LOGI(TAG, "NCSTATE hit：src=0x%08x、%u 筆、%u B",
-                 (unsigned)src_hash, (unsigned)info.n_records, (unsigned)r.bytes);
-    } else {
-        r.why = miss_reason(pe);
-        const nc_state_meta_t meta = {
-            .ver = NC_STATE_BLOB_VER,
-            .flags = 0,
-            .src_hash = src_hash,
-        };
-        const esp_err_t se = nc_state_file_save(NC_STATE_PATH, &meta, s_recs, r.n_records);
-        if (se == ESP_OK) {
-            r.rebuilt = true;
-            r.bytes = nc_state_file_size(NC_STATE_PATH);
-            ESP_LOGW(TAG, "NCSTATE miss（%s）→ 重建：src=0x%08x、%u 筆、%u B（舊檔 → .bak）",
-                     r.why, (unsigned)src_hash, (unsigned)r.n_records, (unsigned)r.bytes);
+        // hit 候選：載入 blob → RAM store，同 cfg records 對拍
+        nc_state_info_t li;
+        const esp_err_t le = nc_state_file_load(NC_STATE_PATH, nc_state_store_cb,
+                                                &s_store, &li);
+        uint16_t first = 0;
+        const uint32_t diff = (le == ESP_OK)
+            ? nc_state_store_cmp(&s_store, s_recs, s_result.n_records, &first)
+            : 0xFFFFFFFFu;
+        s_result.n_skipped = (le == ESP_OK) ? li.n_skipped : 0;
+        if (le == ESP_OK && diff == 0) {
+            matched = true;
+            s_result.cmp_ok = true;
+            s_result.hit = true;
+            s_result.bytes = nc_state_file_size(NC_STATE_PATH);
+            ESP_LOGI(TAG, "NCSTATE hit：src=0x%08x、%u 筆、%u B（同 cfg 完全一致）",
+                     (unsigned)src_hash, (unsigned)s_result.n_records, (unsigned)s_result.bytes);
         } else {
-            ESP_LOGE(TAG, "NCSTATE miss（%s）→ 重建失敗（%s）；L1 JSON／L0 預設仍然有效",
-                     r.why, esp_err_to_name(se));
+            s_result.n_mismatch = diff;
+            s_result.first_diff = first;
+            ESP_LOGW(TAG, "NCSTATE hit 但對拍唔中：%u 筆（first=0x%04x）→ 當 miss 重寫",
+                     (unsigned)diff, (unsigned)first);
         }
     }
+
+    if (!matched) {
+        if (!s_result.n_mismatch) {
+            s_result.why = miss_reason(pe);
+        } else {
+            s_result.why = "cache 同 cfg 唔一致";
+        }
+        if (save_records(&meta, s_result.n_records)) {
+            s_result.rebuilt = true;
+            s_result.bytes = nc_state_file_size(NC_STATE_PATH);
+            ESP_LOGW(TAG, "NCSTATE miss（%s）→ 重建：src=0x%08x、%u 筆、%u B（舊檔 → .bak）",
+                     s_result.why, (unsigned)src_hash, (unsigned)s_result.n_records,
+                     (unsigned)s_result.bytes);
+        }
+    }
+
+    s_result_valid = true;
     if (out != NULL) {
-        *out = r;
+        *out = s_result;
     }
     return ESP_OK;
+}
+
+const nc_state_boot_result_t *nc_state_boot_last(void)
+{
+    return s_result_valid ? &s_result : NULL;
 }

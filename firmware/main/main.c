@@ -1542,6 +1542,16 @@ static size_t status_put_cfg(char *buf, size_t cap)
     char cj[288];
     nc_cfg_json(cj, sizeof(cj));
     jappend(buf, cap, &off, "\"cfg\":%s", cj);
+    const nc_state_boot_result_t *st = nc_state_boot_last();
+    if (st != NULL) {
+        jappend(buf, cap, &off,
+                ",\"state\":{\"hit\":%u,\"cmp_ok\":%u,\"rebuilt\":%u,"
+                "\"src\":%u,\"n\":%u,\"bytes\":%u,\"mism\":%u,\"first\":%u}",
+                st->hit ? 1u : 0u, st->cmp_ok ? 1u : 0u, st->rebuilt ? 1u : 0u,
+                (unsigned)st->src_hash, (unsigned)st->n_records,
+                (unsigned)st->bytes, (unsigned)st->n_mismatch,
+                (unsigned)st->first_diff);
+    }
     return off;
 }
 
