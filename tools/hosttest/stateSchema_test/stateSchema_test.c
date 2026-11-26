@@ -74,14 +74,17 @@ int main(void)
     k = nc_state_key(NC_KEY_LED_ENABLE);
     CHECK(k != NULL && k->type == NC_STATE_T_BOOL, "led enable");
     k = nc_state_key(NC_KEY_LED_FMT);
-    CHECK(k != NULL && k->type == NC_STATE_T_BYTES && k->max_len == 11, "led fmt");
+    CHECK(k != NULL && k->type == NC_STATE_T_UINT && k->n_enum == 5, "led fmt（enum）");
+    CHECK(k != NULL && strcmp(nc_state_enum_name(k, 0), "ws2812") == 0, "fmt enum 0");
+    CHECK(k != NULL && nc_state_enum_id(k, "apa102") == 4, "fmt 名 → index");
+    CHECK(k != NULL && nc_state_enum_id(k, "nope") == -1, "未知 fmt 名 → -1");
     k = nc_state_key(NC_KEY_LED_BACKEND);
     CHECK(k != NULL && k->type == NC_STATE_T_UINT && k->n_enum == 7, "led backend enum");
     CHECK(k != NULL && strcmp(nc_state_enum_name(k, 1), "i80") == 0, "enum 1 = i80");
     CHECK(k != NULL && nc_state_enum_name(k, 7) == NULL, "enum 7 應該 NULL");
     CHECK(nc_state_type_name(NC_STATE_T_SINT) != NULL, "type name");
 
-    printf("[3] 範圍：min／max／str 長度\n");
+    printf("[3] 範圍：min／max／enum／str\n");
     k = nc_state_key(NC_KEY_SYS_FRAME_MS);
     CHECK(!nc_state_key_in_range(k, 0), "frame_ms 0 應該超範圍");
     CHECK(nc_state_key_in_range(k, 1), "frame_ms 1 應該 OK");
@@ -92,8 +95,9 @@ int main(void)
     CHECK(!nc_state_key_in_range(k, -2), "wr -2 應該超範圍");
     CHECK(!nc_state_key_in_range(k, 55), "wr 55 應該超範圍");
     k = nc_state_key(NC_KEY_LED_FMT);
-    CHECK(nc_state_key_str_ok(k, 11), "str 11 字應該 OK");
-    CHECK(!nc_state_key_str_ok(k, 12), "str 12 字應該太長");
+    CHECK(nc_state_key_in_range(k, 4), "enum 4 應該 OK");
+    CHECK(!nc_state_key_in_range(k, 5), "enum 5 應該超範圍");
+    CHECK(!nc_state_key_str_ok(k, 5), "enum key 用 str 規則應該 false");
     CHECK(!nc_state_key_str_ok(nc_state_key(NC_KEY_LED_PX), 1), "非 str key 應該 false");
 
     printf("[4] check：boot／set 共用的驗證\n");
@@ -107,10 +111,8 @@ int main(void)
     r.type = NC_STATE_T_UINT;
     r.u = 0;
     CHECK(nc_state_schema_check(&r) == NC_STATE_CHK_RANGE, "px 0 應該超範圍");
-    const char *big = "0123456789abc";   // 13 字 > 11
-    nc_state_rec_t rs = { .key = NC_KEY_LED_FMT, .type = NC_STATE_T_BYTES,
-                          .bytes = big, .bytes_len = 13 };
-    CHECK(nc_state_schema_check(&rs) == NC_STATE_CHK_RANGE, "fmt 太長");
+    nc_state_rec_t rs = { .key = NC_KEY_LED_FMT, .type = NC_STATE_T_UINT, .u = 5 };
+    CHECK(nc_state_schema_check(&rs) == NC_STATE_CHK_RANGE, "fmt enum 5 超範圍");
     CHECK(strcmp(nc_state_schema_check_name(NC_STATE_CHK_TYPE), "type") == 0, "check name");
 
     printf("[5] 讀：schema 型別把關、sparse 回 false\n");
@@ -148,12 +150,15 @@ int main(void)
     CHECK(nc_state_set_i32(NC_KEY_LED_PX, 1) == NC_STATE_SET_WRONG_TYPE, "型別唔啱");
     CHECK(nc_state_set_i32(NC_KEY_I80_WR, -5) == NC_STATE_SET_OUT_OF_RANGE, "wr -5 拒絕");
     CHECK(nc_state_set_bool(NC_KEY_LED_ENABLE, false) == NC_STATE_SET_OK, "set enable");
-    CHECK(nc_state_set_str(NC_KEY_LED_FMT, "ws2812") == NC_STATE_SET_OK, "set fmt");
-    CHECK(nc_state_set_str(NC_KEY_LED_FMT, "0123456789abc") == NC_STATE_SET_OUT_OF_RANGE,
-          "fmt 13 字應該拒絕");
-    char buf[16];
-    CHECK(nc_state_get_str(NC_KEY_LED_FMT, buf, sizeof(buf)) && strcmp(buf, "ws2812") == 0,
-          "get fmt");
+    CHECK(nc_state_set_u32(NC_KEY_LED_FMT, 0) == NC_STATE_SET_OK, "set fmt enum 0");
+    CHECK(nc_state_set_u32(NC_KEY_LED_FMT, 5) == NC_STATE_SET_OUT_OF_RANGE,
+          "fmt enum 5 應該拒絕");
+    {
+        uint32_t v = 9;
+        CHECK(nc_state_get_u32(NC_KEY_LED_FMT, &v) && v == 0, "get fmt");
+        CHECK(strcmp(nc_state_enum_name(nc_state_key(NC_KEY_LED_FMT), v), "ws2812") == 0,
+              "fmt index → 名");
+    }
     CHECK(nc_state_dirty_count() == 3, "dirty=%u（px／enable／fmt）", nc_state_dirty_count());
     CHECK(nc_state_set_u32(NC_KEY_LED_PX, 256) == NC_STATE_SET_OK, "再 set px");
     CHECK(nc_state_dirty_count() == 3, "同一個 key 再寫唔應該加 dirty=%u", nc_state_dirty_count());

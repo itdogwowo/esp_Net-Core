@@ -87,26 +87,6 @@ bool nc_state_get_bool(uint32_t key, bool *out)
     return true;
 }
 
-bool nc_state_get_str(uint32_t key, char *buf, size_t cap)
-{
-    const nc_state_keydef_t *def = nc_state_key(key);
-    if (def == NULL || buf == NULL || cap == 0 || def->type != NC_STATE_T_BYTES) {
-        return false;
-    }
-    nc_state_rec_t r;
-    if (!nc_state_store_get(store_ro(), key, &r) || r.type != NC_STATE_T_BYTES) {
-        return false;
-    }
-    if ((size_t)r.bytes_len >= cap) {
-        return false;   // 唔截斷
-    }
-    if (r.bytes_len > 0 && r.bytes != NULL) {
-        memcpy(buf, r.bytes, r.bytes_len);
-    }
-    buf[r.bytes_len] = '\0';
-    return true;
-}
-
 // ── 熱路徑綁定 ─────────────────────────────────────────────────
 bool nc_state_bind_u32(uint32_t key, const uint32_t **out)
 {
@@ -218,26 +198,3 @@ nc_state_set_res_t nc_state_set_bool(uint32_t key, bool v)
     return put_rec(def, &r);
 }
 
-nc_state_set_res_t nc_state_set_str(uint32_t key, const char *s)
-{
-    const nc_state_keydef_t *def = nc_state_key(key);
-    if (def == NULL) {
-        return NC_STATE_SET_UNKNOWN_KEY;
-    }
-    if (def->type != NC_STATE_T_BYTES) {
-        return NC_STATE_SET_WRONG_TYPE;
-    }
-    if (s == NULL) {
-        return NC_STATE_SET_OUT_OF_RANGE;
-    }
-    const size_t len = strlen(s);
-    if (!nc_state_key_str_ok(def, len)) {
-        return NC_STATE_SET_OUT_OF_RANGE;   // schema 上限
-    }
-    if (len > NC_STATE_STORE_BYTES_MAX) {
-        return NC_STATE_SET_NO_SPACE;       // store 字串容量
-    }
-    const nc_state_rec_t r = { .key = key, .type = NC_STATE_T_BYTES,
-                               .bytes = s, .bytes_len = (uint16_t)len };
-    return put_rec(def, &r);
-}

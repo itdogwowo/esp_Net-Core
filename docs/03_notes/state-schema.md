@@ -96,6 +96,8 @@ src_hash = **值集**（將寫入的 records）嘅 CRC32；開機：
 
 - `unit` 一定要等於 key id 的 unit byte（生成器驗），「key 屬邊個能力」唔會同 id 打架。
 - `type`：`u8`／`u16`／`u32`／`i8`／`i32`／`bool`／`enum`／`str`；`str` 要寫 `max_len`（唔含 NUL）。
+  **2026-11-27 起 state 只存數值**：`LED_FMT` 由 `str` 改成 `enum`（存 index 0..4），
+  名字留在字典（flash）。store 收到 BYTES 會明示拒絕（唔截斷）。
 - `enum` 要寫 `values[]`（由 0 連續排列），例如 LED backend：`none/i80/spi/rmt/parlio/direct/mock`。
 - `min/max`：`nc_state_set_*()` 同 `nc_state_schema_check()` 共用同一條規則；超出＝明示失敗。
 - **唔寫 `default`**：出廠值仍然只有一份（C 的 `nc_cfg_defaults_*`／Kconfig），避免第二個真相。
@@ -182,5 +184,5 @@ schema/state-keys.json
   `bad` = boot 由 cfg 造出的 record 同 schema 唔一致（code／schema drift，會 log 出嚟）。
 - **寫入語義**：`nc_state_set_*()` 只改 RAM store（`dirty` 計唔同 key 數）；
   reboot 仍然以 `/data/config/*.json` 為權威，永久改要改 JSON。
-- 現時覆蓋：sys（3）／I80（5）／SPI（7）／LED（10）＝ **25 個 key、4 個 unit**；
+- 現時覆蓋：sys（3）／I80（5）／SPI（7）／LED（10）＝ **25 個 key、4 個 unit**（其中 2 個 enum：LED backend／LED fmt）；
   Matrix 的 `state.ncst` 18 筆／124 B。

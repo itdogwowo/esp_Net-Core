@@ -47,13 +47,6 @@ static size_t put_b(size_t n, uint32_t key, bool v)
     return n + 1;
 }
 
-static size_t put_s(size_t n, uint32_t key, const char *s)
-{
-    s_recs[n] = (nc_state_rec_t){ .key = key, .type = NC_STATE_T_BYTES,
-                                  .bytes = s, .bytes_len = (uint16_t)strlen(s) };
-    return n + 1;
-}
-
 // 由已 parse 的 cfg 造 record（sparse：只寫真的值；default 留給 schema／L0）
 static size_t build_records(void)
 {
@@ -96,7 +89,15 @@ static size_t build_records(void)
             n = put_u(n, NC_KEY_LED_LANES, led->lanes);
             n = put_u(n, NC_KEY_LED_PX, led->px);
             if (led->fmt[0] != '\0') {
-                n = put_s(n, NC_KEY_LED_FMT, led->fmt);
+                // JSON 寫人讀名（"ws2812"），state 只存 index（enum）：
+                // 名字留喺 schema 字典（flash），唔入 store／blob。
+                const int fid = nc_state_enum_id(nc_state_key(NC_KEY_LED_FMT), led->fmt);
+                if (fid >= 0) {
+                    n = put_u(n, NC_KEY_LED_FMT, (uint32_t)fid);
+                } else {
+                    ESP_LOGW(TAG, "LED format '%s' 唔在 schema enum 內 → 跳過呢個 key",
+                             led->fmt);
+                }
             }
             n = put_u(n, NC_KEY_LED_CLK, led->clk_hz);
             n = put_u(n, NC_KEY_LED_BIT_CELLS, led->bit_cells);

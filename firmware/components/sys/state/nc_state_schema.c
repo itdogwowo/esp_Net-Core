@@ -85,6 +85,19 @@ const char *nc_state_enum_name(const nc_state_keydef_t *def, uint32_t v)
     return def->enum_names[v];
 }
 
+int nc_state_enum_id(const nc_state_keydef_t *def, const char *name)
+{
+    if (def == NULL || name == NULL || def->n_enum == 0 || def->enum_names == NULL) {
+        return -1;
+    }
+    for (uint16_t i = 0; i < def->n_enum; i++) {
+        if (def->enum_names[i] != NULL && strcmp(def->enum_names[i], name) == 0) {
+            return (int)i;
+        }
+    }
+    return -1;
+}
+
 bool nc_state_key_in_range(const nc_state_keydef_t *def, int64_t v)
 {
     if (def == NULL) {

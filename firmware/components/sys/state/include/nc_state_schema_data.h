@@ -9,7 +9,7 @@
 #include "nc_state_keys.h"   // NC_UNIT_*／NC_KEY_*
 
 #define NC_STATE_SCHEMA_VERSION 2u
-#define NC_STATE_SCHEMA_CRC     0x3a650caau
+#define NC_STATE_SCHEMA_CRC     0x74b03b1du
 #define NC_STATE_KEY_COUNT      25u
 #define NC_STATE_UNIT_COUNT     4u
 

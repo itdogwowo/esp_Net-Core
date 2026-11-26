@@ -20,15 +20,20 @@ extern "C" {
 #endif
 
 #define NC_STATE_STORE_MAX        64
-#define NC_STATE_STORE_BYTES_MAX  16   // 短字串（led fmt 最多 12）
 
+// 12 B／筆（2026-11-27）：state 只存**數值**。
+//   - key 4 + type 1 + pad 3 + union 4
+//   - 冇 bytes[16]：字串唔應該入 state（名字在 schema 字典＝flash，0 RAM）；
+//     LED 的線材格式已由 str 改成 enum（存 index 0..4）。
+//   - u／i 用 union：同一筆只會用其中一個（之前兩個各 4 B）。
 typedef struct {
     uint32_t key;
     uint8_t  type;
-    uint8_t  bytes_len;
-    uint32_t u;
-    int32_t  i;
-    char     bytes[NC_STATE_STORE_BYTES_MAX];
+    uint8_t  _pad[3];
+    union {
+        uint32_t u;
+        int32_t  i;
+    };
 } nc_state_ent_t;
 
 typedef struct {

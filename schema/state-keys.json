@@ -244,10 +244,16 @@
       "id": "0x000C0006",
       "name": "NC_KEY_LED_FMT",
       "unit": "led",
-      "type": "str",
-      "max_len": 11,
+      "type": "enum",
+      "values": [
+        "ws2812",
+        "ws2812w",
+        "ws2815",
+        "ws2801",
+        "apa102"
+      ],
       "path": "driver.json:LED.format",
-      "desc": "ws2812/ws2812w/apa102…"
+      "desc": "線材格式（= nc_px_format_t 的 index）"
     },
     {
       "id": "0x000C0007",

@@ -10172,3 +10172,51 @@ commit 路徑（STATUS_SET 的 persist 位＋reboot 前 flush）；大表補齊 
 （1680×900，見 PNG），三格文字冇重疊、rail 唔壓 box 內文。
 
 **未做**：圖上的 S2（apply_to_cfg）仍然是「未做」——畫圖唔等於做完，實作在下一步。
+
+---
+
+### 7.293 2026-11-27（state 只存數值：entry 32→12 B、字串退場、`s_store` 2,052→772 B）
+
+**為什麼**：§7.292 的圖寫 70 筆 × 32 B，用家問「32 B 邊來的？為什麼要存字串？」
+查完：`nc_state_ent_t` 每一筆都預留 `bytes[16]`（給字串），而且 `u`／`i` 各自 4 B
+（同一筆只會用一個）。但 **firmware 早就已經有 enum**（`nc_px_format_t`＋
+`nc_px_format_parse()`／`name()`），而 schema 本身就有 `enum` 型別——
+字串只是 JSON 給人寫的輸入格式，不應該入 state。
+
+**做法**：
+
+| 改動 | 內容 |
+|---|---|
+| schema | `NC_KEY_LED_FMT`：`str` → `enum`（`ws2812／ws2812w／ws2815／ws2801／apa102`，＝`nc_px_format_t` 的 index） |
+| store | `nc_state_ent_t` 32 → **12 B**：`key 4 + type 1 + pad 3 + union{u,i} 4`；`bytes[16]` 移除 |
+| store 語義 | 收到 `NC_STATE_T_BYTES` → **明示 false**（state 只存數值；唔截斷） |
+| schema API | 新增 `nc_state_enum_id(def, "ws2812")` → 0..4（名→index） |
+| boot | `driver.json` 的 `"format": "ws2812"` 用 `enum_id()` 轉 index 才入 record；唔認得就 log 兼跳過 |
+| render | `nc_state_get_u32(LED_FMT)` 取 index → `nc_state_enum_name()` 取名寫回 `fmt[]` |
+| api | `nc_state_get_str()`／`set_str()` 退場（冇人再用） |
+
+**驗證（host 25/25）**：
+
+- `stateSchema_test`：`LED_FMT` 是 enum（`n_enum=5`）、`enum_id("apa102")==4`、
+  `enum_id("nope")==-1`、`in_range(4)` 過／`in_range(5)` 拒、`str_ok()` 對 enum 回 false
+- `stateStore_test`：`BYTES` 明示拒絕、enum 讀寫、`bind` 型別唔對改用 sint key 驗
+
+**驗證（build＋上板，`idf=v6.1.1`／SuperMini-LED-Textkit）**：
+
+| 項目 | 之前 | 之後 |
+|---|---:|---:|
+| `sizeof(nc_state_ent_t)` | 32 B | **12 B** |
+| `s_store`（`nm` 量到） | `0x804`＝2,052 B | **`0x304`＝772 B（−1,280 B internal RAM）** |
+| `s_recs`（開機暫存） | 768 B | 768 B（不變，blob 相容） |
+| 字典表（flash） | `0x384`＝900 B | 900 B（不變，仍在 `.flash.rodata`） |
+| image | 747,264 B | 747,296 B（+32 B） |
+
+上板：`status sys` `fw=ee16d71-dirty`／`app=54774e80`／`rst=3`；
+`status cfg` → `state{hit:1, n:5, bytes:50}`、`schema{keys:25, crc:0x74B03B1D, bad:0}`。
+（LED_FMT 唔在這塊板的 records 內，所以 blob 值不變 → 正確地 hit。）
+
+**容量結論**：Matrix 典型啟動 **70 筆**（sys 12＋PIN 6×3＋I80 22＋LED 10＋UART 6＋PWM 2），
+70 × 12 = **840 B**；但現時上限 64 筆（772 B）仍然唔夠 → **S4 要一齊提到 96 筆＝1,156 B**。
+
+**未做**：store 64→96（S4）；如果真的需要用戶自訂字串（SSID／裝置名），另設小字串池，
+唔好再回到「每筆預留 16 B」。

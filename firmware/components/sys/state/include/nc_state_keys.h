@@ -60,7 +60,7 @@ enum {
     NC_KEY_LED_LANES = 0x000c0004u,
     /* 0x000c0005 每條 lane 幾顆（driver.json:LED.px） */
     NC_KEY_LED_PX = 0x000c0005u,
-    /* 0x000c0006 ws2812/ws2812w/apa102…（driver.json:LED.format） */
+    /* 0x000c0006 線材格式（= nc_px_format_t 的 index）（driver.json:LED.format） */
     NC_KEY_LED_FMT = 0x000c0006u,
     /* 0x000c0007 I80 PCLK / SPI 時鐘（driver.json:LED.timing.pclk_hz） */
     NC_KEY_LED_CLK = 0x000c0007u,

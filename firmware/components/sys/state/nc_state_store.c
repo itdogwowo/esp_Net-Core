@@ -25,8 +25,8 @@ bool nc_state_store_put(nc_state_store_t *s, const nc_state_rec_t *r)
     if (s == NULL || r == NULL) {
         return false;
     }
-    if (r->type == NC_STATE_T_BYTES && r->bytes_len > NC_STATE_STORE_BYTES_MAX) {
-        return false;   // 明示失敗，唔截斷
+    if (r->type == NC_STATE_T_BYTES) {
+        return false;   // state 只存數值：字串請留喺 config／另設字串池（明示，唔截斷）
     }
     nc_state_ent_t *e = find_mut(s, r->key);
     if (e == NULL) {
@@ -38,14 +38,9 @@ bool nc_state_store_put(nc_state_store_t *s, const nc_state_rec_t *r)
     }
     e->key = r->key;
     e->type = r->type;
-    e->u = r->u;
-    e->i = r->i;
-    e->bytes_len = 0;
-    if (r->type == NC_STATE_T_BYTES) {
-        if (r->bytes_len > 0 && r->bytes != NULL) {
-            memcpy(e->bytes, r->bytes, r->bytes_len);
-            e->bytes_len = (uint8_t)r->bytes_len;
-        }
+    e->u = r->u;    // union：sint 由下面覆寫
+    if (r->type == NC_STATE_T_SINT) {
+        e->i = r->i;
     }
     return true;
 }
@@ -97,12 +92,8 @@ bool nc_state_store_get(const nc_state_store_t *s, uint32_t key, nc_state_rec_t 
     memset(out, 0, sizeof(*out));
     out->key = e->key;
     out->type = e->type;
-    out->u = e->u;
+    out->u = e->u;      // union：同一個位
     out->i = e->i;
-    if (e->type == NC_STATE_T_BYTES && e->bytes_len > 0) {
-        out->bytes = e->bytes;
-        out->bytes_len = e->bytes_len;
-    }
     return true;
 }
 
@@ -118,9 +109,7 @@ static bool ent_same(const nc_state_ent_t *e, const nc_state_rec_t *r)
     case NC_STATE_T_SINT:
         return e->i == r->i;
     case NC_STATE_T_BYTES:
-        return e->bytes_len == r->bytes_len &&
-               (r->bytes_len == 0 ||
-                (r->bytes != NULL && memcmp(e->bytes, r->bytes, r->bytes_len) == 0));
+        return false;   // store 唔存字串（唔會相等）
     default:
         return false;
     }

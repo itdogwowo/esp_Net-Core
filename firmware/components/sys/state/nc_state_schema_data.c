@@ -5,6 +5,8 @@
 
 static const char *const s_enum_nc_key_led_backend[] = { "none", "i80", "spi", "rmt", "parlio", "direct", "mock" };
 
+static const char *const s_enum_nc_key_led_fmt[] = { "ws2812", "ws2812w", "ws2815", "ws2801", "apa102" };
+
 const nc_state_keydef_t nc_state_schema_keys[NC_STATE_KEY_COUNT] = {
     {
         .id = 0x00000002u, .unit = NC_UNIT_SYS,
@@ -168,11 +170,11 @@ const nc_state_keydef_t nc_state_schema_keys[NC_STATE_KEY_COUNT] = {
     },
     {
         .id = 0x000c0006u, .unit = NC_UNIT_LED,
-        .type = NC_STATE_T_BYTES, .min = 0, .max = 11,
-        .max_len = 11, .n_enum = 0,
-        .enum_names = NULL,
+        .type = NC_STATE_T_UINT, .min = 0, .max = 4,
+        .max_len = 0, .n_enum = 5,
+        .enum_names = s_enum_nc_key_led_fmt,
         .name = "NC_KEY_LED_FMT", .path = "driver.json:LED.format",
-        .desc = "ws2812/ws2812w/apa102…",
+        .desc = "線材格式（= nc_px_format_t 的 index）",
     },
     {
         .id = 0x000c0007u, .unit = NC_UNIT_LED,

@@ -41,6 +41,10 @@ const char *nc_state_type_name(uint8_t type);
 const char *nc_state_enum_name(const nc_state_keydef_t *def, uint32_t v);
 
 // ── 驗證（set 同 boot 共用同一條規則） ─────────────────────────
+// enum 名 → index（例："ws2812" → 0）；唔係 enum／冇呢個名 → -1。
+// 用途：JSON 寫的是人讀名（driver.json 的 "format": "ws2812"），state 只存 index。
+int nc_state_enum_id(const nc_state_keydef_t *def, const char *name);
+
 // 數值（uint／sint／bool／enum）：min <= v <= max。
 bool nc_state_key_in_range(const nc_state_keydef_t *def, int64_t v);
 

@@ -25,9 +25,13 @@ OUT = ROOT / "docs/00_pm/state-flow.svg"
 KEY_NOW = 25                 # 現時 schema key 數
 KEY_MATRIX = 380             # hw-matrix.md 的大表
 KEY_TARGET = 565             # 大表＋9 類缺失資源
-STORE_ENTRY = 32             # nc_state_ent_t（u32 key 之後）
-STORE_MAX = 64               # NC_STATE_STORE_MAX
-TYPICAL_ACTIVE = 52          # 典型啟動：sys 12 + i80 22 + led 10 + pin 8
+STORE_ENTRY = 32             # 舊 entry（u32 key＋bytes[16]＋u/i 分開）
+ENTRY_SLIM = 12              # 2026-11-27 瘦身後（key4＋type1＋pad3＋union4）
+STORE_MAX = 64               # 現時 NC_STATE_STORE_MAX
+STORE_MAX_NEW = 96           # 建議（70 筆 + 餘裕）
+# 典型啟動（Matrix 真實 config）：sys 12 + PIN 6×3=18 + I80 22 + LED 10
+#                              + UART 6 + PWM 2 = 70
+TYPICAL_ACTIVE = 70
 BLOB_NOW = 50                # 板上實測 bytes
 CFG_US = 24.4                # 開機 parse（實測 24,343–24,463 µs）
 STATE_US = 8.5               # state merge（實測 8,429–8,664 µs）
@@ -113,52 +117,57 @@ def svg_open(h: int) -> list[str]:
 def panel_cache(y: int) -> str:
     x, w = M, 800
     h = 372
-    s = [rect(x, y, w, h, WHITE, RULE), text(x + 18, y + 28, "① 緩存佔用：未過濾 vs 只載已啟動", 15, INK, 700)]
+    s = [rect(x, y, w, h, WHITE, RULE), text(x + 18, y + 28, "① 緩存佔用：過濾 × 瘦身", 15, INK, 700)]
     s.append(text(x + 18, y + 48,
-                  f"store 每筆 {STORE_ENTRY} B（u32 key）；上限 {STORE_MAX} 筆 = {STORE_MAX*STORE_ENTRY:,} B",
+                  f"entry：舊 {STORE_ENTRY} B（含 bytes[16]）→ 新 {ENTRY_SLIM} B（只存數值；字串唔入 state）",
                   10.5, MUTED))
 
-    bx, bw = x + 170, 470          # bar 區
-    full = KEY_TARGET * STORE_ENTRY
-    scale = bw / full
+    # 全部入 store 的極端情況用文字講（18 KB 會壓扁整條 bar 的刻度）
+    s.append(rect(x + 18, y + 60, w - 36, 34, F_BAD, S_BAD, 1, 6))
+    s.append(text(x + 30, y + 76,
+                  f"如果全部 {KEY_TARGET} key 都入 store：{KEY_TARGET*STORE_ENTRY:,} B"
+                  f"（＝上限的 {KEY_TARGET*STORE_ENTRY/(STORE_MAX*ENTRY_SLIM+4):.1f} 倍）→ 一定爆",
+                  10.5, S_BAD, 700))
+    s.append(text(x + 30, y + 90, "所以一定要 activation 過濾（S4）＋ entry 瘦身（S5，已做）", 9.5, INK2))
 
-    def row(yy, label, keys, fill, stroke, note, delay):
-        wpx = keys * STORE_ENTRY * scale
+    bx, bw = x + 170, 470
+    scale_max = 2500
+    scale = bw / scale_max
+
+    def row(yy, label, keys, entry, fill, stroke, note, delay, limit=None):
+        wpx = keys * entry * scale
         out = [text(bx - 14, yy + 13, label, 11, INK2, 600, anchor="end")]
-        out.append(rect(bx, yy, bw, 24, "#F4F2EC", RULE, 0.8, 3))
-        out.append(bar(bx, yy, wpx, 24, fill, stroke, 1.4, delay))
-        out.append(text(bx + wpx + 8, yy + 16,
-                        f"{keys} key × {STORE_ENTRY} B = {keys*STORE_ENTRY:,} B", 10.5, stroke, 700))
-        out.append(text(bx, yy + 40, note, 9.5, MUTED))
+        out.append(rect(bx, yy, bw, 22, "#F4F2EC", RULE, 0.8, 3))
+        out.append(bar(bx, yy, max(3, wpx), 22, fill, stroke, 1.4, delay))
+        out.append(text(bx + max(3, wpx) + 8, yy + 15,
+                        f"{keys} × {entry} B = {keys*entry:,} B", 10.5, stroke, 700))
+        if limit is not None:
+            out.append(text(bx + max(3, wpx) + 8, yy + 30, limit, 9, S_BAD))
+        out.append(text(bx, yy + 36, note, 9.5, MUTED))
         return "".join(out)
 
-    s.append(text(x + 18, y + 78, "如果所有 key 都入 store（S4 之前）", 11, INK, 700))
-    s.append(row(y + 88, "565 key（大表＋缺失）", KEY_TARGET, F_BAD, S_BAD,
-                 "18 KB > 2 KB 上限 → 第 65 筆之後靜默截斷（違反鐵律 9）", 0.2))
-    s.append(text(x + 18, y + 178, "activation 過濾後（S4 目標）", 11, INK, 700))
-    s.append(row(y + 188, "52 key（典型）", TYPICAL_ACTIVE, F_OK, S_OK,
-                 f"{TYPICAL_ACTIVE*STORE_ENTRY:,} B ＝ 上限的 {TYPICAL_ACTIVE/STORE_MAX*100:.0f}%，餘 {STORE_MAX-TYPICAL_ACTIVE} 筆", 0.7))
+    s.append(text(x + 18, y + 120, f"現時上限：{STORE_MAX} 筆 × {ENTRY_SLIM} B = {STORE_MAX*ENTRY_SLIM:,} B"
+                                   f"（s_store 實測 {STORE_MAX*ENTRY_SLIM+4:,} B）", 10.5, INK, 700))
+    s.append(row(y + 132, "過濾後（70 筆）", TYPICAL_ACTIVE, STORE_ENTRY, F_BAD, S_BAD,
+                 "S4 只做過濾仍然爆：2,240 B > 772 B，而且 70 > 64 筆", 0.25,
+                 limit="← 超上限"))
+    s.append(row(y + 196, "瘦身後（70 筆）", TYPICAL_ACTIVE, ENTRY_SLIM, F_OK, S_OK,
+                 f"要 {STORE_MAX_NEW} 筆 = {STORE_MAX_NEW*ENTRY_SLIM+4:,} B，餘 {STORE_MAX_NEW-TYPICAL_ACTIVE} 筆", 0.55))
+    s.append(row(y + 252, "板上實測（5 筆）", 5, ENTRY_SLIM, F_INFO, S_INFO,
+                 "SuperMini 現時真正有值的 key（sys 3 ＋ device 2）", 0.85))
 
-    # 上限虛線 + 呼吸
-    lim = STORE_MAX * STORE_ENTRY * scale
-    s.append(f'<line x1="{bx+lim:.1f}" y1="{y+84}" x2="{bx+lim:.1f}" y2="{y+150}" '
-             f'stroke="{S_BAD}" stroke-width="1.4" stroke-dasharray="5 4">'
-             f'<animate attributeName="opacity" values="1;0.35;1" dur="2.6s" repeatCount="indefinite"/></line>')
-    s.append(text(bx + lim + 6, y + 80, f"上限 {STORE_MAX*STORE_ENTRY:,} B", 9.5, S_BAD))
+    # 上限虛線（772 B）＋ 建議上限（96 筆）
+    for val, lab, col in ((STORE_MAX*ENTRY_SLIM, f"{STORE_MAX*ENTRY_SLIM} B", S_BAD),
+                          (STORE_MAX_NEW*ENTRY_SLIM+4, f"{STORE_MAX_NEW*ENTRY_SLIM+4:,} B", S_OK)):
+        lx = bx + val * scale
+        s.append(f'<line x1="{lx:.1f}" y1="{y+128}" x2="{lx:.1f}" y2="{y+286}" '
+                 f'stroke="{col}" stroke-width="1.3" stroke-dasharray="5 4">'
+                 f'<animate attributeName="opacity" values="1;0.4;1" dur="2.8s" repeatCount="indefinite"/></line>')
+        s.append(text(lx + 4, y + 126, lab, 9, col))
 
-    # blob
-    s.append(text(x + 18, y + 268, "FAT blob（state.ncst，只存 override）", 11, INK, 700))
-    bw2 = 470
-    rows = [("現在（板上實測）", BLOB_NOW, F_INFO, S_INFO),
-            ("典型（52 key override）", 480, F_INFO, S_INFO),
-            ("worst（565 key 全改）", 5120, F_TODO, S_TODO)]
-    mx = 5120
-    for i, (lab, v, f, st) in enumerate(rows):
-        yy = y + 280 + i * 28
-        s.append(text(bx - 14, yy + 12, lab, 10, INK2, anchor="end"))
-        s.append(rect(bx, yy, bw2, 18, "#F4F2EC", RULE, 0.8, 3))
-        s.append(bar(bx, yy, max(4, v / mx * bw2), 18, f, st, 1.2, 1.0 + i * 0.15))
-        s.append(text(bx + max(4, v / mx * bw2) + 8, yy + 13, f"{v:,} B", 9.5, st, 700))
+    # FAT blob
+    s.append(text(x + 18, y + 316, "FAT blob（state.ncst，只存 override）：現在 50 B；典型 ~480 B（LED_FMT 由 6 B 字串變 1 B index）",
+                  9.5, MUTED))
     return "".join(s)
 
 
@@ -233,7 +242,7 @@ def panel_roadmap(y: int) -> str:
         ("S2", "apply_to_cfg（B05 前）", "override 真正生效", "next"),
         ("S3", "commit＋persist 位", "STATUS_SET 落盤", "todo"),
         ("S4", "activation 搬 boot-time", "store 只載 enabled", "todo"),
-        ("S5", "大表補 9 類（+185）", "RMT／ADC／TWAI…", "todo"),
+        ("S5", "大表補 9 類（+185）", "entry 12 B ✔｜RMT／ADC…", "todo"),
         ("S6", "模板＋preset 驗證", "565 key 可 seed", "todo"),
     ]
     cy = y + 96
@@ -302,8 +311,9 @@ def build() -> str:
     s.append(panel_roadmap(520))
     # 底部一句
     s.append(text(M, 860,
-                  f"現時 schema {KEY_NOW} key（4 unit）；大表 {KEY_MATRIX}；補齊之後 {KEY_TARGET}。"
-                  f" store 上限 {STORE_MAX} 筆 → 典型啟動 {TYPICAL_ACTIVE} 筆，餘裕 {STORE_MAX-TYPICAL_ACTIVE} 筆。",
+                  f"現時 schema {KEY_NOW} key（4 unit）；大表 {KEY_MATRIX}；補齊 {KEY_TARGET}。"
+                  f" entry {STORE_ENTRY}→{ENTRY_SLIM} B（s_store 2,052→772 B）；"
+                  f"典型 {TYPICAL_ACTIVE} 筆需 {STORE_MAX_NEW} 筆容量＝{STORE_MAX_NEW*ENTRY_SLIM+4:,} B。",
                   11, INK2))
     s.append("</svg>")
     return "\n".join(s)

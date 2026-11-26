@@ -38,6 +38,7 @@
 #include "nc_state_boot.h"
 #include "nc_state_keys.h"
 #include "nc_state_api.h"
+#include "nc_state_schema.h"
 #include "nc_prio.h"
 #include "nc_task.h"
 #include "sdkconfig.h"
@@ -196,9 +197,14 @@ static const nc_led_cfg_t *led_cfg(void)
             if (nc_state_get_u32(NC_KEY_LED_PX, &u)) {
                 s_led_from_state.px = (uint16_t)u; hits++;
             }
-            if (nc_state_get_str(NC_KEY_LED_FMT, s_led_from_state.fmt,
-                                  sizeof(s_led_from_state.fmt))) {
-                hits++;
+            if (nc_state_get_u32(NC_KEY_LED_FMT, &u)) {
+                // state 存 enum index；名字由 schema 字典查返（唔存字串）。
+                const char *nm = nc_state_enum_name(nc_state_key(NC_KEY_LED_FMT), u);
+                if (nm != NULL) {
+                    (void)snprintf(s_led_from_state.fmt, sizeof(s_led_from_state.fmt),
+                                   "%s", nm);
+                    hits++;
+                }
             }
             if (nc_state_get_u32(NC_KEY_LED_CLK, &u)) {
                 s_led_from_state.clk_hz = u; hits++;

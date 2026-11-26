@@ -35,14 +35,13 @@ int main(void)
 {
     nc_state_store_t s;
 
-    printf("[1] put／get：uint／sint／bool／bytes\n");
+    printf("[1] put／get：uint／sint／bool／enum\n");
     nc_state_store_clear(&s);
-    const char *fmt = "ws2812";
     nc_state_rec_t rs[] = {
         {.key = NC_KEY_SYS_FRAME_MS, .type = NC_STATE_T_UINT, .u = 20},
         {.key = NC_KEY_I80_WR, .type = NC_STATE_T_SINT, .i = -1},
         {.key = NC_KEY_LED_ENABLE, .type = NC_STATE_T_BOOL, .u = 1},
-        {.key = NC_KEY_LED_FMT, .type = NC_STATE_T_BYTES, .bytes = fmt, .bytes_len = 6},
+        {.key = NC_KEY_LED_FMT, .type = NC_STATE_T_UINT, .u = 0},   // enum："ws2812"
     };
     for (size_t i = 0; i < sizeof(rs) / sizeof(rs[0]); i++) {
         CHECK(nc_state_store_put(&s, &rs[i]), "put[%zu] 失敗", i);
@@ -52,8 +51,7 @@ int main(void)
     CHECK(nc_state_store_get(&s, NC_KEY_SYS_FRAME_MS, &got) && got.u == 20, "get frame_ms");
     CHECK(nc_state_store_get(&s, NC_KEY_I80_WR, &got) && got.i == -1, "get wr");
     CHECK(nc_state_store_get(&s, NC_KEY_LED_ENABLE, &got) && got.u == 1, "get enable");
-    CHECK(nc_state_store_get(&s, NC_KEY_LED_FMT, &got) && got.bytes_len == 6 &&
-          memcmp(got.bytes, fmt, 6) == 0, "get fmt");
+    CHECK(nc_state_store_get(&s, NC_KEY_LED_FMT, &got) && got.u == 0, "get fmt（enum 0）");
 
     printf("[2] 重複 key 覆蓋（唔會加第二筆）\n");
     nc_state_rec_t r2 = {.key = NC_KEY_SYS_FRAME_MS, .type = NC_STATE_T_UINT, .u = 30};
@@ -72,29 +70,23 @@ int main(void)
     CHECK(nc_state_store_cmp(&s, rs2, 4, &first) == 1, "一筆唔同應該 1");
     CHECK(first == NC_KEY_LED_ENABLE, "first_diff=0x%08x", first);
 
-    printf("[4] read API：有值／冇值／型別唔啱／字串 cap\n");
+    printf("[4] read API：有值／冇值／型別唔啱／enum\n");
     s_stub = s;   // stub 指向同一份 store
     uint32_t u = 0;
     int32_t iv = 0;
     bool bv = false;
-    char buf[16];
     CHECK(nc_state_get_u32(NC_KEY_SYS_FRAME_MS, &u) && u == 20, "read frame_ms");
     CHECK(nc_state_get_i32(NC_KEY_I80_WR, &iv) && iv == -1, "read wr");
     CHECK(nc_state_get_bool(NC_KEY_LED_ENABLE, &bv) && bv, "read enable");
-    CHECK(nc_state_get_str(NC_KEY_LED_FMT, buf, sizeof(buf)) &&
-          strcmp(buf, "ws2812") == 0, "read fmt");
+    CHECK(nc_state_get_u32(NC_KEY_LED_FMT, &u) && u == 0, "read fmt enum");
     CHECK(!nc_state_get_u32(0x7FFF, &u), "唔存在 key 應該 false");
     CHECK(!nc_state_get_u32(NC_KEY_I80_WR, &u), "型別唔啱（sint 當 u32）應該 false");
-    CHECK(!nc_state_get_str(NC_KEY_LED_FMT, buf, 4), "cap 唔夠應該 false（唔截斷）");
     nc_state_store_clear(&s_stub);
     CHECK(!nc_state_get_u32(NC_KEY_SYS_FRAME_MS, &u), "store 清空應該 false");
 
-    printf("[5] bytes 太長／store 滿：明示 false\n");
-    char big[NC_STATE_STORE_BYTES_MAX + 1];
-    memset(big, 'x', sizeof(big));
-    nc_state_rec_t rb = {.key = 1, .type = NC_STATE_T_BYTES, .bytes = big,
-                         .bytes_len = (uint16_t)sizeof(big)};
-    CHECK(!nc_state_store_put(&s, &rb), "bytes 太長應該 false");
+    printf("[5] BYTES 唔支援／store 滿：明示 false\n");
+    nc_state_rec_t rb = {.key = 1, .type = NC_STATE_T_BYTES, .bytes = "x", .bytes_len = 1};
+    CHECK(!nc_state_store_put(&s, &rb), "BYTES 應該明示唔支援（state 只存數值）");
     nc_state_store_clear(&s);
     nc_state_rec_t rfill = {.type = NC_STATE_T_UINT, .u = 1};
     for (int i = 0; i < NC_STATE_STORE_MAX; i++) {
@@ -114,11 +106,10 @@ int main(void)
     printf("[7] bind：攞到 stable 位址，set 之後同一個位置見到新值\n");
     {
         nc_state_store_clear(&s_stub);
-        const char *fmt2 = "ws2812";
         nc_state_rec_t brs[] = {
             {.key = NC_KEY_LED_PX, .type = NC_STATE_T_UINT, .u = 64},
             {.key = NC_KEY_I80_WR, .type = NC_STATE_T_SINT, .i = 14},
-            {.key = NC_KEY_LED_FMT, .type = NC_STATE_T_BYTES, .bytes = fmt2, .bytes_len = 6},
+            {.key = NC_KEY_LED_FMT, .type = NC_STATE_T_UINT, .u = 4},
         };
         CHECK(nc_state_store_from_recs(&s_stub, brs, 3) == 3, "from_recs 失敗");
 
@@ -137,7 +128,7 @@ int main(void)
         CHECK(px != NULL && *px == 128, "同一個 pointer 應該見到新值 128");
 
         const uint32_t *bad = NULL;
-        CHECK(!nc_state_bind_u32(NC_KEY_LED_FMT, &bad), "bind 型別唔對應該 false");
+        CHECK(!nc_state_bind_u32(NC_KEY_I80_WR, &bad), "bind 型別唔對應該 false");
         CHECK(!nc_state_bind_u32(0x00FF00FFu, &bad), "bind 未知 key 應該 false");
         CHECK(!nc_state_bind_u32(NC_KEY_LED_PX, NULL), "out=NULL 應該 false");
     }

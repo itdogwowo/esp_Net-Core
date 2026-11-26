@@ -57,7 +57,7 @@ state.ncst（稀疏快取，可重建）← nc_state_boot_sync() ← 派生自�
 | led | `NC_KEY_LED_BUS` | i8 | -1..15 | `driver.json:LED.bus.index` | reboot |
 | led | `NC_KEY_LED_LANES` | u8 | 1..16 | `driver.json:LED.lanes` | reboot |
 | led | `NC_KEY_LED_PX` | u16 | 1..65535 | `driver.json:LED.px` | reboot |
-| led | `NC_KEY_LED_FMT` | str | ≤ 11 字 | `driver.json:LED.format` | reboot |
+| led | `NC_KEY_LED_FMT` | enum | enum：ws2812／ws2812w／ws2815／ws2801／apa102 | `driver.json:LED.format` | reboot |
 | led | `NC_KEY_LED_CLK` | u32 | 1000000..80000000 | `driver.json:LED.timing.pclk_hz` | reboot |
 | led | `NC_KEY_LED_BIT_CELLS` | u8 | 1..64 | `driver.json:LED.timing.bit_cells` | reboot |
 | led | `NC_KEY_LED_T0H` | u8 | 0..64 | `driver.json:LED.timing.t0h` | reboot |

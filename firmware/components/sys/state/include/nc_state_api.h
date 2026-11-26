@@ -25,7 +25,6 @@ extern "C" {
 bool nc_state_get_u32(uint32_t key, uint32_t *out);   // schema type: u8／u16／u32／enum
 bool nc_state_get_i32(uint32_t key, int32_t *out);    // schema type: i8／i32
 bool nc_state_get_bool(uint32_t key, bool *out);      // schema type: bool
-bool nc_state_get_str(uint32_t key, char *buf, size_t cap);   // schema type: str；cap 唔夠→false
 
 // ── 寫（schema 驗證；只改 RAM） ──────────────────────────────────
 typedef enum {
@@ -47,7 +46,6 @@ bool nc_state_bind_i32(uint32_t key, const int32_t **out);
 nc_state_set_res_t nc_state_set_u32(uint32_t key, uint32_t v);
 nc_state_set_res_t nc_state_set_i32(uint32_t key, int32_t v);
 nc_state_set_res_t nc_state_set_bool(uint32_t key, bool v);
-nc_state_set_res_t nc_state_set_str(uint32_t key, const char *s);
 
 // 失敗原因的字串（log／status 用）。
 const char *nc_state_set_res_name(nc_state_set_res_t r);
