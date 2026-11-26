@@ -9068,3 +9068,109 @@ LED lane 同 LCD 面板**；esp_lcd 版只做對照／回退。
 - esp_lcd 版（`DIRECT=n`）用同一份稀疏 JSON 都會 work（解析層自動補 dummy＋wr／dc），
   但實際佔用會變 10 支（補出來的），唔會同直驅一樣 1 支。
 - 16-bit 門檻：**>8 條有效腳**；寫 16 個槽但只有 1 支有效仍然係 8-bit（設計如此）。
+
+### 7.258 2026-11-26（跑分全面重跑＋出圖；現況總記錄）
+
+用家要求：**寫盡記錄現況**，把之前講過的跑分**全部重跑一次**，然後**畫一次圖**睇。
+
+#### 一、身份／環境（呢節所有數字都掛在這組身份上）
+
+| 項目 | 值 |
+|---|---|
+| 板 | ESP32-S3-Matrix（4 MB flash／2 MB PSRAM）＋64×WS2812 8×8 |
+| cid | `54EC`（`.testenv/machine.json` 綁定） |
+| IDF | **v6.1.1 (WSL)**（`make.py` 在 WSL 跑；OTA／NC4 在 Windows 側） |
+| fw／app | `a7aad43`／`6c7c1c6e`（`rst=3`＝software reset，正常） |
+| image | `artifacts/ESP32-S3-Matrix__ESP32-S3-Matrix-LED-Textkit.bin`，**726,800 B**，sha256 `cbfc78e035943252ac64755fb2d1b5ec9bf6cb73abcf8301020ad8a19da1aa03` |
+| 建置 | 45 s（incremental）／`--fresh` 92 s |
+| OTA | **141.1 KB/s**（726,800 B 用 5.0 s） |
+| host test | **21/21 全綠**（cfgstruct 178/178 項、portgen 全 OK） |
+| 圖 | [`bench-2026-11-26.png`](docs/assets/bench-2026-11-26.png)（Pillow 畫；重跑方法見 `modules/lab/bench_lab/README.md`） |
+
+> WebMaster 佔住 COM24，所以 `tenv stamp` 的 `board=`／`cid=` 會係 `-`（正常）；
+> 想 tenv 探板就先 `POST /api/port/release`。
+
+#### 二、現行設定（runtime 真值）
+
+| 項目 | 值 |
+|---|---|
+| I80 | **稀疏**：`data:[14]`（1 支真腳）／8-bit／**冇 wr／dc／cs** |
+| 驅動 | **直驅**（`CONFIG_NETCORE_PIXEL_I80_DIRECT=y`）；只 route／claim GPIO14 |
+| 環 | `i80.prd`：**320 B × 3 格**（internal，零拷貝） |
+| 像素 | 64 px × 1 lane；`fmt` WS2812 GRB；`clk_hz=2,500,000`、`bit_cells=3` |
+| mode | `rgb_breath`／`rainbow`／`white_breath`（JSON 四層資產） |
+| 任務閘 | `render`／`pixel_encode_task`／`pixel_paint_task`／`pixel_effect_task` 全部 `level=4`、`started=1`、`running=1` |
+
+#### 三、上板跑分（10 個樣本，每 0.6 s；`0xF071`）
+
+| 指標 | min | median | max | 備註 |
+|---|---:|---:|---:|---|
+| fps（×10） | 499 | **500** | 500 | 49.9–50.0 |
+| frame_us | 19,758 | **20,003** | 20,078 | 目標 20,000 |
+| frame_max_us | — | 20,276 | — | 最差幀 +276 µs |
+| enc_us | 147 | **150** | 194 | 編碼本體 |
+| tx_us | 15 | **18** | 47 | 提交（直驅在 task context start） |
+| eff_us | 13 | **14** | 14 | 效果層 |
+| pair_us | 39 | **41** | 42 | 抖動＋配對 |
+| apply_us | 31 | **33** | 34 | 套用 |
+| commit_us | 6 | **6** | 6 | 落格 |
+| lat_us（端到端） | 460 | **461** | — | max 762 |
+| starved | 2 | 2 | 2 | render 偶爾冇新格（正常） |
+| drops | 0 | **0** | 0 | 冇漏幀 |
+| fill | 1 | 1 | 1 | 環有 1 格在用 |
+
+#### 四、一幀 20 ms 去了邊（圖 A）
+
+| 段 | 時間 | 佔幀 |
+|---|---:|---:|
+| **CPU 全部**（eff 14＋pair 41＋apply 33＋enc 150＋tx 18） | **256 µs** | **1.3%** |
+| **DMA 線路**（64 px × 24 bit × 3 cells @2.5 MHz） | **1,843 µs** | **9.2%** |
+| **idle**（等下一幀） | **17,904 µs** | **89.5%** |
+
+→ CPU 餘量 >98%；幀率鎖 50 fps 係節拍器決定，唔係性能極限。
+
+#### 五、三個 mode 的畫面檢查（`0xF06B`，每 mode 3 幀）
+
+| mode | 不同顏色數 | 平均亮度 | 判定 |
+|---|---|---|---|
+| `rgb_breath` | 1 / 1 / 1 | 11.7 / 11.7 / 11.7 | ✅ 單色呼吸 |
+| `rainbow` | 1 / **64** / **64** | 11.3 / 11.5 / 11.5 | ✅ 64 顆 64 色 |
+| `white_breath` | 64 / 1 / 1 | 11.5 / 20.0 / 9.0 | ✅ 單色呼吸（呼吸值 20→9 有變化） |
+
+> 切 mode 後第一幀仍可能係舊 mode 的畫面（paint 在幀邊界換場），屬已知、正常。
+
+#### 六、記憶體帳（`status mem`／`status sys`）
+
+| 帳 | 值 |
+|---|---|
+| buffers | 4 個、共 **8,727 B**：`nc4.reply0` 2,615×1（PSRAM）、`usb.rx` 4,128×1、`i80.prd` **320×3**、`usb0.slots` 256×4 |
+| heap（internal） | **185,807 B** 可用 |
+| h_dma | 178,019 B |
+| h_ps（PSRAM） | **2,063,768 B** |
+
+#### 七、兩條 I80 驅動的性能 A/B（同 code、只切 Kconfig；各 5 樣本）
+
+| | esp_lcd 版 | 直驅版 | 判斷 |
+|---|---|---|---|
+| enc_us（中位） | 196 | 212（兩邊 range 151–217 重疊） | 量測變異，非驅動造成 |
+| tx_us（中位） | 11 | 19 | **結構性**：直驅在 task context 做 mount＋gdma_start＋4 µs FIFO 等待；esp_lcd 交 ISR |
+| fps／drops | 50／0 | 50／0 | 一樣 |
+| flash | 730,448 B | **724,592 B**（階段①時；現 release 726,800 B 含後續功能） | 唔 link esp_lcd i80 |
+| 佔用 GPIO | 10 | **1**（稀疏設定後） | 設計目標 |
+
+結論：**唔值得**再追呢 8–19 µs；詳見 §7.256。
+
+#### 八、本輪（2026-11-26）已完成嘅 commit
+
+`c493fdc`（階段①上板）→ `2cd136e`（保留真熒幕接駁位）→ `a076219`（完整 LCD 化：
+cmd/DC/CS）→ `3e55192`（AGENTS）→ `e9c69a4`（照 IDF 對照修正 clk／swizzle）→
+`0ed60f6`（wr／dc 有登記才生效）→ `1c78a0b`（階段②稀疏 data，Matrix 1 支腳）→
+`a7aad43`（背壓／frame 邊界文件）。全部**未 push**。
+
+#### 九、仍然未驗證／未做（誠實清單）
+
+- **LCD 面板**：cmd phase／DC 四段電平／CS 時序未有硬件驗證（冇面板）；多 device 切換未做。
+- **16-bit 資料路徑**：冇 16-bit 硬件，未上板。
+- **驅動 idle gap／underrun 上報**：內部有計數但未入 `0xF071`（想量「誰等誰」要加）。
+- **深睡／重啟後 DMA 狀況**：未有專門測試。
+- **push**：等用家明示。
