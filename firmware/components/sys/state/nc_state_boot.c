@@ -156,39 +156,48 @@ esp_err_t nc_state_boot_sync(nc_state_boot_result_t *out)
 
     nc_state_info_t info;
     const esp_err_t pe = nc_state_file_peek(NC_STATE_PATH, &info);
-    bool matched = false;
+    const bool hash_match = (pe == ESP_OK && info.src_hash == src_hash);
 
-    if (pe == ESP_OK && info.src_hash == src_hash) {
-        // hit 候選：載入 blob → RAM store，同 cfg records 對拍
+    // 無論 hash 是否對得上，都試載入舊 blob 對拍：
+    //   - hash 對 + 值全中 → 真 hit；
+    //   - hash 唔對但值一樣 → **唔重寫**（WL FAT 寫 124 B 實測要 ~762 ms，避免無謂寫盤）；
+    //   - 值有唔同／舊檔壞 → 先寫（唯一必要的一次性成本）。
+    bool cache_ok = false;
+    uint32_t diff = 0xFFFFFFFFu;
+    uint16_t first = 0;
+    if (pe == ESP_OK) {
         nc_state_info_t li;
+        memset(&s_store, 0, sizeof(s_store));
         const esp_err_t le = nc_state_file_load(NC_STATE_PATH, nc_state_store_cb,
                                                 &s_store, &li);
-        uint16_t first = 0;
-        const uint32_t diff = (le == ESP_OK)
-            ? nc_state_store_cmp(&s_store, s_recs, s_result.n_records, &first)
-            : 0xFFFFFFFFu;
-        s_result.n_skipped = (le == ESP_OK) ? li.n_skipped : 0;
-        if (le == ESP_OK && diff == 0) {
-            matched = true;
-            s_result.cmp_ok = true;
-            s_result.hit = true;
-            s_result.bytes = nc_state_file_size(NC_STATE_PATH);
-            ESP_LOGI(TAG, "NCSTATE hit：src=0x%08x、%u 筆、%u B（同 cfg 完全一致）",
-                     (unsigned)src_hash, (unsigned)s_result.n_records, (unsigned)s_result.bytes);
-        } else {
-            s_result.n_mismatch = diff;
-            s_result.first_diff = first;
-            ESP_LOGW(TAG, "NCSTATE hit 但對拍唔中：%u 筆（first=0x%04x）→ 當 miss 重寫",
-                     (unsigned)diff, (unsigned)first);
+        if (le == ESP_OK) {
+            cache_ok = true;
+            diff = nc_state_store_cmp(&s_store, s_recs, s_result.n_records, &first);
+            s_result.n_skipped = li.n_skipped;
         }
     }
 
-    if (!matched) {
-        if (!s_result.n_mismatch) {
-            s_result.why = miss_reason(pe);
-        } else {
-            s_result.why = "cache 同 cfg 唔一致";
-        }
+    bool matched = false;
+    if (hash_match && cache_ok && diff == 0) {
+        matched = true;
+        s_result.cmp_ok = true;
+        s_result.hit = true;
+        s_result.bytes = nc_state_file_size(NC_STATE_PATH);
+        ESP_LOGI(TAG, "NCSTATE hit：src=0x%08x、%u 筆、%u B（同 cfg 完全一致）",
+                 (unsigned)src_hash, (unsigned)s_result.n_records, (unsigned)s_result.bytes);
+    } else if (cache_ok && diff == 0) {
+        // hash 變咗（例如改 comment／tasks 等唔關 state 嘅內容）但 state 值冇變：
+        // 保留舊檔、唔寫盤。status: hit=0, cmp_ok=1, rebuilt=0（值一致，版本戳過時）。
+        matched = true;      // 「值」已經正確，唔使重建
+        s_result.cmp_ok = true;
+        s_result.why = "config hash 改咗但 state 值一樣";
+        s_result.bytes = nc_state_file_size(NC_STATE_PATH);
+        ESP_LOGW(TAG, "NCSTATE miss（%s）→ 值一樣，唔重寫（省 WL 寫盤）",
+                 s_result.why);
+    } else {
+        s_result.n_mismatch = diff;
+        s_result.first_diff = first;
+        s_result.why = (pe != ESP_OK) ? miss_reason(pe) : "cache 同 cfg 唔一致";
         if (save_records(&meta, s_result.n_records)) {
             s_result.rebuilt = true;
             s_result.bytes = nc_state_file_size(NC_STATE_PATH);
@@ -197,6 +206,7 @@ esp_err_t nc_state_boot_sync(nc_state_boot_result_t *out)
                      (unsigned)s_result.bytes);
         }
     }
+    (void)matched;
 
     s_result_valid = true;
     if (out != NULL) {

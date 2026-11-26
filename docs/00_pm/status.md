@@ -9887,3 +9887,21 @@ state sync 唔再重讀 13 KB JSON。
 - 結論：skip JSON parse 最多省 ~30 ms，但要做齊 schema＋setter，風險高；
   **miss 寫檔 762 ms** 更值得先處理（延後到 boot 後寫；斷電只會下次再 miss）。
 
+
+### 7.285 2026-11-26（省 WL 寫盤：hash 變但值一樣 → 唔重寫 state.ncst）
+
+量到 miss 寫檔要 **762 ms**（WL FAT 寫 124 B＋commit），但好多「miss」只係
+config 改咗同 state 無關嘅內容（comment／tasks／links…），值其實一樣。
+→ 改為：**無論 hash 對唔對，都先載入舊 blob 對拍**；
+- hash 對 + 值全中 → 真 hit；
+- hash 唔對但**值一樣** → 保留舊檔、**唔寫盤**（status: hit=0, cmp_ok=1, rebuilt=0，
+  `why="config hash 改咗但 state 值一樣"`）；
+- 值有唔同／舊檔壞 → 才寫（唯一必要的一次性成本）。
+
+**驗證**（fw `4efe9f8-dirty`、app `c804df10`、idf=v6.1.1 WSL；host 24/24）
+- 原本：`t={"cfg_us":30415,"state_us":8265}`、state hit=1；
+- `/config/system.json` append newline（hash 變、state 值不變）→ reboot：
+  `t={"cfg_us":30126,"state_us":8283}`、`state:{"hit":0,"cmp_ok":1,"rebuilt":0,
+  "src":4038124483,"n":18,"bytes":124}`；
+  **state.ncst sha256 前後完全相同** → 真係冇寫盤（唔係 762 ms）；
+- 還原 system.json → reboot：hit=1（正常）。
