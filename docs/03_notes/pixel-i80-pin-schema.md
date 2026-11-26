@@ -251,6 +251,21 @@ DMA → D0.. 資料線（只 route 有用途的 lane）→ WS2812
 ＋肉眼／示波器睇 T0H／T1H）。建議分兩階段落：**① 1 lane、8-bit、2.5 MHz（Matrix 64 px）
 先通** → **② 才做 8／16 lane 與多條鏈**。
 
+### 8.4 設計紅線：I80／LCD_CAM 唔可以「異化」成只for燈（2026-11-26 用家指示）
+
+用家明確要求：**這個驅動要具備真熒幕（LCD 面板）顯示能力，不要把它異化；兩邊的驅動要
+互相參考、可合成。** 所以：
+
+| 規則 | 意思 |
+|---|---|
+| **直驅唔取代 esp_lcd** | LCD 面板（要 DC／CS／cmd phase／多 device）繼續用 `esp_lcd` i80 panel IO；直驅只係多一條「只 data lane」模式。Kconfig 二選一，但兩者都實作同一個 `nc_i80_drv_*` 契約 |
+| **cfg 保持通用** | `nc_i80_drv_cfg_t` 有可選 `wr_pin`／`dc_pin`／`cs_pin`（≥0 才 route）。LED 模式全部 -1（唔需要真腳），面板模式照 i80 規範 route |
+| **共用輸出層** | `render_task` 係公用輸出層（AGENTS §10.1）：將來 LCD 內容同 pixel 環走同一個 encode／submit／reclaim 節奏；直驅／esp_lcd 都只係「硬件尾巴」，上面唔知 |
+| **唔可以偷偷削功能** | 直驅現階段**未做** cmd phase／多 device／CS 仲裁；呢啲寫明「面板請用 esp_lcd 路徑」，唔可以靜默降級（鐵律 9） |
+
+換句話講：直驅係 I80 的**第二個實作**（為咗只 route 用到的 lane），唔係「LED 專用驅動」；
+將來面板要走直驅時，補 cmd phase／CS 就係同一個檔案加分支，唔使另起一套。
+
 ## 9. 待拍板（實作前要答）
 
 1. **`lanes` 的來源**：`min(n_used, LED.lanes)`（提案）還是「`data` 有效腳數就是 lanes，

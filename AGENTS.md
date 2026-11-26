@@ -707,6 +707,12 @@ render_task（公用輸出層；core1，order 10；環／lane／節拍的主人�
   切換 swap 實測 **246 µs**（原本 rebuild 40–150 ms）。
 - **MSC 預設 0**：`nc4.links[].msc=1` 會把 FAT 交畀 USB host，之後上傳／刪檔全部
   `err_busy`。recovery：`CONFIG_NETCORE_USB_MSC_FORCE_OFF=y` 臨時唔交碟。
+- **I80 有兩個實作、同一個 `nc_i80_drv_*` 契約**（2026-11-26）：`esp_lcd` 版（面板
+  用，要齊 data＋WR＋DC）／**直驅版**（`CONFIG_NETCORE_PIXEL_I80_DIRECT`，只 route
+  真正接燈的 lane，Matrix 只需 GPIO14 一支；`hal/lcd_ll.h`＋AHB GDMA 直接寫 LCD_CAM）。
+  **設計紅線：唔可以把它異化成只for燈**——真熒幕（LCD 面板）能力要保留，cfg 有可選
+  `wr_pin`／`dc_pin`／`cs_pin`，面板仍走 esp_lcd 路徑（直驅的 cmd phase／多 device 未做，
+  明講而唔靜默降級）。見 [`pixel-i80-pin-schema.md`](docs/03_notes/pixel-i80-pin-schema.md) §8.4。
 - 16-bit 高位 byte 用 store（唔用 OR），否則 lane 變暗會殘留。
 - **每一步的歷史（含失敗實驗與數字）見
   [`docs/04_evolution/pixel-evolution.md`](docs/04_evolution/pixel-evolution.md)**；
@@ -999,6 +1005,7 @@ commit message 說明。
 | 2026-11-26 | **新增測試環境層 [`tenv`](docs/02_guides/test-environment.md)**：`tools/tenv.py`（init／bind／brief／plan／stamp／verify／selftest）＋`tools/testenv/policy.json`（IDF 要求、host test 支數）＋`.testenv/`（本機意圖／事實，唔進 git）。§0.6 新章、§14.1／§14.3 開工先跑、§15 命令卡；同時修 `ncbuild/env.py` 的空 `.idf` 遮住真 IDF、Windows COM 列舉 | lead（AI） |
 | 2026-11-26 | **再加全樹版 [`tech-evolution.md`](docs/04_evolution/tech-evolution.md)**：9 條主線（NC4 收發／通道／緩衝／任務棧／效果層／配對／編碼／USB-FAT／建置）＋§11 跨主線負結果（12 條）＋§12 量測規矩；pixel 專文保留做細節。找東西第 6 條改成「全樹→專文」兩層 | lead（AI） |
 | 2026-11-26 | **進化日誌獨立成層 `docs/04_evolution/`**：`tech-evolution.md`＋`pixel-evolution.md` 由 `03_notes` 搬入（`git mv`，歷史保留），新增 [`04_evolution/README.md`](docs/04_evolution/README.md)（判準／導航／維護規則／新主線骨架）。§3 目錄地圖、找東西第 6 條、§10.4、§16 權威順序、§17 一齊改 | lead（AI） |
+| 2026-11-26 | **I80 兩個實作（esp_lcd／直驅）＋設計紅線**：直驅只 route 真正接燈的 lane（Matrix 由 10 支腳變 1 支，50 fps／drops=0），但**不得異化成只for燈**——cfg 保留 `wr_pin`／`dc_pin`／`cs_pin`，真熒幕仍走 esp_lcd；直驅的 cmd phase／多 device 未做且明講（見 pixel-i80-pin-schema.md §8.4、status §7.254） | lead（AI） |
 | 2026-11-26 | **Windows 主機的 bash 陷阱**：`make.py`／`doctor` 用 `bash -c` 傳 `C:\…` 路徑，Git Bash 同 WSL bash 都會失敗（doctor 的 board check 會假報 FAIL）。§0.5 新增一節講點判斷、建置改在 WSL 內跑（`bash -lc 'cd /mnt/c/… && IDF_PATH=/home/user/esp/esp-idf python3 make.py …'`）、OTA／NC4 留在 Windows 側。同時記錄 Matrix-LED-Textkit 全面 JSON 化（見 status §7.253） | lead（AI） |
 
 ---

@@ -36,6 +36,7 @@ static const char *TAG = "drv_i80";
 #include "esp_private/gdma.h"
 #include "esp_private/gdma_link.h"
 #include "esp_private/periph_ctrl.h"
+#include "driver/gpio.h"
 #include "esp_rom_gpio.h"
 #include "esp_rom_sys.h"
 #include "hal/lcd_ll.h"
@@ -292,6 +293,29 @@ esp_err_t nc_i80_drv_install(const nc_i80_drv_cfg_t *cfg)
         esp_rom_gpio_connect_out_signal(cfg->lane_pins[i],
                                         (LCD_DATA_OUT0_IDX + i),
                                         false, false);
+    }
+
+    // ③b 可選：真熒幕（LCD 面板）訊號。LED lane 模式全部 -1 → 唔會 route。
+    //     呢個分支係留給「同一個驅動將來出面板」，唔可以當 LED 專用而刪走。
+    //     ⚠ cmd phase／多 device／CS 仲裁未做 → 面板暫時請用 esp_lcd 路徑（唔靜默降級）。
+    if (cfg->wr_pin >= 0) {
+        esp_rom_gpio_pad_select_gpio(cfg->wr_pin);
+        esp_rom_gpio_connect_out_signal(cfg->wr_pin, LCD_PCLK_IDX, false, false);
+    }
+    if (cfg->dc_pin >= 0) {
+        esp_rom_gpio_pad_select_gpio(cfg->dc_pin);
+        esp_rom_gpio_connect_out_signal(cfg->dc_pin, LCD_DC_IDX, false, false);
+    }
+    if (cfg->cs_pin >= 0) {
+        const gpio_config_t cs = {
+            .pin_bit_mask = 1ull << cfg->cs_pin,
+            .mode = GPIO_MODE_OUTPUT,
+            .pull_up_en = GPIO_PULLUP_DISABLE,
+            .pull_down_en = GPIO_PULLDOWN_DISABLE,
+            .intr_type = GPIO_INTR_DISABLE,
+        };
+        gpio_config(&cs);
+        gpio_set_level((gpio_num_t)cfg->cs_pin, cfg->cs_active_high ? 0 : 1); // 先 de-assert
     }
 
     // ④ DMA：AHB GDMA（trigger 5）＋ link list

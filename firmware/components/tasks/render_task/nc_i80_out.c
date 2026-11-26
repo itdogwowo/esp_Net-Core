@@ -256,15 +256,22 @@ nc_pixel_backend_t *nc_px_backend_i80(const nc_px_i80_cfg_t *cfg)
 
     // ② 硬體交給 driver：bus／PCLK／DMA 槽／完成回呼都在那一層。
 #if CONFIG_NETCORE_PIXEL_I80_DIRECT
-    // 直驅：只給 lane_pins（lanes 支）；WR／DC／dummy 由驅動層完全忽略
+    // 直驅：只給 lane_pins（lanes 支）；WR／DC／dummy 由驅動層完全忽略。
+    // wr／dc／cs 一律 -1（純 LED lane 模式）；將來面板輸出才填（見 nc_i80_drv.h）。
     const nc_i80_drv_cfg_t dc = {
         .pins = NULL,
         .lane_pins = cfg->pins,
         .lanes = d->lanes,
+        .wr_pin = -1,
+        .dc_pin = -1,
+        .cs_pin = -1,
         .pclk_hz = cc.wave.clk_hz,
 #else
     const nc_i80_drv_cfg_t dc = {
         .pins = cfg->pins,
+        .wr_pin = -1,
+        .dc_pin = -1,
+        .cs_pin = -1,
         .pclk_hz = cc.wave.clk_hz,
 #endif
         .slot_bytes = d->units * (uint32_t)(d->bus_width / 8),

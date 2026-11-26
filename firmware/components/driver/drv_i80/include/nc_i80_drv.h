@@ -31,6 +31,16 @@ typedef struct {
     // 所以 WR／DC／未接燈的 data 線都唔需要真 GPIO。
     const int *lane_pins;
     uint8_t    lanes;       // DIRECT 版用；0 當 1
+    // 可選：真熒幕（LCD 面板）模式。>=0 就 route，-1 = 唔用（純 LED lane 模式）。
+    // ⚠ 唔可以因為 LED 用唔到 WR／DC 就把這個驅動「異化」成只for燈：
+    //   同一個 nc_i80_drv_* 契約要留給將來的面板輸出（見 pixel-i80-pin-schema.md §8.4）。
+    //   · wr_pin：i80 的 WR／PCLK（LED 模式唔 route；面板要）
+    //   · dc_pin：LCD 的 DC（LED 模式唔需要；esp_lcd 版必須）
+    //   · cs_pin：>=0 才拉（純軟件 GPIO，同 esp_lcd 一樣）；-1 = 無 CS
+    int        wr_pin;
+    int        dc_pin;
+    int        cs_pin;
+    bool       cs_active_high;
     uint32_t   pclk_hz;     // PCLK（WS2812 的 bit 寬度靠它 × bit_cells 湊出來）
     uint32_t   slot_bytes;  // 每一筆固定送幾個 byte（16-bit 模式 = units × 2）
     uint8_t    slots;       // 2..NC_I80_DRV_SLOTS_MAX（3 = 三緩衝）
