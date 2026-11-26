@@ -9521,3 +9521,28 @@ miso、mosi、force_machine、lines、data0..data7），2 通道＝34 keys。
 明示 error，唔靜默降級。
 
 文件：hw-matrix.md §1.1 已重寫（含源碼對照）；原型重跑。
+
+### 7.270 2026-11-26（狀態形態三種＋激活機制：enable=0 零成本）
+
+用家問：「FAT 同 PSRAM 嘅形態係咪唔同？我需要激活機制，唔需要全部一開始放上去。」
+→ 已定案並寫入 [`state-activation.md`](docs/03_notes/state-activation.md)。
+
+**三種形態（同一個事實，三種表示）**
+- A. **FAT JSON**：路徑名＋完整值（人改；8.8 KB）
+- B. **FAT／NVS NCS1**：sparse `(id, 值)`＋CRC（~160 B–2.7 KB）
+- C. **RAM**：`uint32_t val[380]`（1,520 B）＋valid bitmap（48 B）＝**~1.6 KB，放 internal
+  RAM 而唔係 PSRAM**（PSRAM 讀取慢 ~10×；只留俾已激活 unit 嘅大 buffer）。
+
+**激活機制：declared ≠ enabled ≠ activated**
+- `declared`（schema 有 entry）→ `enabled`（config enable=1）→ `activated`（driver 裝好、
+  GPIO claim、buffer allocate、任務接上）；`activated ⊆ enabled ⊆ declared`。
+- `enable=0`：**零 GPIO、零 buffer、零 driver**，只佔 `val[]` 4 B＋bitmap 1 bit。
+- 開機分階段：B05-core（固定核心）→ B05-cfg（parse→NCS1→`val[]`，唔裝 driver）
+  → B05-act（只 activate enabled=1，按依賴圖 topo 排序）→ B05-defer（enable=0 唔郁）。
+- 激活狀態機：`off→requested→resources→ready→running`，失敗入 error 但唔拖死 boot；
+  依賴圖（pin→spi→tft/apa102、i2c→pca9685/xl9555/gt1151q/husb238、i80→led…）。
+- 記憶體帳：Matrix i80+led 激活 ≈3 KB；SPI 未接裝置 0；TFT ≈16–32 KB；唔激活全部 ≈幾 KB。
+- Runtime `activate`／`deactivate` 指令排第二階段（先做「只裝 enabled」＋`status hw`）。
+
+**落地**：A1 狀態機＋B05-act（1 日）→ A2 依賴圖＋GPIO claim＋refcount（0.5 日）→
+A3 `status hw`（0.5 日）→ A4 runtime 指令（1–2 日，可選）。
