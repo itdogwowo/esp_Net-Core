@@ -710,9 +710,12 @@ render_task（公用輸出層；core1，order 10；環／lane／節拍的主人�
 - **I80 有兩個實作、同一個 `nc_i80_drv_*` 契約**（2026-11-26）：`esp_lcd` 版（面板
   用，要齊 data＋WR＋DC）／**直驅版**（`CONFIG_NETCORE_PIXEL_I80_DIRECT`，只 route
   真正接燈的 lane，Matrix 只需 GPIO14 一支；`hal/lcd_ll.h`＋AHB GDMA 直接寫 LCD_CAM）。
-  **設計紅線：唔可以把它異化成只for燈**——真熒幕（LCD 面板）能力要保留，cfg 有可選
-  `wr_pin`／`dc_pin`／`cs_pin`，面板仍走 esp_lcd 路徑（直驅的 cmd phase／多 device 未做，
-  明講而唔靜默降級）。見 [`pixel-i80-pin-schema.md`](docs/03_notes/pixel-i80-pin-schema.md) §8.4。
+  **設計紅線：唔可以把它異化成只for燈**——真熒幕（LCD 面板）能力要保留；直驅已完整
+  LCD 化：`nc_i80_drv_submit_cmd(slot, lcd_cmd, bytes)`（cmd phase＋param phase）、
+  `cmd_bits`、DC 四段電平、CS assert／de-assert；`wr`／`dc`／`cs` **全部可選**
+  （≥0 才 route，唔填 -1 唔影響 LED），唔會像 esp_lcd 缺一就整條 lane 唔建立。
+  面板**未有硬件驗證**（冇面板；cmd／DC 時序要示波器）。見
+  [`pixel-i80-pin-schema.md`](docs/03_notes/pixel-i80-pin-schema.md) §8.4、status §7.255。
 - 16-bit 高位 byte 用 store（唔用 OR），否則 lane 變暗會殘留。
 - **每一步的歷史（含失敗實驗與數字）見
   [`docs/04_evolution/pixel-evolution.md`](docs/04_evolution/pixel-evolution.md)**；
@@ -1006,6 +1009,7 @@ commit message 說明。
 | 2026-11-26 | **再加全樹版 [`tech-evolution.md`](docs/04_evolution/tech-evolution.md)**：9 條主線（NC4 收發／通道／緩衝／任務棧／效果層／配對／編碼／USB-FAT／建置）＋§11 跨主線負結果（12 條）＋§12 量測規矩；pixel 專文保留做細節。找東西第 6 條改成「全樹→專文」兩層 | lead（AI） |
 | 2026-11-26 | **進化日誌獨立成層 `docs/04_evolution/`**：`tech-evolution.md`＋`pixel-evolution.md` 由 `03_notes` 搬入（`git mv`，歷史保留），新增 [`04_evolution/README.md`](docs/04_evolution/README.md)（判準／導航／維護規則／新主線骨架）。§3 目錄地圖、找東西第 6 條、§10.4、§16 權威順序、§17 一齊改 | lead（AI） |
 | 2026-11-26 | **I80 兩個實作（esp_lcd／直驅）＋設計紅線**：直驅只 route 真正接燈的 lane（Matrix 由 10 支腳變 1 支，50 fps／drops=0），但**不得異化成只for燈**——cfg 保留 `wr_pin`／`dc_pin`／`cs_pin`，真熒幕仍走 esp_lcd；直驅的 cmd phase／多 device 未做且明講（見 pixel-i80-pin-schema.md §8.4、status §7.254） | lead（AI） |
+| 2026-11-26 | **我們自己的 I80 驅動完整 LCD 化**：`nc_i80_drv_submit_cmd()`（cmd phase＋param phase）、`cmd_bits`、DC 四段電平、CS assert／de-assert；`wr`／`dc`／`cs` **全部可選**（唔填 -1 唔影響 LED），唔會像 esp_lcd 缺一就整條 lane 唔建立。LED 快路徑加 phase 形狀快取：enc_us 209→186、tx_us 38→32，50 fps／drops=0。面板未上板（冇硬件）。status §7.255 | lead（AI） |
 | 2026-11-26 | **Windows 主機的 bash 陷阱**：`make.py`／`doctor` 用 `bash -c` 傳 `C:\…` 路徑，Git Bash 同 WSL bash 都會失敗（doctor 的 board check 會假報 FAIL）。§0.5 新增一節講點判斷、建置改在 WSL 內跑（`bash -lc 'cd /mnt/c/… && IDF_PATH=/home/user/esp/esp-idf python3 make.py …'`）、OTA／NC4 留在 Windows 側。同時記錄 Matrix-LED-Textkit 全面 JSON 化（見 status §7.253） | lead（AI） |
 
 ---
