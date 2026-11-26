@@ -638,6 +638,55 @@ def gen_preset_devices(driver: dict | None, suppressed: list[str] | None) -> dic
     return out
 
 
+def gen_activation(wiring: dict, driver: dict | None, led_sum: dict) -> list[dict]:
+    """生成期決定「邊個 unit 會激活＋次序＋依賴」（runtime 唔探測硬件）。
+
+    enabled 來源：bus 睇 wiring.json 的 enable；device 睇 driver.json 的 enable
+    （LED 由 gen_led 結果決定，已計 project 讓位）。project 覆寫大於 board 的規則
+    仍然喺 project_pixel_override() 處理。
+    """
+    # (unit, level, deps)
+    units = [
+        ("pin", 0, []), ("sdio", 0, []), ("eth", 0, []), ("usb", 0, []),
+        # bus 自己擁有 GPIO，唔依賴 PIN（PIN 只係通用 label 表）
+        ("spi", 1, []), ("i2c", 1, []), ("uart", 1, []),
+        ("pwm", 1, []), ("i2s", 1, []), ("i80", 1, []), ("enc", 1, []),
+        ("led", 2, ["i80"]), ("apa102", 2, ["spi"]), ("tft", 2, ["spi"]),
+        ("sd", 2, ["sdio"]), ("pca9685", 2, ["i2c"]), ("xl9555", 2, ["i2c"]),
+        ("gt1151q", 2, ["i2c"]), ("husb238", 2, ["i2c"]), ("pcm5102", 2, ["i2s"]),
+        ("uart_motor", 2, ["uart"]), ("audio", 2, []),
+    ]
+    bus_key = {"pin": "PIN", "sdio": "SDIO", "eth": "ETH", "usb": "USB",
+               "spi": "SPI", "i2c": "I2C", "uart": "UART", "pwm": "PWM",
+               "i2s": "I2S", "i80": "I80", "enc": "ENC"}
+    drv_key = {"led": "LED", "apa102": "APA102", "tft": "TFT", "sd": "SDcard",
+               "pca9685": "PCA9685", "xl9555": "XL9555", "gt1151q": "GT1151Q",
+               "husb238": "HUSB238", "pcm5102": "PCM5102", "uart_motor": "uartMotor",
+               "audio": "Audio"}
+    act: list[dict] = []
+    for unit, level, deps in units:
+        enabled = False
+        if unit in bus_key:
+            v = wiring.get(bus_key[unit])
+            enabled = bool((v or {}).get("enable")) if isinstance(v, dict) else False
+        elif unit in drv_key:
+            if unit == "led":
+                enabled = bool(led_sum.get("present") and led_sum.get("enable"))
+            else:
+                v = (driver or {}).get(drv_key[unit])
+                enabled = bool((v or {}).get("enable")) if isinstance(v, dict) else False
+        # 依賴唔 enabled → 呢個 unit 唔可以 enabled（生成期就報，唔使開機才發現）
+        missing = [d for d in deps if not any(a["unit"] == d and a["enabled"] for a in act)]
+        act.append({
+            "unit": unit,
+            "level": level,
+            "enabled": bool(enabled),
+            "deps": deps,
+            "missing_deps": missing if enabled else [],
+        })
+    return act
+
+
 def gen_usb_kinds(wiring: dict) -> str:
     """USB.list index → internal link kind（NC_LINK_CDC / NC_LINK_USBJTAG）。
 
@@ -695,7 +744,8 @@ def main() -> int:
     hw_c, summary = gen_hardware(wiring)
     led_c, led_sum = gen_led(driver, wiring, project_pixel_override(project))
     preset = gen_preset(wiring, hw_rel)
-    summary["devices_preset"] = "preset_devices.json"
+    summary["driver_preset"] = "preset_driver.json"
+    summary["activation_preset"] = "preset_activation.json"
     summary.update({"board": hw_rel, "chip": chip, "cores": num(cap.get("cores"), 1),
                     "usb": (cap.get("usb") or {}).get("link")})
     summary["led"] = led_sum
@@ -724,10 +774,16 @@ def main() -> int:
         encoding="utf-8")
     (out / "preset_hardware.json").write_text(
         json.dumps(preset, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    # 應用硬件（device）層預置：runtime 可改；缺檔時 render 退回 build-time driver.json。
+    # 應用硬件（device）層預置：runtime /data/config/driver.json 可改；
+    # 缺檔／壞檔時 render 退回 build-time 的 nc_port_led()。
     devices = gen_preset_devices(driver, project_pixel_override(project))
-    (out / "preset_devices.json").write_text(
+    (out / "preset_driver.json").write_text(
         json.dumps(devices, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    # 生成期激活表：邊個 unit 會激活、次序、依賴（firmware 開機照表執行）
+    activation = gen_activation(wiring, driver, led_sum)
+    (out / "preset_activation.json").write_text(
+        json.dumps({"version": 1, "units": activation}, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8")
     (out / "nc_port_summary.json").write_text(
         json.dumps(summary, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 

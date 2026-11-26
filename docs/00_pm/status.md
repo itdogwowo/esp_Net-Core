@@ -9546,3 +9546,34 @@ miso、mosi、force_machine、lines、data0..data7），2 通道＝34 keys。
 
 **落地**：A1 狀態機＋B05-act（1 日）→ A2 依賴圖＋GPIO claim＋refcount（0.5 日）→
 A3 `status hw`（0.5 日）→ A4 runtime 指令（1–2 日，可選）。
+
+### 7.271 2026-11-26（激活在「生成期」決定：ncportgen 輸出 preset_activation.json）
+
+用家定案：**激活與否在生成過程（`ports/` → ncportgen）決定**，唔係 runtime 探測／動態開。
+
+**ncportgen 新增 `gen_activation()`**（`tools/ncportgen.py`），生成
+`preset_activation.json`：
+
+```json
+{ "version": 1, "units": [
+  { "unit": "pin", "level": 0, "enabled": 0, "deps": [], "missing_deps": [] },
+  { "unit": "usb",  "level": 0, "enabled": 1, "deps": [] , "missing_deps": [] },
+  { "unit": "i80",  "level": 1, "enabled": 1, "deps": [],    "missing_deps": [] },
+  { "unit": "led",  "level": 2, "enabled": 1, "deps": ["i80"], "missing_deps": [] },
+  { "unit": "spi",  "level": 1, "enabled": 0, "deps": [],    "missing_deps": [] }
+]}
+```
+
+- `enabled` 來源：bus 睇 `wiring.json` 的 `enable`；device 睇 `driver.json` 的 `enable`
+  （LED 由 `gen_led` 結果，已計 project 讓位）。
+- `level`＝激活次序（0 平台／1 bus／2 device）；`deps`＝依賴 unit；
+  **生成期已檢查 missing_deps**（例如 spi device 但 spi 冇 enable → 即刻列出），
+  唔使等開機才發現。
+- **bus 唔依賴 PIN**（bus 自己擁有 GPIO；`PIN` 只係通用 label 表）——初版誤加
+  `pin` dep，實跑發現 Matrix 的 PIN enable=0 但 I80/I2C 正常，已修正。
+- Matrix 實跑：enabled = `usb`(0)、`i2c`(1)、`i80`(1)、`led`(2)；`spi` 等其餘 0。
+
+**firmware 側（下一步 A1）**：ncportgen 會把同一張表編成 `const nc_act_desc_t
+nc_port_act[]`（連 `nc_port.c`），B05-act 只按 `enabled=1`＋`level` 次序 install；
+`enable=0` 永遠唔郁（零 GPIO／零 buffer）。runtime `activate` 指令**唔做**
+（改 config → 重 build 或 reboot 生效，可預測、唔探測硬件）。
