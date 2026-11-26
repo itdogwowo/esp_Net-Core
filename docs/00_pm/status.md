@@ -9425,3 +9425,34 @@ layout 打包器）——字頭太似，容易混淆。
 （`NetBusMaster`、`storage_tool`、`PXLDv3Splitter`、`upload_pixel_lab`…）；
 本 repo `tools/` 係 ESP NC4 協議專用（`nc4.py`、`ota.py`、`tenv.py`、`ncportgen.py`…），
 **冇直接重複**。唯一概念重疊係「上傳檔案」——但協議唔同（NC4 vs WebREPL），所以保留。
+
+### 7.265 2026-11-26（狀態 schema：路徑字典 → (id, 值)；實測省 99%）
+
+用家提出：舊專案 `slave/schema/` 已經有「schema 做資料」嘅做法；硬件有上限
+（SPI≤2、I2C≤2、UART≤3、I80≤2、GPIO≤48…），所以狀態 key 係有限集合；
+不如用 schema 定義「路徑 → u16 id ＋ 型別／範圍／預設」，儲存只寫 `(id, 值)`，
+唔存 key 字串。→ 已設計＋原型量測。
+
+**已寫入**：[`state-schema.md`](docs/03_notes/state-schema.md)
+
+- key id：`domain(4b)|unit(4b)|index(4b)|field(4b)`（u16，總共 65,536 個 key）。
+- 格式 `NCS1`：header 12 B（magic/ver/count/crc）＋ `(id varint, value zigzag varint)`
+  按 id 升序；**sparse，只存同 default 唔同嘅值**。
+- 型別／範圍／預設全部喺 schema；超出＝parse error（唔截斷）；schema ver 一改，
+  舊 blob 自動拒讀。
+- 同 NCB2 分工：NCS1＝固定 schema（最省）；NCB2＝動態／自描述（pixel assets 等）。
+- 舊專案對照：`slave/schema/*.json` 係 **command schema**（cmd+payload 型別，
+  `schema_codec.py` 編 dispatch 表）——同一哲學；我哋而家補 **state schema**。
+
+**原型實測**（`modules/lab/state_schema_lab/schema_preview.py`）：
+
+| | JSON | NCS1 |
+|---|---:|---:|
+| hardware.json＋driver.json 合計 | 8,822 B | **85 B（省 99.0%）** |
+
+85 B = Matrix 實際改咗嘅 21 個 key（schema 25 條）；全 config 估 150–400 B。
+
+**落地計劃**：P1 schema 編譯＋NCS1 codec＋host test（1 日）→ P2 `nc_state` v2 用 NCS1
+（1 日）→ P3 JSON parser 改「路徑→id」（1 日）→ P4 status 顯示（0.5 日）。
+
+**magic 登記表**已加入文件：NCB2／NCS1／NCC2／PXA2／NCLT，新格式一律 `NC` 字頭。
