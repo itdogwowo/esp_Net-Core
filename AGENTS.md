@@ -1060,8 +1060,8 @@ commit message 說明。
 | 2026-11-26 | **Windows 主機的 bash 陷阱**：`make.py`／`doctor` 用 `bash -c` 傳 `C:\…` 路徑，Git Bash 同 WSL bash 都會失敗（doctor 的 board check 會假報 FAIL）。§0.5 新增一節講點判斷、建置改在 WSL 內跑（`bash -lc 'cd /mnt/c/… && IDF_PATH=/home/user/esp/esp-idf python3 make.py …'`）、OTA／NC4 留在 Windows 側。同時記錄 Matrix-LED-Textkit 全面 JSON 化（見 status §7.253） | lead（AI） |
 | 2026-11-27 | **macOS IDF 升 v6.1.1**（v6.0.3 → v6.1.1）：`fetch --tags`＋`checkout`＋**`submodule update`**＋`install.sh esp32s3 esp32p4 esp32c3`；記錄 submodule 陷阱（唔 update 會 `-dirty`）同實測 image 差 **+27,008 B**。§0.5 加「升級／重裝 IDF」段、status §7.289 | lead（AI） |
 | 2026-11-27 | **板上 firmware 推齊 6.1.1＋OTA 速度查清**：重建 `fw=787baa5`（+0 B）→ OTA → `status sys fw=787baa5／app=94d81499／rst=3`，四條 pixel 任務 `level=4`。查清 macOS 側 ~6.4 KB/s ＝ **64 B／10 ms**（payload 線性；`--window 4` 冇用 → 唔係往返延遲），係 USB-Serial-JTAG VCP 的主機側排程，唔關 hub／線材／firmware；Windows 同板同線 168–173 KB/s。§0.5／§8.1 三處速度描述改「分主機」，status §7.290 | lead（AI） |
-| 2026-11-27 | **狀態系統三合一圖（帶動畫）**：`tools/state_diagram.py` → [`state-flow.svg`](docs/00_pm/state-flow.svg)（緩存 18 KB→1.7 KB 前後對比／開機次序 B02→state→apply_to_cfg→B05→B08／路線圖 S0–S6＋四個不變量）；PNG 截圖 [`state-flow-2026-11-27.png`](docs/assets/state-flow-2026-11-27.png)。status §7.292 | lead（AI） |
 | 2026-11-27 | **state 地基三改＋硬件覆蓋率**：key id u16→u32（8/8/8/8，PIN 48／P4 55 放得落）；`src_hash` 由 JSON bytes 改成**值集** CRC（改註解唔再清回寫值）；hit 只看值（hash 降級診斷）；新增 `nc_state_bind_u32/i32()`（熱路徑直接位址）。上板：舊 blob `mism=2` 自動重建、`bytes 48→50`、兩次開機 `hit=1`。新增 [`hw-coverage.md`](docs/03_notes/hw-coverage.md)：三顆晶片真實資源 vs 380-key 大表（4 個 unit 上限寫錯、S3 ETH rmii 無效、缺 9 類資源 +185 key）。status §7.291 | lead（AI） |
+| 2026-11-27 | **狀態系統三合一圖（帶動畫）**：`tools/state_diagram.py` → [`state-flow.svg`](docs/00_pm/state-flow.svg)（緩存 18 KB→1.7 KB 前後對比／開機次序 B02→state→apply_to_cfg→B05→B08／路線圖 S0–S6＋四個不變量）；PNG 截圖 [`state-flow-2026-11-27.png`](docs/assets/state-flow-2026-11-27.png)。status §7.292 | lead（AI） |
 
 ---
 
