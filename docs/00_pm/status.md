@@ -10144,3 +10144,31 @@ console／MSC），留返另一次。
 **未做**：activation 由 build-time 搬 boot-time（S4a/S4b，含 `not_active` 錯誤碼）；
 commit 路徑（STATUS_SET 的 persist 位＋reboot 前 flush）；大表補齊 9 類；
 `nc_state_apply_to_cfg()`（overrides 要在 B05 之前套入 cfg，否則 pin／freq 類 override 靜默失效）。
+
+---
+
+### 7.292 2026-11-27（狀態系統三合一圖：緩存前後、啟動次序、路線圖；帶 SMIL 動畫）
+
+**為什麼**：§7.291 的三件事（u32 id／值集 CRC／activation 過濾）都是「隨時間變化」的
+——緩存由 18 KB 降到 1.7 KB、開機次序有先後、路線圖有已完成／下一步。靜態圖只能講結果，
+所以呢張圖加 SMIL 動畫（bar 生長、光點沿開機路徑、S2 呼吸）。
+
+**產物**：
+
+| 檔案 | 內容 |
+|---|---|
+| [`state-flow.svg`](state-flow.svg) | 1680×900，三格：① 緩存佔用（未過濾 vs 只載已啟動）② 開機次序（B02→state→**S2 apply_to_cfg**→B05→B08）＋activation 閘／miss 分支 ③ 路線圖 S0–S6＋四個不變量 pill |
+| [`../assets/state-flow-2026-11-27.png`](../assets/state-flow-2026-11-27.png) | 上面那張的靜態截圖（動畫看不見時用） |
+| [`tools/state_diagram.py`](../../tools/state_diagram.py) | 生成器；數字由 schema／§7.291 量測帶入，改完重跑就同步 |
+
+**圖上帶出的三個數字**（同 §7.291 一致）：
+
+- store：565 key × 32 B = **18,080 B**（上限 2,048 B → 第 65 筆之後靜默截斷）；
+  activation 過濾後典型 **52 key = 1,664 B**（上限的 81%，餘 12 筆）。
+- blob：現在 **50 B**；典型 480 B；worst 5,120 B。
+- 開機：cfg parse **24.4 ms**、state merge **8.5 ms**（hit）。
+
+**驗證**：SVG 用 `ElementTree` 驗 well-formed；真正渲染用瀏覽器開 `file://` 截圖
+（1680×900，見 PNG），三格文字冇重疊、rail 唔壓 box 內文。
+
+**未做**：圖上的 S2（apply_to_cfg）仍然是「未做」——畫圖唔等於做完，實作在下一步。
