@@ -1573,7 +1573,10 @@ static void apply_devices(const cJSON *root, nc_devices_cfg_t *out, nc_cfg_stat_
 
 esp_err_t nc_cfg_boot(void)
 {
-    return nc_cfg_boot_ex(NULL, 0);
+    nc_cfg_raw_hash_begin();
+    const esp_err_t e = nc_cfg_boot_ex(NULL, 0);
+    nc_cfg_raw_hash_end();
+    return e;
 }
 
 const nc_system_cfg_t *nc_cfg_system(void)

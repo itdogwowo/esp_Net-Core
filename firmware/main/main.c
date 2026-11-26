@@ -1540,6 +1540,9 @@ static size_t status_put_storage(char *buf, size_t cap)
 // build-time 預置 vs FAT 的 hash 比對（定義喺 ph_storage 前；status 先用）。
 static uint32_t s_cfg_fat_hash;
 static int s_cfg_fat_match = -1;   // -1 = 未計／讀唔到
+// B02 分段計時（us）：決定「hit 時跳過 JSON parse」值唔值得做。
+static uint32_t s_cfg_parse_us;    // nc_cfg_boot()：讀 JSON + cJSON + 型別化
+static uint32_t s_state_sync_us;   // nc_state_boot_sync()：hash + 讀寫 state.ncst
 
 static size_t status_put_cfg(char *buf, size_t cap)
 {
@@ -1547,6 +1550,9 @@ static size_t status_put_cfg(char *buf, size_t cap)
     char cj[288];
     nc_cfg_json(cj, sizeof(cj));
     jappend(buf, cap, &off, "\"cfg\":%s", cj);
+    jappend(buf, cap, &off,
+            ",\"t\":{\"cfg_us\":%u,\"state_us\":%u}",
+            (unsigned)s_cfg_parse_us, (unsigned)s_state_sync_us);
     {
         size_t act_n = 0;
         const nc_port_act_t *act = nc_port_activation(&act_n);
@@ -4062,12 +4068,8 @@ static esp_err_t ph_boot(void)
 // 要改 enable 就要 rebuild。呢個結果喺 status cfg 的 act.fat / act.match 見到。
 static void cfg_fat_hash_sync(void)
 {
-    static const char *const paths[] = {
-        "/data/config/hardware.json",
-        "/data/config/driver.json",
-    };
-    uint32_t h = 0;
-    if (nc_state_file_hash_files(paths, sizeof(paths) / sizeof(paths[0]), &h) != ESP_OK) {
+    const uint32_t h = nc_cfg_raw_hash_hw_drv();
+    if (nc_cfg_raw_hash_files() == 0) {
         s_cfg_fat_match = -1;
         return;
     }
@@ -4092,9 +4094,17 @@ static esp_err_t ph_storage(void)
     }
     // 硬體預設（nc_port.c）已經是這塊板的 wiring 編譯結果；用戶 hardware.json
     // 只覆蓋差異。沒有 wiring 檔或舊板的 host test 會自動退回內建預設。
-    (void)nc_cfg_boot();    // 永遠成功：最差 = 全部用預設
-    // 派生狀態快取：hash 對得上就 hit；唔對就由 config 重建（舊檔 → .bak）。
-    (void)nc_state_boot_sync(NULL);
+    {
+        const int64_t t0 = esp_timer_get_time();
+        (void)nc_cfg_boot();    // 永遠成功：最差 = 全部用預設
+        s_cfg_parse_us = (uint32_t)(esp_timer_get_time() - t0);
+    }
+    {
+        const int64_t t0 = esp_timer_get_time();
+        // 派生狀態快取：hash 對得上就 hit；唔對就由 config 重建（舊檔 → .bak）。
+        (void)nc_state_boot_sync(NULL);
+        s_state_sync_us = (uint32_t)(esp_timer_get_time() - t0);
+    }
     cfg_fat_hash_sync();
     // system.json 的 "log_debug_mode"：
     //   0 = 正常（INFO、2 KB、USB 起來之後開始記 → 看到服務/bus 啟動）

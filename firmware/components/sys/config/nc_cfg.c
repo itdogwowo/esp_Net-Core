@@ -20,6 +20,95 @@ struct cfg_file {
     cJSON *root;
 };
 
+// ── boot 期間的原始 JSON hash（避免 state sync 重讀一次 13 KB）──
+static uint32_t s_raw_all;
+static uint32_t s_raw_hw_drv;
+static uint16_t s_raw_files;
+static bool s_raw_active;
+
+// 表驅動 CRC32（IEEE）：byte-wise bit loop 喺 13 KB 要 ~4.6 ms（實測），
+// 換 256-entry 表後 ~0.1 ms；表係第一次用時計（1 KB static，只 boot 用）。
+static uint32_t s_crc_tbl[256];
+static bool s_crc_tbl_ok;
+
+static void crc_tbl_init(void)
+{
+    if (s_crc_tbl_ok) {
+        return;
+    }
+    for (uint32_t i = 0; i < 256; i++) {
+        uint32_t c = i;
+        for (int k = 0; k < 8; k++) {
+            c = (c >> 1) ^ (0xEDB88320u & (uint32_t)(-(int32_t)(c & 1u)));
+        }
+        s_crc_tbl[i] = c;
+    }
+    s_crc_tbl_ok = true;
+}
+
+static uint32_t raw_crc(uint32_t crc, const void *p, size_t n)
+{
+    if (!s_crc_tbl_ok) {
+        crc_tbl_init();
+    }
+    const uint8_t *b = (const uint8_t *)p;
+    for (size_t i = 0; i < n; i++) {
+        crc = (crc >> 8) ^ s_crc_tbl[(crc ^ b[i]) & 0xFFu];
+    }
+    return crc;
+}
+
+void nc_cfg_raw_hash_begin(void)
+{
+    s_raw_all = 0xFFFFFFFFu;
+    s_raw_hw_drv = 0xFFFFFFFFu;
+    s_raw_files = 0;
+    s_raw_active = true;
+}
+
+void nc_cfg_raw_hash_end(void)
+{
+    s_raw_active = false;
+}
+
+uint32_t nc_cfg_raw_hash(void)
+{
+    return ~s_raw_all;
+}
+
+uint32_t nc_cfg_raw_hash_hw_drv(void)
+{
+    return ~s_raw_hw_drv;
+}
+
+uint16_t nc_cfg_raw_hash_files(void)
+{
+    return s_raw_files;
+}
+
+static void raw_hash_feed(const char *layer, const char *buf, size_t n)
+{
+    if (!s_raw_active || layer == NULL || buf == NULL) {
+        return;
+    }
+    // 名要同 ncportgen 一致：<layer>.json（例如 hardware.json），唔係 layer 名。
+    char name[32];
+    const int nn = snprintf(name, sizeof(name), "%s.json", layer);
+    if (nn <= 0 || (size_t)nn >= sizeof(name)) {
+        return;
+    }
+    const size_t ln = (size_t)nn;
+    s_raw_all = raw_crc(s_raw_all, name, ln);
+    s_raw_all = raw_crc(s_raw_all, "\0", 1);
+    s_raw_all = raw_crc(s_raw_all, buf, n);
+    if (strcmp(layer, "hardware") == 0 || strcmp(layer, "driver") == 0) {
+        s_raw_hw_drv = raw_crc(s_raw_hw_drv, name, ln);
+        s_raw_hw_drv = raw_crc(s_raw_hw_drv, "\0", 1);
+        s_raw_hw_drv = raw_crc(s_raw_hw_drv, buf, n);
+    }
+    s_raw_files++;
+}
+
 static bool path_of(const char *layer, char *out, size_t cap, const char *suffix)
 {
     if (layer == NULL || out == NULL || cap == 0) {
@@ -68,6 +157,7 @@ cfg_file_t *nc_cfg_open_ex(const char *layer, bool *exists)
     const size_t n = fread(buf, 1, (size_t)sz, f);
     fclose(f);
     buf[n] = '\0';
+    raw_hash_feed(layer, buf, n);
 
     cJSON *root = cJSON_Parse(buf);
     free(buf);

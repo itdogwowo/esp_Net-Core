@@ -23,15 +23,6 @@
 
 static const char *TAG = "state";
 
-// 來源 JSON（次序固定；hash 跟次序，改次序＝版本變）
-static const char *const k_src_paths[] = {
-    "/data/config/hardware.json",
-    "/data/config/driver.json",
-    "/data/config/system.json",
-    "/data/config/tasks.json",
-    "/data/config/resources.json",
-};
-
 static nc_state_rec_t s_recs[32];
 static nc_state_store_t s_store;          // 常駐 RAM：blob 載入後的值（~576 B internal）
 static nc_state_boot_result_t s_result;
@@ -144,15 +135,15 @@ esp_err_t nc_state_boot_sync(nc_state_boot_result_t *out)
     memset(&s_result, 0, sizeof(s_result));
     memset(&s_store, 0, sizeof(s_store));
 
-    uint32_t src_hash = 0;
-    const esp_err_t he = nc_state_file_hash_files(k_src_paths,
-                            sizeof(k_src_paths) / sizeof(k_src_paths[0]), &src_hash);
-    if (he != ESP_OK) {
-        ESP_LOGW(TAG, "NCSTATE：算 src_hash 失敗（%s）", esp_err_to_name(he));
+    // src_hash 由 nc_cfg_boot() 讀檔時順便計（唔再重讀 13 KB；曾量到 24 ms）。
+    // 次序 = cfg boot 開檔次序：system、hardware、tasks、resources、driver。
+    uint32_t src_hash = nc_cfg_raw_hash();
+    if (nc_cfg_raw_hash_files() == 0) {
+        ESP_LOGW(TAG, "NCSTATE：cfg 未 boot（冇 hash）→ 跳過 state sync");
         if (out != NULL) {
             *out = s_result;
         }
-        return he;
+        return ESP_ERR_INVALID_STATE;
     }
     s_result.src_hash = src_hash;
     s_result.n_records = (uint32_t)build_records();

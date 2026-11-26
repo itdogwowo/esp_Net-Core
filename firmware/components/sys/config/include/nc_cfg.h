@@ -68,6 +68,14 @@ uint8_t nc_cfg_usb_default_kind(uint8_t idx);
 bool nc_cfg_hw_has_port_defaults(void);
 
 // 告訴預設「現在是哪顆晶片」：有 USJ 的用 usb_jtag、只有 OTG 的用 CDC、
+// boot 期間順便累計的原始 JSON hash（同名+NUL+內容；**唔使再重讀檔**）。
+// 次序 = nc_cfg_boot() 開檔次序（system、hardware、tasks、resources、driver）。
+void     nc_cfg_raw_hash_begin(void);
+void     nc_cfg_raw_hash_end(void);
+uint32_t nc_cfg_raw_hash(void);         // 全部 layer（state.ncst 的 src_hash 用）
+uint32_t nc_cfg_raw_hash_hw_drv(void);  // 只 hardware+driver（同 ncportgen cfg hash 對）
+uint16_t nc_cfg_raw_hash_files(void);   // 累計到幾個檔
+
 // 單核板唔砌 decode1。**要在 nc_cfg_boot() 之前呼叫**（main 在 app_main 最前面做）。
 // chip = NULL 或未知 → 保守用「CDC + 2 核」（跟舊行為一致）。
 // 已載入的 config 不受影響：這只改「缺檔／缺欄位時」的預設。
