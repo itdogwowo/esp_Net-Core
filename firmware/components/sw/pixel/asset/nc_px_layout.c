@@ -1285,11 +1285,14 @@ static uint32_t crc32_bytes(const uint8_t *p, size_t n)
     return ~crc;
 }
 
-uint32_t nc_px_layout_cache_key(uint32_t mode_hash, uint32_t map_hash, uint32_t px)
+uint32_t nc_px_layout_cache_key(uint32_t mode_hash, uint32_t map_hash, uint32_t px,
+                                uint32_t assets_hash)
 {
     uint32_t h = 2166136261u;
-    const uint32_t v[4] = { mode_hash, map_hash, px, NC_PX_LAYOUT_CACHE_VER };
-    for (int i = 0; i < 4; i++) {
+    // assets_hash 一定要計：layout／prog 都係由效果內容編譯出來，改 effects.json
+    // 而 mode／map 冇改（好常見）時，舊 key 會令 firmware 讀回舊 program → 燈唔變。
+    const uint32_t v[5] = { mode_hash, map_hash, px, assets_hash, NC_PX_LAYOUT_CACHE_VER };
+    for (int i = 0; i < 5; i++) {
         uint8_t *b = (uint8_t *)&v[i];
         for (int k = 0; k < 4; k++) {
             h ^= b[k];

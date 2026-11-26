@@ -8785,3 +8785,38 @@ show_frame」，已經係舊路徑；實際係零拷貝直寫環（`nc_px_layout
   （比之前 +34,400 B＝content 管線）。
 - **未上板**：`/data/pixel` 係 runtime 資產（映像冇 embed，`strings` 0 命中），
   要 `show_upload.py` 上傳再 reboot 才見效果。
+
+### 7.251 2026-11-26（JSON 燈效上板：正弦表冇 init＝所有效果「中位平線」）
+
+**症狀**：Textkit 上傳四層 JSON 之後，`0xF06B` 的 hex 永遠一樣（`0c0c0c00`），
+改 `phi`／`F`／`end_Time` 完全冇反應；只有 `l_max` 有作用（數值＝`l_max/2`）。
+管線本身健康：`pair.n` 50 fps、`apply` 29 µs、四條任務 level=4。
+
+**根因 1（主因）**：`nc_px_engine_sin_lin()` 讀的 `s_sin_lin[]` 預設全 0，
+要 `nc_px_engine_tables_init()` 才建表。呢個 function 一直只有舊 8×8 引擎
+（`nc_px_engine_core.c:323`）／`effect_bench`／`test_action` 會呼叫；
+**Show 的 content 路徑（pixel_effect_task）漏了**。冇表 → `sin_lin()` 永遠回 2048
+→ 每條 program 都係「中位平線」，相位（phi）、相位增量（F）、波長（end_Time）全部失效，
+只剩 `l_max` 的線性比例。host 對拍證實：加 init 後 breath_r 由 `192 192 192`
+變成 `192 199 207 214…`，breath_g（phi 120°）由同值變成 `358 354 350…`。
+
+**根因 2**：layout 快取 key 只計 `mode_hash + map_hash + px`，**唔計 effects**。
+改 `effects.json` 而 mode／map 冇改時，key 唔變 → 讀回舊 `prog`（舊 phi／F）。
+修法：`nc_px_layout_cache_key()` 加 `assets_hash` 參數；paint 用 FNV 滾
+「效果名＋每段欄位＋播放參數」成 32-bit 指紋餵入。
+
+**改動**：
+- `pixel_effect_task.c`：`waves_build()` 開頭 `nc_px_engine_tables_init()`（冪等）。
+- `nc_px_layout.{h,c}`：cache key 加 `assets_hash`；`nc_px_paint_task.c` 新增
+  `assets_hash()` 並在三個呼叫點傳入；bench／`pxLayout_test` 傳 0。
+
+**上板驗證**（`idf=v6.0.3`、fw `4ad63aa-dirty`、app `349e0c99`、MAC `b4:3a:45:ad:52:e4`）：
+
+- `0xF06B`：rainbow 每幀唔同、**每顆燈唔同**（例如 `160a02` / `170705` / `170308` / `16010c`），
+  breath 隨時間漸變 → 動畫正常。
+- `0xF071`：`pair.n` 1533 @ **50.0 fps**、`apply` 33 µs、**`drops=0`**（修復前 15,236）、
+  `frame_max_us` 20,188。
+- OTA 實測 **110.6 s @ 6.4 KB/s**（比文件記載 150 KB/s 慢很多；可能 hub／線材，待查）。
+
+**未做**：mode 冇寫 `w` 通道時，環裡的 W 會殘留舊值（WS2812 3 B/px 唔受影響；
+RGBW 才要處理）；README 已提醒「一個 mode 要寫齊 R/G/B」。

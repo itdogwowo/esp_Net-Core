@@ -490,7 +490,8 @@ static void test_cache_roundtrip(void)
 
     nc_px_layout_t a;
     check(nc_px_layout_build(&mode, &map, &assets, inv, 1, &a) == ESP_OK, "建立");
-    const uint32_t key = nc_px_layout_cache_key(mode.hash, map.hash, 64);
+    // 效果表指紋（0 = 測試用常數；生產路徑由 paint 計真 hash）
+    const uint32_t key = nc_px_layout_cache_key(mode.hash, map.hash, 64, 0u);
     const char *path = "/tmp/pxlayout_cache_test.bin";
     check(nc_px_layout_save(&a, path, key) == ESP_OK, "存檔");
 

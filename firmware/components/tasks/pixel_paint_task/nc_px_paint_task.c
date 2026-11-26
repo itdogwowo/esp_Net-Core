@@ -177,6 +177,41 @@ static void white_mix(uint8_t *canvas, uint32_t px, uint8_t w)
     }
 }
 
+// 效果表的指紋：layout／prog 都係由 effects.json 編譯出來，但 cache key 原本只計
+// mode＋map＋px → 改 effects.json 之後 key 唔變，會讀回舊 program（燈唔動／反應唔到）。
+// 這裡把整個效果表（名＋每段欄位＋播放參數）滾成一個 32-bit 指紋，餵入 cache key。
+static uint32_t assets_hash(const nc_px_asset_tbl_t *t)
+{
+    uint32_t h = 2166136261u;
+    if (t == NULL) {
+        return h;
+    }
+    for (uint16_t i = 0; i < t->n; i++) {
+        const nc_px_asset_t *a = &t->item[i];
+        for (const char *c = a->name; *c != '\0'; c++) {
+            h = (h ^ (uint8_t)*c) * 16777619u;
+        }
+        const uint16_t small[6] = { a->nseg, a->step, a->spacing, a->offset, a->speed,
+                                    (uint16_t)(a->reverse ? 1u : 0u) };
+        for (int k = 0; k < 6; k++) {
+            const uint8_t *b = (const uint8_t *)&small[k];
+            h = (h ^ b[0]) * 16777619u;
+            h = (h ^ b[1]) * 16777619u;
+        }
+        for (uint8_t g = 0; g < a->nseg; g++) {
+            const uint16_t seg[7] = { a->seg[g].type, a->seg[g].f, a->seg[g].l_max,
+                                      a->seg[g].l_lim, a->seg[g].phi, a->seg[g].end_f,
+                                      a->seg[g].pulse };
+            for (int k = 0; k < 7; k++) {
+                const uint8_t *b = (const uint8_t *)&seg[k];
+                h = (h ^ b[0]) * 16777619u;
+                h = (h ^ b[1]) * 16777619u;
+            }
+        }
+    }
+    return h;
+}
+
 // 最新一幀的快照：paint loop 寫、0xF06B handler 讀。
 // rgbw = NULL 代表「黑幀」（fallback 時用），會把快照內的有效像素清 0。
 static struct {
@@ -722,7 +757,8 @@ static void content_prepare_next(void)
     }
     const int64_t t0 = esp_timer_get_time();
     nc_px_layout_free(&s_content.next_layout);
-    const uint32_t ckey = nc_px_layout_cache_key(m->hash, map->hash, s_content.px);
+    const uint32_t ckey = nc_px_layout_cache_key(m->hash, map->hash, s_content.px,
+                                                   assets_hash(s_content.assets));
     char cpath[96];
     (void)snprintf(cpath, sizeof(cpath), "%s/cache/%08lx.pxlt", s_content.pixel_dir,
                    (unsigned long)ckey);
@@ -824,7 +860,8 @@ static esp_err_t content_apply_mode_locked(const nc_px_mode_t *mode)
     // 組合的快取：同一份 mode／map＋同一個 px → 直接讀已編譯結果（固定時間，唔使再計）。
     // 內容一改（hash 變）或 px 改，key 就唔夾 → 當失效，重建並覆寫。
     // 每個組合一個檔案（key 由 mode／map 內容＋px 決定）：切返之前用過的組合可以即刻讀。
-    const uint32_t ckey = nc_px_layout_cache_key(mode->hash, map->hash, s_content.px);
+    const uint32_t ckey = nc_px_layout_cache_key(mode->hash, map->hash, s_content.px,
+                                                      assets_hash(s_content.assets));
     char cpath[96];
     (void)snprintf(cpath, sizeof(cpath), "%s/cache/%08lx.pxlt", s_content.pixel_dir,
                    (unsigned long)ckey);
@@ -1148,7 +1185,8 @@ static void cache_prebuild_missing(void)
             failed++;
             continue;
         }
-        const uint32_t key = nc_px_layout_cache_key(m->hash, map->hash, s_content.px);
+        const uint32_t key = nc_px_layout_cache_key(m->hash, map->hash, s_content.px,
+                                                   assets_hash(s_content.assets));
         char path[96];
         (void)snprintf(path, sizeof(path), "%s/cache/%08lx.pxlt", s_content.pixel_dir,
                        (unsigned long)key);

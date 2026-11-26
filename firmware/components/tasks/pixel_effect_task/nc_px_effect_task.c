@@ -24,6 +24,7 @@
 #include "esp_timer.h"
 
 #include "nc_pipeline.h"
+#include "nc_px_engine.h"   // nc_px_engine_tables_init（正弦／gamma 表）
 #include "nc_prio.h"
 #include "nc_task.h"
 
@@ -179,6 +180,11 @@ static bool wave_slots_reserve(uint32_t cap)
 
 static bool waves_build(void)
 {
+    // ★ 正弦／gamma 表唔係「自動有」：nc_px_engine_sin_lin() 讀的 s_sin_lin[] 預設全 0，
+    //   冇 init 就永遠回 2048 → 所有效果都係「中位平線」（燈唔動、phi／F 完全冇作用）。
+    //   以前只有舊 8×8 引擎／bench／test_action 會 init，Show 的 content 路徑漏了。
+    //   呢個 function 冪等（s_gam[1023] == 0 才建），每次 reload 呼叫都安全。
+    nc_px_engine_tables_init();
     waves_free();
     if (!wave_slots_reserve(s_set.naprog)) {
         ESP_LOGW(TAG, "wave 指標陣列配置失敗（naprog=%u）", (unsigned)s_set.naprog);
