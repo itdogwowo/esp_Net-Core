@@ -10,6 +10,10 @@
 
 ## 1. 三種形態（同一個事實，三種表示）
 
+> 定案補充（2026-11-26）：**state manager 只有一個持久格式 `NCSTATE`（`state.bin`）**，
+> 內部自描述（type/len/key）；pixel layout 快取係唯一例外（`.layout`）。
+> 詳見 [`state-storage-format.md`](state-storage-format.md)。
+
 | 形態 | 位置 | 內容 | 誰用 |
 |---|---|---|---|
 | **A. JSON** | FAT `/data/config/*.json` | key **路徑名**＋完整值（人改） | 用戶／WebMaster |

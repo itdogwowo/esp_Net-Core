@@ -1,214 +1,128 @@
-# 狀態儲存格式：緊湊二進位（唔直接存 JSON）
+# 統一狀態格式：`NCSTATE`（state manager 唯一格式）
 
-> 2026-11-26。用家定案方向：**設定系統一律「出廠 → FAT 微調 → 壞了回退」**；
-> 而且值會登記入 **state manager**（`nc_state`），所以要有**緊湊、可版本化、可校驗**
-> 的二進位格式，**唔好直接存 JSON**。效果（pixel assets）同樣：JSON 只做輸入，
-> 讀完即刻轉成 runtime 緊湊形態，開機唔再 parse JSON。
+> 2026-11-26。用家定案：
+> 1. **全部統一一個格式＋內部自描述**；
+> 2. **pixel 系列例外**——佢可以保留自己一個格式（layout 大表）；
+> 3. **state manager 只有一個格式**；
+> 4. magic **唔加版本數字**（`"NCSTATE1"` 個 `1` 係我加錯；版本放 header `ver`）。
 
 ---
 
-## 1. 統一四層套路（所有 config 域都一樣）
+## 1. 定案（兩個格式，冇第三個）
 
-| 層 | 內容 | 儲存位置 | 出錯時 |
+| 用途 | 檔案 | magic（8 byte ASCII） | 內容 |
 |---|---|---|---|
-| **L0 出廠** | build-time 生成（`nc_port.c`／`preset_*.json`） | flash（embedded） | 冇得壞（常量） |
-| **L1 FAT 微調** | 人手可改的 JSON（唯一人讀格式） | `/data/config/*.json` | JSON 壞 → **忽略 L1**，用 L0 |
-| **L2 派生二進位** | L1 parse 後的緊湊 cache | `/data/config/*.ncb`（或 NVS blob） | cache 壞／版本唔夾 → 由 L1／L0 重生 |
-| **L3 回退** | 上一份「確認可用」的快照（last-known-good） | `*.ncb.bak` | 全部壞 → 用 L0，並大聲 warn |
+| **狀態／設定值**（state manager 唯一） | `/data/config/state.bin` | `"NCSTATE"`＋`\0` | 所有 unit／裝置嘅值（sparse、self-describing） |
+| **pixel layout 快取**（例外） | `/pixel/cache/<key>.layout` | `"NCLAYOUT"` | 編譯後嘅大 binary 表（aprog／job／runs） |
 
-**規則**
-1. JSON 只係**輸入**；runtime 同 state manager 只存**二進位**。
-2. 二進位檔一律有 `magic + version + crc32`；版本唔夾＝當壞檔（唔會亂讀）。
-3. 壞檔**明示**（log／status），唔好靜默降級（鐵律 9）。
-4. 派生 cache 可以隨時刪：刪完只係慢一次（重生），唔會失資料。
+- **冇第三個格式**。之前提過嘅 `NCB2`／`NCC2`／`PXA2`／`NCS1`／`NCLT` **全部作廢**，
+  只喺文件保留一行「作廢」防撞名。
+- **為什麼 magic 唔加 `1`**：版本係 header 嘅 `ver u16`（=1）負責；名字要保持穩定，
+  咁 hexdump 見到 `"NCSTATE"` 就知係咩，唔會隨版本改名。
 
 ---
 
-## 2. `NCB2`：state manager 的通用狀態 blob
+## 2. `NCSTATE` 佈局（內部自描述）
 
-用嚟存「一堆細狀態」（log 級別、boot 旗標、校準值、last-known-good config…）。
-NVS 本身係 blob，NCB2 係 blob 內部的**自描述格式**（唔係 raw struct —
-raw struct 一改 firmware 就讀錯，係現時 `nc_state` v1 的弱點：size 一變就 drop）。
+### Header（24 B，固定）
 
 ```text
-header (20 B)
-  "NCB2" (4) | ver u16 | flags u16 | strtab_len u32 | payload_len u32 | crc32 u32
-strtab: n u16, n × (len u8 + utf8)            ← key 只存一次（字典）
-payload: 值樹，tag u8
-  0 null | 1 false | 2 true
-  3 int      → zigzag varint
-  4 float    → 8 B double
-  5 str      → varint len + utf8
-  6 arr      → varint count + 值×count
-  7 obj      → varint count + (8 keyref + varint dict_idx + 值)×count
-crc32 = crc32(strtab + payload)
+offset  size  field
+0       8     magic = "NCSTATE\0"
+8       2     ver        （=1；格式版本，改 schema 就 bump）
+10      2     flags      （保留；bit0=有 src_hash）
+12      2     count      （record 數）
+14      4     src_hash   （來源 JSON 嘅 CRC32；版本確認用）
+18      4     payload_len
+22      4     blob_crc   （payload CRC32）
 ```
 
-- **varint**：0..127 = 1 B；負數用 zigzag → 小幅負數（例如 GPIO `-1`）只 1 B。
-- **字典**：`"enable"`、`"_comment"` 等重複 key 全檔只出現一次。
-- **向前兼容**：未知 tag → 跳過（靠 len 前綴）；未知 key → 保留原文唔用。
-- 上限：blob ≤ 4 KB（NVS 單值上限；大 config 用 L2 檔案）。
+### Record（自描述，逐筆）
 
-**實測（lab 原型，generic JSON→NCB2）**
+```text
+type   u8      1=無號整數  2=有號整數  3=bytes/字串  4=bool
+key    varint  schema 嘅 key id
+len    varint  value 佔幾多 byte
+value  ...     （varint／zigzag／raw bytes）
+```
 
-| 檔案 | JSON | NCB2 | 省 |
-|---|---:|---:|---:|
-| `hardware.json` | 5,992 | 3,462 | 42.2% |
-| `driver.json` | 2,830 | 1,618 | 42.8% |
-| `system.json` | 2,274 | 1,378 | 39.4% |
-| `tasks.json` | 1,494 | 1,134 | 24.1% |
-| `resources.json` | 519 | 483 | 6.9% |
-| 合計 7 個檔 | 13,971 | 8,788 | **37.1%** |
+**自描述嘅意思**：
+- reader 淨係靠 `type + len` 就知點解讀同**跳過唔識嘅欄位**（向前兼容）；
+- schema 表（id→名／型別／範圍／預設）只係**加速同驗證**，唔係唯一解讀途徑；
+  schema 版本舊咗都唔會讀錯，只會「唔識就跳過」；
+- 唔存長路徑名（`"hardware.i80.0.wr"`），只存 `u16 id`，慳位。
 
-> 呢個係**通用** encoder（連 key 名）。若按固定 schema 編（field id，唔存 key），
-> 預計 hardware／driver 可再細 50%+（目標：hardware ~700 B、driver ~350 B）。
-> 原型：`modules/lab/state_format_lab/ncb2_preview.py`。
+### 例：Matrix 的 9 筆 record（hexdump）
+
+```text
+4e 43 53 54 41 54 45 00    "NCSTATE\0"
+01 00 00 00 09 00           ver=1 flags=0 count=9
+... src_hash / payload_len / blob_crc ...
+01 81 0e 01 01             type=uint key=0x901 len=1 val=1   （i80.data count）
+02 82 0e 01 01             type=sint key=0x902 len=1 val=-1  （wr）
+...
+03 86 18 07 06 "ws2812"    type=bytes key=0xc06 len=7       （format 字串）
+```
 
 ---
 
-## 3. `NCC2`：config 派生 cache（FAT）
+## 3. 大小（實測）
 
-每個 config 層（system／hardware／driver／tasks／resources）一個 cache：
+| 項目 | 大小 |
+|---|---:|
+| Matrix hardware.json＋driver.json | 8,822 B |
+| **NCSTATE blob（統一格式）** | **80 B**（24 header＋56 records／9 筆） |
+| 每筆平均 | 6.2 B（type 1＋key 1–2＋len 1＋value 1–5） |
+| 舊構想（id＋值，無 type/len） | ~52 B |
+| **統一格式代價** | +28 B（換嚟自描述＋可跳過未知欄位） |
+| worst-case（380 key 全寫） | **≈ 24 + 380×8 ≈ 3.1 KB**（NVS 4 KB blob OK） |
+| 典型（只開 i80＋led） | ~100–150 B |
 
-```text
-"NCC2" (4) | ver u16 | layer u8 | rsv u8 | cfg_hash u32 | payload_len u32 | crc32 u32
-cfg_hash = crc32(L1 JSON bytes)        ← 同 L1 唔同就自動失效
-payload  = 固定 schema binary（field id + varint；冇 key 名）
-```
-
-**開機流程**
-
-```text
-讀 L1 JSON bytes → 算 hash
-  ├─ L2 *.ncb 存在、ver 夾、crc 過、cfg_hash 一樣 → 直接反序列化（快）
-  └─ 否則 → parse JSON（失敗就 L0）→ 序列化 L2 + .bak（last-known-good）
-```
-
-**好處**：正常開機**唔需要 cJSON**；JSON 壞咗都仲有上一次可用嘅 binary。
+> 80 B vs 8,822 B = **省 99.1%**；而且因為 sparse（只存同預設唔同嘅值），
+> 用戶改幾項就只寫幾項。
 
 ---
 
-## 4. `PXA2`：pixel assets 編譯 cache
-
-效果／map／mode／registry 已經係「JSON → runtime 緊湊形態」（aprog 指令流、
-runs、6 B flat 表）；**未有跨開機 cache**（每次開機重新 parse＋compile）。
-補一個編譯 cache：
+## 4. 開機流程（版本確認）
 
 ```text
-"PXA2" (4) | ver u16 | kind u8（mode/effect/map/registry） | rsv u8
-assets_hash u32 | payload_len u32 | crc32 u32 | payload…
+讀 FAT JSON（hardware/driver/system/tasks/resources，固定次序）→ 算 src_hash
+├─ state.bin 存在 && ver 夾 && src_hash 同 && blob_crc 過 → 【hit】直接載入
+└─ 否則 → parse JSON → 重新生成 state.bin（atomic：.tmp → rename）→ log【miss old→new】
+             └─ JSON 壞 → 回 L0 出廠預設（大聲 warn）
 ```
 
-- `payload`：direct mode 用「aprog 指令流 + 參數表 + 每節點邊界」；
-  mode 用「節點樹＋參數」（同現時 JSON 等價但完全數值化）。
-- layout 已經有 `.layout`（binary、6 B/px flat）——**唔重做**，PXA2 只補 program/mode。
-- 開機：hash 夾 → 直接載入；唔夾／壞 → 由 JSON 重建（現有流程）→ 寫回 cache。
-- 刪 cache＝只係慢一次；JSON 仍然係唯一人改來源。
+- **hit**：開機唔使 parse JSON，直接將 record 填入 state（快）。
+- **miss**：重建一次；下次 hit。
+- 舊版本／壞檔：**明示**（log＋`status`），唔靜默。
+- 檔案可以手動刪：刪完只係 miss 一次，唔會失資料（JSON 仍係源頭）。
 
 ---
 
-## 5. 落地次序（估時）
+## 5. Pixel 例外（`.layout`）
 
-| 階段 | 內容 | 估時 |
+layout 係「編譯後大表」（aprog／job／runs，幾百 B 到 32 KB），逐筆 record 開銷太大，
+所以**保持自己一個格式**：
+
+```text
+" layout" header：magic "NCLAYOUT" | ver u32 | key u32 | px u32 |
+                  naprog/njobs/nruns/nvals | payload_bytes | crc32
+```
+
+- 檔名 `<key>.layout`；`key` 已經係 mode／map／assets 內容 hash（等同 src_hash）。
+- 刪咗自動重建（純快取）；舊 `.pxlt`／`.nclt` 自動當壞檔。
+
+---
+
+## 6. magic 登記表（現行）
+
+| magic | 用途 | 狀態 |
 |---|---|---|
-| **P1** | `NCB2` codec（C，~250 行）＋host test（round-trip／varint／壞 CRC）＋`nc_state` 改用它（header 化、last-known-good） | 1 日 |
-| **P2** | `NCC2`：hardware／driver 兩層（最常改、最大）派生 cache＋開機流程 | 1 日 |
-| **P3** | `PXA2`：mode／registry 編譯 cache（program 次之） | 1–2 日 |
-| P4 | `status cfg`／boot log 顯示 cache 命中、版本、fallback 原因 | 0.5 日 |
+| `"NCSTATE"` | 狀態／設定值（state manager 唯一格式） | ✅ 實作中（P1） |
+| `"NCLAYOUT"` | pixel layout 快取 | ✅ 已上板（`.layout`） |
+| `"NCS1"`／`"NCLT"`／`"NCB2"`／`"NCC2"`／`"PXA2"`／`"PXLT"` | 舊代號 | ❌ 作廢，唔再用 |
 
-**風險**：二進位格式一改就要版本升級＋拒絕舊版（唔可以「估」）；要 host test
-覆蓋 round-trip 同壞檔；schema 變更要同時 bump `ver`。
-
----
-
-## 6. 同現有機制的關係
-
-| 現有 | 之後 |
-|---|---|
-| `nc_state` 用 raw struct 落 NVS（size 一變就 drop） | 改用 `NCB2`（自描述、版本化、可加減欄位） |
-| config 每次開機 parse JSON | `NCC2` cache；JSON 只做人改輸入 |
-| pixel 每次開機 parse＋compile | `PXA2` cache；`.layout` 已存在唔動 |
-| 壞檔只靜默回預設 | 一律 warn＋status 顯示（L3 last-known-good） |
-
-> **一句話**：JSON 係「人機介面」，二進位係「機機介面」；兩者都由同一套
-> 「出廠 → FAT → 回退」規則管，格式由 magic／ver／hash／crc 保證唔會亂讀。
-
----
-
-## 8. 哈希規則（所有中間產物一律照呢條）
-
-**用家定案（2026-11-26）**：中間產物要寫入來源 JSON 哈希，開機對哈希：
-一樣＝直接載入；唔一樣＝重新生成。
-
-### 8.1 每個中間物嘅 header（固定佈局）
-
-```text
-magic 4 B | ver u16 | flags u16 | src_hash u32 | payload_len u32 | blob_crc u32
-                                 ^^^^^^^^^^        ^^^^^^^^^        ^^^^^^^^^
-                                 來源 JSON 哈希    長度             自身 CRC
-```
-
-- **`src_hash`**：來源 JSON 嘅 CRC32（IEEE，zlib），按**固定次序**累加：
-  `hash = crc32(hash, "<檔名>\0" + raw_bytes)`；檔名用相對路徑，例如
-  `wiring.json`、`driver.json`、`project/sdkconfig.defaults`。
-  用 **raw bytes**（FAT 上實際內容），唔做 normalization。
-- **`blob_crc`**：header 之後 payload 嘅 CRC32（防讀取／寫入半截）。
-- **`ver`**：格式版本（schema 一改就 bump；舊 blob 直接拒讀）。
-
-### 8.2 開機流程（統一）
-
-```text
-讀 FAT JSON bytes → 算 src_hash
-  ├─ 中間物存在 且 ver 夾 且 src_hash 相同 且 blob_crc 過 → 直接載入（hit）
-  └─ 否則 → 由 JSON 重新生成 → 寫回（atomic：.tmp → rename）→ log miss（old→new）
-```
-
-- **hit**：開機唔使 parse JSON（最快）；log `ncs hit src=0x…`
-- **miss**：parse JSON；若 JSON 壞 → 回 L0 出廠；log `ncs miss old=0x… new=0x…`
-- **CRC 撞車**（人為）唔喺威脅模型內；意外改動 8 KB 內容撞 CRC 機率 ~1/2³²，
-  而且撞車都只會「用舊值一次」，下次改動即 miss。
-
-### 8.3 各中間物嘅 `src_hash` 範圍
-
-| 中間物 | src_hash 來源 |
-|---|---|
-| **NCSTATE**（`state.bin`／NVS） | 所有 config layer 嘅 JSON（固定次序：hardware、driver、system、tasks、resources） |
-| **NCC2**（config 派生 cache） | 該 layer 嘅 JSON（單一檔） |
-| **PXA2**（pixel assets 編譯 cache） | effects.json＋mode／map／registry 所在嗰批 JSON |
-| **NCLAYOUT**（layout cache） | `key` 已經係 mode/map/assets 內容 hash 嘅 FNV；等同 src_hash（見 §8.4） |
-| **preset_activation.json**（生成期激活表） | `wiring.json`＋`driver.json`＋project `sdkconfig.defaults`（ncportgen 已輸出 `src_hash`＋逐檔 crc） |
-
-### 8.4 NCLAYOUT 補充
-
-`.layout` header 本身已有 `key`（FNV-1a over mode_hash/map_hash/px/assets_hash/ver）＋
-`crc`；**key 就係來源哈希**，所以開機載入前比較 `key` 已等同「JSON hash 一樣嗎」。
-唔另加 `src_hash` 欄位（避免重複），但 header 註解會寫明呢個等價關係。
-
----
-
-## 9. 名詞對照（名字自己講清楚，冇代號）
-
-用家 2026-11-26：「簡稱我實際唔知係咩，一定要描述清楚。」
-→ 全部改成**自述式命名**（magic 直接用 ASCII 字串，hexdump 都睇得明）：
-
-| 名（檔案） | 格式 magic | 做咩 | 而家要唔要？ |
-|---|---|---|---|
-| `/data/config/*.json` | — | 人手改嘅設定（原文、易讀） | ✅ 一直用 |
-| **`/data/config/state.bin`** | **`"NCSTATE1"`** | 設定值嘅**機器版**（只存改過嘅值＋CRC；開機直接載入） | ✅ **唯一新格式，會做** |
-| **`/pixel/cache/<key>.layout`** | **`"NCLAYOUT"`** | layout 計算結果嘅**快取**（刪咗自動重建） | ✅ **已有**（firmware 自己寫） |
-
-**取消／暫緩（唔會做，保留名只為防撞）**：
-
-| 名 | 原本想做咩 | 狀態 |
-|---|---|---|
-| `NCB2` | 通用自描述 blob | ⏸ 暫緩（冇需要） |
-| `NCC2` | config 派生快取 | ❌ 取消（`state.bin` 已做到） |
-| `PXA2` | pixel assets 編譯快取 | ⏸ 暫緩（開機 parse 唔慢） |
-
-**一句話**：
-- `state.bin` ＝「設定的機器版」（快、省、有指紋）
-- `<key>.layout` ＝「layout 答案紙」（已有，唔使理）
-- 其他一律唔做。
-
-> 命名規矩：新格式用**自述名**（檔案名講用途、magic 用 ASCII 全名），
-> 唔再用 `PX*`／`NCxx` 呢類要查表嘅代號。
+**命名規矩**：
+1. magic 用 ASCII 全名、**唔加版本數字**（版本喺 header `ver`）。
+2. 檔案名講用途（`state.bin`、`<key>.layout`）。
+3. 新格式先登記呢張表。

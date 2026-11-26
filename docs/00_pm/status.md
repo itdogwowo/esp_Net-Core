@@ -9649,3 +9649,28 @@ boot log／`status hw` 可核對。
 **取消／暫緩嘅代號**（文件已寫明）：`NCB2` ⏸、`NCC2` ❌ 取消、`PXA2` ⏸；
 `state.bin` 係唯一會新增嘅格式。命名規矩：**檔案名講用途、magic 用 ASCII 全名**，
 唔再用要查表嘅代號。
+
+### 7.275 2026-11-26（統一格式定案：NCSTATE 一個格式＋內部自描述；pixel 例外）
+
+用家定案：**全部統一格式＋內部自描述**；pixel 系列可保留自己一個格式；
+state manager 只有一個格式。並問「為什麼 NCSTATE1 有個 1」——答案：我加錯咗，
+版本應該喺 header `ver u16`，唔應該放入名 → magic 改回 **`"NCSTATE"`（冇 1）**。
+
+**最終只有兩個格式**（[`state-storage-format.md`](docs/03_notes/state-storage-format.md) 重寫）：
+- `/data/config/state.bin`：magic **`"NCSTATE\0"`**，state manager **唯一格式**；
+- `/pixel/cache/<key>.layout`：magic **`"NCLAYOUT"`**，pixel layout 大表（例外）；
+- 舊 `NCB2`／`NCC2`／`PXA2`／`NCS1`／`NCLT` **全部作廢**。
+
+**NCSTATE 佈局**：header 24 B（magic 8＋ver/flags/count 6＋src_hash/len/crc 12）
+＋逐筆 record `type u8 | key varint | len varint | value`。
+- `type`：1=uint、2=sint、3=bytes、4=bool；`len` 令 reader 可以**跳過唔識嘅欄位**
+  → 真正「內部自描述」，schema 只係加速／驗證表。
+- **sparse**：只存同預設唔同嘅值。
+
+**實測**（`modules/lab/state_schema_lab/unified_state_preview.py`）：
+JSON 8,822 B → **NCSTATE 80 B（省 99.1%）**；9 筆 record、每筆平均 6.2 B；
+舊構想（id+值無 type/len）約 52 B → 統一格式多 28 B，換嚟自描述＋向前兼容。
+worst-case 380 key ≈ 3.1 KB（NVS 4 KB OK）。
+
+**命名規矩**：magic 用 ASCII 全名、**唔加版本數字**（version 喺 header `ver`）；
+檔案名講用途；新格式先喺 magic 表登記。

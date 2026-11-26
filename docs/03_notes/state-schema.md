@@ -41,8 +41,12 @@ driver.led.px        = 0x2_0_0_5   （driver domain=2、unit=led=0）
 ## 3. 儲存格式 `NCSTATE`（schema 版，最省）
 
 ```text
-header 16 B: "NCSTATE" | ver u16 | count u16 | src_hash u32 | blob_crc u32
-body:  count × ( id varint , value zigzag-varint )   ← 按 id 升序
+統一格式：NCSTATE（state manager 唯一格式，內部自描述）——詳見 state-storage-format.md
+
+header 24 B: "NCSTATE\0" | ver u16 | flags u16 | count u16 |
+             src_hash u32 | payload_len u32 | blob_crc u32
+record:      type u8 | key varint | len varint | value
+             （type 1=uint 2=sint 3=bytes 4=bool；len 令 reader 可以跳過唔識嘅）
 
 src_hash = 來源 JSON（config layers）嘅 CRC32；開機：
   file 存在 && ver 夾 && src_hash == 現時 JSON hash && blob_crc 過 → 直接載入
