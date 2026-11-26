@@ -18,7 +18,7 @@
 extern "C" {
 #endif
 
-#define NC_STATE_PATH      "/data/config/state.NCSTATE"
+#define NC_STATE_PATH      "/data/config/state.ncst"
 #define NC_STATE_PATH_BAK  NC_STATE_PATH ".bak"
 
 typedef struct {

@@ -115,7 +115,7 @@ src_hash = 來源 JSON（config layers）嘅 CRC32；開機：
 state：  nc_state（RAM：id → value；schema 表查型別/範圍）
           │  commit：只 encode dirty → NCSTATE blob
           ▼
-落盤：  NVS blob（或 /data/config/state.NCSTATE；header+id/值，sparse）
+落盤：  NVS blob（或 /data/config/state.ncst；header+id/值，sparse）
           │  開機：blob 優先；壞／版本唔夾 → 由 JSON（再壞 → L0 出廠）
 ```
 

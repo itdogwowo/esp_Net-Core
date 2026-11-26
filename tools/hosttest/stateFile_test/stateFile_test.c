@@ -37,7 +37,7 @@ int main(void)
     char pa[160], pb[160], pst[180], pst_bak[200];
     (void)snprintf(pa, sizeof(pa), "%s/a.json", dir);
     (void)snprintf(pb, sizeof(pb), "%s/b.json", dir);
-    (void)snprintf(pst, sizeof(pst), "%s/state.NCSTATE", dir);
+    (void)snprintf(pst, sizeof(pst), "%s/state.ncst", dir);
     (void)snprintf(pst_bak, sizeof(pst_bak), "%s.bak", pst);
 
     printf("[1] hash_files：缺檔跳過、改名／改內容會變\n");

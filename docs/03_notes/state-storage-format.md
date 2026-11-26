@@ -5,6 +5,7 @@
 > 2. **pixel 系列例外**——佢可以保留自己一個格式（layout 大表）；
 > 3. **state manager 只有一個格式**；
 > 4. magic **唔加版本數字**（`"NCSTATE1"` 個 `1` 係我加錯；版本放 header `ver`）。
+> 5. 檔名用 **`state.ncst`**（短、清楚；格式名仍然係 `NCSTATE`，magic 唔變）。
 
 ---
 
@@ -12,7 +13,7 @@
 
 | 用途 | 檔案 | magic（8 byte ASCII） | 內容 |
 |---|---|---|---|
-| **狀態／設定值**（state manager 唯一） | `/data/config/state.NCSTATE` | `"NCSTATE"`＋`\0` | 所有 unit／裝置嘅值（sparse、self-describing） |
+| **狀態／設定值**（state manager 唯一） | `/data/config/state.ncst` | `"NCSTATE"`＋`\0` | 所有 unit／裝置嘅值（sparse、self-describing） |
 | **pixel layout 快取**（例外） | `/pixel/cache/<key>.layout` | `"NCLAYOUT"` | 編譯後嘅大 binary 表（aprog／job／runs） |
 
 - **冇第三個格式**。之前提過嘅 `NCB2`／`NCC2`／`PXA2`／`NCS1`／`NCLT` **全部作廢**，
@@ -87,8 +88,8 @@ value  ...     （varint／zigzag／raw bytes）
 
 ```text
 讀 FAT JSON（hardware/driver/system/tasks/resources，固定次序）→ 算 src_hash
-├─ state.NCSTATE 存在 && ver 夾 && src_hash 同 && blob_crc 過 → 【hit】直接載入
-└─ 否則 → parse JSON → 重新生成 state.NCSTATE（atomic：.tmp → rename）→ log【miss old→new】
+├─ state.ncst 存在 && ver 夾 && src_hash 同 && blob_crc 過 → 【hit】直接載入
+└─ 否則 → parse JSON → 重新生成 state.ncst（atomic：.tmp → rename）→ log【miss old→new】
              └─ JSON 壞 → 回 L0 出廠預設（大聲 warn）
 ```
 
@@ -124,7 +125,7 @@ layout 係「編譯後大表」（aprog／job／runs，幾百 B 到 32 KB），�
 
 **命名規矩**：
 1. magic 用 ASCII 全名、**唔加版本數字**（版本喺 header `ver`）。
-2. 檔案名講用途（`state.NCSTATE`、`<key>.layout`）。
+2. 檔案名講用途（`state.ncst`、`<key>.layout`）。
 3. 新格式先登記呢張表。
 
 ---
@@ -135,7 +136,7 @@ layout 係「編譯後大表」（aprog／job／runs，幾百 B 到 32 KB），�
 
 | 記憶體 | 舊路徑（JSON） | NCSTATE 之後 |
 |---|---|---|
-| **flash（FAT）** | config JSON 13.1 KB（文字） | JSON 保留＋`state.NCSTATE` ~124 B（＋`.bak` 一份） |
+| **flash（FAT）** | config JSON 13.1 KB（文字） | JSON 保留＋`state.ncst` ~124 B（＋`.bak` 一份） |
 | **internal RAM（常駐）** | 解析後 struct：hardware 800＋devices 164＋system 1,020＋tasks 604＋resources 964 = **3,552 B** | `val[380]` 1,520 B＋bitmap 48 B = **1,568 B**（可取代上面 3,552 B） |
 | **internal RAM（開機暫態）** | cJSON tree（13 KB 文字 → 約 20–35 KB） | decode buffer ≈124 B（讀檔一次） |
 | **PSRAM** | **0 B**（config 唔用 PSRAM） | **0 B** |
@@ -152,13 +153,13 @@ layout 係「編譯後大表」（aprog／job／runs，幾百 B 到 32 KB），�
 |---|---|---|
 | **L0 出廠預設** | firmware const（`nc_port.c`／schema default） | 永遠存在，唔會失 |
 | **L1 FAT JSON** | `/data/config/*.json`（完整、非 sparse、人手改） | 壞／失 → 回 L0（同以前一樣） |
-| **L2 state.NCSTATE** | FAT（派生快取、CRC＋src_hash） | 壞／版本唔夾 → 由 L1 重生 |
-| **L2b state.NCSTATE.bak** | FAT（每次寫新檔前保留上一份） | last-known-good，可手動還原 |
+| **L2 state.ncst** | FAT（派生快取、CRC＋src_hash） | 壞／版本唔夾 → 由 L1 重生 |
+| **L2b state.ncst.bak** | FAT（每次寫新檔前保留上一份） | last-known-good，可手動還原 |
 | **預設值唔變** | schema default 喺 flash；bitmap 未 set = 用 default | 讀到的永遠係有效值，唔會「零」 |
 
 上板實測（fw `b455bd1-dirty`、app `2bc43408`、idf=v6.1.1 WSL）：
-- 首次開機：生成 `/config/state.NCSTATE` **124 B**、magic `"NCSTATE\0"`、ver=1、
+- 首次開機：生成 `/config/state.ncst` **124 B**、magic `"NCSTATE\0"`、ver=1、
   count=18 筆（hardware／driver／system 的 I80＋LED＋sys 值）。
 - 寫 19 B 垃圾入去 → reboot：檔案自動重生 124 B（magic 正確），舊垃圾保留做
-  `state.NCSTATE.bak`（last-known-good 機制證實可運作）。
-- manifest：**19 個檔**（scan 之後見到 `/config/state.NCSTATE`）。
+  `state.ncst.bak`（last-known-good 機制證實可運作）。
+- manifest：**19 個檔**（scan 之後見到 `/config/state.ncst`）。

@@ -9609,7 +9609,7 @@ boot log／`status hw` 可核對。
 
 | 簡稱 | 意思 | 狀態 |
 |---|---|---|
-| **NCSTATE** | 設定值嘅機讀檔（`state.NCSTATE`，sparse id＋值＋CRC） | ✅ **唯一新格式，要做** |
+| **NCSTATE** | 設定值嘅機讀檔（`state.ncst`，sparse id＋值＋CRC） | ✅ **唯一新格式，要做** |
 | **NCLAYOUT** | layout 編譯快取（`.layout`，原 `.pxlt`） | ✅ **已經有**，firmware 自己寫 |
 | NCB2 | 通用自描述 blob | ⏸ 暫緩（冇需要） |
 | NCC2 | config 派生快取 | ❌ **取消**（NCSTATE 已做到同一件事） |
@@ -9621,7 +9621,7 @@ boot log／`status hw` 可核對。
 **下一步**維持：A1（firmware 讀 activation 表、只裝 enabled）＋P1（NCSTATE codec）——
 而 P1 就係實現嗰「唯一新格式」。
 
-### 7.274 2026-11-26（命名清楚化：`state.NCSTATE` 與 `<key>.layout`；唔再用代號）
+### 7.274 2026-11-26（命名清楚化：`state.ncst` 與 `<key>.layout`；唔再用代號）
 
 用家：「NCS1／NCLT 不一定要四個字，但一定要描述清楚，現在根本不清不楚。」
 → 全部改成**自述式命名**，magic 直接用 ASCII 全名。
@@ -9630,7 +9630,7 @@ boot log／`status hw` 可核對。
 
 | 檔案 | 格式 magic | 做咩 | 狀態 |
 |---|---|---|---|
-| `/data/config/state.NCSTATE` | `"NCSTATE1"` | 設定值嘅機器版（sparse id＋值＋CRC） | ✅ 唯一新格式（未做，P1） |
+| `/data/config/state.ncst` | `"NCSTATE1"` | 設定值嘅機器版（sparse id＋值＋CRC） | ✅ 唯一新格式（未做，P1） |
 | `/pixel/cache/<key>.layout` | `"NCLAYOUT"` | layout 計算結果快取 | ✅ **已改好、上板驗證** |
 
 **改動（code）**
@@ -9647,7 +9647,7 @@ boot log／`status hw` 可核對。
 - host test 21/21；LED 正常。
 
 **取消／暫緩嘅代號**（文件已寫明）：`NCB2` ⏸、`NCC2` ❌ 取消、`PXA2` ⏸；
-`state.NCSTATE` 係唯一會新增嘅格式。命名規矩：**檔案名講用途、magic 用 ASCII 全名**，
+`state.ncst` 係唯一會新增嘅格式。命名規矩：**檔案名講用途、magic 用 ASCII 全名**，
 唔再用要查表嘅代號。
 
 ### 7.275 2026-11-26（統一格式定案：NCSTATE 一個格式＋內部自描述；pixel 例外）
@@ -9657,7 +9657,7 @@ state manager 只有一個格式。並問「為什麼 NCSTATE1 有個 1」——
 版本應該喺 header `ver u16`，唔應該放入名 → magic 改回 **`"NCSTATE"`（冇 1）**。
 
 **最終只有兩個格式**（[`state-storage-format.md`](docs/03_notes/state-storage-format.md) 重寫）：
-- `/data/config/state.NCSTATE`：magic **`"NCSTATE\0"`**，state manager **唯一格式**；
+- `/data/config/state.ncst`：magic **`"NCSTATE\0"`**，state manager **唯一格式**；
 - `/pixel/cache/<key>.layout`：magic **`"NCLAYOUT"`**，pixel layout 大表（例外）；
 - 舊 `NCB2`／`NCC2`／`PXA2`／`NCS1`／`NCLT` **全部作廢**。
 
@@ -9699,12 +9699,12 @@ worst-case 380 key ≈ 3.1 KB（NVS 4 KB OK）。
 
 **上板**（fw `bd70185-dirty`、app `40a4f819`、idf=v6.1.1 (WSL)）：OTA 成功、
 `rst=3`、`up_s` 正常；codec 未接 runtime，行為同之前一樣（LED 正常）。
-**未做**：JSON→NCSTATE 生成、開機 hit/miss、`state.NCSTATE` 落 FAT（下一步 P2）。
+**未做**：JSON→NCSTATE 生成、開機 hit/miss、`state.ncst` 落 FAT（下一步 P2）。
 
-### 7.277 2026-11-26（P2 第一步：開機 JSON→`state.NCSTATE`＋hash hit/miss＋.bak，上板驗證）
+### 7.277 2026-11-26（P2 第一步：開機 JSON→`state.ncst`＋hash hit/miss＋.bak，上板驗證）
 
 用家：「繼續繼續；開機時由 JSON 生成 state.bin。之前唔係商量咗叫 .NCSTATE？
-而家做法係咪連保護性預設都少咗（失敗退還）」→ 已改檔名 **`state.NCSTATE`**、
+而家做法係咪連保護性預設都少咗（失敗退還）」→ 已改檔名 **`state.ncst`**、
 保護層唔減（多一層 `.bak`），並完成 P2 第一步上板。
 
 **新增**（firmware `components/sys/state/`）
@@ -9712,7 +9712,7 @@ worst-case 380 key ≈ 3.1 KB（NVS 4 KB OK）。
   來源哈希（`crc32("<basename>\0"+raw bytes)` 逐檔累加）、`peek`／`load`／`size`。
 - `nc_state_boot.[ch]`：B02 之後呼叫 `nc_state_boot_sync()`：
   * 由已 parse 的 cfg 造 18 筆 record（I80／LED／sys）；
-  * peek `state.NCSTATE`：ver／CRC／src_hash 全中 → **hit**（log）；
+  * peek `state.ncst`：ver／CRC／src_hash 全中 → **hit**（log）；
   * 否則 miss（原因明示）→ atomic 重寫，舊檔保留 `.bak`；
   * L0／L1 完全不變：JSON 壞 → 照舊回出廠預設。
 - main.c：`(void)nc_state_boot_sync(NULL);`（`nc_cfg_boot()` 之後）。
@@ -9720,10 +9720,10 @@ worst-case 380 key ≈ 3.1 KB（NVS 4 KB OK）。
   壞 magic／截斷／缺檔、無 `.tmp` 殘留；run_all **23/23 全綠**。
 
 **上板驗證**（fw `b455bd1-dirty`、app `2bc43408`、idf=v6.1.1 (WSL)）
-- 首次開機生成 `/config/state.NCSTATE` **124 B**（magic `"NCSTATE\0"`、ver=1、
+- 首次開機生成 `/config/state.ncst` **124 B**（magic `"NCSTATE\0"`、ver=1、
   count=18 筆、payload 98 B、CRC 正確）；manifest scan **19 個檔**見到它。
 - 寫入 19 B 垃圾 → reboot：自動重生 **124 B**（magic 正確）；舊檔變
-  `state.NCSTATE.bak`（19 B）→ last-known-good 實測有效。
+  `state.ncst.bak`（19 B）→ last-known-good 實測有效。
 - 保護層：L0 出廠（firmware const）→ L1 JSON（權威）→ L2 NCSTATE（快取）→
   L2b `.bak`；任何一層壞都唔會令值變零。
 - **RAM**：`val[380]`(1,520 B)＋bitmap(48 B)＝**1,568 B internal**；PSRAM **0 B**；
@@ -9733,3 +9733,17 @@ worst-case 380 key ≈ 3.1 KB（NVS 4 KB OK）。
 **未做（P3）**：driver／config 真正改讀 state（省 2 KB internal＋免 cJSON）；
 hit 時跳過 JSON parse；schema key 表＋`status cfg` 顯示 hit/miss。
 
+
+### 7.278 2026-11-26（檔名定案：`state.ncst`；格式名 NCSTATE 不變）
+
+用家：`.NCSTATE` → **`.ncst`、`state.ncst`**，更清晰 → 已改。
+
+- firmware `nc_state_boot.h`：`NC_STATE_PATH "/data/config/state.ncst"`（`.bak` 自動跟）。
+- host test 臨時檔名同步；文件全部 `state.NCSTATE` → `state.ncst`；
+  並加註：「檔名 state.ncst（短、清楚）；格式名仍然 NCSTATE，magic 唔變」。
+- host test **23/23** 全綠；IDF build 成功。
+- 上板（fw `a144855-dirty`、app `6e72798d`）：
+  * `/config/state.ncst` = **124 B**、magic `"NCSTATE\\0"`（同之前一樣格式）；
+  * 舊 `/config/state.NCSTATE` 及其 `.bak` 已刪（GET 確認 404）；
+  * manifest 已修正（清走舊檔的 stale entry），`/config/state.ncst` 可見。
+- 命名：**格式 NCSTATE（magic）、檔案 `state.ncst`、備份 `state.ncst.bak`**。
