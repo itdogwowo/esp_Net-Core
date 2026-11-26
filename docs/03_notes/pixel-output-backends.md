@@ -31,6 +31,9 @@ render_task：DMA 完成還格 → submit → 硬件
 > `driver.json` 的 `LED.backend` 已經收 `rmt`／`parlio`（`ncportgen.py` 有 enum），
 > 但 `setup_backends()` 會大聲講「未有 firmware 支援」並停用該 lane —— 唔會靜默
 > 退到 mock。
+>
+> **I80 的腳位 schema**（稀疏 `data`、`-1`＝未用、自動 8↔16-bit、自動補 dummy、
+> `wr`／`dc` 可省）見 [`pixel-i80-pin-schema.md`](pixel-i80-pin-schema.md)（2026-11-26 設計稿，未實作）。
 
 ## 3. 後端契約（`nc_pixel_backend_t`，見 `nc_render.h`）
 
