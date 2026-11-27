@@ -17,7 +17,9 @@ PLAN = [("nc4.reply0", 2615, "核數（1 decoder）", "psram"),
         ("usb.rx", 4128, "link 的 region（cfg）", "int"),
         ("i80.prd", 576, "px×lane（cfg）", "int"),
         ("mock.prd", 576, "測試後端", "int")]
-EXTRA = [("usb0.rx", 4128, "link 第二份（待確認）")]
+# 2026-11-27 查清：usb0.rx 同 usb.rx 係**同一塊記憶體**（USJ parser 用 link 名再包一次），
+# 唔係第二份；已用 nc_buf_find_region() 去重，帳目唔再重複計。
+EXTRA: list = []
 ARENA_ZERO = 32_768          # 冇模組時的 ncm.arena（有模組 = 掃描量）
 ARENA_OLD = 512 * 1024
 SCHEMA_FLASH = 12_404
@@ -94,8 +96,8 @@ def panel1(y: int) -> str:
     # 結論
     s.append(rect(x + 20, by + 52, bw, 92, F_AMBER, S_AMBER, 1.1, 10))
     s.append(text(x + 34, by + 76, "答案：真正「寫死」＝ .bss／.data 143.6 KB（93%）——全部係 RTOS／網絡／驅動骨架，唔關業務事。", 11, INK, 700))
-    s.append(text(x + 34, by + 98, "業務緩衝（plan 7,895 B ＋ 額外 4,128 B）已經全部由 cfg／掃描決定；arena 由「掃到幾多模組」決定（冇模組 32 KB）。", 10.5, INK2))
-    s.append(text(x + 34, by + 118, "唯一「量唔到就固定」的是 task stack 與靜態表——它們唔跟設定變，屬必要固定成本。", 10.5, INK2))
+    s.append(text(x + 34, by + 98, "業務緩衝（plan 7,895 B）全部由 cfg／掃描決定；arena 由「掃到幾多模組」決定（冇模組 32 KB）。", 10.5, INK2))
+    s.append(text(x + 34, by + 118, "usb.rx／usb0.rx 係同一塊（USJ parser 用 link 名再包一次）——已加 nc_buf_find_region() 去重，帳目唔再計兩次。", 10.5, INK2))
     return "".join(s)
 
 
@@ -137,7 +139,6 @@ def panel3(y: int) -> str:
             (".bss／.data", fmt(STATIC), "編譯期", "✗ 固定（RTOS／lwIP／WiFi 骨架）"),
             ("nc4.reply0", "2,615", "decoder 數（核數）", "△ 單核只宣告 1 條（已省 2,615）"),
             ("usb.rx", "4,128", "link region（cfg）", "△ 改 hardware.json 的 rx.region 就變"),
-            ("usb0.rx", "4,128", "link 第二份", "? 待確認：同 usb.rx 係唔係同一用途"),
             ("i80.prd", "576", "px×lane（cfg）", "△ 跟 cfg，唔會超配"),
             ("mock.prd", "576", "測試後端", "△ release 仍然存在 → 可條件編譯省 576"),
             ("ncm.arena", "32,768", "掃描 .nce／.nct", "✓ 0 模組 = 32 KB；有模組照實測（原 512 KB）"),

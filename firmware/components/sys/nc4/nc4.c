@@ -295,8 +295,12 @@ nc4_parser_t *nc4_parser_create_in(void *region, size_t region_bytes,
     char name[NC4_LINK_NAME_MAX + 4];
     snprintf(name, sizeof(name), "%.*s.rx", NC4_LINK_NAME_MAX, source ? source : "p");
     // 外部區域（plan 給的）：owns=false，release 只會除名，唔會 free 區域
-    p->ring = nc_buf_at(name, region, region_bytes, NC_BUF_SRAM,
-                        (uint32_t)region_bytes, 1, NC_BUF_F_STREAM | NC_BUF_F_RUNTIME);
+    // 同一塊 region 可能已經由 plan／管理器包裝過（usb.rx）：重用，唔重複登記。
+    p->ring = nc_buf_find_region(region, region_bytes);
+    if (p->ring == NULL) {
+        p->ring = nc_buf_at(name, region, region_bytes, NC_BUF_SRAM,
+                            (uint32_t)region_bytes, 1, NC_BUF_F_STREAM | NC_BUF_F_RUNTIME);
+    }
     if (p->ring == NULL) {
         free(p);
         return NULL;

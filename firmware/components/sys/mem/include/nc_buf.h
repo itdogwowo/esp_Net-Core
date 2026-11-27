@@ -70,6 +70,11 @@ nc_buf_t *nc_buf_create(const char *name, nc_buf_where_t where,
                         uint32_t slot_bytes, uint16_t n, uint32_t flags);
 
 // 在「外部已配好的區域」上建立（plan／arena 給的記憶體走這條）
+// 同一個外部 region 已經有人包裝過就回傳既有 wrapper（唔會重複登記）。
+// 為什麼要有：USJ 路徑的 parser 會用 link 名再包一次 plan 給的 region；
+// 冇呢個查找就會出現「同一塊記憶體兩個名」（usb.rx／usb0.rx），帳目多算一倍。
+nc_buf_t *nc_buf_find_region(const void *region, size_t region_bytes);
+
 nc_buf_t *nc_buf_at(const char *name, void *region, size_t region_bytes,
                     nc_buf_where_t where, uint32_t slot_bytes, uint16_t n,
                     uint32_t flags);

@@ -750,5 +750,9 @@ B06 掃描 /data/pixel/effects + /data/tasks（.nce／.nct）
 ### 12.4 緩衝地圖（2026-11-27）
 
 [`docs/00_pm/buffer-map.svg`](../00_pm/buffer-map.svg)（`tools/buffer_diagram.py`）：實測
-靜態 143,559 B／動態 7,895 B（plan）＋4,128 B（usb0.rx）／flash 字典 12,404 B；
-逐項標明來源（編譯期／cfg／掃描）同彈性。四個待處理見 status §7.300。
+靜態 143,559 B（94.8%）／動態 **7,895 B（5.2%）**／flash 字典 12,404 B；逐項標明來源
+（編譯期／cfg／掃描）同彈性。
+
+**同一個 region 唔重複登記**（2026-11-27）：`nc_buf_find_region()` 會回傳既有 wrapper；
+USJ parser 以前用 link 名再包一次 → `usb.rx`／`usb0.rx` 兩個名、帳目多算 4,128 B
+（見 status §7.301）。

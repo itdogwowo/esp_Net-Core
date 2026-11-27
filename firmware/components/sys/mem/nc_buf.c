@@ -350,6 +350,23 @@ nc_buf_t *nc_buf_create(const char *name, nc_buf_where_t where,
     return b;
 }
 
+nc_buf_t *nc_buf_find_region(const void *region, size_t region_bytes)
+{
+    if (region == NULL) {
+        return NULL;
+    }
+    for (int i = 0; i < NC_BUF_MAX; i++) {
+        nc_buf_t *b = s_reg[i];
+        if (b == NULL) {
+            continue;
+        }
+        if (nc_buf_raw(b, 0) == region && nc_buf_slot_bytes(b) == region_bytes) {
+            return b;
+        }
+    }
+    return NULL;
+}
+
 nc_buf_t *nc_buf_at(const char *name, void *region, size_t region_bytes,
                     nc_buf_where_t where, uint32_t slot_bytes, uint16_t n,
                     uint32_t flags)
