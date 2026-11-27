@@ -35,7 +35,23 @@ typedef enum {
     NC_STATE_SET_NOT_READY,      // state 未 sync（store 未建立）
     NC_STATE_SET_NO_SPACE,       // store 滿／字串超出 store 容量
     NC_STATE_SET_NOT_ACTIVE,     // 呢個 unit 未啟動（改 config＋reboot）
+    NC_STATE_SET_INVALID_ARG,    // 參數唔合法（空名／空指針）
 } nc_state_set_res_t;
+
+// ── 動態 key（任務／效果；**唔入字典**）────────────────────────
+// 為什麼：任務管理器會熱插拔（.nct 隨時載入）、效果器亦會（.nce）；
+// 靜態 index 一插就錯位，字典一定失效。所以動態 key 用「名的 hash」做身份：
+//   key = 0xF0<<24 ｜ hash24(name)
+// 名係穩定身份（改載入次序／插新任務都唔會令舊值對錯人）。
+// 碰撞：24-bit（1/16M）；管理員載入時用 nc_state_key_is_dyn／同名重算自查，
+// 撞到要大聲 log（唔好靜默蓋值）。
+#define NC_STATE_DYN_DOMAIN 0xF0u
+
+uint32_t nc_state_name_hash(const char *name);      // FNV-1a 32（同一個名永遠同值）
+bool     nc_state_key_is_dyn(uint32_t key);
+// 動態寫／讀：唔查 schema（呼叫者＝任務管理器／效果管理器，範圍自己驗）。
+nc_state_set_res_t nc_state_dyn_set_s32(const char *name, int32_t v);
+bool     nc_state_dyn_get_s32(const char *name, int32_t *v);
 
 // ── 熱路徑綁定位址（唔使每次查 key） ───────────────────────────
 // store 係固定陣列：同一個 key 之後再 set 都係改同一個位置，pointer 一直有效，

@@ -10343,8 +10343,8 @@ sys／net 永遠啟動；I80／SPI 要 `enable`；LED 要 `devices.present && le
 
 **S5 大表 9 類**：新增 unit rmt(32)／pcnt(12)／adc(60)／twai(15)／mcpwm(12)／
 parlio(6)／lcd(12)／touch(28)／cam(8)＝**185 key**（class=struct，未有 driver 消費）。
-schema：**161 → 346 key、8 → 17 unit**。字典表（`nm`，`.flash.rodata`）5,796 → **12,404 B**，
-仍然 0 SRAM。
+schema：**161 → 346 key、8 → 17 unit**（2026-11-27 同日把 `task` 移出字典 → **286 key／16 unit**，
+見 §7.297）。
 
 **S6 覆蓋率工具**：新增 `tools/schema_coverage.py`
 （`--config` 逐 key resolve、`--write docs/03_notes/schema-coverage.md`、
@@ -10362,3 +10362,24 @@ Matrix 實測：**hit 52/346、type 0**（其餘 missing 係未用到的 hardwar
 | **reboot 後** | `fm=25`、`sys.frame_ms=25`、`hit=1`、**`cmp_ok=0`**（state 贏）、`rst=3` |
 | set LED px（未啟動） | `not_active`（S4） |
 | 還原 20 → 排隊 → reboot | `fm=20`、`cmp_ok=1`（同 cfg 一致） |
+
+---
+
+### 7.297 2026-11-27（把 `task` 移出字典：任務／效果係熱插拔，字典一定失效）
+
+**用家指正**：任務管理器會隨時熱插拔（`.nct`），字典一靜態化就失效；應該「拿管理器提供的
+ID 去問它叫什麼」。效果器同理（`.nce`，目前幾條固定曲線，更適合掃描後再給 key）。
+
+**做了什麼**：
+
+- `schema/state-keys.json` **移除 `task` unit（60 key）** → **346 → 286 key、17 → 16 unit**；
+  image **−5,264 B**（字典字串為主）。
+- 新增**動態 key**機制（`nc_state_name_hash()` FNV-1a、`nc_state_key_is_dyn()`、
+  `nc_state_dyn_set_s32()/get_s32()`）：`key = 0xF0<<24 ｜ hash24(name)`。
+  名係跨開機穩定的身份，插模組／改次序都唔會令舊值對錯人。
+- `nc_state_store_prune()` 保留 0xF0 域（否則開機 prune 會掃走任務值）。
+- 設計與落地清單：[`state-dynamic-keys.md`](03_notes/state-dynamic-keys.md)。
+
+**為什麼唔用 index**：插一個任務 → index 位移 → 舊值對錯任務（比冇值更危險）。
+**未做**：任務管理器／效果管理器實際用 name-hash 讀寫（要同 `nc_task_list_json()`、
+`.nce` 掃描對齊）、碰撞自查 log、孤兒值清理。

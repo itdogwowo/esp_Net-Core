@@ -147,6 +147,7 @@ const char *nc_state_set_res_name(nc_state_set_res_t r)
     case NC_STATE_SET_NOT_READY:    return "not_ready";
     case NC_STATE_SET_NO_SPACE:     return "no_space";
     case NC_STATE_SET_NOT_ACTIVE:   return "not_active";
+    case NC_STATE_SET_INVALID_ARG:  return "invalid_arg";
     default:                        return "?";
     }
 }
@@ -170,6 +171,61 @@ static nc_state_set_res_t put_rec(const nc_state_keydef_t *def, const nc_state_r
     }
     dirty_mark(def->id);
     return NC_STATE_SET_OK;
+}
+
+uint32_t nc_state_name_hash(const char *name)
+{
+    if (name == NULL || name[0] == '\0') {
+        return 0;
+    }
+    uint32_t h = 2166136261u;                 // FNV-1a：細、穩定、唔使表
+    for (const unsigned char *p = (const unsigned char *)name; *p != '\0'; p++) {
+        h ^= *p;
+        h *= 16777619u;
+    }
+    return h;
+}
+
+bool nc_state_key_is_dyn(uint32_t key)
+{
+    return (key >> 24) == NC_STATE_DYN_DOMAIN;
+}
+
+static uint32_t dyn_key(const char *name)
+{
+    return ((uint32_t)NC_STATE_DYN_DOMAIN << 24) | (nc_state_name_hash(name) & 0x00FFFFFFu);
+}
+
+nc_state_set_res_t nc_state_dyn_set_s32(const char *name, int32_t v)
+{
+    if (name == NULL || name[0] == '\0') {
+        return NC_STATE_SET_INVALID_ARG;
+    }
+    nc_state_store_t *st = store_rw();
+    if (st == NULL) {
+        return NC_STATE_SET_NOT_READY;
+    }
+    const uint32_t key = dyn_key(name);
+    const nc_state_rec_t r = { .key = key, .type = NC_STATE_T_SINT, .i = v };
+    if (!nc_state_store_put(st, &r)) {
+        return NC_STATE_SET_NO_SPACE;
+    }
+    dirty_mark(key);
+    return NC_STATE_SET_OK;
+}
+
+bool nc_state_dyn_get_s32(const char *name, int32_t *v)
+{
+    if (name == NULL || name[0] == '\0' || v == NULL) {
+        return false;
+    }
+    nc_state_rec_t r;
+    const nc_state_store_t *st = nc_state_boot_store();
+    if (st == NULL || !nc_state_store_get(st, dyn_key(name), &r) || r.type != NC_STATE_T_SINT) {
+        return false;
+    }
+    *v = r.i;
+    return true;
 }
 
 nc_state_set_res_t nc_state_set_u32(uint32_t key, uint32_t v)

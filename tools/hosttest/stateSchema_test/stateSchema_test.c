@@ -91,8 +91,8 @@ int main(void)
     CHECK(k != NULL && k->cls == NC_STATE_CLS_VALUE, "cID 應該係 value");
     k = nc_state_key(NC_KEY_LINK0_ENABLE);
     CHECK(k != NULL && k->cls == NC_STATE_CLS_STRUCT, "link 應該係 struct");
-    k = nc_state_key(NC_KEY_TASK0_LEVEL);
-    CHECK(k != NULL && k->cls == NC_STATE_CLS_STRUCT, "task 應該係 struct");
+    k = nc_state_key(NC_KEY_ROUTE0_MASK);
+    CHECK(k != NULL && k->cls == NC_STATE_CLS_STRUCT, "route 應該係 struct（task 已移出字典）");
     for (uint32_t i = 0; i < nc_state_key_count(); i++) {
         const nc_state_keydef_t *d = nc_state_key_at(i);
         CHECK(d != NULL && (d->cls == NC_STATE_CLS_VALUE || d->cls == NC_STATE_CLS_STRUCT),
@@ -188,6 +188,18 @@ int main(void)
     CHECK(nc_state_set_u32(NC_KEY_SYS_FRAME_MS, 20) == NC_STATE_SET_OK,
           "已啟動 unit 照常可寫");
     nc_state_active_units_set(0xFFFFu);
+
+    printf("[6c] 動態 key：任務／效果用 name-hash（唔入字典）\n");
+    CHECK(nc_state_name_hash("render") == nc_state_name_hash("render"), "同名要同 hash");
+    CHECK(nc_state_name_hash("render") != nc_state_name_hash("pixel_paint_task"), "唔同名要唔同 hash");
+    CHECK(nc_state_name_hash(NULL) == 0, "NULL → 0");
+    CHECK(nc_state_key_is_dyn(((uint32_t)NC_STATE_DYN_DOMAIN << 24) | 0x123456u), "0xF0 域係動態");
+    CHECK(!nc_state_key_is_dyn(NC_KEY_SYS_FRAME_MS), "固定 key 唔係動態");
+    CHECK(nc_state_dyn_set_s32("render", 4) == NC_STATE_SET_OK, "動態寫入");
+    int32_t dv = 0;
+    CHECK(nc_state_dyn_get_s32("render", &dv) && dv == 4, "動態讀回");
+    CHECK(!nc_state_dyn_get_s32("未載入的任務", &dv), "未寫過的任務讀唔到");
+    CHECK(nc_state_dyn_set_s32("", 1) == NC_STATE_SET_INVALID_ARG, "空名要 invalid_arg");
 
     printf("[7] 未 sync（store 未 ready）→ not_ready\n");
     s_ready = false;

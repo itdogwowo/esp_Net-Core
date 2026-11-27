@@ -17,7 +17,6 @@ enum {
     NC_UNIT_NET = 1,  /* 0x1 網絡層（network.json wifi） */
     NC_UNIT_LINK = 2,  /* 0x2 NC4 通道（system.json nc4.links） */
     NC_UNIT_ROUTE = 3,  /* 0x3 路由表（system.json nc4.routes） */
-    NC_UNIT_TASK = 4,  /* 0x4 任務（tasks.json） */
     NC_UNIT_RMT = 5,  /* 0x5 RMT（遙控／WS2812／IR；S3/P4 8 ch、C3 4 ch） */
     NC_UNIT_PCNT = 6,  /* 0x6 PCNT 計數器（S3/P4 4 unit；C3 冇） */
     NC_UNIT_I80 = 7,  /* 0x7 I80／LCD_CAM 匯流排（hardware.json） */
@@ -191,126 +190,6 @@ enum {
     NC_KEY_ROUTE6_MASK = 0x00030601u,
     /* 0x00030701 decode 目標 bitmask（bit0=decode0；0=只轉發）（system.json:nc4.routes[7].out） */
     NC_KEY_ROUTE7_MASK = 0x00030701u,
-    /* 0x00040001 -1=停用；0..15 層（tasks.json:tasks[0].level） */
-    NC_KEY_TASK0_LEVEL = 0x00040001u,
-    /* 0x00040002 bit0=core0、bit1=core1（tasks.json:tasks[0].affinity） */
-    NC_KEY_TASK0_AFFINITY = 0x00040002u,
-    /* 0x00040003 1..6（租戶上限）（tasks.json:tasks[0].prio） */
-    NC_KEY_TASK0_PRIO = 0x00040003u,
-    /* 0x00040101 -1=停用；0..15 層（tasks.json:tasks[1].level） */
-    NC_KEY_TASK1_LEVEL = 0x00040101u,
-    /* 0x00040102 bit0=core0、bit1=core1（tasks.json:tasks[1].affinity） */
-    NC_KEY_TASK1_AFFINITY = 0x00040102u,
-    /* 0x00040103 1..6（租戶上限）（tasks.json:tasks[1].prio） */
-    NC_KEY_TASK1_PRIO = 0x00040103u,
-    /* 0x00040201 -1=停用；0..15 層（tasks.json:tasks[2].level） */
-    NC_KEY_TASK2_LEVEL = 0x00040201u,
-    /* 0x00040202 bit0=core0、bit1=core1（tasks.json:tasks[2].affinity） */
-    NC_KEY_TASK2_AFFINITY = 0x00040202u,
-    /* 0x00040203 1..6（租戶上限）（tasks.json:tasks[2].prio） */
-    NC_KEY_TASK2_PRIO = 0x00040203u,
-    /* 0x00040301 -1=停用；0..15 層（tasks.json:tasks[3].level） */
-    NC_KEY_TASK3_LEVEL = 0x00040301u,
-    /* 0x00040302 bit0=core0、bit1=core1（tasks.json:tasks[3].affinity） */
-    NC_KEY_TASK3_AFFINITY = 0x00040302u,
-    /* 0x00040303 1..6（租戶上限）（tasks.json:tasks[3].prio） */
-    NC_KEY_TASK3_PRIO = 0x00040303u,
-    /* 0x00040401 -1=停用；0..15 層（tasks.json:tasks[4].level） */
-    NC_KEY_TASK4_LEVEL = 0x00040401u,
-    /* 0x00040402 bit0=core0、bit1=core1（tasks.json:tasks[4].affinity） */
-    NC_KEY_TASK4_AFFINITY = 0x00040402u,
-    /* 0x00040403 1..6（租戶上限）（tasks.json:tasks[4].prio） */
-    NC_KEY_TASK4_PRIO = 0x00040403u,
-    /* 0x00040501 -1=停用；0..15 層（tasks.json:tasks[5].level） */
-    NC_KEY_TASK5_LEVEL = 0x00040501u,
-    /* 0x00040502 bit0=core0、bit1=core1（tasks.json:tasks[5].affinity） */
-    NC_KEY_TASK5_AFFINITY = 0x00040502u,
-    /* 0x00040503 1..6（租戶上限）（tasks.json:tasks[5].prio） */
-    NC_KEY_TASK5_PRIO = 0x00040503u,
-    /* 0x00040601 -1=停用；0..15 層（tasks.json:tasks[6].level） */
-    NC_KEY_TASK6_LEVEL = 0x00040601u,
-    /* 0x00040602 bit0=core0、bit1=core1（tasks.json:tasks[6].affinity） */
-    NC_KEY_TASK6_AFFINITY = 0x00040602u,
-    /* 0x00040603 1..6（租戶上限）（tasks.json:tasks[6].prio） */
-    NC_KEY_TASK6_PRIO = 0x00040603u,
-    /* 0x00040701 -1=停用；0..15 層（tasks.json:tasks[7].level） */
-    NC_KEY_TASK7_LEVEL = 0x00040701u,
-    /* 0x00040702 bit0=core0、bit1=core1（tasks.json:tasks[7].affinity） */
-    NC_KEY_TASK7_AFFINITY = 0x00040702u,
-    /* 0x00040703 1..6（租戶上限）（tasks.json:tasks[7].prio） */
-    NC_KEY_TASK7_PRIO = 0x00040703u,
-    /* 0x00040801 -1=停用；0..15 層（tasks.json:tasks[8].level） */
-    NC_KEY_TASK8_LEVEL = 0x00040801u,
-    /* 0x00040802 bit0=core0、bit1=core1（tasks.json:tasks[8].affinity） */
-    NC_KEY_TASK8_AFFINITY = 0x00040802u,
-    /* 0x00040803 1..6（租戶上限）（tasks.json:tasks[8].prio） */
-    NC_KEY_TASK8_PRIO = 0x00040803u,
-    /* 0x00040901 -1=停用；0..15 層（tasks.json:tasks[9].level） */
-    NC_KEY_TASK9_LEVEL = 0x00040901u,
-    /* 0x00040902 bit0=core0、bit1=core1（tasks.json:tasks[9].affinity） */
-    NC_KEY_TASK9_AFFINITY = 0x00040902u,
-    /* 0x00040903 1..6（租戶上限）（tasks.json:tasks[9].prio） */
-    NC_KEY_TASK9_PRIO = 0x00040903u,
-    /* 0x00040a01 -1=停用；0..15 層（tasks.json:tasks[10].level） */
-    NC_KEY_TASK10_LEVEL = 0x00040a01u,
-    /* 0x00040a02 bit0=core0、bit1=core1（tasks.json:tasks[10].affinity） */
-    NC_KEY_TASK10_AFFINITY = 0x00040a02u,
-    /* 0x00040a03 1..6（租戶上限）（tasks.json:tasks[10].prio） */
-    NC_KEY_TASK10_PRIO = 0x00040a03u,
-    /* 0x00040b01 -1=停用；0..15 層（tasks.json:tasks[11].level） */
-    NC_KEY_TASK11_LEVEL = 0x00040b01u,
-    /* 0x00040b02 bit0=core0、bit1=core1（tasks.json:tasks[11].affinity） */
-    NC_KEY_TASK11_AFFINITY = 0x00040b02u,
-    /* 0x00040b03 1..6（租戶上限）（tasks.json:tasks[11].prio） */
-    NC_KEY_TASK11_PRIO = 0x00040b03u,
-    /* 0x00040c01 -1=停用；0..15 層（tasks.json:tasks[12].level） */
-    NC_KEY_TASK12_LEVEL = 0x00040c01u,
-    /* 0x00040c02 bit0=core0、bit1=core1（tasks.json:tasks[12].affinity） */
-    NC_KEY_TASK12_AFFINITY = 0x00040c02u,
-    /* 0x00040c03 1..6（租戶上限）（tasks.json:tasks[12].prio） */
-    NC_KEY_TASK12_PRIO = 0x00040c03u,
-    /* 0x00040d01 -1=停用；0..15 層（tasks.json:tasks[13].level） */
-    NC_KEY_TASK13_LEVEL = 0x00040d01u,
-    /* 0x00040d02 bit0=core0、bit1=core1（tasks.json:tasks[13].affinity） */
-    NC_KEY_TASK13_AFFINITY = 0x00040d02u,
-    /* 0x00040d03 1..6（租戶上限）（tasks.json:tasks[13].prio） */
-    NC_KEY_TASK13_PRIO = 0x00040d03u,
-    /* 0x00040e01 -1=停用；0..15 層（tasks.json:tasks[14].level） */
-    NC_KEY_TASK14_LEVEL = 0x00040e01u,
-    /* 0x00040e02 bit0=core0、bit1=core1（tasks.json:tasks[14].affinity） */
-    NC_KEY_TASK14_AFFINITY = 0x00040e02u,
-    /* 0x00040e03 1..6（租戶上限）（tasks.json:tasks[14].prio） */
-    NC_KEY_TASK14_PRIO = 0x00040e03u,
-    /* 0x00040f01 -1=停用；0..15 層（tasks.json:tasks[15].level） */
-    NC_KEY_TASK15_LEVEL = 0x00040f01u,
-    /* 0x00040f02 bit0=core0、bit1=core1（tasks.json:tasks[15].affinity） */
-    NC_KEY_TASK15_AFFINITY = 0x00040f02u,
-    /* 0x00040f03 1..6（租戶上限）（tasks.json:tasks[15].prio） */
-    NC_KEY_TASK15_PRIO = 0x00040f03u,
-    /* 0x00041001 -1=停用；0..15 層（tasks.json:tasks[16].level） */
-    NC_KEY_TASK16_LEVEL = 0x00041001u,
-    /* 0x00041002 bit0=core0、bit1=core1（tasks.json:tasks[16].affinity） */
-    NC_KEY_TASK16_AFFINITY = 0x00041002u,
-    /* 0x00041003 1..6（租戶上限）（tasks.json:tasks[16].prio） */
-    NC_KEY_TASK16_PRIO = 0x00041003u,
-    /* 0x00041101 -1=停用；0..15 層（tasks.json:tasks[17].level） */
-    NC_KEY_TASK17_LEVEL = 0x00041101u,
-    /* 0x00041102 bit0=core0、bit1=core1（tasks.json:tasks[17].affinity） */
-    NC_KEY_TASK17_AFFINITY = 0x00041102u,
-    /* 0x00041103 1..6（租戶上限）（tasks.json:tasks[17].prio） */
-    NC_KEY_TASK17_PRIO = 0x00041103u,
-    /* 0x00041201 -1=停用；0..15 層（tasks.json:tasks[18].level） */
-    NC_KEY_TASK18_LEVEL = 0x00041201u,
-    /* 0x00041202 bit0=core0、bit1=core1（tasks.json:tasks[18].affinity） */
-    NC_KEY_TASK18_AFFINITY = 0x00041202u,
-    /* 0x00041203 1..6（租戶上限）（tasks.json:tasks[18].prio） */
-    NC_KEY_TASK18_PRIO = 0x00041203u,
-    /* 0x00041301 -1=停用；0..15 層（tasks.json:tasks[19].level） */
-    NC_KEY_TASK19_LEVEL = 0x00041301u,
-    /* 0x00041302 bit0=core0、bit1=core1（tasks.json:tasks[19].affinity） */
-    NC_KEY_TASK19_AFFINITY = 0x00041302u,
-    /* 0x00041303 1..6（租戶上限）（tasks.json:tasks[19].prio） */
-    NC_KEY_TASK19_PRIO = 0x00041303u,
     /* 0x00050001 RMT 通道啟用（hardware.json:RMT.list[0].enable） */
     NC_KEY_RMT0_ENABLE = 0x00050001u,
     /* 0x00050002 訊號腳（hardware.json:RMT.list[0].gpio） */

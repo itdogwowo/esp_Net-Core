@@ -33,7 +33,7 @@ state.ncst（稀疏快取，可重建）← nc_state_boot_sync() ← 派生自�
 > 所以「有哪些值可以設定」永遠只有一個答案。
 
 <!-- BEGIN GENERATED: schema -->
-**現時：schema v2、346 個 key、17 個 unit（sys 4／net 3／link 64／route 8／task 60／rmt 32／pcnt 12／i80 5／spi 7／adc 60／twai 15／mcpwm 12／led 10／parlio 6／lcd 12／touch 28／cam 8）**
+**現時：schema v2、286 個 key、16 個 unit（sys 4／net 3／link 64／route 8／rmt 32／pcnt 12／i80 5／spi 7／adc 60／twai 15／mcpwm 12／led 10／parlio 6／lcd 12／touch 28／cam 8）**
 
 | unit | key（C 名） | type | class | 可接受值 | config 路徑（人讀） | 生效 |
 |---|---|---|---|---|---|---|
@@ -116,66 +116,6 @@ state.ncst（稀疏快取，可重建）← nc_state_boot_sync() ← 派生自�
 | route | `NC_KEY_ROUTE5_MASK` | u32 | struct | 0..65535 | `system.json:nc4.routes[5].out` | reboot |
 | route | `NC_KEY_ROUTE6_MASK` | u32 | struct | 0..65535 | `system.json:nc4.routes[6].out` | reboot |
 | route | `NC_KEY_ROUTE7_MASK` | u32 | struct | 0..65535 | `system.json:nc4.routes[7].out` | reboot |
-| task | `NC_KEY_TASK0_LEVEL` | i8 | struct | -1..15 | `tasks.json:tasks[0].level` | reboot |
-| task | `NC_KEY_TASK0_AFFINITY` | u8 | struct | 0..3 | `tasks.json:tasks[0].affinity` | reboot |
-| task | `NC_KEY_TASK0_PRIO` | u8 | struct | 1..6 | `tasks.json:tasks[0].prio` | reboot |
-| task | `NC_KEY_TASK1_LEVEL` | i8 | struct | -1..15 | `tasks.json:tasks[1].level` | reboot |
-| task | `NC_KEY_TASK1_AFFINITY` | u8 | struct | 0..3 | `tasks.json:tasks[1].affinity` | reboot |
-| task | `NC_KEY_TASK1_PRIO` | u8 | struct | 1..6 | `tasks.json:tasks[1].prio` | reboot |
-| task | `NC_KEY_TASK2_LEVEL` | i8 | struct | -1..15 | `tasks.json:tasks[2].level` | reboot |
-| task | `NC_KEY_TASK2_AFFINITY` | u8 | struct | 0..3 | `tasks.json:tasks[2].affinity` | reboot |
-| task | `NC_KEY_TASK2_PRIO` | u8 | struct | 1..6 | `tasks.json:tasks[2].prio` | reboot |
-| task | `NC_KEY_TASK3_LEVEL` | i8 | struct | -1..15 | `tasks.json:tasks[3].level` | reboot |
-| task | `NC_KEY_TASK3_AFFINITY` | u8 | struct | 0..3 | `tasks.json:tasks[3].affinity` | reboot |
-| task | `NC_KEY_TASK3_PRIO` | u8 | struct | 1..6 | `tasks.json:tasks[3].prio` | reboot |
-| task | `NC_KEY_TASK4_LEVEL` | i8 | struct | -1..15 | `tasks.json:tasks[4].level` | reboot |
-| task | `NC_KEY_TASK4_AFFINITY` | u8 | struct | 0..3 | `tasks.json:tasks[4].affinity` | reboot |
-| task | `NC_KEY_TASK4_PRIO` | u8 | struct | 1..6 | `tasks.json:tasks[4].prio` | reboot |
-| task | `NC_KEY_TASK5_LEVEL` | i8 | struct | -1..15 | `tasks.json:tasks[5].level` | reboot |
-| task | `NC_KEY_TASK5_AFFINITY` | u8 | struct | 0..3 | `tasks.json:tasks[5].affinity` | reboot |
-| task | `NC_KEY_TASK5_PRIO` | u8 | struct | 1..6 | `tasks.json:tasks[5].prio` | reboot |
-| task | `NC_KEY_TASK6_LEVEL` | i8 | struct | -1..15 | `tasks.json:tasks[6].level` | reboot |
-| task | `NC_KEY_TASK6_AFFINITY` | u8 | struct | 0..3 | `tasks.json:tasks[6].affinity` | reboot |
-| task | `NC_KEY_TASK6_PRIO` | u8 | struct | 1..6 | `tasks.json:tasks[6].prio` | reboot |
-| task | `NC_KEY_TASK7_LEVEL` | i8 | struct | -1..15 | `tasks.json:tasks[7].level` | reboot |
-| task | `NC_KEY_TASK7_AFFINITY` | u8 | struct | 0..3 | `tasks.json:tasks[7].affinity` | reboot |
-| task | `NC_KEY_TASK7_PRIO` | u8 | struct | 1..6 | `tasks.json:tasks[7].prio` | reboot |
-| task | `NC_KEY_TASK8_LEVEL` | i8 | struct | -1..15 | `tasks.json:tasks[8].level` | reboot |
-| task | `NC_KEY_TASK8_AFFINITY` | u8 | struct | 0..3 | `tasks.json:tasks[8].affinity` | reboot |
-| task | `NC_KEY_TASK8_PRIO` | u8 | struct | 1..6 | `tasks.json:tasks[8].prio` | reboot |
-| task | `NC_KEY_TASK9_LEVEL` | i8 | struct | -1..15 | `tasks.json:tasks[9].level` | reboot |
-| task | `NC_KEY_TASK9_AFFINITY` | u8 | struct | 0..3 | `tasks.json:tasks[9].affinity` | reboot |
-| task | `NC_KEY_TASK9_PRIO` | u8 | struct | 1..6 | `tasks.json:tasks[9].prio` | reboot |
-| task | `NC_KEY_TASK10_LEVEL` | i8 | struct | -1..15 | `tasks.json:tasks[10].level` | reboot |
-| task | `NC_KEY_TASK10_AFFINITY` | u8 | struct | 0..3 | `tasks.json:tasks[10].affinity` | reboot |
-| task | `NC_KEY_TASK10_PRIO` | u8 | struct | 1..6 | `tasks.json:tasks[10].prio` | reboot |
-| task | `NC_KEY_TASK11_LEVEL` | i8 | struct | -1..15 | `tasks.json:tasks[11].level` | reboot |
-| task | `NC_KEY_TASK11_AFFINITY` | u8 | struct | 0..3 | `tasks.json:tasks[11].affinity` | reboot |
-| task | `NC_KEY_TASK11_PRIO` | u8 | struct | 1..6 | `tasks.json:tasks[11].prio` | reboot |
-| task | `NC_KEY_TASK12_LEVEL` | i8 | struct | -1..15 | `tasks.json:tasks[12].level` | reboot |
-| task | `NC_KEY_TASK12_AFFINITY` | u8 | struct | 0..3 | `tasks.json:tasks[12].affinity` | reboot |
-| task | `NC_KEY_TASK12_PRIO` | u8 | struct | 1..6 | `tasks.json:tasks[12].prio` | reboot |
-| task | `NC_KEY_TASK13_LEVEL` | i8 | struct | -1..15 | `tasks.json:tasks[13].level` | reboot |
-| task | `NC_KEY_TASK13_AFFINITY` | u8 | struct | 0..3 | `tasks.json:tasks[13].affinity` | reboot |
-| task | `NC_KEY_TASK13_PRIO` | u8 | struct | 1..6 | `tasks.json:tasks[13].prio` | reboot |
-| task | `NC_KEY_TASK14_LEVEL` | i8 | struct | -1..15 | `tasks.json:tasks[14].level` | reboot |
-| task | `NC_KEY_TASK14_AFFINITY` | u8 | struct | 0..3 | `tasks.json:tasks[14].affinity` | reboot |
-| task | `NC_KEY_TASK14_PRIO` | u8 | struct | 1..6 | `tasks.json:tasks[14].prio` | reboot |
-| task | `NC_KEY_TASK15_LEVEL` | i8 | struct | -1..15 | `tasks.json:tasks[15].level` | reboot |
-| task | `NC_KEY_TASK15_AFFINITY` | u8 | struct | 0..3 | `tasks.json:tasks[15].affinity` | reboot |
-| task | `NC_KEY_TASK15_PRIO` | u8 | struct | 1..6 | `tasks.json:tasks[15].prio` | reboot |
-| task | `NC_KEY_TASK16_LEVEL` | i8 | struct | -1..15 | `tasks.json:tasks[16].level` | reboot |
-| task | `NC_KEY_TASK16_AFFINITY` | u8 | struct | 0..3 | `tasks.json:tasks[16].affinity` | reboot |
-| task | `NC_KEY_TASK16_PRIO` | u8 | struct | 1..6 | `tasks.json:tasks[16].prio` | reboot |
-| task | `NC_KEY_TASK17_LEVEL` | i8 | struct | -1..15 | `tasks.json:tasks[17].level` | reboot |
-| task | `NC_KEY_TASK17_AFFINITY` | u8 | struct | 0..3 | `tasks.json:tasks[17].affinity` | reboot |
-| task | `NC_KEY_TASK17_PRIO` | u8 | struct | 1..6 | `tasks.json:tasks[17].prio` | reboot |
-| task | `NC_KEY_TASK18_LEVEL` | i8 | struct | -1..15 | `tasks.json:tasks[18].level` | reboot |
-| task | `NC_KEY_TASK18_AFFINITY` | u8 | struct | 0..3 | `tasks.json:tasks[18].affinity` | reboot |
-| task | `NC_KEY_TASK18_PRIO` | u8 | struct | 1..6 | `tasks.json:tasks[18].prio` | reboot |
-| task | `NC_KEY_TASK19_LEVEL` | i8 | struct | -1..15 | `tasks.json:tasks[19].level` | reboot |
-| task | `NC_KEY_TASK19_AFFINITY` | u8 | struct | 0..3 | `tasks.json:tasks[19].affinity` | reboot |
-| task | `NC_KEY_TASK19_PRIO` | u8 | struct | 1..6 | `tasks.json:tasks[19].prio` | reboot |
 | rmt | `NC_KEY_RMT0_ENABLE` | bool | struct | 0..1 | `hardware.json:RMT.list[0].enable` | reboot |
 | rmt | `NC_KEY_RMT0_GPIO` | i8 | struct | -1..54 | `hardware.json:RMT.list[0].gpio` | reboot |
 | rmt | `NC_KEY_RMT0_MODE` | enum | struct | enum：tx／rx | `hardware.json:RMT.list[0].mode` | reboot |

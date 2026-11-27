@@ -122,7 +122,9 @@ uint16_t nc_state_store_prune(nc_state_store_t *s, const nc_state_rec_t *recs, s
     }
     uint16_t keep = 0;
     for (uint16_t i = 0; i < s->n; i++) {
-        bool found = false;
+        // 動態域（0xF0xxxxxx）＝熱插拔任務／效果的值，唔屬 cfg 期望集，
+        // 但佢哋係「開機要保留的 override」——所以 prune 唔可以掃走。
+        bool found = ((s->e[i].key >> 24) == 0xF0u);
         for (size_t j = 0; j < n && !found; j++) {
             found = (recs[j].key == s->e[i].key);
         }

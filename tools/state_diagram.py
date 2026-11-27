@@ -22,8 +22,8 @@ SCHEMA = ROOT / "schema" / "state-keys.json"
 OUT = ROOT / "docs/00_pm/state-flow.svg"
 
 # ── 量測／推導值（來源見 docs/00_pm/status.md §7.291）────────────────
-KEY_NOW = 346                 # 現時 schema key 數
-UNITS_NOW = 17                # 現時 schema unit 數
+KEY_NOW = 286                 # 現時 schema key 數
+UNITS_NOW = 16                # 現時 schema unit 數
 KEY_MATRIX = 380             # hw-matrix.md 的大表
 KEY_TARGET = 565             # 大表＋9 類缺失資源
 STORE_ENTRY = 32             # 舊 entry（u32 key＋bytes[16]＋u/i 分開）
@@ -245,7 +245,7 @@ def panel_roadmap(y: int) -> str:
         ("S2", "apply_to_cfg（B05 前）", "override 真正生效", "done"),
         ("S3", "commit＋persist", "state 贏；reboot 仍在", "done"),
         ("S4", "activation 開機決定", "未啟動 → not_active", "done"),
-        ("S5", "大表補 9 類（+185）", "346 key／17 unit", "done"),
+        ("S5", "大表補 9 類（+185）", "286 key／16 unit（task 移出）", "done"),
         ("S6", "覆蓋率＋模板", "52/346 hit、type 0", "done"),
     ]
     cy = y + 96
