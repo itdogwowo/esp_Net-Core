@@ -63,7 +63,7 @@ int main(void)
     CHECK(nc_state_key_name("NC_KEY_NOPE") == NULL, "未知名應該 NULL");
     CHECK(nc_state_key_name(NULL) == NULL, "NULL 名應該 NULL");
     CHECK(nc_state_key_at(NC_STATE_KEY_COUNT) == NULL, "越界應該 NULL");
-    CHECK(nc_state_unit(15) == NULL, "未知 unit 應該 NULL");
+    CHECK(nc_state_unit(250) == NULL, "未知 unit 應該 NULL");
 
     printf("[2] 型別：schema type → blob type\n");
     const nc_state_keydef_t *k;
@@ -178,6 +178,16 @@ int main(void)
     CHECK(nc_state_dirty_count() == 3, "dirty=%u（px／enable／fmt）", nc_state_dirty_count());
     CHECK(nc_state_set_u32(NC_KEY_LED_PX, 256) == NC_STATE_SET_OK, "再 set px");
     CHECK(nc_state_dirty_count() == 3, "同一個 key 再寫唔應該加 dirty=%u", nc_state_dirty_count());
+
+    printf("[6b] activation：未啟動 unit → not_active（S4）\n");
+    nc_state_active_units_set((uint16_t)(1u << NC_UNIT_SYS));
+    CHECK(!nc_state_unit_active(NC_UNIT_LED), "LED 應該標成未啟動");
+    CHECK(nc_state_unit_active(NC_UNIT_SYS), "SYS 永遠啟動");
+    CHECK(nc_state_set_u32(NC_KEY_LED_PX, 128) == NC_STATE_SET_NOT_ACTIVE,
+          "未啟動 unit 的 set 要回 not_active");
+    CHECK(nc_state_set_u32(NC_KEY_SYS_FRAME_MS, 20) == NC_STATE_SET_OK,
+          "已啟動 unit 照常可寫");
+    nc_state_active_units_set(0xFFFFu);
 
     printf("[7] 未 sync（store 未 ready）→ not_ready\n");
     s_ready = false;

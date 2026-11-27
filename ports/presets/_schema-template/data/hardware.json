@@ -1,0 +1,363 @@
+{
+  "version": 1,
+  "_comment": [
+    "由 tools/schema_coverage.py --template 生成；全部 key 都列出、值=預設（enable=0）。"
+  ],
+  "I80": {
+    "list": [
+      {
+        "data": 0,
+        "wr": -1,
+        "dc": -1,
+        "cs": -1,
+        "freq": 1000000
+      }
+    ]
+  },
+  "SPI": {
+    "enable": false,
+    "list": [
+      {
+        "baudrate": 100000,
+        "phase": 0,
+        "polarity": 0,
+        "GPIO": {
+          "sck": -1,
+          "mosi": -1,
+          "miso": -1
+        }
+      }
+    ]
+  },
+  "RMT": {
+    "list": [
+      {
+        "enable": false,
+        "gpio": -1,
+        "mode": "tx",
+        "dma": false
+      },
+      {
+        "enable": false,
+        "gpio": -1,
+        "mode": "tx",
+        "dma": false
+      },
+      {
+        "enable": false,
+        "gpio": -1,
+        "mode": "tx",
+        "dma": false
+      },
+      {
+        "enable": false,
+        "gpio": -1,
+        "mode": "tx",
+        "dma": false
+      },
+      {
+        "enable": false,
+        "gpio": -1,
+        "mode": "tx",
+        "dma": false
+      },
+      {
+        "enable": false,
+        "gpio": -1,
+        "mode": "tx",
+        "dma": false
+      },
+      {
+        "enable": false,
+        "gpio": -1,
+        "mode": "tx",
+        "dma": false
+      },
+      {
+        "enable": false,
+        "gpio": -1,
+        "mode": "tx",
+        "dma": false
+      }
+    ]
+  },
+  "PCNT": {
+    "list": [
+      {
+        "enable": false,
+        "gpio_a": -1,
+        "gpio_b": -1
+      },
+      {
+        "enable": false,
+        "gpio_a": -1,
+        "gpio_b": -1
+      },
+      {
+        "enable": false,
+        "gpio_a": -1,
+        "gpio_b": -1
+      },
+      {
+        "enable": false,
+        "gpio_a": -1,
+        "gpio_b": -1
+      }
+    ]
+  },
+  "ADC": {
+    "list": [
+      {
+        "enable": false,
+        "unit": "adc1",
+        "atten": "0db"
+      },
+      {
+        "enable": false,
+        "unit": "adc1",
+        "atten": "0db"
+      },
+      {
+        "enable": false,
+        "unit": "adc1",
+        "atten": "0db"
+      },
+      {
+        "enable": false,
+        "unit": "adc1",
+        "atten": "0db"
+      },
+      {
+        "enable": false,
+        "unit": "adc1",
+        "atten": "0db"
+      },
+      {
+        "enable": false,
+        "unit": "adc1",
+        "atten": "0db"
+      },
+      {
+        "enable": false,
+        "unit": "adc1",
+        "atten": "0db"
+      },
+      {
+        "enable": false,
+        "unit": "adc1",
+        "atten": "0db"
+      },
+      {
+        "enable": false,
+        "unit": "adc1",
+        "atten": "0db"
+      },
+      {
+        "enable": false,
+        "unit": "adc1",
+        "atten": "0db"
+      },
+      {
+        "enable": false,
+        "unit": "adc1",
+        "atten": "0db"
+      },
+      {
+        "enable": false,
+        "unit": "adc1",
+        "atten": "0db"
+      },
+      {
+        "enable": false,
+        "unit": "adc1",
+        "atten": "0db"
+      },
+      {
+        "enable": false,
+        "unit": "adc1",
+        "atten": "0db"
+      },
+      {
+        "enable": false,
+        "unit": "adc1",
+        "atten": "0db"
+      },
+      {
+        "enable": false,
+        "unit": "adc1",
+        "atten": "0db"
+      },
+      {
+        "enable": false,
+        "unit": "adc1",
+        "atten": "0db"
+      },
+      {
+        "enable": false,
+        "unit": "adc1",
+        "atten": "0db"
+      },
+      {
+        "enable": false,
+        "unit": "adc1",
+        "atten": "0db"
+      },
+      {
+        "enable": false,
+        "unit": "adc1",
+        "atten": "0db"
+      }
+    ]
+  },
+  "TWAI": {
+    "list": [
+      {
+        "enable": false,
+        "tx": -1,
+        "rx": -1,
+        "bitrate": 10000,
+        "mode": "normal"
+      },
+      {
+        "enable": false,
+        "tx": -1,
+        "rx": -1,
+        "bitrate": 10000,
+        "mode": "normal"
+      },
+      {
+        "enable": false,
+        "tx": -1,
+        "rx": -1,
+        "bitrate": 10000,
+        "mode": "normal"
+      }
+    ]
+  },
+  "MCPWM": {
+    "list": [
+      {
+        "enable": false,
+        "timer": 0,
+        "gpio_a": -1,
+        "gpio_b": -1,
+        "freq": 1,
+        "duty": 0
+      },
+      {
+        "enable": false,
+        "timer": 0,
+        "gpio_a": -1,
+        "gpio_b": -1,
+        "freq": 1,
+        "duty": 0
+      }
+    ]
+  },
+  "PARLIO": {
+    "list": [
+      {
+        "enable": false,
+        "data_width": 0,
+        "clk": -1,
+        "data": [
+          -1
+        ],
+        "freq": 1000000,
+        "mode": "tx"
+      }
+    ]
+  },
+  "LCD": {
+    "list": [
+      {
+        "enable": false,
+        "data_width": 0,
+        "pclk": -1,
+        "hsync": -1,
+        "vsync": -1,
+        "de": -1,
+        "freq": 1000000,
+        "h_res": 0,
+        "v_res": 0,
+        "hsync_pw": 0,
+        "vsync_pw": 0,
+        "big_endian": false
+      }
+    ]
+  },
+  "TOUCH": {
+    "list": [
+      {
+        "enable": false,
+        "threshold": 0
+      },
+      {
+        "enable": false,
+        "threshold": 0
+      },
+      {
+        "enable": false,
+        "threshold": 0
+      },
+      {
+        "enable": false,
+        "threshold": 0
+      },
+      {
+        "enable": false,
+        "threshold": 0
+      },
+      {
+        "enable": false,
+        "threshold": 0
+      },
+      {
+        "enable": false,
+        "threshold": 0
+      },
+      {
+        "enable": false,
+        "threshold": 0
+      },
+      {
+        "enable": false,
+        "threshold": 0
+      },
+      {
+        "enable": false,
+        "threshold": 0
+      },
+      {
+        "enable": false,
+        "threshold": 0
+      },
+      {
+        "enable": false,
+        "threshold": 0
+      },
+      {
+        "enable": false,
+        "threshold": 0
+      },
+      {
+        "enable": false,
+        "threshold": 0
+      }
+    ]
+  },
+  "CAM": {
+    "list": [
+      {
+        "enable": false,
+        "data_width": 0,
+        "pclk": -1,
+        "vsync": -1,
+        "href": -1,
+        "xclk": -1,
+        "xclk_freq": 1000000,
+        "sccb_addr": 0
+      }
+    ]
+  }
+}

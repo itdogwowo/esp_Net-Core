@@ -9,7 +9,8 @@
     "min/max：set 時的範圍（int64 比較）；u8/i8 的型別上下限由生成器再夾一次。",
     "key id 規矩 = domain(8b) | unit(8b) | index(8b) | field(8b)（u32）；",
     "所以 key 的 unit 一定要等於 id 的 unit byte（生成器會驗）；index 用嚟分通道／lane／pin。",
-    "class：value = 會入 store（開機由 cfg 造 record、可回寫）；struct = 字典登記＋驗證，但由 cfg 直接消費（links／routes／tasks／wifi），唔佔 store。"
+    "class：value = 會入 store（開機由 cfg 造 record、可回寫）；struct = 字典登記＋驗證，但由 cfg 直接消費（links／routes／tasks／wifi），唔佔 store。",
+    "S5（2026-11-27）：RMT／PCNT／ADC／TWAI／MCPWM／PARLIO／LCD／TOUCH／CAM 共 185 key 入字典（class=struct，未有 driver 消費）。"
   ],
   "units": [
     {
@@ -51,6 +52,51 @@
       "id": 4,
       "name": "task",
       "desc": "任務（tasks.json）"
+    },
+    {
+      "id": 5,
+      "name": "rmt",
+      "desc": "RMT（遙控／WS2812／IR；S3/P4 8 ch、C3 4 ch）"
+    },
+    {
+      "id": 6,
+      "name": "pcnt",
+      "desc": "PCNT 計數器（S3/P4 4 unit；C3 冇）"
+    },
+    {
+      "id": 9,
+      "name": "adc",
+      "desc": "ADC（S3 20 ch／P4 14／C3 6）"
+    },
+    {
+      "id": 10,
+      "name": "twai",
+      "desc": "TWAI／CAN（S3 1／P4 3／C3 1；要外加收發器）"
+    },
+    {
+      "id": 11,
+      "name": "mcpwm",
+      "desc": "MCPWM 馬達 PWM（S3/P4 2 unit；C3 冇）"
+    },
+    {
+      "id": 13,
+      "name": "parlio",
+      "desc": "PARLIO 並列輸出（P4 專有，≤16-bit）"
+    },
+    {
+      "id": 14,
+      "name": "lcd",
+      "desc": "LCD RGB 面板（S3 8–16-bit／P4 8–24-bit）"
+    },
+    {
+      "id": 15,
+      "name": "touch",
+      "desc": "電容觸摸（S3/P4 14 ch；C3 冇）"
+    },
+    {
+      "id": 16,
+      "name": "cam",
+      "desc": "DVP／CSI 相機（S3 8–16-bit／P4 8/16）"
     }
   ],
   "keys": [
@@ -1973,6 +2019,2185 @@
       "max": 6,
       "path": "tasks.json:tasks[19].prio",
       "desc": "1..6（租戶上限）",
+      "class": "struct"
+    },
+    {
+      "id": "0x00050001",
+      "name": "NC_KEY_RMT0_ENABLE",
+      "unit": "rmt",
+      "type": "bool",
+      "min": 0,
+      "max": 1,
+      "path": "hardware.json:RMT.list[0].enable",
+      "desc": "RMT 通道啟用",
+      "class": "struct"
+    },
+    {
+      "id": "0x00050002",
+      "name": "NC_KEY_RMT0_GPIO",
+      "unit": "rmt",
+      "type": "i8",
+      "min": -1,
+      "max": 54,
+      "path": "hardware.json:RMT.list[0].gpio",
+      "desc": "訊號腳",
+      "class": "struct"
+    },
+    {
+      "id": "0x00050003",
+      "name": "NC_KEY_RMT0_MODE",
+      "unit": "rmt",
+      "type": "enum",
+      "values": [
+        "tx",
+        "rx"
+      ],
+      "path": "hardware.json:RMT.list[0].mode",
+      "desc": "tx／rx",
+      "class": "struct"
+    },
+    {
+      "id": "0x00050004",
+      "name": "NC_KEY_RMT0_DMA",
+      "unit": "rmt",
+      "type": "bool",
+      "min": 0,
+      "max": 1,
+      "path": "hardware.json:RMT.list[0].dma",
+      "desc": "用 GDMA（S3/P4 TX3／RX7；C3 冇）",
+      "class": "struct"
+    },
+    {
+      "id": "0x00050101",
+      "name": "NC_KEY_RMT1_ENABLE",
+      "unit": "rmt",
+      "type": "bool",
+      "min": 0,
+      "max": 1,
+      "path": "hardware.json:RMT.list[1].enable",
+      "desc": "RMT 通道啟用",
+      "class": "struct"
+    },
+    {
+      "id": "0x00050102",
+      "name": "NC_KEY_RMT1_GPIO",
+      "unit": "rmt",
+      "type": "i8",
+      "min": -1,
+      "max": 54,
+      "path": "hardware.json:RMT.list[1].gpio",
+      "desc": "訊號腳",
+      "class": "struct"
+    },
+    {
+      "id": "0x00050103",
+      "name": "NC_KEY_RMT1_MODE",
+      "unit": "rmt",
+      "type": "enum",
+      "values": [
+        "tx",
+        "rx"
+      ],
+      "path": "hardware.json:RMT.list[1].mode",
+      "desc": "tx／rx",
+      "class": "struct"
+    },
+    {
+      "id": "0x00050104",
+      "name": "NC_KEY_RMT1_DMA",
+      "unit": "rmt",
+      "type": "bool",
+      "min": 0,
+      "max": 1,
+      "path": "hardware.json:RMT.list[1].dma",
+      "desc": "用 GDMA（S3/P4 TX3／RX7；C3 冇）",
+      "class": "struct"
+    },
+    {
+      "id": "0x00050201",
+      "name": "NC_KEY_RMT2_ENABLE",
+      "unit": "rmt",
+      "type": "bool",
+      "min": 0,
+      "max": 1,
+      "path": "hardware.json:RMT.list[2].enable",
+      "desc": "RMT 通道啟用",
+      "class": "struct"
+    },
+    {
+      "id": "0x00050202",
+      "name": "NC_KEY_RMT2_GPIO",
+      "unit": "rmt",
+      "type": "i8",
+      "min": -1,
+      "max": 54,
+      "path": "hardware.json:RMT.list[2].gpio",
+      "desc": "訊號腳",
+      "class": "struct"
+    },
+    {
+      "id": "0x00050203",
+      "name": "NC_KEY_RMT2_MODE",
+      "unit": "rmt",
+      "type": "enum",
+      "values": [
+        "tx",
+        "rx"
+      ],
+      "path": "hardware.json:RMT.list[2].mode",
+      "desc": "tx／rx",
+      "class": "struct"
+    },
+    {
+      "id": "0x00050204",
+      "name": "NC_KEY_RMT2_DMA",
+      "unit": "rmt",
+      "type": "bool",
+      "min": 0,
+      "max": 1,
+      "path": "hardware.json:RMT.list[2].dma",
+      "desc": "用 GDMA（S3/P4 TX3／RX7；C3 冇）",
+      "class": "struct"
+    },
+    {
+      "id": "0x00050301",
+      "name": "NC_KEY_RMT3_ENABLE",
+      "unit": "rmt",
+      "type": "bool",
+      "min": 0,
+      "max": 1,
+      "path": "hardware.json:RMT.list[3].enable",
+      "desc": "RMT 通道啟用",
+      "class": "struct"
+    },
+    {
+      "id": "0x00050302",
+      "name": "NC_KEY_RMT3_GPIO",
+      "unit": "rmt",
+      "type": "i8",
+      "min": -1,
+      "max": 54,
+      "path": "hardware.json:RMT.list[3].gpio",
+      "desc": "訊號腳",
+      "class": "struct"
+    },
+    {
+      "id": "0x00050303",
+      "name": "NC_KEY_RMT3_MODE",
+      "unit": "rmt",
+      "type": "enum",
+      "values": [
+        "tx",
+        "rx"
+      ],
+      "path": "hardware.json:RMT.list[3].mode",
+      "desc": "tx／rx",
+      "class": "struct"
+    },
+    {
+      "id": "0x00050304",
+      "name": "NC_KEY_RMT3_DMA",
+      "unit": "rmt",
+      "type": "bool",
+      "min": 0,
+      "max": 1,
+      "path": "hardware.json:RMT.list[3].dma",
+      "desc": "用 GDMA（S3/P4 TX3／RX7；C3 冇）",
+      "class": "struct"
+    },
+    {
+      "id": "0x00050401",
+      "name": "NC_KEY_RMT4_ENABLE",
+      "unit": "rmt",
+      "type": "bool",
+      "min": 0,
+      "max": 1,
+      "path": "hardware.json:RMT.list[4].enable",
+      "desc": "RMT 通道啟用",
+      "class": "struct"
+    },
+    {
+      "id": "0x00050402",
+      "name": "NC_KEY_RMT4_GPIO",
+      "unit": "rmt",
+      "type": "i8",
+      "min": -1,
+      "max": 54,
+      "path": "hardware.json:RMT.list[4].gpio",
+      "desc": "訊號腳",
+      "class": "struct"
+    },
+    {
+      "id": "0x00050403",
+      "name": "NC_KEY_RMT4_MODE",
+      "unit": "rmt",
+      "type": "enum",
+      "values": [
+        "tx",
+        "rx"
+      ],
+      "path": "hardware.json:RMT.list[4].mode",
+      "desc": "tx／rx",
+      "class": "struct"
+    },
+    {
+      "id": "0x00050404",
+      "name": "NC_KEY_RMT4_DMA",
+      "unit": "rmt",
+      "type": "bool",
+      "min": 0,
+      "max": 1,
+      "path": "hardware.json:RMT.list[4].dma",
+      "desc": "用 GDMA（S3/P4 TX3／RX7；C3 冇）",
+      "class": "struct"
+    },
+    {
+      "id": "0x00050501",
+      "name": "NC_KEY_RMT5_ENABLE",
+      "unit": "rmt",
+      "type": "bool",
+      "min": 0,
+      "max": 1,
+      "path": "hardware.json:RMT.list[5].enable",
+      "desc": "RMT 通道啟用",
+      "class": "struct"
+    },
+    {
+      "id": "0x00050502",
+      "name": "NC_KEY_RMT5_GPIO",
+      "unit": "rmt",
+      "type": "i8",
+      "min": -1,
+      "max": 54,
+      "path": "hardware.json:RMT.list[5].gpio",
+      "desc": "訊號腳",
+      "class": "struct"
+    },
+    {
+      "id": "0x00050503",
+      "name": "NC_KEY_RMT5_MODE",
+      "unit": "rmt",
+      "type": "enum",
+      "values": [
+        "tx",
+        "rx"
+      ],
+      "path": "hardware.json:RMT.list[5].mode",
+      "desc": "tx／rx",
+      "class": "struct"
+    },
+    {
+      "id": "0x00050504",
+      "name": "NC_KEY_RMT5_DMA",
+      "unit": "rmt",
+      "type": "bool",
+      "min": 0,
+      "max": 1,
+      "path": "hardware.json:RMT.list[5].dma",
+      "desc": "用 GDMA（S3/P4 TX3／RX7；C3 冇）",
+      "class": "struct"
+    },
+    {
+      "id": "0x00050601",
+      "name": "NC_KEY_RMT6_ENABLE",
+      "unit": "rmt",
+      "type": "bool",
+      "min": 0,
+      "max": 1,
+      "path": "hardware.json:RMT.list[6].enable",
+      "desc": "RMT 通道啟用",
+      "class": "struct"
+    },
+    {
+      "id": "0x00050602",
+      "name": "NC_KEY_RMT6_GPIO",
+      "unit": "rmt",
+      "type": "i8",
+      "min": -1,
+      "max": 54,
+      "path": "hardware.json:RMT.list[6].gpio",
+      "desc": "訊號腳",
+      "class": "struct"
+    },
+    {
+      "id": "0x00050603",
+      "name": "NC_KEY_RMT6_MODE",
+      "unit": "rmt",
+      "type": "enum",
+      "values": [
+        "tx",
+        "rx"
+      ],
+      "path": "hardware.json:RMT.list[6].mode",
+      "desc": "tx／rx",
+      "class": "struct"
+    },
+    {
+      "id": "0x00050604",
+      "name": "NC_KEY_RMT6_DMA",
+      "unit": "rmt",
+      "type": "bool",
+      "min": 0,
+      "max": 1,
+      "path": "hardware.json:RMT.list[6].dma",
+      "desc": "用 GDMA（S3/P4 TX3／RX7；C3 冇）",
+      "class": "struct"
+    },
+    {
+      "id": "0x00050701",
+      "name": "NC_KEY_RMT7_ENABLE",
+      "unit": "rmt",
+      "type": "bool",
+      "min": 0,
+      "max": 1,
+      "path": "hardware.json:RMT.list[7].enable",
+      "desc": "RMT 通道啟用",
+      "class": "struct"
+    },
+    {
+      "id": "0x00050702",
+      "name": "NC_KEY_RMT7_GPIO",
+      "unit": "rmt",
+      "type": "i8",
+      "min": -1,
+      "max": 54,
+      "path": "hardware.json:RMT.list[7].gpio",
+      "desc": "訊號腳",
+      "class": "struct"
+    },
+    {
+      "id": "0x00050703",
+      "name": "NC_KEY_RMT7_MODE",
+      "unit": "rmt",
+      "type": "enum",
+      "values": [
+        "tx",
+        "rx"
+      ],
+      "path": "hardware.json:RMT.list[7].mode",
+      "desc": "tx／rx",
+      "class": "struct"
+    },
+    {
+      "id": "0x00050704",
+      "name": "NC_KEY_RMT7_DMA",
+      "unit": "rmt",
+      "type": "bool",
+      "min": 0,
+      "max": 1,
+      "path": "hardware.json:RMT.list[7].dma",
+      "desc": "用 GDMA（S3/P4 TX3／RX7；C3 冇）",
+      "class": "struct"
+    },
+    {
+      "id": "0x00060001",
+      "name": "NC_KEY_PCNT0_ENABLE",
+      "unit": "pcnt",
+      "type": "bool",
+      "min": 0,
+      "max": 1,
+      "path": "hardware.json:PCNT.list[0].enable",
+      "desc": "PCNT 單元啟用",
+      "class": "struct"
+    },
+    {
+      "id": "0x00060002",
+      "name": "NC_KEY_PCNT0_GPIO_A",
+      "unit": "pcnt",
+      "type": "i8",
+      "min": -1,
+      "max": 54,
+      "path": "hardware.json:PCNT.list[0].gpio_a",
+      "desc": "A 相腳",
+      "class": "struct"
+    },
+    {
+      "id": "0x00060003",
+      "name": "NC_KEY_PCNT0_GPIO_B",
+      "unit": "pcnt",
+      "type": "i8",
+      "min": -1,
+      "max": 54,
+      "path": "hardware.json:PCNT.list[0].gpio_b",
+      "desc": "B 相腳（-1=單相）",
+      "class": "struct"
+    },
+    {
+      "id": "0x00060101",
+      "name": "NC_KEY_PCNT1_ENABLE",
+      "unit": "pcnt",
+      "type": "bool",
+      "min": 0,
+      "max": 1,
+      "path": "hardware.json:PCNT.list[1].enable",
+      "desc": "PCNT 單元啟用",
+      "class": "struct"
+    },
+    {
+      "id": "0x00060102",
+      "name": "NC_KEY_PCNT1_GPIO_A",
+      "unit": "pcnt",
+      "type": "i8",
+      "min": -1,
+      "max": 54,
+      "path": "hardware.json:PCNT.list[1].gpio_a",
+      "desc": "A 相腳",
+      "class": "struct"
+    },
+    {
+      "id": "0x00060103",
+      "name": "NC_KEY_PCNT1_GPIO_B",
+      "unit": "pcnt",
+      "type": "i8",
+      "min": -1,
+      "max": 54,
+      "path": "hardware.json:PCNT.list[1].gpio_b",
+      "desc": "B 相腳（-1=單相）",
+      "class": "struct"
+    },
+    {
+      "id": "0x00060201",
+      "name": "NC_KEY_PCNT2_ENABLE",
+      "unit": "pcnt",
+      "type": "bool",
+      "min": 0,
+      "max": 1,
+      "path": "hardware.json:PCNT.list[2].enable",
+      "desc": "PCNT 單元啟用",
+      "class": "struct"
+    },
+    {
+      "id": "0x00060202",
+      "name": "NC_KEY_PCNT2_GPIO_A",
+      "unit": "pcnt",
+      "type": "i8",
+      "min": -1,
+      "max": 54,
+      "path": "hardware.json:PCNT.list[2].gpio_a",
+      "desc": "A 相腳",
+      "class": "struct"
+    },
+    {
+      "id": "0x00060203",
+      "name": "NC_KEY_PCNT2_GPIO_B",
+      "unit": "pcnt",
+      "type": "i8",
+      "min": -1,
+      "max": 54,
+      "path": "hardware.json:PCNT.list[2].gpio_b",
+      "desc": "B 相腳（-1=單相）",
+      "class": "struct"
+    },
+    {
+      "id": "0x00060301",
+      "name": "NC_KEY_PCNT3_ENABLE",
+      "unit": "pcnt",
+      "type": "bool",
+      "min": 0,
+      "max": 1,
+      "path": "hardware.json:PCNT.list[3].enable",
+      "desc": "PCNT 單元啟用",
+      "class": "struct"
+    },
+    {
+      "id": "0x00060302",
+      "name": "NC_KEY_PCNT3_GPIO_A",
+      "unit": "pcnt",
+      "type": "i8",
+      "min": -1,
+      "max": 54,
+      "path": "hardware.json:PCNT.list[3].gpio_a",
+      "desc": "A 相腳",
+      "class": "struct"
+    },
+    {
+      "id": "0x00060303",
+      "name": "NC_KEY_PCNT3_GPIO_B",
+      "unit": "pcnt",
+      "type": "i8",
+      "min": -1,
+      "max": 54,
+      "path": "hardware.json:PCNT.list[3].gpio_b",
+      "desc": "B 相腳（-1=單相）",
+      "class": "struct"
+    },
+    {
+      "id": "0x00090001",
+      "name": "NC_KEY_ADC0_ENABLE",
+      "unit": "adc",
+      "type": "bool",
+      "min": 0,
+      "max": 1,
+      "path": "hardware.json:ADC.list[0].enable",
+      "desc": "ADC 通道啟用",
+      "class": "struct"
+    },
+    {
+      "id": "0x00090002",
+      "name": "NC_KEY_ADC0_UNIT",
+      "unit": "adc",
+      "type": "enum",
+      "values": [
+        "adc1",
+        "adc2"
+      ],
+      "path": "hardware.json:ADC.list[0].unit",
+      "desc": "adc1／adc2",
+      "class": "struct"
+    },
+    {
+      "id": "0x00090003",
+      "name": "NC_KEY_ADC0_ATTEN",
+      "unit": "adc",
+      "type": "enum",
+      "values": [
+        "0db",
+        "2_5db",
+        "6db",
+        "12db"
+      ],
+      "path": "hardware.json:ADC.list[0].atten",
+      "desc": "衰減",
+      "class": "struct"
+    },
+    {
+      "id": "0x00090101",
+      "name": "NC_KEY_ADC1_ENABLE",
+      "unit": "adc",
+      "type": "bool",
+      "min": 0,
+      "max": 1,
+      "path": "hardware.json:ADC.list[1].enable",
+      "desc": "ADC 通道啟用",
+      "class": "struct"
+    },
+    {
+      "id": "0x00090102",
+      "name": "NC_KEY_ADC1_UNIT",
+      "unit": "adc",
+      "type": "enum",
+      "values": [
+        "adc1",
+        "adc2"
+      ],
+      "path": "hardware.json:ADC.list[1].unit",
+      "desc": "adc1／adc2",
+      "class": "struct"
+    },
+    {
+      "id": "0x00090103",
+      "name": "NC_KEY_ADC1_ATTEN",
+      "unit": "adc",
+      "type": "enum",
+      "values": [
+        "0db",
+        "2_5db",
+        "6db",
+        "12db"
+      ],
+      "path": "hardware.json:ADC.list[1].atten",
+      "desc": "衰減",
+      "class": "struct"
+    },
+    {
+      "id": "0x00090201",
+      "name": "NC_KEY_ADC2_ENABLE",
+      "unit": "adc",
+      "type": "bool",
+      "min": 0,
+      "max": 1,
+      "path": "hardware.json:ADC.list[2].enable",
+      "desc": "ADC 通道啟用",
+      "class": "struct"
+    },
+    {
+      "id": "0x00090202",
+      "name": "NC_KEY_ADC2_UNIT",
+      "unit": "adc",
+      "type": "enum",
+      "values": [
+        "adc1",
+        "adc2"
+      ],
+      "path": "hardware.json:ADC.list[2].unit",
+      "desc": "adc1／adc2",
+      "class": "struct"
+    },
+    {
+      "id": "0x00090203",
+      "name": "NC_KEY_ADC2_ATTEN",
+      "unit": "adc",
+      "type": "enum",
+      "values": [
+        "0db",
+        "2_5db",
+        "6db",
+        "12db"
+      ],
+      "path": "hardware.json:ADC.list[2].atten",
+      "desc": "衰減",
+      "class": "struct"
+    },
+    {
+      "id": "0x00090301",
+      "name": "NC_KEY_ADC3_ENABLE",
+      "unit": "adc",
+      "type": "bool",
+      "min": 0,
+      "max": 1,
+      "path": "hardware.json:ADC.list[3].enable",
+      "desc": "ADC 通道啟用",
+      "class": "struct"
+    },
+    {
+      "id": "0x00090302",
+      "name": "NC_KEY_ADC3_UNIT",
+      "unit": "adc",
+      "type": "enum",
+      "values": [
+        "adc1",
+        "adc2"
+      ],
+      "path": "hardware.json:ADC.list[3].unit",
+      "desc": "adc1／adc2",
+      "class": "struct"
+    },
+    {
+      "id": "0x00090303",
+      "name": "NC_KEY_ADC3_ATTEN",
+      "unit": "adc",
+      "type": "enum",
+      "values": [
+        "0db",
+        "2_5db",
+        "6db",
+        "12db"
+      ],
+      "path": "hardware.json:ADC.list[3].atten",
+      "desc": "衰減",
+      "class": "struct"
+    },
+    {
+      "id": "0x00090401",
+      "name": "NC_KEY_ADC4_ENABLE",
+      "unit": "adc",
+      "type": "bool",
+      "min": 0,
+      "max": 1,
+      "path": "hardware.json:ADC.list[4].enable",
+      "desc": "ADC 通道啟用",
+      "class": "struct"
+    },
+    {
+      "id": "0x00090402",
+      "name": "NC_KEY_ADC4_UNIT",
+      "unit": "adc",
+      "type": "enum",
+      "values": [
+        "adc1",
+        "adc2"
+      ],
+      "path": "hardware.json:ADC.list[4].unit",
+      "desc": "adc1／adc2",
+      "class": "struct"
+    },
+    {
+      "id": "0x00090403",
+      "name": "NC_KEY_ADC4_ATTEN",
+      "unit": "adc",
+      "type": "enum",
+      "values": [
+        "0db",
+        "2_5db",
+        "6db",
+        "12db"
+      ],
+      "path": "hardware.json:ADC.list[4].atten",
+      "desc": "衰減",
+      "class": "struct"
+    },
+    {
+      "id": "0x00090501",
+      "name": "NC_KEY_ADC5_ENABLE",
+      "unit": "adc",
+      "type": "bool",
+      "min": 0,
+      "max": 1,
+      "path": "hardware.json:ADC.list[5].enable",
+      "desc": "ADC 通道啟用",
+      "class": "struct"
+    },
+    {
+      "id": "0x00090502",
+      "name": "NC_KEY_ADC5_UNIT",
+      "unit": "adc",
+      "type": "enum",
+      "values": [
+        "adc1",
+        "adc2"
+      ],
+      "path": "hardware.json:ADC.list[5].unit",
+      "desc": "adc1／adc2",
+      "class": "struct"
+    },
+    {
+      "id": "0x00090503",
+      "name": "NC_KEY_ADC5_ATTEN",
+      "unit": "adc",
+      "type": "enum",
+      "values": [
+        "0db",
+        "2_5db",
+        "6db",
+        "12db"
+      ],
+      "path": "hardware.json:ADC.list[5].atten",
+      "desc": "衰減",
+      "class": "struct"
+    },
+    {
+      "id": "0x00090601",
+      "name": "NC_KEY_ADC6_ENABLE",
+      "unit": "adc",
+      "type": "bool",
+      "min": 0,
+      "max": 1,
+      "path": "hardware.json:ADC.list[6].enable",
+      "desc": "ADC 通道啟用",
+      "class": "struct"
+    },
+    {
+      "id": "0x00090602",
+      "name": "NC_KEY_ADC6_UNIT",
+      "unit": "adc",
+      "type": "enum",
+      "values": [
+        "adc1",
+        "adc2"
+      ],
+      "path": "hardware.json:ADC.list[6].unit",
+      "desc": "adc1／adc2",
+      "class": "struct"
+    },
+    {
+      "id": "0x00090603",
+      "name": "NC_KEY_ADC6_ATTEN",
+      "unit": "adc",
+      "type": "enum",
+      "values": [
+        "0db",
+        "2_5db",
+        "6db",
+        "12db"
+      ],
+      "path": "hardware.json:ADC.list[6].atten",
+      "desc": "衰減",
+      "class": "struct"
+    },
+    {
+      "id": "0x00090701",
+      "name": "NC_KEY_ADC7_ENABLE",
+      "unit": "adc",
+      "type": "bool",
+      "min": 0,
+      "max": 1,
+      "path": "hardware.json:ADC.list[7].enable",
+      "desc": "ADC 通道啟用",
+      "class": "struct"
+    },
+    {
+      "id": "0x00090702",
+      "name": "NC_KEY_ADC7_UNIT",
+      "unit": "adc",
+      "type": "enum",
+      "values": [
+        "adc1",
+        "adc2"
+      ],
+      "path": "hardware.json:ADC.list[7].unit",
+      "desc": "adc1／adc2",
+      "class": "struct"
+    },
+    {
+      "id": "0x00090703",
+      "name": "NC_KEY_ADC7_ATTEN",
+      "unit": "adc",
+      "type": "enum",
+      "values": [
+        "0db",
+        "2_5db",
+        "6db",
+        "12db"
+      ],
+      "path": "hardware.json:ADC.list[7].atten",
+      "desc": "衰減",
+      "class": "struct"
+    },
+    {
+      "id": "0x00090801",
+      "name": "NC_KEY_ADC8_ENABLE",
+      "unit": "adc",
+      "type": "bool",
+      "min": 0,
+      "max": 1,
+      "path": "hardware.json:ADC.list[8].enable",
+      "desc": "ADC 通道啟用",
+      "class": "struct"
+    },
+    {
+      "id": "0x00090802",
+      "name": "NC_KEY_ADC8_UNIT",
+      "unit": "adc",
+      "type": "enum",
+      "values": [
+        "adc1",
+        "adc2"
+      ],
+      "path": "hardware.json:ADC.list[8].unit",
+      "desc": "adc1／adc2",
+      "class": "struct"
+    },
+    {
+      "id": "0x00090803",
+      "name": "NC_KEY_ADC8_ATTEN",
+      "unit": "adc",
+      "type": "enum",
+      "values": [
+        "0db",
+        "2_5db",
+        "6db",
+        "12db"
+      ],
+      "path": "hardware.json:ADC.list[8].atten",
+      "desc": "衰減",
+      "class": "struct"
+    },
+    {
+      "id": "0x00090901",
+      "name": "NC_KEY_ADC9_ENABLE",
+      "unit": "adc",
+      "type": "bool",
+      "min": 0,
+      "max": 1,
+      "path": "hardware.json:ADC.list[9].enable",
+      "desc": "ADC 通道啟用",
+      "class": "struct"
+    },
+    {
+      "id": "0x00090902",
+      "name": "NC_KEY_ADC9_UNIT",
+      "unit": "adc",
+      "type": "enum",
+      "values": [
+        "adc1",
+        "adc2"
+      ],
+      "path": "hardware.json:ADC.list[9].unit",
+      "desc": "adc1／adc2",
+      "class": "struct"
+    },
+    {
+      "id": "0x00090903",
+      "name": "NC_KEY_ADC9_ATTEN",
+      "unit": "adc",
+      "type": "enum",
+      "values": [
+        "0db",
+        "2_5db",
+        "6db",
+        "12db"
+      ],
+      "path": "hardware.json:ADC.list[9].atten",
+      "desc": "衰減",
+      "class": "struct"
+    },
+    {
+      "id": "0x00090A01",
+      "name": "NC_KEY_ADC10_ENABLE",
+      "unit": "adc",
+      "type": "bool",
+      "min": 0,
+      "max": 1,
+      "path": "hardware.json:ADC.list[10].enable",
+      "desc": "ADC 通道啟用",
+      "class": "struct"
+    },
+    {
+      "id": "0x00090A02",
+      "name": "NC_KEY_ADC10_UNIT",
+      "unit": "adc",
+      "type": "enum",
+      "values": [
+        "adc1",
+        "adc2"
+      ],
+      "path": "hardware.json:ADC.list[10].unit",
+      "desc": "adc1／adc2",
+      "class": "struct"
+    },
+    {
+      "id": "0x00090A03",
+      "name": "NC_KEY_ADC10_ATTEN",
+      "unit": "adc",
+      "type": "enum",
+      "values": [
+        "0db",
+        "2_5db",
+        "6db",
+        "12db"
+      ],
+      "path": "hardware.json:ADC.list[10].atten",
+      "desc": "衰減",
+      "class": "struct"
+    },
+    {
+      "id": "0x00090B01",
+      "name": "NC_KEY_ADC11_ENABLE",
+      "unit": "adc",
+      "type": "bool",
+      "min": 0,
+      "max": 1,
+      "path": "hardware.json:ADC.list[11].enable",
+      "desc": "ADC 通道啟用",
+      "class": "struct"
+    },
+    {
+      "id": "0x00090B02",
+      "name": "NC_KEY_ADC11_UNIT",
+      "unit": "adc",
+      "type": "enum",
+      "values": [
+        "adc1",
+        "adc2"
+      ],
+      "path": "hardware.json:ADC.list[11].unit",
+      "desc": "adc1／adc2",
+      "class": "struct"
+    },
+    {
+      "id": "0x00090B03",
+      "name": "NC_KEY_ADC11_ATTEN",
+      "unit": "adc",
+      "type": "enum",
+      "values": [
+        "0db",
+        "2_5db",
+        "6db",
+        "12db"
+      ],
+      "path": "hardware.json:ADC.list[11].atten",
+      "desc": "衰減",
+      "class": "struct"
+    },
+    {
+      "id": "0x00090C01",
+      "name": "NC_KEY_ADC12_ENABLE",
+      "unit": "adc",
+      "type": "bool",
+      "min": 0,
+      "max": 1,
+      "path": "hardware.json:ADC.list[12].enable",
+      "desc": "ADC 通道啟用",
+      "class": "struct"
+    },
+    {
+      "id": "0x00090C02",
+      "name": "NC_KEY_ADC12_UNIT",
+      "unit": "adc",
+      "type": "enum",
+      "values": [
+        "adc1",
+        "adc2"
+      ],
+      "path": "hardware.json:ADC.list[12].unit",
+      "desc": "adc1／adc2",
+      "class": "struct"
+    },
+    {
+      "id": "0x00090C03",
+      "name": "NC_KEY_ADC12_ATTEN",
+      "unit": "adc",
+      "type": "enum",
+      "values": [
+        "0db",
+        "2_5db",
+        "6db",
+        "12db"
+      ],
+      "path": "hardware.json:ADC.list[12].atten",
+      "desc": "衰減",
+      "class": "struct"
+    },
+    {
+      "id": "0x00090D01",
+      "name": "NC_KEY_ADC13_ENABLE",
+      "unit": "adc",
+      "type": "bool",
+      "min": 0,
+      "max": 1,
+      "path": "hardware.json:ADC.list[13].enable",
+      "desc": "ADC 通道啟用",
+      "class": "struct"
+    },
+    {
+      "id": "0x00090D02",
+      "name": "NC_KEY_ADC13_UNIT",
+      "unit": "adc",
+      "type": "enum",
+      "values": [
+        "adc1",
+        "adc2"
+      ],
+      "path": "hardware.json:ADC.list[13].unit",
+      "desc": "adc1／adc2",
+      "class": "struct"
+    },
+    {
+      "id": "0x00090D03",
+      "name": "NC_KEY_ADC13_ATTEN",
+      "unit": "adc",
+      "type": "enum",
+      "values": [
+        "0db",
+        "2_5db",
+        "6db",
+        "12db"
+      ],
+      "path": "hardware.json:ADC.list[13].atten",
+      "desc": "衰減",
+      "class": "struct"
+    },
+    {
+      "id": "0x00090E01",
+      "name": "NC_KEY_ADC14_ENABLE",
+      "unit": "adc",
+      "type": "bool",
+      "min": 0,
+      "max": 1,
+      "path": "hardware.json:ADC.list[14].enable",
+      "desc": "ADC 通道啟用",
+      "class": "struct"
+    },
+    {
+      "id": "0x00090E02",
+      "name": "NC_KEY_ADC14_UNIT",
+      "unit": "adc",
+      "type": "enum",
+      "values": [
+        "adc1",
+        "adc2"
+      ],
+      "path": "hardware.json:ADC.list[14].unit",
+      "desc": "adc1／adc2",
+      "class": "struct"
+    },
+    {
+      "id": "0x00090E03",
+      "name": "NC_KEY_ADC14_ATTEN",
+      "unit": "adc",
+      "type": "enum",
+      "values": [
+        "0db",
+        "2_5db",
+        "6db",
+        "12db"
+      ],
+      "path": "hardware.json:ADC.list[14].atten",
+      "desc": "衰減",
+      "class": "struct"
+    },
+    {
+      "id": "0x00090F01",
+      "name": "NC_KEY_ADC15_ENABLE",
+      "unit": "adc",
+      "type": "bool",
+      "min": 0,
+      "max": 1,
+      "path": "hardware.json:ADC.list[15].enable",
+      "desc": "ADC 通道啟用",
+      "class": "struct"
+    },
+    {
+      "id": "0x00090F02",
+      "name": "NC_KEY_ADC15_UNIT",
+      "unit": "adc",
+      "type": "enum",
+      "values": [
+        "adc1",
+        "adc2"
+      ],
+      "path": "hardware.json:ADC.list[15].unit",
+      "desc": "adc1／adc2",
+      "class": "struct"
+    },
+    {
+      "id": "0x00090F03",
+      "name": "NC_KEY_ADC15_ATTEN",
+      "unit": "adc",
+      "type": "enum",
+      "values": [
+        "0db",
+        "2_5db",
+        "6db",
+        "12db"
+      ],
+      "path": "hardware.json:ADC.list[15].atten",
+      "desc": "衰減",
+      "class": "struct"
+    },
+    {
+      "id": "0x00091001",
+      "name": "NC_KEY_ADC16_ENABLE",
+      "unit": "adc",
+      "type": "bool",
+      "min": 0,
+      "max": 1,
+      "path": "hardware.json:ADC.list[16].enable",
+      "desc": "ADC 通道啟用",
+      "class": "struct"
+    },
+    {
+      "id": "0x00091002",
+      "name": "NC_KEY_ADC16_UNIT",
+      "unit": "adc",
+      "type": "enum",
+      "values": [
+        "adc1",
+        "adc2"
+      ],
+      "path": "hardware.json:ADC.list[16].unit",
+      "desc": "adc1／adc2",
+      "class": "struct"
+    },
+    {
+      "id": "0x00091003",
+      "name": "NC_KEY_ADC16_ATTEN",
+      "unit": "adc",
+      "type": "enum",
+      "values": [
+        "0db",
+        "2_5db",
+        "6db",
+        "12db"
+      ],
+      "path": "hardware.json:ADC.list[16].atten",
+      "desc": "衰減",
+      "class": "struct"
+    },
+    {
+      "id": "0x00091101",
+      "name": "NC_KEY_ADC17_ENABLE",
+      "unit": "adc",
+      "type": "bool",
+      "min": 0,
+      "max": 1,
+      "path": "hardware.json:ADC.list[17].enable",
+      "desc": "ADC 通道啟用",
+      "class": "struct"
+    },
+    {
+      "id": "0x00091102",
+      "name": "NC_KEY_ADC17_UNIT",
+      "unit": "adc",
+      "type": "enum",
+      "values": [
+        "adc1",
+        "adc2"
+      ],
+      "path": "hardware.json:ADC.list[17].unit",
+      "desc": "adc1／adc2",
+      "class": "struct"
+    },
+    {
+      "id": "0x00091103",
+      "name": "NC_KEY_ADC17_ATTEN",
+      "unit": "adc",
+      "type": "enum",
+      "values": [
+        "0db",
+        "2_5db",
+        "6db",
+        "12db"
+      ],
+      "path": "hardware.json:ADC.list[17].atten",
+      "desc": "衰減",
+      "class": "struct"
+    },
+    {
+      "id": "0x00091201",
+      "name": "NC_KEY_ADC18_ENABLE",
+      "unit": "adc",
+      "type": "bool",
+      "min": 0,
+      "max": 1,
+      "path": "hardware.json:ADC.list[18].enable",
+      "desc": "ADC 通道啟用",
+      "class": "struct"
+    },
+    {
+      "id": "0x00091202",
+      "name": "NC_KEY_ADC18_UNIT",
+      "unit": "adc",
+      "type": "enum",
+      "values": [
+        "adc1",
+        "adc2"
+      ],
+      "path": "hardware.json:ADC.list[18].unit",
+      "desc": "adc1／adc2",
+      "class": "struct"
+    },
+    {
+      "id": "0x00091203",
+      "name": "NC_KEY_ADC18_ATTEN",
+      "unit": "adc",
+      "type": "enum",
+      "values": [
+        "0db",
+        "2_5db",
+        "6db",
+        "12db"
+      ],
+      "path": "hardware.json:ADC.list[18].atten",
+      "desc": "衰減",
+      "class": "struct"
+    },
+    {
+      "id": "0x00091301",
+      "name": "NC_KEY_ADC19_ENABLE",
+      "unit": "adc",
+      "type": "bool",
+      "min": 0,
+      "max": 1,
+      "path": "hardware.json:ADC.list[19].enable",
+      "desc": "ADC 通道啟用",
+      "class": "struct"
+    },
+    {
+      "id": "0x00091302",
+      "name": "NC_KEY_ADC19_UNIT",
+      "unit": "adc",
+      "type": "enum",
+      "values": [
+        "adc1",
+        "adc2"
+      ],
+      "path": "hardware.json:ADC.list[19].unit",
+      "desc": "adc1／adc2",
+      "class": "struct"
+    },
+    {
+      "id": "0x00091303",
+      "name": "NC_KEY_ADC19_ATTEN",
+      "unit": "adc",
+      "type": "enum",
+      "values": [
+        "0db",
+        "2_5db",
+        "6db",
+        "12db"
+      ],
+      "path": "hardware.json:ADC.list[19].atten",
+      "desc": "衰減",
+      "class": "struct"
+    },
+    {
+      "id": "0x000A0001",
+      "name": "NC_KEY_TWAI0_ENABLE",
+      "unit": "twai",
+      "type": "bool",
+      "min": 0,
+      "max": 1,
+      "path": "hardware.json:TWAI.list[0].enable",
+      "desc": "CAN 啟用",
+      "class": "struct"
+    },
+    {
+      "id": "0x000A0002",
+      "name": "NC_KEY_TWAI0_TX",
+      "unit": "twai",
+      "type": "i8",
+      "min": -1,
+      "max": 54,
+      "path": "hardware.json:TWAI.list[0].tx",
+      "desc": "TX 腳",
+      "class": "struct"
+    },
+    {
+      "id": "0x000A0003",
+      "name": "NC_KEY_TWAI0_RX",
+      "unit": "twai",
+      "type": "i8",
+      "min": -1,
+      "max": 54,
+      "path": "hardware.json:TWAI.list[0].rx",
+      "desc": "RX 腳",
+      "class": "struct"
+    },
+    {
+      "id": "0x000A0004",
+      "name": "NC_KEY_TWAI0_BITRATE",
+      "unit": "twai",
+      "type": "u32",
+      "min": 10000,
+      "max": 1000000,
+      "path": "hardware.json:TWAI.list[0].bitrate",
+      "desc": "位元率（bps）",
+      "class": "struct"
+    },
+    {
+      "id": "0x000A0005",
+      "name": "NC_KEY_TWAI0_MODE",
+      "unit": "twai",
+      "type": "enum",
+      "values": [
+        "normal",
+        "listen"
+      ],
+      "path": "hardware.json:TWAI.list[0].mode",
+      "desc": "normal／listen",
+      "class": "struct"
+    },
+    {
+      "id": "0x000A0101",
+      "name": "NC_KEY_TWAI1_ENABLE",
+      "unit": "twai",
+      "type": "bool",
+      "min": 0,
+      "max": 1,
+      "path": "hardware.json:TWAI.list[1].enable",
+      "desc": "CAN 啟用",
+      "class": "struct"
+    },
+    {
+      "id": "0x000A0102",
+      "name": "NC_KEY_TWAI1_TX",
+      "unit": "twai",
+      "type": "i8",
+      "min": -1,
+      "max": 54,
+      "path": "hardware.json:TWAI.list[1].tx",
+      "desc": "TX 腳",
+      "class": "struct"
+    },
+    {
+      "id": "0x000A0103",
+      "name": "NC_KEY_TWAI1_RX",
+      "unit": "twai",
+      "type": "i8",
+      "min": -1,
+      "max": 54,
+      "path": "hardware.json:TWAI.list[1].rx",
+      "desc": "RX 腳",
+      "class": "struct"
+    },
+    {
+      "id": "0x000A0104",
+      "name": "NC_KEY_TWAI1_BITRATE",
+      "unit": "twai",
+      "type": "u32",
+      "min": 10000,
+      "max": 1000000,
+      "path": "hardware.json:TWAI.list[1].bitrate",
+      "desc": "位元率（bps）",
+      "class": "struct"
+    },
+    {
+      "id": "0x000A0105",
+      "name": "NC_KEY_TWAI1_MODE",
+      "unit": "twai",
+      "type": "enum",
+      "values": [
+        "normal",
+        "listen"
+      ],
+      "path": "hardware.json:TWAI.list[1].mode",
+      "desc": "normal／listen",
+      "class": "struct"
+    },
+    {
+      "id": "0x000A0201",
+      "name": "NC_KEY_TWAI2_ENABLE",
+      "unit": "twai",
+      "type": "bool",
+      "min": 0,
+      "max": 1,
+      "path": "hardware.json:TWAI.list[2].enable",
+      "desc": "CAN 啟用",
+      "class": "struct"
+    },
+    {
+      "id": "0x000A0202",
+      "name": "NC_KEY_TWAI2_TX",
+      "unit": "twai",
+      "type": "i8",
+      "min": -1,
+      "max": 54,
+      "path": "hardware.json:TWAI.list[2].tx",
+      "desc": "TX 腳",
+      "class": "struct"
+    },
+    {
+      "id": "0x000A0203",
+      "name": "NC_KEY_TWAI2_RX",
+      "unit": "twai",
+      "type": "i8",
+      "min": -1,
+      "max": 54,
+      "path": "hardware.json:TWAI.list[2].rx",
+      "desc": "RX 腳",
+      "class": "struct"
+    },
+    {
+      "id": "0x000A0204",
+      "name": "NC_KEY_TWAI2_BITRATE",
+      "unit": "twai",
+      "type": "u32",
+      "min": 10000,
+      "max": 1000000,
+      "path": "hardware.json:TWAI.list[2].bitrate",
+      "desc": "位元率（bps）",
+      "class": "struct"
+    },
+    {
+      "id": "0x000A0205",
+      "name": "NC_KEY_TWAI2_MODE",
+      "unit": "twai",
+      "type": "enum",
+      "values": [
+        "normal",
+        "listen"
+      ],
+      "path": "hardware.json:TWAI.list[2].mode",
+      "desc": "normal／listen",
+      "class": "struct"
+    },
+    {
+      "id": "0x000B0001",
+      "name": "NC_KEY_MCPWM0_ENABLE",
+      "unit": "mcpwm",
+      "type": "bool",
+      "min": 0,
+      "max": 1,
+      "path": "hardware.json:MCPWM.list[0].enable",
+      "desc": "MCPWM 啟用",
+      "class": "struct"
+    },
+    {
+      "id": "0x000B0002",
+      "name": "NC_KEY_MCPWM0_TIMER",
+      "unit": "mcpwm",
+      "type": "u8",
+      "min": 0,
+      "max": 2,
+      "path": "hardware.json:MCPWM.list[0].timer",
+      "desc": "timer 0..2",
+      "class": "struct"
+    },
+    {
+      "id": "0x000B0003",
+      "name": "NC_KEY_MCPWM0_GPIO_A",
+      "unit": "mcpwm",
+      "type": "i8",
+      "min": -1,
+      "max": 54,
+      "path": "hardware.json:MCPWM.list[0].gpio_a",
+      "desc": "PWMxA 腳",
+      "class": "struct"
+    },
+    {
+      "id": "0x000B0004",
+      "name": "NC_KEY_MCPWM0_GPIO_B",
+      "unit": "mcpwm",
+      "type": "i8",
+      "min": -1,
+      "max": 54,
+      "path": "hardware.json:MCPWM.list[0].gpio_b",
+      "desc": "PWMxB 腳",
+      "class": "struct"
+    },
+    {
+      "id": "0x000B0005",
+      "name": "NC_KEY_MCPWM0_FREQ",
+      "unit": "mcpwm",
+      "type": "u32",
+      "min": 1,
+      "max": 40000000,
+      "path": "hardware.json:MCPWM.list[0].freq",
+      "desc": "頻率 Hz",
+      "class": "struct"
+    },
+    {
+      "id": "0x000B0006",
+      "name": "NC_KEY_MCPWM0_DUTY",
+      "unit": "mcpwm",
+      "type": "u16",
+      "min": 0,
+      "max": 1000,
+      "path": "hardware.json:MCPWM.list[0].duty",
+      "desc": "初始 duty（0..1000‰）",
+      "class": "struct"
+    },
+    {
+      "id": "0x000B0101",
+      "name": "NC_KEY_MCPWM1_ENABLE",
+      "unit": "mcpwm",
+      "type": "bool",
+      "min": 0,
+      "max": 1,
+      "path": "hardware.json:MCPWM.list[1].enable",
+      "desc": "MCPWM 啟用",
+      "class": "struct"
+    },
+    {
+      "id": "0x000B0102",
+      "name": "NC_KEY_MCPWM1_TIMER",
+      "unit": "mcpwm",
+      "type": "u8",
+      "min": 0,
+      "max": 2,
+      "path": "hardware.json:MCPWM.list[1].timer",
+      "desc": "timer 0..2",
+      "class": "struct"
+    },
+    {
+      "id": "0x000B0103",
+      "name": "NC_KEY_MCPWM1_GPIO_A",
+      "unit": "mcpwm",
+      "type": "i8",
+      "min": -1,
+      "max": 54,
+      "path": "hardware.json:MCPWM.list[1].gpio_a",
+      "desc": "PWMxA 腳",
+      "class": "struct"
+    },
+    {
+      "id": "0x000B0104",
+      "name": "NC_KEY_MCPWM1_GPIO_B",
+      "unit": "mcpwm",
+      "type": "i8",
+      "min": -1,
+      "max": 54,
+      "path": "hardware.json:MCPWM.list[1].gpio_b",
+      "desc": "PWMxB 腳",
+      "class": "struct"
+    },
+    {
+      "id": "0x000B0105",
+      "name": "NC_KEY_MCPWM1_FREQ",
+      "unit": "mcpwm",
+      "type": "u32",
+      "min": 1,
+      "max": 40000000,
+      "path": "hardware.json:MCPWM.list[1].freq",
+      "desc": "頻率 Hz",
+      "class": "struct"
+    },
+    {
+      "id": "0x000B0106",
+      "name": "NC_KEY_MCPWM1_DUTY",
+      "unit": "mcpwm",
+      "type": "u16",
+      "min": 0,
+      "max": 1000,
+      "path": "hardware.json:MCPWM.list[1].duty",
+      "desc": "初始 duty（0..1000‰）",
+      "class": "struct"
+    },
+    {
+      "id": "0x000D0001",
+      "name": "NC_KEY_PARLIO0_ENABLE",
+      "unit": "parlio",
+      "type": "bool",
+      "min": 0,
+      "max": 1,
+      "path": "hardware.json:PARLIO.list[0].enable",
+      "desc": "PARLIO 啟用（P4 專有）",
+      "class": "struct"
+    },
+    {
+      "id": "0x000D0002",
+      "name": "NC_KEY_PARLIO0_WIDTH",
+      "unit": "parlio",
+      "type": "u8",
+      "min": 0,
+      "max": 16,
+      "path": "hardware.json:PARLIO.list[0].data_width",
+      "desc": "1/2/4/8/16 bit",
+      "class": "struct"
+    },
+    {
+      "id": "0x000D0003",
+      "name": "NC_KEY_PARLIO0_CLK",
+      "unit": "parlio",
+      "type": "i8",
+      "min": -1,
+      "max": 54,
+      "path": "hardware.json:PARLIO.list[0].clk",
+      "desc": "時鐘腳",
+      "class": "struct"
+    },
+    {
+      "id": "0x000D0004",
+      "name": "NC_KEY_PARLIO0_D0",
+      "unit": "parlio",
+      "type": "i8",
+      "min": -1,
+      "max": 54,
+      "path": "hardware.json:PARLIO.list[0].data[0]",
+      "desc": "D0",
+      "class": "struct"
+    },
+    {
+      "id": "0x000D0005",
+      "name": "NC_KEY_PARLIO0_FREQ",
+      "unit": "parlio",
+      "type": "u32",
+      "min": 1000000,
+      "max": 40000000,
+      "path": "hardware.json:PARLIO.list[0].freq",
+      "desc": "IO clock Hz（≤40 MHz）",
+      "class": "struct"
+    },
+    {
+      "id": "0x000D0006",
+      "name": "NC_KEY_PARLIO0_MODE",
+      "unit": "parlio",
+      "type": "enum",
+      "values": [
+        "tx",
+        "rx"
+      ],
+      "path": "hardware.json:PARLIO.list[0].mode",
+      "desc": "tx／rx",
+      "class": "struct"
+    },
+    {
+      "id": "0x000E0001",
+      "name": "NC_KEY_LCD0_ENABLE",
+      "unit": "lcd",
+      "type": "bool",
+      "min": 0,
+      "max": 1,
+      "path": "hardware.json:LCD.list[0].enable",
+      "desc": "RGB 面板啟用",
+      "class": "struct"
+    },
+    {
+      "id": "0x000E0002",
+      "name": "NC_KEY_LCD0_WIDTH",
+      "unit": "lcd",
+      "type": "u8",
+      "min": 0,
+      "max": 24,
+      "path": "hardware.json:LCD.list[0].data_width",
+      "desc": "8/16/24 bit",
+      "class": "struct"
+    },
+    {
+      "id": "0x000E0003",
+      "name": "NC_KEY_LCD0_PCLK",
+      "unit": "lcd",
+      "type": "i8",
+      "min": -1,
+      "max": 54,
+      "path": "hardware.json:LCD.list[0].pclk",
+      "desc": "PCLK 腳",
+      "class": "struct"
+    },
+    {
+      "id": "0x000E0004",
+      "name": "NC_KEY_LCD0_HSYNC",
+      "unit": "lcd",
+      "type": "i8",
+      "min": -1,
+      "max": 54,
+      "path": "hardware.json:LCD.list[0].hsync",
+      "desc": "HSYNC",
+      "class": "struct"
+    },
+    {
+      "id": "0x000E0005",
+      "name": "NC_KEY_LCD0_VSYNC",
+      "unit": "lcd",
+      "type": "i8",
+      "min": -1,
+      "max": 54,
+      "path": "hardware.json:LCD.list[0].vsync",
+      "desc": "VSYNC",
+      "class": "struct"
+    },
+    {
+      "id": "0x000E0006",
+      "name": "NC_KEY_LCD0_DE",
+      "unit": "lcd",
+      "type": "i8",
+      "min": -1,
+      "max": 54,
+      "path": "hardware.json:LCD.list[0].de",
+      "desc": "DE",
+      "class": "struct"
+    },
+    {
+      "id": "0x000E0007",
+      "name": "NC_KEY_LCD0_FREQ",
+      "unit": "lcd",
+      "type": "u32",
+      "min": 1000000,
+      "max": 80000000,
+      "path": "hardware.json:LCD.list[0].freq",
+      "desc": "PCLK Hz（8-bit<80M／16-bit<40M）",
+      "class": "struct"
+    },
+    {
+      "id": "0x000E0008",
+      "name": "NC_KEY_LCD0_HPX",
+      "unit": "lcd",
+      "type": "u16",
+      "min": 0,
+      "max": 4096,
+      "path": "hardware.json:LCD.list[0].h_res",
+      "desc": "水平像素",
+      "class": "struct"
+    },
+    {
+      "id": "0x000E0009",
+      "name": "NC_KEY_LCD0_VPX",
+      "unit": "lcd",
+      "type": "u16",
+      "min": 0,
+      "max": 4096,
+      "path": "hardware.json:LCD.list[0].v_res",
+      "desc": "垂直像素",
+      "class": "struct"
+    },
+    {
+      "id": "0x000E000A",
+      "name": "NC_KEY_LCD0_HSYNC_PW",
+      "unit": "lcd",
+      "type": "u16",
+      "min": 0,
+      "max": 1024,
+      "path": "hardware.json:LCD.list[0].hsync_pw",
+      "desc": "HSYNC 寬度",
+      "class": "struct"
+    },
+    {
+      "id": "0x000E000B",
+      "name": "NC_KEY_LCD0_VSYNC_PW",
+      "unit": "lcd",
+      "type": "u16",
+      "min": 0,
+      "max": 1024,
+      "path": "hardware.json:LCD.list[0].vsync_pw",
+      "desc": "VSYNC 寬度",
+      "class": "struct"
+    },
+    {
+      "id": "0x000E000C",
+      "name": "NC_KEY_LCD0_BIG_ENDIAN",
+      "unit": "lcd",
+      "type": "bool",
+      "min": 0,
+      "max": 1,
+      "path": "hardware.json:LCD.list[0].big_endian",
+      "desc": "RGB 順序",
+      "class": "struct"
+    },
+    {
+      "id": "0x000F0001",
+      "name": "NC_KEY_TOUCH0_ENABLE",
+      "unit": "touch",
+      "type": "bool",
+      "min": 0,
+      "max": 1,
+      "path": "hardware.json:TOUCH.list[0].enable",
+      "desc": "觸摸通道啟用",
+      "class": "struct"
+    },
+    {
+      "id": "0x000F0002",
+      "name": "NC_KEY_TOUCH0_THRESHOLD",
+      "unit": "touch",
+      "type": "u16",
+      "min": 0,
+      "max": 65535,
+      "path": "hardware.json:TOUCH.list[0].threshold",
+      "desc": "觸發門檻",
+      "class": "struct"
+    },
+    {
+      "id": "0x000F0101",
+      "name": "NC_KEY_TOUCH1_ENABLE",
+      "unit": "touch",
+      "type": "bool",
+      "min": 0,
+      "max": 1,
+      "path": "hardware.json:TOUCH.list[1].enable",
+      "desc": "觸摸通道啟用",
+      "class": "struct"
+    },
+    {
+      "id": "0x000F0102",
+      "name": "NC_KEY_TOUCH1_THRESHOLD",
+      "unit": "touch",
+      "type": "u16",
+      "min": 0,
+      "max": 65535,
+      "path": "hardware.json:TOUCH.list[1].threshold",
+      "desc": "觸發門檻",
+      "class": "struct"
+    },
+    {
+      "id": "0x000F0201",
+      "name": "NC_KEY_TOUCH2_ENABLE",
+      "unit": "touch",
+      "type": "bool",
+      "min": 0,
+      "max": 1,
+      "path": "hardware.json:TOUCH.list[2].enable",
+      "desc": "觸摸通道啟用",
+      "class": "struct"
+    },
+    {
+      "id": "0x000F0202",
+      "name": "NC_KEY_TOUCH2_THRESHOLD",
+      "unit": "touch",
+      "type": "u16",
+      "min": 0,
+      "max": 65535,
+      "path": "hardware.json:TOUCH.list[2].threshold",
+      "desc": "觸發門檻",
+      "class": "struct"
+    },
+    {
+      "id": "0x000F0301",
+      "name": "NC_KEY_TOUCH3_ENABLE",
+      "unit": "touch",
+      "type": "bool",
+      "min": 0,
+      "max": 1,
+      "path": "hardware.json:TOUCH.list[3].enable",
+      "desc": "觸摸通道啟用",
+      "class": "struct"
+    },
+    {
+      "id": "0x000F0302",
+      "name": "NC_KEY_TOUCH3_THRESHOLD",
+      "unit": "touch",
+      "type": "u16",
+      "min": 0,
+      "max": 65535,
+      "path": "hardware.json:TOUCH.list[3].threshold",
+      "desc": "觸發門檻",
+      "class": "struct"
+    },
+    {
+      "id": "0x000F0401",
+      "name": "NC_KEY_TOUCH4_ENABLE",
+      "unit": "touch",
+      "type": "bool",
+      "min": 0,
+      "max": 1,
+      "path": "hardware.json:TOUCH.list[4].enable",
+      "desc": "觸摸通道啟用",
+      "class": "struct"
+    },
+    {
+      "id": "0x000F0402",
+      "name": "NC_KEY_TOUCH4_THRESHOLD",
+      "unit": "touch",
+      "type": "u16",
+      "min": 0,
+      "max": 65535,
+      "path": "hardware.json:TOUCH.list[4].threshold",
+      "desc": "觸發門檻",
+      "class": "struct"
+    },
+    {
+      "id": "0x000F0501",
+      "name": "NC_KEY_TOUCH5_ENABLE",
+      "unit": "touch",
+      "type": "bool",
+      "min": 0,
+      "max": 1,
+      "path": "hardware.json:TOUCH.list[5].enable",
+      "desc": "觸摸通道啟用",
+      "class": "struct"
+    },
+    {
+      "id": "0x000F0502",
+      "name": "NC_KEY_TOUCH5_THRESHOLD",
+      "unit": "touch",
+      "type": "u16",
+      "min": 0,
+      "max": 65535,
+      "path": "hardware.json:TOUCH.list[5].threshold",
+      "desc": "觸發門檻",
+      "class": "struct"
+    },
+    {
+      "id": "0x000F0601",
+      "name": "NC_KEY_TOUCH6_ENABLE",
+      "unit": "touch",
+      "type": "bool",
+      "min": 0,
+      "max": 1,
+      "path": "hardware.json:TOUCH.list[6].enable",
+      "desc": "觸摸通道啟用",
+      "class": "struct"
+    },
+    {
+      "id": "0x000F0602",
+      "name": "NC_KEY_TOUCH6_THRESHOLD",
+      "unit": "touch",
+      "type": "u16",
+      "min": 0,
+      "max": 65535,
+      "path": "hardware.json:TOUCH.list[6].threshold",
+      "desc": "觸發門檻",
+      "class": "struct"
+    },
+    {
+      "id": "0x000F0701",
+      "name": "NC_KEY_TOUCH7_ENABLE",
+      "unit": "touch",
+      "type": "bool",
+      "min": 0,
+      "max": 1,
+      "path": "hardware.json:TOUCH.list[7].enable",
+      "desc": "觸摸通道啟用",
+      "class": "struct"
+    },
+    {
+      "id": "0x000F0702",
+      "name": "NC_KEY_TOUCH7_THRESHOLD",
+      "unit": "touch",
+      "type": "u16",
+      "min": 0,
+      "max": 65535,
+      "path": "hardware.json:TOUCH.list[7].threshold",
+      "desc": "觸發門檻",
+      "class": "struct"
+    },
+    {
+      "id": "0x000F0801",
+      "name": "NC_KEY_TOUCH8_ENABLE",
+      "unit": "touch",
+      "type": "bool",
+      "min": 0,
+      "max": 1,
+      "path": "hardware.json:TOUCH.list[8].enable",
+      "desc": "觸摸通道啟用",
+      "class": "struct"
+    },
+    {
+      "id": "0x000F0802",
+      "name": "NC_KEY_TOUCH8_THRESHOLD",
+      "unit": "touch",
+      "type": "u16",
+      "min": 0,
+      "max": 65535,
+      "path": "hardware.json:TOUCH.list[8].threshold",
+      "desc": "觸發門檻",
+      "class": "struct"
+    },
+    {
+      "id": "0x000F0901",
+      "name": "NC_KEY_TOUCH9_ENABLE",
+      "unit": "touch",
+      "type": "bool",
+      "min": 0,
+      "max": 1,
+      "path": "hardware.json:TOUCH.list[9].enable",
+      "desc": "觸摸通道啟用",
+      "class": "struct"
+    },
+    {
+      "id": "0x000F0902",
+      "name": "NC_KEY_TOUCH9_THRESHOLD",
+      "unit": "touch",
+      "type": "u16",
+      "min": 0,
+      "max": 65535,
+      "path": "hardware.json:TOUCH.list[9].threshold",
+      "desc": "觸發門檻",
+      "class": "struct"
+    },
+    {
+      "id": "0x000F0A01",
+      "name": "NC_KEY_TOUCH10_ENABLE",
+      "unit": "touch",
+      "type": "bool",
+      "min": 0,
+      "max": 1,
+      "path": "hardware.json:TOUCH.list[10].enable",
+      "desc": "觸摸通道啟用",
+      "class": "struct"
+    },
+    {
+      "id": "0x000F0A02",
+      "name": "NC_KEY_TOUCH10_THRESHOLD",
+      "unit": "touch",
+      "type": "u16",
+      "min": 0,
+      "max": 65535,
+      "path": "hardware.json:TOUCH.list[10].threshold",
+      "desc": "觸發門檻",
+      "class": "struct"
+    },
+    {
+      "id": "0x000F0B01",
+      "name": "NC_KEY_TOUCH11_ENABLE",
+      "unit": "touch",
+      "type": "bool",
+      "min": 0,
+      "max": 1,
+      "path": "hardware.json:TOUCH.list[11].enable",
+      "desc": "觸摸通道啟用",
+      "class": "struct"
+    },
+    {
+      "id": "0x000F0B02",
+      "name": "NC_KEY_TOUCH11_THRESHOLD",
+      "unit": "touch",
+      "type": "u16",
+      "min": 0,
+      "max": 65535,
+      "path": "hardware.json:TOUCH.list[11].threshold",
+      "desc": "觸發門檻",
+      "class": "struct"
+    },
+    {
+      "id": "0x000F0C01",
+      "name": "NC_KEY_TOUCH12_ENABLE",
+      "unit": "touch",
+      "type": "bool",
+      "min": 0,
+      "max": 1,
+      "path": "hardware.json:TOUCH.list[12].enable",
+      "desc": "觸摸通道啟用",
+      "class": "struct"
+    },
+    {
+      "id": "0x000F0C02",
+      "name": "NC_KEY_TOUCH12_THRESHOLD",
+      "unit": "touch",
+      "type": "u16",
+      "min": 0,
+      "max": 65535,
+      "path": "hardware.json:TOUCH.list[12].threshold",
+      "desc": "觸發門檻",
+      "class": "struct"
+    },
+    {
+      "id": "0x000F0D01",
+      "name": "NC_KEY_TOUCH13_ENABLE",
+      "unit": "touch",
+      "type": "bool",
+      "min": 0,
+      "max": 1,
+      "path": "hardware.json:TOUCH.list[13].enable",
+      "desc": "觸摸通道啟用",
+      "class": "struct"
+    },
+    {
+      "id": "0x000F0D02",
+      "name": "NC_KEY_TOUCH13_THRESHOLD",
+      "unit": "touch",
+      "type": "u16",
+      "min": 0,
+      "max": 65535,
+      "path": "hardware.json:TOUCH.list[13].threshold",
+      "desc": "觸發門檻",
+      "class": "struct"
+    },
+    {
+      "id": "0x00100001",
+      "name": "NC_KEY_CAM0_ENABLE",
+      "unit": "cam",
+      "type": "bool",
+      "min": 0,
+      "max": 1,
+      "path": "hardware.json:CAM.list[0].enable",
+      "desc": "相機啟用",
+      "class": "struct"
+    },
+    {
+      "id": "0x00100002",
+      "name": "NC_KEY_CAM0_WIDTH",
+      "unit": "cam",
+      "type": "u8",
+      "min": 0,
+      "max": 16,
+      "path": "hardware.json:CAM.list[0].data_width",
+      "desc": "8/16 bit",
+      "class": "struct"
+    },
+    {
+      "id": "0x00100003",
+      "name": "NC_KEY_CAM0_PCLK",
+      "unit": "cam",
+      "type": "i8",
+      "min": -1,
+      "max": 54,
+      "path": "hardware.json:CAM.list[0].pclk",
+      "desc": "PCLK",
+      "class": "struct"
+    },
+    {
+      "id": "0x00100004",
+      "name": "NC_KEY_CAM0_VSYNC",
+      "unit": "cam",
+      "type": "i8",
+      "min": -1,
+      "max": 54,
+      "path": "hardware.json:CAM.list[0].vsync",
+      "desc": "VSYNC",
+      "class": "struct"
+    },
+    {
+      "id": "0x00100005",
+      "name": "NC_KEY_CAM0_HREF",
+      "unit": "cam",
+      "type": "i8",
+      "min": -1,
+      "max": 54,
+      "path": "hardware.json:CAM.list[0].href",
+      "desc": "HREF",
+      "class": "struct"
+    },
+    {
+      "id": "0x00100006",
+      "name": "NC_KEY_CAM0_XCLK",
+      "unit": "cam",
+      "type": "i8",
+      "min": -1,
+      "max": 54,
+      "path": "hardware.json:CAM.list[0].xclk",
+      "desc": "XCLK",
+      "class": "struct"
+    },
+    {
+      "id": "0x00100007",
+      "name": "NC_KEY_CAM0_XCLK_FREQ",
+      "unit": "cam",
+      "type": "u32",
+      "min": 1000000,
+      "max": 40000000,
+      "path": "hardware.json:CAM.list[0].xclk_freq",
+      "desc": "XCLK Hz",
+      "class": "struct"
+    },
+    {
+      "id": "0x00100008",
+      "name": "NC_KEY_CAM0_SCCB_ADDR",
+      "unit": "cam",
+      "type": "u8",
+      "min": 0,
+      "max": 127,
+      "path": "hardware.json:CAM.list[0].sccb_addr",
+      "desc": "SCCB 位址",
       "class": "struct"
     }
   ]

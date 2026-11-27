@@ -1584,6 +1584,22 @@ const nc_system_cfg_t *nc_cfg_system(void)
     return &s_sys;
 }
 
+// 開機階段專用（state 套 override）；執行期唔好經呢個改。
+nc_system_cfg_t *nc_cfg_system_mut(void)
+{
+    return &s_sys;
+}
+
+nc_hardware_cfg_t *nc_cfg_hardware_mut(void)
+{
+    return &s_hw;
+}
+
+nc_devices_cfg_t *nc_cfg_devices_mut(void)
+{
+    return &s_dev;
+}
+
 const nc_tasks_cfg_t *nc_cfg_tasks(void)
 {
     return &s_tasks;

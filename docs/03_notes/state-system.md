@@ -44,6 +44,21 @@ driver（例：render_task LED）── nc_state_read_*() ──→ 值
 
 ---
 
+## 2.5 開機語義（2026-11-27 定案，S3）
+
+| 情況 | 邊個贏 | 行為 |
+|---|---|---|
+| blob `src_hash` ＝ cfg 值集 hash（config 冇改） | **state（override）** | 保留 blob 值；只 prune 停用 unit 的舊記錄 |
+| `src_hash` 唔同（config 改過值） | **JSON** | 由 cfg 重建（舊檔 → `.bak`），回寫值清掉 |
+| 冇檔／壞檔 | JSON | 重建 |
+
+- 為什麼唔可以用「值同 cfg 唔同」做重建條件：回寫值本身就係「同 cfg 唔同」，
+  咁樣一 reboot 就會被清走（2026-11-27 實測 frame_ms 25 → 20，就係呢個 bug）。
+- `src_hash` 仍然係「config 值集」的 CRC；回寫唔改佢。改一句 `_comment` 唔會令
+  override 失效；改任何設定值就會（可預期）。
+- 落盤 API：`nc_state_persist()`（唔可以叫 `nc_state_commit()`——`nc_state.c` 有個
+  NVS 世代的同名函式，實測 linker 揀錯，寫入回 OK 但 blob 冇變）。
+
 ## 3. 檔案格式（NCSTATE）
 
 ```text

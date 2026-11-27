@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "_comment": [
+    "由 tools/schema_coverage.py --template 生成；全部 key 都列出、值=預設（enable=0）。"
+  ],
+  "LED": {
+    "enable": false,
+    "backend": "none",
+    "bus": {
+      "index": -1
+    },
+    "lanes": 1,
+    "px": 1,
+    "format": "ws2812",
+    "timing": {
+      "pclk_hz": 1000000,
+      "bit_cells": 1,
+      "t0h": 0,
+      "t1h": 0
+    }
+  }
+}

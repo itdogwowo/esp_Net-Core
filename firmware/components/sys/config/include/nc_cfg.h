@@ -104,6 +104,12 @@ const nc_hardware_cfg_t *nc_cfg_hardware(void);
 // 應用硬件（device）層：/data/config/devices.json（runtime 可改；缺檔 → present=false，
 // render 會退回 build-time generated 的 nc_port_led()）。
 const nc_devices_cfg_t *nc_cfg_devices(void);
+// **只准開機階段**（B02 之後、B05 之前）用：state 套用 override 時要改 cfg。
+// 執行期一律用上面的 const 版本（唔好喺 task 入面改 cfg）。
+nc_system_cfg_t   *nc_cfg_system_mut(void);
+nc_hardware_cfg_t *nc_cfg_hardware_mut(void);
+nc_devices_cfg_t  *nc_cfg_devices_mut(void);
+
 const nc_cfg_stat_t   *nc_cfg_stat_of(const char *layer);   // "system" / "tasks" / "resources"
 
 // ───────────────────── 核數收斂：單核板的「兩核 → 一核」 ─────────────────────

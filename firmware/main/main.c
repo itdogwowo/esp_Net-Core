@@ -1300,6 +1300,12 @@ static void on_reboot(nc4_ctx_t *ctx, const nc4_frame_t *f)
                    ((uint32_t)f->data[2] << 16) | ((uint32_t)f->data[3] << 24);
     }
     ESP_LOGW(TAG, "[%s] NC4 REBOOT (0x100F) delay=%ums", ctx->source, (unsigned)delay_ms);
+    // S3：reboot 前把「今次改過」的 state 落盤（冇 dirty 就唔寫，避免無謂 WL 寫盤）。
+    if (nc_state_dirty_count() > 0 || nc_state_persist_pending()) {
+        const esp_err_t se = nc_state_persist();
+        ESP_LOGW(TAG, "state commit：%s（dirty=%u）",
+                 esp_err_to_name(se), (unsigned)nc_state_dirty_count());
+    }
     vTaskDelay(pdMS_TO_TICKS(delay_ms + 50));
     esp_restart();
 }
@@ -1545,6 +1551,7 @@ static int s_cfg_fat_match = -1;   // -1 = 未計／讀唔到
 // B02 分段計時（us）：決定「hit 時跳過 JSON parse」值唔值得做。
 static uint32_t s_cfg_parse_us;    // nc_cfg_boot()：讀 JSON + cJSON + 型別化
 static uint32_t s_state_sync_us;   // nc_state_boot_sync()：hash + 讀寫 state.ncst
+static uint32_t s_state_apply_n;   // nc_state_apply_to_cfg()：套用幾多筆 override
 
 static size_t status_put_cfg(char *buf, size_t cap)
 {
@@ -1578,18 +1585,32 @@ static size_t status_put_cfg(char *buf, size_t cap)
                 (unsigned)nc_port_activation_src_hash(), (unsigned)act_n,
                 (unsigned)en, units, (unsigned)s_cfg_fat_hash, s_cfg_fat_match);
     }
+    if (nc_cfg_system() != NULL) {
+        uint32_t fmv = 0;
+        const bool fm_ok = nc_state_get_u32(NC_KEY_SYS_FRAME_MS, &fmv);
+        jappend(buf, cap, &off, ",\"fm\":%d,\"dirty\":%u",
+                fm_ok ? (int)fmv : -1, (unsigned)nc_state_dirty_count());
+        jappend(buf, cap, &off,
+                ",\"sys\":{\"frame_ms\":%u,\"px\":%u,\"log\":%u,\"cid\":\"%s\"}",
+                (unsigned)nc_cfg_system()->frame_interval_ms,
+                (unsigned)nc_cfg_system()->num_pixels,
+                (unsigned)nc_cfg_system()->log_debug_mode,
+                nc_cfg_system()->cid);
+    }
     const nc_state_boot_result_t *st = nc_state_boot_last();
     if (st != NULL) {
         jappend(buf, cap, &off,
                 ",\"state\":{\"hit\":%u,\"cmp_ok\":%u,\"rebuilt\":%u,"
                 "\"src\":%u,\"n\":%u,\"bytes\":%u,\"mism\":%u,\"first\":%u,"
-                "\"store\":%u}",
+                "\"store\":%u,\"apply\":%u,\"inactive\":%u}",
                 st->hit ? 1u : 0u, st->cmp_ok ? 1u : 0u, st->rebuilt ? 1u : 0u,
                 (unsigned)st->src_hash, (unsigned)st->n_records,
                 (unsigned)st->bytes, (unsigned)st->n_mismatch,
                 (unsigned)st->first_diff,
                 (unsigned)((nc_state_boot_store() != NULL)
-                               ? nc_state_boot_store()->n : 0u));
+                               ? nc_state_boot_store()->n : 0u),
+                (unsigned)s_state_apply_n,
+                (unsigned)((st != NULL) ? st->n_inactive : 0u));
     }
     // schema registry：一份宣告（schema/state-keys.json）→ 生成的表。
     //   ver／crc 同 build 對數；bad = 由 cfg 造的 record 同 schema 唔一致（要修）；
@@ -4117,6 +4138,10 @@ static esp_err_t ph_storage(void)
         (void)nc_state_boot_sync(NULL);
         s_state_sync_us = (uint32_t)(esp_timer_get_time() - t0);
     }
+    // S2：把 state override 蓋回 cfg —— **一定要喺 B05（hardware）之前**，
+    // 因為 driver 裝機時讀的是 cfg；太遲套 = pin／freq 類 override 靜默失效。
+    s_state_apply_n = nc_state_apply_to_cfg();
+    ESP_LOGI(TAG, "state→cfg：套用 %u 筆 override（B05 之前）", (unsigned)s_state_apply_n);
     cfg_fat_hash_sync();
     // system.json 的 "log_debug_mode"：
     //   0 = 正常（INFO、2 KB、USB 起來之後開始記 → 看到服務/bus 啟動）

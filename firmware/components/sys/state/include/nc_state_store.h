@@ -55,6 +55,9 @@ uint16_t nc_state_store_from_recs(nc_state_store_t *s, const nc_state_rec_t *rec
 const nc_state_ent_t *nc_state_store_find(const nc_state_store_t *s, uint32_t key);
 bool nc_state_store_get(const nc_state_store_t *s, uint32_t key, nc_state_rec_t *out);
 
+// 只保留「期望的 records」有的 key（清走停用 unit 的舊記錄）；回移除筆數。
+uint16_t nc_state_store_prune(nc_state_store_t *s, const nc_state_rec_t *recs, size_t n);
+
 // 同「期望的 records」對拍：回唔一致筆數（0 = 全中）；first_diff 回第一筆唔同的 key。
 // store 有多出嚟的 key（舊 blob 遺留）唔算唔一致（向前兼容）。
 uint32_t nc_state_store_cmp(const nc_state_store_t *s, const nc_state_rec_t *recs, size_t n,

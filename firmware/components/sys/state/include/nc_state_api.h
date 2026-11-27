@@ -34,6 +34,7 @@ typedef enum {
     NC_STATE_SET_OUT_OF_RANGE,   // 超出 schema min/max／str 太長／enum 冇呢個值
     NC_STATE_SET_NOT_READY,      // state 未 sync（store 未建立）
     NC_STATE_SET_NO_SPACE,       // store 滿／字串超出 store 容量
+    NC_STATE_SET_NOT_ACTIVE,     // 呢個 unit 未啟動（改 config＋reboot）
 } nc_state_set_res_t;
 
 // ── 熱路徑綁定位址（唔使每次查 key） ───────────────────────────
@@ -42,6 +43,14 @@ typedef enum {
 // 未 sync／schema 冇此 key／型別唔對 → false（唔會回假 pointer）。
 bool nc_state_bind_u32(uint32_t key, const uint32_t **out);
 bool nc_state_bind_i32(uint32_t key, const int32_t **out);
+
+// ── activation（S4）─────────────────────────────────────────────
+// boot 由 cfg 算出「邊啲 unit 啟動」，寫入呢個 mask（bit = unit id）。
+// 未啟動的 unit：唔會造 record，set 會回 NC_STATE_SET_NOT_ACTIVE。
+void     nc_state_active_units_set(uint16_t mask);
+uint16_t nc_state_active_units(void);
+bool     nc_state_unit_active(uint8_t unit);
+
 
 nc_state_set_res_t nc_state_set_u32(uint32_t key, uint32_t v);
 nc_state_set_res_t nc_state_set_i32(uint32_t key, int32_t v);

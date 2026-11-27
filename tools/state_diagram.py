@@ -6,7 +6,7 @@
 為什麼有動畫：三件事都是「隨時間變化」的——
   ① 緩存佔用：activation 過濾之後由 18 KB 降到 1.7 KB；
   ② 開機次序：B02 → state merge → apply_to_cfg → B05 → B08 的時序；
-  ③ 路線圖：S0／S1 已完成，S2 之後是下一步。
+  ③ 路線圖：S0–S6 全部完成（2026-11-27）。
 靜態圖只能講「結果」，動畫可以講「先後」。
 
 數字全部由程式／schema 讀（同 config_diagram.py 同一個原則：圖唔會同實作講兩套）。
@@ -22,7 +22,8 @@ SCHEMA = ROOT / "schema" / "state-keys.json"
 OUT = ROOT / "docs/00_pm/state-flow.svg"
 
 # ── 量測／推導值（來源見 docs/00_pm/status.md §7.291）────────────────
-KEY_NOW = 25                 # 現時 schema key 數
+KEY_NOW = 346                 # 現時 schema key 數
+UNITS_NOW = 17                # 現時 schema unit 數
 KEY_MATRIX = 380             # hw-matrix.md 的大表
 KEY_TARGET = 565             # 大表＋9 類缺失資源
 STORE_ENTRY = 32             # 舊 entry（u32 key＋bytes[16]＋u/i 分開）
@@ -215,7 +216,7 @@ def panel_boot(y: int) -> str:
     # 右側：activation 閘 + hit/miss 分支
     gx = x + w - 250
     s.append(rect(gx, y + 66, 232, 122, F_TODO, S_TODO, 1))
-    s.append(text(gx + 12, y + 86, "activation 閘（S4a/S4b）", 10.5, INK, 700))
+    s.append(text(gx + 12, y + 86, "activation 閘（S4 已做）", 10.5, INK, 700))
     for i, ln in enumerate(["enabled = cfg.enable && deps_ok",
                             "表：全部能力（flash XIP，0 RAM）",
                             "store：只載 enabled 的 key",
@@ -236,16 +237,16 @@ def panel_boot(y: int) -> str:
 def panel_roadmap(y: int) -> str:
     x, w = M, R - M
     h = 300
-    s = [rect(x, y, w, h, WHITE, RULE), text(x + 18, y + 28, "③ 路線圖：由「能跑」到「覆蓋全部硬件」", 15, INK, 700)]
+    s = [rect(x, y, w, h, WHITE, RULE), text(x + 18, y + 28, "③ 路線圖：S0–S6 全部完成（2026-11-27）", 15, INK, 700)]
 
     steps = [
         ("S0", "key id u32 8/8/8/8", "PIN 48／P4 55 放得落", "done"),
         ("S1", "值集 CRC＋hit 只看值", "改註解唔清回寫值", "done"),
-        ("S2", "apply_to_cfg（B05 前）", "override 真正生效", "next"),
-        ("S3", "commit＋persist 位", "STATUS_SET 落盤", "todo"),
-        ("S4", "activation 搬 boot-time", "store 只載 enabled", "todo"),
-        ("S5", "大表補 9 類（+185）", "entry 12 B ✔｜RMT／ADC…", "todo"),
-        ("S6", "模板＋preset 驗證", "565 key 可 seed", "todo"),
+        ("S2", "apply_to_cfg（B05 前）", "override 真正生效", "done"),
+        ("S3", "commit＋persist", "state 贏；reboot 仍在", "done"),
+        ("S4", "activation 開機決定", "未啟動 → not_active", "done"),
+        ("S5", "大表補 9 類（+185）", "346 key／17 unit", "done"),
+        ("S6", "覆蓋率＋模板", "52/346 hit、type 0", "done"),
     ]
     cy = y + 96
     lane_x0, lane_x1 = x + 70, x + w - 70
@@ -254,8 +255,8 @@ def panel_roadmap(y: int) -> str:
     # 底線
     s.append(f'<line x1="{lane_x0:.1f}" y1="{cy}" x2="{lane_x1:.1f}" y2="{cy}" '
              f'stroke="{RULE}" stroke-width="3"/>')
-    # 進度線（走到 S1）
-    done_end = lane_x0 + gap
+    # 進度線（S0–S6 全部完成）
+    done_end = lane_x0 + gap * (len(steps) - 1)
     s.append(f'<line x1="{lane_x0:.1f}" y1="{cy}" x2="{done_end:.1f}" y2="{cy}" '
              f'stroke="{S_OK}" stroke-width="4" stroke-linecap="round">'
              f'<animate attributeName="x2" from="{lane_x0:.1f}" to="{done_end:.1f}" dur="1.6s" fill="freeze"/></line>')
@@ -266,7 +267,7 @@ def panel_roadmap(y: int) -> str:
         f, sc = colors[st]
         # 節點
         s.append(f'<circle cx="{px:.1f}" cy="{cy}" r="13" fill="{f}" stroke="{sc}" stroke-width="2.2"/>')
-        if st == "next":
+        if st == "next":  # 現時冇 next；保留動畫定義
             s.append(f'<circle cx="{px:.1f}" cy="{cy}" r="13" fill="none" stroke="{sc}" stroke-width="2">'
                      f'<animate attributeName="r" values="13;20;13" dur="2.2s" repeatCount="indefinite"/>'
                      f'<animate attributeName="opacity" values="0.9;0;0.9" dur="2.2s" repeatCount="indefinite"/></circle>')
@@ -304,8 +305,8 @@ def build() -> str:
     s = svg_open(h)
     s.append(text(M, 62, "統一狀態系統：緩存、啟動次序、路線圖", 26, INK, 800))
     s.append(text(M, 90,
-                  "2026-11-27 · NCSTATE · key id u32（8/8/8/8）· 值集 CRC · activation 過濾（未做）"
-                  " · 圖由 tools/state_diagram.py 生成 · 開圖有動畫：bar 生長／光點沿開機路徑／S2 呼吸",
+                  "2026-11-27 · NCSTATE · key id u32（8/8/8/8）· 值集 CRC · activation 過濾（S4 已做）"
+                  " · 圖由 tools/state_diagram.py 生成 · 開圖有動畫：bar 生長／光點沿開機路徑／進度線生長",
                   11.5, MUTED))
     s.append(text(R, 62, "esp_Net-Core", 12, FAINT, 600, mono=True, anchor="end"))
     s.append(panel_cache(124))
@@ -313,7 +314,7 @@ def build() -> str:
     s.append(panel_roadmap(520))
     # 底部一句
     s.append(text(M, 860,
-                  f"現時 schema {KEY_NOW} key（4 unit）；大表 {KEY_MATRIX}；補齊 {KEY_TARGET}。"
+                  f"現時 schema {KEY_NOW} key（{UNITS_NOW} unit）；大表 {KEY_MATRIX}；補齊 {KEY_TARGET}。"
                   f" entry {STORE_ENTRY}→{ENTRY_SLIM} B；s_store 2,052→{STORE_MAX*ENTRY_SLIM+4:,} B（{STORE_MAX} 筆）；"
                   f"開機暫存搬 PSRAM → state 佔 SRAM 2,820→{STORE_MAX*ENTRY_SLIM+4+4:,} B。",
                   11, INK2))

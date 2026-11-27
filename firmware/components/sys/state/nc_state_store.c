@@ -115,6 +115,29 @@ static bool ent_same(const nc_state_ent_t *e, const nc_state_rec_t *r)
     }
 }
 
+uint16_t nc_state_store_prune(nc_state_store_t *s, const nc_state_rec_t *recs, size_t n)
+{
+    if (s == NULL) {
+        return 0;
+    }
+    uint16_t keep = 0;
+    for (uint16_t i = 0; i < s->n; i++) {
+        bool found = false;
+        for (size_t j = 0; j < n && !found; j++) {
+            found = (recs[j].key == s->e[i].key);
+        }
+        if (found) {
+            if (keep != i) {
+                s->e[keep] = s->e[i];
+            }
+            keep++;
+        }
+    }
+    const uint16_t dropped = (uint16_t)(s->n - keep);
+    s->n = keep;
+    return dropped;
+}
+
 uint32_t nc_state_store_cmp(const nc_state_store_t *s, const nc_state_rec_t *recs, size_t n,
                             uint32_t *first_diff)
 {

@@ -10307,3 +10307,58 @@ links／routes、`network.json` 的 wifi、`tasks.json` 的任務。用家要求
 
 **未做**：net／link／route／task 的 record 產生（要等 S2 `apply_to_cfg()` 之後才有意義——
 現時 net_lines／router／task manager 都係直接讀 cfg，唔讀 state）。
+
+---
+
+### 7.296 2026-11-27（S2–S6 一次過：apply_to_cfg／回寫／activation／大表 9 類／覆蓋率工具）
+
+**S2 `nc_state_apply_to_cfg()`**：B02 之後、**B05 之前**把 store 的 value 蓋回 cfg
+（sys 3＋cID、I80 5、SPI 7、LED 10）；render_task 手寫讀 key 的 50 行**已刪**，
+統一由 cfg 拿 merge 後的值。cfg 新增 `nc_cfg_system_mut()/hardware_mut()/devices_mut()`
+（明文只准開機階段用）。
+
+**S3 回寫（語義＋實作都修正過）**：`nc_state_persist()`／`nc_state_persist_path()`；
+`STATUS_SET` 支援 `{"state":{"key","value","persist":1}}`。**三個實測踩到的坑**：
+
+1. **同名覆蓋**：原本叫 `nc_state_commit()`，但 `nc_state.c` 有個 NVS 世代的同名函式
+   → linker 揀舊那個，寫入回 OK 但 blob 冇變（set 25 → 重啟 20）。改名 `nc_state_persist()`。
+2. **爆棧**：`recs[96]×24 B = 2,304 B` 放 stack，而 `STATUS_SET` 喺 decode 任務（3,072 B）
+   執行 → `rst=4` panic。改 heap；**再往下一層**：FAT 寫入路徑（VFS／FatFS）本身都超
+   3 KB stack，所以最終設計係 **decode 只排隊、main 喺 reboot 前落盤**。
+3. **判定條件**：原本用「cfg 同 blob 值唔一致」做重建條件 → 回寫值一 reboot 就冇。
+   改成 hash 對得上 ＝ state（override）贏；hash 唔同 ＝ JSON 贏。
+
+| 情況 | 判定 |
+|---|---|
+| blob `src_hash` ＝ cfg 值集 hash | **state（override）贏**：保留 blob 值，只 prune 停用 unit 的舊記錄 |
+| 唔同（config 改過） | **JSON 贏**：重建，回寫值清掉（可預期） |
+| 冇檔／壞檔 | 重建 |
+
+reboot 指令：`dirty>0 || persist_pending` 時先落盤再 restart。
+
+**S4 activation（開機由 cfg 決定）**：`nc_state_active_units()` mask；
+sys／net 永遠啟動；I80／SPI 要 `enable`；LED 要 `devices.present && led_decl && led.enable`。
+未啟動 unit 唔造 record、`set` 回 **`not_active`**。上板實測：LED px → `not_active`；
+`inactive=22`（LED 10＋I80 5＋SPI 7）。
+
+**S5 大表 9 類**：新增 unit rmt(32)／pcnt(12)／adc(60)／twai(15)／mcpwm(12)／
+parlio(6)／lcd(12)／touch(28)／cam(8)＝**185 key**（class=struct，未有 driver 消費）。
+schema：**161 → 346 key、8 → 17 unit**。字典表（`nm`，`.flash.rodata`）5,796 → **12,404 B**，
+仍然 0 SRAM。
+
+**S6 覆蓋率工具**：新增 `tools/schema_coverage.py`
+（`--config` 逐 key resolve、`--write docs/03_notes/schema-coverage.md`、
+`--template` 由 schema 生成全部 key 的模板 JSON）；
+模板寫入 `ports/presets/_schema-template/data/`（`_` 開頭＝參考模板，`preset_check` 跳過）。
+Matrix 實測：**hit 52/346、type 0**（其餘 missing 係未用到的 hardware 類）；
+`preset_check` 由 2 個 preset 驗到 **346 個 schema key**。
+
+**上板（SuperMini，`idf=v6.1.1`）**：
+
+| 項目 | 結果 |
+|---|---|
+| 開機 | `state{hit:1,n:4,store:6→4,apply:4,inactive:22}`；`sys{frame_ms:20,px:64,cid:"52E4"}` |
+| set frame_ms=25 + persist | `ok；已排隊，reboot 前落盤` |
+| **reboot 後** | `fm=25`、`sys.frame_ms=25`、`hit=1`、**`cmp_ok=0`**（state 贏）、`rst=3` |
+| set LED px（未啟動） | `not_active`（S4） |
+| 還原 20 → 排隊 → reboot | `fm=20`、`cmp_ok=1`（同 cfg 一致） |

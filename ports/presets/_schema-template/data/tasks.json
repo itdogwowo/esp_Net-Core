@@ -1,0 +1,108 @@
+{
+  "version": 1,
+  "_comment": [
+    "由 tools/schema_coverage.py --template 生成；全部 key 都列出、值=預設（enable=0）。"
+  ],
+  "tasks": [
+    {
+      "level": -1,
+      "affinity": 0,
+      "prio": 1
+    },
+    {
+      "level": -1,
+      "affinity": 0,
+      "prio": 1
+    },
+    {
+      "level": -1,
+      "affinity": 0,
+      "prio": 1
+    },
+    {
+      "level": -1,
+      "affinity": 0,
+      "prio": 1
+    },
+    {
+      "level": -1,
+      "affinity": 0,
+      "prio": 1
+    },
+    {
+      "level": -1,
+      "affinity": 0,
+      "prio": 1
+    },
+    {
+      "level": -1,
+      "affinity": 0,
+      "prio": 1
+    },
+    {
+      "level": -1,
+      "affinity": 0,
+      "prio": 1
+    },
+    {
+      "level": -1,
+      "affinity": 0,
+      "prio": 1
+    },
+    {
+      "level": -1,
+      "affinity": 0,
+      "prio": 1
+    },
+    {
+      "level": -1,
+      "affinity": 0,
+      "prio": 1
+    },
+    {
+      "level": -1,
+      "affinity": 0,
+      "prio": 1
+    },
+    {
+      "level": -1,
+      "affinity": 0,
+      "prio": 1
+    },
+    {
+      "level": -1,
+      "affinity": 0,
+      "prio": 1
+    },
+    {
+      "level": -1,
+      "affinity": 0,
+      "prio": 1
+    },
+    {
+      "level": -1,
+      "affinity": 0,
+      "prio": 1
+    },
+    {
+      "level": -1,
+      "affinity": 0,
+      "prio": 1
+    },
+    {
+      "level": -1,
+      "affinity": 0,
+      "prio": 1
+    },
+    {
+      "level": -1,
+      "affinity": 0,
+      "prio": 1
+    },
+    {
+      "level": -1,
+      "affinity": 0,
+      "prio": 1
+    }
+  ]
+}

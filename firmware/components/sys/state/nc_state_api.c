@@ -44,6 +44,24 @@ void nc_state_dirty_reset(void)
     s_dirty_n = 0;
 }
 
+// ── activation（S4）────────────────────────────────────────────
+static uint16_t s_active = 0xFFFFu;
+
+void nc_state_active_units_set(uint16_t mask)
+{
+    s_active = mask;
+}
+
+uint16_t nc_state_active_units(void)
+{
+    return s_active;
+}
+
+bool nc_state_unit_active(uint8_t unit)
+{
+    return unit < 16u && (s_active & (1u << unit)) != 0;
+}
+
 // ── 讀 ─────────────────────────────────────────────────────────
 bool nc_state_get_u32(uint32_t key, uint32_t *out)
 {
@@ -128,6 +146,7 @@ const char *nc_state_set_res_name(nc_state_set_res_t r)
     case NC_STATE_SET_OUT_OF_RANGE: return "out_of_range";
     case NC_STATE_SET_NOT_READY:    return "not_ready";
     case NC_STATE_SET_NO_SPACE:     return "no_space";
+    case NC_STATE_SET_NOT_ACTIVE:   return "not_active";
     default:                        return "?";
     }
 }
@@ -142,6 +161,9 @@ static nc_state_set_res_t put_rec(const nc_state_keydef_t *def, const nc_state_r
     nc_state_store_t *st = store_rw();
     if (st == NULL) {
         return NC_STATE_SET_NOT_READY;
+    }
+    if (!nc_state_unit_active(def->unit)) {
+        return NC_STATE_SET_NOT_ACTIVE;
     }
     if (!nc_state_store_put(st, r)) {
         return NC_STATE_SET_NO_SPACE;

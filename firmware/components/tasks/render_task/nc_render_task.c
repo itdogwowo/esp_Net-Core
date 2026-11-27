@@ -172,60 +172,9 @@ static const nc_led_cfg_t *led_cfg(void)
                          (unsigned)c->px, c->fmt);
             }
         }
-        // P3：driver 真正由 state store 讀值（state.ncst hit／重建後都同 cfg 一致）。
-        // 只覆寫 store 真係有嘅 key；冇（sparse／未 sync）就保留上面 cfg 的值。
-        const nc_state_store_t *st = nc_state_boot_store();
-        if (c != NULL && st != NULL) {
-            static nc_led_cfg_t s_led_from_state;
-            s_led_from_state = *c;
-            uint32_t u;
-            int32_t iv;
-            bool bv;
-            uint8_t hits = 0;
-            if (nc_state_get_bool(NC_KEY_LED_ENABLE, &bv)) {
-                s_led_from_state.enable = bv; hits++;
-            }
-            if (nc_state_get_u32(NC_KEY_LED_BACKEND, &u)) {
-                s_led_from_state.backend = (uint8_t)u; hits++;
-            }
-            if (nc_state_get_i32(NC_KEY_LED_BUS, &iv)) {
-                s_led_from_state.bus = (int8_t)iv; hits++;
-            }
-            if (nc_state_get_u32(NC_KEY_LED_LANES, &u)) {
-                s_led_from_state.lanes = (uint8_t)u; hits++;
-            }
-            if (nc_state_get_u32(NC_KEY_LED_PX, &u)) {
-                s_led_from_state.px = (uint16_t)u; hits++;
-            }
-            if (nc_state_get_u32(NC_KEY_LED_FMT, &u)) {
-                // state 存 enum index；名字由 schema 字典查返（唔存字串）。
-                const char *nm = nc_state_enum_name(nc_state_key(NC_KEY_LED_FMT), u);
-                if (nm != NULL) {
-                    (void)snprintf(s_led_from_state.fmt, sizeof(s_led_from_state.fmt),
-                                   "%s", nm);
-                    hits++;
-                }
-            }
-            if (nc_state_get_u32(NC_KEY_LED_CLK, &u)) {
-                s_led_from_state.clk_hz = u; hits++;
-            }
-            if (nc_state_get_u32(NC_KEY_LED_BIT_CELLS, &u)) {
-                s_led_from_state.bit_cells = (uint8_t)u; hits++;
-            }
-            if (nc_state_get_u32(NC_KEY_LED_T0H, &u)) {
-                s_led_from_state.t0h = (uint8_t)u; hits++;
-            }
-            if (nc_state_get_u32(NC_KEY_LED_T1H, &u)) {
-                s_led_from_state.t1h = (uint8_t)u; hits++;
-            }
-            if (hits > 0) {
-                c = &s_led_from_state;
-                ESP_LOGI(TAG, "燈鏈由 state.ncst（P3）決定：%u 個 key、"
-                         "enable=%d backend=%u lanes=%u px=%u fmt=%s",
-                         (unsigned)hits, c->enable ? 1 : 0, (unsigned)c->backend,
-                         (unsigned)c->lanes, (unsigned)c->px, c->fmt);
-            }
-        }
+        // S2（2026-11-27）：state override 已經喺 B02 之後由 nc_state_apply_to_cfg()
+        // 蓋入 cfg；呢度直接用 cfg 就係 merge 後的值，唔再自己逐個 key 讀。
+        (void)0;
     }
     return c;
 }

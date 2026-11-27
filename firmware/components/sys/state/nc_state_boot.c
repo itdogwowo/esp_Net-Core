@@ -12,6 +12,7 @@
 //         L2b .bak（last-known-good）。任何一層壞都唔會令設定「靜靜變零」。
 #include "nc_state_boot.h"
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -20,6 +21,7 @@
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "nc_cfg.h"
+#include "nc_state_api.h"
 #include "nc_state_blob.h"
 #include "nc_state_file.h"
 #include "nc_state_keys.h"
@@ -53,6 +55,7 @@ static nc_state_rec_t *recs_buf(void) { return s_recs; }
 static nc_state_store_t s_store;          // 常駐 RAM：blob 載入後的值（~576 B internal）
 static nc_state_boot_result_t s_result;
 static bool s_result_valid;
+static uint32_t s_src_hash;      // 值集 hash（commit 沿用）
 
 static size_t put_u(nc_state_rec_t *recs, size_t n, uint32_t key, uint32_t v)
 {
@@ -96,7 +99,7 @@ static size_t build_records(nc_state_rec_t *recs)
     }
 
     const nc_hardware_cfg_t *hw = nc_cfg_hardware();
-    if (hw != NULL && hw->n_i80 > 0) {
+    if (hw != NULL && hw->n_i80 > 0 && nc_state_unit_active(NC_UNIT_I80)) {
         const nc_i80_cfg_t *b = &hw->i80[0];
         n = put_u(recs, n, NC_KEY_I80_COUNT, b->n_used);
         n = put_i(recs, n, NC_KEY_I80_WR, b->wr);
@@ -104,7 +107,7 @@ static size_t build_records(nc_state_rec_t *recs)
         n = put_i(recs, n, NC_KEY_I80_CS, b->cs);
         n = put_u(recs, n, NC_KEY_I80_FREQ, b->freq_hz);
     }
-    if (hw != NULL && hw->n_spi > 0) {
+    if (hw != NULL && hw->n_spi > 0 && nc_state_unit_active(NC_UNIT_SPI)) {
         const nc_spi_cfg_t *s = &hw->spi[0];
         n = put_b(recs, n, NC_KEY_SPI_ENABLE, s->enable);
         n = put_u(recs, n, NC_KEY_SPI_BAUD, s->baud);
@@ -116,7 +119,7 @@ static size_t build_records(nc_state_rec_t *recs)
     }
 
     const nc_devices_cfg_t *dv = nc_cfg_devices();
-    if (dv != NULL && dv->present) {
+    if (dv != NULL && dv->present && nc_state_unit_active(NC_UNIT_LED)) {
         const nc_led_cfg_t *led = &dv->led;
         n = put_b(recs, n, NC_KEY_LED_ENABLE, led->enable);
         n = put_u(recs, n, NC_KEY_LED_BACKEND, led->backend);
@@ -187,6 +190,27 @@ esp_err_t nc_state_boot_sync(nc_state_boot_result_t *out)
         }
         return ESP_ERR_NO_MEM;      // 明示失敗；state 係快取，cfg／JSON 仍然權威
     }
+    // S4：邊啲 unit 啟動（開機由 cfg 決定；未啟動 = 唔造 record、set 回 not_active）
+    {
+        uint16_t mask = (uint16_t)((1u << NC_UNIT_SYS) | (1u << NC_UNIT_NET));
+        const nc_hardware_cfg_t *hw0 = nc_cfg_hardware();
+        if (hw0 != NULL) {
+            if (hw0->n_i80 > 0 && hw0->i80[0].enable) mask |= (uint16_t)(1u << NC_UNIT_I80);
+            if (hw0->n_spi > 0 && hw0->spi[0].enable) mask |= (uint16_t)(1u << NC_UNIT_SPI);
+        }
+        const nc_devices_cfg_t *dv0 = nc_cfg_devices();
+        if (dv0 != NULL && dv0->present && dv0->led_decl && dv0->led.enable) {
+            mask |= (uint16_t)(1u << NC_UNIT_LED);
+        }
+        nc_state_active_units_set(mask);
+        s_result.n_inactive = 0;
+        for (uint32_t i = 0; i < nc_state_key_count(); i++) {
+            const nc_state_keydef_t *d = nc_state_key_at(i);
+            if (d != NULL && d->cls == NC_STATE_CLS_VALUE && !nc_state_unit_active(d->unit)) {
+                s_result.n_inactive++;
+            }
+        }
+    }
     s_result.n_records = (uint32_t)build_records(recs);
 
     // src_hash = **值**的 CRC（2026-11-27 由「JSON 檔案 bytes 的 hash」改過來）：
@@ -201,6 +225,7 @@ esp_err_t nc_state_boot_sync(nc_state_boot_result_t *out)
         return ESP_ERR_INVALID_STATE;
     }
     s_result.src_hash = src_hash;
+    s_src_hash = src_hash;
 
     // schema 係唯一名單：由 cfg 造出的 record 一定要同 schema 對得上（型別／範圍）。
     // 對唔上唔會靜靜收貨：計數＋逐筆 log（最常見 = 加咗 key 但 schema 未加）。
@@ -242,26 +267,33 @@ esp_err_t nc_state_boot_sync(nc_state_boot_result_t *out)
         }
     }
 
-    // 判定只看「值」：src_hash 係診斷用的版本戳，唔做閘門。
-    // 為什麼：hash 一改語義（例如 2026-11-27 由 bytes-hash 改成值-hash）就會永遠
-    // 對唔上，但值其實一樣 —— 若以 hash 做閘門，hit 會永遠 0，冇人信個指標。
-    if (cache_ok && diff == 0) {
-        s_result.cmp_ok = true;
+    // 定案（S3，2026-11-27）：
+    //   hash 對得上 ＝ 「config 冇改過」→ **state（override）贏**：保留 blob 裡的值，
+    //     只 prune 走停用 unit 的舊記錄。唔可以用「值同 cfg 唔同」做重建條件，
+    //     否則回寫值一 reboot 就冇（實測 frame_ms=25 重啟變回 20）。
+    //   hash 唔對 ＝ config 改過 → **JSON 贏**：由 cfg 重建（回寫值清掉，可預期）。
+    //   冇檔／壞檔 → 由 cfg 重建。
+    if (cache_ok && hash_match) {
         s_result.hit = true;
+        s_result.cmp_ok = (diff == 0);
+        s_result.n_mismatch = (diff == 0) ? 0 : diff;
+        s_result.first_diff = first;
         s_result.bytes = nc_state_file_size(NC_STATE_PATH);
-        if (!hash_match) {
-            s_result.why = "值一樣、src_hash 過時（唔重寫，省 WL 寫盤）";
-            ESP_LOGW(TAG, "NCSTATE hit（%s）：src=0x%08x／file=0x%08x、%u 筆、%u B",
-                     s_result.why, (unsigned)src_hash, (unsigned)info.src_hash,
-                     (unsigned)s_result.n_records, (unsigned)s_result.bytes);
-        } else {
-            ESP_LOGI(TAG, "NCSTATE hit：src=0x%08x、%u 筆、%u B（同 cfg 完全一致）",
+        const uint16_t dropped = nc_state_store_prune(&s_store, recs, s_result.n_records);
+        if (diff == 0) {
+            ESP_LOGI(TAG, "NCSTATE hit：src=0x%08x、%u 筆、%u B（同 cfg 一致）",
                      (unsigned)src_hash, (unsigned)s_result.n_records, (unsigned)s_result.bytes);
+        } else {
+            ESP_LOGW(TAG, "NCSTATE hit（state 贏）：%u 筆 override（first=0x%08x）、"
+                     "prune %u 筆舊記錄、%u B",
+                     (unsigned)diff, (unsigned)first, (unsigned)dropped,
+                     (unsigned)s_result.bytes);
         }
     } else {
         s_result.n_mismatch = diff;
         s_result.first_diff = first;
-        s_result.why = (pe != ESP_OK) ? miss_reason(pe) : "cache 同 cfg 唔一致";
+        s_result.why = (pe != ESP_OK) ? miss_reason(pe)
+                       : "config 改過（src_hash 唔同）";
         if (save_records(&meta, recs, s_result.n_records)) {
             s_result.rebuilt = true;
             s_result.bytes = nc_state_file_size(NC_STATE_PATH);
@@ -281,6 +313,102 @@ esp_err_t nc_state_boot_sync(nc_state_boot_result_t *out)
 const nc_state_boot_result_t *nc_state_boot_last(void)
 {
     return s_result_valid ? &s_result : NULL;
+}
+
+uint32_t nc_state_boot_src_hash(void)
+{
+    return s_src_hash;
+}
+
+// ── S2：store → cfg（B02 之後、B05 之前）──────────────────────────
+static bool get_u(uint32_t key, uint32_t *v)
+{
+    nc_state_rec_t r;
+    if (!nc_state_store_get(nc_state_boot_store(), key, &r) || r.type != NC_STATE_T_UINT) {
+        return false;
+    }
+    *v = r.u;
+    return true;
+}
+
+static bool get_i(uint32_t key, int32_t *v)
+{
+    nc_state_rec_t r;
+    if (!nc_state_store_get(nc_state_boot_store(), key, &r) || r.type != NC_STATE_T_SINT) {
+        return false;
+    }
+    *v = r.i;
+    return true;
+}
+
+static bool get_b(uint32_t key, bool *v)
+{
+    nc_state_rec_t r;
+    if (!nc_state_store_get(nc_state_boot_store(), key, &r) || r.type != NC_STATE_T_BOOL) {
+        return false;
+    }
+    *v = r.u != 0;
+    return true;
+}
+
+uint32_t nc_state_apply_to_cfg(void)
+{
+    uint32_t n = 0;
+    uint32_t u = 0;
+    int32_t iv = 0;
+    bool bv = false;
+
+    nc_system_cfg_t *sys = nc_cfg_system_mut();
+    if (sys != NULL) {
+        if (get_u(NC_KEY_SYS_FRAME_MS, &u)) { sys->frame_interval_ms = (uint16_t)u; n++; }
+        if (get_u(NC_KEY_SYS_NUM_PIXELS, &u)) { sys->num_pixels = (uint16_t)u; n++; }
+        if (get_u(NC_KEY_SYS_LOG_DEBUG, &u)) { sys->log_debug_mode = (uint8_t)u; n++; }
+        if (get_u(NC_KEY_SYS_CID, &u)) {
+            (void)snprintf(sys->cid, sizeof(sys->cid), "%04X", (unsigned)u);
+            n++;
+        }
+    }
+
+    nc_hardware_cfg_t *hw = nc_cfg_hardware_mut();
+    if (hw != NULL && hw->n_i80 > 0 && nc_state_unit_active(NC_UNIT_I80)) {
+        nc_i80_cfg_t *b = &hw->i80[0];
+        if (get_u(NC_KEY_I80_COUNT, &u)) { b->n_used = (uint8_t)u; n++; }
+        if (get_i(NC_KEY_I80_WR, &iv)) { b->wr = (int8_t)iv; n++; }
+        if (get_i(NC_KEY_I80_DC, &iv)) { b->dc = (int8_t)iv; n++; }
+        if (get_i(NC_KEY_I80_CS, &iv)) { b->cs = (int8_t)iv; n++; }
+        if (get_u(NC_KEY_I80_FREQ, &u)) { b->freq_hz = u; n++; }
+    }
+    if (hw != NULL && hw->n_spi > 0 && nc_state_unit_active(NC_UNIT_SPI)) {
+        nc_spi_cfg_t *sp = &hw->spi[0];
+        if (get_b(NC_KEY_SPI_ENABLE, &bv)) { sp->enable = bv; n++; }
+        if (get_u(NC_KEY_SPI_BAUD, &u)) { sp->baud = u; n++; }
+        if (get_u(NC_KEY_SPI_PHASE, &u)) { sp->phase = (uint8_t)u; n++; }
+        if (get_u(NC_KEY_SPI_POL, &u)) { sp->polarity = (uint8_t)u; n++; }
+        if (get_i(NC_KEY_SPI_SCK, &iv)) { sp->sck = (int8_t)iv; n++; }
+        if (get_i(NC_KEY_SPI_MOSI, &iv)) { sp->mosi = (int8_t)iv; n++; }
+        if (get_i(NC_KEY_SPI_MISO, &iv)) { sp->miso = (int8_t)iv; n++; }
+    }
+    nc_devices_cfg_t *dv = nc_cfg_devices_mut();
+    if (dv != NULL && dv->present && dv->led_decl && nc_state_unit_active(NC_UNIT_LED)) {
+        nc_led_cfg_t *led = &dv->led;
+        if (get_b(NC_KEY_LED_ENABLE, &bv)) { led->enable = bv; n++; }
+        if (get_u(NC_KEY_LED_BACKEND, &u)) { led->backend = (uint8_t)u; n++; }
+        if (get_i(NC_KEY_LED_BUS, &iv)) { led->bus = (int8_t)iv; n++; }
+        if (get_u(NC_KEY_LED_LANES, &u)) { led->lanes = (uint8_t)u; n++; }
+        if (get_u(NC_KEY_LED_PX, &u)) { led->px = (uint16_t)u; n++; }
+        if (get_u(NC_KEY_LED_FMT, &u)) {
+            const char *nm = nc_state_enum_name(nc_state_key(NC_KEY_LED_FMT), u);
+            if (nm != NULL) {
+                (void)snprintf(led->fmt, sizeof(led->fmt), "%s", nm);
+                n++;
+            }
+        }
+        if (get_u(NC_KEY_LED_CLK, &u)) { led->clk_hz = u; n++; }
+        if (get_u(NC_KEY_LED_BIT_CELLS, &u)) { led->bit_cells = (uint8_t)u; n++; }
+        if (get_u(NC_KEY_LED_T0H, &u)) { led->t0h = (uint8_t)u; n++; }
+        if (get_u(NC_KEY_LED_T1H, &u)) { led->t1h = (uint8_t)u; n++; }
+    }
+    return n;
 }
 
 const nc_state_store_t *nc_state_boot_store(void)

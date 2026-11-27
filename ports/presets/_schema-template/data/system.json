@@ -1,0 +1,120 @@
+{
+  "version": 1,
+  "_comment": [
+    "由 tools/schema_coverage.py --template 生成；全部 key 都列出、值=預設（enable=0）。"
+  ],
+  "frame_interval_ms": 1,
+  "num_pixels": 0,
+  "log_debug_mode": 0,
+  "cID": 0,
+  "nc4": {
+    "links": [
+      {
+        "enable": false,
+        "kind": "usb",
+        "index": 0,
+        "msc": -1,
+        "port": 0,
+        "iface": "any",
+        "service": "auto",
+        "mem": "auto"
+      },
+      {
+        "enable": false,
+        "kind": "usb",
+        "index": 0,
+        "msc": -1,
+        "port": 0,
+        "iface": "any",
+        "service": "auto",
+        "mem": "auto"
+      },
+      {
+        "enable": false,
+        "kind": "usb",
+        "index": 0,
+        "msc": -1,
+        "port": 0,
+        "iface": "any",
+        "service": "auto",
+        "mem": "auto"
+      },
+      {
+        "enable": false,
+        "kind": "usb",
+        "index": 0,
+        "msc": -1,
+        "port": 0,
+        "iface": "any",
+        "service": "auto",
+        "mem": "auto"
+      },
+      {
+        "enable": false,
+        "kind": "usb",
+        "index": 0,
+        "msc": -1,
+        "port": 0,
+        "iface": "any",
+        "service": "auto",
+        "mem": "auto"
+      },
+      {
+        "enable": false,
+        "kind": "usb",
+        "index": 0,
+        "msc": -1,
+        "port": 0,
+        "iface": "any",
+        "service": "auto",
+        "mem": "auto"
+      },
+      {
+        "enable": false,
+        "kind": "usb",
+        "index": 0,
+        "msc": -1,
+        "port": 0,
+        "iface": "any",
+        "service": "auto",
+        "mem": "auto"
+      },
+      {
+        "enable": false,
+        "kind": "usb",
+        "index": 0,
+        "msc": -1,
+        "port": 0,
+        "iface": "any",
+        "service": "auto",
+        "mem": "auto"
+      }
+    ],
+    "routes": [
+      {
+        "out": 0
+      },
+      {
+        "out": 0
+      },
+      {
+        "out": 0
+      },
+      {
+        "out": 0
+      },
+      {
+        "out": 0
+      },
+      {
+        "out": 0
+      },
+      {
+        "out": 0
+      },
+      {
+        "out": 0
+      }
+    ]
+  }
+}

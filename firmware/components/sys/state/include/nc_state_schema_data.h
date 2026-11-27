@@ -9,15 +9,15 @@
 #include "nc_state_keys.h"   // NC_UNIT_*／NC_KEY_*
 
 #define NC_STATE_SCHEMA_VERSION 2u
-#define NC_STATE_SCHEMA_CRC     0xc02c6840u
-#define NC_STATE_KEY_COUNT      161u
+#define NC_STATE_SCHEMA_CRC     0x6d728650u
+#define NC_STATE_KEY_COUNT      346u
 #define NC_STATE_KEY_VALUE      26u
-#define NC_STATE_KEY_STRUCT     135u
+#define NC_STATE_KEY_STRUCT     320u
 
 // class：value = 開機由 cfg 造 record 入 store；struct = 字典登記，cfg 直接消費。
 #define NC_STATE_CLS_VALUE  0u
 #define NC_STATE_CLS_STRUCT 1u
-#define NC_STATE_UNIT_COUNT     8u
+#define NC_STATE_UNIT_COUNT     17u
 
 // 一筆 key 的完整描述（id／能力群組／型別／可接受範圍／人讀資料）。
 // type 用 nc_state_blob.h 的 NC_STATE_T_*；str 的長度上限在 max_len。

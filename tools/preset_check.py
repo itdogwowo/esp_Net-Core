@@ -166,8 +166,10 @@ def main() -> int:
     args = ap.parse_args()
 
     schema = json.loads(SCHEMA.read_text(encoding="utf-8"))
+    # `_` 開頭 = schema 參考模板（由 schema_coverage.py --template 生成），
+    # 唔係可以直接 seed 的 preset，所以唔套「四層四任務」嗰類規則。
     dirs = sorted(d for d in PRESETS.iterdir()
-                  if d.is_dir() and (d / "data").is_dir())
+                  if d.is_dir() and (d / "data").is_dir() and not d.name.startswith("_"))
     if not dirs:
         print(f"✘ {PRESETS.relative_to(ROOT)} 冇 preset", file=sys.stderr)
         return 1

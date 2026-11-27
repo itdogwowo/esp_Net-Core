@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "_comment": [
+    "由 tools/schema_coverage.py --template 生成；全部 key 都列出、值=預設（enable=0）。"
+  ],
+  "wifi": {
+    "enable": false,
+    "timeout_s": 1,
+    "mode": "sta"
+  }
+}

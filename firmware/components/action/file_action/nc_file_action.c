@@ -17,6 +17,9 @@
 #include "nc_store.h"
 #include "nc_boot.h"            // fs_format：狀態一律經 state manager
 #include "nc_log.h"             // log_mode / log_level
+#include "nc_state_api.h"       // S3：{"state":{key,value,persist}}
+#include "nc_state_boot.h"
+#include "nc_state_schema.h"
 
 static const char *TAG = "nc_file_action";
 
@@ -1008,6 +1011,58 @@ static void on_status_set(nc4_ctx_t *ctx, const nc4_frame_t *f)
     cJSON *root = cJSON_Parse(json);
     if (root == NULL) {
         ack(ctx, false, "bad json");
+        return;
+    }
+
+    // ── S3：{"state":{"key":<id>,"value":<v>,"persist":1}} ──
+    // 通用寫入：key 由 schema 決定型別／範圍；persist=1 就即刻回寫 state.ncst，
+    // 否則只改 RAM（下次 reboot 由 JSON 重建）。回覆講清楚係「記住」定「只今次」。
+    cJSON *st = cJSON_GetObjectItemCaseSensitive(root, "state");
+    if (cJSON_IsObject(st)) {
+        cJSON *jk = cJSON_GetObjectItemCaseSensitive(st, "key");
+        cJSON *jv = cJSON_GetObjectItemCaseSensitive(st, "value");
+        cJSON *jp = cJSON_GetObjectItemCaseSensitive(st, "persist");
+        if (!cJSON_IsNumber(jk) || !cJSON_IsNumber(jv)) {
+            cJSON_Delete(root);
+            ack(ctx, false, "state 要 {key,value[,persist]}");
+            return;
+        }
+        const uint32_t key = (uint32_t)jk->valuedouble;
+        const int32_t v = jv->valueint;
+        // persist 兩個來源都收：JSON 內 "persist":1，或 STATUS_SET 的 persist byte。
+        const bool want_persist = cJSON_IsTrue(jp) || (f->len > used && f->data[used] != 0);
+        const nc_state_keydef_t *def = nc_state_key(key);
+        nc_state_set_res_t r;
+        if (def == NULL) {
+            r = NC_STATE_SET_UNKNOWN_KEY;
+        } else if (def->type == NC_STATE_T_SINT) {
+            r = nc_state_set_i32(key, v);
+        } else if (def->type == NC_STATE_T_BOOL) {
+            r = nc_state_set_bool(key, v != 0);
+        } else {
+            r = nc_state_set_u32(key, (uint32_t)v);
+        }
+        bool persisted = false;
+        esp_err_t se = ESP_OK;
+        if (r == NC_STATE_SET_OK && want_persist) {
+            // 只排隊：真正寫 FAT 由 main 任務喺 reboot 前做（decode stack 唔夠）。
+            nc_state_persist_request();
+            persisted = true;
+            se = ESP_OK;
+        }
+        cJSON_Delete(root);
+        char msg[128];
+        (void)snprintf(msg, sizeof(msg), "key=0x%08x -> %s%s", (unsigned)key,
+                       nc_state_set_res_name(r),
+                       (r != NC_STATE_SET_OK) ? ""
+                       : persisted ? "；已排隊，reboot 前落盤"
+                       : want_persist ? "；寫入失敗（只改 RAM）"
+                                      : "；只改 RAM（重啟失效）");
+        if (r == NC_STATE_SET_OK && want_persist && !persisted) {
+            ESP_LOGW(TAG, "STATE_SET persist 失敗：%s", esp_err_to_name(se));
+        }
+        ESP_LOGI(TAG, "STATUS_SET state %s", msg);
+        ack(ctx, r == NC_STATE_SET_OK, msg);
         return;
     }
 
