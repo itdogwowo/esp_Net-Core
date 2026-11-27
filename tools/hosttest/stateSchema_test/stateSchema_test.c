@@ -84,6 +84,22 @@ int main(void)
     CHECK(k != NULL && nc_state_enum_name(k, 7) == NULL, "enum 7 應該 NULL");
     CHECK(nc_state_type_name(NC_STATE_T_SINT) != NULL, "type name");
 
+    printf("[2b] class：value 才入 store；struct 係字典登記\n");
+    CHECK(NC_STATE_KEY_VALUE + NC_STATE_KEY_STRUCT == NC_STATE_KEY_COUNT, "value+struct 要等於總數");
+    CHECK(NC_STATE_KEY_STRUCT > 0 && NC_STATE_KEY_VALUE > 0, "兩類都要有");
+    k = nc_state_key(NC_KEY_SYS_CID);
+    CHECK(k != NULL && k->cls == NC_STATE_CLS_VALUE, "cID 應該係 value");
+    k = nc_state_key(NC_KEY_LINK0_ENABLE);
+    CHECK(k != NULL && k->cls == NC_STATE_CLS_STRUCT, "link 應該係 struct");
+    k = nc_state_key(NC_KEY_TASK0_LEVEL);
+    CHECK(k != NULL && k->cls == NC_STATE_CLS_STRUCT, "task 應該係 struct");
+    for (uint32_t i = 0; i < nc_state_key_count(); i++) {
+        const nc_state_keydef_t *d = nc_state_key_at(i);
+        CHECK(d != NULL && (d->cls == NC_STATE_CLS_VALUE || d->cls == NC_STATE_CLS_STRUCT),
+              "key %u 的 class 唔合法（%u）", i, d ? d->cls : 9u);
+        CHECK(d != NULL && d->path[0] != '\0', "key %u 冇 path", i);
+    }
+
     printf("[3] 範圍：min／max／enum／str\n");
     k = nc_state_key(NC_KEY_SYS_FRAME_MS);
     CHECK(!nc_state_key_in_range(k, 0), "frame_ms 0 應該超範圍");

@@ -8,7 +8,8 @@
     "type：u8/u16/u32/i8/i32/bool/enum/str；str 要寫 max_len（唔含 NUL）。",
     "min/max：set 時的範圍（int64 比較）；u8/i8 的型別上下限由生成器再夾一次。",
     "key id 規矩 = domain(8b) | unit(8b) | index(8b) | field(8b)（u32）；",
-    "所以 key 的 unit 一定要等於 id 的 unit byte（生成器會驗）；index 用嚟分通道／lane／pin。"
+    "所以 key 的 unit 一定要等於 id 的 unit byte（生成器會驗）；index 用嚟分通道／lane／pin。",
+    "class：value = 會入 store（開機由 cfg 造 record、可回寫）；struct = 字典登記＋驗證，但由 cfg 直接消費（links／routes／tasks／wifi），唔佔 store。"
   ],
   "units": [
     {
@@ -30,6 +31,26 @@
       "id": 12,
       "name": "led",
       "desc": "燈鏈（driver.json 的 LED 段）"
+    },
+    {
+      "id": 1,
+      "name": "net",
+      "desc": "網絡層（network.json wifi）"
+    },
+    {
+      "id": 2,
+      "name": "link",
+      "desc": "NC4 通道（system.json nc4.links）"
+    },
+    {
+      "id": 3,
+      "name": "route",
+      "desc": "路由表（system.json nc4.routes）"
+    },
+    {
+      "id": 4,
+      "name": "task",
+      "desc": "任務（tasks.json）"
     }
   ],
   "keys": [
@@ -41,7 +62,8 @@
       "min": 1,
       "max": 1000,
       "path": "system.json:frame_interval_ms",
-      "desc": "節拍間隔 ms"
+      "desc": "節拍間隔 ms",
+      "class": "value"
     },
     {
       "id": "0x00000003",
@@ -51,7 +73,8 @@
       "min": 0,
       "max": 65535,
       "path": "system.json:num_pixels",
-      "desc": "總像素數（資訊用）"
+      "desc": "總像素數（資訊用）",
+      "class": "value"
     },
     {
       "id": "0x00000004",
@@ -61,7 +84,8 @@
       "min": 0,
       "max": 1,
       "path": "system.json:log_debug_mode",
-      "desc": "log 除錯模式"
+      "desc": "log 除錯模式",
+      "class": "value"
     },
     {
       "id": "0x00070001",
@@ -71,7 +95,8 @@
       "min": 0,
       "max": 16,
       "path": "hardware.json:I80.list[0].data",
-      "desc": "真正接燈的資料腳數（稀疏非 -1）"
+      "desc": "真正接燈的資料腳數（稀疏非 -1）",
+      "class": "value"
     },
     {
       "id": "0x00070002",
@@ -81,7 +106,8 @@
       "min": -1,
       "max": 54,
       "path": "hardware.json:I80.list[0].wr",
-      "desc": "WR pin（-1 = 未用）"
+      "desc": "WR pin（-1 = 未用）",
+      "class": "value"
     },
     {
       "id": "0x00070003",
@@ -91,7 +117,8 @@
       "min": -1,
       "max": 54,
       "path": "hardware.json:I80.list[0].dc",
-      "desc": "DC pin（-1 = 未用）"
+      "desc": "DC pin（-1 = 未用）",
+      "class": "value"
     },
     {
       "id": "0x00070004",
@@ -101,7 +128,8 @@
       "min": -1,
       "max": 54,
       "path": "hardware.json:I80.list[0].cs",
-      "desc": "CS pin（-1 = 未用）"
+      "desc": "CS pin（-1 = 未用）",
+      "class": "value"
     },
     {
       "id": "0x00070005",
@@ -111,7 +139,8 @@
       "min": 1000000,
       "max": 80000000,
       "path": "hardware.json:I80.list[0].freq",
-      "desc": "LCD PCLK Hz"
+      "desc": "LCD PCLK Hz",
+      "class": "value"
     },
     {
       "id": "0x00080001",
@@ -121,7 +150,8 @@
       "min": 0,
       "max": 1,
       "path": "hardware.json:SPI.enable",
-      "desc": "SPI 是否啟用"
+      "desc": "SPI 是否啟用",
+      "class": "value"
     },
     {
       "id": "0x00080002",
@@ -131,7 +161,8 @@
       "min": 100000,
       "max": 80000000,
       "path": "hardware.json:SPI.list[0].baudrate",
-      "desc": "SPI 時鐘"
+      "desc": "SPI 時鐘",
+      "class": "value"
     },
     {
       "id": "0x00080003",
@@ -141,7 +172,8 @@
       "min": 0,
       "max": 1,
       "path": "hardware.json:SPI.list[0].phase",
-      "desc": "phase（0/1）"
+      "desc": "phase（0/1）",
+      "class": "value"
     },
     {
       "id": "0x00080004",
@@ -151,7 +183,8 @@
       "min": 0,
       "max": 1,
       "path": "hardware.json:SPI.list[0].polarity",
-      "desc": "polarity（0/1）"
+      "desc": "polarity（0/1）",
+      "class": "value"
     },
     {
       "id": "0x00080005",
@@ -161,7 +194,8 @@
       "min": -1,
       "max": 54,
       "path": "hardware.json:SPI.list[0].GPIO.sck",
-      "desc": "SCLK pin"
+      "desc": "SCLK pin",
+      "class": "value"
     },
     {
       "id": "0x00080006",
@@ -171,7 +205,8 @@
       "min": -1,
       "max": 54,
       "path": "hardware.json:SPI.list[0].GPIO.mosi",
-      "desc": "MOSI（單線 / data0）"
+      "desc": "MOSI（單線 / data0）",
+      "class": "value"
     },
     {
       "id": "0x00080007",
@@ -181,7 +216,8 @@
       "min": -1,
       "max": 54,
       "path": "hardware.json:SPI.list[0].GPIO.miso",
-      "desc": "MISO（-1 = 冇）"
+      "desc": "MISO（-1 = 冇）",
+      "class": "value"
     },
     {
       "id": "0x000C0001",
@@ -191,7 +227,8 @@
       "min": 0,
       "max": 1,
       "path": "driver.json:LED.enable",
-      "desc": "燈鏈啟用"
+      "desc": "燈鏈啟用",
+      "class": "value"
     },
     {
       "id": "0x000C0002",
@@ -208,7 +245,8 @@
         "mock"
       ],
       "path": "driver.json:LED.backend",
-      "desc": "nc_led_backend_t"
+      "desc": "nc_led_backend_t",
+      "class": "value"
     },
     {
       "id": "0x000C0003",
@@ -218,7 +256,8 @@
       "min": -1,
       "max": 15,
       "path": "driver.json:LED.bus.index",
-      "desc": "引用 hardware 同類 list 的 index"
+      "desc": "引用 hardware 同類 list 的 index",
+      "class": "value"
     },
     {
       "id": "0x000C0004",
@@ -228,7 +267,8 @@
       "min": 1,
       "max": 16,
       "path": "driver.json:LED.lanes",
-      "desc": "真的接燈的 lane 數"
+      "desc": "真的接燈的 lane 數",
+      "class": "value"
     },
     {
       "id": "0x000C0005",
@@ -238,7 +278,8 @@
       "min": 1,
       "max": 65535,
       "path": "driver.json:LED.px",
-      "desc": "每條 lane 幾顆"
+      "desc": "每條 lane 幾顆",
+      "class": "value"
     },
     {
       "id": "0x000C0006",
@@ -253,7 +294,8 @@
         "apa102"
       ],
       "path": "driver.json:LED.format",
-      "desc": "線材格式（= nc_px_format_t 的 index）"
+      "desc": "線材格式（= nc_px_format_t 的 index）",
+      "class": "value"
     },
     {
       "id": "0x000C0007",
@@ -263,7 +305,8 @@
       "min": 1000000,
       "max": 80000000,
       "path": "driver.json:LED.timing.pclk_hz",
-      "desc": "I80 PCLK / SPI 時鐘"
+      "desc": "I80 PCLK / SPI 時鐘",
+      "class": "value"
     },
     {
       "id": "0x000C0008",
@@ -273,7 +316,8 @@
       "min": 1,
       "max": 64,
       "path": "driver.json:LED.timing.bit_cells",
-      "desc": "每 bit 幾個 cell"
+      "desc": "每 bit 幾個 cell",
+      "class": "value"
     },
     {
       "id": "0x000C0009",
@@ -283,7 +327,8 @@
       "min": 0,
       "max": 64,
       "path": "driver.json:LED.timing.t0h",
-      "desc": "0 的高電平 cell 數"
+      "desc": "0 的高電平 cell 數",
+      "class": "value"
     },
     {
       "id": "0x000C000A",
@@ -293,7 +338,1642 @@
       "min": 0,
       "max": 64,
       "path": "driver.json:LED.timing.t1h",
-      "desc": "1 的高電平 cell 數"
+      "desc": "1 的高電平 cell 數",
+      "class": "value"
+    },
+    {
+      "id": "0x00000001",
+      "name": "NC_KEY_SYS_CID",
+      "unit": "sys",
+      "type": "u16",
+      "min": 0,
+      "max": 65535,
+      "path": "system.json:cID",
+      "desc": "16-bit cID；0 = 由 MAC 推導",
+      "class": "value"
+    },
+    {
+      "id": "0x00010001",
+      "name": "NC_KEY_NET_WIFI_ENABLE",
+      "unit": "net",
+      "type": "bool",
+      "min": 0,
+      "max": 1,
+      "path": "network.json:wifi.enable",
+      "desc": "WiFi 啟用",
+      "class": "struct"
+    },
+    {
+      "id": "0x00010002",
+      "name": "NC_KEY_NET_WIFI_TIMEOUT",
+      "unit": "net",
+      "type": "u16",
+      "min": 1,
+      "max": 600,
+      "path": "network.json:wifi.timeout_s",
+      "desc": "連線 timeout 秒",
+      "class": "struct"
+    },
+    {
+      "id": "0x00010003",
+      "name": "NC_KEY_NET_WIFI_MODE",
+      "unit": "net",
+      "type": "enum",
+      "values": [
+        "sta",
+        "ap"
+      ],
+      "path": "network.json:wifi.mode",
+      "desc": "sta／ap",
+      "class": "struct"
+    },
+    {
+      "id": "0x00020001",
+      "name": "NC_KEY_LINK0_ENABLE",
+      "unit": "link",
+      "type": "bool",
+      "min": 0,
+      "max": 1,
+      "path": "system.json:nc4.links[0].enable",
+      "desc": "通道啟用",
+      "class": "struct"
+    },
+    {
+      "id": "0x00020002",
+      "name": "NC_KEY_LINK0_KIND",
+      "unit": "link",
+      "type": "enum",
+      "values": [
+        "usb",
+        "cdc",
+        "uart",
+        "tcp",
+        "udp",
+        "ws",
+        "http",
+        "usb_jtag"
+      ],
+      "path": "system.json:nc4.links[0].kind",
+      "desc": "通道類型（複合名用 iface）",
+      "class": "struct"
+    },
+    {
+      "id": "0x00020003",
+      "name": "NC_KEY_LINK0_INDEX",
+      "unit": "link",
+      "type": "u8",
+      "min": 0,
+      "max": 15,
+      "path": "system.json:nc4.links[0].index",
+      "desc": "同類線編號",
+      "class": "struct"
+    },
+    {
+      "id": "0x00020004",
+      "name": "NC_KEY_LINK0_MSC",
+      "unit": "link",
+      "type": "i8",
+      "min": -1,
+      "max": 1,
+      "path": "system.json:nc4.links[0].msc",
+      "desc": "USB MSC（0/1；-1 未寫）",
+      "class": "struct"
+    },
+    {
+      "id": "0x00020005",
+      "name": "NC_KEY_LINK0_PORT",
+      "unit": "link",
+      "type": "u16",
+      "min": 0,
+      "max": 65535,
+      "path": "system.json:nc4.links[0].port",
+      "desc": "TCP/UDP/WS/HTTP 端口",
+      "class": "struct"
+    },
+    {
+      "id": "0x00020006",
+      "name": "NC_KEY_LINK0_IFACE",
+      "unit": "link",
+      "type": "enum",
+      "values": [
+        "any",
+        "eth",
+        "wifi"
+      ],
+      "path": "system.json:nc4.links[0].iface",
+      "desc": "綁哪個網絡介面",
+      "class": "struct"
+    },
+    {
+      "id": "0x00020007",
+      "name": "NC_KEY_LINK0_SVC",
+      "unit": "link",
+      "type": "enum",
+      "values": [
+        "auto",
+        "nc4",
+        "web"
+      ],
+      "path": "system.json:nc4.links[0].service",
+      "desc": "auto／nc4／web",
+      "class": "struct"
+    },
+    {
+      "id": "0x00020008",
+      "name": "NC_KEY_LINK0_MEM",
+      "unit": "link",
+      "type": "enum",
+      "values": [
+        "auto",
+        "sram",
+        "psram"
+      ],
+      "path": "system.json:nc4.links[0].mem",
+      "desc": "緩衝位置 auto／sram／psram",
+      "class": "struct"
+    },
+    {
+      "id": "0x00020101",
+      "name": "NC_KEY_LINK1_ENABLE",
+      "unit": "link",
+      "type": "bool",
+      "min": 0,
+      "max": 1,
+      "path": "system.json:nc4.links[1].enable",
+      "desc": "通道啟用",
+      "class": "struct"
+    },
+    {
+      "id": "0x00020102",
+      "name": "NC_KEY_LINK1_KIND",
+      "unit": "link",
+      "type": "enum",
+      "values": [
+        "usb",
+        "cdc",
+        "uart",
+        "tcp",
+        "udp",
+        "ws",
+        "http",
+        "usb_jtag"
+      ],
+      "path": "system.json:nc4.links[1].kind",
+      "desc": "通道類型（複合名用 iface）",
+      "class": "struct"
+    },
+    {
+      "id": "0x00020103",
+      "name": "NC_KEY_LINK1_INDEX",
+      "unit": "link",
+      "type": "u8",
+      "min": 0,
+      "max": 15,
+      "path": "system.json:nc4.links[1].index",
+      "desc": "同類線編號",
+      "class": "struct"
+    },
+    {
+      "id": "0x00020104",
+      "name": "NC_KEY_LINK1_MSC",
+      "unit": "link",
+      "type": "i8",
+      "min": -1,
+      "max": 1,
+      "path": "system.json:nc4.links[1].msc",
+      "desc": "USB MSC（0/1；-1 未寫）",
+      "class": "struct"
+    },
+    {
+      "id": "0x00020105",
+      "name": "NC_KEY_LINK1_PORT",
+      "unit": "link",
+      "type": "u16",
+      "min": 0,
+      "max": 65535,
+      "path": "system.json:nc4.links[1].port",
+      "desc": "TCP/UDP/WS/HTTP 端口",
+      "class": "struct"
+    },
+    {
+      "id": "0x00020106",
+      "name": "NC_KEY_LINK1_IFACE",
+      "unit": "link",
+      "type": "enum",
+      "values": [
+        "any",
+        "eth",
+        "wifi"
+      ],
+      "path": "system.json:nc4.links[1].iface",
+      "desc": "綁哪個網絡介面",
+      "class": "struct"
+    },
+    {
+      "id": "0x00020107",
+      "name": "NC_KEY_LINK1_SVC",
+      "unit": "link",
+      "type": "enum",
+      "values": [
+        "auto",
+        "nc4",
+        "web"
+      ],
+      "path": "system.json:nc4.links[1].service",
+      "desc": "auto／nc4／web",
+      "class": "struct"
+    },
+    {
+      "id": "0x00020108",
+      "name": "NC_KEY_LINK1_MEM",
+      "unit": "link",
+      "type": "enum",
+      "values": [
+        "auto",
+        "sram",
+        "psram"
+      ],
+      "path": "system.json:nc4.links[1].mem",
+      "desc": "緩衝位置 auto／sram／psram",
+      "class": "struct"
+    },
+    {
+      "id": "0x00020201",
+      "name": "NC_KEY_LINK2_ENABLE",
+      "unit": "link",
+      "type": "bool",
+      "min": 0,
+      "max": 1,
+      "path": "system.json:nc4.links[2].enable",
+      "desc": "通道啟用",
+      "class": "struct"
+    },
+    {
+      "id": "0x00020202",
+      "name": "NC_KEY_LINK2_KIND",
+      "unit": "link",
+      "type": "enum",
+      "values": [
+        "usb",
+        "cdc",
+        "uart",
+        "tcp",
+        "udp",
+        "ws",
+        "http",
+        "usb_jtag"
+      ],
+      "path": "system.json:nc4.links[2].kind",
+      "desc": "通道類型（複合名用 iface）",
+      "class": "struct"
+    },
+    {
+      "id": "0x00020203",
+      "name": "NC_KEY_LINK2_INDEX",
+      "unit": "link",
+      "type": "u8",
+      "min": 0,
+      "max": 15,
+      "path": "system.json:nc4.links[2].index",
+      "desc": "同類線編號",
+      "class": "struct"
+    },
+    {
+      "id": "0x00020204",
+      "name": "NC_KEY_LINK2_MSC",
+      "unit": "link",
+      "type": "i8",
+      "min": -1,
+      "max": 1,
+      "path": "system.json:nc4.links[2].msc",
+      "desc": "USB MSC（0/1；-1 未寫）",
+      "class": "struct"
+    },
+    {
+      "id": "0x00020205",
+      "name": "NC_KEY_LINK2_PORT",
+      "unit": "link",
+      "type": "u16",
+      "min": 0,
+      "max": 65535,
+      "path": "system.json:nc4.links[2].port",
+      "desc": "TCP/UDP/WS/HTTP 端口",
+      "class": "struct"
+    },
+    {
+      "id": "0x00020206",
+      "name": "NC_KEY_LINK2_IFACE",
+      "unit": "link",
+      "type": "enum",
+      "values": [
+        "any",
+        "eth",
+        "wifi"
+      ],
+      "path": "system.json:nc4.links[2].iface",
+      "desc": "綁哪個網絡介面",
+      "class": "struct"
+    },
+    {
+      "id": "0x00020207",
+      "name": "NC_KEY_LINK2_SVC",
+      "unit": "link",
+      "type": "enum",
+      "values": [
+        "auto",
+        "nc4",
+        "web"
+      ],
+      "path": "system.json:nc4.links[2].service",
+      "desc": "auto／nc4／web",
+      "class": "struct"
+    },
+    {
+      "id": "0x00020208",
+      "name": "NC_KEY_LINK2_MEM",
+      "unit": "link",
+      "type": "enum",
+      "values": [
+        "auto",
+        "sram",
+        "psram"
+      ],
+      "path": "system.json:nc4.links[2].mem",
+      "desc": "緩衝位置 auto／sram／psram",
+      "class": "struct"
+    },
+    {
+      "id": "0x00020301",
+      "name": "NC_KEY_LINK3_ENABLE",
+      "unit": "link",
+      "type": "bool",
+      "min": 0,
+      "max": 1,
+      "path": "system.json:nc4.links[3].enable",
+      "desc": "通道啟用",
+      "class": "struct"
+    },
+    {
+      "id": "0x00020302",
+      "name": "NC_KEY_LINK3_KIND",
+      "unit": "link",
+      "type": "enum",
+      "values": [
+        "usb",
+        "cdc",
+        "uart",
+        "tcp",
+        "udp",
+        "ws",
+        "http",
+        "usb_jtag"
+      ],
+      "path": "system.json:nc4.links[3].kind",
+      "desc": "通道類型（複合名用 iface）",
+      "class": "struct"
+    },
+    {
+      "id": "0x00020303",
+      "name": "NC_KEY_LINK3_INDEX",
+      "unit": "link",
+      "type": "u8",
+      "min": 0,
+      "max": 15,
+      "path": "system.json:nc4.links[3].index",
+      "desc": "同類線編號",
+      "class": "struct"
+    },
+    {
+      "id": "0x00020304",
+      "name": "NC_KEY_LINK3_MSC",
+      "unit": "link",
+      "type": "i8",
+      "min": -1,
+      "max": 1,
+      "path": "system.json:nc4.links[3].msc",
+      "desc": "USB MSC（0/1；-1 未寫）",
+      "class": "struct"
+    },
+    {
+      "id": "0x00020305",
+      "name": "NC_KEY_LINK3_PORT",
+      "unit": "link",
+      "type": "u16",
+      "min": 0,
+      "max": 65535,
+      "path": "system.json:nc4.links[3].port",
+      "desc": "TCP/UDP/WS/HTTP 端口",
+      "class": "struct"
+    },
+    {
+      "id": "0x00020306",
+      "name": "NC_KEY_LINK3_IFACE",
+      "unit": "link",
+      "type": "enum",
+      "values": [
+        "any",
+        "eth",
+        "wifi"
+      ],
+      "path": "system.json:nc4.links[3].iface",
+      "desc": "綁哪個網絡介面",
+      "class": "struct"
+    },
+    {
+      "id": "0x00020307",
+      "name": "NC_KEY_LINK3_SVC",
+      "unit": "link",
+      "type": "enum",
+      "values": [
+        "auto",
+        "nc4",
+        "web"
+      ],
+      "path": "system.json:nc4.links[3].service",
+      "desc": "auto／nc4／web",
+      "class": "struct"
+    },
+    {
+      "id": "0x00020308",
+      "name": "NC_KEY_LINK3_MEM",
+      "unit": "link",
+      "type": "enum",
+      "values": [
+        "auto",
+        "sram",
+        "psram"
+      ],
+      "path": "system.json:nc4.links[3].mem",
+      "desc": "緩衝位置 auto／sram／psram",
+      "class": "struct"
+    },
+    {
+      "id": "0x00020401",
+      "name": "NC_KEY_LINK4_ENABLE",
+      "unit": "link",
+      "type": "bool",
+      "min": 0,
+      "max": 1,
+      "path": "system.json:nc4.links[4].enable",
+      "desc": "通道啟用",
+      "class": "struct"
+    },
+    {
+      "id": "0x00020402",
+      "name": "NC_KEY_LINK4_KIND",
+      "unit": "link",
+      "type": "enum",
+      "values": [
+        "usb",
+        "cdc",
+        "uart",
+        "tcp",
+        "udp",
+        "ws",
+        "http",
+        "usb_jtag"
+      ],
+      "path": "system.json:nc4.links[4].kind",
+      "desc": "通道類型（複合名用 iface）",
+      "class": "struct"
+    },
+    {
+      "id": "0x00020403",
+      "name": "NC_KEY_LINK4_INDEX",
+      "unit": "link",
+      "type": "u8",
+      "min": 0,
+      "max": 15,
+      "path": "system.json:nc4.links[4].index",
+      "desc": "同類線編號",
+      "class": "struct"
+    },
+    {
+      "id": "0x00020404",
+      "name": "NC_KEY_LINK4_MSC",
+      "unit": "link",
+      "type": "i8",
+      "min": -1,
+      "max": 1,
+      "path": "system.json:nc4.links[4].msc",
+      "desc": "USB MSC（0/1；-1 未寫）",
+      "class": "struct"
+    },
+    {
+      "id": "0x00020405",
+      "name": "NC_KEY_LINK4_PORT",
+      "unit": "link",
+      "type": "u16",
+      "min": 0,
+      "max": 65535,
+      "path": "system.json:nc4.links[4].port",
+      "desc": "TCP/UDP/WS/HTTP 端口",
+      "class": "struct"
+    },
+    {
+      "id": "0x00020406",
+      "name": "NC_KEY_LINK4_IFACE",
+      "unit": "link",
+      "type": "enum",
+      "values": [
+        "any",
+        "eth",
+        "wifi"
+      ],
+      "path": "system.json:nc4.links[4].iface",
+      "desc": "綁哪個網絡介面",
+      "class": "struct"
+    },
+    {
+      "id": "0x00020407",
+      "name": "NC_KEY_LINK4_SVC",
+      "unit": "link",
+      "type": "enum",
+      "values": [
+        "auto",
+        "nc4",
+        "web"
+      ],
+      "path": "system.json:nc4.links[4].service",
+      "desc": "auto／nc4／web",
+      "class": "struct"
+    },
+    {
+      "id": "0x00020408",
+      "name": "NC_KEY_LINK4_MEM",
+      "unit": "link",
+      "type": "enum",
+      "values": [
+        "auto",
+        "sram",
+        "psram"
+      ],
+      "path": "system.json:nc4.links[4].mem",
+      "desc": "緩衝位置 auto／sram／psram",
+      "class": "struct"
+    },
+    {
+      "id": "0x00020501",
+      "name": "NC_KEY_LINK5_ENABLE",
+      "unit": "link",
+      "type": "bool",
+      "min": 0,
+      "max": 1,
+      "path": "system.json:nc4.links[5].enable",
+      "desc": "通道啟用",
+      "class": "struct"
+    },
+    {
+      "id": "0x00020502",
+      "name": "NC_KEY_LINK5_KIND",
+      "unit": "link",
+      "type": "enum",
+      "values": [
+        "usb",
+        "cdc",
+        "uart",
+        "tcp",
+        "udp",
+        "ws",
+        "http",
+        "usb_jtag"
+      ],
+      "path": "system.json:nc4.links[5].kind",
+      "desc": "通道類型（複合名用 iface）",
+      "class": "struct"
+    },
+    {
+      "id": "0x00020503",
+      "name": "NC_KEY_LINK5_INDEX",
+      "unit": "link",
+      "type": "u8",
+      "min": 0,
+      "max": 15,
+      "path": "system.json:nc4.links[5].index",
+      "desc": "同類線編號",
+      "class": "struct"
+    },
+    {
+      "id": "0x00020504",
+      "name": "NC_KEY_LINK5_MSC",
+      "unit": "link",
+      "type": "i8",
+      "min": -1,
+      "max": 1,
+      "path": "system.json:nc4.links[5].msc",
+      "desc": "USB MSC（0/1；-1 未寫）",
+      "class": "struct"
+    },
+    {
+      "id": "0x00020505",
+      "name": "NC_KEY_LINK5_PORT",
+      "unit": "link",
+      "type": "u16",
+      "min": 0,
+      "max": 65535,
+      "path": "system.json:nc4.links[5].port",
+      "desc": "TCP/UDP/WS/HTTP 端口",
+      "class": "struct"
+    },
+    {
+      "id": "0x00020506",
+      "name": "NC_KEY_LINK5_IFACE",
+      "unit": "link",
+      "type": "enum",
+      "values": [
+        "any",
+        "eth",
+        "wifi"
+      ],
+      "path": "system.json:nc4.links[5].iface",
+      "desc": "綁哪個網絡介面",
+      "class": "struct"
+    },
+    {
+      "id": "0x00020507",
+      "name": "NC_KEY_LINK5_SVC",
+      "unit": "link",
+      "type": "enum",
+      "values": [
+        "auto",
+        "nc4",
+        "web"
+      ],
+      "path": "system.json:nc4.links[5].service",
+      "desc": "auto／nc4／web",
+      "class": "struct"
+    },
+    {
+      "id": "0x00020508",
+      "name": "NC_KEY_LINK5_MEM",
+      "unit": "link",
+      "type": "enum",
+      "values": [
+        "auto",
+        "sram",
+        "psram"
+      ],
+      "path": "system.json:nc4.links[5].mem",
+      "desc": "緩衝位置 auto／sram／psram",
+      "class": "struct"
+    },
+    {
+      "id": "0x00020601",
+      "name": "NC_KEY_LINK6_ENABLE",
+      "unit": "link",
+      "type": "bool",
+      "min": 0,
+      "max": 1,
+      "path": "system.json:nc4.links[6].enable",
+      "desc": "通道啟用",
+      "class": "struct"
+    },
+    {
+      "id": "0x00020602",
+      "name": "NC_KEY_LINK6_KIND",
+      "unit": "link",
+      "type": "enum",
+      "values": [
+        "usb",
+        "cdc",
+        "uart",
+        "tcp",
+        "udp",
+        "ws",
+        "http",
+        "usb_jtag"
+      ],
+      "path": "system.json:nc4.links[6].kind",
+      "desc": "通道類型（複合名用 iface）",
+      "class": "struct"
+    },
+    {
+      "id": "0x00020603",
+      "name": "NC_KEY_LINK6_INDEX",
+      "unit": "link",
+      "type": "u8",
+      "min": 0,
+      "max": 15,
+      "path": "system.json:nc4.links[6].index",
+      "desc": "同類線編號",
+      "class": "struct"
+    },
+    {
+      "id": "0x00020604",
+      "name": "NC_KEY_LINK6_MSC",
+      "unit": "link",
+      "type": "i8",
+      "min": -1,
+      "max": 1,
+      "path": "system.json:nc4.links[6].msc",
+      "desc": "USB MSC（0/1；-1 未寫）",
+      "class": "struct"
+    },
+    {
+      "id": "0x00020605",
+      "name": "NC_KEY_LINK6_PORT",
+      "unit": "link",
+      "type": "u16",
+      "min": 0,
+      "max": 65535,
+      "path": "system.json:nc4.links[6].port",
+      "desc": "TCP/UDP/WS/HTTP 端口",
+      "class": "struct"
+    },
+    {
+      "id": "0x00020606",
+      "name": "NC_KEY_LINK6_IFACE",
+      "unit": "link",
+      "type": "enum",
+      "values": [
+        "any",
+        "eth",
+        "wifi"
+      ],
+      "path": "system.json:nc4.links[6].iface",
+      "desc": "綁哪個網絡介面",
+      "class": "struct"
+    },
+    {
+      "id": "0x00020607",
+      "name": "NC_KEY_LINK6_SVC",
+      "unit": "link",
+      "type": "enum",
+      "values": [
+        "auto",
+        "nc4",
+        "web"
+      ],
+      "path": "system.json:nc4.links[6].service",
+      "desc": "auto／nc4／web",
+      "class": "struct"
+    },
+    {
+      "id": "0x00020608",
+      "name": "NC_KEY_LINK6_MEM",
+      "unit": "link",
+      "type": "enum",
+      "values": [
+        "auto",
+        "sram",
+        "psram"
+      ],
+      "path": "system.json:nc4.links[6].mem",
+      "desc": "緩衝位置 auto／sram／psram",
+      "class": "struct"
+    },
+    {
+      "id": "0x00020701",
+      "name": "NC_KEY_LINK7_ENABLE",
+      "unit": "link",
+      "type": "bool",
+      "min": 0,
+      "max": 1,
+      "path": "system.json:nc4.links[7].enable",
+      "desc": "通道啟用",
+      "class": "struct"
+    },
+    {
+      "id": "0x00020702",
+      "name": "NC_KEY_LINK7_KIND",
+      "unit": "link",
+      "type": "enum",
+      "values": [
+        "usb",
+        "cdc",
+        "uart",
+        "tcp",
+        "udp",
+        "ws",
+        "http",
+        "usb_jtag"
+      ],
+      "path": "system.json:nc4.links[7].kind",
+      "desc": "通道類型（複合名用 iface）",
+      "class": "struct"
+    },
+    {
+      "id": "0x00020703",
+      "name": "NC_KEY_LINK7_INDEX",
+      "unit": "link",
+      "type": "u8",
+      "min": 0,
+      "max": 15,
+      "path": "system.json:nc4.links[7].index",
+      "desc": "同類線編號",
+      "class": "struct"
+    },
+    {
+      "id": "0x00020704",
+      "name": "NC_KEY_LINK7_MSC",
+      "unit": "link",
+      "type": "i8",
+      "min": -1,
+      "max": 1,
+      "path": "system.json:nc4.links[7].msc",
+      "desc": "USB MSC（0/1；-1 未寫）",
+      "class": "struct"
+    },
+    {
+      "id": "0x00020705",
+      "name": "NC_KEY_LINK7_PORT",
+      "unit": "link",
+      "type": "u16",
+      "min": 0,
+      "max": 65535,
+      "path": "system.json:nc4.links[7].port",
+      "desc": "TCP/UDP/WS/HTTP 端口",
+      "class": "struct"
+    },
+    {
+      "id": "0x00020706",
+      "name": "NC_KEY_LINK7_IFACE",
+      "unit": "link",
+      "type": "enum",
+      "values": [
+        "any",
+        "eth",
+        "wifi"
+      ],
+      "path": "system.json:nc4.links[7].iface",
+      "desc": "綁哪個網絡介面",
+      "class": "struct"
+    },
+    {
+      "id": "0x00020707",
+      "name": "NC_KEY_LINK7_SVC",
+      "unit": "link",
+      "type": "enum",
+      "values": [
+        "auto",
+        "nc4",
+        "web"
+      ],
+      "path": "system.json:nc4.links[7].service",
+      "desc": "auto／nc4／web",
+      "class": "struct"
+    },
+    {
+      "id": "0x00020708",
+      "name": "NC_KEY_LINK7_MEM",
+      "unit": "link",
+      "type": "enum",
+      "values": [
+        "auto",
+        "sram",
+        "psram"
+      ],
+      "path": "system.json:nc4.links[7].mem",
+      "desc": "緩衝位置 auto／sram／psram",
+      "class": "struct"
+    },
+    {
+      "id": "0x00030001",
+      "name": "NC_KEY_ROUTE0_MASK",
+      "unit": "route",
+      "type": "u32",
+      "min": 0,
+      "max": 65535,
+      "path": "system.json:nc4.routes[0].out",
+      "desc": "decode 目標 bitmask（bit0=decode0；0=只轉發）",
+      "class": "struct"
+    },
+    {
+      "id": "0x00030101",
+      "name": "NC_KEY_ROUTE1_MASK",
+      "unit": "route",
+      "type": "u32",
+      "min": 0,
+      "max": 65535,
+      "path": "system.json:nc4.routes[1].out",
+      "desc": "decode 目標 bitmask（bit0=decode0；0=只轉發）",
+      "class": "struct"
+    },
+    {
+      "id": "0x00030201",
+      "name": "NC_KEY_ROUTE2_MASK",
+      "unit": "route",
+      "type": "u32",
+      "min": 0,
+      "max": 65535,
+      "path": "system.json:nc4.routes[2].out",
+      "desc": "decode 目標 bitmask（bit0=decode0；0=只轉發）",
+      "class": "struct"
+    },
+    {
+      "id": "0x00030301",
+      "name": "NC_KEY_ROUTE3_MASK",
+      "unit": "route",
+      "type": "u32",
+      "min": 0,
+      "max": 65535,
+      "path": "system.json:nc4.routes[3].out",
+      "desc": "decode 目標 bitmask（bit0=decode0；0=只轉發）",
+      "class": "struct"
+    },
+    {
+      "id": "0x00030401",
+      "name": "NC_KEY_ROUTE4_MASK",
+      "unit": "route",
+      "type": "u32",
+      "min": 0,
+      "max": 65535,
+      "path": "system.json:nc4.routes[4].out",
+      "desc": "decode 目標 bitmask（bit0=decode0；0=只轉發）",
+      "class": "struct"
+    },
+    {
+      "id": "0x00030501",
+      "name": "NC_KEY_ROUTE5_MASK",
+      "unit": "route",
+      "type": "u32",
+      "min": 0,
+      "max": 65535,
+      "path": "system.json:nc4.routes[5].out",
+      "desc": "decode 目標 bitmask（bit0=decode0；0=只轉發）",
+      "class": "struct"
+    },
+    {
+      "id": "0x00030601",
+      "name": "NC_KEY_ROUTE6_MASK",
+      "unit": "route",
+      "type": "u32",
+      "min": 0,
+      "max": 65535,
+      "path": "system.json:nc4.routes[6].out",
+      "desc": "decode 目標 bitmask（bit0=decode0；0=只轉發）",
+      "class": "struct"
+    },
+    {
+      "id": "0x00030701",
+      "name": "NC_KEY_ROUTE7_MASK",
+      "unit": "route",
+      "type": "u32",
+      "min": 0,
+      "max": 65535,
+      "path": "system.json:nc4.routes[7].out",
+      "desc": "decode 目標 bitmask（bit0=decode0；0=只轉發）",
+      "class": "struct"
+    },
+    {
+      "id": "0x00040001",
+      "name": "NC_KEY_TASK0_LEVEL",
+      "unit": "task",
+      "type": "i8",
+      "min": -1,
+      "max": 15,
+      "path": "tasks.json:tasks[0].level",
+      "desc": "-1=停用；0..15 層",
+      "class": "struct"
+    },
+    {
+      "id": "0x00040002",
+      "name": "NC_KEY_TASK0_AFFINITY",
+      "unit": "task",
+      "type": "u8",
+      "min": 0,
+      "max": 3,
+      "path": "tasks.json:tasks[0].affinity",
+      "desc": "bit0=core0、bit1=core1",
+      "class": "struct"
+    },
+    {
+      "id": "0x00040003",
+      "name": "NC_KEY_TASK0_PRIO",
+      "unit": "task",
+      "type": "u8",
+      "min": 1,
+      "max": 6,
+      "path": "tasks.json:tasks[0].prio",
+      "desc": "1..6（租戶上限）",
+      "class": "struct"
+    },
+    {
+      "id": "0x00040101",
+      "name": "NC_KEY_TASK1_LEVEL",
+      "unit": "task",
+      "type": "i8",
+      "min": -1,
+      "max": 15,
+      "path": "tasks.json:tasks[1].level",
+      "desc": "-1=停用；0..15 層",
+      "class": "struct"
+    },
+    {
+      "id": "0x00040102",
+      "name": "NC_KEY_TASK1_AFFINITY",
+      "unit": "task",
+      "type": "u8",
+      "min": 0,
+      "max": 3,
+      "path": "tasks.json:tasks[1].affinity",
+      "desc": "bit0=core0、bit1=core1",
+      "class": "struct"
+    },
+    {
+      "id": "0x00040103",
+      "name": "NC_KEY_TASK1_PRIO",
+      "unit": "task",
+      "type": "u8",
+      "min": 1,
+      "max": 6,
+      "path": "tasks.json:tasks[1].prio",
+      "desc": "1..6（租戶上限）",
+      "class": "struct"
+    },
+    {
+      "id": "0x00040201",
+      "name": "NC_KEY_TASK2_LEVEL",
+      "unit": "task",
+      "type": "i8",
+      "min": -1,
+      "max": 15,
+      "path": "tasks.json:tasks[2].level",
+      "desc": "-1=停用；0..15 層",
+      "class": "struct"
+    },
+    {
+      "id": "0x00040202",
+      "name": "NC_KEY_TASK2_AFFINITY",
+      "unit": "task",
+      "type": "u8",
+      "min": 0,
+      "max": 3,
+      "path": "tasks.json:tasks[2].affinity",
+      "desc": "bit0=core0、bit1=core1",
+      "class": "struct"
+    },
+    {
+      "id": "0x00040203",
+      "name": "NC_KEY_TASK2_PRIO",
+      "unit": "task",
+      "type": "u8",
+      "min": 1,
+      "max": 6,
+      "path": "tasks.json:tasks[2].prio",
+      "desc": "1..6（租戶上限）",
+      "class": "struct"
+    },
+    {
+      "id": "0x00040301",
+      "name": "NC_KEY_TASK3_LEVEL",
+      "unit": "task",
+      "type": "i8",
+      "min": -1,
+      "max": 15,
+      "path": "tasks.json:tasks[3].level",
+      "desc": "-1=停用；0..15 層",
+      "class": "struct"
+    },
+    {
+      "id": "0x00040302",
+      "name": "NC_KEY_TASK3_AFFINITY",
+      "unit": "task",
+      "type": "u8",
+      "min": 0,
+      "max": 3,
+      "path": "tasks.json:tasks[3].affinity",
+      "desc": "bit0=core0、bit1=core1",
+      "class": "struct"
+    },
+    {
+      "id": "0x00040303",
+      "name": "NC_KEY_TASK3_PRIO",
+      "unit": "task",
+      "type": "u8",
+      "min": 1,
+      "max": 6,
+      "path": "tasks.json:tasks[3].prio",
+      "desc": "1..6（租戶上限）",
+      "class": "struct"
+    },
+    {
+      "id": "0x00040401",
+      "name": "NC_KEY_TASK4_LEVEL",
+      "unit": "task",
+      "type": "i8",
+      "min": -1,
+      "max": 15,
+      "path": "tasks.json:tasks[4].level",
+      "desc": "-1=停用；0..15 層",
+      "class": "struct"
+    },
+    {
+      "id": "0x00040402",
+      "name": "NC_KEY_TASK4_AFFINITY",
+      "unit": "task",
+      "type": "u8",
+      "min": 0,
+      "max": 3,
+      "path": "tasks.json:tasks[4].affinity",
+      "desc": "bit0=core0、bit1=core1",
+      "class": "struct"
+    },
+    {
+      "id": "0x00040403",
+      "name": "NC_KEY_TASK4_PRIO",
+      "unit": "task",
+      "type": "u8",
+      "min": 1,
+      "max": 6,
+      "path": "tasks.json:tasks[4].prio",
+      "desc": "1..6（租戶上限）",
+      "class": "struct"
+    },
+    {
+      "id": "0x00040501",
+      "name": "NC_KEY_TASK5_LEVEL",
+      "unit": "task",
+      "type": "i8",
+      "min": -1,
+      "max": 15,
+      "path": "tasks.json:tasks[5].level",
+      "desc": "-1=停用；0..15 層",
+      "class": "struct"
+    },
+    {
+      "id": "0x00040502",
+      "name": "NC_KEY_TASK5_AFFINITY",
+      "unit": "task",
+      "type": "u8",
+      "min": 0,
+      "max": 3,
+      "path": "tasks.json:tasks[5].affinity",
+      "desc": "bit0=core0、bit1=core1",
+      "class": "struct"
+    },
+    {
+      "id": "0x00040503",
+      "name": "NC_KEY_TASK5_PRIO",
+      "unit": "task",
+      "type": "u8",
+      "min": 1,
+      "max": 6,
+      "path": "tasks.json:tasks[5].prio",
+      "desc": "1..6（租戶上限）",
+      "class": "struct"
+    },
+    {
+      "id": "0x00040601",
+      "name": "NC_KEY_TASK6_LEVEL",
+      "unit": "task",
+      "type": "i8",
+      "min": -1,
+      "max": 15,
+      "path": "tasks.json:tasks[6].level",
+      "desc": "-1=停用；0..15 層",
+      "class": "struct"
+    },
+    {
+      "id": "0x00040602",
+      "name": "NC_KEY_TASK6_AFFINITY",
+      "unit": "task",
+      "type": "u8",
+      "min": 0,
+      "max": 3,
+      "path": "tasks.json:tasks[6].affinity",
+      "desc": "bit0=core0、bit1=core1",
+      "class": "struct"
+    },
+    {
+      "id": "0x00040603",
+      "name": "NC_KEY_TASK6_PRIO",
+      "unit": "task",
+      "type": "u8",
+      "min": 1,
+      "max": 6,
+      "path": "tasks.json:tasks[6].prio",
+      "desc": "1..6（租戶上限）",
+      "class": "struct"
+    },
+    {
+      "id": "0x00040701",
+      "name": "NC_KEY_TASK7_LEVEL",
+      "unit": "task",
+      "type": "i8",
+      "min": -1,
+      "max": 15,
+      "path": "tasks.json:tasks[7].level",
+      "desc": "-1=停用；0..15 層",
+      "class": "struct"
+    },
+    {
+      "id": "0x00040702",
+      "name": "NC_KEY_TASK7_AFFINITY",
+      "unit": "task",
+      "type": "u8",
+      "min": 0,
+      "max": 3,
+      "path": "tasks.json:tasks[7].affinity",
+      "desc": "bit0=core0、bit1=core1",
+      "class": "struct"
+    },
+    {
+      "id": "0x00040703",
+      "name": "NC_KEY_TASK7_PRIO",
+      "unit": "task",
+      "type": "u8",
+      "min": 1,
+      "max": 6,
+      "path": "tasks.json:tasks[7].prio",
+      "desc": "1..6（租戶上限）",
+      "class": "struct"
+    },
+    {
+      "id": "0x00040801",
+      "name": "NC_KEY_TASK8_LEVEL",
+      "unit": "task",
+      "type": "i8",
+      "min": -1,
+      "max": 15,
+      "path": "tasks.json:tasks[8].level",
+      "desc": "-1=停用；0..15 層",
+      "class": "struct"
+    },
+    {
+      "id": "0x00040802",
+      "name": "NC_KEY_TASK8_AFFINITY",
+      "unit": "task",
+      "type": "u8",
+      "min": 0,
+      "max": 3,
+      "path": "tasks.json:tasks[8].affinity",
+      "desc": "bit0=core0、bit1=core1",
+      "class": "struct"
+    },
+    {
+      "id": "0x00040803",
+      "name": "NC_KEY_TASK8_PRIO",
+      "unit": "task",
+      "type": "u8",
+      "min": 1,
+      "max": 6,
+      "path": "tasks.json:tasks[8].prio",
+      "desc": "1..6（租戶上限）",
+      "class": "struct"
+    },
+    {
+      "id": "0x00040901",
+      "name": "NC_KEY_TASK9_LEVEL",
+      "unit": "task",
+      "type": "i8",
+      "min": -1,
+      "max": 15,
+      "path": "tasks.json:tasks[9].level",
+      "desc": "-1=停用；0..15 層",
+      "class": "struct"
+    },
+    {
+      "id": "0x00040902",
+      "name": "NC_KEY_TASK9_AFFINITY",
+      "unit": "task",
+      "type": "u8",
+      "min": 0,
+      "max": 3,
+      "path": "tasks.json:tasks[9].affinity",
+      "desc": "bit0=core0、bit1=core1",
+      "class": "struct"
+    },
+    {
+      "id": "0x00040903",
+      "name": "NC_KEY_TASK9_PRIO",
+      "unit": "task",
+      "type": "u8",
+      "min": 1,
+      "max": 6,
+      "path": "tasks.json:tasks[9].prio",
+      "desc": "1..6（租戶上限）",
+      "class": "struct"
+    },
+    {
+      "id": "0x00040A01",
+      "name": "NC_KEY_TASK10_LEVEL",
+      "unit": "task",
+      "type": "i8",
+      "min": -1,
+      "max": 15,
+      "path": "tasks.json:tasks[10].level",
+      "desc": "-1=停用；0..15 層",
+      "class": "struct"
+    },
+    {
+      "id": "0x00040A02",
+      "name": "NC_KEY_TASK10_AFFINITY",
+      "unit": "task",
+      "type": "u8",
+      "min": 0,
+      "max": 3,
+      "path": "tasks.json:tasks[10].affinity",
+      "desc": "bit0=core0、bit1=core1",
+      "class": "struct"
+    },
+    {
+      "id": "0x00040A03",
+      "name": "NC_KEY_TASK10_PRIO",
+      "unit": "task",
+      "type": "u8",
+      "min": 1,
+      "max": 6,
+      "path": "tasks.json:tasks[10].prio",
+      "desc": "1..6（租戶上限）",
+      "class": "struct"
+    },
+    {
+      "id": "0x00040B01",
+      "name": "NC_KEY_TASK11_LEVEL",
+      "unit": "task",
+      "type": "i8",
+      "min": -1,
+      "max": 15,
+      "path": "tasks.json:tasks[11].level",
+      "desc": "-1=停用；0..15 層",
+      "class": "struct"
+    },
+    {
+      "id": "0x00040B02",
+      "name": "NC_KEY_TASK11_AFFINITY",
+      "unit": "task",
+      "type": "u8",
+      "min": 0,
+      "max": 3,
+      "path": "tasks.json:tasks[11].affinity",
+      "desc": "bit0=core0、bit1=core1",
+      "class": "struct"
+    },
+    {
+      "id": "0x00040B03",
+      "name": "NC_KEY_TASK11_PRIO",
+      "unit": "task",
+      "type": "u8",
+      "min": 1,
+      "max": 6,
+      "path": "tasks.json:tasks[11].prio",
+      "desc": "1..6（租戶上限）",
+      "class": "struct"
+    },
+    {
+      "id": "0x00040C01",
+      "name": "NC_KEY_TASK12_LEVEL",
+      "unit": "task",
+      "type": "i8",
+      "min": -1,
+      "max": 15,
+      "path": "tasks.json:tasks[12].level",
+      "desc": "-1=停用；0..15 層",
+      "class": "struct"
+    },
+    {
+      "id": "0x00040C02",
+      "name": "NC_KEY_TASK12_AFFINITY",
+      "unit": "task",
+      "type": "u8",
+      "min": 0,
+      "max": 3,
+      "path": "tasks.json:tasks[12].affinity",
+      "desc": "bit0=core0、bit1=core1",
+      "class": "struct"
+    },
+    {
+      "id": "0x00040C03",
+      "name": "NC_KEY_TASK12_PRIO",
+      "unit": "task",
+      "type": "u8",
+      "min": 1,
+      "max": 6,
+      "path": "tasks.json:tasks[12].prio",
+      "desc": "1..6（租戶上限）",
+      "class": "struct"
+    },
+    {
+      "id": "0x00040D01",
+      "name": "NC_KEY_TASK13_LEVEL",
+      "unit": "task",
+      "type": "i8",
+      "min": -1,
+      "max": 15,
+      "path": "tasks.json:tasks[13].level",
+      "desc": "-1=停用；0..15 層",
+      "class": "struct"
+    },
+    {
+      "id": "0x00040D02",
+      "name": "NC_KEY_TASK13_AFFINITY",
+      "unit": "task",
+      "type": "u8",
+      "min": 0,
+      "max": 3,
+      "path": "tasks.json:tasks[13].affinity",
+      "desc": "bit0=core0、bit1=core1",
+      "class": "struct"
+    },
+    {
+      "id": "0x00040D03",
+      "name": "NC_KEY_TASK13_PRIO",
+      "unit": "task",
+      "type": "u8",
+      "min": 1,
+      "max": 6,
+      "path": "tasks.json:tasks[13].prio",
+      "desc": "1..6（租戶上限）",
+      "class": "struct"
+    },
+    {
+      "id": "0x00040E01",
+      "name": "NC_KEY_TASK14_LEVEL",
+      "unit": "task",
+      "type": "i8",
+      "min": -1,
+      "max": 15,
+      "path": "tasks.json:tasks[14].level",
+      "desc": "-1=停用；0..15 層",
+      "class": "struct"
+    },
+    {
+      "id": "0x00040E02",
+      "name": "NC_KEY_TASK14_AFFINITY",
+      "unit": "task",
+      "type": "u8",
+      "min": 0,
+      "max": 3,
+      "path": "tasks.json:tasks[14].affinity",
+      "desc": "bit0=core0、bit1=core1",
+      "class": "struct"
+    },
+    {
+      "id": "0x00040E03",
+      "name": "NC_KEY_TASK14_PRIO",
+      "unit": "task",
+      "type": "u8",
+      "min": 1,
+      "max": 6,
+      "path": "tasks.json:tasks[14].prio",
+      "desc": "1..6（租戶上限）",
+      "class": "struct"
+    },
+    {
+      "id": "0x00040F01",
+      "name": "NC_KEY_TASK15_LEVEL",
+      "unit": "task",
+      "type": "i8",
+      "min": -1,
+      "max": 15,
+      "path": "tasks.json:tasks[15].level",
+      "desc": "-1=停用；0..15 層",
+      "class": "struct"
+    },
+    {
+      "id": "0x00040F02",
+      "name": "NC_KEY_TASK15_AFFINITY",
+      "unit": "task",
+      "type": "u8",
+      "min": 0,
+      "max": 3,
+      "path": "tasks.json:tasks[15].affinity",
+      "desc": "bit0=core0、bit1=core1",
+      "class": "struct"
+    },
+    {
+      "id": "0x00040F03",
+      "name": "NC_KEY_TASK15_PRIO",
+      "unit": "task",
+      "type": "u8",
+      "min": 1,
+      "max": 6,
+      "path": "tasks.json:tasks[15].prio",
+      "desc": "1..6（租戶上限）",
+      "class": "struct"
+    },
+    {
+      "id": "0x00041001",
+      "name": "NC_KEY_TASK16_LEVEL",
+      "unit": "task",
+      "type": "i8",
+      "min": -1,
+      "max": 15,
+      "path": "tasks.json:tasks[16].level",
+      "desc": "-1=停用；0..15 層",
+      "class": "struct"
+    },
+    {
+      "id": "0x00041002",
+      "name": "NC_KEY_TASK16_AFFINITY",
+      "unit": "task",
+      "type": "u8",
+      "min": 0,
+      "max": 3,
+      "path": "tasks.json:tasks[16].affinity",
+      "desc": "bit0=core0、bit1=core1",
+      "class": "struct"
+    },
+    {
+      "id": "0x00041003",
+      "name": "NC_KEY_TASK16_PRIO",
+      "unit": "task",
+      "type": "u8",
+      "min": 1,
+      "max": 6,
+      "path": "tasks.json:tasks[16].prio",
+      "desc": "1..6（租戶上限）",
+      "class": "struct"
+    },
+    {
+      "id": "0x00041101",
+      "name": "NC_KEY_TASK17_LEVEL",
+      "unit": "task",
+      "type": "i8",
+      "min": -1,
+      "max": 15,
+      "path": "tasks.json:tasks[17].level",
+      "desc": "-1=停用；0..15 層",
+      "class": "struct"
+    },
+    {
+      "id": "0x00041102",
+      "name": "NC_KEY_TASK17_AFFINITY",
+      "unit": "task",
+      "type": "u8",
+      "min": 0,
+      "max": 3,
+      "path": "tasks.json:tasks[17].affinity",
+      "desc": "bit0=core0、bit1=core1",
+      "class": "struct"
+    },
+    {
+      "id": "0x00041103",
+      "name": "NC_KEY_TASK17_PRIO",
+      "unit": "task",
+      "type": "u8",
+      "min": 1,
+      "max": 6,
+      "path": "tasks.json:tasks[17].prio",
+      "desc": "1..6（租戶上限）",
+      "class": "struct"
+    },
+    {
+      "id": "0x00041201",
+      "name": "NC_KEY_TASK18_LEVEL",
+      "unit": "task",
+      "type": "i8",
+      "min": -1,
+      "max": 15,
+      "path": "tasks.json:tasks[18].level",
+      "desc": "-1=停用；0..15 層",
+      "class": "struct"
+    },
+    {
+      "id": "0x00041202",
+      "name": "NC_KEY_TASK18_AFFINITY",
+      "unit": "task",
+      "type": "u8",
+      "min": 0,
+      "max": 3,
+      "path": "tasks.json:tasks[18].affinity",
+      "desc": "bit0=core0、bit1=core1",
+      "class": "struct"
+    },
+    {
+      "id": "0x00041203",
+      "name": "NC_KEY_TASK18_PRIO",
+      "unit": "task",
+      "type": "u8",
+      "min": 1,
+      "max": 6,
+      "path": "tasks.json:tasks[18].prio",
+      "desc": "1..6（租戶上限）",
+      "class": "struct"
+    },
+    {
+      "id": "0x00041301",
+      "name": "NC_KEY_TASK19_LEVEL",
+      "unit": "task",
+      "type": "i8",
+      "min": -1,
+      "max": 15,
+      "path": "tasks.json:tasks[19].level",
+      "desc": "-1=停用；0..15 層",
+      "class": "struct"
+    },
+    {
+      "id": "0x00041302",
+      "name": "NC_KEY_TASK19_AFFINITY",
+      "unit": "task",
+      "type": "u8",
+      "min": 0,
+      "max": 3,
+      "path": "tasks.json:tasks[19].affinity",
+      "desc": "bit0=core0、bit1=core1",
+      "class": "struct"
+    },
+    {
+      "id": "0x00041303",
+      "name": "NC_KEY_TASK19_PRIO",
+      "unit": "task",
+      "type": "u8",
+      "min": 1,
+      "max": 6,
+      "path": "tasks.json:tasks[19].prio",
+      "desc": "1..6（租戶上限）",
+      "class": "struct"
     }
   ]
 }

@@ -112,6 +112,9 @@ def load_schema() -> dict:
         typ = str(k.get("type", ""))
         if typ not in TYPES:
             die(f"未知 type：{typ!r}（{name}）")
+        cls = str(k.get("class", "value"))
+        if cls not in ("value", "struct"):
+            die(f"key {name} 的 class 要 value／struct（而家 {cls!r}）")
         uname = str(k.get("unit", ""))
         if uname not in unit_by_name:
             die(f"key {name} 引用了未知 unit：{uname!r}")
@@ -158,6 +161,7 @@ def load_schema() -> dict:
             "unit": unit["id"],
             "unit_name": uname,
             "type": typ,
+            "cls": cls,
             "blob": t["blob"],
             "min": lo,
             "max": hi,
@@ -239,6 +243,12 @@ def render_data_h(schema: dict, crc: int) -> str:
         f'#define NC_STATE_SCHEMA_VERSION {schema["version"]}u',
         f'#define NC_STATE_SCHEMA_CRC     0x{crc:08x}u',
         f'#define NC_STATE_KEY_COUNT      {len(schema["keys"])}u',
+        f'#define NC_STATE_KEY_VALUE      {sum(1 for k in schema["keys"] if k["cls"]=="value")}u',
+        f'#define NC_STATE_KEY_STRUCT     {sum(1 for k in schema["keys"] if k["cls"]=="struct")}u',
+        "",
+        "// class：value = 開機由 cfg 造 record 入 store；struct = 字典登記，cfg 直接消費。",
+        "#define NC_STATE_CLS_VALUE  0u",
+        "#define NC_STATE_CLS_STRUCT 1u",
         f'#define NC_STATE_UNIT_COUNT     {len(schema["units"])}u',
         "",
         "// 一筆 key 的完整描述（id／能力群組／型別／可接受範圍／人讀資料）。",
@@ -246,6 +256,7 @@ def render_data_h(schema: dict, crc: int) -> str:
         "typedef struct {",
         "    uint32_t id;        // u32：domain(8)｜unit(8)｜index(8)｜field(8)",
         "    uint8_t  unit;        // NC_UNIT_*",
+        "    uint8_t  cls;         // NC_STATE_CLS_VALUE／STRUCT",
         "    uint8_t  type;        // NC_STATE_T_UINT／SINT／BOOL／BYTES",
         "    int32_t  min;         // 數值範圍（str 用 0..max_len）",
         "    int32_t  max;",
@@ -289,6 +300,7 @@ def render_data_c(schema: dict) -> str:
         lines += [
             "    {",
             f"        .id = 0x{k['id']:08x}u, .unit = NC_UNIT_{k['unit_name'].upper()},",
+            f"        .cls = NC_STATE_CLS_{k['cls'].upper()},",
             f"        .type = {k['blob']}, .min = {k['min']}, .max = {k['max']},",
             f"        .max_len = {k['max_len']}, .n_enum = {len(k['values'])},",
             f"        .enum_names = {enum_ref},",
@@ -330,13 +342,13 @@ def render_doc_block(schema: dict) -> str:
         f"**現時：schema v{schema['version']}、{len(schema['keys'])} 個 key、"
         f"{len(schema['units'])} 個 unit（{summary}）**",
         "",
-        "| unit | key（C 名） | type | 可接受值 | config 路徑（人讀） | 生效 |",
-        "|---|---|---|---|---|---|",
+        "| unit | key（C 名） | type | class | 可接受值 | config 路徑（人讀） | 生效 |",
+        "|---|---|---|---|---|---|---|",
     ]
     for k in schema["keys"]:
         path = f"`{k['path']}`" if k["path"] else "—"
         lines.append(
-            f"| {units[k['unit']]} | `{k['name']}` | {k['type']} | {_value_text(k)} | {path} | reboot |"
+            f"| {units[k['unit']]} | `{k['name']}` | {k['type']} | {k['cls']} | {_value_text(k)} | {path} | reboot |"
         )
     lines += ["", "> 「生效」全部係 reboot：B02 由 JSON 重算 cfg → state.ncst；"
                   "runtime `nc_state_set_*` 只改 RAM（見 §3）。", DOC_END]

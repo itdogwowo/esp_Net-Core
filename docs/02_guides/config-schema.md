@@ -33,35 +33,171 @@ state.ncst（稀疏快取，可重建）← nc_state_boot_sync() ← 派生自�
 > 所以「有哪些值可以設定」永遠只有一個答案。
 
 <!-- BEGIN GENERATED: schema -->
-**現時：schema v2、25 個 key、4 個 unit（sys 3／i80 5／spi 7／led 10）**
+**現時：schema v2、161 個 key、8 個 unit（sys 4／net 3／link 64／route 8／task 60／i80 5／spi 7／led 10）**
 
-| unit | key（C 名） | type | 可接受值 | config 路徑（人讀） | 生效 |
-|---|---|---|---|---|---|
-| sys | `NC_KEY_SYS_FRAME_MS` | u16 | 1..1000 | `system.json:frame_interval_ms` | reboot |
-| sys | `NC_KEY_SYS_NUM_PIXELS` | u16 | 0..65535 | `system.json:num_pixels` | reboot |
-| sys | `NC_KEY_SYS_LOG_DEBUG` | u8 | 0..1 | `system.json:log_debug_mode` | reboot |
-| i80 | `NC_KEY_I80_COUNT` | u8 | 0..16 | `hardware.json:I80.list[0].data` | reboot |
-| i80 | `NC_KEY_I80_WR` | i8 | -1..54 | `hardware.json:I80.list[0].wr` | reboot |
-| i80 | `NC_KEY_I80_DC` | i8 | -1..54 | `hardware.json:I80.list[0].dc` | reboot |
-| i80 | `NC_KEY_I80_CS` | i8 | -1..54 | `hardware.json:I80.list[0].cs` | reboot |
-| i80 | `NC_KEY_I80_FREQ` | u32 | 1000000..80000000 | `hardware.json:I80.list[0].freq` | reboot |
-| spi | `NC_KEY_SPI_ENABLE` | bool | 0..1 | `hardware.json:SPI.enable` | reboot |
-| spi | `NC_KEY_SPI_BAUD` | u32 | 100000..80000000 | `hardware.json:SPI.list[0].baudrate` | reboot |
-| spi | `NC_KEY_SPI_PHASE` | u8 | 0..1 | `hardware.json:SPI.list[0].phase` | reboot |
-| spi | `NC_KEY_SPI_POL` | u8 | 0..1 | `hardware.json:SPI.list[0].polarity` | reboot |
-| spi | `NC_KEY_SPI_SCK` | i8 | -1..54 | `hardware.json:SPI.list[0].GPIO.sck` | reboot |
-| spi | `NC_KEY_SPI_MOSI` | i8 | -1..54 | `hardware.json:SPI.list[0].GPIO.mosi` | reboot |
-| spi | `NC_KEY_SPI_MISO` | i8 | -1..54 | `hardware.json:SPI.list[0].GPIO.miso` | reboot |
-| led | `NC_KEY_LED_ENABLE` | bool | 0..1 | `driver.json:LED.enable` | reboot |
-| led | `NC_KEY_LED_BACKEND` | enum | enum：none／i80／spi／rmt／parlio／direct／mock | `driver.json:LED.backend` | reboot |
-| led | `NC_KEY_LED_BUS` | i8 | -1..15 | `driver.json:LED.bus.index` | reboot |
-| led | `NC_KEY_LED_LANES` | u8 | 1..16 | `driver.json:LED.lanes` | reboot |
-| led | `NC_KEY_LED_PX` | u16 | 1..65535 | `driver.json:LED.px` | reboot |
-| led | `NC_KEY_LED_FMT` | enum | enum：ws2812／ws2812w／ws2815／ws2801／apa102 | `driver.json:LED.format` | reboot |
-| led | `NC_KEY_LED_CLK` | u32 | 1000000..80000000 | `driver.json:LED.timing.pclk_hz` | reboot |
-| led | `NC_KEY_LED_BIT_CELLS` | u8 | 1..64 | `driver.json:LED.timing.bit_cells` | reboot |
-| led | `NC_KEY_LED_T0H` | u8 | 0..64 | `driver.json:LED.timing.t0h` | reboot |
-| led | `NC_KEY_LED_T1H` | u8 | 0..64 | `driver.json:LED.timing.t1h` | reboot |
+| unit | key（C 名） | type | class | 可接受值 | config 路徑（人讀） | 生效 |
+|---|---|---|---|---|---|---|
+| sys | `NC_KEY_SYS_CID` | u16 | value | 0..65535 | `system.json:cID` | reboot |
+| sys | `NC_KEY_SYS_FRAME_MS` | u16 | value | 1..1000 | `system.json:frame_interval_ms` | reboot |
+| sys | `NC_KEY_SYS_NUM_PIXELS` | u16 | value | 0..65535 | `system.json:num_pixels` | reboot |
+| sys | `NC_KEY_SYS_LOG_DEBUG` | u8 | value | 0..1 | `system.json:log_debug_mode` | reboot |
+| net | `NC_KEY_NET_WIFI_ENABLE` | bool | struct | 0..1 | `network.json:wifi.enable` | reboot |
+| net | `NC_KEY_NET_WIFI_TIMEOUT` | u16 | struct | 1..600 | `network.json:wifi.timeout_s` | reboot |
+| net | `NC_KEY_NET_WIFI_MODE` | enum | struct | enum：sta／ap | `network.json:wifi.mode` | reboot |
+| link | `NC_KEY_LINK0_ENABLE` | bool | struct | 0..1 | `system.json:nc4.links[0].enable` | reboot |
+| link | `NC_KEY_LINK0_KIND` | enum | struct | enum：usb／cdc／uart／tcp／udp／ws／http／usb_jtag | `system.json:nc4.links[0].kind` | reboot |
+| link | `NC_KEY_LINK0_INDEX` | u8 | struct | 0..15 | `system.json:nc4.links[0].index` | reboot |
+| link | `NC_KEY_LINK0_MSC` | i8 | struct | -1..1 | `system.json:nc4.links[0].msc` | reboot |
+| link | `NC_KEY_LINK0_PORT` | u16 | struct | 0..65535 | `system.json:nc4.links[0].port` | reboot |
+| link | `NC_KEY_LINK0_IFACE` | enum | struct | enum：any／eth／wifi | `system.json:nc4.links[0].iface` | reboot |
+| link | `NC_KEY_LINK0_SVC` | enum | struct | enum：auto／nc4／web | `system.json:nc4.links[0].service` | reboot |
+| link | `NC_KEY_LINK0_MEM` | enum | struct | enum：auto／sram／psram | `system.json:nc4.links[0].mem` | reboot |
+| link | `NC_KEY_LINK1_ENABLE` | bool | struct | 0..1 | `system.json:nc4.links[1].enable` | reboot |
+| link | `NC_KEY_LINK1_KIND` | enum | struct | enum：usb／cdc／uart／tcp／udp／ws／http／usb_jtag | `system.json:nc4.links[1].kind` | reboot |
+| link | `NC_KEY_LINK1_INDEX` | u8 | struct | 0..15 | `system.json:nc4.links[1].index` | reboot |
+| link | `NC_KEY_LINK1_MSC` | i8 | struct | -1..1 | `system.json:nc4.links[1].msc` | reboot |
+| link | `NC_KEY_LINK1_PORT` | u16 | struct | 0..65535 | `system.json:nc4.links[1].port` | reboot |
+| link | `NC_KEY_LINK1_IFACE` | enum | struct | enum：any／eth／wifi | `system.json:nc4.links[1].iface` | reboot |
+| link | `NC_KEY_LINK1_SVC` | enum | struct | enum：auto／nc4／web | `system.json:nc4.links[1].service` | reboot |
+| link | `NC_KEY_LINK1_MEM` | enum | struct | enum：auto／sram／psram | `system.json:nc4.links[1].mem` | reboot |
+| link | `NC_KEY_LINK2_ENABLE` | bool | struct | 0..1 | `system.json:nc4.links[2].enable` | reboot |
+| link | `NC_KEY_LINK2_KIND` | enum | struct | enum：usb／cdc／uart／tcp／udp／ws／http／usb_jtag | `system.json:nc4.links[2].kind` | reboot |
+| link | `NC_KEY_LINK2_INDEX` | u8 | struct | 0..15 | `system.json:nc4.links[2].index` | reboot |
+| link | `NC_KEY_LINK2_MSC` | i8 | struct | -1..1 | `system.json:nc4.links[2].msc` | reboot |
+| link | `NC_KEY_LINK2_PORT` | u16 | struct | 0..65535 | `system.json:nc4.links[2].port` | reboot |
+| link | `NC_KEY_LINK2_IFACE` | enum | struct | enum：any／eth／wifi | `system.json:nc4.links[2].iface` | reboot |
+| link | `NC_KEY_LINK2_SVC` | enum | struct | enum：auto／nc4／web | `system.json:nc4.links[2].service` | reboot |
+| link | `NC_KEY_LINK2_MEM` | enum | struct | enum：auto／sram／psram | `system.json:nc4.links[2].mem` | reboot |
+| link | `NC_KEY_LINK3_ENABLE` | bool | struct | 0..1 | `system.json:nc4.links[3].enable` | reboot |
+| link | `NC_KEY_LINK3_KIND` | enum | struct | enum：usb／cdc／uart／tcp／udp／ws／http／usb_jtag | `system.json:nc4.links[3].kind` | reboot |
+| link | `NC_KEY_LINK3_INDEX` | u8 | struct | 0..15 | `system.json:nc4.links[3].index` | reboot |
+| link | `NC_KEY_LINK3_MSC` | i8 | struct | -1..1 | `system.json:nc4.links[3].msc` | reboot |
+| link | `NC_KEY_LINK3_PORT` | u16 | struct | 0..65535 | `system.json:nc4.links[3].port` | reboot |
+| link | `NC_KEY_LINK3_IFACE` | enum | struct | enum：any／eth／wifi | `system.json:nc4.links[3].iface` | reboot |
+| link | `NC_KEY_LINK3_SVC` | enum | struct | enum：auto／nc4／web | `system.json:nc4.links[3].service` | reboot |
+| link | `NC_KEY_LINK3_MEM` | enum | struct | enum：auto／sram／psram | `system.json:nc4.links[3].mem` | reboot |
+| link | `NC_KEY_LINK4_ENABLE` | bool | struct | 0..1 | `system.json:nc4.links[4].enable` | reboot |
+| link | `NC_KEY_LINK4_KIND` | enum | struct | enum：usb／cdc／uart／tcp／udp／ws／http／usb_jtag | `system.json:nc4.links[4].kind` | reboot |
+| link | `NC_KEY_LINK4_INDEX` | u8 | struct | 0..15 | `system.json:nc4.links[4].index` | reboot |
+| link | `NC_KEY_LINK4_MSC` | i8 | struct | -1..1 | `system.json:nc4.links[4].msc` | reboot |
+| link | `NC_KEY_LINK4_PORT` | u16 | struct | 0..65535 | `system.json:nc4.links[4].port` | reboot |
+| link | `NC_KEY_LINK4_IFACE` | enum | struct | enum：any／eth／wifi | `system.json:nc4.links[4].iface` | reboot |
+| link | `NC_KEY_LINK4_SVC` | enum | struct | enum：auto／nc4／web | `system.json:nc4.links[4].service` | reboot |
+| link | `NC_KEY_LINK4_MEM` | enum | struct | enum：auto／sram／psram | `system.json:nc4.links[4].mem` | reboot |
+| link | `NC_KEY_LINK5_ENABLE` | bool | struct | 0..1 | `system.json:nc4.links[5].enable` | reboot |
+| link | `NC_KEY_LINK5_KIND` | enum | struct | enum：usb／cdc／uart／tcp／udp／ws／http／usb_jtag | `system.json:nc4.links[5].kind` | reboot |
+| link | `NC_KEY_LINK5_INDEX` | u8 | struct | 0..15 | `system.json:nc4.links[5].index` | reboot |
+| link | `NC_KEY_LINK5_MSC` | i8 | struct | -1..1 | `system.json:nc4.links[5].msc` | reboot |
+| link | `NC_KEY_LINK5_PORT` | u16 | struct | 0..65535 | `system.json:nc4.links[5].port` | reboot |
+| link | `NC_KEY_LINK5_IFACE` | enum | struct | enum：any／eth／wifi | `system.json:nc4.links[5].iface` | reboot |
+| link | `NC_KEY_LINK5_SVC` | enum | struct | enum：auto／nc4／web | `system.json:nc4.links[5].service` | reboot |
+| link | `NC_KEY_LINK5_MEM` | enum | struct | enum：auto／sram／psram | `system.json:nc4.links[5].mem` | reboot |
+| link | `NC_KEY_LINK6_ENABLE` | bool | struct | 0..1 | `system.json:nc4.links[6].enable` | reboot |
+| link | `NC_KEY_LINK6_KIND` | enum | struct | enum：usb／cdc／uart／tcp／udp／ws／http／usb_jtag | `system.json:nc4.links[6].kind` | reboot |
+| link | `NC_KEY_LINK6_INDEX` | u8 | struct | 0..15 | `system.json:nc4.links[6].index` | reboot |
+| link | `NC_KEY_LINK6_MSC` | i8 | struct | -1..1 | `system.json:nc4.links[6].msc` | reboot |
+| link | `NC_KEY_LINK6_PORT` | u16 | struct | 0..65535 | `system.json:nc4.links[6].port` | reboot |
+| link | `NC_KEY_LINK6_IFACE` | enum | struct | enum：any／eth／wifi | `system.json:nc4.links[6].iface` | reboot |
+| link | `NC_KEY_LINK6_SVC` | enum | struct | enum：auto／nc4／web | `system.json:nc4.links[6].service` | reboot |
+| link | `NC_KEY_LINK6_MEM` | enum | struct | enum：auto／sram／psram | `system.json:nc4.links[6].mem` | reboot |
+| link | `NC_KEY_LINK7_ENABLE` | bool | struct | 0..1 | `system.json:nc4.links[7].enable` | reboot |
+| link | `NC_KEY_LINK7_KIND` | enum | struct | enum：usb／cdc／uart／tcp／udp／ws／http／usb_jtag | `system.json:nc4.links[7].kind` | reboot |
+| link | `NC_KEY_LINK7_INDEX` | u8 | struct | 0..15 | `system.json:nc4.links[7].index` | reboot |
+| link | `NC_KEY_LINK7_MSC` | i8 | struct | -1..1 | `system.json:nc4.links[7].msc` | reboot |
+| link | `NC_KEY_LINK7_PORT` | u16 | struct | 0..65535 | `system.json:nc4.links[7].port` | reboot |
+| link | `NC_KEY_LINK7_IFACE` | enum | struct | enum：any／eth／wifi | `system.json:nc4.links[7].iface` | reboot |
+| link | `NC_KEY_LINK7_SVC` | enum | struct | enum：auto／nc4／web | `system.json:nc4.links[7].service` | reboot |
+| link | `NC_KEY_LINK7_MEM` | enum | struct | enum：auto／sram／psram | `system.json:nc4.links[7].mem` | reboot |
+| route | `NC_KEY_ROUTE0_MASK` | u32 | struct | 0..65535 | `system.json:nc4.routes[0].out` | reboot |
+| route | `NC_KEY_ROUTE1_MASK` | u32 | struct | 0..65535 | `system.json:nc4.routes[1].out` | reboot |
+| route | `NC_KEY_ROUTE2_MASK` | u32 | struct | 0..65535 | `system.json:nc4.routes[2].out` | reboot |
+| route | `NC_KEY_ROUTE3_MASK` | u32 | struct | 0..65535 | `system.json:nc4.routes[3].out` | reboot |
+| route | `NC_KEY_ROUTE4_MASK` | u32 | struct | 0..65535 | `system.json:nc4.routes[4].out` | reboot |
+| route | `NC_KEY_ROUTE5_MASK` | u32 | struct | 0..65535 | `system.json:nc4.routes[5].out` | reboot |
+| route | `NC_KEY_ROUTE6_MASK` | u32 | struct | 0..65535 | `system.json:nc4.routes[6].out` | reboot |
+| route | `NC_KEY_ROUTE7_MASK` | u32 | struct | 0..65535 | `system.json:nc4.routes[7].out` | reboot |
+| task | `NC_KEY_TASK0_LEVEL` | i8 | struct | -1..15 | `tasks.json:tasks[0].level` | reboot |
+| task | `NC_KEY_TASK0_AFFINITY` | u8 | struct | 0..3 | `tasks.json:tasks[0].affinity` | reboot |
+| task | `NC_KEY_TASK0_PRIO` | u8 | struct | 1..6 | `tasks.json:tasks[0].prio` | reboot |
+| task | `NC_KEY_TASK1_LEVEL` | i8 | struct | -1..15 | `tasks.json:tasks[1].level` | reboot |
+| task | `NC_KEY_TASK1_AFFINITY` | u8 | struct | 0..3 | `tasks.json:tasks[1].affinity` | reboot |
+| task | `NC_KEY_TASK1_PRIO` | u8 | struct | 1..6 | `tasks.json:tasks[1].prio` | reboot |
+| task | `NC_KEY_TASK2_LEVEL` | i8 | struct | -1..15 | `tasks.json:tasks[2].level` | reboot |
+| task | `NC_KEY_TASK2_AFFINITY` | u8 | struct | 0..3 | `tasks.json:tasks[2].affinity` | reboot |
+| task | `NC_KEY_TASK2_PRIO` | u8 | struct | 1..6 | `tasks.json:tasks[2].prio` | reboot |
+| task | `NC_KEY_TASK3_LEVEL` | i8 | struct | -1..15 | `tasks.json:tasks[3].level` | reboot |
+| task | `NC_KEY_TASK3_AFFINITY` | u8 | struct | 0..3 | `tasks.json:tasks[3].affinity` | reboot |
+| task | `NC_KEY_TASK3_PRIO` | u8 | struct | 1..6 | `tasks.json:tasks[3].prio` | reboot |
+| task | `NC_KEY_TASK4_LEVEL` | i8 | struct | -1..15 | `tasks.json:tasks[4].level` | reboot |
+| task | `NC_KEY_TASK4_AFFINITY` | u8 | struct | 0..3 | `tasks.json:tasks[4].affinity` | reboot |
+| task | `NC_KEY_TASK4_PRIO` | u8 | struct | 1..6 | `tasks.json:tasks[4].prio` | reboot |
+| task | `NC_KEY_TASK5_LEVEL` | i8 | struct | -1..15 | `tasks.json:tasks[5].level` | reboot |
+| task | `NC_KEY_TASK5_AFFINITY` | u8 | struct | 0..3 | `tasks.json:tasks[5].affinity` | reboot |
+| task | `NC_KEY_TASK5_PRIO` | u8 | struct | 1..6 | `tasks.json:tasks[5].prio` | reboot |
+| task | `NC_KEY_TASK6_LEVEL` | i8 | struct | -1..15 | `tasks.json:tasks[6].level` | reboot |
+| task | `NC_KEY_TASK6_AFFINITY` | u8 | struct | 0..3 | `tasks.json:tasks[6].affinity` | reboot |
+| task | `NC_KEY_TASK6_PRIO` | u8 | struct | 1..6 | `tasks.json:tasks[6].prio` | reboot |
+| task | `NC_KEY_TASK7_LEVEL` | i8 | struct | -1..15 | `tasks.json:tasks[7].level` | reboot |
+| task | `NC_KEY_TASK7_AFFINITY` | u8 | struct | 0..3 | `tasks.json:tasks[7].affinity` | reboot |
+| task | `NC_KEY_TASK7_PRIO` | u8 | struct | 1..6 | `tasks.json:tasks[7].prio` | reboot |
+| task | `NC_KEY_TASK8_LEVEL` | i8 | struct | -1..15 | `tasks.json:tasks[8].level` | reboot |
+| task | `NC_KEY_TASK8_AFFINITY` | u8 | struct | 0..3 | `tasks.json:tasks[8].affinity` | reboot |
+| task | `NC_KEY_TASK8_PRIO` | u8 | struct | 1..6 | `tasks.json:tasks[8].prio` | reboot |
+| task | `NC_KEY_TASK9_LEVEL` | i8 | struct | -1..15 | `tasks.json:tasks[9].level` | reboot |
+| task | `NC_KEY_TASK9_AFFINITY` | u8 | struct | 0..3 | `tasks.json:tasks[9].affinity` | reboot |
+| task | `NC_KEY_TASK9_PRIO` | u8 | struct | 1..6 | `tasks.json:tasks[9].prio` | reboot |
+| task | `NC_KEY_TASK10_LEVEL` | i8 | struct | -1..15 | `tasks.json:tasks[10].level` | reboot |
+| task | `NC_KEY_TASK10_AFFINITY` | u8 | struct | 0..3 | `tasks.json:tasks[10].affinity` | reboot |
+| task | `NC_KEY_TASK10_PRIO` | u8 | struct | 1..6 | `tasks.json:tasks[10].prio` | reboot |
+| task | `NC_KEY_TASK11_LEVEL` | i8 | struct | -1..15 | `tasks.json:tasks[11].level` | reboot |
+| task | `NC_KEY_TASK11_AFFINITY` | u8 | struct | 0..3 | `tasks.json:tasks[11].affinity` | reboot |
+| task | `NC_KEY_TASK11_PRIO` | u8 | struct | 1..6 | `tasks.json:tasks[11].prio` | reboot |
+| task | `NC_KEY_TASK12_LEVEL` | i8 | struct | -1..15 | `tasks.json:tasks[12].level` | reboot |
+| task | `NC_KEY_TASK12_AFFINITY` | u8 | struct | 0..3 | `tasks.json:tasks[12].affinity` | reboot |
+| task | `NC_KEY_TASK12_PRIO` | u8 | struct | 1..6 | `tasks.json:tasks[12].prio` | reboot |
+| task | `NC_KEY_TASK13_LEVEL` | i8 | struct | -1..15 | `tasks.json:tasks[13].level` | reboot |
+| task | `NC_KEY_TASK13_AFFINITY` | u8 | struct | 0..3 | `tasks.json:tasks[13].affinity` | reboot |
+| task | `NC_KEY_TASK13_PRIO` | u8 | struct | 1..6 | `tasks.json:tasks[13].prio` | reboot |
+| task | `NC_KEY_TASK14_LEVEL` | i8 | struct | -1..15 | `tasks.json:tasks[14].level` | reboot |
+| task | `NC_KEY_TASK14_AFFINITY` | u8 | struct | 0..3 | `tasks.json:tasks[14].affinity` | reboot |
+| task | `NC_KEY_TASK14_PRIO` | u8 | struct | 1..6 | `tasks.json:tasks[14].prio` | reboot |
+| task | `NC_KEY_TASK15_LEVEL` | i8 | struct | -1..15 | `tasks.json:tasks[15].level` | reboot |
+| task | `NC_KEY_TASK15_AFFINITY` | u8 | struct | 0..3 | `tasks.json:tasks[15].affinity` | reboot |
+| task | `NC_KEY_TASK15_PRIO` | u8 | struct | 1..6 | `tasks.json:tasks[15].prio` | reboot |
+| task | `NC_KEY_TASK16_LEVEL` | i8 | struct | -1..15 | `tasks.json:tasks[16].level` | reboot |
+| task | `NC_KEY_TASK16_AFFINITY` | u8 | struct | 0..3 | `tasks.json:tasks[16].affinity` | reboot |
+| task | `NC_KEY_TASK16_PRIO` | u8 | struct | 1..6 | `tasks.json:tasks[16].prio` | reboot |
+| task | `NC_KEY_TASK17_LEVEL` | i8 | struct | -1..15 | `tasks.json:tasks[17].level` | reboot |
+| task | `NC_KEY_TASK17_AFFINITY` | u8 | struct | 0..3 | `tasks.json:tasks[17].affinity` | reboot |
+| task | `NC_KEY_TASK17_PRIO` | u8 | struct | 1..6 | `tasks.json:tasks[17].prio` | reboot |
+| task | `NC_KEY_TASK18_LEVEL` | i8 | struct | -1..15 | `tasks.json:tasks[18].level` | reboot |
+| task | `NC_KEY_TASK18_AFFINITY` | u8 | struct | 0..3 | `tasks.json:tasks[18].affinity` | reboot |
+| task | `NC_KEY_TASK18_PRIO` | u8 | struct | 1..6 | `tasks.json:tasks[18].prio` | reboot |
+| task | `NC_KEY_TASK19_LEVEL` | i8 | struct | -1..15 | `tasks.json:tasks[19].level` | reboot |
+| task | `NC_KEY_TASK19_AFFINITY` | u8 | struct | 0..3 | `tasks.json:tasks[19].affinity` | reboot |
+| task | `NC_KEY_TASK19_PRIO` | u8 | struct | 1..6 | `tasks.json:tasks[19].prio` | reboot |
+| i80 | `NC_KEY_I80_COUNT` | u8 | value | 0..16 | `hardware.json:I80.list[0].data` | reboot |
+| i80 | `NC_KEY_I80_WR` | i8 | value | -1..54 | `hardware.json:I80.list[0].wr` | reboot |
+| i80 | `NC_KEY_I80_DC` | i8 | value | -1..54 | `hardware.json:I80.list[0].dc` | reboot |
+| i80 | `NC_KEY_I80_CS` | i8 | value | -1..54 | `hardware.json:I80.list[0].cs` | reboot |
+| i80 | `NC_KEY_I80_FREQ` | u32 | value | 1000000..80000000 | `hardware.json:I80.list[0].freq` | reboot |
+| spi | `NC_KEY_SPI_ENABLE` | bool | value | 0..1 | `hardware.json:SPI.enable` | reboot |
+| spi | `NC_KEY_SPI_BAUD` | u32 | value | 100000..80000000 | `hardware.json:SPI.list[0].baudrate` | reboot |
+| spi | `NC_KEY_SPI_PHASE` | u8 | value | 0..1 | `hardware.json:SPI.list[0].phase` | reboot |
+| spi | `NC_KEY_SPI_POL` | u8 | value | 0..1 | `hardware.json:SPI.list[0].polarity` | reboot |
+| spi | `NC_KEY_SPI_SCK` | i8 | value | -1..54 | `hardware.json:SPI.list[0].GPIO.sck` | reboot |
+| spi | `NC_KEY_SPI_MOSI` | i8 | value | -1..54 | `hardware.json:SPI.list[0].GPIO.mosi` | reboot |
+| spi | `NC_KEY_SPI_MISO` | i8 | value | -1..54 | `hardware.json:SPI.list[0].GPIO.miso` | reboot |
+| led | `NC_KEY_LED_ENABLE` | bool | value | 0..1 | `driver.json:LED.enable` | reboot |
+| led | `NC_KEY_LED_BACKEND` | enum | value | enum：none／i80／spi／rmt／parlio／direct／mock | `driver.json:LED.backend` | reboot |
+| led | `NC_KEY_LED_BUS` | i8 | value | -1..15 | `driver.json:LED.bus.index` | reboot |
+| led | `NC_KEY_LED_LANES` | u8 | value | 1..16 | `driver.json:LED.lanes` | reboot |
+| led | `NC_KEY_LED_PX` | u16 | value | 1..65535 | `driver.json:LED.px` | reboot |
+| led | `NC_KEY_LED_FMT` | enum | value | enum：ws2812／ws2812w／ws2815／ws2801／apa102 | `driver.json:LED.format` | reboot |
+| led | `NC_KEY_LED_CLK` | u32 | value | 1000000..80000000 | `driver.json:LED.timing.pclk_hz` | reboot |
+| led | `NC_KEY_LED_BIT_CELLS` | u8 | value | 1..64 | `driver.json:LED.timing.bit_cells` | reboot |
+| led | `NC_KEY_LED_T0H` | u8 | value | 0..64 | `driver.json:LED.timing.t0h` | reboot |
+| led | `NC_KEY_LED_T1H` | u8 | value | 0..64 | `driver.json:LED.timing.t1h` | reboot |
 
 > 「生效」全部係 reboot：B02 由 JSON 重算 cfg → state.ncst；runtime `nc_state_set_*` 只改 RAM（見 §3）。
 <!-- END GENERATED: schema -->

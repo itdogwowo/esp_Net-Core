@@ -68,6 +68,8 @@ def check_value(ck: Check, where: str, key: dict, val) -> None:
             ck.err(f"{where}：{key['name']} 要 {vals} 之一，實際 {val!r}")
         return
     if typ in ("u8", "u16", "u32", "i8", "i32", "enum"):
+        if val == "":
+            return      # 空字串 = 未設定（例：cID "" = 由 MAC 推導）
         if isinstance(val, bool) or not isinstance(val, int):
             ck.err(f"{where}：{key['name']} 要整數，實際 {val!r}")
             return

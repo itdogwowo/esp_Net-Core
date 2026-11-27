@@ -104,6 +104,19 @@ src_hash = **值集**（將寫入的 records）嘅 CRC32；開機：
 
 ---
 
+## 4.1 class：value vs struct（2026-11-27）
+
+| class | 意思 | 誰用 | 例 |
+|---|---|---|---|
+| `value` | 開機由 cfg 造 record 入 **store**；可 set／回寫；熱路徑讀 | `nc_state_api` | LED px／timing、I80 freq、cID、sys 3 個 |
+| `struct` | **只登記**入字典（型別／範圍／path），由 cfg 直接消費；唔入 store | 各層自己的 parser | links（64）、routes（8）、tasks（60）、wifi（3） |
+
+- 為什麼要分：struct 類（links／routes／tasks）在開機被 net_lines／router／task manager
+  讀一次就唔再讀；塞入 store 只會抄一份（135 × 12 B = 1,620 B SRAM）而冇好處。
+- 之後 S2（`apply_to_cfg()`）＋ S4（activation gate）做好，可以逐個把 struct 改成 value，
+  令「runtime 改 → 寫回 → 重啟生效」覆蓋到網絡／路由／任務。
+- 生成物：`NC_STATE_KEY_VALUE`／`NC_STATE_KEY_STRUCT`／`nc_state_keydef_t.cls`。
+
 ## 5. 同現有 JSON 層嘅關係
 
 ```text

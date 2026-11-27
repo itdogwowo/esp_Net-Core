@@ -10262,3 +10262,48 @@ SRAM 由 2,820 → 1,160 B，同時容量由 64 → 96 筆（更寬鬆）。
 **未做**：如果將來有「runtime 可改的表」（例如動態 device 清單），才用
 `EXT_RAM_BSS_ATTR`（要開 `CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY`）或 PSRAM heap；
 現時字典是 const，放 flash 最省。
+
+---
+
+### 7.295 2026-11-27（字典覆蓋剩餘配置：links／routes／tasks／wifi；新增 class＝value／struct）
+
+**為什麼**：硬件（380 key）之外，剩下四層完全冇入字典——`system.json` 的
+links／routes、`network.json` 的 wifi、`tasks.json` 的任務。用家要求逐層收進來。
+
+**先分類（關鍵決定）**：
+
+| 類 | 是什麼 | 處理 |
+|---|---|---|
+| **value** | 開機由 cfg 造 record 入 store、可回寫、熱路徑會讀 | 入 store（現 26 個） |
+| **struct** | 由 cfg **直接消費一次**（net_lines／router／task manager 開機讀完就唔再用） | **只登記入字典**，唔入 store（現 135 個） |
+
+理由：把 struct 類塞入 store 只會抄一份、仲要多 135×12＝1,620 B SRAM，冇任何好處。
+
+**新增 unit／key（25 → 161 key、4 → 8 unit）**：
+
+| unit | key 數 | 內容 | class |
+|---|---:|---|---|
+| `net`（1） | 3 | wifi enable／timeout_s／mode（ssid／pw／ip／credentials 留 JSON） | struct |
+| `link`（2） | 64 | 8 條 × 8 欄：enable／kind／index／msc／port／iface／service／mem | struct |
+| `route`（3） | 8 | 8 條 × decode 目標 bitmask（bit0=decode0；0=只轉發） | struct |
+| `task`（4） | 60 | 20 條 × level／affinity／prio | struct |
+| `sys`（0） | **+1** | `cID`（u16，0＝由 MAC 推導；JSON 的 "F5F9" → 0xF5F9） | **value** |
+
+生成器加 `class`：`nc_state_keydef_t.cls`（`NC_STATE_CLS_VALUE／STRUCT`）、
+`NC_STATE_KEY_VALUE`／`NC_STATE_KEY_STRUCT`；`gen_state_keys.py --doc` 的一覽表加 class 欄。
+
+**量測（`idf=v6.1.1`／SuperMini）**：
+
+| 項目 | 之前 | 之後 |
+|---|---:|---:|
+| schema key／unit | 25／4 | **161／8** |
+| 字典表（`.flash.rodata`，`nm`） | 0x384＝900 B | **0x16A4＝5,796 B**（仍 **0 SRAM**） |
+| value／struct | — | **26／135** |
+| `s_store`／`s_recs` | 1,156／4 B | 一樣（struct 唔入 store） |
+| image | 747,440 B | 760,560 B（+13,120 B，主要係字典字串） |
+
+**兼容修正**：`tools/preset_check.py` 對數值 key 收到空字串（`"cID": ""` = 由 MAC 推導）
+本來報錯，改成「空字串＝未設定，跳過」。
+
+**未做**：net／link／route／task 的 record 產生（要等 S2 `apply_to_cfg()` 之後才有意義——
+現時 net_lines／router／task manager 都係直接讀 cfg，唔讀 state）。

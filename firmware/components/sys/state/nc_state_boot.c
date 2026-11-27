@@ -12,6 +12,7 @@
 //         L2b .bak（last-known-good）。任何一層壞都唔會令設定「靜靜變零」。
 #include "nc_state_boot.h"
 
+#include <stdlib.h>
 #include <string.h>
 
 #include "sdkconfig.h"
@@ -81,6 +82,17 @@ static size_t build_records(nc_state_rec_t *recs)
         n = put_u(recs, n, NC_KEY_SYS_FRAME_MS, sys->frame_interval_ms);
         n = put_u(recs, n, NC_KEY_SYS_NUM_PIXELS, sys->num_pixels);
         n = put_u(recs, n, NC_KEY_SYS_LOG_DEBUG, sys->log_debug_mode);
+    }
+
+    if (sys != NULL && sys->cid[0] != '\0') {
+        // cID：JSON 寫 4 個 hex 字（"F5F9"）；0 或空 = 由 MAC 推導（唔寫 record）。
+        char *end = NULL;
+        const unsigned long v = strtoul(sys->cid, &end, 16);
+        if (end != NULL && *end == '\0' && v > 0 && v <= 0xFFFFul) {
+            n = put_u(recs, n, NC_KEY_SYS_CID, (uint32_t)v);
+        } else {
+            ESP_LOGW(TAG, "system.json cID '%s' 唔係合法 hex → 跳過", sys->cid);
+        }
     }
 
     const nc_hardware_cfg_t *hw = nc_cfg_hardware();
