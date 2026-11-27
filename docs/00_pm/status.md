@@ -10508,3 +10508,29 @@ task_nc4_declare()：plan "usb.rx"（slot = region, n=1, STREAM）
 
 **上板（tests 映像、SuperMini）**：plan 由 5 項變 **4 項**（`nc4.reply0`／`usb.rx`／
 `i80.prd`／`mock.prd`）、psram 由 35,383 → **2,615 B**；`rst=3`。release 映像本來就冇編 ncm。
+
+---
+
+### 7.303 2026-11-27（緩衝位置＋干擾調查：為統計量測定規矩）
+
+**用家要求**：調查緩衝位置，並找出「統計量測時會互相影響」的路徑。
+
+**圖**：[`buffer-locations.svg`](buffer-locations.svg)（`tools/buffer_locations.py`）。
+**文件**：[`buffer-interference.md`](03_notes/buffer-interference.md)。
+
+**位置（實測）**：
+
+| 記憶體 | 內容 |
+|---|---|
+| Internal SRAM | `static` 143,559 B、`usb.rx` 4,128、環（`i80.prd` 576／`mock.prd` 576）、stack |
+| DMA internal | I80／SPI 後端槽（S3 唔可以 DMA 讀 PSRAM） |
+| PSRAM | `nc4.reply0` 2,615／decoder、`ncm.arena`（有模組 32 KB 起）、`s_recs` 768 |
+| Flash XIP | schema 12,404 B、程式、資產 |
+
+**六條干擾路徑**：PSRAM 帶寬（reply ↔ 大環）、internal 爭用（parser／stack ↔ Wi-Fi）、
+DMA 池、flash cache（只影響開機）、鎖（FILE／MSC 拖 RTT）、量測自身（0xF061／0xF081）。
+
+**規矩**：每次量測記 where（S／D／P）＋同場模組；同一時間只量一個子系統；
+PSRAM 類要標明有冇同時跑 pixel producer；RTT 要扣量測自身；用 min／median。
+
+**未量**（下一步）：RTT 開／關 pixel producer、FPS 開／關 Wi-Fi、`reply0` 搬 internal 的 A/B。
