@@ -3689,6 +3689,10 @@ static void link_audit(void)
 //   （release 映像沒有 ncm，這個競爭本來就不存在。）
 #define NC_MOD_TASK_PRIO 2
 
+// 開機框架的掃描結果：B06 掃描 + 合併，B08 才載入 payload；
+// 亦係 arena 大小的來源（掃到幾多 → 宣告幾大）。
+static nc_mod_scan_t s_mod_scan;
+
 static esp_err_t task_ncm_start(const nc_task_res_view_t *res, int n)
 {
     if (n < 1 || res[0].ptr == NULL) {
@@ -3721,11 +3725,17 @@ static int task_ncm_declare(nc_task_res_t *out, int max)
     if (max < 1) {
         return 0;
     }
+    // 2026-11-27：由「掃描結果」決定 arena 大小（唔再無條件預留 512 KB）。
+    // 掃到 N 個模組、檔案合計 B bytes → arena = clamp(B + N×1 KB, 32 KB, 512 KB)。
+    const size_t arena = nc_mod_arena_bytes(&s_mod_scan);
+    ESP_LOGI(TAG, "ncm arena：掃到 %d 個模組、檔案 %u B → 宣告 %u B（上限 %u B）",
+             s_mod_scan.count, (unsigned)s_mod_scan.bytes, (unsigned)arena,
+             (unsigned)NC_MOD_ARENA_MAX);
     out[0] = (nc_task_res_t){
-        .name = "ncm.arena", .bytes = NC_MOD_ARENA_MAX,
+        .name = "ncm.arena", .bytes = arena,
         .cls = NC_PLAN_CLS_BULK, .align = 32,
-        // P5：整塊 arena 就是「一格 512 KB」的緩衝區（`.nct` / `.nce` 之後用 nc_buf_carve 由它切）
-        .slot_bytes = NC_MOD_ARENA_MAX, .n = 1, .flags = 0,
+        // 整塊 arena 是「一格」的緩衝區（`.nct` / `.nce` 之後用 nc_buf_carve 由它切）
+        .slot_bytes = arena, .n = 1, .flags = 0,
     };
     return 1;
 }
@@ -3740,9 +3750,6 @@ static const nc_task_t s_task_ncm = {
 };
 NC_TASK_AUTO_REG(ncm, &s_task_ncm);
 
-
-// 開機框架的掃描結果：B06 掃描 + 合併，B08 才載入 payload。
-static nc_mod_scan_t s_mod_scan;
 
 #endif
 #if NC_HAS_ETH

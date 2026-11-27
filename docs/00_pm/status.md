@@ -10408,3 +10408,21 @@ _data_start/_data_end` 實量，唔係估算），令「靜態 vs 動態」可�
 
 **未做**：模組 arena 仍然用固定上限；效果數量要掃完 `.nce` 才知——下一步把 plan 的
 宣告時機推遲到掃描之後，bytes 由實測數量算。
+
+---
+
+### 7.299 2026-11-27（模組 arena 由掃描量決定：512 KB → 32 KB 起）
+
+**延續 §7.298**：最後兩塊「固定上限」的第一塊——`ncm.arena` 以前無條件宣告
+`NC_MOD_ARENA_MAX = 512 KB`。
+
+**改法**：B06 掃描 `.nce`／`.nct` 時順便累加檔案大小（`nc_mod_scan_t.bytes`）；
+`nc_mod_arena_bytes(scan) = clamp(檔案合計 + 模組數×1 KB, 32 KB, 512 KB)`，32 B 對齊。
+`task_ncm_declare()` 用這個值宣告，boot log 印「掃到 N 個、檔案 B B → 宣告 A B」。
+
+**量測**：tests 映像、SuperMini（裝置冇任何模組）→ `ncm.arena = 32,768 B`
+（原本 524,288 B，**省 480 KB PSRAM**）。host `mod_test` 加四條斷言：空 → MIN、
+NULL → MIN、2 個 5,000 B → 合計＋2 KB 且 32 對齊、超大 → MAX。
+
+**未做**：效果層自己的 px×lane 緩衝已經跟 cfg；`.nce` 載入後的效果值流仍然共用 arena，
+下一步才把它也納入 plan（等效果管理器掃描落地，見 `state-dynamic-keys.md`）。

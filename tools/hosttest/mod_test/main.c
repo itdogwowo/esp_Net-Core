@@ -273,6 +273,23 @@ int main(void)
     }
 
     case_begin("init");
+    // arena 大小由掃描結果決定（2026-11-27）：唔再無條件預留 512 KB。
+    printf("[arena] 掃描量 → arena bytes\n");
+    {
+        nc_mod_scan_t sc;
+        memset(&sc, 0, sizeof(sc));
+        CHECK(nc_mod_arena_bytes(&sc) == NC_MOD_ARENA_MIN, "冇模組 → MIN（32 KB）");
+        CHECK(nc_mod_arena_bytes(NULL) == NC_MOD_ARENA_MIN, "NULL → MIN");
+        sc.count = 2;
+        sc.bytes = 5000;
+        const size_t ab = nc_mod_arena_bytes(&sc);
+        CHECK(ab >= 5000u + 2u * 1024u && ab <= NC_MOD_ARENA_MAX && (ab % 32u) == 0,
+              "2 個模組 5,000 B → 合計＋2 KB、32 對齊（%u）", (unsigned)ab);
+        sc.count = NC_MOD_MAX_ENTRIES;
+        sc.bytes = (size_t)NC_MOD_ARENA_MAX * 2u;
+        CHECK(nc_mod_arena_bytes(&sc) == NC_MOD_ARENA_MAX, "超出上限 → MAX");
+    }
+
     CHECK(nc_mod_init(NULL, 0) == ESP_ERR_NO_MEM, "沒有 arena → 明確失敗");
     CHECK(nc_mod_init(arena, sizeof(arena)) == ESP_OK, "arena 64 KB 就緒");
     CHECK(nc_mod_set_backend(&FAKE) == ESP_OK, "backend 裝上");

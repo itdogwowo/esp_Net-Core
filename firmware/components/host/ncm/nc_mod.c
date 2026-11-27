@@ -5,6 +5,7 @@
 
 #include <dirent.h>
 #include <stdarg.h>
+#include <sys/stat.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -771,6 +772,10 @@ int nc_mod_scan_dir(const char *dir, nc_mod_scan_t *out)
         memset(ent, 0, sizeof(*ent));
         snprintf(ent->path, sizeof(ent->path), "%s", path);
         if (nc_mod_probe(path, &ent->probe) == ESP_OK) {
+            struct stat st;
+            if (stat(path, &st) == 0 && st.st_size > 0) {
+                out->bytes += (size_t)st.st_size;
+            }
             out->count++;
             ok++;
         } else {
@@ -781,6 +786,22 @@ int nc_mod_scan_dir(const char *dir, nc_mod_scan_t *out)
     out->bad += bad;
     ESP_LOGI(TAG, "掃描 %s：%d 個可用、%d 個被拒", dir, ok, bad);
     return ok;
+}
+
+// arena 大小：掃到的檔案總大小 ＋ 每個模組 1 KB（header／manifest／對齊 slack），
+// 32 B 對齊，夾在 [MIN, MAX]。冇模組 → MIN：唔再無條件預留 512 KB。
+size_t nc_mod_arena_bytes(const nc_mod_scan_t *scan)
+{
+    size_t need = (scan != NULL) ? scan->bytes : 0u;
+    need += (size_t)((scan != NULL) ? scan->count : 0) * 1024u;
+    need = (need + 31u) & ~(size_t)31u;
+    if (need < NC_MOD_ARENA_MIN) {
+        need = NC_MOD_ARENA_MIN;
+    }
+    if (need > NC_MOD_ARENA_MAX) {
+        need = NC_MOD_ARENA_MAX;
+    }
+    return need;
 }
 
 int nc_mod_scan_all(nc_mod_scan_t *out)

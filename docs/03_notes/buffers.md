@@ -726,3 +726,23 @@ CONFIG_NETCORE_PIXEL_PACK_PSRAM=y
 
 > 下一步（未做）：把 plan 的 bytes 由「宣告時已算好」進一步改成「掃描完 `.nct`／`.nce`
 > 才宣告」——現時模組 arena 仍然係固定上限；效果數量掃描之後才知。
+
+### 12.3 模組 arena：由掃描量決定（2026-11-27）
+
+以前：`ncm.arena` **無條件宣告 512 KB**（`NC_MOD_ARENA_MAX`），2 MB PSRAM 的板一開始就少 25%。
+
+現在：
+
+```
+B06 掃描 /data/pixel/effects + /data/tasks（.nce／.nct）
+  → scan.count（幾個模組）、scan.bytes（檔案合計）
+  → arena = clamp(bytes + count × 1 KB, 32 KB, 512 KB)，32 B 對齊
+  → nc_plan_declare("ncm.arena", arena)
+```
+
+- 冇模組 → **32 KB**（`NC_MOD_ARENA_MIN`），唔再白佔 480 KB。
+- 有模組 → 按實際大小 ＋ 每模組 1 KB 的 header／manifest／對齊 slack。
+- 超出 512 KB → 夾到上限並在掃描 log 講清楚（唔會靜默截斷：載入時要塞就明示失敗）。
+- `nc_mod_arena_bytes()` 放喺 `nc_mod.c`（唔係 main），所以 host test 直接驗得到。
+
+實測（tests 映像、SuperMini、冇任何 `.nce`／`.nct`）：`ncm.arena = 32,768 B`（原本 524,288 B）。

@@ -126,6 +126,7 @@ typedef struct {
     nc_mod_entry_t entries[NC_MOD_MAX_ENTRIES];
     int            count;
     int            bad;        // 被拒的檔案數
+    size_t         bytes;      // 掃到的檔案總大小（payload+容器），用嚟計 arena
 } nc_mod_scan_t;
 
 // 掃一個目錄，append 到 out（不 reset）。回傳成功加入的數量。
@@ -138,6 +139,11 @@ int nc_mod_merge_cfg(nc_mod_scan_t *scan);
 int nc_mod_load_all(const nc_mod_scan_t *scan);
 // 把掃描結果的 provides / requires 加進 nc_res 表（B06，nc_res_build 之後）。
 int nc_mod_declare_res(const nc_mod_scan_t *scan);
+// arena 要幾大：掃到幾多就宣告幾多（＋每模組 1 KB overhead、32 B 對齊），
+// 夾在 [NC_MOD_ARENA_MIN, NC_MOD_ARENA_MAX]。冇模組 → MIN（唔再無條件 512 KB）。
+#define NC_MOD_ARENA_MIN (32u * 1024u)
+size_t nc_mod_arena_bytes(const nc_mod_scan_t *scan);
+
 // 指定 level 的載入（nc_mod_load 是 level=5 的包裝）。
 esp_err_t nc_mod_load_ex(const char *path, int level);
 
