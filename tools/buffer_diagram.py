@@ -1,225 +1,182 @@
 #!/usr/bin/env python3
-"""Generate docs/00_pm/buffers.svg — 核 ↔ 通道 ↔ 緩衝 的關係圖。
+"""緩衝地圖：邊啲係「寫死」，邊啲係「掃描／設定驅動」。
 
-Single source of truth: 手寫的內容清單 + 固定幾何，輸出獨立 SVG（無外部字型／圖片）。
-    python tools/buffer_diagram.py [out.svg]
+    python3 tools/buffer_diagram.py            # → docs/00_pm/buffer-map.svg
 
-圖在答三條問題
---------------
-    ① 一幀資料從硬件進來之後，經過哪幾塊記憶體才會被解析？
-    ② 每塊緩衝是誰的（plan / heap / PSRAM）、哪一核寫、哪一核讀？
-    ③ PUSH 與 PULL 兩種通道，緩衝鏈差在哪裡（有沒有 producer、有沒有 slots）？
-
-數值全部來自程式（nc_cfg_defaults.c 與各模組常數），改程式要重跑。
+數字來源：板上 `status mem`（2026-11-27、SuperMini、release）＋
+`nm`（schema 表在 .flash.rodata）。要更新數字就改下面常數。
 """
-import sys
 from pathlib import Path
 
-W = 1680
+ROOT = Path(__file__).resolve().parent.parent
+OUT = ROOT / "docs/00_pm/buffer-map.svg"
 
-INK      = "#17191C"
-INK2     = "#3D4247"
-MUTED    = "#6E747B"
-FAINT    = "#9AA0A6"
-RULE     = "#DCD8CE"
-PAPER    = "#FBFAF6"
-WHITE    = "#FFFFFF"
+# ── 實測（status mem / nm）──
+BSS, DATA = 104_272, 39_287
+PLAN = [("nc4.reply0", 2615, "核數（1 decoder）", "psram"),
+        ("usb.rx", 4128, "link 的 region（cfg）", "int"),
+        ("i80.prd", 576, "px×lane（cfg）", "int"),
+        ("mock.prd", 576, "測試後端", "int")]
+EXTRA = [("usb0.rx", 4128, "link 第二份（待確認）")]
+ARENA_ZERO = 32_768          # 冇模組時的 ncm.arena（有模組 = 掃描量）
+ARENA_OLD = 512 * 1024
+SCHEMA_FLASH = 12_404
+STATIC = BSS + DATA
+DYNAMIC = sum(b for _, b, _, _ in PLAN) + sum(b for _, b, _ in EXTRA)
 
-# 緩衝的「來源」用顏色分（這張圖最重要的一層編碼）
-F_PLAN_I = "#F3EFF8"; S_PLAN_I = "#B79BC9"   # plan INTERNAL
-F_PLAN_P = "#EAF1F7"; S_PLAN_P = "#8FB0CB"   # plan PSRAM（BULK）
-F_HEAP   = "#F5F4EF"; S_HEAP   = "#BEB8A8"   # runtime heap
-F_DRV    = "#EDF4EF"; S_DRV    = "#94B7A2"   # 驅動／硬件 FIFO
-F_NONE   = "#FAF9F5"; S_NONE   = "#DCD8CE"
+INK, INK2, MUTED = "#1b2430", "#43536a", "#7c8ba1"
+RULE, WHITE = "#d8dfe8", "#ffffff"
+F_RED, S_RED = "#fdecea", "#c0392b"
+F_BLUE, S_BLUE = "#eaf2fd", "#2f6fbf"
+F_GREEN, S_GREEN = "#e9f7ef", "#1e8449"
+F_AMBER, S_AMBER = "#fef7e6", "#b9770e"
+F_PURPLE, S_PURPLE = "#f3edfb", "#6c3fb0"
 
-C_CORE0  = "#1F5F8B"
-C_CORE1  = "#A8661B"
-
-SANS = "'Segoe UI','Noto Sans TC','Microsoft JhengHei','PingFang TC',sans-serif"
-MONO = "'Cascadia Mono','Consolas','SF Mono',monospace"
-
-out = []
+W, H = 1680, 1000
+M = 34
 
 
-def esc(s):
+def esc(s: str) -> str:
     return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
-def cw(ch, fs, mono=False):
-    o = ord(ch)
-    if o >= 0x2E80 or ch in "，。、；：（）「」『』【】！？—…·｜":
-        return fs * 1.0
-    if mono:
-        return fs * 0.60
-    if ch == " ":
-        return fs * 0.28
-    if ch in "ilj|!.,:;'`[](){}":
-        return fs * 0.30
-    if ch in "mwMW@%":
-        return fs * 0.85
-    if ch.isupper() or ch.isdigit():
-        return fs * 0.58
-    return fs * 0.53
+def text(x, y, s, size=11, fill=INK, weight=400, anchor="start"):
+    return (f'<text x="{x:.1f}" y="{y:.1f}" font-size="{size}" fill="{fill}" '
+            f'font-weight="{weight}" text-anchor="{anchor}" '
+            f'font-family="Inter, Noto Sans CJK TC, PingFang TC, sans-serif">{esc(s)}</text>')
 
 
-def measure(s, fs, mono=False):
-    return sum(cw(c, fs, mono) for c in s)
+def rect(x, y, w, h, fill, stroke=None, sw=1, r=10):
+    st = f' stroke="{stroke}" stroke-width="{sw}"' if stroke else ""
+    return f'<rect x="{x:.1f}" y="{y:.1f}" width="{w:.1f}" height="{h:.1f}" rx="{r}" fill="{fill}"{st}/>'
 
 
-def rect(x, y, w, h, fill=WHITE, stroke=RULE, sw=1, rx=6, dash=None):
-    d = f' stroke-dasharray="{dash}"' if dash else ""
-    out.append(f'<rect x="{x:.1f}" y="{y:.1f}" width="{w:.1f}" height="{h:.1f}" rx="{rx}" '
-               f'fill="{fill}" stroke="{stroke}" stroke-width="{sw}"{d}/>')
+def fmt(n: int) -> str:
+    return f"{n:,}"
 
 
-def text(x, y, s, fs=12, fill=INK, weight=400, mono=False, anchor="start"):
-    fam = MONO if mono else SANS
-    out.append(f'<text x="{x:.1f}" y="{y:.1f}" font-family="{fam}" font-size="{fs}" '
-               f'font-weight="{weight}" fill="{fill}" text-anchor="{anchor}">{esc(s)}</text>')
+def panel1(y: int) -> str:
+    x, w, h = M, W - 2 * M, 430
+    s = [rect(x, y, w, h, WHITE, RULE, 1.2, 14),
+         text(x + 20, y + 30, "① 邊啲係寫死、邊啲係掃描／設定出嚟", 16, INK, 700)]
+    # 三個來源欄
+    cols = [
+        ("編譯期寫死（.bss／.data）", STATIC, F_RED, S_RED,
+         ["FreeRTOS／lwIP／Wi-Fi／驅動靜態", "固定表、小陣列、decoder 結構", "任務 stack（main 3–8 KB、ncm 8 KB）"]),
+        ("設定／掃描驅動（plan ＋ nc_buf）", DYNAMIC, F_BLUE, S_BLUE,
+         ["per-link rx（hardware.json）", "回覆幀（decoder 數 = 核數）", "px×lane 環（cfg）＋模組 arena（掃描）"]),
+        ("flash，0 RAM（.flash.rodata）", SCHEMA_FLASH, F_GREEN, S_GREEN,
+         ["schema 字典 286 key／16 unit", "路徑／描述字串", "唔佔 SRAM，XIP 直接讀"]),
+    ]
+    cw = (w - 40 - 2 * 16) / 3
+    for i, (title, nbytes, f, st, lines) in enumerate(cols):
+        cx = x + 20 + i * (cw + 16)
+        cy = y + 50
+        s.append(rect(cx, cy, cw, 176, f, st, 1.2, 10))
+        s.append(text(cx + 14, cy + 24, title, 11.5, st, 700))
+        s.append(text(cx + 14, cy + 54, fmt(nbytes) + " B", 22, INK, 700))
+        for j, ln in enumerate(lines):
+            s.append(text(cx + 14, cy + 82 + j * 18, "· " + ln, 9.5, INK2))
+
+    # 堆疊條（比例）
+    by = y + 250
+    s.append(text(x + 20, by - 8, "靜態 vs 動態（真機實測）", 11, INK2, 700))
+    total = STATIC + DYNAMIC
+    bw = w - 40
+    sw_ = bw * STATIC / total
+    s.append(rect(x + 20, by, sw_, 34, F_RED, S_RED, 1))
+    s.append(f'<rect x="{x+20:.1f}" y="{by}" width="0" height="34" fill="{F_RED}" stroke="{S_RED}">'
+             f'<animate attributeName="width" from="0" to="{sw_:.1f}" dur="1.4s" fill="freeze"/></rect>')
+    s.append(rect(x + 20 + sw_, by, bw - sw_, 34, F_BLUE, S_BLUE, 1))
+    s.append(text(x + 30, by + 23, f"靜態 {fmt(STATIC)} B（{STATIC*100/total:.1f}%）", 11, S_RED, 700))
+    s.append(text(x + w - 20, by - 8,
+                  f"動態 {fmt(DYNAMIC)} B（{DYNAMIC*100/total:.1f}%）", 10.5, S_BLUE, 700, anchor="end"))
+    # 結論
+    s.append(rect(x + 20, by + 52, bw, 92, F_AMBER, S_AMBER, 1.1, 10))
+    s.append(text(x + 34, by + 76, "答案：真正「寫死」＝ .bss／.data 143.6 KB（93%）——全部係 RTOS／網絡／驅動骨架，唔關業務事。", 11, INK, 700))
+    s.append(text(x + 34, by + 98, "業務緩衝（plan 7,895 B ＋ 額外 4,128 B）已經全部由 cfg／掃描決定；arena 由「掃到幾多模組」決定（冇模組 32 KB）。", 10.5, INK2))
+    s.append(text(x + 34, by + 118, "唯一「量唔到就固定」的是 task stack 與靜態表——它們唔跟設定變，屬必要固定成本。", 10.5, INK2))
+    return "".join(s)
 
 
-def arrow(x1, y, x2, color=FAINT):
-    out.append(f'<line x1="{x1:.1f}" y1="{y:.1f}" x2="{x2 - 6:.1f}" y2="{y:.1f}" '
-               f'stroke="{color}" stroke-width="1.3"/>')
-    out.append(f'<path d="M {x2 - 7:.1f} {y - 4:.1f} L {x2 - 1:.1f} {y:.1f} '
-               f'L {x2 - 7:.1f} {y + 4:.1f}" fill="none" stroke="{color}" stroke-width="1.3"/>')
+def panel2(y: int) -> str:
+    x, w, h = M, W - 2 * M, 210
+    s = [rect(x, y, w, h, WHITE, RULE, 1.2, 14),
+         text(x + 20, y + 30, "② 開機時序：幾時掃描、幾時先申請", 16, INK, 700)]
+    steps = [
+        ("B02", "讀 cfg", "hardware／system／driver\n決定 rx region、px×lane", F_BLUE, S_BLUE),
+        ("B06", "掃描 .nce／.nct", "只讀 header＋manifest\n累加檔案大小 → arena", F_GREEN, S_GREEN),
+        ("B06", "declare", "bytes = cfg 值／掃描量\n（唔用 MAX_* 乘）", F_GREEN, S_GREEN),
+        ("B07", "plan commit", "每個 class 一次 carve\n逐項成功／失敗", F_AMBER, S_AMBER),
+        ("B08", "包裝成 nc_buf", "nc_buf_at(plan 指標)\n零額外分配", F_PURPLE, S_PURPLE),
+    ]
+    cw, gap = 236, 24
+    for i, (tag, title, sub, f, st) in enumerate(steps):
+        cx = x + 20 + i * (cw + gap)
+        cy = y + 52
+        s.append(rect(cx, cy, cw, 116, f, st, 1.2, 10))
+        s.append(text(cx + 12, cy + 22, tag, 10.5, st, 700))
+        s.append(text(cx + 12, cy + 44, title, 12, INK, 700))
+        for j, ln in enumerate(sub.split("\n")):
+            s.append(text(cx + 12, cy + 68 + j * 16, ln, 9.5, INK2))
+        if i < len(steps) - 1:
+            ax = cx + cw + 4
+            s.append(f'<path d="M {ax} {cy+58} h {gap-8}" stroke="{MUTED}" stroke-width="2" '
+                     f'marker-end="url(#arr)"/>')
+    s.append(text(x + 20, y + h - 16,
+                  "重點：plan 的 bytes 喺 declare 之前就已經係「實際數字」；冇任何一步係「先要一大塊再算」。",
+                  10, MUTED))
+    return "".join(s)
 
 
-# ── 內容清單 ───────────────────────────────────────────────────────────
-# 每行一條通道：(通道, 入口, 暫存, 解析環, 解碼, 出口, fill/stroke 對)
-ROWS = [
-    ("CDC（OTG）", C_CORE0,
-     ("TinyUSB", ["CDC-ACM · USB FS", "主機寫入 OUT 端點"], F_DRV, S_DRV),
-     ("CDC.slots", ["4 × 256 B = 1 KB", "heap（nc_buf，runtime）", "寫：cdc.rx（同核）"], F_HEAP, S_HEAP),
-     ("usb.rx", ["4,128 B · plan INTERNAL", "STREAM，容得落 4,115 B 幀", "本通道的 parser 環"], F_PLAN_I, S_PLAN_I),
-     ("decode0", ["PUSH：producer kick 叫醒", "parser 解析 → handler", "棧 3,072 B · prio 4"], F_PLAN_I, C_CORE0),
-     ("回覆 + TX", ["回覆幀 2,615 B（plan BULK）", "TinyUSB TX FIFO", "s_tx_reply 仲裁：回覆優先"], F_PLAN_P, S_PLAN_P)),
-
-    ("usb_jtag（JTAG）", C_CORE0,
-     ("USB-Serial-JTAG", ["303A:1001 · 無 OTG 的板", "LL 直讀 RX FIFO"], F_DRV, S_DRV),
-     ("（無暫存）", ["PULL：冇 producer task", "decode 自己讀 FIFO", "一次 256 B"], F_NONE, S_NONE),
-     ("usb.rx", ["4,128 B · plan INTERNAL", "chunk 256 × budget 8", "每輪最多搬 2,048 B"], F_PLAN_I, S_PLAN_I),
-     ("decode0", ["每 10 ms 輪詢一次", "parser 解析 → handler", "單核：只有這一個"], F_PLAN_I, C_CORE0),
-     ("回覆 + TX", ["回覆幀 2,615 B（plan BULK）", "LL TX FIFO · 100 ms 上限", "s_jtag_tx_lock 同 log 共用"], F_PLAN_P, S_PLAN_P)),
-
-    ("UART", C_CORE1,
-     ("UART 驅動", ["921600 8N1", "driver 環 1 KB"], F_DRV, S_DRV),
-     ("UART.slots", ["4 × 256 B = 1 KB", "heap（nc_buf，runtime）", "寫：uart.rx（同核）"], F_HEAP, S_HEAP),
-     ("uart.rx", ["1,024 B · plan INTERNAL", "收得落 ≤1,011 B 指令", "要 4 KB 就要改 config"], F_PLAN_I, S_PLAN_I),
-     ("decode1（預設）", ["PUSH，owner_init 裝 driver", "單核時同 decode0", "雙核：core1"], F_PLAN_I, C_CORE1),
-     ("回覆 + TX", ["回覆幀 2,615 B（plan BULK）", "nc_uart_drv_send · TX 環 1 KB", "4 KB 轉寄阻塞 ~44 ms"], F_PLAN_P, S_PLAN_P)),
-
-    ("TCP（P4）", C_CORE0,
-     ("lwIP socket", ["乙太網／Wi-Fi", "非阻塞 recv"], F_DRV, S_DRV),
-     ("（無暫存）", ["PULL：decode 直接 recv", "frame_mode 時零複製", "整幀進插槽"], F_NONE, S_NONE),
-     ("tcp.rx", ["16,410 B · plan INTERNAL", "2 幀：跨讀需要餘裕", "chunk 8,192"], F_PLAN_I, S_PLAN_I),
-     ("decode0（P4 預設）", ["PULL：冇 kick，每輪問一次", "parser 解析 → handler", "同 core0 的 HTTP／WS 共用"], F_PLAN_I, C_CORE0),
-     ("回覆 + TX", ["回覆幀 2,615 B（plan BULK）", "tcp_nc4_send", "s_tcp_tx_lock 整幀獨佔"], F_PLAN_P, S_PLAN_P)),
-]
-
-# ── 幾何 ───────────────────────────────────────────────────────────────
-L, R = 44, W - 44
-GAP = 24
-COLW = (R - L - GAP * 4) / 5
-TOP = 156
-ROWH = 108
-ROWGAP = 14
-PANEL_Y = TOP + (ROWH + ROWGAP) * len(ROWS) + 16
-PANEL_H = 196
-H = PANEL_Y + PANEL_H + 34
-
-HDR = ["① 入口（硬件／驅動）", "② 暫存（有 producer 才有）", "③ 解析環（plan 給）",
-       "④ 誰解析（核）", "⑤ 出口（回覆與 TX）"]
+def panel3(y: int) -> str:
+    x, w, h = M, W - 2 * M, 236
+    s = [rect(x, y, w, h, WHITE, RULE, 1.2, 14),
+         text(x + 20, y + 30, "③ 逐項清單：邊個可以彈性、邊個唔可以", 16, INK, 700)]
+    rows = [("緩衝", "bytes", "來源", "彈性"),
+            (".bss／.data", fmt(STATIC), "編譯期", "✗ 固定（RTOS／lwIP／WiFi 骨架）"),
+            ("nc4.reply0", "2,615", "decoder 數（核數）", "△ 單核只宣告 1 條（已省 2,615）"),
+            ("usb.rx", "4,128", "link region（cfg）", "△ 改 hardware.json 的 rx.region 就變"),
+            ("usb0.rx", "4,128", "link 第二份", "? 待確認：同 usb.rx 係唔係同一用途"),
+            ("i80.prd", "576", "px×lane（cfg）", "△ 跟 cfg，唔會超配"),
+            ("mock.prd", "576", "測試後端", "△ release 仍然存在 → 可條件編譯省 576"),
+            ("ncm.arena", "32,768", "掃描 .nce／.nct", "✓ 0 模組 = 32 KB；有模組照實測（原 512 KB）"),
+            ("schema 表", "12,404", "schema JSON（生成期）", "✓ flash，0 SRAM")]
+    ry = y + 54
+    colx = [x + 24, x + 220, x + 330, x + 560]
+    for i, r in enumerate(rows):
+        yy = ry + i * 20
+        if i == 0:
+            for j, c in enumerate(r):
+                s.append(text(colx[j], yy, c, 10.5, INK, 700))
+            s.append(f'<line x1="{x+20:.1f}" y1="{yy+6:.1f}" x2="{x+w-20:.1f}" y2="{yy+6:.1f}" stroke="{RULE}"/>')
+            continue
+        flexible = r[3].startswith("✓") or r[3].startswith("△")
+        col = S_GREEN if r[3].startswith("✓") else (S_AMBER if r[3].startswith("?") else (INK2 if flexible else S_RED))
+        s.append(text(colx[0], yy, r[0], 10, INK, 600))
+        s.append(text(colx[1], yy, r[1], 10, INK2))
+        s.append(text(colx[2], yy, r[2], 10, INK2))
+        s.append(text(colx[3], yy, r[3], 10, col, 600 if flexible else 400))
+    return "".join(s)
 
 
-def cell(x, y, w, h, title, lines, fill, stroke, core_color=None):
-    rect(x, y, w, h, fill, stroke, 1.2)
-    if core_color:
-        out.append(f'<rect x="{x}" y="{y}" width="4.5" height="{h}" rx="2" fill="{core_color}"/>')
-    text(x + 14, y + 22, title, 12.5, INK, 600, mono=True)
-    for i, ln in enumerate(lines[:3]):
-        text(x + 14, y + 40 + i * 15, ln, 10.5, INK2 if i == 0 else MUTED)
-
-
-def build():
-    out.append(f'<svg xmlns="http://www.w3.org/2000/svg" width="{W}" height="{H}" '
-               f'viewBox="0 0 {W} {H}" font-family="{SANS}">')
-    rect(0, 0, W, H, PAPER, PAPER, 0, 0)
-
-    text(L, 52, "核 ↔ 通道 ↔ 緩衝：一幀資料要經過哪幾塊記憶體", 25, INK, 600)
-    text(L, 78, "四條通道的鏈一樣長，但 PUSH 多一個 producer 與 slots，PULL 直接讀硬件。"
-                "顏色 = 這塊緩衝從哪來。", 12.5, MUTED)
-
-    # 圖例
-    lx = L
-    for lbl, f, s in [("plan INTERNAL（宣告、開機配一次）", F_PLAN_I, S_PLAN_I),
-                      ("plan PSRAM／BULK（有 PSRAM 才放）", F_PLAN_P, S_PLAN_P),
-                      ("heap（runtime，可丟）", F_HEAP, S_HEAP),
-                      ("驅動／硬件 FIFO", F_DRV, S_DRV)]:
-        rect(lx, 92, 13, 11, f, s, 1, 3)
-        text(lx + 19, 102, lbl, 10.5, MUTED)
-        lx += 19 + measure(lbl, 10.5) + 26
-
-    # 欄標題
-    for i, h in enumerate(HDR):
-        text(L + i * (COLW + GAP), TOP - 12, h, 11.5, MUTED, 600)
-
-    for r, (name, core_col, *cells) in enumerate(ROWS):
-        y = TOP + r * (ROWH + ROWGAP)
-        for c, (title, lines, f, s) in enumerate(cells):
-            x = L + c * (COLW + GAP)
-            if c == 0:
-                # 入口格：加通道名
-                rect(x, y, COLW, ROWH, f, s, 1.2)
-                text(x + 14, y + 20, name, 12, INK, 700)
-                text(x + 14, y + 40, title, 11, INK2, 600, mono=True)
-                for i, ln in enumerate(lines[:2]):
-                    text(x + 14, y + 58 + i * 15, ln, 10.5, MUTED)
-            elif c == 3:
-                cell(x, y, COLW, ROWH, title, lines, f, s, core_color=core_col)
-            else:
-                cell(x, y, COLW, ROWH, title, lines, f, s)
-            # 箭頭
-            if c > 0:
-                arrow(x - GAP + 2, y + ROWH / 2, x - 2)
-
-    # ── 底部：跨核 + 單核 ────────────────────────────────────────────
-    rect(L, PANEL_Y, R - L, PANEL_H, WHITE)
-
-    text(L + 16, PANEL_Y + 26, "跨核轉寄：唯一允許的跨核 notify", 12.5, INK, 600)
-    y = PANEL_Y + 44
-    rect(L + 16, y, 250, 54, F_PLAN_P, S_PLAN_P, 1.2)
-    text(L + 28, y + 20, "decode0", 12, INK, 700)
-    text(L + 28, y + 38, "解析完，目的不是本核的 link", 10.5, MUTED)
-    arrow(L + 272, y + 27, L + 320)
-    rect(L + 322, y, 330, 54, F_PLAN_P, S_PLAN_P, 1.2)
-    text(L + 336, y + 20, "fwd.c1（PSRAM）", 12, INK, 700, mono=True)
-    text(L + 336, y + 38, "4 格 × 8,221 B（16 名 + 8,205 幀）= 32,884 B", 10.5, MUTED)
-    arrow(L + 658, y + 27, L + 706)
-    rect(L + 708, y, 250, 54, F_PLAN_P, S_PLAN_P, 1.2)
-    text(L + 722, y + 20, "decode1", 12, INK, 700)
-    text(L + 722, y + 38, "每輪先清 queue，再送 link", 10.5, MUTED)
-    text(L + 974, y + 22, "佇列滿就丟（來源核唔可以停）", 10.5, MUTED)
-    text(L + 974, y + 40, "drops 計在 STATUS mem.fwd", 10.5, MUTED)
-
-    text(L + 16, PANEL_Y + 122, "單核（C3／C6／H2）會縮成什麼", 12.5, INK, 600)
-    text(L + 16, PANEL_Y + 142,
-         "decode1 與 decoder1 唔建立；nc4.reply1 唔宣告（省 2,615 B）；全部 link 的 core 都收斂到 0；"
-         "fwd.c1 永遠用不到。", 11, INK2)
-    text(L + 16, PANEL_Y + 162,
-         "usb.rx 仍然是 4,128 B —— 它跟核數無關，跟「主機的 chunk 有幾大」有關。", 11, MUTED)
-    text(L + 16, PANEL_Y + 182,
-         "heap 那兩層（slots、read chunk）在單核一樣存在：它們由「有冇 producer」決定，唔係由核數。", 11, MUTED)
-
-    out.append("</svg>")
-
-
-def main():
-    build()
-    dst = Path(sys.argv[1]) if len(sys.argv) > 1 else Path("docs/00_pm/buffers.svg")
-    dst.parent.mkdir(parents=True, exist_ok=True)
-    dst.write_text("\n".join(out), encoding="utf-8")
-    print(f"{dst}  ({W}×{H})")
+def main() -> None:
+    defs = '''<defs>
+  <marker id="arr" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+    <path d="M 0 0 L 10 5 L 0 10 z" fill="#7c8ba1"/>
+  </marker>
+</defs>'''
+    head = (f'<svg xmlns="http://www.w3.org/2000/svg" width="{W}" height="{H}" viewBox="0 0 {W} {H}">'
+            f'{defs}<rect width="{W}" height="{H}" fill="#f7f9fc"/>'
+            + text(M, 46, "緩衝地圖：邊啲寫死、邊啲掃描", 26, INK, 700)
+            + text(M, 72, "2026-11-27 · 真機 status mem＋nm · 圖由 tools/buffer_diagram.py 生成 · "
+                          "開圖有動畫：靜態／動態條生長", 11, MUTED)
+            + text(W - M, 46, "esp_Net-Core", 11, MUTED, anchor="end"))
+    body = panel1(96) + panel2(536) + panel3(760)
+    foot = text(M, H - 12, f"靜態 {fmt(STATIC)} B ＋ 動態 {fmt(DYNAMIC)} B ＋ flash 字典 {fmt(SCHEMA_FLASH)} B"
+                           f" · arena 0 模組 {fmt(ARENA_ZERO)} B（舊 {fmt(ARENA_OLD)} B）", 10, MUTED)
+    OUT.write_text(head + body + foot + "</svg>\n", encoding="utf-8")
+    print(f"wrote {OUT.relative_to(ROOT)}（{OUT.stat().st_size} B）")
 
 
 if __name__ == "__main__":

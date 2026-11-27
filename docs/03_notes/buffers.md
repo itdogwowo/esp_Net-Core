@@ -746,3 +746,9 @@ B06 掃描 /data/pixel/effects + /data/tasks（.nce／.nct）
 - `nc_mod_arena_bytes()` 放喺 `nc_mod.c`（唔係 main），所以 host test 直接驗得到。
 
 實測（tests 映像、SuperMini、冇任何 `.nce`／`.nct`）：`ncm.arena = 32,768 B`（原本 524,288 B）。
+
+### 12.4 緩衝地圖（2026-11-27）
+
+[`docs/00_pm/buffer-map.svg`](../00_pm/buffer-map.svg)（`tools/buffer_diagram.py`）：實測
+靜態 143,559 B／動態 7,895 B（plan）＋4,128 B（usb0.rx）／flash 字典 12,404 B；
+逐項標明來源（編譯期／cfg／掃描）同彈性。四個待處理見 status §7.300。

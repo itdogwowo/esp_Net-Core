@@ -10426,3 +10426,33 @@ NULL → MIN、2 個 5,000 B → 合計＋2 KB 且 32 對齊、超大 → MAX。
 
 **未做**：效果層自己的 px×lane 緩衝已經跟 cfg；`.nce` 載入後的效果值流仍然共用 arena，
 下一步才把它也納入 plan（等效果管理器掃描落地，見 `state-dynamic-keys.md`）。
+
+---
+
+### 7.300 2026-11-27（緩衝地圖：邊啲寫死、邊啲掃描；四個調查發現）
+
+**圖**：[`buffer-map.svg`](buffer-map.svg)／PNG `docs/assets/buffer-map-2026-11-27.png`
+（`python3 tools/buffer_diagram.py`；三塊：兩層對照／開機時序／逐項清單）。
+
+**實測（SuperMini、release、`status mem`＋`nm`）**：
+
+| 類 | 量 | 來源 |
+|---|---:|---|
+| 靜態 `.bss`＋`.data` | **143,559 B**（bss 104,272／data 39,287） | 編譯期（RTOS／lwIP／Wi-Fi／驅動骨架） |
+| 動態 plan | **7,895 B**（reply0 2,615 psram；usb.rx 4,128＋i80.prd 576＋mock.prd 576 int） | cfg／核數／px×lane |
+| 額外 nc_buf | **4,128 B**（`usb0.rx`） | link（見發現 ①） |
+| flash 字典 | **12,404 B** | `.flash.rodata`，0 SRAM |
+
+靜態佔 92.3%、動態 7.7%——所以「預留一大塊」的印象主要來自 RTOS 骨架，唔關業務緩衝事。
+
+**四個發現**：
+
+1. **`usb.rx` 同 `usb0.rx` 各 4,128 B**：前者係 plan 切出來的（`nc_buf_at` 包裝、零額外分配），
+   後者係 `nc4_parser_create()` 自己建的第二個 ring（名字 `<link>.rx`）。
+   兩者同時存在 → **疑似同一條 USB 線有兩個 parser 環（~4 KB 冗餘）**，待確認用途後合併。
+2. **`mock.prd` 576 B 在 release 仍然建立**：測試後端唔應該出現在 production；可條件編譯省 576 B。
+3. **`ncm.arena` 已經係掃描量**（0 模組 32,768 B，原 512 KB）——§7.299 生效。
+4. **`nc4.reply0` 2,615 B 係按 decoder 數宣告**：單核只 1 條（雙核才 2 條），已經係彈性做法。
+
+**結論**：真正「寫死」只有 RTOS／網絡骨架 143.6 KB；業務緩衝（12 KB）全部可以由 cfg／掃描
+決定，而且 plan 的 bytes 喺 declare 之前就係實數，冇「先要一大塊再算」的步驟。
