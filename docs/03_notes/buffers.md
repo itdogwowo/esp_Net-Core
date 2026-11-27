@@ -740,12 +740,14 @@ B06 掃描 /data/pixel/effects + /data/tasks（.nce／.nct）
   → nc_plan_declare("ncm.arena", arena)
 ```
 
-- 冇模組 → **32 KB**（`NC_MOD_ARENA_MIN`），唔再白佔 480 KB。
+- **冇模組 → 0 B**：arena 係「載入模組的地方」，一個模組都冇就唔宣告（連 32 KB 都唔留）。
+  有模組才用 `NC_MOD_ARENA_MIN`（32 KB）做下限（WAMR metadata／對齊 headroom）。
 - 有模組 → 按實際大小 ＋ 每模組 1 KB 的 header／manifest／對齊 slack。
 - 超出 512 KB → 夾到上限並在掃描 log 講清楚（唔會靜默截斷：載入時要塞就明示失敗）。
 - `nc_mod_arena_bytes()` 放喺 `nc_mod.c`（唔係 main），所以 host test 直接驗得到。
 
-實測（tests 映像、SuperMini、冇任何 `.nce`／`.nct`）：`ncm.arena = 32,768 B`（原本 524,288 B）。
+實測（tests 映像、SuperMini、冇任何 `.nce`／`.nct`）：`ncm.arena` **唔存在**
+（原本 524,288 B、後來 32,768 B，最終 0）。release 映像本來就冇編 ncm。
 
 ### 12.4 緩衝地圖（2026-11-27）
 

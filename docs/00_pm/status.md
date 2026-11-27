@@ -10491,3 +10491,20 @@ task_nc4_declare()：plan "usb.rx"（slot = region, n=1, STREAM）
 | state | hit=1／n=4／apply=4 | 不變 |
 
 所以「動態」真實總量係 **7,895 B**（5.2%），唔係 12,023 B。圖 [`buffer-map.svg`](buffer-map.svg) 已更新。
+
+---
+
+### 7.302 2026-11-27（arena 再收：冇模組 = 完全唔宣告，0 B）
+
+**用家疑問**：32,768 B 好似有點多，係 PSRAM 邊度？——答：係 **PSRAM**（`ncm.arena` 宣告
+`NC_PLAN_CLS_BULK` → `NC_PLAN_PSRAM`，`status mem` 標 `psram`），唔關內部 SRAM 事。
+
+**再收一步**：arena 係「載入模組的地方」，一個模組都冇就冇必要存在。
+
+- `nc_mod_arena_bytes()`：`scan->count == 0` → **0**（唔再 MIN 32 KB）。
+- `task_ncm_declare()`：arena 0 → 唔宣告（log：`ncm arena：0 個模組 → 唔宣告（省 32 KB PSRAM）`）。
+- `task_ncm_start()`：冇資源 → log 明示「冇模組 → 唔啟動」＋回 `ESP_ERR_NOT_FOUND`
+  （唔會行 loop；加 `.nce`／`.nct` 重開機就有）。
+
+**上板（tests 映像、SuperMini）**：plan 由 5 項變 **4 項**（`nc4.reply0`／`usb.rx`／
+`i80.prd`／`mock.prd`）、psram 由 35,383 → **2,615 B**；`rst=3`。release 映像本來就冇編 ncm。

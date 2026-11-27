@@ -20,7 +20,7 @@ PLAN = [("nc4.reply0", 2615, "核數（1 decoder）", "psram"),
 # 2026-11-27 查清：usb0.rx 同 usb.rx 係**同一塊記憶體**（USJ parser 用 link 名再包一次），
 # 唔係第二份；已用 nc_buf_find_region() 去重，帳目唔再重複計。
 EXTRA: list = []
-ARENA_ZERO = 32_768          # 冇模組時的 ncm.arena（有模組 = 掃描量）
+ARENA_ZERO = 0               # 冇模組 = 唔宣告（tests 映像實測）；有模組才 32 KB 起
 ARENA_OLD = 512 * 1024
 SCHEMA_FLASH = 12_404
 STATIC = BSS + DATA
@@ -141,7 +141,7 @@ def panel3(y: int) -> str:
             ("usb.rx", "4,128", "link region（cfg）", "△ 改 hardware.json 的 rx.region 就變"),
             ("i80.prd", "576", "px×lane（cfg）", "△ 跟 cfg，唔會超配"),
             ("mock.prd", "576", "測試後端", "△ release 仍然存在 → 可條件編譯省 576"),
-            ("ncm.arena", "32,768", "掃描 .nce／.nct", "✓ 0 模組 = 32 KB；有模組照實測（原 512 KB）"),
+            ("ncm.arena", "0", "掃描 .nce／.nct", "✓ 0 模組 = 唔宣告（原 32 KB）；有模組 32 KB 起～512 KB"),
             ("schema 表", "12,404", "schema JSON（生成期）", "✓ flash，0 SRAM")]
     ry = y + 54
     colx = [x + 24, x + 220, x + 330, x + 560]
@@ -175,7 +175,7 @@ def main() -> None:
             + text(W - M, 46, "esp_Net-Core", 11, MUTED, anchor="end"))
     body = panel1(96) + panel2(536) + panel3(760)
     foot = text(M, H - 12, f"靜態 {fmt(STATIC)} B ＋ 動態 {fmt(DYNAMIC)} B ＋ flash 字典 {fmt(SCHEMA_FLASH)} B"
-                           f" · arena 0 模組 {fmt(ARENA_ZERO)} B（舊 {fmt(ARENA_OLD)} B）", 10, MUTED)
+                           f" · arena 0 模組 = {fmt(ARENA_ZERO)} B（舊 32 KB 起）", 10, MUTED)
     OUT.write_text(head + body + foot + "</svg>\n", encoding="utf-8")
     print(f"wrote {OUT.relative_to(ROOT)}（{OUT.stat().st_size} B）")
 

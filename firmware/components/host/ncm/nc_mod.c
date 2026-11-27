@@ -792,8 +792,13 @@ int nc_mod_scan_dir(const char *dir, nc_mod_scan_t *out)
 // 32 B 對齊，夾在 [MIN, MAX]。冇模組 → MIN：唔再無條件預留 512 KB。
 size_t nc_mod_arena_bytes(const nc_mod_scan_t *scan)
 {
-    size_t need = (scan != NULL) ? scan->bytes : 0u;
-    need += (size_t)((scan != NULL) ? scan->count : 0) * 1024u;
+    // 一個模組都冇 → 0 B：arena 係「載入模組的地方」，冇模組就唔需要存在。
+    // 有模組才用 MIN 做下限（WAMR 模組 metadata／對齊 headroom）。
+    if (scan == NULL || scan->count <= 0) {
+        return 0;
+    }
+    size_t need = scan->bytes;
+    need += (size_t)scan->count * 1024u;
     need = (need + 31u) & ~(size_t)31u;
     if (need < NC_MOD_ARENA_MIN) {
         need = NC_MOD_ARENA_MIN;

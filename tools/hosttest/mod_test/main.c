@@ -278,8 +278,8 @@ int main(void)
     {
         nc_mod_scan_t sc;
         memset(&sc, 0, sizeof(sc));
-        CHECK(nc_mod_arena_bytes(&sc) == NC_MOD_ARENA_MIN, "冇模組 → MIN（32 KB）");
-        CHECK(nc_mod_arena_bytes(NULL) == NC_MOD_ARENA_MIN, "NULL → MIN");
+        CHECK(nc_mod_arena_bytes(&sc) == 0, "冇模組 → 0 B（唔再預留 32 KB）");
+        CHECK(nc_mod_arena_bytes(NULL) == 0, "NULL → 0 B");
         sc.count = 2;
         sc.bytes = 5000;
         const size_t ab = nc_mod_arena_bytes(&sc);

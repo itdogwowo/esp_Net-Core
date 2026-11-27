@@ -3695,7 +3695,12 @@ static nc_mod_scan_t s_mod_scan;
 
 static esp_err_t task_ncm_start(const nc_task_res_view_t *res, int n)
 {
-    if (n < 1 || res[0].ptr == NULL) {
+    if (n < 1 || res == NULL) {
+        // 明示：冇宣告 arena = 冇模組，ncm 唔啟動（唔係錯誤，加 .nce 重開機就有）
+        ESP_LOGI(TAG, "ncm：冇模組 → 唔啟動（0 B arena；加 .nce／.nct 後重開機）");
+        return ESP_ERR_NOT_FOUND;
+    }
+    if (res[0].ptr == NULL) {
         return ESP_ERR_NO_MEM;
     }
     nc_mod_set_task_placement(NC_MOD_TASK_CORE, NC_MOD_TASK_PRIO);
@@ -3728,6 +3733,10 @@ static int task_ncm_declare(nc_task_res_t *out, int max)
     // 2026-11-27：由「掃描結果」決定 arena 大小（唔再無條件預留 512 KB）。
     // 掃到 N 個模組、檔案合計 B bytes → arena = clamp(B + N×1 KB, 32 KB, 512 KB)。
     const size_t arena = nc_mod_arena_bytes(&s_mod_scan);
+    if (arena == 0) {
+        ESP_LOGI(TAG, "ncm arena：0 個模組 → 唔宣告（省 32 KB PSRAM；加 .nce 後重開機才要）");
+        return 0;       // ncm 任務冇資源 → 唔啟動（task_ncm_start 會講明）
+    }
     ESP_LOGI(TAG, "ncm arena：掃到 %d 個模組、檔案 %u B → 宣告 %u B（上限 %u B）",
              s_mod_scan.count, (unsigned)s_mod_scan.bytes, (unsigned)arena,
              (unsigned)NC_MOD_ARENA_MAX);
