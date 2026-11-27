@@ -1782,10 +1782,17 @@ static size_t status_put_sys(char *buf, size_t cap)
     return off;
 }
 
+// 靜態／動態分開報（2026-11-27）：`.bss`＋`.data` 係**開機前就定死**的靜態量，
+// plan 的 carve 才係「按 cfg／掃描量度」申請的動態量。用 linker symbol 量，唔靠估算。
+extern char _bss_start, _bss_end, _data_start, _data_end;
+
 static size_t status_put_mem(char *buf, size_t cap)
 {
     size_t off = 0;
-    jappend(buf, cap, &off, "\"mem\":{\"plan\":");
+    const size_t bss = (size_t)(&_bss_end - &_bss_start);
+    const size_t data = (size_t)(&_data_end - &_data_start);
+    jappend(buf, cap, &off, "\"mem\":{\"static\":{\"bss\":%u,\"data\":%u,\"total\":%u},\"plan\":",
+            (unsigned)bss, (unsigned)data, (unsigned)(bss + data));
     jchain(buf, cap, &off, nc_plan_json);
     jappend(buf, cap, &off, ",\"hub\":");
     jchain(buf, cap, &off, nc_hub_registry_json);

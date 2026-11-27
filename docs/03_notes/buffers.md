@@ -695,3 +695,34 @@ CONFIG_NETCORE_PIXEL_PACK_PSRAM=y
 完全不同的 latency（19.967 ms vs 0.970 ms 就是例子）。固定政策可以事前預算、
 量測、保證上限；如果 internal 不足，應該在 build／plan 階段就失敗，不是 runtime
 偷偷換 PSRAM。
+
+---
+
+## 12. 靜態 vs 動態：分界線（2026-11-27）
+
+以前本文件的講法容易被讀成「所有 buffer 都係開機一次預留最大量」。實況要分兩層：
+
+| 類 | 係咩 | 誰決定大小 | 量 |
+|---|---|---|---|
+| **靜態（.bss／.data）** | 開機前就定死：核心結構、固定表、小陣列 | C 宣告 | `status mem` 的 `static.{bss,data}`（linker symbol 實量） |
+| **動態（plan carve）** | 按 cfg／掃描量度之後申請：per-link rx、模組 arena、pixel ring、reply frame | 服務 `nc_plan_declare()`（bytes 由 cfg／掃描得來），B07 一次 carve | `status mem` 的 `plan.declared／planned／allocated` |
+
+所以「動態申請」其實已經存在（`nc_plan`）：**宣告 → 加總 → 每 class 一次 carve → 逐項發指標**，
+失敗逐項回報（唔會整批死，亦唔會靜默降級）。
+
+### 12.1 分界規則（新增 buffer 時照這個判）
+
+1. **細、永遠都要、唔跟設定變** → 靜態（例：狀態 store、schema 表、decoder 小結構）。
+2. **大、跟設定／掃描變** → plan 宣告（例：每條 link 的 rx region、`.nct` 模組 arena、
+   px×lane 的 ring）。bytes 要用「實際掃到幾多」計，唔可以用 `MAX_*` 乘出來。
+3. **熱插拔的數量（任務／效果）** → 唔可以靜態陣列；用 `nc_buf_create()`（heap）
+   或 plan，並用動態 key 記錄（見 `state-dynamic-keys.md`）。
+
+### 12.2 現況量測（SuperMini／`idf=v6.1.1`，`status mem`）
+
+- `static.bss` ≈ 104 KB、`static.data` ≈ 39 KB（linker symbol 實量，包含 FreeRTOS／lwIP／Wi-Fi 等）
+- `plan`：`decl=4`、`carve=0`（每 class 一次大塊，逐項切）、`bytes.int=5,280`／`psram=2,615`
+- `buf`：5 條、合計 12,023 B（每條格數／格大小由 cfg 決定）
+
+> 下一步（未做）：把 plan 的 bytes 由「宣告時已算好」進一步改成「掃描完 `.nct`／`.nce`
+> 才宣告」——現時模組 arena 仍然係固定上限；效果數量掃描之後才知。

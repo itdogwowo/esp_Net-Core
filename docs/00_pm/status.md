@@ -10383,3 +10383,28 @@ ID 去問它叫什麼」。效果器同理（`.nce`，目前幾條固定曲線�
 **為什麼唔用 index**：插一個任務 → index 位移 → 舊值對錯任務（比冇值更危險）。
 **未做**：任務管理器／效果管理器實際用 name-hash 讀寫（要同 `nc_task_list_json()`、
 `.nce` 掃描對齊）、碰撞自查 log、孤兒值清理。
+
+---
+
+### 7.298 2026-11-27（靜態／動態緩衝分開報；plan 已經係「量度後申請」）
+
+**用家要求**：把「固定預留一大塊靜態」同「按掃描量度動態申請」分開。
+
+**查清現況**：緩衝其實已經有兩層——
+
+| 類 | 內容 | 大小由誰定 | 實測（SuperMini） |
+|---|---|---|---|
+| 靜態 `.bss`／`.data` | 核心結構、固定表、小陣列 | C 宣告（開機前定死） | bss ≈104 KB、data ≈39 KB（linker symbol 量） |
+| 動態 plan carve | per-link rx、模組 arena、pixel ring、reply frame | 服務 `nc_plan_declare()` 用 cfg／掃描值宣告 → 每 class 一次 carve | `decl=4`、`int=5,280 B`、`psram=2,615 B` |
+
+所以「動態」不是新功能，而是一直在 plan 裡；之前文件寫「開機一次要齊」令人誤會成
+「一定要預留最大量」。
+
+**今次改動**：`status mem` 加 `static:{bss,data,total}`（用 linker symbol `_bss_start/_bss_end/
+_data_start/_data_end` 實量，唔係估算），令「靜態 vs 動態」可以一眼對數。
+
+**分界規則**（寫入 `docs/03_notes/buffers.md` §12）：細＋永遠要＋唔跟設定 → 靜態；
+大＋跟 cfg／掃描 → plan 宣告；熱插拔數量（任務／效果）→ heap／plan ＋ 動態 key。
+
+**未做**：模組 arena 仍然用固定上限；效果數量要掃完 `.nce` 才知——下一步把 plan 的
+宣告時機推遲到掃描之後，bytes 由實測數量算。
