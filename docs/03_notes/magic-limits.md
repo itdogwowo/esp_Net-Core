@@ -64,3 +64,20 @@
 3. `NC_TASK_MAX` 20（核心 8＋模組 8＋…）
 4. `NC_PX_JOB_RANGE_MAX` 4（一個 job 4 段 range）
 5. `NC_HW_MAX` 32 / claim 64
+
+## G. 回覆緩衝為什麼變大（2026-11-28）
+
+- **同線路無關**：`nc4_ctx_t.reply` 係每個 **decoder** 一份的「砌回覆幀工作緩衝」
+  （plan 喺開機 declare，`main.c` 的 k_reply_name，大小 `NC4_REPLY_FRAME_MAX`）；
+  link 只係讀砌好的幀去送，link 自己另有 TX 緩衝（由 config 的 region／slot 決定）。
+- **為什麼兩份**：core0／core1 可以同時各自回覆；共用一塊會互相覆蓋（舊版 static
+  ~10 KB 就係咁樣卡住「第二個 decoder」）。
+- **為什麼由 2,615 變 8,211**：回覆幀 = header + 2 + JSON + CRC。以前 JSON 寫死
+  2,600，所以幀只需 2,615；改成「payload 上限 − 2」之後，幀要同協議最大 frame
+  一樣大（8,205 + 少少），砌幀緩衝就跟住大。
+- **代價**：2 × 5,596 ≈ **11.2 KB**（BULK class：有 PSRAM 用 PSRAM，C3 落 internal）。
+
+三條可以唔加記憶體的路（未做）：
+1. 直接砌入 link 的 TX 緩衝（零拷貝）——要 link 提供「借位」API，MTU 唔同時 fallback；
+2. 回覆緩衝按需 heap（用完即還）——有碎片／延遲；
+3. 保留 2,600——status 永遠提早截斷（即係用家反對嗰種）。
