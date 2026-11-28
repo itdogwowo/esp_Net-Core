@@ -11177,3 +11177,38 @@ render／encode task running、無 crash、state 重建正常；之後已還原 
 
 → runtime 切 mode 只讀 cache／swap，冇 build；只有 cache 被預算淘汰或 layout >32 KB
 例外仍會重建（16IO 4 個 mode 合共遠低於 128 KB，唔會發生）。
+
+---
+
+### 7.325 2026-11-28（32 KB／128 KB 係政策唔係格式上限；cache 舊 key 清理）
+
+**釐清**
+- **32 KB**：單張 `.layout` 值唔值得存嘅**政策門檻**（可改），唔係格式上限。
+- **128 KB**：cache 總量預算（Kconfig `NETCORE_PIXEL_LAYOUT_CACHE_KB`，0=不限），
+  亦係政策，唔係格式上限。
+- 真正格式限制：header／record 欄位闊度（aprog u16、counts 等）、單一 payload 1 MB
+  安全檢查、FAT 容量。
+
+**cache 估算公式（用家要求白話）**
+```text
+cache ≈ 44B header
+      + 40B × 效果程式數（aprog）
+      + 32B × 波形段數（segments）
+      + 12B × 工作項數（jobs）
+      + 16B × 連續區段數（runs）
+```
+- `aprog`：一個效果編譯後的小程式（每個不同 effect 一份）。
+- `segments`：正弦／方波／脈衝等波形段。
+- `jobs`：一個效果要寫哪個通道（r/g/b…）。
+- `runs`：連續寫哪幾顆 pixel 的區段；通常係最大項。
+- 例：16IO grid16 = 256 runs（4 KB）＋其他 ≈ **7.5 KB**。
+
+**新增：cache 舊 key 清理**
+- `cache_prebuild_missing()` 全部 mode 預建時收集目前有效 key；
+  完成後 `cache_cleanup_stale()` 掃 `/pixel/cache/*.layout`，唔喺有效 key 清單就刪。
+- 效果／map／mode 一改，key 變；舊 cache 唔再佔 128 KB 預算，亦唔會被 LRU 誤用。
+- 真機驗證：手動放入 `deadbeef.layout` → reload 後 **exists=0**；
+  4 個有效 cache 仍然 `present=4、built=0`。
+
+**未改**：單張 >32 KB 仍然唔存（效能政策）；如果將來要保證所有 mode 零 runtime build，
+可以調高門檻或改存大表。

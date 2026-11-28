@@ -311,6 +311,55 @@ static bool layout_cache_trim(size_t need, const char *skip)
 }
 
 // 存一張 layout cache；need 已含 header overhead。回 ESP_ERR_NO_MEM = 超預算唔存。
+// 掃描 cache 目錄，刪走「唔屬於目前任何 mode」的舊 .layout（effects／map／mode
+// 一改，key 就變；舊 key 唔應該繼續佔 128 KB 預算）。keys 係目前所有 mode 的 key。
+static void cache_cleanup_stale(const uint32_t *keys, uint32_t nkeys)
+{
+    if (keys == NULL || nkeys == 0) {
+        return;
+    }
+    char cdir[96];
+    (void)snprintf(cdir, sizeof(cdir), "%s/cache", s_content.pixel_dir);
+    DIR *d = opendir(cdir);
+    if (d == NULL) {
+        return;
+    }
+    uint32_t removed = 0;
+    struct dirent *de;
+    while ((de = readdir(d)) != NULL) {
+        const char *fn = de->d_name;
+        const size_t nl = strlen(fn);
+        const size_t sl = sizeof(LAYOUT_CACHE_SUFFIX) - 1;
+        if (nl <= sl || strcmp(fn + nl - sl, LAYOUT_CACHE_SUFFIX) != 0) {
+            continue;
+        }
+        char *end = NULL;
+        const unsigned long v = strtoul(fn, &end, 16);
+        if (end == NULL || *end != '.') {
+            continue;
+        }
+        bool valid = false;
+        for (uint32_t i = 0; i < nkeys; i++) {
+            if ((uint32_t)v == keys[i]) {
+                valid = true;
+                break;
+            }
+        }
+        if (!valid) {
+            char path[192];
+            (void)snprintf(path, sizeof(path), "%s/%s", cdir, fn);
+            if (unlink(path) == 0) {
+                removed++;
+            }
+        }
+    }
+    closedir(d);
+    if (removed > 0) {
+        ESP_LOGI(TAG, "cache 清理：刪走 %u 個舊 key（目前有效 key=%u）",
+                 (unsigned)removed, (unsigned)nkeys);
+    }
+}
+
 static esp_err_t layout_cache_save(const nc_px_layout_t *l, const char *path, uint32_t key,
                                    size_t payload_bytes)
 {
@@ -1382,6 +1431,11 @@ static void cache_prebuild_missing(void)
         free(cand);
         return;
     }
+    // 全部 mode 預建時，順便收集有效 key，之後清走舊 key 的 cache。
+    uint32_t *valid_keys = NULL;
+    if (n == modes->n) {
+        valid_keys = (uint32_t *)malloc((size_t)n * sizeof(*valid_keys));
+    }
     uint32_t present = 0, built = 0, too_big = 0, failed = 0;
     const int64_t t0 = esp_timer_get_time();
     const nc_px_hw_inv_t inv = { .hw = NC_PX_HW_WS2812, .base = 0, .px = s_content.px };
@@ -1398,6 +1452,9 @@ static void cache_prebuild_missing(void)
         }
         const uint32_t key = nc_px_layout_cache_key(m->hash, map->hash, s_content.px,
                                                    assets_hash(tmp));
+        if (valid_keys != NULL) {
+            valid_keys[ci] = key;
+        }
         char path[96];
         (void)snprintf(path, sizeof(path), "%s/cache/%08lx.layout", s_content.pixel_dir,
                        (unsigned long)key);
@@ -1424,6 +1481,12 @@ static void cache_prebuild_missing(void)
         nc_px_layout_free(&lay);
     }
     nc_px_asset_tbl_free(tmp);
+    if (valid_keys != NULL) {
+        if (failed == 0) {
+            cache_cleanup_stale(valid_keys, n);
+        }
+        free(valid_keys);
+    }
     free(cand);
     s_prebuild.present = present;
     s_prebuild.built = built;
