@@ -700,6 +700,15 @@ esp_err_t nc_px_mode_parse(const char *json, size_t len, nc_px_mode_entry_t *poo
 }
 
 // ═══════════════════════ registry（show）═══════════════════════
+void nc_px_show_free(nc_px_show_t *show)
+{
+    if (show == NULL) {
+        return;
+    }
+    free(show->list);
+    memset(show, 0, sizeof(*show));
+}
+
 esp_err_t nc_px_show_parse(const char *json, size_t len, nc_px_show_t *out)
 {
     if (json == NULL || out == NULL) {
@@ -731,9 +740,17 @@ esp_err_t nc_px_show_parse(const char *json, size_t len, nc_px_show_t *out)
                     for (;;) {
                         char v[NC_PX_LAYER_NAME_MAX];
                         if (nc_px_js_str(&j, v, sizeof(v))) {
-                            if (out->nlist < NC_PX_SHOW_LIST_MAX) {
-                                copy_str(out->list[out->nlist++], NC_PX_LAYER_NAME_MAX, v);
+                            if (out->nlist == out->cap) {
+                                const uint32_t cap = (out->cap != 0) ? out->cap * 2u : 8u;
+                                char (*nl)[NC_PX_LAYER_NAME_MAX] = realloc(
+                                    out->list, (size_t)cap * NC_PX_LAYER_NAME_MAX);
+                                if (nl == NULL) {
+                                    return ESP_ERR_NO_MEM;
+                                }
+                                out->list = nl;
+                                out->cap = cap;
                             }
+                            copy_str(out->list[out->nlist++], NC_PX_LAYER_NAME_MAX, v);
                         } else if (!nc_px_js_skip(&j)) {
                             return ESP_ERR_INVALID_ARG;
                         }

@@ -23,7 +23,6 @@
 static const char *TAG = "px_layer";
 
 #define SCAN_FILE_MAX (256*1024)   // 500 組 map 就 ~58 KB；8 KB 會失敗
-#define SCAN_ENTRIES  32
 #define SCAN_NAME_LEN 32
 #define SCAN_PATH_LEN 192
 
@@ -89,6 +88,45 @@ static int cmp_name(const void *a, const void *b)
 {
     return strcmp((const char *)a, (const char *)b);
 }
+// 掃目錄的 .json 檔名（動態；唔再固定 32 個）。回傳排序好的陣列，*out_n=數量。
+static char (*scan_json_names(const char *dir, uint32_t *out_n))[SCAN_NAME_LEN]
+{
+    *out_n = 0;
+    DIR *d = opendir(dir);
+    if (d == NULL) {
+        return NULL;
+    }
+    uint32_t n = 0;
+    struct dirent *e;
+    while ((e = readdir(d)) != NULL) {
+        const char *fn = e->d_name;
+        if (fn[0] != '.' && strlen(fn) < SCAN_NAME_LEN && ends_with(fn, ".json")) {
+            n++;
+        }
+    }
+    rewinddir(d);
+    char (*names)[SCAN_NAME_LEN] = NULL;
+    if (n > 0) {
+        names = malloc((size_t)n * sizeof(*names));
+        if (names == NULL) {
+            closedir(d);
+            return NULL;
+        }
+        uint32_t k = 0;
+        while ((e = readdir(d)) != NULL) {
+            const char *fn = e->d_name;
+            if (fn[0] == '.' || strlen(fn) >= SCAN_NAME_LEN || !ends_with(fn, ".json")) {
+                continue;
+            }
+            memcpy(names[k++], fn, SCAN_NAME_LEN);
+        }
+        qsort(names, n, sizeof(*names), cmp_name);
+        *out_n = n;
+    }
+    closedir(d);
+    return names;
+}
+
 
 static int cmp_mode_index(const void *a, const void *b)
 {
@@ -137,8 +175,11 @@ void nc_px_layer_clear(void)
     //   nc_px_asset_scan() 會把同名效果當重複丟掉（log「撞名：…（保留第一個）」），
     //   結果改咗 effects.json 之後要 reboot 才生效，刪走的效果亦仍然留在 RAM。
     nc_px_asset_clear();
+    free(s_maps.item);
+    free(s_modes.item);
     memset(&s_maps, 0, sizeof(s_maps));
     memset(&s_modes, 0, sizeof(s_modes));
+    nc_px_show_free(&s_show);
     memset(&s_show, 0, sizeof(s_show));
     map_pool_free();
     free(s_mode_pool);
@@ -156,25 +197,30 @@ esp_err_t nc_px_map_scan(const char *dir)
         ESP_LOGW(TAG, "掃唔到 %s（當作冇 mapping）", dir);
         return ESP_ERR_NOT_FOUND;
     }
-    static char names[SCAN_ENTRIES][SCAN_NAME_LEN];
-    int n = 0;
-    struct dirent *e = NULL;
-    while ((e = readdir(d)) != NULL) {
-        const char *fn = e->d_name;
-        if (fn[0] == '.' || strlen(fn) >= SCAN_NAME_LEN) {
-            continue;
-        }
-        if (ends_with(fn, ".json") && n < SCAN_ENTRIES) {
-            memcpy(names[n++], fn, SCAN_NAME_LEN);
-        }
-    }
     closedir(d);
-    qsort(names, (size_t)n, sizeof(names[0]), cmp_name);
+    uint32_t n = 0;
+    char (*names)[SCAN_NAME_LEN] = scan_json_names(dir, &n);
+    if (n == 0) {
+        free(names);
+        return ESP_OK;
+    }
+
+    // 表由檔案數決定；上限只剩 RAM。
+    free(s_maps.item);
+    s_maps.item = (nc_px_map_t *)map_pool_alloc_bytes((size_t)n * sizeof(*s_maps.item));
+    s_maps.cap = (s_maps.item != NULL) ? n : 0;
+    s_maps.n = 0;
+    s_maps.rejected = 0;
+    if (s_maps.item == NULL) {
+        ESP_LOGW(TAG, "map 表配置失敗（%u 檔）", (unsigned)n);
+        free(names);
+        return ESP_ERR_NO_MEM;
+    }
 
     // ── pass 1：數容量（group／sel 由檔案決定，唔用固定陣列）──
     uint32_t need_group = 0;
     uint32_t need_sel = 0;
-    for (int i = 0; i < n; i++) {
+    for (uint32_t i = 0; i < n; i++) {
         char path[SCAN_PATH_LEN];
         const int w = snprintf(path, sizeof(path), "%s/%s", dir, names[i]);
         if (w < 0 || (size_t)w >= sizeof(path)) {
@@ -201,7 +247,7 @@ esp_err_t nc_px_map_scan(const char *dir)
     }
 
     // ── pass 2：解析＋登記 ──
-    for (int i = 0; i < n; i++) {
+    for (uint32_t i = 0; i < n; i++) {
         char path[SCAN_PATH_LEN];
         const int w = snprintf(path, sizeof(path), "%s/%s", dir, names[i]);
         if (w < 0 || (size_t)w >= sizeof(path)) {
@@ -230,7 +276,7 @@ esp_err_t nc_px_map_scan(const char *dir)
             continue;
         }
         bool dup = false;
-        for (uint8_t k = 0; k < s_maps.n; k++) {
+        for (uint32_t k = 0; k < s_maps.n; k++) {
             if (s_maps.item[k].id == m.id || strcmp(s_maps.item[k].name, m.name) == 0) {
                 dup = true;
             }
@@ -240,7 +286,7 @@ esp_err_t nc_px_map_scan(const char *dir)
             s_maps.rejected++;
             continue;
         }
-        if (s_maps.n >= NC_PX_MAP_MAX) {
+        if (s_maps.n >= s_maps.cap) {
             s_maps.rejected++;
             continue;
         }
@@ -248,6 +294,7 @@ esp_err_t nc_px_map_scan(const char *dir)
         ESP_LOGI(TAG, "mapping %u（%s）：%u group(s)", (unsigned)m.id, m.name,
                  (unsigned)m.ngroups);
     }
+    free(names);
     return ESP_OK;
 }
 
@@ -261,24 +308,29 @@ esp_err_t nc_px_mode_scan(const char *dir)
         ESP_LOGW(TAG, "掃唔到 %s（當作冇 mode）", dir);
         return ESP_ERR_NOT_FOUND;
     }
-    static char names[SCAN_ENTRIES][SCAN_NAME_LEN];
-    int n = 0;
-    struct dirent *e = NULL;
-    while ((e = readdir(d)) != NULL) {
-        const char *fn = e->d_name;
-        if (fn[0] == '.' || strlen(fn) >= SCAN_NAME_LEN) {
-            continue;
-        }
-        if (ends_with(fn, ".json") && n < SCAN_ENTRIES) {
-            memcpy(names[n++], fn, SCAN_NAME_LEN);
-        }
-    }
     closedir(d);
-    qsort(names, (size_t)n, sizeof(names[0]), cmp_name);
+    uint32_t n = 0;
+    char (*names)[SCAN_NAME_LEN] = scan_json_names(dir, &n);
+    if (n == 0) {
+        free(names);
+        return ESP_OK;
+    }
+
+    // 表由檔案數決定；上限只剩 RAM。
+    free(s_modes.item);
+    s_modes.item = (nc_px_mode_t *)map_pool_alloc_bytes((size_t)n * sizeof(*s_modes.item));
+    s_modes.cap = (s_modes.item != NULL) ? n : 0;
+    s_modes.n = 0;
+    s_modes.rejected = 0;
+    if (s_modes.item == NULL) {
+        ESP_LOGW(TAG, "mode 表配置失敗（%u 檔）", (unsigned)n);
+        free(names);
+        return ESP_ERR_NO_MEM;
+    }
 
     // ── pass 1：數 mode 條目（容量由檔案決定）──
     uint32_t need = 0;
-    for (int i = 0; i < n; i++) {
+    for (uint32_t i = 0; i < n; i++) {
         char path[SCAN_PATH_LEN];
         const int w = snprintf(path, sizeof(path), "%s/%s", dir, names[i]);
         if (w < 0 || (size_t)w >= SCAN_PATH_LEN) {
@@ -309,7 +361,7 @@ esp_err_t nc_px_mode_scan(const char *dir)
     uint32_t used = 0;
 
     // ── pass 2：解析＋登記（每個 mode 用 pool 的一段）──
-    for (int i = 0; i < n; i++) {
+    for (uint32_t i = 0; i < n; i++) {
         char path[SCAN_PATH_LEN];
         const int w = snprintf(path, sizeof(path), "%s/%s", dir, names[i]);
         if (w < 0 || (size_t)w >= SCAN_PATH_LEN) {
@@ -338,7 +390,7 @@ esp_err_t nc_px_mode_scan(const char *dir)
             continue;
         }
         bool dup = false;
-        for (uint8_t k = 0; k < s_modes.n; k++) {
+        for (uint32_t k = 0; k < s_modes.n; k++) {
             if (s_modes.item[k].id == m.id || strcmp(s_modes.item[k].name, m.name) == 0) {
                 dup = true;
             }
@@ -348,7 +400,7 @@ esp_err_t nc_px_mode_scan(const char *dir)
             s_modes.rejected++;
             continue;
         }
-        if (s_modes.n >= NC_PX_MODE_MAX) {
+        if (s_modes.n >= s_modes.cap) {
             s_modes.rejected++;
             continue;
         }
@@ -356,6 +408,7 @@ esp_err_t nc_px_mode_scan(const char *dir)
         used += m.nentry;
         ESP_LOGI(TAG, "mode %u（%s）：%u 項", (unsigned)m.id, m.name, (unsigned)m.nentry);
     }
+    free(names);
     qsort(s_modes.item, s_modes.n, sizeof(s_modes.item[0]), cmp_mode_index);
     return ESP_OK;
 }
@@ -435,7 +488,7 @@ static bool ref_matches(const char *ref, const char *name, uint8_t id)
 
 const nc_px_map_t *nc_px_map_find(const char *ref)
 {
-    for (uint8_t i = 0; i < s_maps.n; i++) {
+    for (uint32_t i = 0; i < s_maps.n; i++) {
         if (ref_matches(ref, s_maps.item[i].name, s_maps.item[i].id)) {
             return &s_maps.item[i];
         }
@@ -445,7 +498,7 @@ const nc_px_map_t *nc_px_map_find(const char *ref)
 
 const nc_px_mode_t *nc_px_mode_find(const char *ref)
 {
-    for (uint8_t i = 0; i < s_modes.n; i++) {
+    for (uint32_t i = 0; i < s_modes.n; i++) {
         if (ref_matches(ref, s_modes.item[i].name, s_modes.item[i].id)) {
             return &s_modes.item[i];
         }

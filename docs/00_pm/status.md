@@ -10982,3 +10982,31 @@ render／encode task running、無 crash、state 重建正常；之後已還原 
 
 **仍然唔支援**：如果要「每一個 mode × 每一個 map」都預先 cache，現在係 mode 各自 mapping，
 唔會生成 Cartesian product；要真全組合要另立 mode，並受 16 modes／128 KB 預算限制。
+
+---
+
+### 7.318 2026-11-28（拆掉 map 8／mode 16／show list 16／scan 32 的硬上限）
+
+**用家定案**：8／16／16／16 只係實作 static array，唔係 storage／效能推導，唔應該做用戶可見上限；
+整體唔希望限制用戶設定，只有 RAM／FAT／快取預算呢類真實成本才要講。
+
+**已改（真機 build＋host tests 綠）**
+- `nc_px_layer_scan.c`：
+  - 目錄 `.json` 檔名改 **動態 array**（原本 `SCAN_ENTRIES=32`，第 33 個檔唔掃）；
+  - `nc_px_map_tbl_t`／`nc_px_mode_tbl_t` 改 `{n, rejected, cap, item*}`；item 按掃到檔案數
+    `heap_caps_malloc`（PSRAM 優先），**冇 8／16 硬上限**；容量不足只會 `ESP_ERR_NO_MEM`；
+  - `nc_px_layer_clear()` 釋放 map／mode／show 動態記憶體。
+- `nc_px_show_t`：`list` 改動態 `char (*)[24]`，`nc_px_show_parse()` 按 list 長度 realloc；
+  新增 `nc_px_show_free()`。registry list 唔再只 16 個。
+- paint：prebuild 候選 array 由 `NC_PX_MODE_MAX` 固定 16 改按 `modes->n` malloc；
+  show 迴圈改 uint32。`NC_PX_SHOW_LIST_MAX` 移除。
+- mode entries／effects table／group／sel 本來已經係動態（之前已做），今次冇再動。
+
+**仍然係硬上限（下一步）**
+- 一個 program **16 段**（`NC_PX_SEG_MAX`）：`nc_px_asset_t.seg[16]` 同 compiled
+  `nc_px_prog_t.seg[16]` inline；要拆要改 asset／program／layout cache 的 variable-length
+  序列化，係另一個 refactor，今次未做。
+- map／mode `id` 欄位仍然 0–255（`uint8_t`）；名稱為主，數字 id 係 legacy。
+- `NC_PX_MODE_ENTRY_MAX=8` 只剩 legacy show／bench 固定 array，production paint 唔用。
+
+**驗證**：16IO build 成功、host tests 全綠；16IO 本身 3 maps／4 modes，行為不變。

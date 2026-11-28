@@ -27,8 +27,7 @@ extern "C" {
 // 正常超過只會令 pool 配置失敗（ESP_ERR_NO_MEM），唔會靜默丟資料。
 #define NC_PX_GROUP_MAX     65535u
 #define NC_PX_GROUP_SEL_MAX 4194304u
-#define NC_PX_MODE_ENTRY_MAX  8
-#define NC_PX_SHOW_LIST_MAX  16
+#define NC_PX_MODE_ENTRY_MAX  8   // legacy show/bench 固定 array；production paint 唔用呢個上限
 
 // ── 硬體型別（registry 的 key；同 pixel_task.py 的 TYPE_MAP 一致）──
 typedef enum {
@@ -118,9 +117,10 @@ typedef struct {
 
 // ── show（播放清單）──
 typedef struct {
-    bool    auto_play;
-    uint8_t nlist;
-    char    list[NC_PX_SHOW_LIST_MAX][NC_PX_LAYER_NAME_MAX];
+    bool        auto_play;
+    uint32_t    nlist;
+    uint32_t    cap;
+    char      (*list)[NC_PX_LAYER_NAME_MAX];   // 動態；nc_px_show_parse() 配置
 } nc_px_show_t;
 
 // ═══════════════════════ API ═══════════════════════
@@ -128,6 +128,7 @@ typedef struct {
 // map 兩步：先 `nc_px_map_count()` 數要幾多 group／sel，配好 pool，再 `nc_px_map_parse()`。
 // pool 由呼叫端擁有；parse 只向前推，容量不足回 ESP_ERR_NO_MEM（唔會截斷）。
 void      nc_px_map_pool_reset(nc_px_map_pool_t *pool);
+void      nc_px_show_free(nc_px_show_t *show);
 esp_err_t nc_px_map_count(const char *json, size_t len, uint32_t *ngroups, uint32_t *nsels);
 esp_err_t nc_px_map_parse(const char *json, size_t len, nc_px_map_pool_t *pool,
                           nc_px_map_t *out);

@@ -40,6 +40,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <errno.h>
 #include <dirent.h>
@@ -820,14 +821,14 @@ static const nc_px_mode_t *playlist_next_mode(void)
         return NULL;
     }
     int cur = -1;
-    for (uint8_t i = 0; i < reg->nlist; i++) {
+    for (uint32_t i = 0; i < reg->nlist; i++) {
         if (strcmp(reg->list[i], s_content.mode_name) == 0) {
             cur = (int)i;
             break;
         }
     }
     const int start = (cur >= 0) ? (cur + 1) : 0;
-    for (uint8_t n = 0; n < reg->nlist; n++) {
+    for (uint32_t n = 0; n < reg->nlist; n++) {
         const int idx = (start + n) % reg->nlist;
         const nc_px_mode_t *m = nc_px_mode_find(reg->list[idx]);
         if (m != NULL && strcmp(m->name, s_content.mode_name) != 0) {
@@ -1146,14 +1147,14 @@ static void content_auto_advance(void)
         return;
     }
     int cur = -1;
-    for (uint8_t i = 0; i < reg->nlist; i++) {
+    for (uint32_t i = 0; i < reg->nlist; i++) {
         if (strcmp(reg->list[i], s_content.mode_name) == 0) {
             cur = (int)i;
             break;
         }
     }
     const int start = (cur >= 0) ? (cur + 1) : 0;
-    for (uint8_t n = 0; n < reg->nlist; n++) {
+    for (uint32_t n = 0; n < reg->nlist; n++) {
         const int idx = (start + n) % reg->nlist;
         const nc_px_mode_t *mode = nc_px_mode_find(reg->list[idx]);
         if (mode != NULL) {
@@ -1280,11 +1281,15 @@ static void cache_prebuild_missing(void)
         return;
     }
     const nc_px_show_t *reg = nc_px_show();
-    const nc_px_mode_t *cand[NC_PX_MODE_MAX];
+    const nc_px_mode_t **cand = (const nc_px_mode_t **)malloc(
+        (size_t)(modes->n ? modes->n : 1u) * sizeof(*cand));
+    if (cand == NULL) {
+        return;
+    }
     uint32_t n = 0;
     // 先跟 registry list（播放清單次序），再加其餘 mode（去重）。
     if (reg != NULL) {
-        for (uint8_t i = 0; i < reg->nlist && n < NC_PX_MODE_MAX; i++) {
+        for (uint32_t i = 0; i < reg->nlist && n < modes->n; i++) {
             const nc_px_mode_t *m = nc_px_mode_find(reg->list[i]);
             bool dup = false;
             for (uint32_t k = 0; k < n; k++) {
@@ -1298,7 +1303,7 @@ static void cache_prebuild_missing(void)
             }
         }
     }
-    for (uint32_t i = 0; i < modes->n && n < NC_PX_MODE_MAX; i++) {
+    for (uint32_t i = 0; i < modes->n; i++) {
         const nc_px_mode_t *m = &modes->item[i];
         bool dup = false;
         for (uint32_t k = 0; k < n; k++) {
@@ -1318,6 +1323,7 @@ static void cache_prebuild_missing(void)
     nc_px_asset_tbl_t *tmp = nc_px_asset_tbl_alloc(0);
     if (tmp == NULL) {
         ESP_LOGW(TAG, "開機預建：臨時 asset 表配置失敗 → 略過");
+        free(cand);
         return;
     }
     uint32_t present = 0, built = 0, too_big = 0, failed = 0;
@@ -1362,6 +1368,7 @@ static void cache_prebuild_missing(void)
         nc_px_layout_free(&lay);
     }
     nc_px_asset_tbl_free(tmp);
+    free(cand);
     s_prebuild.present = present;
     s_prebuild.built = built;
     s_prebuild.too_big = too_big;

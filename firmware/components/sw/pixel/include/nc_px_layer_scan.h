@@ -16,19 +16,20 @@
 extern "C" {
 #endif
 
-#define NC_PX_MAP_MAX   8
-#define NC_PX_MODE_MAX 16
-
+// 2026-11-28：唔再用固定 8 maps／16 modes。表由掃描到的檔案數決定，item 由
+// nc_px_layer_scan.c 動態配置；上限只剩 RAM／FAT。呼叫端用 tbl->n／.item。
 typedef struct {
-    uint8_t     n;
-    uint16_t    rejected;      // 讀唔到／解析失敗／重複
-    nc_px_map_t item[NC_PX_MAP_MAX];
+    uint32_t     n;
+    uint32_t     rejected;     // 讀唔到／解析失敗／重複
+    uint32_t     cap;
+    nc_px_map_t *item;
 } nc_px_map_tbl_t;
 
 typedef struct {
-    uint8_t     n;
-    uint16_t    rejected;
-    nc_px_mode_t item[NC_PX_MODE_MAX];
+    uint32_t      n;
+    uint32_t      rejected;
+    uint32_t      cap;
+    nc_px_mode_t *item;
 } nc_px_mode_tbl_t;
 
 // 掃一個目錄（例如 `…/pixel/map`）；目錄唔存在 → ESP_ERR_NOT_FOUND。
