@@ -11958,3 +11958,17 @@ status ncm → live=mini、frames 增長
   量產映像維持 `CONFIG_NETCORE_PXBENCH` 控制（預設關）。
 - 真機驗證（tests 映像）：`raw 0xF062 0108000a` → `{"lanes":1,"px":8,…,"pass50":1}`。
 - 兩個 release 映像建置綠（Zero-Show、Matrix-LED-Textkit）。
+
+---
+
+### 7.368 2026-11-28（`test_action` 開始支援 `NC_TEST_ALLOW_<id>`；pixel 組已完成）
+
+- 機制本來就有（`CMakeLists.txt` 由 `NC_TEST_IDS` 產生 `NC_TEST_ALLOW_0..7`），
+  但 `test_action` 的指令從未用過；之前只有 native 模組受控。
+- **pixel 組（ID 3）** 已包好：`on_matrix／on_render／on_sinbench／on_progbench`
+  及 4 個表項全部 `#if defined(NC_TEST_ALLOW_3) && NC_TEST_ALLOW_3`。
+- 雙向驗證：
+  - `NC_TEST_IDS=0`（預設）→ 建置綠、pixel 指令唔收錄；
+  - `NC_TEST_IDS=0,3`（獨立 build dir）→ `-- 測試 ID：0;3`、建置綠（證明 enabled 時可編）。
+- 其餘組（1=measure、2=network、4=ncm）未包；network handlers 唔連續
+  （2744–3410 中間夾住其他測試、`on_tcp_send` 喺 4540），要逐段包／先確認邊界。

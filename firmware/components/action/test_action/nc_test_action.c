@@ -3983,6 +3983,7 @@ static void on_mutex_bench(nc4_ctx_t *ctx, const nc4_frame_t *f)
 #if CONFIG_NETCORE_PIXEL
 #define NC4_CMD_MATRIX 0xF060
 
+#if defined(NC_TEST_ALLOW_3) && NC_TEST_ALLOW_3
 static void on_matrix(nc4_ctx_t *ctx, const nc4_frame_t *f)
 {
     static char j[900];
@@ -4383,6 +4384,7 @@ static void on_progbench(nc4_ctx_t *ctx, const nc4_frame_t *f)
                    canvas_kind, (unsigned)pair12_ns, (unsigned)conv_ns, (unsigned)dither_ns);
     reply_json(ctx, NC4_CMD_HUB_RSP, j);
 }
+#endif  // NC_TEST_ALLOW_3（pixel 測試組）
 #endif  // CONFIG_NETCORE_PIXEL
 
 // ── 註冊 ──
@@ -5141,10 +5143,12 @@ static const nc_action_t k_actions[] = {
     { NC4_CMD_PARSER_SELFTEST, on_parser_selftest, "test" },
     { NC4_CMD_MUTEX_BENCH, on_mutex_bench, "test" },
 #if CONFIG_NETCORE_PIXEL
+#if defined(NC_TEST_ALLOW_3) && NC_TEST_ALLOW_3
     { NC4_CMD_MATRIX, on_matrix, "test" },
     { NC4_CMD_RENDER, on_render, "test" },
     { NC4_CMD_SINBENCH, on_sinbench, "test" },
     { NC4_CMD_PROGBENCH, on_progbench, "test" },
+#endif
 #endif
     { NC4_CMD_RX_BENCH, on_rx_bench, "test" },
     { NC4_CMD_RX_RESULT, on_rx_result, "test" },
