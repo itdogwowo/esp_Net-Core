@@ -1266,6 +1266,16 @@ static esp_err_t reply_send_tail(nc4_reply_t *r, size_t json_len, uint8_t more, 
     if (r->ctx == NULL || r->ctx->send == NULL || r->frame == NULL) {
         return ESP_ERR_INVALID_STATE;
     }
+    // 用實際字串長度覆核：任何 jappend／snprintf 截斷都會令「回報長度」≠「實際長度」，
+    // 主機就會讀多幾 byte（JSON extra data）。以 strlen 為準，唔一致就 log。
+    {
+        const char *jb = (const char *)r->frame + NC4_HDR_LEN + 2;
+        const size_t real = strnlen(jb, NC4_REPLY_JSON_MAX);
+        if (real != json_len) {
+            ESP_LOGW(TAG, "status：頁長度校正 %u → %u", (unsigned)json_len, (unsigned)real);
+            json_len = real;
+        }
+    }
     if (json_len + 3 > NC4_REPLY_JSON_MAX) {
         reply_send(r, json_len);              // 超限：交返舊路徑（會回錯誤物件）
         return ESP_ERR_INVALID_SIZE;
