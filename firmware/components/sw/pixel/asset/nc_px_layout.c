@@ -10,6 +10,15 @@
 //   熱路徑只讀 runs ＋ 每條值流。
 #include "nc_px_layout.h"
 
+// `.nce` 的輸出值數由信箱提供；用 hook 避免 host 測試要 link nc_px_nce.c
+// （nc_px_nce.c 自己以 constructor 註冊）。冇註冊 = 0 → 照舊 skip。
+static uint32_t (*s_nce_values)(void);
+
+void nc_px_layout_set_nce_values(uint32_t (*fn)(void))
+{
+    s_nce_values = fn;
+}
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -462,12 +471,25 @@ esp_err_t nc_px_layout_build(const nc_px_mode_t *mode, const nc_px_map_t *map,
             }
             ai = naprog;
             out->aprog[ai].asset = src[e].asset;
-            out->aprog[ai].nv = src[e].asset->pixel_hint ? src[e].asset->pixel_hint : 1;
             out->aprog[ai].vals_off = nvals;
-            if (nc_px_engine_program_compile(src[e].asset, &out->aprog[ai].prog) != ESP_OK) {
-                out->skipped++;
-                out->skip_prog++;
-                continue;
+            if (src[e].asset->kind == NC_PX_ASSET_NCE) {
+                // `.nce`：值流由插件填（信箱），唔 compile program。
+                // 值數由信箱大小決定；未接／未 init → 照舊 skip（有計數，唔會靜默）。
+                const uint32_t nv = (s_nce_values != NULL) ? s_nce_values() : 0u;
+                if (nv == 0) {
+                    out->skipped++;
+                    out->skip_prog++;
+                    continue;
+                }
+                out->aprog[ai].nv = nv;
+                memset(&out->aprog[ai].prog, 0, sizeof(out->aprog[ai].prog));
+            } else {
+                out->aprog[ai].nv = src[e].asset->pixel_hint ? src[e].asset->pixel_hint : 1;
+                if (nc_px_engine_program_compile(src[e].asset, &out->aprog[ai].prog) != ESP_OK) {
+                    out->skipped++;
+                    out->skip_prog++;
+                    continue;
+                }
             }
             nvals += out->aprog[ai].nv;
             naprog++;

@@ -11748,3 +11748,17 @@ layout cache 改 name_id＋dictionary CRC；舊 cache 版本++。Phase 1 模組�
 - 方向固定：in 唯讀、out 唯寫；唔夠記憶體明示拒絕，唔縮。
 - `px` 係 **in region 的一個參數**（唔係 manifest 欄位）；`fps` 刪除。
 - 設計文件：`docs/03_notes/module-buffer-interface.md`（含要改嘅 5 處）。
+
+---
+
+### 7.356 2026-11-28（`.nce` 消費側接線完成：layout aprog ＋ effect task 取值）
+
+- `nc_px_layout`：`NC_PX_ASSET_NCE` 唔再 compile program；`nv = 信箱值數`
+  （透過 `nc_px_layout_set_nce_values()` hook，`nc_px_nce.c` 用 constructor 註冊；
+  host 測試冇註冊 → 0 → 照舊 skip）。值數 0 = 明示 skip（唔靜默）。
+- `pixel_effect_task`：NCE aprog 由 `nc_px_nce_latest()` + `nc_px_nce_to_vals()`
+  取值（未 publish → 全 0 黑，唔會讀亂數）。
+- 至此 `.nce` 全鏈：ncm tick 填 → 信箱 → effect task 值流 → 配對 write → 環 → 燈。
+
+**驗證**：`--tests` build ✔；host **30/30**。**未上板**（板跑舊 firmware，
+未確認 board／project，所以未 flash）。

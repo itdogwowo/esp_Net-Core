@@ -3,6 +3,7 @@
 // 見 nc_px_nce.h 的契約。這裡只管「搬 0–255 的 bytes」，唔識通道、唔識 write 模式、
 // 唔識燈 —— 那些全部係配對層的事。
 #include "nc_px_nce.h"
+#include "nc_px_layout.h"
 
 #include <string.h>
 
@@ -10,6 +11,12 @@
 #include "esp_log.h"
 
 static const char *TAG = "px.nce";
+
+// 開機自動告訴 layout「.nce 的值數由這個函式查」——雙方唔使互相 include 實作。
+static void __attribute__((constructor)) nce_register(void)
+{
+    nc_px_layout_set_nce_values(nc_px_nce_bytes);
+}
 
 static uint8_t *s_buf[2];
 static uint32_t s_bytes;

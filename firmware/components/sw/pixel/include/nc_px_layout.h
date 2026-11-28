@@ -156,6 +156,10 @@ void nc_px_layout_apply_dither(const nc_px_layout_t *l, uint16_t *const vals[],
 uint32_t nc_px_layout_apply12(const nc_px_layout_t *l, uint16_t *const *vals, uint16_t *dst);
 
 // 由 program 算一條值流（給 effect 任務；wave table 在 ap 內）
+// `.nce` 的輸出值數（信箱大小）由 nc_px_nce.c 以 constructor 註冊；
+// host 測試冇註冊就當 0（layout 照舊 skip，有計數）。
+void nc_px_layout_set_nce_values(uint32_t (*fn)(void));
+
 uint32_t nc_px_aprog_vals(const nc_px_aprog_t *ap, uint32_t step, uint16_t *out, uint32_t cap);
 
 #ifdef __cplusplus

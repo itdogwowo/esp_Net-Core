@@ -26,6 +26,7 @@
 #include "nc_pipeline.h"
 #include "nc_px_engine.h"   // nc_px_engine_tables_init（正弦／gamma 表）
 #include "nc_prio.h"
+#include "nc_px_nce.h"     // .nce 值流信箱
 #include "nc_task.h"
 
 static const char *TAG = "px_effect";
@@ -304,6 +305,20 @@ static uint32_t cached_vals(uint32_t i, uint32_t step, uint16_t *out, uint32_t c
     uint32_t n = ap->nv;
     if (n > cap) {
         n = cap;
+    }
+    // `.nce`：值流唔係畫波，而係插件每 tick 填好的信箱（0–255 → <<4 入 12-bit）。
+    // 未 publish（插件未開／未跑）→ 全 0（黑），唔會讀到亂數。
+    if (a->kind == NC_PX_ASSET_NCE) {
+        nc_px_nce_frame_t f;
+        if (!nc_px_nce_latest(&f) || f.data == NULL) {
+            memset(out, 0, (size_t)n * sizeof(uint16_t));
+            return n;
+        }
+        const uint32_t k = nc_px_nce_to_vals(f.data, f.bytes, out, n);
+        for (uint32_t j = k; j < n; j++) {
+            out[j] = 0;
+        }
+        return n;
     }
     if (s_wave[i] == NULL) {
         return nc_px_aprog_vals(ap, step, out, n);

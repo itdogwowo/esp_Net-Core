@@ -13,6 +13,13 @@
 
 #include "nc_px_nce.h"
 
+// stub：nc_px_nce.c 開機時會向 layout 註冊「值數查詢」；呢支測試唔 link layout。
+// （firmware 用真身；host 測試只需要符號存在。）
+void nc_px_layout_set_nce_values(void *fn)
+{
+    (void)fn;
+}
+
 static int s_fail;
 static int s_case;
 
