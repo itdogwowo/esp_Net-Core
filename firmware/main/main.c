@@ -1350,7 +1350,7 @@ static const nc_action_t s_pxbench_actions[] = {
 NC_ACTION_TABLE_DEF(s_pxbench_table, "bench", s_pxbench_actions);
 #endif
 
-
+// ── 0x1101 STATUS_GET → 0x1102 STATUS_RSP ──
 // keys 語義照 mp 版：空 = 全部、"? "= 目錄、其餘逗號分隔
 
 // ── 有界 JSON append ──
@@ -1888,54 +1888,15 @@ static bool keys_want(const char *keys, const char *name)
 
 // ── 0x1101 STATUS_GET → 0x1102 STATUS_RSP ──
 // keys 語義照 mp 版：空 = 全部、"? "= 目錄、其餘逗號分隔
-// STATUS_GET 的分頁單位＝key（次序固定，主機由 page=0 逐頁讀到 more=0）。
-// 一頁一個 key：block 大細差好遠（sys 200 B、mem 1.5 KB），固定「一個 key」最簡單、
-// 亦唔會因為 capacity 改變而令頁界漂移。
-typedef struct {
-    const char *name;
-    size_t (*fn)(char *buf, size_t cap);
-} status_block_t;
-
-static const status_block_t k_status_blocks[] = {
-    { "sys",      status_put_sys },
-    { "storage",  status_put_storage },
-    { "cfg",      status_put_cfg },
-    { "log",      status_put_log },
-#if CONFIG_FREERTOS_USE_TRACE_FACILITY
-    { "rt",       status_put_rt },
-#endif
-    { "mem",      status_put_mem },
-    { "provides", status_put_provides },
-    { "tasks",    status_put_tasks },
-    { "wifi",     status_put_wifi },
-    { "cmds",     status_put_cmds },
-    { "net",      status_put_net },
-};
-#define NC_STATUS_BLOCKS (sizeof(k_status_blocks) / sizeof(k_status_blocks[0]))
-
-// `keys` 同時接受 "task"（舊名）同 "tasks"。
-static bool status_block_wanted(const status_block_t *b, const char *keys)
-{
-    return keys_want(keys, b->name) ||
-           (strcmp(b->name, "tasks") == 0 && keys_want(keys, "task"));
-}
-
-// ── 0x1101 STATUS_GET → 0x1102 STATUS_RSP ──
 static void on_status_get(nc4_ctx_t *ctx, const nc4_frame_t *f)
 {
     // keys 是 str_u16len：2B 長度 + 內容
     char keys[64] = {0};
-    uint16_t klen = 0;
     if (f->len >= 2) {
-        klen = (uint16_t)(f->data[0] | (f->data[1] << 8));
+        uint16_t klen = (uint16_t)(f->data[0] | (f->data[1] << 8));
         if (klen < sizeof(keys) && 2 + klen <= f->len) {
             memcpy(keys, f->data + 2, klen);
         }
-    }
-    // page（u16，緊接 keys 之後；缺席 = 0）
-    uint16_t page = 0;
-    if (f->len >= 2 + klen + 2) {
-        page = (uint16_t)(f->data[2 + klen] | (f->data[2 + klen + 1] << 8));
     }
 
     if (strcmp(keys, "?") == 0) {
@@ -1958,39 +1919,59 @@ static void on_status_get(nc4_ctx_t *ctx, const nc4_frame_t *f)
     // （全部 key 加埋大約 5.8 KB，一個 2.6 KB 的幀一定裝唔落 —— 所以「空 keys」係
     //   「盡量裝」，唔係「保證全部」。要齊就分批問。）
     jappend(json, cap, &off, "{");
-
-    // 分頁：先數入選 key，再砌第 page 個。
-    size_t wanted = 0;
-    for (size_t i = 0; i < NC_STATUS_BLOCKS; i++) {
-        if (status_block_wanted(&k_status_blocks[i], keys)) {
-            wanted++;
-        }
+    if (keys_want(keys, "sys")) {
+        status_add(json, cap, &off, &first, status_put_sys);
     }
+    if (keys_want(keys, "storage")) {
+        status_add(json, cap, &off, &first, status_put_storage);
+    }
+    if (keys_want(keys, "cfg")) {
+        status_add(json, cap, &off, &first, status_put_cfg);
+    }
+    if (keys_want(keys, "log")) {
+        status_add(json, cap, &off, &first, status_put_log);
+    }
+#if CONFIG_FREERTOS_USE_TRACE_FACILITY
+    if (keys_want(keys, "rt")) {
+        status_add(json, cap, &off, &first, status_put_rt);
+    }
+#endif
+    if (keys_want(keys, "mem")) {
+        status_add(json, cap, &off, &first, status_put_mem);
+    }
+    if (keys_want(keys, "provides")) {
+        status_add(json, cap, &off, &first, status_put_provides);
+    }
+    if (keys_want(keys, "task") || keys_want(keys, "tasks")) {
+        status_add(json, cap, &off, &first, status_put_tasks);
+    }
+    if (keys_want(keys, "wifi")) {
+        status_add(json, cap, &off, &first, status_put_wifi);
+    }
+    if (keys_want(keys, "cmds")) {
+        status_add(json, cap, &off, &first, status_put_cmds);
+    }
+    if (keys_want(keys, "net")) {
+        status_add(json, cap, &off, &first, status_put_net);
+    }
+    // 元件自註冊的區塊（例如測試能力 ncm）——main 唔識佢哋，
+    // 排喺內建區塊之後；2,600 B 上限照舊（放唔落就截）。
+    nc_status_append(keys, json, cap, &off, &first);
     uint8_t more = 0;
-    if (page < wanted) {
-        size_t idx = 0;
-        for (size_t i = 0; i < NC_STATUS_BLOCKS; i++) {
-            if (!status_block_wanted(&k_status_blocks[i], keys)) {
-                continue;
-            }
-            if (idx++ != page) {
-                continue;
-            }
-            status_add(json, cap, &off, &first, k_status_blocks[i].fn);
-            break;
-        }
-        more = (page + 1 < wanted) ? 1 : 0;
-    }
     if (off >= cap - 1) {
-        // 單一 block 都放唔落：回合法錯誤物件（唔可以切半）；more=1 話畀主機仲有。
+        // 放唔落：**唔可以送半截 JSON 出去**（主機一定 parse 失敗）。
+        // 寧願回一個合法、講清楚發生咩事的物件，叫主機分批問；
+        // more=1 話畀主機「仲有」，但 cursor 未做，主機照舊自己拆 keys。
         more = 1;
         off = 0;
         jappend(json, cap, &off,
-                "{\"err\":\"page_too_big\",\"page\":%u,\"cap\":%u}",
-                (unsigned)page, (unsigned)NC4_REPLY_JSON_MAX);
+                "{\"truncated\":1,\"cap\":%u,"
+                "\"tips\":\"keys=sys,storage,cfg,log,mem,provides,tasks,ncm 分批問\"}",
+                (unsigned)NC4_REPLY_JSON_MAX);
     } else {
         jappend(json, cap, &off, "}");
     }
+    // 協議尾段：more(u8) ＋ timeout_ms(u16 LE)；timeout 暫時 0（未開半雙工窗口）。
     reply_send_tail(&r, off, more, 0);
 }
 

@@ -46,7 +46,6 @@ def main() -> int:
 
     st = sub.add_parser("status", help="STATUS_GET（keys 空白 = 全部，? = 目錄）")
     st.add_argument("keys", nargs="?", default="")
-    st.add_argument("--page", type=int, default=0, help="分頁（0 起）")
 
     raw = sub.add_parser("raw")
     raw.add_argument("cmd", type=lambda v: int(v, 0))
@@ -70,8 +69,7 @@ def main() -> int:
 
         elif args.action == "status":
             kb = args.keys.encode()
-            # str_u16len(keys) + page(u16)；page 缺席 = 0
-            payload = struct.pack("<H", len(kb)) + kb + struct.pack("<H", args.page)
+            payload = struct.pack("<H", len(kb)) + kb      # str_u16len
             s.write(pack(CMD_STATUS_GET, payload, args.addr))
             resp = wait_for(s, CMD_STATUS_RSP, 3.0)
             if resp is None:
