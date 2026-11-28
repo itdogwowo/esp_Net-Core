@@ -11666,3 +11666,16 @@ layout cache 改 name_id＋dictionary CRC；舊 cache 版本++。Phase 1 模組�
   呢個係下一步，唔係已經有。
 
 **驗證**：host 29/29；`--tests` build ✔；release build ✔。未上板。
+
+---
+
+### 7.350 2026-11-28（回收回覆緩衝 +11.2 KB；分頁定案同協議 schema 落地）
+
+- `NC4_REPLY_JSON_MAX` 回到 **2,600**（每 decoder 緩衝 8,211 → 2,615 B，
+  兩個 decoder 省 **~11.2 KB**）。理由：分頁（`more`＋`timeout_ms`）先係解法，
+  緩衝唔需要同 frame 一樣大。
+- **協議 schema 已改權威來源**：`mp_Net-Core/slave/schema/status.json` 的
+  `0x1102 STATUS_RSP` payload 追加 `more(u8)`＋`timeout_ms(u16)`（尾段，舊主機安全）。
+  C 側要跟同一佈局：`[len][json][more][timeout_ms LE]`，**唔可以**塞入 JSON body。
+- 未做：C 側 `on_status_get` 先量後砌＋尾段 3 B；`timeout_ms` 暫 0（半雙工未啟用）。
+- 驗證：host 29/29；`--tests` build ✔。
