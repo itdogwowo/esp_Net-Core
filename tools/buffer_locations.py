@@ -56,7 +56,7 @@ def panel1(y):
           ("ncm.arena", 0, "有模組才 32 KB 起（現時 0）"),
           ("s_recs 暫存", 768, "state 開機對稿（一次）")]),
         ("Flash（XIP，0 RAM）", F_FL, S_FL,
-         [("schema 字典", 12404, "286 key／16 unit，開機讀一次"),
+         [("schema 字典", 29735, "286 key／16 unit（keys 表 10,296＋字串 18,071），開機讀一次"),
           ("code＋const", 0, "XIP 直接執行；同 flash cache 爭")]),
     ]
     ly = y + 52

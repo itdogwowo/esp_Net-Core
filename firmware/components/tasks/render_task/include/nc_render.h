@@ -83,7 +83,11 @@ typedef struct {
     int            dc;
     int            cs;
     uint32_t       pclk_hz;
-    uint32_t       px;
+    uint32_t       px;        // legacy：= dma_px（每 lane 最多幾顆；舊路徑用）
+    uint32_t       ring_px;   // canonical frame px（Σ line px；0 = 跟 px）
+    uint32_t       dma_px;    // DMA 時間 px（max line px；0 = 跟 px）
+    uint8_t        n_line;    // >0 = 逐線獨立來源（line_px[]）
+    uint16_t       line_px[16];
     nc_px_format_t fmt;
     nc_px_wave_cfg_t wave;
     uint16_t       dither_bits;

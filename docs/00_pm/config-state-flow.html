@@ -1,0 +1,1006 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Config → State → Pixel JSON → 緩衝：一步一步（動畫）</title>
+<style>
+  :root{
+    --bg:#0b1020; --panel:#121a2e; --panel2:#0e1628; --line:#26324d;
+    --text:#e6ecf7; --muted:#9fb0cc; --dim:#6b7c9c;
+    --value:#4c9aff; --state:#45d483; --pixel:#f2b84b; --buf:#b18cff;
+    --warn:#e06ad8; --hot:#ffd166; --ok:#45d483; --bad:#e06ad8;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{
+    margin:0; padding:16px 20px 30px;
+    background:radial-gradient(1100px 520px at 16% -12%, #16213c 0%, transparent 62%),
+               radial-gradient(900px 480px at 88% 4%, #131b30 0%, transparent 58%), var(--bg);
+    color:var(--text);
+    font-family:"Inter","Noto Sans TC","PingFang TC",system-ui,-apple-system,sans-serif;
+    -webkit-font-smoothing:antialiased;
+  }
+  header h1{font-size:21px; margin:0 0 4px; letter-spacing:.2px}
+  header .sub{color:var(--muted); font-size:12px; line-height:1.6; margin:0 0 10px; max-width:1350px}
+  header .sub b{color:var(--text); font-weight:500}
+  header .sub code{color:var(--pixel); font-size:11px}
+
+  .controls{display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin:0 0 10px}
+  .controls button{
+    background:var(--panel); color:var(--text); border:1px solid var(--line);
+    border-radius:8px; padding:6px 11px; font-size:12px; font-family:inherit; cursor:pointer;
+    transition:border-color .2s, background .2s;
+  }
+  .controls button:hover{border-color:var(--value)}
+  .controls button.primary{background:#16345f; border-color:#2b5c9e}
+  .controls button:disabled{opacity:.4; cursor:default}
+  .controls .pos{font-size:12px; color:var(--muted); font-variant-numeric:tabular-nums; min-width:86px; text-align:center}
+  .controls .hint{font-size:11px; color:var(--dim)}
+  .progress{flex:1; min-width:120px; height:4px; background:#0a1220; border:1px solid var(--line); border-radius:4px; overflow:hidden}
+  .progress i{display:block; height:100%; width:0; background:linear-gradient(90deg,var(--value),var(--state))}
+
+  main{display:grid; grid-template-columns:238px minmax(0,1fr) 396px; gap:12px; align-items:stretch}
+  @media (max-width:1360px){ main{grid-template-columns:210px minmax(0,1fr) 360px} }
+
+  /* ── 左：章節／步驟導覽 ── */
+  .rail{border:1px solid var(--line); border-radius:12px; background:linear-gradient(180deg,#101830,#0c1322);
+        padding:8px; max-height:none; overflow:visible}
+  .rail .ch{font-size:10px; letter-spacing:.08em; color:var(--dim); text-transform:uppercase;
+            padding:8px 6px 4px; border-top:1px solid #1b2740}
+  .rail .ch:first-child{border-top:0}
+  .rail .st{display:flex; gap:7px; align-items:flex-start; width:100%; text-align:left;
+            background:transparent; border:1px solid transparent; border-radius:8px;
+            color:var(--muted); padding:5px 6px; font-size:11px; line-height:1.35; cursor:pointer;
+            font-family:inherit; transition:background .2s,border-color .2s,color .2s}
+  .rail .st:hover{background:#141e36; color:var(--text)}
+  .rail .st .n{color:var(--dim); font-variant-numeric:tabular-nums; min-width:15px}
+  .rail .st.on{background:#16233f; border-color:#2b4a7e; color:var(--text)}
+  .rail .st.on .n{color:var(--value)}
+  .rail .st.done .n{color:var(--state)}
+
+  /* ── 中：動畫台 ── */
+  .stage{position:relative; border:1px solid var(--line); border-radius:14px; min-height:620px;
+         background:
+           linear-gradient(180deg,rgba(18,26,46,.75),rgba(10,16,30,.85)),
+           repeating-linear-gradient(0deg,#0d1526 0 1px,transparent 1px 28px),
+           repeating-linear-gradient(90deg,#0d1526 0 1px,transparent 1px 28px);
+         overflow:hidden}
+  .stage .scene-label{position:absolute; left:14px; top:10px; z-index:6; font-size:10.5px;
+        letter-spacing:.1em; color:var(--dim); text-transform:uppercase}
+  .scene{position:absolute; inset:0; display:none}
+  .scene.on{display:block}
+  .scene[data-scene="8"] .canvas{top:18px}
+  .canvas{position:absolute; left:0; top:0; width:900px; height:600px}
+  svg.links{position:absolute; left:0; top:0; width:900px; height:600px; overflow:visible; pointer-events:none; z-index:1}
+  svg.links path.e{fill:none; stroke:#31405e; stroke-width:1.6;
+       marker-end:url(#arw); transition:stroke .35s, stroke-width .35s, opacity .35s}
+  svg.links path.e.flow{stroke-dasharray:7 6; animation:dash 1s linear infinite; stroke-width:2.4}
+  svg.links path.e.flow[data-c="value"]{stroke:var(--value)}
+  svg.links path.e.flow[data-c="state"]{stroke:var(--state)}
+  svg.links path.e.flow[data-c="pixel"]{stroke:var(--pixel)}
+  svg.links path.e.flow[data-c="buf"]{stroke:var(--buf)}
+  svg.links path.e.dash{stroke-dasharray:5 5}
+  @keyframes dash{to{stroke-dashoffset:-26}}
+
+  .node{position:absolute; z-index:2; border:1px solid var(--line); border-radius:10px;
+        background:linear-gradient(180deg,#121a2e,#0d1526); padding:8px 10px;
+        transition:opacity .35s, border-color .35s, box-shadow .35s, transform .35s;
+        box-shadow:0 2px 10px #0006}
+  .node b{display:block; font-size:11.5px; font-weight:650; color:var(--c,var(--text)); margin-bottom:3px; letter-spacing:.1px}
+  .node em{display:block; font-style:normal; font-size:9.5px; color:var(--muted); line-height:1.45}
+  .node .kv{display:block; font-size:9.5px; color:var(--dim); margin-top:4px; font-variant-numeric:tabular-nums}
+  .node .tag{display:inline-block; font-size:8.5px; border:1px solid var(--line); border-radius:999px;
+             padding:0 6px; color:var(--dim); margin-top:4px}
+  .node.on{border-color:var(--c,var(--value)); transform:translateY(-1px);
+           box-shadow:0 0 0 1px var(--c,var(--value)), 0 0 26px color-mix(in srgb,var(--c,var(--value)) 30%, transparent);
+           animation:breathe 2.8s ease-in-out infinite}
+  .node.dim{opacity:.22}
+  .node.pulse{animation:pop .5s cubic-bezier(.2,.7,.3,1) both}
+  @keyframes pop{0%{transform:translateY(4px) scale(.985); opacity:.55} 60%{transform:translateY(-2px) scale(1.012)} 100%{transform:translateY(0) scale(1); opacity:1}}
+  @keyframes breathe{
+    0%,100%{box-shadow:0 0 0 1px var(--c,var(--value)), 0 0 18px color-mix(in srgb,var(--c,var(--value)) 22%, transparent)}
+    50%{box-shadow:0 0 0 1px var(--c,var(--value)), 0 0 34px color-mix(in srgb,var(--c,var(--value)) 42%, transparent)}
+  }
+  .node.big{padding:10px 12px}
+  .node.chain{border-radius:999px; text-align:center}
+  .node.redline{border-color:#5a2440; background:linear-gradient(180deg,#1c1226,#140d1c)}
+  .chips{display:flex; gap:6px; flex-wrap:wrap}
+  .chip{font-size:9.5px; color:var(--muted); border:1px solid var(--line); border-radius:999px;
+        padding:2px 8px; background:#0c1425}
+  .chip.c-value{border-color:#2b4a7e; color:#9cc4ff}
+  .chip.c-state{border-color:#24573c; color:#8fe3b0}
+  .chip.c-pixel{border-color:#5a4a1c; color:#ffd98a}
+  .chip.c-buf{border-color:#46325f; color:#d4c2ff}
+
+  /* ── 右：旁白 ── */
+  .nar{border:1px solid var(--line); border-radius:14px; background:linear-gradient(180deg,#101830,#0c1322);
+       padding:14px 15px; min-height:620px; display:flex; flex-direction:column; gap:10px}
+  .nar .ch{font-size:10.5px; letter-spacing:.08em; color:var(--dim); text-transform:uppercase}
+  .nar h2{font-size:15.5px; margin:0; line-height:1.4; color:var(--text)}
+  .nar .rule{height:1px; background:var(--line)}
+  .nar .body{font-size:12px; color:var(--muted); line-height:1.65; overflow:auto; padding-right:2px}
+  .nar .body .blk{margin:0 0 10px}
+  .nar .body .lbl{display:inline-block; font-size:9.5px; letter-spacing:.06em; border-radius:4px;
+       padding:1px 6px; margin-right:6px; vertical-align:1px; font-weight:600}
+  .nar .body .lbl.a{background:#14304f; color:#8dc1ff; border:1px solid #2b4a7e}
+  .nar .body .lbl.b{background:#122e20; color:#8fe3b0; border:1px solid #24573c}
+  .nar .body .lbl.c{background:#2f2410; color:#ffd98a; border:1px solid #5a4a1c}
+  .nar .body .lbl.d{background:#2a1633; color:#e9a8ef; border:1px solid #5a2440}
+  .nar .body p{margin:0 0 4px}
+  .nar .body code{color:var(--pixel); font-size:11px; word-break:break-word}
+  .nar .body b{color:var(--text); font-weight:600}
+  .nar .body i{font-style:normal; color:var(--dim)}
+  .nar .foot{margin-top:auto; font-size:10px; color:var(--dim); line-height:1.5; border-top:1px solid #1b2740; padding-top:8px}
+  .nar .foot a{color:#7fa8dd; text-decoration:none}
+  .nar .foot a:hover{text-decoration:underline}
+
+  .legend{display:flex; gap:12px; flex-wrap:wrap; font-size:10.5px; color:var(--dim); margin:8px 0 0}
+  .legend i{display:inline-block; width:8px; height:8px; border-radius:2px; margin-right:5px}
+  .table{width:100%; border-collapse:collapse; font-size:11.5px}
+  .table th{color:var(--dim); font-weight:500; text-align:left; border-bottom:1px solid var(--line); padding:7px 8px}
+  .table td{padding:7px 8px; border-bottom:1px solid #1b2740; color:var(--muted); vertical-align:top}
+  .table td b{color:var(--text); font-weight:600}
+  .table tr.on td{background:#15233f; color:var(--text)}
+  .foot-note{margin-top:10px; font-size:10.5px; color:var(--dim)}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Config → State → Pixel JSON → 緩衝：一步一步</h1>
+  <div class="sub">
+    用家問嘅三件事——<b>狀態管理員</b>、<b>pixel 的 JSON 遮罩／壓縮</b>、<b>緩衝</b>——係同一個系統嘅三塊。
+    呢頁逐格示範「佢做咩、點做」，數字取自 <code>docs/00_pm/status.md §7.291–.303</code>（2026-11-27、HEAD <code>1d75fea</code>）。
+    自動播放中；<b>←／→</b> 切換、<b>空白</b> 暫停、<b>R</b> 重播。
+  </div>
+</header>
+
+<div class="controls">
+  <button id="prev">◀ 上一步</button>
+  <button id="next" class="primary">下一步 ▶</button>
+  <button id="play">⏸ 暫停</button>
+  <button id="reset">⟲ 重播</button>
+  <span class="pos" id="pos">1 / 19</span>
+  <div class="progress"><i id="bar"></i></div>
+  <span class="hint">點左邊任一步可跳去</span>
+</div>
+
+<main>
+  <nav class="rail" id="rail"></nav>
+
+  <section class="stage" id="stage">
+    <div class="scene-label" id="sceneLabel"></div>
+
+    <!-- ══════════ 場景 0：全景 ══════════ -->
+    <div class="scene" data-scene="0">
+      <div class="canvas">
+        <div class="node big" id="w1" style="left:18px;top:52px;width:250px;height:170px;--c:var(--value)">
+          <b>① 值：config / state</b>
+          <em>schema registry → NCSTATE blob → RAM store</em>
+          <em>→ <code>apply_to_cfg()</code> → consumers</em>
+          <span class="kv">286 key／16 unit · store 1,156 B</span>
+          <span class="tag">單一真相：schema/state-keys.json</span>
+        </div>
+        <div class="node big" id="w2" style="left:298px;top:52px;width:250px;height:170px;--c:var(--pixel)">
+          <b>② 內容：pixel JSON</b>
+          <em>四層 JSON（effects／map／mode／registry）</em>
+          <em>→ sel 展開 → layout 編譯 → runs／flat6</em>
+          <span class="kv">500 組 map build 39–40 ms</span>
+          <span class="tag">自己一套格式（NCLAYOUT 快取）</span>
+        </div>
+        <div class="node big" id="w3" style="left:578px;top:52px;width:250px;height:170px;--c:var(--buf)">
+          <b>③ 記憶體：緩衝</b>
+          <em><code>nc_plan</code> 決策＋<code>nc_buf</code> 格／串流</em>
+          <em>＋ pixel 自己的環／值流／DMA 槽</em>
+          <span class="kv">plan 7,895 B · static 143,559 B</span>
+          <span class="tag">動態只佔 5.2%</span>
+        </div>
+
+        <div class="node redline" id="nomanager" style="left:18px;top:252px;width:810px;height:96px">
+          <b style="color:var(--warn)">冇一個跨層「config manager」——設計上刻意分開</b>
+          <em>值 ↔ 佈局 分開（handoff-2026-11-04 §8.3：「不要把狀態管理器同緩衝管理器撈在一起」）</em>
+          <div class="chips" style="margin-top:6px">
+            <span class="chip c-value">state manager（值）</span>
+            <span class="chip c-buf">nc_plan／nc_buf（佈局）</span>
+            <span class="chip c-value">nc_task（任務）</span>
+            <span class="chip c-pixel">nc_px_*（內容）</span>
+            <span class="chip c-buf">ncportgen（activation）</span>
+          </div>
+        </div>
+
+        <div class="node chain" id="b02" style="left:24px;top:404px;width:128px;height:64px;--c:var(--value)">
+          <b>B02</b><em>cfg parse</em>
+        </div>
+        <div class="node chain" id="bsta" style="left:190px;top:404px;width:128px;height:64px;--c:var(--state)">
+          <b>state sync</b><em>對拍·hit</em>
+        </div>
+        <div class="node chain" id="bapp" style="left:356px;top:404px;width:128px;height:64px;--c:var(--state)">
+          <b>apply_to_cfg</b><em>B05 之前</em>
+        </div>
+        <div class="node chain" id="b05" style="left:522px;top:404px;width:128px;height:64px;--c:var(--value)">
+          <b>B05</b><em>裝 driver</em>
+        </div>
+        <div class="node chain" id="b08" style="left:688px;top:404px;width:128px;height:64px;--c:var(--pixel)">
+          <b>B08</b><em>開任務 loop</em>
+        </div>
+
+        <svg class="links">
+          <defs><marker id="arw" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#31405e"/></marker></defs>
+          <path class="e" id="e-b02-sta" d="M 152 436 L 190 436"/>
+          <path class="e" id="e-sta-app" d="M 318 436 L 356 436"/>
+          <path class="e" id="e-app-05" d="M 484 436 L 522 436"/>
+          <path class="e" id="e-05-08" d="M 650 436 L 688 436"/>
+        </svg>
+        <div class="node" id="road" style="left:24px;top:492px;width:844px;height:82px;--c:var(--hot)">
+          <b>跟住嘅路線（19 步）</b>
+          <em>① 全景 → ② 值來源 → ③ NCSTATE → ④ schema → ⑤ pixel JSON → ⑥ 熱路徑 → ⑦ 緩衝 → ⑧ 管理器 → ⑨ 工具／現況</em>
+          <span class="kv">每步左邊可跳；←／→ 可切換；空白暫停</span>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- ══════════ 場景 1：值嘅三個來源 ══════════ -->
+    <div class="scene" data-scene="1">
+      <div class="canvas">
+        <div class="node" id="s-l0" style="left:16px;top:64px;width:246px;height:78px;--c:var(--value)">
+          <b>L0 出廠 const</b>
+          <em><code>nc_port.c</code>／Kconfig／內建預設</em>
+          <span class="tag">改它要 rebuild</span>
+        </div>
+        <div class="node" id="s-preset" style="left:16px;top:168px;width:246px;height:78px;--c:var(--value)">
+          <b>build 預置</b>
+          <em><code>ports/project/…/data/config/*.json</code></em>
+          <span class="tag">嵌進固件；裝置缺檔才 seed</span>
+        </div>
+        <div class="node" id="s-fat" style="left:16px;top:272px;width:246px;height:78px;--c:var(--state)">
+          <b>FAT live（最高權威）</b>
+          <em><code>/data/config/*.json</code></em>
+          <span class="tag">改完 reboot 生效</span>
+        </div>
+
+        <div class="node" id="b02b" style="left:330px;top:150px;width:206px;height:104px;--c:var(--value)">
+          <b>B02 <code>nc_cfg_boot()</code></b>
+          <em>cJSON → 型別化 struct</em>
+          <em>順便計「值集 hash」（src_hash）</em>
+          <span class="kv">5 個 JSON · ~24–30 ms</span>
+        </div>
+        <div class="node" id="cfg" style="left:330px;top:316px;width:206px;height:78px;--c:var(--value)">
+          <b>cfg structs（RAM）</b>
+          <em>之後全系統只讀呢層</em>
+          <span class="kv">miss／bad／inv／unk 計數</span>
+        </div>
+
+        <div class="node" id="sncst" style="left:600px;top:60px;width:184px;height:76px;--c:var(--state)">
+          <b>state.ncst</b>
+          <em>NCSTATE sparse blob</em>
+          <span class="kv">50 B（5 筆）～ ~270 B</span>
+        </div>
+        <div class="node" id="store" style="left:600px;top:160px;width:184px;height:76px;--c:var(--state)">
+          <b>RAM store</b>
+          <em>96 × 12 B = 1,156 B</em>
+          <span class="kv">s_recs 768 B 在 PSRAM</span>
+        </div>
+        <div class="node" id="apply" style="left:600px;top:260px;width:184px;height:64px;--c:var(--state)">
+          <b>apply_to_cfg()</b>
+          <em>26 個 value key 蓋回 cfg</em>
+          <span class="tag">必須在 B05 之前</span>
+        </div>
+        <div class="node" id="cons" style="left:600px;top:360px;width:268px;height:120px;--c:var(--pixel)">
+          <b>消費者（只讀 cfg）</b>
+          <em>B05 driver：I80／SPI／LED</em>
+          <em>B08 任務：net／router／task manager</em>
+          <em>render：LED 由 state 讀值</em>
+        </div>
+
+        <svg class="links">
+          <defs><marker id="arw1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#31405e"/></marker></defs>
+          <path class="e" id="e-l0" d="M 262 103 C 296 103, 296 190, 330 190"/>
+          <path class="e" id="e-preset" d="M 262 207 C 296 207, 296 196, 330 196"/>
+          <path class="e" id="e-fat" d="M 262 311 C 296 311, 296 204, 330 204"/>
+          <path class="e" id="e-b02cfg" d="M 433 254 L 433 316"/>
+          <path class="e" id="e-sncst" d="M 692 136 L 692 160"/>
+          <path class="e" id="e-store" d="M 692 236 L 692 260"/>
+          <path class="e" id="e-applycfg" d="M 600 292 C 566 292, 566 330, 536 330"/>
+          <path class="e" id="e-cfgcons" d="M 536 370 C 566 370, 566 400, 600 400"/>
+        </svg>
+      </div>
+    </div>
+
+    <!-- ══════════ 場景 2：NCSTATE 快取 ══════════ -->
+    <div class="scene" data-scene="2">
+      <div class="canvas">
+        <div class="node" id="cfg2" style="left:16px;top:210px;width:166px;height:76px;--c:var(--value)">
+          <b>cfg structs</b>
+          <em>由 L1 JSON 型別化</em>
+        </div>
+        <div class="node" id="recs" style="left:208px;top:200px;width:174px;height:96px;--c:var(--state)">
+          <b>造 records</b>
+          <em>只造「已 activation」unit</em>
+          <em>32 × 24 B（s_recs）</em>
+          <span class="kv">暫存放 PSRAM</span>
+        </div>
+        <div class="node" id="blob" style="left:408px;top:150px;width:220px;height:150px;--c:var(--state)">
+          <b>NCSTATE blob</b>
+          <em>header 26 B：magic／ver／count／src_hash／len／crc</em>
+          <em>record：type u8 ＋ key varint ＋ len varint ＋ value</em>
+          <span class="kv">sparse：同預設一樣嘅值唔寫</span>
+        </div>
+        <div class="node" id="cmp" style="left:664px;top:170px;width:212px;height:100px;--c:var(--hot)">
+          <b>對拍 src_hash</b>
+          <em>src_hash ＝「值集」CRC32</em>
+          <em>唔係 JSON bytes CRC</em>
+          <span class="kv">改一句 _comment 唔會清 override</span>
+        </div>
+        <div class="node" id="hit" style="left:664px;top:48px;width:212px;height:74px;--c:var(--ok)">
+          <b>hash 同 → hit</b>
+          <em>state 贏（保留 override）</em>
+          <span class="tag">cmp_ok 顯示值同 cfg 同否</span>
+        </div>
+        <div class="node" id="diff" style="left:664px;top:300px;width:212px;height:74px;--c:var(--bad)">
+          <b>hash 唔同 → JSON 贏</b>
+          <em>重建 blob；舊檔變 .bak</em>
+          <span class="tag">回寫值被清（可預期）</span>
+        </div>
+        <div class="node" id="bak" style="left:408px;top:330px;width:220px;height:70px;--c:var(--hot)">
+          <b>壞檔 → self-heal</b>
+          <em>CRC／magic／ver 唔過 → 由 JSON 重生</em>
+          <span class="tag">last-known-good：state.ncst.bak</span>
+        </div>
+        <div class="node" id="store2" style="left:208px;top:360px;width:174px;height:70px;--c:var(--state)">
+          <b>RAM store</b>
+          <em>96 × 12 B = 1,156 B</em>
+        </div>
+        <div class="node" id="apply2" style="left:16px;top:360px;width:166px;height:66px;--c:var(--state)">
+          <b>apply_to_cfg</b>
+          <em>B05 之前</em>
+        </div>
+        <div class="node" id="persist" style="left:16px;top:470px;width:400px;height:80px;--c:var(--hot)">
+          <b>回寫：STATUS_SET → 排隊 → reboot 前落盤</b>
+          <em>decode 任務 stack 只有 3,072 B，唔可以喺 handler 直接寫 FAT</em>
+          <span class="kv">落盤 API 叫 nc_state_persist()（唔係 commit）</span>
+        </div>
+
+        <svg class="links">
+          <defs><marker id="arw2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#31405e"/></marker></defs>
+          <path class="e" id="e-cfgrecs" d="M 182 248 L 208 248"/>
+          <path class="e" id="e-recsblob" d="M 382 240 L 408 225"/>
+          <path class="e" id="e-blobcmp" d="M 628 225 L 664 215"/>
+          <path class="e" id="e-cmphit" d="M 770 170 L 770 122"/>
+          <path class="e" id="e-cmpdiff" d="M 770 270 L 770 300"/>
+          <path class="e" id="e-blobbak" d="M 518 300 L 518 330"/>
+          <path class="e" id="e-blobstore" d="M 408 290 C 380 315, 380 345, 382 360"/>
+          <path class="e" id="e-storeapply" d="M 208 395 L 182 393"/>
+          <path class="e" id="e-applypersist" d="M 99 426 L 99 470" class="dash"/>
+        </svg>
+      </div>
+    </div>
+
+    <!-- ══════════ 場景 3：schema registry ══════════ -->
+    <div class="scene" data-scene="3">
+      <div class="canvas">
+        <div class="node" id="json" style="left:16px;top:132px;width:228px;height:140px;--c:var(--value)">
+          <b>schema/state-keys.json</b>
+          <em>單位＋key＋型別／範圍／enum／path</em>
+          <span class="kv">v2 · 286 key · 16 unit</span>
+          <span class="kv">value 26 ／ struct 260</span>
+          <span class="tag">唯一 source of truth</span>
+        </div>
+        <div class="node" id="gen" style="left:290px;top:150px;width:190px;height:96px;--c:var(--value)">
+          <b>gen_state_keys.py</b>
+          <em>跑一次生成 3 份 C＋doc 表</em>
+          <span class="kv">run_all 開頭 --check</span>
+        </div>
+        <div class="node" id="f1" style="left:530px;top:44px;width:264px;height:52px;--c:var(--value)">
+          <b>nc_state_keys.h</b><em>key id＋unit id（C 名）</em>
+        </div>
+        <div class="node" id="f2" style="left:530px;top:110px;width:264px;height:52px;--c:var(--value)">
+          <b>nc_state_schema_data.[ch]</b><em>runtime 表：id／unit／type／min／max／enum</em>
+        </div>
+        <div class="node" id="f3" style="left:530px;top:176px;width:264px;height:52px;--c:var(--value)">
+          <b>config-schema.md（生成區）</b><em>「可以設定什麼」一頁</em>
+        </div>
+        <div class="node" id="api" style="left:290px;top:300px;width:190px;height:96px;--c:var(--state)">
+          <b>nc_state_schema／api</b>
+          <em>查表／驗型別／驗範圍</em>
+          <em>讀寫唯一入口</em>
+        </div>
+        <div class="node" id="store3" style="left:530px;top:300px;width:190px;height:80px;--c:var(--state)">
+          <b>RAM store</b>
+          <em>只存數值（12 B／筆）</em>
+          <span class="kv">字串留 dictionary（flash）</span>
+        </div>
+        <div class="node" id="gate" style="left:16px;top:320px;width:228px;height:96px;--c:var(--hot)">
+          <b>測試閘門</b>
+          <em>run_all.sh：<code>--check</code>＋preset_check</em>
+          <span class="kv">唔同步＝25/25 直接 fail</span>
+        </div>
+        <div class="node" id="dict" style="left:530px;top:420px;width:264px;height:90px;--c:var(--hot)">
+          <b>flash 字典</b>
+          <em>12,404 B（.flash.rodata）</em>
+          <span class="tag">0 SRAM；value 26 筆入 store</span>
+        </div>
+        <div class="node" id="cov1" style="left:16px;top:516px;width:136px;height:58px;--c:var(--state)">
+          <b>system.json</b><em>76 key · 4 value</em>
+        </div>
+        <div class="node" id="cov2" style="left:162px;top:516px;width:136px;height:58px;--c:var(--state)">
+          <b>hardware.json</b><em>197 key · 12 value</em>
+        </div>
+        <div class="node" id="cov3" style="left:308px;top:516px;width:136px;height:58px;--c:var(--ok)">
+          <b>driver.json</b><em>10 key · 10 value ✅</em>
+        </div>
+        <div class="node" id="cov4" style="left:454px;top:516px;width:136px;height:58px;--c:var(--warn)">
+          <b>tasks.json</b><em>0 key · 動態 name-hash</em>
+        </div>
+        <div class="node" id="cov5" style="left:600px;top:516px;width:136px;height:58px;--c:var(--bad)">
+          <b>resources.json</b><em>0 key · 唔入 schema</em>
+        </div>
+        <div class="node" id="cov6" style="left:746px;top:516px;width:136px;height:58px;--c:var(--hot)">
+          <b>network.json</b><em>3 key · 全 struct</em>
+        </div>
+
+        <svg class="links">
+          <defs><marker id="arw3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#31405e"/></marker></defs>
+          <path class="e" id="e-jsongen" d="M 244 200 L 290 198"/>
+          <path class="e" id="e-genf1" d="M 480 186 C 506 186, 506 70, 530 70"/>
+          <path class="e" id="e-genf2" d="M 480 198 C 508 198, 508 136, 530 136"/>
+          <path class="e" id="e-genf3" d="M 480 210 C 510 210, 510 202, 530 202"/>
+          <path class="e" id="e-f2api" d="M 530 162 C 512 250, 500 280, 480 320"/>
+          <path class="e" id="e-apistore" d="M 480 348 L 530 340"/>
+          <path class="e" id="e-gateapi" d="M 244 368 L 290 368"/>
+          <path class="e" id="e-apidict" d="M 480 384 C 500 410, 510 440, 530 452"/>
+        </svg>
+      </div>
+    </div>
+
+    <!-- ══════════ 場景 4：pixel JSON 管線 ══════════ -->
+    <div class="scene" data-scene="4">
+      <div class="canvas">
+        <div class="node" id="l1" style="left:16px;top:34px;width:172px;height:56px;--c:var(--pixel)">
+          <b>effects.json</b><em>波形 program（12-bit）</em>
+        </div>
+        <div class="node" id="l2" style="left:16px;top:102px;width:172px;height:56px;--c:var(--pixel)">
+          <b>map/*.json</b><em>group ＋ sel 選擇器</em>
+        </div>
+        <div class="node" id="l3" style="left:16px;top:170px;width:172px;height:56px;--c:var(--pixel)">
+          <b>modes/*.json</b><em>group × effect × write × range</em>
+        </div>
+        <div class="node" id="l4" style="left:16px;top:238px;width:172px;height:56px;--c:var(--pixel)">
+          <b>registry.json</b><em>playlist list[]</em>
+        </div>
+        <div class="node" id="scan" style="left:214px;top:112px;width:176px;height:118px;--c:var(--pixel)">
+          <b>掃描／解析</b>
+          <em>map／mode pool → PSRAM</em>
+          <em>壞檔／過大 → rejected（明示）</em>
+          <span class="kv">effects 每檔 16 KB · 48 檔</span>
+        </div>
+        <div class="node" id="sel" style="left:414px;top:58px;width:196px;height:112px;--c:var(--pixel)">
+          <b>sel 展開（「遮罩」）</b>
+          <em>Python slice：":"／"0:18"／"::2"／"15:10:-1"</em>
+          <em>有序全域 index（32-bit）</em>
+          <span class="kv">反序／隔顆／重疊／跨型別</span>
+        </div>
+        <div class="node" id="layout" style="left:414px;top:196px;width:196px;height:112px;--c:var(--pixel)">
+          <b>nc_px_layout_build()</b>
+          <em>counting bucket O(px+n)</em>
+          <em>→ 合併 runs（dst 升序）</em>
+          <span class="kv">16 B／run：dst32 src32 count32 job32</span>
+        </div>
+        <div class="node" id="runs" style="left:638px;top:58px;width:152px;height:70px;--c:var(--pixel)">
+          <b>runs</b><em>500 組 → 500–1,500 段</em>
+          <span class="kv">熱路徑只掃 runs</span>
+        </div>
+        <div class="node" id="flat" style="left:638px;top:146px;width:152px;height:70px;--c:var(--pixel)">
+          <b>flat6</b><em>6 B／px 落點表</em>
+          <span class="kv">{dst16,src16,write8,aprog8}</span>
+        </div>
+        <div class="node" id="cache" style="left:638px;top:234px;width:224px;height:84px;--c:var(--hot)">
+          <b>NCLAYOUT 快取</b>
+          <em>/pixel/cache/&lt;key&gt;.layout</em>
+          <span class="kv">≤ 32 KB 才存；key=hash(mode/map/px/assets)</span>
+        </div>
+        <div class="node" id="aprog" style="left:414px;top:330px;width:196px;height:78px;--c:var(--pixel)">
+          <b>aprog 值流</b>
+          <em>同一 asset 只編一次</em>
+          <span class="kv">500 組共用 20 效果 → 20 條值流</span>
+        </div>
+        <div class="node" id="c1" style="left:16px;top:402px;width:196px;height:62px;--c:var(--hot)">
+          <b>runs ＝ RLE</b><em>連續段合併（真壓縮感）</em>
+        </div>
+        <div class="node" id="c2" style="left:224px;top:402px;width:196px;height:62px;--c:var(--hot)">
+          <b>值流按 asset 去重</b><em>第二種「壓縮」</em>
+        </div>
+        <div class="node" id="c3" style="left:432px;top:402px;width:196px;height:62px;--c:var(--hot)">
+          <b>flat6 ＝ 反壓縮</b><em>展開 6 B／px 換速度</em>
+        </div>
+        <div class="node" id="c4" style="left:640px;top:402px;width:222px;height:62px;--c:var(--warn)">
+          <b>JSON 本身冇壓縮</b><em>PXA2 作廢；冇 zlib／entropy</em>
+        </div>
+
+        <svg class="links">
+          <defs><marker id="arw4" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#31405e"/></marker></defs>
+          <path class="e" id="e-l1scan" d="M 188 62 C 206 62, 206 140, 214 150"/>
+          <path class="e" id="e-l2scan" d="M 188 130 L 214 150"/>
+          <path class="e" id="e-l3scan" d="M 188 198 L 214 186"/>
+          <path class="e" id="e-l4scan" d="M 188 266 C 206 266, 206 210, 214 204"/>
+          <path class="e" id="e-scansel" d="M 390 140 C 404 130, 404 118, 414 114"/>
+          <path class="e" id="e-sellayout" d="M 512 170 L 512 196"/>
+          <path class="e" id="e-layoutruns" d="M 610 220 C 626 190, 626 120, 638 100"/>
+          <path class="e" id="e-runsflat" d="M 714 128 L 714 146"/>
+          <path class="e" id="e-flatcache" d="M 714 216 L 714 234"/>
+          <path class="e" id="e-layoutaprog" d="M 512 308 L 512 330"/>
+        </svg>
+      </div>
+    </div>
+
+    <!-- ══════════ 場景 5：熱路徑 ══════════ -->
+    <div class="scene" data-scene="5">
+      <div class="canvas">
+        <div class="node" id="p0" style="left:16px;top:96px;width:150px;height:104px;--c:var(--pixel)">
+          <b>mode／map／assets</b>
+          <em>layout 編譯一次</em>
+          <span class="kv">build 39–40 ms（500 組）</span>
+        </div>
+        <div class="node" id="p1" style="left:200px;top:96px;width:150px;height:104px;--c:var(--pixel)">
+          <b>pixel_paint_task</b>
+          <em>掃 runs／flat → canvas</em>
+          <em>white mix 在內圈</em>
+          <span class="kv">16×600：9.65–10.25 ms</span>
+        </div>
+        <div class="node" id="p2" style="left:384px;top:96px;width:130px;height:104px;--c:var(--buf)">
+          <b>prd 環</b>
+          <em>零拷貝：直接寫格</em>
+          <span class="kv">3 格（2,400 用 5 格）</span>
+        </div>
+        <div class="node" id="p3" style="left:548px;top:96px;width:150px;height:104px;--c:var(--pixel)">
+          <b>pixel_encode_task</b>
+          <em>WS2812 GRB／I80 波形</em>
+          <span class="kv">SWAR 合成 6,365 µs</span>
+        </div>
+        <div class="node" id="p4" style="left:732px;top:96px;width:150px;height:104px;--c:var(--buf)">
+          <b>render_task</b>
+          <em>DMA 完成還格 → submit</em>
+          <em>→ I80 → 燈</em>
+          <span class="kv">節拍由 system.json</span>
+        </div>
+        <div class="node" id="ptasks" style="left:16px;top:246px;width:520px;height:86px;--c:var(--pixel)">
+          <b>四層四任務全部 level=4</b>
+          <em>pixel_effect → pixel_paint → pixel_encode → render（公用輸出層）</em>
+          <span class="kv">少一條就唔點燈；render order 10 先 on_start</span>
+        </div>
+        <div class="node" id="pswap" style="left:556px;top:246px;width:326px;height:86px;--c:var(--hot)">
+          <b>換場：預建下一張</b>
+          <em>播放時 idle slice 預建 layout＋flat</em>
+          <span class="kv">swap 246 µs（原 rebuild 40–150 ms）</span>
+        </div>
+        <div class="node" id="pnum" style="left:16px;top:360px;width:866px;height:150px;--c:var(--pixel)">
+          <b>一段動畫的一幀（16×600 實測）</b>
+          <em>pair 9.65–10.25 ms（含 flat 掃描＋值流讀取＋寫環）</em>
+          <em>encode：9,600 px I80 合成 6,365 µs（舊 24,018 µs，3.77×）</em>
+          <em>fps：環節拍 20 ms／50 fps；抖動 4 子幀時環 5 格</em>
+          <span class="kv">apply 8-bit 3.7–4.1 ms／12-bit 5.6–5.9 ms（EffectPerf 500 組）</span>
+        </div>
+
+        <svg class="links">
+          <defs><marker id="arw5" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#31405e"/></marker></defs>
+          <path class="e" id="e-p01" d="M 166 148 L 200 148"/>
+          <path class="e" id="e-p12" d="M 350 148 L 384 148"/>
+          <path class="e" id="e-p23" d="M 514 148 L 548 148"/>
+          <path class="e" id="e-p34" d="M 698 148 L 732 148"/>
+        </svg>
+      </div>
+    </div>
+
+    <!-- ══════════ 場景 6：緩衝帳 ══════════ -->
+    <div class="scene" data-scene="6">
+      <div class="canvas">
+        <div class="node" id="m-static" style="left:16px;top:36px;width:270px;height:86px;--c:var(--buf)">
+          <b>Internal：static</b>
+          <em>.bss 104,272 ＋ .data 39,287</em>
+          <span class="kv">143,559 B（RTOS／lwIP／Wi-Fi 骨架）</span>
+        </div>
+        <div class="node" id="m-plan" style="left:16px;top:138px;width:270px;height:96px;--c:var(--buf)">
+          <b>Internal：plan／nc_buf</b>
+          <em>4 項 7,895 B：reply0(psram)／usb.rx／i80.prd／mock.prd</em>
+          <span class="kv">靜態＋動態 = 151,454 B；動態 5.2%</span>
+        </div>
+        <div class="node" id="m-sram" style="left:16px;top:250px;width:270px;height:76px;--c:var(--state)">
+          <b>Internal：state</b>
+          <em>s_store 1,156 B＋dirty 384 B</em>
+          <span class="kv">s_recs 768 B 已搬 PSRAM（只剩 4 B）</span>
+        </div>
+        <div class="node" id="m-ring" style="left:16px;top:342px;width:270px;height:76px;--c:var(--pixel)">
+          <b>Pixel 自己的環</b>
+          <em>環經 plan 宣告、熱路徑走 nc_px_q</em>
+          <span class="kv">值流／DMA 槽 owned by pixel，唔在 plan</span>
+        </div>
+
+        <div class="node" id="m-ps" style="left:310px;top:36px;width:250px;height:96px;--c:var(--buf)">
+          <b>PSRAM：reply 緩衝</b>
+          <em>nc4.reply0 2,615 B（每個 decoder）</em>
+          <span class="kv">回覆 JSON 上限 2,600 B</span>
+        </div>
+        <div class="node" id="m-arena" style="left:310px;top:148px;width:250px;height:86px;--c:var(--buf)">
+          <b>PSRAM：ncm.arena</b>
+          <em>release 冇 ncm → 0 B</em>
+          <span class="kv">有模組 32 KB 起（上限 512 KB）</span>
+        </div>
+        <div class="node" id="m-flat" style="left:310px;top:250px;width:250px;height:86px;--c:var(--pixel)">
+          <b>PSRAM：flat6／值流</b>
+          <em>flat 6 B／px（9,600 px＝57.6 KB）</em>
+          <span class="kv">current＋next ≈115 KB</span>
+        </div>
+        <div class="node" id="m-dma" style="left:310px;top:352px;width:250px;height:76px;--c:var(--buf)">
+          <b>DMA internal</b>
+          <em>I80／SPI 後端槽（S3 DMA 唔讀 PSRAM）</em>
+          <span class="kv">≤48 KB 才 internal</span>
+        </div>
+
+        <div class="node" id="m-flash" style="left:592px;top:36px;width:278px;height:96px;--c:var(--hot)">
+          <b>Flash（XIP）：0 SRAM</b>
+          <em>schema 字典 12,404 B＋程式＋資產</em>
+          <span class="kv">讀嘅時候爭 flash cache（只影響開機）</span>
+        </div>
+        <div class="node" id="m-owner" style="left:592px;top:148px;width:278px;height:186px;--c:var(--buf)">
+          <b>擁有者分工（唔係一個 pool）</b>
+          <em>nc_plan：決策＋每 class 一次 carve</em>
+          <em>nc_buf：格／串流／帳</em>
+          <em>pixel：環／值流／DMA 槽／canvas</em>
+          <em>FAT：state.ncst（可重建）</em>
+          <em>flash：dictionary（const）</em>
+        </div>
+        <div class="node" id="m-note" style="left:592px;top:352px;width:278px;height:76px;--c:var(--warn)">
+          <b>兩層干擾（統計前要知）</b>
+          <em>PSRAM 帶寬：reply ↔ 大環</em>
+          <span class="kv">internal 爭用：parser／stack ↔ Wi-Fi</span>
+        </div>
+
+        <svg class="links">
+          <defs><marker id="arw6" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#31405e"/></marker></defs>
+        </svg>
+      </div>
+    </div>
+
+    <!-- ══════════ 場景 7：管理器 ══════════ -->
+    <div class="scene" data-scene="7">
+      <div class="canvas">
+        <div style="position:absolute;left:10px;top:26px;width:880px">
+          <table class="table" id="mgrTable">
+            <thead><tr><th style="width:88px">域</th><th style="width:210px">管理器</th><th>單一真相</th><th style="width:240px">缺口</th></tr></thead>
+            <tbody>
+              <tr><td><b>值</b></td><td>nc_cfg ＋ nc_state（NCSTATE）</td><td>讀寫唯一經 <code>nc_state_api</code>；apply 後只讀 cfg</td><td>struct 類未入 store；NVS 舊路徑；熱插拔動態 key 未接</td></tr>
+              <tr><td><b>schema</b></td><td>schema/state-keys.json → 生成 3 檔</td><td>286 key／16 unit；run_all 驗同步</td><td>刻意排除 tasks／effects</td></tr>
+              <tr><td><b>緩衝</b></td><td>nc_plan（決策＋carve）＋nc_buf（格）</td><td>nc_buf 係唯一「格工具」；mem.buf 一份帳</td><td>pixel 環自有一套；值流／DMA 槽不在 plan</td></tr>
+              <tr><td><b>任務</b></td><td>nc_task（registry／level／order／claim／loop）</td><td>租戶任務單一入口</td><td>core 任務 C 宣告；.nct 不可宣告 buffer</td></tr>
+              <tr><td><b>pixel 內容</b></td><td>nc_px_asset/program/layout/scan/engine</td><td>自己一套（JSON＋NCLAYOUT）</td><td>唔入 schema／plan</td></tr>
+              <tr><td><b>activation</b></td><td>ncportgen（build-time const 表）</td><td>生成期表，status cfg.act 睇</td><td>runtime 冇 activate／deactivate</td></tr>
+            </tbody>
+          </table>
+          <div class="node redline" style="position:absolute;left:0;top:300px;width:880px;height:84px">
+            <b style="color:var(--warn)">答案：冇一個跨層 config manager</b>
+            <em>最接近嘅係開機三步鏈：<code>nc_cfg_boot()</code> → <code>nc_state_boot_sync()</code> → <code>nc_state_apply_to_cfg()</code>。</em>
+            <em>順序有意義：state 必須在 B05 hardware 前覆蓋回 cfg。之後所有人只讀 cfg struct。</em>
+          </div>
+          <div class="node" id="principle" style="position:absolute;left:0;top:398px;width:880px;height:104px;--c:var(--state)">
+            <b>接駁原則（新 session 照呢三條走）</b>
+            <em>① 讀值只經 <code>nc_state_api</code>／cfg（唔好自己 parse JSON）；加減能力只改 <code>schema/state-keys.json</code>＋跑生成器。</em>
+            <em>② 緩衝只經 <code>nc_plan</code>（declare→commit→get）＋<code>nc_buf</code>；熱路徑唔准 runtime malloc／free。</em>
+            <em>③ pixel 內容唔入 schema／plan；layout 快取刪咗只係慢一次（純快取，唔係真相）。</em>
+          </div>
+
+        </div>
+      </div>
+    </div>
+
+    <!-- ══════════ 場景 8：工具／現況 ══════════ -->
+    <div class="scene" data-scene="8">
+      <div class="canvas">
+        <div class="node" id="tool1" style="left:10px;top:8px;width:436px;height:128px;--c:var(--value)">
+          <b>schema／state</b>
+          <em>gen_state_keys.py（--check）· schema_coverage.py · preset_check.py</em>
+          <em>config_diagram.py／state_diagram.py · nc4.py status cfg</em>
+          <em>nc4_file.py（刪 state.ncst 測 miss）· 4 支 state hosttest</em>
+        </div>
+        <div class="node" id="tool2" style="left:10px;top:148px;width:436px;height:128px;--c:var(--buf)">
+          <b>緩衝</b>
+          <em>buffer_diagram.py · buffer_locations.py</em>
+          <em>buf_probe.py（RTT／slot／吞吐）· buf_test.py（0xF032）</em>
+          <em>stack_cover.py／stack_depth.py · plan/buf/portgen hosttest</em>
+        </div>
+        <div class="node" id="tool3" style="left:10px;top:288px;width:436px;height:128px;--c:var(--pixel)">
+          <b>pixel 內容／layout</b>
+          <em>show_upload.py · show_verify.py · layout_bench.py（0xF077）</em>
+          <em>effect_bench.py · pipeline_stats.py · fps_trace.py（0xF081）</em>
+          <em>px*_test（7 支）· 0xF06B／0xF06D／0xF06F</em>
+        </div>
+        <div class="node" id="tool4" style="left:10px;top:428px;width:436px;height:96px;--c:var(--hot)">
+          <b>建置／環境／閘門</b>
+          <em>make.py · board.py · ncportgen.py · tenv.py · nc4.py／ota.py</em>
+          <span class="kv">bash tools/hosttest/run_all.sh → 25/25（兩個 schema 閘門）</span>
+        </div>
+
+        <div class="node" id="live" style="left:470px;top:8px;width:420px;height:150px;--c:var(--warn)">
+          <b>現況：板上 vs HEAD</b>
+          <em>連住嘅 Zero：fw 0.1.2／idf v6.0.3／app d6837876（11-21 舊 Show）</em>
+          <em>→ status cfg 冇 state／schema／act；buf 仲有 usb0.slots（舊帳）</em>
+          <em>→ HEAD 有 NCSTATE；要重建＋OTA 才有 live 數字（macOS ~6.4 KB/s，~110 s）</em>
+        </div>
+        <div class="node" id="todo" style="left:470px;top:170px;width:420px;height:170px;--c:var(--state)">
+          <b>未做（值得跟）</b>
+          <em>· hit 仍然先 parse JSON（可省 ~24–30 ms）</em>
+          <em>· struct 類（links／routes／tasks）未入 store</em>
+          <em>· runtime activate／deactivate（A1–A4）未實作</em>
+          <em>· 任務／效果管理器 name-hash 未接</em>
+          <em>· reply0 搬 internal 的 A/B 未量</em>
+        </div>
+        <div class="node" id="drift" style="left:470px;top:352px;width:420px;height:172px;--c:var(--bad)">
+          <b>文件矛盾（會誤導下次）</b>
+          <em>· state-system.md／state-schema.md 仍寫 25 key／4 unit</em>
+          <em>· driver.json：schema 範圍同 parser 未完全對齊（driver-config §4）</em>
+          <em>· AGENTS §10.3 說 6 B 表只准 internal ↔ §11.2 說 PSRAM</em>
+          <em>· nc_px_layout.h 註解過期（code 預設 PSRAM）</em>
+          <span class="tag">已修：config-schema §2（links/routes 已在 schema）</span>
+        </div>
+        <div class="node" id="nextstep" style="left:470px;top:528px;width:420px;height:56px;--c:var(--hot)">
+          <b>下一步建議</b>
+          <em>① 修過期文件 → ② 建 HEAD 16×16 映像上板 → ③ 再跑統計量測</em>
+        </div>
+
+      </div>
+    </div>
+  </section>
+
+  <aside class="nar">
+    <div class="ch" id="narCh">① 全景</div>
+    <h2 id="narTitle">載入中…</h2>
+    <div class="rule"></div>
+    <div class="body" id="narBody"></div>
+    <div class="foot" id="narFoot"></div>
+  </aside>
+</main>
+
+<div class="legend">
+  <span><i style="background:var(--value)"></i>值（config／state）</span>
+  <span><i style="background:var(--pixel)"></i>pixel 內容／熱路徑</span>
+  <span><i style="background:var(--state)"></i>NCSTATE／schema</span>
+  <span><i style="background:var(--buf)"></i>緩衝／記憶體</span>
+  <span><i style="background:var(--warn)"></i>陷阱／過期</span>
+  <span>箭嘴有虛線流動＝今步關聯</span>
+</div>
+<div class="foot-note">
+  數字來源：<a href="../00_pm/status.md">status.md</a> §7.291–.303、<a href="../03_notes/state-system.md">state-system.md</a>、
+  <a href="../00_pm/pixel-layout-pairing.md">pixel-layout-pairing.md</a>、<a href="../03_notes/buffers.md">buffers.md</a>；
+  圖係解釋用（唔係生成物），2026-11-27。
+</div>
+
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+
+  const STEPS = [
+    // ── ① 全景 ──
+    { ch:'① 全景', sc:0, title:'你問嘅三樣嘢，其實係三個世界', nodes:['w1','w2','w3','road'], edges:[], dim:true,
+      body:`<div class="blk"><span class="lbl a">做咩</span><p>「狀態管理員」「pixel 的 JSON」「緩衝」係同一個 firmware 嘅三塊，但<b>唔係同一個管理器</b>。</p></div>
+      <div class="blk"><span class="lbl b">點分</span><p><b>值</b>＝schema＋NCSTATE＋RAM store；<b>內容</b>＝pixel 四層 JSON＋layout 編譯；<b>記憶體</b>＝nc_plan／nc_buf／pixel 自己嘅環。</p></div>
+      <div class="blk"><span class="lbl c">一句</span><p>統一嘅只有「值」嘅格式；跨層 config manager 唔存在（設計上刻意）。</p></div>` },
+    { ch:'① 全景', sc:0, title:'開機鏈：B02 讀值 → state → apply → B05／B08', nodes:['b02','bsta','bapp','b05','b08'], edges:['e-b02-sta|state','e-sta-app|state','e-app-05|value','e-05-08|pixel'], dim:true,
+      body:`<div class="blk"><span class="lbl a">做咩</span><p>開機時值要<b>先整理好</b>，driver／任務之後只讀整理好嘅 cfg。</p></div>
+      <div class="blk"><span class="lbl b">點做</span><p>B02 parse JSON → cfg；state 對拍（快取 override）；<code>apply_to_cfg()</code> 在 <b>B05 之前</b>蓋回 cfg；B05 讀 cfg 裝 driver；B08 開任務。</p></div>
+      <div class="blk"><span class="lbl d">陷阱</span><p>apply 遲過 B05 → pin／freq 類 override 會<b>靜默失效</b>。</p></div>` },
+
+    // ── ② 值：來源 ──
+    { ch:'② 值：來源', sc:1, title:'三個來源，權威：FAT live > build 預置 > L0', nodes:['s-l0','s-preset','s-fat','b02b'], edges:['e-l0|value','e-preset|value','e-fat|state'], dim:true,
+      body:`<div class="blk"><span class="lbl a">做咩</span><p>同一個設定可以來自三個地方，邊個贏有好清楚嘅次序。</p></div>
+      <div class="blk"><span class="lbl b">點做</span><p><b>L0</b> 出廠 const（rebuild）；<b>build 預置</b>（嵌進固件，只喺裝置缺檔時 seed）；<b>FAT live</b>（最高權威，reboot 生效）。</p></div>
+      <div class="blk"><span class="lbl d">陷阱</span><p>build 預置<b>唔會覆蓋</b>裝置已有嘅檔；要出廠狀態要 <code>fs_format=1</code>＋reboot。</p></div>` },
+    { ch:'② 值：來源', sc:1, title:'B02：5 個 JSON → 型別化 struct ＋ 值集 hash', nodes:['b02b','cfg','cons'], edges:['e-b02cfg|value','e-cfgcons|pixel'], dim:true,
+      body:`<div class="blk"><span class="lbl a">做咩</span><p>一次讀齊設定，之後全系統只讀 struct，唔再碰 JSON。</p></div>
+      <div class="blk"><span class="lbl b">點做</span><p>讀 system／hardware／tasks／resources／driver → cJSON → 型別化；順便計「值集 hash」（<code>src_hash</code>）。壞檔回預設、缺欄位用預設，計 miss／bad／inv／unk。</p></div>
+      <div class="blk"><span class="lbl c">數字</span><p>Matrix ≈30.1 ms（5 JSON＋型別化＋hash）；SuperMini 24.4 ms。</p></div>` },
+
+    // ── ③ 值：NCSTATE ──
+    { ch:'③ 值：NCSTATE', sc:2, title:'NCSTATE：同預設唔同嘅值，壓成一個細 blob', nodes:['recs','blob','bak'], edges:['e-cfgrecs|state','e-recsblob|state','e-blobbak|hot'], dim:true,
+      body:`<div class="blk"><span class="lbl a">做咩</span><p>開機唔想再 parse 13 KB JSON，所以把「改過嘅值」存成人讀唔到、機讀得快嘅格式。</p></div>
+      <div class="blk"><span class="lbl b">點做</span><p>header 26 B（magic／ver／flags／count／src_hash／payload_len／blob_crc）＋ record（type u8＋key varint＋len varint＋value）。<b>sparse</b>：同預設一樣唔寫；未知 type 靠 len 跳過。</p></div>
+      <div class="blk"><span class="lbl c">數字</span><p>SuperMini 5 筆＝<b>50 B</b>；26 個 value key 全寫估 ~270 B；舊 Matrix 量 124 B。壞檔自動重生，舊檔留 <code>.bak</code>（last-known-good）。</p></div>` },
+    { ch:'③ 值：NCSTATE', sc:2, title:'開機判定：hit（state 贏）／hash 變（JSON 贏）', nodes:['cmp','hit','diff'], edges:['e-blobcmp|state','e-cmphit|state','e-cmpdiff|state'], dim:true,
+      body:`<div class="blk"><span class="lbl a">做咩</span><p>決定今次用 state 定 JSON。</p></div>
+      <div class="blk"><span class="lbl b">點做</span><p><code>src_hash</code> ＝「值集」CRC32（唔係 JSON bytes）。<b>同</b> → hit，state 贏（保留 override）；<b>唔同</b> → JSON 贏、重建；<b>壞檔</b> → self-heal。</p></div>
+      <div class="blk"><span class="lbl d">陷阱</span><p>唔可以用「值同 cfg 唔同」做重建條件——回寫值本身就係唔同，一 reboot 就會被清走（實測 frame_ms 25→20）。</p></div>` },
+    { ch:'③ 值：NCSTATE', sc:2, title:'apply_to_cfg ＋ 回寫：邊個位落盤', nodes:['store2','apply2','persist'], edges:['e-blobstore|state','e-storeapply|state','e-applypersist|state'], dim:true,
+      body:`<div class="blk"><span class="lbl a">做咩</span><p>state 值要真正影響行為；runtime 改值要能持久化。</p></div>
+      <div class="blk"><span class="lbl b">點做</span><p>B02 後、B05 前 <code>apply_to_cfg()</code> 把 26 個 value key 蓋回 cfg；<code>STATUS_SET</code> 只排隊，reboot 前 main 落盤。</p></div>
+      <div class="blk"><span class="lbl d">陷阱</span><p>decode 任務 stack 只有 3,072 B，handler 唔可以寫 FAT；落盤叫 <code>nc_state_persist()</code>，<b>唔係</b> <code>nc_state_commit()</code>（linker 會揀錯）。</p></div>` },
+    { ch:'③ 值：NCSTATE', sc:3, title:'schema registry：加減能力只改一個 JSON', nodes:['json','gen','f1','f2','f3','api','store3','gate','dict'], edges:['e-jsongen|value','e-genf1|value','e-genf2|value','e-genf3|value','e-f2api|value','e-apistore|state','e-gateapi|hot','e-apidict|hot'], dim:true,
+      body:`<div class="blk"><span class="lbl a">做咩</span><p>「有咩可以設定」只有一份答案，加／減能力唔使改一街 code。</p></div>
+      <div class="blk"><span class="lbl b">點做</span><p><code>schema/state-keys.json</code> → <code>gen_state_keys.py</code> → 3 份 C＋doc 表 → <code>nc_state_schema</code>／<code>nc_state_api</code>。run_all 開頭 <code>--check</code> 驗同步。</p></div>
+      <div class="blk"><span class="lbl c">數字</span><p>v2、<b>286 key／16 unit</b>（value 26／struct 260）、字典 <b>12,404 B flash（0 SRAM）</b>。class 分 value（入 store）／struct（只登記、由 cfg 直接消費）。</p></div>` },
+
+    { ch:'④ Schema', sc:3, title:'遮罩覆蓋：6 個 config 檔，邊個有「名分」？', nodes:['cov1','cov2','cov3','cov4','cov5','cov6'], edges:[], dim:true,
+      body:`<div class="blk"><span class="lbl a">做咩</span><p>「遮罩」唔係一份，係三層：① schema 字典（有冇名分）② class value／struct（入唔入 store）③ activation unit mask（開機邊個 unit 生效）。</p></div>
+      <div class="blk"><span class="lbl b">逐檔</span><p><b>driver.json ✅</b> 10 個 LED key 全部 value（cfg→record→store→apply→render）；<b>hardware</b> 197（12 value）；<b>system</b> 76（4 value）；<b>network</b> 3（全 struct，B02 唔讀，nc_wifi 自己讀）。</p></div>
+      <div class="blk"><span class="lbl d">例外</span><p><b>tasks.json</b> 0 key（刻意移除；熱插拔走動態 key）＋<b>resources.json</b> 0 key（完全唔入 schema）。總數 286 key＝4 檔；真正寫入 blob 只有 26 個 value key（system 4＋hardware 12＋driver 10）。</p></div>` },
+
+    // ── ⑤ pixel JSON ──
+    { ch:'⑤ Pixel JSON', sc:4, title:'四層 JSON：效果／map／mode／播放清單', nodes:['l1','l2','l3','l4','scan'], edges:['e-l1scan|pixel','e-l2scan|pixel','e-l3scan|pixel','e-l4scan|pixel'], dim:true,
+      body:`<div class="blk"><span class="lbl a">做咩</span><p>pixel 內容（效果、接線順序、模式、playlist）全部係 FAT 上嘅 JSON：<code>/data/pixel</code>。</p></div>
+      <div class="blk"><span class="lbl b">點做</span><p>effects（波形 program）／map（group＋sel）／modes（group×effect×write×range）／registry（list）。開機掃目錄解析，pool 放 PSRAM；壞檔 rejected 唔會搞死全張表。</p></div>
+      <div class="blk"><span class="lbl c">數字</span><p>16×600 樣本：effects 15 KB、map 58 KB（501 組）、mode 42 KB（500 條）。上限：effects 每檔 16 KB、map／mode 每檔 256 KB。</p></div>` },
+    { ch:'⑤ Pixel JSON', sc:4, title:'sel＝「遮罩」：Python slice → 有序 index', nodes:['sel'], edges:['e-scansel|pixel'], dim:true,
+      body:`<div class="blk"><span class="lbl a">做咩</span><p>你講嘅「遮罩」喺呢個 repo 嘅真身＝<b>sel 選擇器</b>＋<b>write 通道遮罩</b>，唔係 boolean mask 表達式。</p></div>
+      <div class="blk"><span class="lbl b">點做</span><p><code>sel</code> 係 Python slice 字串：<code>":"</code>／<code>"0:18"</code>／<code>"::2"</code>／<code>"15:10:-1"</code>。依書寫次序拼接成有序全域 index（32-bit），可反序、隔顆、重疊、跨型別；同 pixel 多 entry 按 entry 次序後寫覆蓋。</p></div>
+      <div class="blk"><span class="lbl d">陷阱</span><p>slice 數字仍係 int16（&gt;32,767 夾住）；「遮罩」唔可以當 set（重複／次序有意義）。</p></div>` },
+    { ch:'⑤ Pixel JSON', sc:4, title:'編譯：counting bucket → runs（RLE）＋值流去重', nodes:['layout','runs','aprog'], edges:['e-sellayout|pixel','e-layoutruns|pixel','e-layoutaprog|pixel'], dim:true,
+      body:`<div class="blk"><span class="lbl a">做咩</span><p>把「任意組合」嘅散落寫入，編成熱路徑可以順序掃嘅表。</p></div>
+      <div class="blk"><span class="lbl b">點做</span><p>group.sel 展開 → mode range 再切 → counting bucket 按 dst 分桶（O(px+n)、穩定）→ 合併連續段成 <b>runs</b>（16 B：dst32／src32／count32／job32，dst 升序）。</p></div>
+      <div class="blk"><span class="lbl c">數字</span><p>500 組 → 500–1,500 runs（8–24 KB，代替 9,600 index）；同一 asset 只編一條值流（500 組共用 20 效果 → 20 條）。build 39–40 ms（500 組）。</p></div>` },
+    { ch:'⑤ Pixel JSON', sc:4, title:'flat6 落點表 ＋ NCLAYOUT 快取', nodes:['flat','cache'], edges:['e-runsflat|pixel','e-flatcache|hot'], dim:true,
+      body:`<div class="blk"><span class="lbl a">做咩</span><p>runs 再展開成每顆 6 B 嘅落點表，換走熱路徑嘅分支；編譯結果存檔，下次直接讀。</p></div>
+      <div class="blk"><span class="lbl b">點做</span><p><code>flat6 {dst16,src16,write8,aprog8}</code> → <b>PSRAM</b>（11-25 定案）；快取 <code>/pixel/cache/&lt;key&gt;.layout</code>（magic <code>NCLAYOUT</code>），key＝hash(mode／map／px／assets／ver)，<b>≤32 KB 才存</b>。</p></div>
+      <div class="blk"><span class="lbl c">數字</span><p>9,600 px flat＝57.6 KB；current＋next ≈115 KB；大表（&gt;32 KB）直接 rebuild（讀表同重建差不多）。</p></div>` },
+    { ch:'⑤ Pixel JSON', sc:4, title:'「壓縮」真相：邊啲係壓縮，邊啲唔係', nodes:['c1','c2','c3','c4'], edges:[], dim:true,
+      body:`<div class="blk"><span class="lbl a">做咩</span><p>分清你問嘅「壓縮法」——呢個 repo 冇一個叫「JSON 遮罩壓縮」嘅正式功能。</p></div>
+      <div class="blk"><span class="lbl b">有嘅</span><p>① map 用 <b>sel 範圍</b>描述（唔逐粒寫）；② layout 編譯成 <b>runs＝RLE</b>；③ <b>值流按 asset 去重</b>；④ <code>flat6</code> 係<b>反壓縮</b>（展開換速度）；⑤ <code>NCLAYOUT</code> 係編譯快取。</p></div>
+      <div class="blk"><span class="lbl d">冇嘅</span><p>JSON 本身冇壓縮；<b>PXA2</b>（pixel assets 編譯快取）已作廢／暫緩；冇 zlib／entropy／bit-packed。呢個就係「最接近你講嘅遮罩壓縮」嘅答案。</p></div>` },
+
+    // ── ⑥ 熱路徑／緩衝 ──
+    { ch:'⑥ 熱路徑／緩衝', sc:5, title:'一幀真正發生咩事', nodes:['p0','p1','p2','p3','p4','ptasks','pswap','pnum'], edges:['e-p01|pixel','e-p12|pixel','e-p23|pixel','e-p34|pixel'], dim:true,
+      body:`<div class="blk"><span class="lbl a">做咩</span><p>layout 編好之後，每幀就係四層四任務接力。</p></div>
+      <div class="blk"><span class="lbl b">點做</span><p>paint 掃 runs／flat → canvas（含 white mix）→ 零拷貝寫 <code>prd</code> 環 → encode 出 WS2812／I80 波形 → render DMA submit → 燈。</p></div>
+      <div class="blk"><span class="lbl c">數字</span><p>四任務全部 <code>level=4</code>；16×600 pair 9.65–10.25 ms／幀；I80 合成 6,365 µs（SWAR 3.77×）；換場預建 swap 246 µs。</p></div>` },
+    { ch:'⑥ 熱路徑／緩衝', sc:6, title:'緩衝帳：邊啲記憶體、邊個擁有', nodes:['m-static','m-plan','m-sram','m-ring','m-ps','m-arena','m-flat','m-dma','m-flash','m-owner','m-note'], edges:[], dim:true,
+      body:`<div class="blk"><span class="lbl a">做咩</span><p>唔係「一個大 pool」：每樣嘢有自己嘅位置同擁有者。</p></div>
+      <div class="blk"><span class="lbl b">點分</span><p>internal static 143,559 B（RTOS／網絡骨架）；plan／nc_buf 4 條 <b>7,895 B</b>；state 1,156 B＋dirty 384 B、<code>s_recs</code> 768 B 在 PSRAM；pixel 環／值流／DMA 槽自己擁有；flash 字典 12,404 B（0 SRAM）。</p></div>
+      <div class="blk"><span class="lbl c">一句</span><p>真正「寫死」只有骨架 143.6 KB；業務動態緩衝只佔 <b>5.2%</b>。統計量測要記 where＋同場模組。</p></div>` },
+
+    // ── ⑦ 管理器 ──
+    { ch:'⑦ 管理器', sc:7, title:'有冇統一管理器？答案：冇，但每個域有自己嘅', nodes:[], edges:[], dim:false,
+      body:`<div class="blk"><span class="lbl a">做咩</span><p>呢個就係你問「什麼的有沒有一個統一管理器」嘅答案。</p></div>
+      <div class="blk"><span class="lbl b">分工</span><p>值→nc_state＋schema；佈局→nc_plan／nc_buf；任務→nc_task；pixel 內容→nc_px_*；activation→ncportgen（build-time）。</p></div>
+      <div class="blk"><span class="lbl c">設計原則</span><p>「值」同「佈局」刻意分開（handoff §8.3）。最接近統一入口嘅係 B02 三步鏈；之後所有人只讀 cfg struct。</p></div>` },
+
+    // ── ⑧ 工具／現況 ──
+    { ch:'⑧ 工具／現況', sc:8, title:'工具清單（真係存在、點跑）', nodes:['tool1','tool2','tool3','tool4'], edges:[], dim:true,
+      body:`<div class="blk"><span class="lbl a">做咩</span><p>你問「用了什麼工具有什麼工具」——呢四組就係。</p></div>
+      <div class="blk"><span class="lbl b">四組</span><p><b>schema／state</b>（gen／coverage／preset_check／status cfg）；<b>緩衝</b>（buffer_diagram／locations／buf_probe／buf_test）；<b>pixel</b>（show_upload／show_verify／layout_bench／effect_bench／fps_trace）；<b>建置／閘門</b>（make.py／board.py／tenv／run_all 25/25）。</p></div>
+      <div class="blk"><span class="lbl c">閘門</span><p><code>run_all.sh</code> 開頭自動跑 <code>gen_state_keys --check</code>＋<code>preset_check</code>，唔同步直接 fail。</p></div>` },
+    { ch:'⑧ 工具／現況', sc:8, title:'現況 vs HEAD：板上仲係舊 firmware', nodes:['live','todo','drift','nextstep'], edges:[], dim:true,
+      body:`<div class="blk"><span class="lbl a">做咩</span><p>老實講「做到邊」同「邊啲文件過期」。</p></div>
+      <div class="blk"><span class="lbl b">現況</span><p>HEAD 有 NCSTATE；連住嘅 Zero 仍係 <code>fw 0.1.2／idf v6.0.3</code> 舊 Show（status cfg 冇 state／schema／act）。要重建＋OTA 才有 live 數字（macOS ~6.4 KB/s、~110 s）。</p></div>
+      <div class="blk"><span class="lbl d">未做＋文件矛盾</span><p>hit 未跳 parse、struct 未入 store、runtime activate 未做、任務／效果 name-hash 未接；state 文件仍寫 25 key、AGENTS §10.3 同 §11.2 對 flat6 內外矛盾、nc_px_layout.h 註解過期、driver schema 同 parser 未對齊（已修 config-schema §2）。</p></div>` },
+  ];
+
+  const SHORT = [
+    '三個世界','開機鏈','三個來源','B02 解析','NCSTATE blob','開機判定','apply／回寫','schema registry',
+    '遮罩覆蓋','四層 JSON','sel 遮罩','編譯 runs','flat6＋快取','壓縮真相','一幀流程','緩衝帳','管理器','工具','現況／文件矛盾'
+  ];
+
+  let cur = -1, playing = true, timer = null, elapsed = 0;
+  const DUR = 7200;       // 每步自動前進（ms）
+  const TICK = 60;
+
+  // ── 左邊 rail ──
+  const rail = $('rail');
+  let lastCh = '';
+  STEPS.forEach((st, i) => {
+    if (st.ch !== lastCh) {
+      const d = document.createElement('div');
+      d.className = 'ch'; d.textContent = st.ch; rail.appendChild(d); lastCh = st.ch;
+    }
+    const b = document.createElement('button');
+    b.className = 'st'; b.dataset.i = i;
+    b.innerHTML = '<span class="n">' + String(i + 1).padStart(2, '0') + '</span><span>' + (SHORT[i] || st.title) + '</span>';
+    b.addEventListener('click', () => { stopAuto(); go(i); });
+    rail.appendChild(b);
+  });
+
+  function go(i) {
+    if (i < 0 || i >= STEPS.length) return;
+    cur = i;
+    const st = STEPS[i];
+
+    // scenes
+    document.querySelectorAll('.scene').forEach((s) => s.classList.toggle('on', +s.dataset.scene === st.sc));
+    const scene = document.querySelector('.scene[data-scene="' + st.sc + '"]');
+    $('sceneLabel').textContent = st.ch + ' — 場景 ' + (st.sc + 1) + '／9';
+
+    // nodes
+    scene.querySelectorAll('.node').forEach((n) => {
+      n.classList.remove('on');
+      if (st.nodes.length) n.classList.toggle('dim', !st.nodes.includes(n.id) && st.dim);
+      else n.classList.remove('dim');
+    });
+    st.nodes.forEach((id) => {
+      const n = document.getElementById(id);
+      if (!n) return;
+      n.classList.remove('pulse');
+      void n.offsetWidth;       // 強制 reflow → 每次 highlight 都重播 pop
+      n.classList.add('on', 'pulse');
+    });
+
+    // edges
+    scene.querySelectorAll('path.e').forEach((p) => {
+      p.classList.remove('flow');
+      const hit = (st.edges || []).find((e) => e.split('|')[0] === p.id);
+      if (hit) { p.classList.add('flow'); p.dataset.c = hit.split('|')[1] || 'value'; }
+    });
+    scene.querySelectorAll('.table tr').forEach((tr) => tr.style.background = '');
+
+    // narration
+    $('narCh').textContent = st.ch;
+    $('narTitle').textContent = st.title;
+    $('narBody').innerHTML = st.body;
+    $('narBody').scrollTop = 0;
+    const lit = (st.nodes || []).map((id) => {
+      const n = document.getElementById(id);
+      const b = n && n.querySelector('b');
+      return b ? b.textContent.trim().slice(0, 26) : null;
+    }).filter(Boolean);
+    $('narFoot').innerHTML = '第 ' + (i + 1) + ' / ' + STEPS.length + ' 步'
+      + (lit.length ? ' · 圖上亮起：' + lit.join(' ・ ') : '')
+      + ' · <a href="#s' + (i + 1) + '">#s' + (i + 1) + '</a>';
+
+    // rail state
+    document.querySelectorAll('.rail .st').forEach((b, k) => {
+      b.classList.toggle('on', k === i);
+      b.classList.toggle('done', k < i);
+    });
+    $('pos').textContent = (i + 1) + ' / ' + STEPS.length;
+    $('prev').disabled = i === 0;
+    $('next').disabled = i === STEPS.length - 1;
+
+    elapsed = 0; $('bar').style.width = '0%';
+    try { if (location.hash !== '#s' + (i + 1)) history.replaceState(null, '', '#s' + (i + 1)); } catch (e) { /* file:// 某些瀏覽器 */ }
+    if (playing) startAuto();
+  }
+
+  function startAuto() {
+    stopAuto();
+    timer = setInterval(() => {
+      elapsed += TICK;
+      $('bar').style.width = Math.min(100, (elapsed / DUR) * 100) + '%';
+      if (elapsed >= DUR) {
+        if (cur < STEPS.length - 1) go(cur + 1);
+        else { stopAuto(); playing = false; $('play').textContent = '▶ 自動'; }
+      }
+    }, TICK);
+    $('play').textContent = '⏸ 暫停';
+  }
+  function stopAuto() { if (timer) { clearInterval(timer); timer = null; } }
+  function toggleAuto() {
+    playing = !playing;
+    if (playing) startAuto(); else { stopAuto(); $('play').textContent = '▶ 自動'; }
+  }
+
+  $('prev').addEventListener('click', () => { go(cur - 1); });
+  $('next').addEventListener('click', () => { go(cur + 1); });
+  $('play').addEventListener('click', toggleAuto);
+  $('reset').addEventListener('click', () => { playing = true; go(0); });
+  window.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowRight') { e.preventDefault(); go(cur + 1); }
+    else if (e.key === 'ArrowLeft') { e.preventDefault(); go(cur - 1); }
+    else if (e.key === ' ') { e.preventDefault(); toggleAuto(); }
+    else if (e.key === 'r' || e.key === 'R') { playing = true; go(0); }
+  });
+
+  // 場景畫布固定 900×600；窄螢幕等比縮細（stage 變窄時唔會截走右邊）
+  function fitCanvas() {
+    const stage = $('stage');
+    const sc = Math.min(1, (stage.clientWidth - 2) / 900);
+    document.querySelectorAll('.canvas').forEach((c) => {
+      c.style.transformOrigin = 'top left';
+      c.style.transform = 'scale(' + sc.toFixed(4) + ')';
+    });
+  }
+  window.addEventListener('resize', fitCanvas);
+  fitCanvas();
+
+  // 支援 #sN 直接跳去某一步（給截圖／分享用）
+  const m = location.hash.match(/^#s(\d+)$/);
+  const start = m ? Math.max(0, Math.min(STEPS.length - 1, +m[1] - 1)) : 0;
+  go(start);
+})();
+</script>
+</body>
+</html>

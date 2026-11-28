@@ -582,6 +582,109 @@ static void pack_bus_case(const char *name, nc_px_format_t fmt, uint8_t bits,
     free(nw);
 }
 
+// 2026-11-28：逐線獨立來源（每條 lane 不同 px／不同內容）逐 byte 對拍。
+// 參考路徑：每條 lane 各自 nc_px_codec_wave_frame()（獨立 payload／px）→ 逐 tick 組 bus word。
+static void test_pack_bus_seg(void)
+{
+    section("分段來源：每線不同 px／內容，pack_bus_seg 同逐 lane 參考路徑對拍");
+    const uint32_t lanes = 3;
+    const uint16_t px_line[16] = { 5, 3, 7 };
+    uint32_t off[16] = { 0 };
+    uint32_t total = 0;
+    uint32_t max_px = 0;
+    for (uint32_t k = 0; k < lanes; k++) {
+        off[k] = total;
+        total += px_line[k];
+        if (px_line[k] > max_px) max_px = px_line[k];
+    }
+    nc_px_codec_cfg_t cc;
+    memset(&cc, 0, sizeof(cc));
+    cc.fmt = NC_PX_FMT_WS2812;
+    cc.bits = 8;
+    cc.dither_mode = 0;
+    cc.px = max_px;
+    nc_px_wave_default(cc.fmt, &cc.wave);
+    cc.wave.bit_cells = 3;
+
+    nc_pixel_codec_t *cd[3] = { NULL };
+    uint8_t *pay = (uint8_t *)malloc((size_t)total * NC_PX_BPP);
+    uint8_t *ref[3] = { NULL };
+    uint8_t *out = (uint8_t *)calloc((size_t)max_px * 3u * 8u * 3u, 1);
+    bool ok = (pay != NULL && out != NULL);
+    for (uint32_t k = 0; k < lanes && ok; k++) {
+        cd[k] = nc_px_codec_new();
+        ok = (cd[k] != NULL && nc_px_codec_init(cd[k], &cc) != NULL);
+        ref[k] = (uint8_t *)calloc(nc_px_codec_total_units(cd[k]), 1);
+        ok = ok && (ref[k] != NULL);
+    }
+    for (uint32_t i = 0; ok && i < total * NC_PX_BPP; i++) {
+        pay[i] = (uint8_t)((i * 53u + 7u) & 0xFFu);
+    }
+    if (ok) {
+        // 參考：每條 lane 自己的 payload segment + 自己 px。
+        for (uint32_t k = 0; k < lanes; k++) {
+            (void)nc_px_codec_frame(cd[k], 3);
+            ok = ok && (nc_px_codec_wave_frame(cd[k], pay + (size_t)off[k] * NC_PX_BPP,
+                                               px_line[k], ref[k],
+                                               nc_px_codec_total_units(cd[k])) != 0);
+        }
+        // 重設抖動狀態，跑新路徑。
+        for (uint32_t k = 0; k < lanes; k++) {
+            ok = ok && (nc_px_codec_init(cd[k], &cc) != NULL);
+            (void)nc_px_codec_frame(cd[k], 3);
+        }
+        const uint32_t ticks = nc_px_codec_pack_bus_seg(cd, pay, px_line, off, lanes,
+                                                        max_px, out, 8);
+        CHECK_EQ(ticks, max_px * 3u * 8u * 3u);
+        uint32_t bad = 0;
+        for (uint32_t t = 0; ok && t < ticks; t++) {
+            uint8_t want = 0;
+            for (uint32_t k = 0; k < lanes; k++) {
+                if (t < nc_px_codec_total_units(cd[k]) && ref[k][t] != 0) {
+                    want |= (uint8_t)(1u << k);
+                }
+            }
+            if (out[t] != want) {
+                if (bad < 3) {
+                    printf("    tick %u：got=0x%02x want=0x%02x\n",
+                           (unsigned)t, out[t], want);
+                }
+                bad++;
+            }
+        }
+        CHECK_EQ(bad, 0);
+        // mask-only 路徑：buffer 先預填 [all][x][0] pattern，只寫中間 mask；
+        // 結果要同 full 路徑逐 byte 一樣。
+        uint8_t *full = (uint8_t *)malloc(ticks);
+        ok = (full != NULL);
+        if (ok) {
+            memcpy(full, out, ticks);
+            memset(out, 0, ticks);
+            const uint8_t all = (uint8_t)((1u << lanes) - 1u);
+            for (uint32_t t = 0; t + 2u < ticks; t += 3u) {
+                out[t] = all;
+            }
+            for (uint32_t k = 0; k < lanes; k++) {
+                ok = ok && (nc_px_codec_init(cd[k], &cc) != NULL);
+                (void)nc_px_codec_frame(cd[k], 3);
+            }
+            (void)nc_px_codec_pack_bus_seg_mask(cd, pay, px_line, off, lanes,
+                                                max_px, out, 8);
+            CHECK(memcmp(full, out, ticks) == 0);
+            free(full);
+        }
+        CHECK(memcmp(pay, pay, 1) == 0);   // no-op；保持編譯器唔投訴
+    } else {
+        CHECK(0);
+    }
+    for (uint32_t k = 0; k < lanes; k++) {
+        if (ref[k] != NULL) free(ref[k]);
+        if (cd[k] != NULL) nc_px_codec_free(cd[k]);
+    }
+    free(pay);
+    free(out);
+}
+
 static void test_pack_bus(void)
 {
     section("展開＋轉置一次過：新舊路徑逐 byte 對拍（8/16 lane、RGBW、dither、bc）");
@@ -727,6 +830,7 @@ int main(void)
     test_dither();
     test_multilane();
     test_pack_bus();
+    test_pack_bus_seg();
     test_pack_bus_clear16();
     test_backends();
     printf("\n%d passed, %d failed\n", g_pass, g_fail);

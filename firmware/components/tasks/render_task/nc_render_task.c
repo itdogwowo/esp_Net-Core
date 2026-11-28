@@ -215,6 +215,16 @@ static uint32_t stage_px(const char *be)
     // present=1 而 enable=0 都照用 px：那時只剩 mock lane，環的大小仍然要一致。
     const nc_led_cfg_t *decl = led_cfg();
     if (decl != NULL && decl->px > 0) {
+        // 2026-11-28：逐線獨立內容 → 環 = Σ line_px（DMA 時間仍由 max 決定）。
+        if (decl->n_line > 0 && strcmp(be, "i80") == 0) {
+            uint32_t total = 0;
+            for (uint8_t k = 0; k < decl->n_line && k < 16; k++) {
+                total += decl->line_px[k];
+            }
+            if (total > 0) {
+                return total;
+            }
+        }
         return (uint32_t)decl->px;
     }
     const uint32_t px = (CONFIG_NETCORE_PIXEL_LEDS > 0) ? (uint32_t)CONFIG_NETCORE_PIXEL_LEDS
@@ -453,8 +463,25 @@ static esp_err_t setup_backends(void)
     const int n = plan_lanes();
     for (int i = 0; i < n; i++) {
         const px_plan_t *pl = &s_plan[i];
+        const nc_led_cfg_t *ledseg = led_active();
+        uint32_t codec_px = pl->px;
+        uint8_t seg_n = 0;
+        uint16_t seg_px[16] = { 0 };
+        uint32_t seg_max = 0;
+        if (ledseg != NULL && ledseg->n_line > 0 && strcmp(pl->be, "i80") == 0) {
+            seg_n = ledseg->n_line;
+            for (uint8_t k = 0; k < seg_n && k < 16; k++) {
+                seg_px[k] = ledseg->line_px[k];
+                if (seg_px[k] > seg_max) {
+                    seg_max = seg_px[k];
+                }
+            }
+            if (seg_max > 0) {
+                codec_px = seg_max;      // codec 每條線最多 max px；DMA slot 跟 max
+            }
+        }
         nc_px_codec_cfg_t cc;
-        codec_cfg_of(&cc, pl->px, pl->be);
+        codec_cfg_of(&cc, codec_px, pl->be);
 #if CONFIG_NETCORE_PIXEL_I80
         if (strcmp(pl->be, "i80") == 0) {
             static int s_i80_pins[18];
@@ -474,7 +501,11 @@ static esp_err_t setup_backends(void)
                 .dc = s_i80_pins[width + 1],
                 .cs = cs_pin,
                 .pclk_hz = cc.wave.clk_hz,
-                .px = pl->px,
+                .px = codec_px,
+                .ring_px = pl->px,
+                .dma_px = codec_px,
+                .n_line = seg_n,
+                .line_px = { 0 },
                 .fmt = cc.fmt,
                 .wave = cc.wave,
                 .dither_bits = cc.bits,
@@ -482,6 +513,11 @@ static esp_err_t setup_backends(void)
                 .zone_px = (uint8_t)cc.zone_px,
                 .slots = (uint8_t)pl->slots,
             };
+            if (seg_n > 0) {
+                for (uint8_t k = 0; k < seg_n && k < 16; k++) {
+                    ic.line_px[k] = seg_px[k];
+                }
+            }
             nc_pixel_backend_t *be = nc_px_backend_i80(&ic);
             if (be == NULL) {
                 ESP_LOGE(TAG, "i80 後端建立失敗（腳位被佔用或沒開）→ 這道 lane 停用");

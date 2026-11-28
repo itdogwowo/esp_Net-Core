@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "name": "ESP32-S3-Generic-16IO",
+  "hardware": "S3/ESP32-S3-Generic-16IO",
+  "aliases": [
+    "16io",
+    "led16-test"
+  ],
+  "seed": [
+    "hardware",
+    "system",
+    "network",
+    "tasks",
+    "resources",
+    "driver"
+  ],
+  "default": true
+}

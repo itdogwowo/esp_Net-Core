@@ -16,7 +16,7 @@
 | 環（i80.prd） | PSRAM（`CONFIG_NETCORE_PIXEL_RING_PSRAM=y`） | internal（大 px 會 OOM，明示失敗） |
 | packed 波形 | PSRAM（`CONFIG_NETCORE_PIXEL_PACK_PSRAM=y`） | internal |
 | 示範幾何 | 2 lane × 256 px | 1 lane × 64 px |
-| 6 B 配對表 | **一律 internal**（PSRAM 版實測慢過 runs） | internal |
+| flat6（6 B/px 落點表） | **PSRAM**（`nc_px_layout_flatify()`，2026-11-25 定案） | internal（冇 PSRAM 時 malloc） |
 
 判準：**大 buffer 先問 PSRAM，細而熱（表／parser／stack）一律 internal**。
 

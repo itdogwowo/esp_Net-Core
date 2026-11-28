@@ -255,7 +255,9 @@ void              nc_px_codec_free(nc_pixel_codec_t *c);
 const nc_px_formatspec_t *nc_px_codec_spec(const nc_pixel_codec_t *c);
 uint32_t nc_px_codec_lane_bytes(const nc_pixel_codec_t *c);
 uint32_t nc_px_codec_bits(const nc_pixel_codec_t *c);          // 一幀幾個位（含頭尾）
-uint32_t nc_px_codec_units(const nc_pixel_codec_t *c);         // 一幀幾個時序單元（不含 reset）
+uint32_t nc_px_codec_units(const nc_pixel_codec_t *c);
+// 波形是否為最常見的 WS2812 3-cell（t0h=1、t1h=2）—— DMA 槽可預填 pattern。
+bool     nc_px_codec_wave_is_3_1_2(const nc_pixel_codec_t *c);         // 一幀幾個時序單元（不含 reset）
 uint32_t nc_px_codec_total_units(const nc_pixel_codec_t *c);   // 含 reset
 void     nc_px_codec_frame(nc_pixel_codec_t *c, uint32_t frame_idx);
 
@@ -291,6 +293,23 @@ void nc_px_codec_pack_merge8_store(const uint8_t *lane[8], uint32_t packed_bytes
 // tick 直接寫 bus word（8-bit：1 B；16-bit：2 B little-endian，bit k = lane k）。
 // 呼叫前要對每條 lane 做 nc_px_codec_frame(c, seq)；out 只寫 active ticks，
 // reset 部份由呼叫端保持 0。回傳寫出的 tick 數（px × lane_bytes × 8 × bit_cells）。
+// 逐條線獨立來源（2026-11-28）：每條 lane 由 rgbw + off[k] 讀自己 px_line[k] 顆；
+//   i >= px_line[k] 之後該 lane 出 0（reset）。max_px = max(px_line)，
+//   輸出 tick 數同「所有 lane 都 px=max」一樣；DMA 時間跟最長那條。
+//   舊 pack_bus() 保持不變（廣播／舊 backend 用）。
+uint32_t nc_px_codec_pack_bus_seg(nc_pixel_codec_t *const codec[], const uint8_t *rgbw,
+                                  const uint16_t *px_line, const uint32_t *off,
+                                  uint32_t lanes, uint32_t max_px,
+                                  uint8_t *out, uint32_t bus_width);
+
+// 同 pack_bus_seg 一樣，但 **只寫每 bit 的中間 word**（mask）；
+// 呼叫端要事先把輸出 buffer 填好固定 pattern（t=0 的 active word、t=2 的 0 word）。
+// production 的 DMA slot 可以開機填一次，之後每幀只寫 mask → 少 2/3 輸出寫入。
+uint32_t nc_px_codec_pack_bus_seg_mask(nc_pixel_codec_t *const codec[], const uint8_t *rgbw,
+                                       const uint16_t *px_line, const uint32_t *off,
+                                       uint32_t lanes, uint32_t max_px,
+                                       uint8_t *out, uint32_t bus_width);
+
 uint32_t nc_px_codec_pack_bus(nc_pixel_codec_t *const codec[], const uint8_t *rgbw,
                               uint32_t px, uint8_t *out, uint32_t lanes, uint32_t bus_width);
 

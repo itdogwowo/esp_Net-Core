@@ -1514,7 +1514,10 @@ static const char *const k_unimpl[] = {
 
 static bool is_known_device(const char *k)
 {
-    static const char *const k_known[] = { "LED", "WS2812", "led", "version", "_comment", "SD" };
+    static const char *const k_known[] = {
+        "LED", "WS2812", "led", "version", "_comment", "SD",
+        "LED_PWM", "LED_WS2812", "LED_PCA9685", "LED_APA102",
+    };
     for (size_t i = 0; i < sizeof(k_known) / sizeof(k_known[0]); i++) {
         if (strcmp(k, k_known[i]) == 0) {
             return true;
@@ -1528,6 +1531,113 @@ static bool is_known_device(const char *k)
     return false;
 }
 
+
+// ── 2026-11-28：LED_WS2812 系列（每 list item = 一條線）────────────────
+// 新設定形狀：
+//   "LED_WS2812": { "enable":1, "list":[
+//       { "bus": {"type":"i80","index":0}, "px":256, "order":"GRB", "d_stay":0 }, ... ] }
+// 暫時仍然填 legacy nc_led_cfg_t（render 重用現有 I80 後端）：
+//   bus = 0（S3 只有一個 I80）、lanes = list 數、px = 每條線 px、fmt 由 order 決定；
+//   timing 唔讀（codec 用預設）。
+static bool led_order_has_w(const char *s)
+{
+    if (s == NULL) {
+        return false;
+    }
+    for (const char *p = s; *p != '\0'; p++) {
+        if (*p == 'W' || *p == 'w') {
+            return true;
+        }
+    }
+    return false;
+}
+
+static void apply_led_ws2812(const cJSON *o, nc_devices_cfg_t *out, nc_cfg_stat_t *st)
+{
+    nc_led_cfg_t *l = &out->led;
+    memset(l, 0, sizeof(*l));
+    l->present = true;
+    l->enable = dev_enabled(o);
+    l->backend = NC_LED_BACKEND_I80;
+    l->bus = 0;
+    snprintf(l->fmt, sizeof(l->fmt), "ws2812");
+
+    const cJSON *list = item(o, "list");
+    if (!cJSON_IsArray(list)) {
+        st->invalid++;
+        ESP_LOGW(TAG, "driver.json LED_WS2812：enable=1 但 list 唔係陣列 → 這組停用");
+        l->enable = false;
+        return;
+    }
+    const uint16_t n = (uint16_t)cJSON_GetArraySize(list);
+    if (n > 16) {
+        st->invalid++;
+        ESP_LOGW(TAG, "driver.json LED_WS2812：%u 條線（I80 上限 16）→ 只讀前 16 條",
+                 (unsigned)n);
+        l->enable = false;
+        return;
+    }
+    if (l->enable && n == 0) {
+        st->invalid++;
+        ESP_LOGW(TAG, "driver.json LED_WS2812：enable=1 但 list 係空 → 這組停用");
+        l->enable = false;
+        return;
+    }
+
+    uint16_t px0 = 0;
+    const cJSON *it = NULL;
+    uint16_t i = 0;
+    bool fmt_w = false;
+    cJSON_ArrayForEach(it, list) {
+        if (!cJSON_IsObject(it)) {
+            st->invalid++;
+            continue;
+        }
+        const cJSON *bus = item(it, "bus");
+        const cJSON *ty = cJSON_IsObject(bus) ? item(bus, "type") : NULL;
+        if (!cJSON_IsString(ty) || strcmp(ty->valuestring, "i80") != 0) {
+            st->invalid++;
+            ESP_LOGW(TAG, "LED_WS2812.list[%u].bus.type 要係 \"i80\" → 這組停用", (unsigned)i);
+            l->enable = false;
+        }
+        const cJSON *ix = cJSON_IsObject(bus) ? item(bus, "index") : NULL;
+        if (!cJSON_IsNumber(ix) || ix->valueint != (int)i) {
+            st->invalid++;
+            ESP_LOGW(TAG, "LED_WS2812.list[%u].bus.index 要係 %u（第幾條 data line）",
+                     (unsigned)i, (unsigned)i);
+            l->enable = false;
+        }
+        const cJSON *px = item(it, "px");
+        if (!cJSON_IsNumber(px) || px->valueint < 1 || px->valueint > 65535) {
+            st->invalid++;
+            l->enable = false;
+        } else {
+            const uint16_t p = (uint16_t)px->valueint;
+            if (i < 16) {
+                l->line_px[i] = p;
+            }
+            if (p > px0) {
+                px0 = p;      // legacy px = max；真實每線 px 喺 line_px[]
+            }
+        }
+        const cJSON *order = item(it, "order");
+        if (cJSON_IsString(order) && led_order_has_w(order->valuestring)) {
+            fmt_w = true;
+        }
+        i++;
+    }
+    if (l->enable) {
+        l->lanes = (uint8_t)i;
+        l->px = px0;   // legacy：max(px)；line_px[] 才是每線獨立 px
+        l->n_line = (uint8_t)i;
+        if (fmt_w) {
+            snprintf(l->fmt, sizeof(l->fmt), "ws2812w");
+        }
+        ESP_LOGI(TAG, "driver.json LED_WS2812：%u 條線 × %u px、fmt=%s（timing 由 driver 內建）",
+                 (unsigned)l->lanes, (unsigned)l->px, l->fmt);
+    }
+}
+
 static void apply_devices(const cJSON *root, nc_devices_cfg_t *out, nc_cfg_stat_t *st)
 {
     memset(out, 0, sizeof(*out));
@@ -1536,16 +1646,23 @@ static void apply_devices(const cJSON *root, nc_devices_cfg_t *out, nc_cfg_stat_
     }
     out->present = true;
 
-    const cJSON *led = item(root, "LED");
-    if (led == NULL) {
-        led = item(root, "WS2812");
-    }
-    if (led == NULL) {
-        led = item(root, "led");
-    }
-    if (cJSON_IsObject(led)) {
+    // 新系列優先：LED_WS2812（每 item 一條線）→ 填 legacy nc_led_cfg_t 給 render。
+    const cJSON *ws = item(root, "LED_WS2812");
+    if (cJSON_IsObject(ws)) {
         out->led_decl = true;
-        apply_dev_led(led, out, st);
+        apply_led_ws2812(ws, out, st);
+    } else {
+        const cJSON *led = item(root, "LED");
+        if (led == NULL) {
+            led = item(root, "WS2812");
+        }
+        if (led == NULL) {
+            led = item(root, "led");
+        }
+        if (cJSON_IsObject(led)) {
+            out->led_decl = true;
+            apply_dev_led(led, out, st);
+        }
     }
 
     for (size_t i = 0; i < sizeof(k_unimpl) / sizeof(k_unimpl[0]); i++) {

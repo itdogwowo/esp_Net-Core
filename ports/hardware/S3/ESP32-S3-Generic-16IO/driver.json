@@ -1,0 +1,153 @@
+{
+  "version": 1,
+  "_comment": "功能測試：16 條線，每條 16×16；內容由 pixel 四層決定（每條一個 effect）。",
+  "LED_WS2812": {
+    "enable": 1,
+    "list": [
+      {
+        "bus": {
+          "type": "i80",
+          "index": 0
+        },
+        "px": 256,
+        "order": "GRB",
+        "d_stay": 0
+      },
+      {
+        "bus": {
+          "type": "i80",
+          "index": 1
+        },
+        "px": 256,
+        "order": "GRB",
+        "d_stay": 0
+      },
+      {
+        "bus": {
+          "type": "i80",
+          "index": 2
+        },
+        "px": 256,
+        "order": "GRB",
+        "d_stay": 0
+      },
+      {
+        "bus": {
+          "type": "i80",
+          "index": 3
+        },
+        "px": 256,
+        "order": "GRB",
+        "d_stay": 0
+      },
+      {
+        "bus": {
+          "type": "i80",
+          "index": 4
+        },
+        "px": 256,
+        "order": "GRB",
+        "d_stay": 0
+      },
+      {
+        "bus": {
+          "type": "i80",
+          "index": 5
+        },
+        "px": 256,
+        "order": "GRB",
+        "d_stay": 0
+      },
+      {
+        "bus": {
+          "type": "i80",
+          "index": 6
+        },
+        "px": 256,
+        "order": "GRB",
+        "d_stay": 0
+      },
+      {
+        "bus": {
+          "type": "i80",
+          "index": 7
+        },
+        "px": 256,
+        "order": "GRB",
+        "d_stay": 0
+      },
+      {
+        "bus": {
+          "type": "i80",
+          "index": 8
+        },
+        "px": 256,
+        "order": "GRB",
+        "d_stay": 0
+      },
+      {
+        "bus": {
+          "type": "i80",
+          "index": 9
+        },
+        "px": 256,
+        "order": "GRB",
+        "d_stay": 0
+      },
+      {
+        "bus": {
+          "type": "i80",
+          "index": 10
+        },
+        "px": 256,
+        "order": "GRB",
+        "d_stay": 0
+      },
+      {
+        "bus": {
+          "type": "i80",
+          "index": 11
+        },
+        "px": 256,
+        "order": "GRB",
+        "d_stay": 0
+      },
+      {
+        "bus": {
+          "type": "i80",
+          "index": 12
+        },
+        "px": 256,
+        "order": "GRB",
+        "d_stay": 0
+      },
+      {
+        "bus": {
+          "type": "i80",
+          "index": 13
+        },
+        "px": 256,
+        "order": "GRB",
+        "d_stay": 0
+      },
+      {
+        "bus": {
+          "type": "i80",
+          "index": 14
+        },
+        "px": 256,
+        "order": "GRB",
+        "d_stay": 0
+      },
+      {
+        "bus": {
+          "type": "i80",
+          "index": 15
+        },
+        "px": 256,
+        "order": "GRB",
+        "d_stay": 0
+      }
+    ]
+  }
+}

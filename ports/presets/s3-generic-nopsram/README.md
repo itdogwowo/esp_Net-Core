@@ -16,7 +16,8 @@
 | `driver.json` | `lanes: 2`、`px: 256` | `lanes: 1`、`px: 64` |
 | `system.json` | `num_pixels: 512` | `num_pixels: 64` |
 
-- **6 B 配對表永遠 internal**（PSRAM 版實測慢過 runs）——所以有 PSRAM 都唔會放 PSRAM。
+- **flat6（6 B/px）預設 PSRAM**（2026-11-25 定案）；冇 PSRAM 時 `malloc` 落 internal，
+  唔夠就明示失敗（唔會靜靜退更慢的路）。量測例外才手動 `flatify_place(false)`。
 - 冇 PSRAM 時，環／packed 要 internal；唔夠會**明示失敗**（唔會靜靜退更慢的路）。
 - 想加大 px：先量 `status mem` 的 `h_int`；9,600 px 這類尺寸冇 PSRAM 一定放唔落。
 

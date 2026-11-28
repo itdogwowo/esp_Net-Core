@@ -142,7 +142,7 @@ def panel3(y: int) -> str:
             ("i80.prd", "576", "px×lane（cfg）", "△ 跟 cfg，唔會超配"),
             ("mock.prd", "576", "測試後端", "△ release 仍然存在 → 可條件編譯省 576"),
             ("ncm.arena", "0", "掃描 .nce／.nct", "✓ 0 模組 = 唔宣告（原 32 KB）；有模組 32 KB 起～512 KB"),
-            ("schema 表", "12,404", "schema JSON（生成期）", "✓ flash，0 SRAM")]
+            ("schema 表", "29,735", "schema JSON（生成期）", "✓ flash，0 SRAM")]
     ry = y + 54
     colx = [x + 24, x + 220, x + 330, x + 560]
     for i, r in enumerate(rows):

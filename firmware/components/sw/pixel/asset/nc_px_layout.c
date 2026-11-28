@@ -737,6 +737,21 @@ static uint32_t apply_flat_rgb(const nc_px_layout_t *l, uint16_t *const *vals, u
 }
 
 // 6 B 表版本的 8-bit 寫入（內圈：一次乘法都冇）；可以只做一段。
+bool nc_px_layout_needs_clear(const nc_px_layout_t *l)
+{
+    if (l == NULL || l->flat == NULL || l->nflat < l->px) {
+        return true;
+    }
+    for (uint32_t i = 0; i < l->nflat; i++) {
+        const uint8_t w = l->flat[i].write;
+        if (w != NC_PX_WRITE_RGB && w != NC_PX_WRITE_RGBW &&
+            w != NC_PX_WRITE_WW && w != NC_PX_WRITE_WWWW) {
+            return true;      // r/g/b/w 只寫一個通道 → 要由零開始
+        }
+    }
+    return false;
+}
+
 uint32_t nc_px_layout_apply_range(const nc_px_layout_t *l, uint16_t *const *vals,
                                   uint8_t *dst, uint32_t from, uint32_t count)
 {

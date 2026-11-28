@@ -261,6 +261,12 @@ uint32_t nc_px_codec_bits(const nc_pixel_codec_t *c)
     return head + body + (uint32_t)c->spec->tail_bytes * 8u;
 }
 
+bool nc_px_codec_wave_is_3_1_2(const nc_pixel_codec_t *c)
+{
+    return c != NULL && c->cfg.wave.bit_cells == 3 &&
+           c->cfg.wave.t0h == 1 && c->cfg.wave.t1h == 2;
+}
+
 uint32_t nc_px_codec_total_units(const nc_pixel_codec_t *c)
 {
     if (c == NULL) {
@@ -778,6 +784,274 @@ uint32_t nc_px_codec_pack_bus(nc_pixel_codec_t *const codec[], const uint8_t *rg
         }
     }
     return tick;
+}
+
+// 逐線獨立來源（2026-11-28）：同 pack_bus 的「非廣播」路徑一樣逐 lane 推進，
+// 但每條 lane 有自己的 pointer／剩餘 px；過咗自己 px 之後該 lane 出 0（reset）。
+// 唔用 broadcast 快路徑：內容／長度唔同，一定要逐 lane。
+static inline void pack_bus_emit_seg(uint8_t *out, uint32_t *tick, uint32_t stride,
+                                     uint16_t active, uint16_t bits,
+                                     uint32_t t_lo, uint32_t t_hi, uint32_t bc)
+{
+    for (uint32_t k = 0; k < bc; k++) {
+        const uint16_t w = (k < t_lo) ? active : ((k < t_hi) ? bits : 0u);
+        if (stride == 2) {
+            out[*tick * 2u] = (uint8_t)w;
+            out[*tick * 2u + 1u] = (uint8_t)(w >> 8);
+        } else {
+            out[*tick] = (uint8_t)w;
+        }
+        (*tick)++;
+    }
+}
+
+__attribute__((optimize("O3")))
+static uint32_t pack_bus_seg_impl(nc_pixel_codec_t *const codec[], const uint8_t *rgbw,
+                                  const uint16_t *px_line, const uint32_t *off,
+                                  uint32_t lanes, uint32_t max_px,
+                                  uint8_t *out, uint32_t bus_width, bool mask_only)
+{
+    if (codec == NULL || rgbw == NULL || px_line == NULL || off == NULL || out == NULL ||
+        lanes == 0 || lanes > 16 || (bus_width != 8 && bus_width != 16) ||
+        lanes > bus_width || max_px == 0) {
+        return 0;
+    }
+    nc_pixel_codec_t *c0 = codec[0];
+    if (c0 == NULL || c0->spec->clk || c0->px < max_px) {
+        return 0;
+    }
+    const uint32_t lb = c0->spec->lane_bytes;
+    const uint32_t bc = c0->cfg.wave.bit_cells;
+    if (lb == 0 || lb > 4 || bc == 0) {
+        return 0;
+    }
+    for (uint32_t k = 1; k < lanes; k++) {
+        if (codec[k] == NULL || codec[k]->spec != c0->spec ||
+            codec[k]->cfg.wave.bit_cells != bc ||
+            codec[k]->cfg.wave.t0h != c0->cfg.wave.t0h ||
+            codec[k]->cfg.wave.t1h != c0->cfg.wave.t1h ||
+            codec[k]->cfg.bits != c0->cfg.bits ||
+            codec[k]->cfg.dither_mode != c0->cfg.dither_mode ||
+            codec[k]->cfg.zone_px != c0->cfg.zone_px) {
+            return 0;
+        }
+    }
+    uint32_t t_lo = c0->cfg.wave.t0h;
+    uint32_t t_hi = c0->cfg.wave.t1h;
+    t_lo = (t_lo == 0) ? 1u : (t_lo >= bc ? bc - 1u : t_lo);
+    t_hi = (t_hi <= t_lo) ? bc : (t_hi >= bc ? bc : t_hi);
+    const uint32_t stride = (bus_width == 16) ? 2u : 1u;
+    const uint16_t all = (uint16_t)((1u << lanes) - 1u);
+    const uint8_t *src[16];
+    uint32_t left[16];
+    uint8_t  need_zero[16];
+    uint8_t  lv[16][4];
+    // 快路徑：8-bit、無抖動、非時鐘燈（production 最常見）→ 直接由 RGBW 取線材 byte，
+    // 唔使逐 pixel 經 lane_px()／lane_order()／dither 檢查。
+    bool fast = (c0->fast_ok != 0 && c0->fast_lb == lb && lb <= 4);
+    for (uint32_t k = 1; k < lanes && fast; k++) {
+        fast = (codec[k]->fast_ok != 0 && codec[k]->fast_lb == lb);
+    }
+    const uint8_t *fmap = c0->fast_map;
+    for (uint32_t k = 0; k < lanes; k++) {
+        src[k] = rgbw + (size_t)off[k] * NC_PX_BPP;
+        left[k] = px_line[k];
+        need_zero[k] = 0;
+        memset(lv[k], 0, sizeof(lv[k]));
+    }
+    // 最常見：16 條線 px 全部等於 max，而且 8-bit／無抖動（bench／預設 production）：
+    // 冇 lane 結束／padding，active mask 固定 all；省掉 left／need_zero 分支。
+    bool equal_px = true;
+    for (uint32_t k = 0; k < lanes; k++) {
+        if (px_line[k] != max_px) {
+            equal_px = false;
+            break;
+        }
+    }
+    if (fast && equal_px) {
+        uint32_t tick2 = 0;
+        const bool fast16 = (lanes == 16 && lb == 3 && bc == 3 && t_lo == 1 && t_hi == 2);
+        if (fast16) {
+            // 16 lane／3 通道／WS2812 的最熱路徑：一次過由 16 個 src 取 3 bytes，
+            // 直接砌 3 組 64-bit lane word → 3 次 transpose → 每 bit 寫 3 words。
+            const uint8_t m0 = fmap[0], m1 = fmap[1], m2 = fmap[2];
+            uint16_t *o16 = (uint16_t *)out;
+            for (uint32_t i = 0; i < max_px; i++) {
+                uint64_t l0 = 0, l1 = 0, l2 = 0, h0 = 0, h1 = 0, h2 = 0;
+                for (uint32_t k = 0; k < 8; k++) {
+                    const uint8_t *sp = src[k];
+                    const uint32_t p4 = *(const uint32_t *)sp;   // RGBW 4 bytes，一次讀
+                    const uint32_t sh = 8u * k;
+                    l0 |= (uint64_t)((p4 >> (8u * m0)) & 0xFFu) << sh;
+                    l1 |= (uint64_t)((p4 >> (8u * m1)) & 0xFFu) << sh;
+                    l2 |= (uint64_t)((p4 >> (8u * m2)) & 0xFFu) << sh;
+                    src[k] += NC_PX_BPP;
+                }
+                for (uint32_t k = 8; k < 16; k++) {
+                    const uint8_t *sp = src[k];
+                    const uint32_t p4 = *(const uint32_t *)sp;
+                    const uint32_t sh = 8u * (k - 8u);
+                    h0 |= (uint64_t)((p4 >> (8u * m0)) & 0xFFu) << sh;
+                    h1 |= (uint64_t)((p4 >> (8u * m1)) & 0xFFu) << sh;
+                    h2 |= (uint64_t)((p4 >> (8u * m2)) & 0xFFu) << sh;
+                    src[k] += NC_PX_BPP;
+                }
+                l0 = pack_bus_t8(l0); h0 = pack_bus_t8(h0);
+                l1 = pack_bus_t8(l1); h1 = pack_bus_t8(h1);
+                l2 = pack_bus_t8(l2); h2 = pack_bus_t8(h2);
+                for (int b = 7; b >= 0; b--) {
+                    const uint32_t sh = (uint32_t)b * 8u;
+                    const uint16_t mcol0 = (uint16_t)(((l0 >> sh) & 0xFFu) |
+                                                      (((h0 >> sh) & 0xFFu) << 8));
+                    const uint16_t mcol1 = (uint16_t)(((l1 >> sh) & 0xFFu) |
+                                                      (((h1 >> sh) & 0xFFu) << 8));
+                    const uint16_t mcol2 = (uint16_t)(((l2 >> sh) & 0xFFu) |
+                                                      (((h2 >> sh) & 0xFFu) << 8));
+                    o16[tick2 + 1u] = mcol0;
+                    o16[tick2 + 4u] = mcol1;
+                    o16[tick2 + 7u] = mcol2;
+                    if (!mask_only) {
+                        o16[tick2] = all;
+                        o16[tick2 + 2u] = 0;
+                        o16[tick2 + 3u] = all;
+                        o16[tick2 + 5u] = 0;
+                        o16[tick2 + 6u] = all;
+                        o16[tick2 + 8u] = 0;
+                    }
+                    tick2 += 9u;
+                }
+            }
+            return tick2;
+        }
+        uint8_t lv2[16][4];
+        for (uint32_t i = 0; i < max_px; i++) {
+            for (uint32_t k = 0; k < lanes; k++) {
+                const uint8_t *sp = src[k];
+                lv2[k][0] = sp[fmap[0]];
+                lv2[k][1] = sp[fmap[1]];
+                lv2[k][2] = (lb > 2) ? sp[fmap[2]] : 0;
+                lv2[k][3] = (lb > 3) ? sp[fmap[3]] : 0;
+                src[k] += NC_PX_BPP;
+            }
+            for (uint32_t ch = 0; ch < lb; ch++) {
+                uint64_t xl = 0, xh = 0;
+                for (uint32_t k = 0; k < lanes; k++) {
+                    if (k < 8) {
+                        xl |= (uint64_t)lv2[k][ch] << (8u * k);
+                    } else {
+                        xh |= (uint64_t)lv2[k][ch] << (8u * (k - 8u));
+                    }
+                }
+                xl = pack_bus_t8(xl);
+                xh = pack_bus_t8(xh);
+                for (int b = 7; b >= 0; b--) {
+                    const uint32_t sh = (uint32_t)b * 8u;
+                    const uint16_t m = (uint16_t)(((xl >> sh) & 0xFFu) |
+                                                  (((xh >> sh) & 0xFFu) << 8));
+                    if (bc == 3 && t_lo == 1 && t_hi == 2) {
+                        if (stride == 2) {
+                            uint16_t *o = (uint16_t *)out;
+                            o[tick2 + 1u] = m;
+                            if (!mask_only) {
+                                o[tick2] = all;
+                                o[tick2 + 2u] = 0;
+                            }
+                            tick2 += 3u;
+                        } else {
+                            out[tick2 + 1u] = (uint8_t)m;
+                            if (!mask_only) {
+                                out[tick2] = (uint8_t)all;
+                                out[tick2 + 2u] = 0;
+                            }
+                            tick2 += 3u;
+                        }
+                    } else {
+                        pack_bus_emit_seg(out, &tick2, stride, all, m, t_lo, t_hi, bc);
+                    }
+                }
+            }
+        }
+        return tick2;
+    }
+
+    uint32_t tick = 0;
+    for (uint32_t i = 0; i < max_px; i++) {
+        const uint32_t zone = (c0->cfg.zone_px == 0) ? 0u : (i / c0->cfg.zone_px);
+        uint16_t active = 0;
+        for (uint32_t k = 0; k < lanes; k++) {
+            if (left[k] > 0) {
+                active |= (uint16_t)(1u << k);
+                if (fast) {
+                    const uint8_t *sp = src[k];
+                    for (uint32_t b = 0; b < lb; b++) {
+                        lv[k][b] = sp[fmap[b]];
+                    }
+                } else {
+                    (void)nc_px_codec_lane_px(codec[k], src[k], zone, lv[k]);
+                }
+                src[k] += NC_PX_BPP;
+                if (--left[k] == 0) {
+                    need_zero[k] = 1;
+                }
+            } else if (need_zero[k] != 0) {
+                memset(lv[k], 0, sizeof(lv[k]));
+                need_zero[k] = 0;
+            }
+        }
+        for (uint32_t ch = 0; ch < lb; ch++) {
+            uint64_t xl = 0, xh = 0;
+            for (uint32_t k = 0; k < lanes; k++) {
+                if (k < 8) {
+                    xl |= (uint64_t)lv[k][ch] << (8u * k);
+                } else {
+                    xh |= (uint64_t)lv[k][ch] << (8u * (k - 8u));
+                }
+            }
+            xl = pack_bus_t8(xl);
+            xh = pack_bus_t8(xh);
+            for (int b = 7; b >= 0; b--) {
+                const uint32_t sh = (uint32_t)b * 8u;
+                const uint16_t m = (uint16_t)(((xl >> sh) & 0xFFu) |
+                                              (((xh >> sh) & 0xFFu) << 8));
+                if (bc == 3 && t_lo == 1 && t_hi == 2) {
+                    // 最常見的 WS2812 波形：每個 bit = [active][bit mask][0]
+                    if (stride == 2) {
+                        uint16_t *o = (uint16_t *)out;
+                        o[tick] = active;
+                        o[tick + 1u] = m;
+                        o[tick + 2u] = 0;
+                        tick += 3u;
+                    } else {
+                        out[tick] = (uint8_t)active;
+                        out[tick + 1u] = (uint8_t)m;
+                        out[tick + 2u] = 0;
+                        tick += 3u;
+                    }
+                } else {
+                    pack_bus_emit_seg(out, &tick, stride, active, m, t_lo, t_hi, bc);
+                }
+            }
+        }
+    }
+    return tick;
+}
+
+uint32_t nc_px_codec_pack_bus_seg(nc_pixel_codec_t *const codec[], const uint8_t *rgbw,
+                                  const uint16_t *px_line, const uint32_t *off,
+                                  uint32_t lanes, uint32_t max_px,
+                                  uint8_t *out, uint32_t bus_width)
+{
+    return pack_bus_seg_impl(codec, rgbw, px_line, off, lanes, max_px, out,
+                             bus_width, false);
+}
+
+uint32_t nc_px_codec_pack_bus_seg_mask(nc_pixel_codec_t *const codec[], const uint8_t *rgbw,
+                                       const uint16_t *px_line, const uint32_t *off,
+                                       uint32_t lanes, uint32_t max_px,
+                                       uint8_t *out, uint32_t bus_width)
+{
+    return pack_bus_seg_impl(codec, rgbw, px_line, off, lanes, max_px, out,
+                             bus_width, true);
 }
 
 uint32_t nc_px_codec_spi_frame(nc_pixel_codec_t *c, const uint8_t *rgbw, uint32_t px,

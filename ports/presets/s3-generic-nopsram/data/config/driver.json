@@ -6,22 +6,19 @@
     "其餘 device（TFT／PCA9685／SDcard…）firmware 未實作；寫 enable=1 會開機大聲 warn。"
   ],
   "version": 1,
-  "LED": {
+  "LED_WS2812": {
     "enable": 1,
-    "backend": "i80",
-    "bus": {
-      "type": "i80",
-      "index": 0
-    },
-    "lanes": 1,
-    "px": 64,
-    "format": "ws2812",
-    "timing": {
-      "pclk_hz": 2500000,
-      "bit_cells": 3,
-      "t0h": 1,
-      "t1h": 2
-    }
+    "list": [
+      {
+        "bus": {
+          "type": "i80",
+          "index": 0
+        },
+        "px": 64,
+        "order": "GRB",
+        "d_stay": 0
+      }
+    ]
   },
   "TFT": {
     "enable": 0

@@ -97,6 +97,7 @@ CONSOLE_SYM = {
 DRV_HW_SECTIONS = ("ETH", "PIN", "SPI", "I2C", "I80", "UART", "I2S",
                    "PWM", "SDIO", "ENC", "XL9555")
 DRV_KNOWN = {"version", "_comment", "USB", "TFT", "SDcard", "Audio", "PCM5102",
+             "LED_WS2812", "LED_PWM", "LED_PCA9685", "LED_APA102",
              "GT1151Q", "HUSB238", "PCA9685", "APA102", "WS2812", "uartMotor",
              "LED", "IMU"}
 BUS_KINDS = {"spi": "SPI", "i2c": "I2C", "uart": "UART", "i2s": "I2S",
@@ -139,6 +140,12 @@ RUNTIME_KEYS_BY_FILE = {
     # 改 wiring 之後跑 tools/sync_hardware_presets.py 同步。
     "hardware.json": {"version", "_comment", "_gpio_convention", "ETH", "USB", "PIN", "SPI",
                       "I2C", "I80", "UART", "I2S", "PWM", "SDIO", "ENC", "XL9555"},
+    # driver.json = 應用硬件（device）層；只有 LED 有 driver，其餘段寫 enable=1 會 warn。
+    "driver.json": {"version", "_comment", "LED", "WS2812", "LED_WS2812",
+                    "LED_PWM", "LED_PCA9685", "LED_APA102",
+                    "TFT", "APA102", "PCA9685",
+                    "Audio", "PCM5102", "GT1151Q", "HUSB238", "uartMotor", "XL9555",
+                    "SD", "SDcard"},
 }
 
 MARK_OPEN = "# >>> profile: {name}"
@@ -558,6 +565,64 @@ def _led_vs_kconfig(cfg_port: dict, info: dict, label: str, r: Report) -> None:
               f"CONFIG_NETCORE_PIXEL_I80_BUS_WIDTH={_int_of(raw)} 唔一致")
 
 
+def _check_led_ws2812(d: Path, drv: dict, wiring: dict | None,
+                      cfg_port: dict, r: Report) -> bool:
+    """LED_WS2812 系列：每 item 一條線；bus.index = 第幾條 data line（唔係 hardware I80 index）。"""
+    sec = drv.get("LED_WS2812")
+    if sec is None:
+        return False
+    label = f"{rel(d)}/driver.json 的 LED_WS2812"
+    if not isinstance(sec, dict):
+        r.err(f"{label} 要係物件")
+        return False
+    enable = bool(_int_of(sec.get("enable"), 0))
+    items = sec.get("list")
+    if items is None:
+        items = []
+    if not isinstance(items, list):
+        r.err(f"{label}.list 要係陣列")
+        return enable
+    for old in ("timing", "format", "backend", "lanes"):
+        if old in sec:
+            r.err(f"{label} 唔應該有 {old}：LED_WS2812 由 driver 決定格式／時序，"
+                  "config 只寫 bus／px／order／d_stay")
+    if not enable:
+        return False
+    if not items:
+        r.err(f"{label}.enable=1 但 list 係空")
+        return True
+    if len(items) > 16:
+        r.err(f"{label}.list 有 {len(items)} 條線（I80 上限 16）")
+    buses = ((wiring or {}).get("I80") or {}).get("list") or []
+    if not buses:
+        r.err(f"{label}: wiring.json 冇 I80.list（LED_WS2812 要 I80 資料腳）")
+        return True
+    b = buses[0]
+    used = [x for x in (b.get("data") or []) if isinstance(x, int) and x >= 0]
+    if len(used) < len(items):
+        r.err(f"{label} 要 {len(items)} 條線，但 wiring.json I80[0].data 只有 {len(used)} 支有效腳")
+    for i, it in enumerate(items):
+        il = f"{label}.list[{i}]"
+        if not isinstance(it, dict):
+            r.err(f"{il} 要係物件")
+            continue
+        bus = it.get("bus")
+        if not isinstance(bus, dict) or str(bus.get("type") or "").lower() != "i80":
+            r.err(f'{il}.bus 要係 {{ "type": "i80", "index": {i} }}')
+        else:
+            idx = _int_of(bus.get("index"), -1)
+            if idx != i:
+                r.err(f"{il}.bus.index={idx}（每 item 一條線，index 要等於 {i}；"
+                      "S3 只有一個 I80，index = 第幾條 data line）")
+        px = _int_of(it.get("px"), 0)
+        if px is None or not (1 <= px <= LED_MAX_PX):
+            r.err(f"{il}.px={it.get('px')} 唔合法（1..{LED_MAX_PX}）")
+        order = str(it.get("order") or "").upper()
+        if order and order not in ("GRB", "RGB", "GRBW", "RGBW"):
+            r.err(f"{il}.order={order!r} 看不懂（GRB／RGB／GRBW／RGBW）")
+    return True
+
+
 def _check_led(d: Path, drv: dict, wiring: dict | None,
                cfg_port: dict, r: Report) -> bool:
     """LED 段 schema。回 True = 有宣告而且 enable（外接燈具要讓位的那個判斷用）。"""
@@ -709,8 +774,10 @@ def _check_driver_layers(d: Path, drv: dict, wiring: dict | None,
                 for i, item in enumerate(v):
                     walk(item, f"{here}[{i}]", local_en, sub_usb, sub_sec)
 
-    walk(drv, "", True, False, "")
-    return _check_led(d, drv, wiring, cfg_port, r)
+    drv_walk = {k: v for k, v in drv.items() if k != "LED_WS2812"}
+    walk(drv_walk, "", True, False, "")
+    const_ws = _check_led_ws2812(d, drv, wiring, cfg_port, r)
+    return _check_led(d, drv, wiring, cfg_port, r) or const_ws
 
 
 def check_board(d: Path, cfg_common: dict, cfg_port: dict) -> Report:

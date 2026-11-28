@@ -27,6 +27,7 @@
 | [roadmap.md](00_pm/roadmap.md) | **重寫計劃（歷史分期）**：背景、已定案、非目標、Phase 0–5 現況、開放決策。Phase 0／1 已完成，近期清單看 status.md §7 |
 | [handoff-2026-11-04.md](00_pm/handoff-2026-11-04.md) | **交接單**：當時的系統全貌、五個未解問題、下一步建議（歷史文件，結論已併入 status／next-steps） |
 | [disposition.md](00_pm/disposition.md) | **死碼與文件處置表**：哪些留、哪些刪、哪些標為歷史（B2b／B3／B4／B5／B6） |
+| [config-state-flow.html](00_pm/config-state-flow.html) | **動畫解釋頁（19 步）**：config → state（NCSTATE／schema）→ pixel JSON（sel／runs／flat6／NCLAYOUT）→ 緩衝／管理器／工具，逐步講「做咩、點做、數字」；瀏覽器直接開，←／→ 切換、空白暫停 |
 | [README.md](00_pm/README.md) | 這一層放什麼、不放什麼（判準） |
 
 ## 01_protocol — 協議層
@@ -48,7 +49,8 @@
 |---|---|
 | [build_and_flash.md](02_guides/build_and_flash.md) | **建置與燒錄**：IDF v6.0.3 安裝、macOS 26 的兩個地雷（libexpat / pip truststore）、`app-flash` vs `flash`、疑難排解 |
 | [configuration.md](02_guides/configuration.md) | **配置實務**：一個設定放哪（build 層 vs runtime 層）、**WiFi 的兩道閘**、**LED 的 Kconfig／runtime 分工**、開機 B01–B11 邊一步讀它、改完怎樣驗證 |
-| [config-schema.md](02_guides/config-schema.md) | **可以設定什麼、在哪裡設（schema registry）**：`schema/state-keys.json` 生成的 key 一覽（type／範圍／config 路徑）、未入 schema 的 cfg 欄位、三種設定路徑、驗證清單；配 [設定流轉圖](00_pm/config-layers.svg)／[schema registry 圖](00_pm/schema-registry.svg) |
+| [config-schema.md](02_guides/config-schema.md) | **可以設定什麼、在哪裡設（schema registry）**：`schema/state-keys.json` 生成的 key 一覽（type／範圍／config 路徑）、三種「有冇入 schema」狀態、三種設定路徑、驗證清單；配 [設定流轉圖](00_pm/config-layers.svg)／[schema registry 圖](00_pm/schema-registry.svg) |
+| [driver-config.md](02_guides/driver-config.md) | **`driver.json` 微調指南**：三個位置同權威、LED 10 個 key（含實際 parser 範圍 vs schema 差異）、1 lane／2 lane／SPI／mock 完整範例、驗證步驟、常見陷阱；中央基準實際值見 [`ports/presets/STATUS.md`](../ports/presets/STATUS.md)（生成） |
 | [testing.md](02_guides/testing.md) | **測試方法與結果**：環境、9 個解碼器 case、benchmark 怎麼打、OTA 怎麼推、怎麼重跑、未測清單、紀錄表 |
 | [test-environment.md](02_guides/test-environment.md) | **每台機的測試環境（tenv）**：政策／本機紀錄／現場探測三層、`tenv brief`／`plan`／`stamp`／`verify`、IDF 與板 cid 漂移怎樣判、`.testenv/` 為何不進 git |
 | [measurement-method.md](02_guides/measurement-method.md) | **量測方法（可重跑）**：四條原則（含**用物理上限當參考線／達標率**）、S0–S7 流程、`buf_probe.py` 每個子命令回答什麼、尺寸公式（region/slot/slots/stack/環）、雙核＋同核隔離驗收、偶發事件追法、**十條踩過的陷阱**、紀錄模板（多了「物理上限／達標率」兩欄）、OTA-only 的安全規則 |

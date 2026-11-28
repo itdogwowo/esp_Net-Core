@@ -1,0 +1,1292 @@
+{
+  "version": 1,
+  "id": 3,
+  "name": "led16grid16",
+  "index": 3,
+  "play_loop": -1,
+  "maxF": 0,
+  "mapping": "led16grid16",
+  "white": 0,
+  "map": [
+    {
+      "group": "led16grid16.d00_00",
+      "effect": "cell16_math",
+      "write": "r"
+    },
+    {
+      "group": "led16grid16.d00_01",
+      "effect": "cell16_square",
+      "write": "g"
+    },
+    {
+      "group": "led16grid16.d00_02",
+      "effect": "cell16_pulse",
+      "write": "b"
+    },
+    {
+      "group": "led16grid16.d00_03",
+      "effect": "cell16_keep",
+      "write": "rgb"
+    },
+    {
+      "group": "led16grid16.d00_04",
+      "effect": "cell16_math",
+      "write": "r"
+    },
+    {
+      "group": "led16grid16.d00_05",
+      "effect": "cell16_square",
+      "write": "g"
+    },
+    {
+      "group": "led16grid16.d00_06",
+      "effect": "cell16_pulse",
+      "write": "b"
+    },
+    {
+      "group": "led16grid16.d00_07",
+      "effect": "cell16_keep",
+      "write": "rgb"
+    },
+    {
+      "group": "led16grid16.d00_08",
+      "effect": "cell16_math",
+      "write": "r"
+    },
+    {
+      "group": "led16grid16.d00_09",
+      "effect": "cell16_square",
+      "write": "g"
+    },
+    {
+      "group": "led16grid16.d00_10",
+      "effect": "cell16_pulse",
+      "write": "b"
+    },
+    {
+      "group": "led16grid16.d00_11",
+      "effect": "cell16_keep",
+      "write": "rgb"
+    },
+    {
+      "group": "led16grid16.d00_12",
+      "effect": "cell16_math",
+      "write": "r"
+    },
+    {
+      "group": "led16grid16.d00_13",
+      "effect": "cell16_square",
+      "write": "g"
+    },
+    {
+      "group": "led16grid16.d00_14",
+      "effect": "cell16_pulse",
+      "write": "b"
+    },
+    {
+      "group": "led16grid16.d00_15",
+      "effect": "cell16_keep",
+      "write": "rgb"
+    },
+    {
+      "group": "led16grid16.d01_00",
+      "effect": "cell16_square",
+      "write": "r"
+    },
+    {
+      "group": "led16grid16.d01_01",
+      "effect": "cell16_pulse",
+      "write": "g"
+    },
+    {
+      "group": "led16grid16.d01_02",
+      "effect": "cell16_keep",
+      "write": "b"
+    },
+    {
+      "group": "led16grid16.d01_03",
+      "effect": "cell16_math",
+      "write": "rgb"
+    },
+    {
+      "group": "led16grid16.d01_04",
+      "effect": "cell16_square",
+      "write": "r"
+    },
+    {
+      "group": "led16grid16.d01_05",
+      "effect": "cell16_pulse",
+      "write": "g"
+    },
+    {
+      "group": "led16grid16.d01_06",
+      "effect": "cell16_keep",
+      "write": "b"
+    },
+    {
+      "group": "led16grid16.d01_07",
+      "effect": "cell16_math",
+      "write": "rgb"
+    },
+    {
+      "group": "led16grid16.d01_08",
+      "effect": "cell16_square",
+      "write": "r"
+    },
+    {
+      "group": "led16grid16.d01_09",
+      "effect": "cell16_pulse",
+      "write": "g"
+    },
+    {
+      "group": "led16grid16.d01_10",
+      "effect": "cell16_keep",
+      "write": "b"
+    },
+    {
+      "group": "led16grid16.d01_11",
+      "effect": "cell16_math",
+      "write": "rgb"
+    },
+    {
+      "group": "led16grid16.d01_12",
+      "effect": "cell16_square",
+      "write": "r"
+    },
+    {
+      "group": "led16grid16.d01_13",
+      "effect": "cell16_pulse",
+      "write": "g"
+    },
+    {
+      "group": "led16grid16.d01_14",
+      "effect": "cell16_keep",
+      "write": "b"
+    },
+    {
+      "group": "led16grid16.d01_15",
+      "effect": "cell16_math",
+      "write": "rgb"
+    },
+    {
+      "group": "led16grid16.d02_00",
+      "effect": "cell16_pulse",
+      "write": "r"
+    },
+    {
+      "group": "led16grid16.d02_01",
+      "effect": "cell16_keep",
+      "write": "g"
+    },
+    {
+      "group": "led16grid16.d02_02",
+      "effect": "cell16_math",
+      "write": "b"
+    },
+    {
+      "group": "led16grid16.d02_03",
+      "effect": "cell16_square",
+      "write": "rgb"
+    },
+    {
+      "group": "led16grid16.d02_04",
+      "effect": "cell16_pulse",
+      "write": "r"
+    },
+    {
+      "group": "led16grid16.d02_05",
+      "effect": "cell16_keep",
+      "write": "g"
+    },
+    {
+      "group": "led16grid16.d02_06",
+      "effect": "cell16_math",
+      "write": "b"
+    },
+    {
+      "group": "led16grid16.d02_07",
+      "effect": "cell16_square",
+      "write": "rgb"
+    },
+    {
+      "group": "led16grid16.d02_08",
+      "effect": "cell16_pulse",
+      "write": "r"
+    },
+    {
+      "group": "led16grid16.d02_09",
+      "effect": "cell16_keep",
+      "write": "g"
+    },
+    {
+      "group": "led16grid16.d02_10",
+      "effect": "cell16_math",
+      "write": "b"
+    },
+    {
+      "group": "led16grid16.d02_11",
+      "effect": "cell16_square",
+      "write": "rgb"
+    },
+    {
+      "group": "led16grid16.d02_12",
+      "effect": "cell16_pulse",
+      "write": "r"
+    },
+    {
+      "group": "led16grid16.d02_13",
+      "effect": "cell16_keep",
+      "write": "g"
+    },
+    {
+      "group": "led16grid16.d02_14",
+      "effect": "cell16_math",
+      "write": "b"
+    },
+    {
+      "group": "led16grid16.d02_15",
+      "effect": "cell16_square",
+      "write": "rgb"
+    },
+    {
+      "group": "led16grid16.d03_00",
+      "effect": "cell16_keep",
+      "write": "r"
+    },
+    {
+      "group": "led16grid16.d03_01",
+      "effect": "cell16_math",
+      "write": "g"
+    },
+    {
+      "group": "led16grid16.d03_02",
+      "effect": "cell16_square",
+      "write": "b"
+    },
+    {
+      "group": "led16grid16.d03_03",
+      "effect": "cell16_pulse",
+      "write": "rgb"
+    },
+    {
+      "group": "led16grid16.d03_04",
+      "effect": "cell16_keep",
+      "write": "r"
+    },
+    {
+      "group": "led16grid16.d03_05",
+      "effect": "cell16_math",
+      "write": "g"
+    },
+    {
+      "group": "led16grid16.d03_06",
+      "effect": "cell16_square",
+      "write": "b"
+    },
+    {
+      "group": "led16grid16.d03_07",
+      "effect": "cell16_pulse",
+      "write": "rgb"
+    },
+    {
+      "group": "led16grid16.d03_08",
+      "effect": "cell16_keep",
+      "write": "r"
+    },
+    {
+      "group": "led16grid16.d03_09",
+      "effect": "cell16_math",
+      "write": "g"
+    },
+    {
+      "group": "led16grid16.d03_10",
+      "effect": "cell16_square",
+      "write": "b"
+    },
+    {
+      "group": "led16grid16.d03_11",
+      "effect": "cell16_pulse",
+      "write": "rgb"
+    },
+    {
+      "group": "led16grid16.d03_12",
+      "effect": "cell16_keep",
+      "write": "r"
+    },
+    {
+      "group": "led16grid16.d03_13",
+      "effect": "cell16_math",
+      "write": "g"
+    },
+    {
+      "group": "led16grid16.d03_14",
+      "effect": "cell16_square",
+      "write": "b"
+    },
+    {
+      "group": "led16grid16.d03_15",
+      "effect": "cell16_pulse",
+      "write": "rgb"
+    },
+    {
+      "group": "led16grid16.d04_00",
+      "effect": "cell16_math",
+      "write": "r"
+    },
+    {
+      "group": "led16grid16.d04_01",
+      "effect": "cell16_square",
+      "write": "g"
+    },
+    {
+      "group": "led16grid16.d04_02",
+      "effect": "cell16_pulse",
+      "write": "b"
+    },
+    {
+      "group": "led16grid16.d04_03",
+      "effect": "cell16_keep",
+      "write": "rgb"
+    },
+    {
+      "group": "led16grid16.d04_04",
+      "effect": "cell16_math",
+      "write": "r"
+    },
+    {
+      "group": "led16grid16.d04_05",
+      "effect": "cell16_square",
+      "write": "g"
+    },
+    {
+      "group": "led16grid16.d04_06",
+      "effect": "cell16_pulse",
+      "write": "b"
+    },
+    {
+      "group": "led16grid16.d04_07",
+      "effect": "cell16_keep",
+      "write": "rgb"
+    },
+    {
+      "group": "led16grid16.d04_08",
+      "effect": "cell16_math",
+      "write": "r"
+    },
+    {
+      "group": "led16grid16.d04_09",
+      "effect": "cell16_square",
+      "write": "g"
+    },
+    {
+      "group": "led16grid16.d04_10",
+      "effect": "cell16_pulse",
+      "write": "b"
+    },
+    {
+      "group": "led16grid16.d04_11",
+      "effect": "cell16_keep",
+      "write": "rgb"
+    },
+    {
+      "group": "led16grid16.d04_12",
+      "effect": "cell16_math",
+      "write": "r"
+    },
+    {
+      "group": "led16grid16.d04_13",
+      "effect": "cell16_square",
+      "write": "g"
+    },
+    {
+      "group": "led16grid16.d04_14",
+      "effect": "cell16_pulse",
+      "write": "b"
+    },
+    {
+      "group": "led16grid16.d04_15",
+      "effect": "cell16_keep",
+      "write": "rgb"
+    },
+    {
+      "group": "led16grid16.d05_00",
+      "effect": "cell16_square",
+      "write": "r"
+    },
+    {
+      "group": "led16grid16.d05_01",
+      "effect": "cell16_pulse",
+      "write": "g"
+    },
+    {
+      "group": "led16grid16.d05_02",
+      "effect": "cell16_keep",
+      "write": "b"
+    },
+    {
+      "group": "led16grid16.d05_03",
+      "effect": "cell16_math",
+      "write": "rgb"
+    },
+    {
+      "group": "led16grid16.d05_04",
+      "effect": "cell16_square",
+      "write": "r"
+    },
+    {
+      "group": "led16grid16.d05_05",
+      "effect": "cell16_pulse",
+      "write": "g"
+    },
+    {
+      "group": "led16grid16.d05_06",
+      "effect": "cell16_keep",
+      "write": "b"
+    },
+    {
+      "group": "led16grid16.d05_07",
+      "effect": "cell16_math",
+      "write": "rgb"
+    },
+    {
+      "group": "led16grid16.d05_08",
+      "effect": "cell16_square",
+      "write": "r"
+    },
+    {
+      "group": "led16grid16.d05_09",
+      "effect": "cell16_pulse",
+      "write": "g"
+    },
+    {
+      "group": "led16grid16.d05_10",
+      "effect": "cell16_keep",
+      "write": "b"
+    },
+    {
+      "group": "led16grid16.d05_11",
+      "effect": "cell16_math",
+      "write": "rgb"
+    },
+    {
+      "group": "led16grid16.d05_12",
+      "effect": "cell16_square",
+      "write": "r"
+    },
+    {
+      "group": "led16grid16.d05_13",
+      "effect": "cell16_pulse",
+      "write": "g"
+    },
+    {
+      "group": "led16grid16.d05_14",
+      "effect": "cell16_keep",
+      "write": "b"
+    },
+    {
+      "group": "led16grid16.d05_15",
+      "effect": "cell16_math",
+      "write": "rgb"
+    },
+    {
+      "group": "led16grid16.d06_00",
+      "effect": "cell16_pulse",
+      "write": "r"
+    },
+    {
+      "group": "led16grid16.d06_01",
+      "effect": "cell16_keep",
+      "write": "g"
+    },
+    {
+      "group": "led16grid16.d06_02",
+      "effect": "cell16_math",
+      "write": "b"
+    },
+    {
+      "group": "led16grid16.d06_03",
+      "effect": "cell16_square",
+      "write": "rgb"
+    },
+    {
+      "group": "led16grid16.d06_04",
+      "effect": "cell16_pulse",
+      "write": "r"
+    },
+    {
+      "group": "led16grid16.d06_05",
+      "effect": "cell16_keep",
+      "write": "g"
+    },
+    {
+      "group": "led16grid16.d06_06",
+      "effect": "cell16_math",
+      "write": "b"
+    },
+    {
+      "group": "led16grid16.d06_07",
+      "effect": "cell16_square",
+      "write": "rgb"
+    },
+    {
+      "group": "led16grid16.d06_08",
+      "effect": "cell16_pulse",
+      "write": "r"
+    },
+    {
+      "group": "led16grid16.d06_09",
+      "effect": "cell16_keep",
+      "write": "g"
+    },
+    {
+      "group": "led16grid16.d06_10",
+      "effect": "cell16_math",
+      "write": "b"
+    },
+    {
+      "group": "led16grid16.d06_11",
+      "effect": "cell16_square",
+      "write": "rgb"
+    },
+    {
+      "group": "led16grid16.d06_12",
+      "effect": "cell16_pulse",
+      "write": "r"
+    },
+    {
+      "group": "led16grid16.d06_13",
+      "effect": "cell16_keep",
+      "write": "g"
+    },
+    {
+      "group": "led16grid16.d06_14",
+      "effect": "cell16_math",
+      "write": "b"
+    },
+    {
+      "group": "led16grid16.d06_15",
+      "effect": "cell16_square",
+      "write": "rgb"
+    },
+    {
+      "group": "led16grid16.d07_00",
+      "effect": "cell16_keep",
+      "write": "r"
+    },
+    {
+      "group": "led16grid16.d07_01",
+      "effect": "cell16_math",
+      "write": "g"
+    },
+    {
+      "group": "led16grid16.d07_02",
+      "effect": "cell16_square",
+      "write": "b"
+    },
+    {
+      "group": "led16grid16.d07_03",
+      "effect": "cell16_pulse",
+      "write": "rgb"
+    },
+    {
+      "group": "led16grid16.d07_04",
+      "effect": "cell16_keep",
+      "write": "r"
+    },
+    {
+      "group": "led16grid16.d07_05",
+      "effect": "cell16_math",
+      "write": "g"
+    },
+    {
+      "group": "led16grid16.d07_06",
+      "effect": "cell16_square",
+      "write": "b"
+    },
+    {
+      "group": "led16grid16.d07_07",
+      "effect": "cell16_pulse",
+      "write": "rgb"
+    },
+    {
+      "group": "led16grid16.d07_08",
+      "effect": "cell16_keep",
+      "write": "r"
+    },
+    {
+      "group": "led16grid16.d07_09",
+      "effect": "cell16_math",
+      "write": "g"
+    },
+    {
+      "group": "led16grid16.d07_10",
+      "effect": "cell16_square",
+      "write": "b"
+    },
+    {
+      "group": "led16grid16.d07_11",
+      "effect": "cell16_pulse",
+      "write": "rgb"
+    },
+    {
+      "group": "led16grid16.d07_12",
+      "effect": "cell16_keep",
+      "write": "r"
+    },
+    {
+      "group": "led16grid16.d07_13",
+      "effect": "cell16_math",
+      "write": "g"
+    },
+    {
+      "group": "led16grid16.d07_14",
+      "effect": "cell16_square",
+      "write": "b"
+    },
+    {
+      "group": "led16grid16.d07_15",
+      "effect": "cell16_pulse",
+      "write": "rgb"
+    },
+    {
+      "group": "led16grid16.d08_00",
+      "effect": "cell16_math",
+      "write": "r"
+    },
+    {
+      "group": "led16grid16.d08_01",
+      "effect": "cell16_square",
+      "write": "g"
+    },
+    {
+      "group": "led16grid16.d08_02",
+      "effect": "cell16_pulse",
+      "write": "b"
+    },
+    {
+      "group": "led16grid16.d08_03",
+      "effect": "cell16_keep",
+      "write": "rgb"
+    },
+    {
+      "group": "led16grid16.d08_04",
+      "effect": "cell16_math",
+      "write": "r"
+    },
+    {
+      "group": "led16grid16.d08_05",
+      "effect": "cell16_square",
+      "write": "g"
+    },
+    {
+      "group": "led16grid16.d08_06",
+      "effect": "cell16_pulse",
+      "write": "b"
+    },
+    {
+      "group": "led16grid16.d08_07",
+      "effect": "cell16_keep",
+      "write": "rgb"
+    },
+    {
+      "group": "led16grid16.d08_08",
+      "effect": "cell16_math",
+      "write": "r"
+    },
+    {
+      "group": "led16grid16.d08_09",
+      "effect": "cell16_square",
+      "write": "g"
+    },
+    {
+      "group": "led16grid16.d08_10",
+      "effect": "cell16_pulse",
+      "write": "b"
+    },
+    {
+      "group": "led16grid16.d08_11",
+      "effect": "cell16_keep",
+      "write": "rgb"
+    },
+    {
+      "group": "led16grid16.d08_12",
+      "effect": "cell16_math",
+      "write": "r"
+    },
+    {
+      "group": "led16grid16.d08_13",
+      "effect": "cell16_square",
+      "write": "g"
+    },
+    {
+      "group": "led16grid16.d08_14",
+      "effect": "cell16_pulse",
+      "write": "b"
+    },
+    {
+      "group": "led16grid16.d08_15",
+      "effect": "cell16_keep",
+      "write": "rgb"
+    },
+    {
+      "group": "led16grid16.d09_00",
+      "effect": "cell16_square",
+      "write": "r"
+    },
+    {
+      "group": "led16grid16.d09_01",
+      "effect": "cell16_pulse",
+      "write": "g"
+    },
+    {
+      "group": "led16grid16.d09_02",
+      "effect": "cell16_keep",
+      "write": "b"
+    },
+    {
+      "group": "led16grid16.d09_03",
+      "effect": "cell16_math",
+      "write": "rgb"
+    },
+    {
+      "group": "led16grid16.d09_04",
+      "effect": "cell16_square",
+      "write": "r"
+    },
+    {
+      "group": "led16grid16.d09_05",
+      "effect": "cell16_pulse",
+      "write": "g"
+    },
+    {
+      "group": "led16grid16.d09_06",
+      "effect": "cell16_keep",
+      "write": "b"
+    },
+    {
+      "group": "led16grid16.d09_07",
+      "effect": "cell16_math",
+      "write": "rgb"
+    },
+    {
+      "group": "led16grid16.d09_08",
+      "effect": "cell16_square",
+      "write": "r"
+    },
+    {
+      "group": "led16grid16.d09_09",
+      "effect": "cell16_pulse",
+      "write": "g"
+    },
+    {
+      "group": "led16grid16.d09_10",
+      "effect": "cell16_keep",
+      "write": "b"
+    },
+    {
+      "group": "led16grid16.d09_11",
+      "effect": "cell16_math",
+      "write": "rgb"
+    },
+    {
+      "group": "led16grid16.d09_12",
+      "effect": "cell16_square",
+      "write": "r"
+    },
+    {
+      "group": "led16grid16.d09_13",
+      "effect": "cell16_pulse",
+      "write": "g"
+    },
+    {
+      "group": "led16grid16.d09_14",
+      "effect": "cell16_keep",
+      "write": "b"
+    },
+    {
+      "group": "led16grid16.d09_15",
+      "effect": "cell16_math",
+      "write": "rgb"
+    },
+    {
+      "group": "led16grid16.d10_00",
+      "effect": "cell16_pulse",
+      "write": "r"
+    },
+    {
+      "group": "led16grid16.d10_01",
+      "effect": "cell16_keep",
+      "write": "g"
+    },
+    {
+      "group": "led16grid16.d10_02",
+      "effect": "cell16_math",
+      "write": "b"
+    },
+    {
+      "group": "led16grid16.d10_03",
+      "effect": "cell16_square",
+      "write": "rgb"
+    },
+    {
+      "group": "led16grid16.d10_04",
+      "effect": "cell16_pulse",
+      "write": "r"
+    },
+    {
+      "group": "led16grid16.d10_05",
+      "effect": "cell16_keep",
+      "write": "g"
+    },
+    {
+      "group": "led16grid16.d10_06",
+      "effect": "cell16_math",
+      "write": "b"
+    },
+    {
+      "group": "led16grid16.d10_07",
+      "effect": "cell16_square",
+      "write": "rgb"
+    },
+    {
+      "group": "led16grid16.d10_08",
+      "effect": "cell16_pulse",
+      "write": "r"
+    },
+    {
+      "group": "led16grid16.d10_09",
+      "effect": "cell16_keep",
+      "write": "g"
+    },
+    {
+      "group": "led16grid16.d10_10",
+      "effect": "cell16_math",
+      "write": "b"
+    },
+    {
+      "group": "led16grid16.d10_11",
+      "effect": "cell16_square",
+      "write": "rgb"
+    },
+    {
+      "group": "led16grid16.d10_12",
+      "effect": "cell16_pulse",
+      "write": "r"
+    },
+    {
+      "group": "led16grid16.d10_13",
+      "effect": "cell16_keep",
+      "write": "g"
+    },
+    {
+      "group": "led16grid16.d10_14",
+      "effect": "cell16_math",
+      "write": "b"
+    },
+    {
+      "group": "led16grid16.d10_15",
+      "effect": "cell16_square",
+      "write": "rgb"
+    },
+    {
+      "group": "led16grid16.d11_00",
+      "effect": "cell16_keep",
+      "write": "r"
+    },
+    {
+      "group": "led16grid16.d11_01",
+      "effect": "cell16_math",
+      "write": "g"
+    },
+    {
+      "group": "led16grid16.d11_02",
+      "effect": "cell16_square",
+      "write": "b"
+    },
+    {
+      "group": "led16grid16.d11_03",
+      "effect": "cell16_pulse",
+      "write": "rgb"
+    },
+    {
+      "group": "led16grid16.d11_04",
+      "effect": "cell16_keep",
+      "write": "r"
+    },
+    {
+      "group": "led16grid16.d11_05",
+      "effect": "cell16_math",
+      "write": "g"
+    },
+    {
+      "group": "led16grid16.d11_06",
+      "effect": "cell16_square",
+      "write": "b"
+    },
+    {
+      "group": "led16grid16.d11_07",
+      "effect": "cell16_pulse",
+      "write": "rgb"
+    },
+    {
+      "group": "led16grid16.d11_08",
+      "effect": "cell16_keep",
+      "write": "r"
+    },
+    {
+      "group": "led16grid16.d11_09",
+      "effect": "cell16_math",
+      "write": "g"
+    },
+    {
+      "group": "led16grid16.d11_10",
+      "effect": "cell16_square",
+      "write": "b"
+    },
+    {
+      "group": "led16grid16.d11_11",
+      "effect": "cell16_pulse",
+      "write": "rgb"
+    },
+    {
+      "group": "led16grid16.d11_12",
+      "effect": "cell16_keep",
+      "write": "r"
+    },
+    {
+      "group": "led16grid16.d11_13",
+      "effect": "cell16_math",
+      "write": "g"
+    },
+    {
+      "group": "led16grid16.d11_14",
+      "effect": "cell16_square",
+      "write": "b"
+    },
+    {
+      "group": "led16grid16.d11_15",
+      "effect": "cell16_pulse",
+      "write": "rgb"
+    },
+    {
+      "group": "led16grid16.d12_00",
+      "effect": "cell16_math",
+      "write": "r"
+    },
+    {
+      "group": "led16grid16.d12_01",
+      "effect": "cell16_square",
+      "write": "g"
+    },
+    {
+      "group": "led16grid16.d12_02",
+      "effect": "cell16_pulse",
+      "write": "b"
+    },
+    {
+      "group": "led16grid16.d12_03",
+      "effect": "cell16_keep",
+      "write": "rgb"
+    },
+    {
+      "group": "led16grid16.d12_04",
+      "effect": "cell16_math",
+      "write": "r"
+    },
+    {
+      "group": "led16grid16.d12_05",
+      "effect": "cell16_square",
+      "write": "g"
+    },
+    {
+      "group": "led16grid16.d12_06",
+      "effect": "cell16_pulse",
+      "write": "b"
+    },
+    {
+      "group": "led16grid16.d12_07",
+      "effect": "cell16_keep",
+      "write": "rgb"
+    },
+    {
+      "group": "led16grid16.d12_08",
+      "effect": "cell16_math",
+      "write": "r"
+    },
+    {
+      "group": "led16grid16.d12_09",
+      "effect": "cell16_square",
+      "write": "g"
+    },
+    {
+      "group": "led16grid16.d12_10",
+      "effect": "cell16_pulse",
+      "write": "b"
+    },
+    {
+      "group": "led16grid16.d12_11",
+      "effect": "cell16_keep",
+      "write": "rgb"
+    },
+    {
+      "group": "led16grid16.d12_12",
+      "effect": "cell16_math",
+      "write": "r"
+    },
+    {
+      "group": "led16grid16.d12_13",
+      "effect": "cell16_square",
+      "write": "g"
+    },
+    {
+      "group": "led16grid16.d12_14",
+      "effect": "cell16_pulse",
+      "write": "b"
+    },
+    {
+      "group": "led16grid16.d12_15",
+      "effect": "cell16_keep",
+      "write": "rgb"
+    },
+    {
+      "group": "led16grid16.d13_00",
+      "effect": "cell16_square",
+      "write": "r"
+    },
+    {
+      "group": "led16grid16.d13_01",
+      "effect": "cell16_pulse",
+      "write": "g"
+    },
+    {
+      "group": "led16grid16.d13_02",
+      "effect": "cell16_keep",
+      "write": "b"
+    },
+    {
+      "group": "led16grid16.d13_03",
+      "effect": "cell16_math",
+      "write": "rgb"
+    },
+    {
+      "group": "led16grid16.d13_04",
+      "effect": "cell16_square",
+      "write": "r"
+    },
+    {
+      "group": "led16grid16.d13_05",
+      "effect": "cell16_pulse",
+      "write": "g"
+    },
+    {
+      "group": "led16grid16.d13_06",
+      "effect": "cell16_keep",
+      "write": "b"
+    },
+    {
+      "group": "led16grid16.d13_07",
+      "effect": "cell16_math",
+      "write": "rgb"
+    },
+    {
+      "group": "led16grid16.d13_08",
+      "effect": "cell16_square",
+      "write": "r"
+    },
+    {
+      "group": "led16grid16.d13_09",
+      "effect": "cell16_pulse",
+      "write": "g"
+    },
+    {
+      "group": "led16grid16.d13_10",
+      "effect": "cell16_keep",
+      "write": "b"
+    },
+    {
+      "group": "led16grid16.d13_11",
+      "effect": "cell16_math",
+      "write": "rgb"
+    },
+    {
+      "group": "led16grid16.d13_12",
+      "effect": "cell16_square",
+      "write": "r"
+    },
+    {
+      "group": "led16grid16.d13_13",
+      "effect": "cell16_pulse",
+      "write": "g"
+    },
+    {
+      "group": "led16grid16.d13_14",
+      "effect": "cell16_keep",
+      "write": "b"
+    },
+    {
+      "group": "led16grid16.d13_15",
+      "effect": "cell16_math",
+      "write": "rgb"
+    },
+    {
+      "group": "led16grid16.d14_00",
+      "effect": "cell16_pulse",
+      "write": "r"
+    },
+    {
+      "group": "led16grid16.d14_01",
+      "effect": "cell16_keep",
+      "write": "g"
+    },
+    {
+      "group": "led16grid16.d14_02",
+      "effect": "cell16_math",
+      "write": "b"
+    },
+    {
+      "group": "led16grid16.d14_03",
+      "effect": "cell16_square",
+      "write": "rgb"
+    },
+    {
+      "group": "led16grid16.d14_04",
+      "effect": "cell16_pulse",
+      "write": "r"
+    },
+    {
+      "group": "led16grid16.d14_05",
+      "effect": "cell16_keep",
+      "write": "g"
+    },
+    {
+      "group": "led16grid16.d14_06",
+      "effect": "cell16_math",
+      "write": "b"
+    },
+    {
+      "group": "led16grid16.d14_07",
+      "effect": "cell16_square",
+      "write": "rgb"
+    },
+    {
+      "group": "led16grid16.d14_08",
+      "effect": "cell16_pulse",
+      "write": "r"
+    },
+    {
+      "group": "led16grid16.d14_09",
+      "effect": "cell16_keep",
+      "write": "g"
+    },
+    {
+      "group": "led16grid16.d14_10",
+      "effect": "cell16_math",
+      "write": "b"
+    },
+    {
+      "group": "led16grid16.d14_11",
+      "effect": "cell16_square",
+      "write": "rgb"
+    },
+    {
+      "group": "led16grid16.d14_12",
+      "effect": "cell16_pulse",
+      "write": "r"
+    },
+    {
+      "group": "led16grid16.d14_13",
+      "effect": "cell16_keep",
+      "write": "g"
+    },
+    {
+      "group": "led16grid16.d14_14",
+      "effect": "cell16_math",
+      "write": "b"
+    },
+    {
+      "group": "led16grid16.d14_15",
+      "effect": "cell16_square",
+      "write": "rgb"
+    },
+    {
+      "group": "led16grid16.d15_00",
+      "effect": "cell16_keep",
+      "write": "r"
+    },
+    {
+      "group": "led16grid16.d15_01",
+      "effect": "cell16_math",
+      "write": "g"
+    },
+    {
+      "group": "led16grid16.d15_02",
+      "effect": "cell16_square",
+      "write": "b"
+    },
+    {
+      "group": "led16grid16.d15_03",
+      "effect": "cell16_pulse",
+      "write": "rgb"
+    },
+    {
+      "group": "led16grid16.d15_04",
+      "effect": "cell16_keep",
+      "write": "r"
+    },
+    {
+      "group": "led16grid16.d15_05",
+      "effect": "cell16_math",
+      "write": "g"
+    },
+    {
+      "group": "led16grid16.d15_06",
+      "effect": "cell16_square",
+      "write": "b"
+    },
+    {
+      "group": "led16grid16.d15_07",
+      "effect": "cell16_pulse",
+      "write": "rgb"
+    },
+    {
+      "group": "led16grid16.d15_08",
+      "effect": "cell16_keep",
+      "write": "r"
+    },
+    {
+      "group": "led16grid16.d15_09",
+      "effect": "cell16_math",
+      "write": "g"
+    },
+    {
+      "group": "led16grid16.d15_10",
+      "effect": "cell16_square",
+      "write": "b"
+    },
+    {
+      "group": "led16grid16.d15_11",
+      "effect": "cell16_pulse",
+      "write": "rgb"
+    },
+    {
+      "group": "led16grid16.d15_12",
+      "effect": "cell16_keep",
+      "write": "r"
+    },
+    {
+      "group": "led16grid16.d15_13",
+      "effect": "cell16_math",
+      "write": "g"
+    },
+    {
+      "group": "led16grid16.d15_14",
+      "effect": "cell16_square",
+      "write": "b"
+    },
+    {
+      "group": "led16grid16.d15_15",
+      "effect": "cell16_pulse",
+      "write": "rgb"
+    }
+  ]
+}

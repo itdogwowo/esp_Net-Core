@@ -419,6 +419,114 @@ def _suppressed_stub(suppressed: list[str]) -> str:
             "const nc_led_cfg_t *nc_port_led(void) { return &s_led; }\n")
 
 
+
+def _gen_led_ws2812(driver: dict, wiring: dict,
+                    suppressed: list[str] | None) -> tuple[str, dict]:
+    """driver.json 的 LED_WS2812 段 →（暫時）legacy nc_led_cfg_t。
+
+    新設定：`LED_WS2812 = { enable, list:[ {bus:{type:"i80",index:<line>},
+    px, order, d_stay}, ... ] }`
+      · 每個 list item = 一條線；item 的 bus.index 是第幾條 data line（0..N-1）。
+      · S3 只有一個 I80 → legacy nc_led_cfg_t.bus 固定 0（hardware I80 list index），
+        lanes = list item 數；px = 每條線的 px（目前 driver 要求全部一樣）。
+      · timing 唔寫入 config：clk/bit_cells/t0h/t1h 全部 0 → codec 用 driver 預設。
+    """
+    section = driver.get("LED_WS2812")
+    if not isinstance(section, dict):
+        raise GenError("driver.json 的 LED_WS2812 要係物件："
+                       '{ "enable": 1, "list": [ { "bus": {"type":"i80","index":0}, … } ] }')
+    enable = bool(num(section.get("enable"), 0))
+    items = section.get("list")
+    if items is None:
+        items = []
+    if not isinstance(items, list):
+        raise GenError("LED_WS2812.list 要係陣列")
+    if not enable:
+        if suppressed:
+            return _suppressed_stub(suppressed), {
+                "present": False, "enable": False, "backend": "i80", "bus": -1,
+                "px": 0, "format": "ws2812", "lanes": 0, "wired": True,
+                "suppressed_by": sorted(set(suppressed))}
+        return ("// driver.json 有 LED_WS2812 但 enable=0 → 明確唔用燈（render 只留 mock lane）。\n"
+                "static const nc_led_cfg_t s_led = { .present = true, .enable = false,\n"
+                "    .backend = NC_LED_BACKEND_I80, .bus = -1 };\n"
+                "const nc_led_cfg_t *nc_port_led(void) { return &s_led; }\n",
+                {"present": True, "enable": False, "backend": "i80", "bus": -1,
+                 "px": 0, "format": "ws2812", "lanes": 0, "wired": True})
+    if not items:
+        raise GenError("LED_WS2812.enable=1 但 list 係空（至少要一條線）")
+    if len(items) > 16:
+        raise GenError(f"LED_WS2812.list 有 {len(items)} 條線（I80 上限 16）")
+
+    px0 = None
+    line_px = []
+    fmt = "ws2812"
+    for i, it in enumerate(items):
+        if not isinstance(it, dict):
+            raise GenError(f"LED_WS2812.list[{i}] 要係物件")
+        bus = it.get("bus")
+        if not isinstance(bus, dict):
+            raise GenError(f"LED_WS2812.list[{i}].bus 要係物件："
+                           '{ "type": "i80", "index": 0 }')
+        if str(bus.get("type") or "").lower() != "i80":
+            raise GenError(f"LED_WS2812.list[{i}].bus.type 要係 \"i80\""
+                           "（RMT 未實作；唔好靜默當 i80）")
+        line = num(bus.get("index"), -1)
+        if line != i:
+            raise GenError(f"LED_WS2812.list[{i}].bus.index={line}（要順序 {i}；"
+                           "index = 第幾條 data line）")
+        px = num(it.get("px"), 0)
+        if px < 1 or px > LED_PX_MAX:
+            raise GenError(f"LED_WS2812.list[{i}].px={px}（1..{LED_PX_MAX}）")
+        # 2026-11-28：每條線可以不同 px；內部對齊到**最長**那條。
+        # 同一 transaction 會送 max px 給所有 active lane；短線多出的資料由
+        # WS2812 鏈尾自然忽略（唔需要為短線額外填充 buffer）。
+        line_px.append(px)
+        if px0 is None or px > px0:
+            px0 = px
+        order = str(it.get("order") or "").upper()
+        if order:
+            if order not in ("GRB", "RGB"):
+                if order in ("GRBW", "RGBW"):
+                    fmt = "ws2812w"
+                else:
+                    raise GenError(f"LED_WS2812.list[{i}].order={order!r} 看不懂"
+                                   "（GRB／RGB／GRBW／RGBW）")
+
+    # px0 = 最長那條線的 px；所有 lane 都用它（auto-align）。
+    # hardware 層：S3 只有一個 I80 → legacy bus=0；但一定要有足夠 data 腳。
+    buses = ((wiring.get("I80") or {}).get("list") or [])
+    if not buses:
+        raise GenError("wiring.json 冇 I80.list（LED_WS2812 要 I80 資料腳）")
+    used = [x for x in (num(v, -1) for v in (buses[0].get("data") or [])) if x >= 0]
+    if len(used) < len(items):
+        raise GenError(f"LED_WS2812 要 {len(items)} 條線，但 wiring.json I80[0].data "
+                       f"只有 {len(used)} 支有效腳")
+    lanes = len(items)
+    body = [
+        "// driver 層：LED_WS2812（來源 driver.json 的 LED_WS2812 段）。",
+        "// 每條線可以不同 px／內容：frame=Σpx、DMA 時間=maxpx；短線尾出 reset。",
+        "// timing 不在 config —— codec 用格式／driver 內建預設。",
+        "static const nc_led_cfg_t s_led = {",
+        "    .present = true,",
+        "    .enable = true,",
+        "    .backend = NC_LED_BACKEND_I80,",
+        "    .bus = 0,",
+        f"    .lanes = {lanes},",
+        f"    .px = {px0},",
+        f"    .fmt = {cstr(fmt)},",
+        f"    .n_line = {lanes},",
+        "    .line_px = {" + ", ".join(str(v) for v in line_px) + "},",
+        "};",
+        "const nc_led_cfg_t *nc_port_led(void) { return &s_led; }",
+    ]
+    return "\n".join(body) + "\n", {
+        "present": True, "enable": True, "backend": "i80", "bus": 0,
+        "px": px0, "format": fmt, "lanes": lanes, "wired": True,
+        "line_px": line_px, "source": "LED_WS2812",
+    }
+
+
 def gen_led(driver: dict | None, wiring: dict,
             suppressed: list[str] | None = None) -> tuple[str, dict]:
     """driver.json 的 LED 段 → nc_led_cfg_t（build-time 生成）。
@@ -429,6 +537,10 @@ def gen_led(driver: dict | None, wiring: dict,
     suppressed = project 的 sdkconfig 覆寫了 pixel 的符號名（見 project_pixel_override）：
     那時仍然驗證 JSON（錯就 build 失敗），但唔會生成（讓位俾 project 的 Kconfig）。
     """
+    # 2026-11-28：新系列 LED_WS2812（每 item 一條線）優先；舊 LED 段仍然接受。
+    if isinstance(driver, dict) and "LED_WS2812" in driver:
+        return _gen_led_ws2812(driver, wiring, suppressed)
+
     present = isinstance(driver, dict) and "LED" in driver
     led = (driver or {}).get("LED") if present else None
     if not present:
@@ -597,10 +709,10 @@ def gen_preset(wiring: dict, hw_rel: str) -> dict:
             "它會被 build 嵌入、並在 /data/config/hardware.json 缺失時 seed 到裝置；"
             "**唔係** firmware 內建預設本身：真正的內建預設是 nc_port.c（同樣由 wiring.json 生成）。",
             "所以改這份只會改「用戶看到的值」；要改行為就改 wiring.json 再 rebuild"
-            "（目前 typed 解析：ETH／SDIO／PIN／PWM／UART；SPI／I2C／I80／I2S／ENC／XL9555 未 parse）。",
+            "（目前 typed 解析：ETH／SDIO／PIN／PWM／UART／SPI／I80；I2C／I2S／ENC／XL9555 未 parse）。",
             "燈鏈（LED）不在這份：它是 driver 層，寫在該板的 driver.json，"
             "build 時生成 nc_led_cfg_t（見 nc_port.c）。",
-            "硬度事實（flash/psram/CPU）在 board.json，不在這裡。",
+            "硬體事實（flash/psram/CPU）在 board.json，不在這裡。",
         ],
         "version": 1,
     }

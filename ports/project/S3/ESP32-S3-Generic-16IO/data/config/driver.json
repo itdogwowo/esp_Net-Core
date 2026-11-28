@@ -1,0 +1,159 @@
+{
+  "version": 1,
+  "_comment": [
+    "應用硬件（device）層：呢份係 build 時由 ports/hardware/.../driver.json 產生的預置。",
+    "現場可以直接改 /data/config/devices.json（USB 或 WebMaster），**reboot 生效**，唔使重 build。",
+    "規則：device 只寫 bus:{type,index}＋型號參數；**腳位只在 hardware.json**（I80/SPI/…）。",
+    "目前 firmware 真正支援：LED（ws2812 via i80）。其餘 device 寫 enable=1 會開機大聲 warn（唔會靜默）。",
+    "呢個檔缺少都開得機：render 會退回 build-time 的 driver.json 設定。"
+  ],
+  "LED_WS2812": {
+    "enable": 1,
+    "list": [
+      {
+        "bus": {
+          "type": "i80",
+          "index": 0
+        },
+        "px": 256,
+        "order": "GRB",
+        "d_stay": 0
+      },
+      {
+        "bus": {
+          "type": "i80",
+          "index": 1
+        },
+        "px": 256,
+        "order": "GRB",
+        "d_stay": 0
+      },
+      {
+        "bus": {
+          "type": "i80",
+          "index": 2
+        },
+        "px": 256,
+        "order": "GRB",
+        "d_stay": 0
+      },
+      {
+        "bus": {
+          "type": "i80",
+          "index": 3
+        },
+        "px": 256,
+        "order": "GRB",
+        "d_stay": 0
+      },
+      {
+        "bus": {
+          "type": "i80",
+          "index": 4
+        },
+        "px": 256,
+        "order": "GRB",
+        "d_stay": 0
+      },
+      {
+        "bus": {
+          "type": "i80",
+          "index": 5
+        },
+        "px": 256,
+        "order": "GRB",
+        "d_stay": 0
+      },
+      {
+        "bus": {
+          "type": "i80",
+          "index": 6
+        },
+        "px": 256,
+        "order": "GRB",
+        "d_stay": 0
+      },
+      {
+        "bus": {
+          "type": "i80",
+          "index": 7
+        },
+        "px": 256,
+        "order": "GRB",
+        "d_stay": 0
+      },
+      {
+        "bus": {
+          "type": "i80",
+          "index": 8
+        },
+        "px": 256,
+        "order": "GRB",
+        "d_stay": 0
+      },
+      {
+        "bus": {
+          "type": "i80",
+          "index": 9
+        },
+        "px": 256,
+        "order": "GRB",
+        "d_stay": 0
+      },
+      {
+        "bus": {
+          "type": "i80",
+          "index": 10
+        },
+        "px": 256,
+        "order": "GRB",
+        "d_stay": 0
+      },
+      {
+        "bus": {
+          "type": "i80",
+          "index": 11
+        },
+        "px": 256,
+        "order": "GRB",
+        "d_stay": 0
+      },
+      {
+        "bus": {
+          "type": "i80",
+          "index": 12
+        },
+        "px": 256,
+        "order": "GRB",
+        "d_stay": 0
+      },
+      {
+        "bus": {
+          "type": "i80",
+          "index": 13
+        },
+        "px": 256,
+        "order": "GRB",
+        "d_stay": 0
+      },
+      {
+        "bus": {
+          "type": "i80",
+          "index": 14
+        },
+        "px": 256,
+        "order": "GRB",
+        "d_stay": 0
+      },
+      {
+        "bus": {
+          "type": "i80",
+          "index": 15
+        },
+        "px": 256,
+        "order": "GRB",
+        "d_stay": 0
+      }
+    ]
+  }
+}

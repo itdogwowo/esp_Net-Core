@@ -10534,3 +10534,424 @@ DMA 池、flash cache（只影響開機）、鎖（FILE／MSC 拖 RTT）、量�
 PSRAM 類要標明有冇同時跑 pixel producer；RTT 要扣量測自身；用 min／median。
 
 **未量**（下一步）：RTT 開／關 pixel producer、FPS 開／關 Wi-Fi、`reply0` 搬 internal 的 A/B。
+
+---
+
+### 7.304 2026-11-27（真機驗證：6.1.1 OTA、NCSTATE 預算、所有支援硬件開齊 26 筆）
+
+**用家要求**：做真機測試，並且要用 **IDF 6.1.1**。
+
+**環境**（`idf=v6.1.1 (macOS)`；板 = Waveshare ESP32-S3-Zero、
+port `/dev/cu.usbmodem50787D188F501`、cid 36688）：
+
+- build：`IDF_PATH=$HOME/esp/esp-idf python3 make.py build ESP32-S3-Zero --project ESP32-S3-Zero-Show --fresh`
+  → **759.7 KB**（`0xbdeb0`，分區剩 51%），`PROJECT_VER=1d75fea-dirty`。
+- OTA：`tools/ota.py` 推 777,904 B → BEGIN 3.2 s、WRITE **5.2 s＝145.9 KB/s**（macOS；
+  同 §7.290 的 6.4 KB/s 唔一致，今次 USB 埠／hub／主機狀態未查——先記錄事實）。
+- 上板後 `status sys`：`fw=1d75fea-dirty`、`app=263862e7`、**`idf=v6.1.1`**、`rst=3`。
+- `fs_format=1` + reboot 重新 seed 新預置（舊 FAT 的 hardware.json 仍是舊 firmware 種的
+  `I80.enable=0`，會令 I80 unit 唔啟動）。
+
+**實測（`status cfg`）**：
+
+| 情境 | state.n | state.bytes | store／apply | inactive | 備註 |
+|---|---:|---:|---:|---:|---|
+| 預設 project（I80＋LED＋cID） | **19** | **140 B** | 19／19 | 7（SPI） | 第 2 次開機 `hit=1`、`cmp_ok=1` |
+| 所有支援硬件開齊（硬體 SPI enable 1） | **26** | **184 B** | 26／26 | **0** | 第 2 次開機 `hit=1`、bytes 不變 |
+| 還原預設 | 19 | 140 B | 19／19 | 7 | `hit=1` |
+
+- 兩者同 [`state-storage-budget.md`](../03_notes/state-storage-budget.md) 的公式計算**完全一致**
+  （該文已加「實機量測」段；`tools/state_budget.py` 有同一組數字）。
+- 開機時間：`cfg_us≈30 ms`；`state_us` hit **9.5 ms**；miss／重建 **0.40–0.47 s**
+  （140–184 B 寫 FAT＋commit；比 Matrix 舊 124 B／762 ms 快，同板／WL 狀態有關）。
+- `status mem`（release、Zero）：static `.bss 104,208＋.data 39,223＝143,431 B`；
+  plan 3 項 7,703 B（int 5,088＋psram 2,615）；四條 pixel 任務 `level=4 running=1`。
+- `schema.bad=0`；`act.match=1`、`act.en={usb,i80,led}`。
+
+**工具新增**：`tools/nc4_file.py put <local> <remote>`／`delete <remote>`（NC4 FILE 0x2001–0x2003／0x2009）
+——真機測試時用嚟上傳「SPI 開」的 hardware.json，唔使 rebuild 或 MSC。
+
+**未量**：`reply0` 搬 internal 的 RTT A/B、多 bus／多 lane 的 value key 擴充（現時 schema 每個
+unit 只有 index 0 的 value key；未來多 bus 要加 key）。
+
+**狀態**：板已回到預設 project 配置（19 筆／140 B、hit=1）；`/config/hardware.json.bak`
+留住測試用的 SPI 版（無害，可用 FILE_CONFIRM／重新上傳清掉）。
+
+---
+
+### 7.305 2026-11-28（A/B 實測：舊 JSON 模式 vs 現在 NCSTATE 模式，差幾多 RAM／flash）
+
+**用家要求**：對比原本舊 JSON 模式同現在模式的緩衝區（記憶體）使用差幾多。
+
+**方法**（同板、同 IDF、同 project、各建一次）：
+- 舊 = `bd70185`（NCSTATE 之前，config JSON → cfg structs）；新 = HEAD `1d75fea-dirty`。
+- Zero（S3）、`ESP32-S3-Zero-Show`、IDF **v6.1.1**；`git worktree` 建舊樹、同一個 `make.py`。
+- 量 ELF section（`.dram0.bss`／`.data`／`.flash.text`／`.flash.rodata`）＋ app `.bin`。
+
+| 項目 | 舊（JSON → cfg） | 現在（＋NCSTATE） | 差 |
+|---|---:|---:|---:|
+| app image（flash） | 735,264 B | 777,904 B | **+42,640 B** |
+| `.dram0.bss`（SRAM） | 101,568 B | 104,208 B | **+2,640 B** |
+| `.dram0.data`（SRAM） | 39,223 B | 39,223 B | +0 B |
+| 靜態 SRAM 合計 | 140,791 B | 143,431 B | **+2,640 B** |
+| flash `.text` | 475,480 B | 485,708 B | +10,228 B |
+| flash `.rodata` | 161,052 B | 193,468 B | **+32,416 B** |
+
+**+2,640 B SRAM 逐符號**（`nm -S` diff）：`s_store` 1,156、`s_dirty_keys` 384、
+`s_crc_tbl` 1,024（config hash 表驅動 CRC）、`s_result` 40＋pointer／counter ≈80。
+**+42,640 B flash**：state 層 code ≈+10 KB、schema 字典／字串 ≈+32 KB。
+
+**其他層**：
+- FAT：config JSON **11,872 B 仍然存在**（最高權威），另加 `state.ncst` **140 B**
+  （全開 26 筆 184 B）＋`.bak` 同 size → **+約 320 B**；冇取代 JSON。
+- 開機 cJSON 暫態：兩邊一樣（**hit 仍然要 parse JSON**，~20–35 KB heap）；
+- PSRAM：新加 `s_recs` 768 B（開機一次；SRAM 只剩 4 B pointer）；
+- 開機時間：新加 `state_us` **8.5–9.5 ms（hit）**；重建 miss **0.40–0.47 s**（Zero 實測）；
+- 好處（不是省位）：runtime set／persist、override 語義、schema 驗證、self-heal。
+
+**結論**：現階段 NCSTATE **未省 RAM／flash**，而係「cfg 之上多一層 cache＋API」：
++2,640 B SRAM、+42,640 B flash、+~320 B FAT、+768 B PSRAM、+~9 ms 開機，
+換嚟 runtime 設定與一致性。要真正省位就要做未完成的兩步：
+① hit 時跳過 JSON parse（省 20–35 KB 暫態＋~24–30 ms）；
+② cfg structs 由 store 取代（省 3,552 B 常駐 SRAM）。flash 字典（29,735 B）唔會消失。
+
+**更正一個舊數字**：§7.300／§7.303 寫「flash 字典 12,404 B」係**漏咗 key 名／path 字串**；
+`nc_state_schema_data.c.obj` 實際 **29,735 B**（keys 陣列 10,296＋units 192＋enum pointer 1,916＋
+字串 18,071）。`tools/buffer_diagram.py`／`buffer_locations.py` 及相關 note 已更正；
+完整表：[`state-storage-budget.md`](../03_notes/state-storage-budget.md) §3.5。
+
+---
+
+### 7.306 2026-11-28（狀態管理器「前後對比」真機實測：JSON 值 vs state 值、persist 前後）
+
+**用家要求**：對比狀態管理器儲存下來的設定「前後」——即 JSON config（來源）vs NCSTATE blob（存下來的值），
+以及 runtime 改值 persist 前後。
+
+**新工具**：
+- `tools/state_dump.py`：下載／解碼 `state.ncst`，逐 record 對 schema 印出 key／unit／type／state 值
+  vs JSON config 值，標 `同 JSON／OVERRIDE／衍生`，並列出未入 blob 的 value key。
+- `tools/nc4_file.py get <remote> <local>`：用 FILE_READ（0x2007）由裝置下載檔案（之前只有 query／put）。
+
+**情境 A：原狀（第二次開機，hit）**
+
+`python3 tools/state_dump.py --port <PORT>` →
+
+```text
+NCSTATE  state.ncst 140 B
+ver=1 count=19 src_hash=0x27e73e6b payload=114 blob_crc=0x27e73e6b crc=OK
+
+ key     name                    unit   state          JSON          狀態
+     2  SYS_FRAME_MS            sys       20            20          同 JSON
+     3  SYS_NUM_PIXELS          sys       64            64          同 JSON
+     4  SYS_LOG_DEBUG           sys        0             0          同 JSON
+     1  SYS_CID                 sys    36688       36688（"8F50"）  同 JSON
+458753  I80_COUNT               i80        8             8（data[]）  衍生
+458754  I80_WR                  i80        2             2          同 JSON
+…（I80 DC／CS／FREQ、LED 10 個 key 全部同 JSON）
+有入 blob：19 筆；冇入：7 筆（SPI_ENABLE／BAUD／PHASE／POL／SCK／MOSI／MISO）
+大小：state.ncst 140 B（header 26＋records 114） vs config JSON 11,875 B（6 檔）
+```
+
+**情境 B：`STATUS_SET {"state":{"key":2,"value":25,"persist":1}}` → reboot**
+
+| 項目 | 前 | 後 |
+|---|---|---|
+| state 的 `frame_ms` | 20（同 JSON） | **25（OVERRIDE）** |
+| JSON `system.json` sha256 | `abedab65…716` | **一樣**（冇改 JSON） |
+| blob size／count | 140 B／19 | **140 B／19**（25 同 20 都係 1 byte varint） |
+| blob `src_hash` | `0x27e73e6b` | **一樣**（cfg 值集冇變） |
+| blob `blob_crc` | `0x27e73e6b` | `0xe8e13648`（payload 有變） |
+| `status cfg` | `fm=20`、`cmp_ok=1` | **`fm=25`、`hit=1`、`cmp_ok=0`、`mism=1`、`first=2`** |
+| 大小 | 140 B | 140 B |
+
+- 語義：`src_hash` 同（JSON 冇改）→ state 贏，override 生效；`cmp_ok=0`／`mism=1` 係預期。
+- reboot 時 log 見 `state commit：ESP_OK（dirty=1）`（reboot 前落盤）。
+
+**情境 C：還原 `value=20,persist=1` → reboot**
+
+- state `frame_ms` 返 20（同 JSON）、`cmp_ok=1`、`mism=0`、`hit=1`；
+- blob **140 B、crc `0x27e73e6b` 同情境 A 完全一樣**（round-trip 證實數值一致）。
+
+**結論**：NCSTATE 存嘅就係「26 個 value key 之中，實際 active 嘅 19 筆」；`struct` 260 個 key
+（links／routes／wifi／未實作硬件）**0 B**。JSON 係來源（最高權威）；state 只係 override／快取，
+所以「前後對比」會見到：JSON 不變、state 值變、size 通常唔變（varint），src_hash 唔變、blob_crc 變。
+
+---
+
+### 7.307 2026-11-28（遮罩機制前後：究竟省咗幾多 SRAM？逐件拆開）
+
+**用家問法**：「我應該係節省了大量 SRAM，係講加咗遮罩機制同加之前。」
+
+先定義：呢個設計嘅「遮罩」其實係三件嘢，各自貢獻唔同：
+
+| 機制 | 加之前 | 加之後 | SRAM 影響 |
+|---|---|---|---|
+| **class 遮罩**（value 26／struct 260） | 如果全部 286 key 都入 store：**3,432 B**（286 格，遠超 96 格上限） | 只留 26 個 value key；store 固定 **1,156 B**（96 格）；實際用 **228 B**（19 筆） | 容量 **−2,276 B**；實際載入 **−3,204 B** |
+| **activation mask**（S4） | 未啟動 unit 都會造 record | 未啟動 unit 唔造 record（Zero：SPI 7 個 key 唔入 blob） | **固定 array 唔變**；只省 record／blob（約 −42 B） |
+| **entry 瘦身 32→12 B**（S5） | `s_store` 64×32＝**2,052 B** | 64×12＝**772 B** | **−1,280 B** |
+| **s_recs 搬 PSRAM** | 768 B 喺 SRAM | 4 B pointer；768 B 喺 PSRAM | SRAM **−764 B** |
+
+**實測歷史（status §7.293／§7.294）**：
+state 佔 SRAM **2,820 B → 1,160 B（−1,660 B）**＝ entry 瘦身 −1,280 ＋ s_recs 搬走 −764 ＋
+store 64→96 格 +384。之後 S3 回寫再加 `s_dirty_keys` 384＋`s_crc_tbl` 1,024，所以同「完全冇 state」比
+最終係 **+2,640 B**（§7.305）。
+
+**「遮罩前後」對照（同一個 schema）**：
+
+| 設計 | store 需要 | 實際用 | blob |
+|---|---:|---:|---:|
+| 舊計劃：565 key×32 B 全入 | 18,080 B | — | — |
+| 冇 class 遮罩：286 key 全當 value（12 B） | 3,432 B | — | ~1,981 B |
+| **現在**：class 遮罩＋activation；96 格固定 | **1,156 B** | 228 B（19 筆）／312 B（全開 26 筆） | **140 B／184 B** |
+
+**結論**：
+- 同「全 key 儲存」比，**確實省好多**：store 容量 −2,276 B（相對舊 32 B 計劃 −16,924 B）、
+  實際載入 −3.2 KB、blob −1.8 KB。
+- 但 **activation mask 本身唔會縮細 `s_store`**（固定 96 格，寫幾多筆都佔 1,156 B）；
+  真正令 SRAM 數字下降嘅係 **entry 瘦身＋s_recs 搬 PSRAM**。
+- 對比「完全冇 state 嘅舊 JSON 模式」，現時仍然 **+2,640 B SRAM／+42,640 B flash**；
+  大規模節省要等「hit 跳過 JSON parse＋cfg structs 由 store 取代」。
+- 而且 260 個 `struct` key（links／routes／wifi／未實作硬件）完全 0 B store／0 B blob——
+  呢個就係「class 遮罩」最直接嘅節省。
+
+完整表格：[`state-storage-budget.md`](../03_notes/state-storage-budget.md) §1.5／§3.5；真機數 §7.306。
+
+---
+
+### 7.308 2026-11-28（用家要求落地：開機掃描筆數 → 動態配置 state store，減少靜態 standby）
+
+**用家要求**（呼應 §7.298）：開機時先掃描有幾多數值，然後再動態申請，減少靜態使用／唔好留一堆 buffer standby。
+
+**改動**（`nc_state_store`）：
+- `nc_state_store_t` 由「固定 `e[96]`」改成 **pointer＋n＋cap**（靜態部分 **8 B**）。
+- `nc_state_boot_sync()` 在 B02 掃完 records 後：
+  - `need = max(cfg records, 舊 blob n_records) + NC_STATE_DYN_RESERVE（8）`
+  - `cap = clamp(need, 4, NC_STATE_STORE_MAX=96)`；`heap_caps_malloc(MALLOC_CAP_INTERNAL)` 一次
+  - `nc_state_store_bind()`；**開機一次配置、永不釋放、runtime 唔租**（鐵律不變）
+  - 配置失敗 → 明示 log＋跳過 state sync（cfg／JSON 仍然權威）
+- `status cfg.state` 新增 **`cap`** 欄位（睇實際配置幾多格）。
+- Host tests 改為自己 `bind` buffer；**25/25 全綠**。
+
+**Zero 上板實測（`idf=v6.1.1`；OTA 兩次）**：
+
+| 項目 | 改動前（app 263862e7） | 改動後（app 5d5991c8） | 差 |
+|---|---:|---:|---:|
+| static `.bss` | 104,208 B | **103,056 B** | **−1,152 B** |
+| static 合計 | 143,431 B | **142,279 B** | **−1,152 B** |
+| store 靜態 | 1,156 B（固定 96 格） | **8 B**（pointer＋n＋cap） | −1,148 B |
+| store 開機配置 | — | **cap=27 × 12＝324 B**（19 筆＋8 reserve） | heap +324 B |
+| 淨內部 RAM | — | — | **約 +808 B 可用**（−1,152 static＋324 heap） |
+| `status cfg.state` | n=19／bytes=140／store=19 | n=19／bytes=140／store=19／**cap=27** | 一樣；`hit=1`、`cmp_ok=1` |
+| image | 777,904 B | 778,544 B | +640 B（code） |
+
+- 例：全部支援硬件開齊 26 筆 → cap 34（26＋8）＝408 B，仍然遠低於固定 1,156 B。
+- 開機 log（code 內）：`state store：掃到 27 筆 → 開機配置 27 格（324 B internal）`。
+
+**未做（下一步可再壓）**：`s_dirty_keys` 384 B → bitmap 12 B（−372 B）；`s_crc_tbl` 1,024 B →
+16-entry nibble 表 64 B（−960 B）或 const flash。兩項做完 state 常駐可再降 ~1.3 KB。
+
+**注意**：未來任務／效果管理器接動態 key 之後，store cap 要由「掃描 .nct／.nce 的 key 數」
+計（現時留 8 格 reserve）；唔可以 runtime 再 realloc（鐵律：一次配置、永不釋放）。
+
+---
+
+### 7.309 2026-11-28（兩個「監察用」硬件＋project pair：S3 Generic PSRAM／NoPSRAM）
+
+**用家要求**：根據「中央示範 preset 要係最新、project 唔好只更新一部分」的要求，做兩份
+**硬件＋項目** pair 用嚟監察最新情況。
+
+**新增**（每 pair 都有完整 6 個 config 檔，可直接 build／OTA／status）：
+
+| preset（runtime 真相） | hardware（build 事實） | project | pixel 幾何 |
+|---|---|---|---|
+| `ports/presets/s3-generic-psram/` | `S3/ESP32-S3-Generic-PSRAM` | `S3/ESP32-S3-Generic-PSRAM` | 2 lane × 256 px；環／packed 在 PSRAM |
+| `ports/presets/s3-generic-nopsram/` | `S3/ESP32-S3-Generic-NoPSRAM` | `S3/ESP32-S3-Generic-NoPSRAM` | 1 lane × 64 px；環／packed 在 internal |
+
+每個 hardware 有 `board.json／wiring.json／driver.json／sdkconfig.defaults／partitions.csv／README.md`；
+project 有 `project.json／sdkconfig.defaults／data/config/*.json`。呢兩個係**通用示範板**，唔綁實體板；
+腳位係 demo（GPIO14/15／GPIO14），真板要改 wiring。
+
+**建置驗證（IDF v6.1.1）**：
+- `ESP32-S3-Generic-PSRAM` → **752.4 KB**（0xbc180，分區剩 51%）
+- `ESP32-S3-Generic-NoPSRAM` → **746.6 KB**（0xbaa40，分區剩 51%）
+- `tools/board.py check`：**0 error**（新 pair 的 warn 只係 direct I80 冇 wr/dc＋project sdkconfig 覆寫提示，屬預期）
+
+**防「project 更新唔全面」**：新增 `tools/sync_preset_pairs.py`
+- `--check`：project 的 `system／network／tasks／resources` 要同 preset 一致；board／project 的 LED 幾何
+  要同 preset `driver.json` 一致；project `hardware.json` 的 I80／USB 要對得上 preset。
+- `--write`：由 preset 重寫 project 的 runtime 4 檔（hardware／driver 仍由 `sync_*_presets.py` 生成）。
+- **`run_all.sh` 已加閘門**；現時 `preset_pair OK：2 對`、`sync_hardware／driver --check` 全部 OK、host 25/25。
+
+**監察用法**：
+```bash
+IDF_PATH=$HOME/esp/esp-idf python3 make.py build ESP32-S3-Generic-PSRAM --project ESP32-S3-Generic-PSRAM --fresh
+python3 tools/nc4.py --port <PORT> status cfg     # state.hit／schema.bad／act.match
+python3 tools/nc4.py --port <PORT> status mem     # static／plan／PSRAM
+python3 tools/nc4.py --port <PORT> status tasks
+python3 tools/state_dump.py --port <PORT>         # 逐 key 對 JSON
+```
+
+**未做**：呢兩個 pair 未有實體板，所以只驗 build／靜態檢查，未上板；上板時要按實際模組改
+`wiring.json` 的資料腳同 PSRAM 類型（octal 等）。
+
+---
+
+### 7.310 2026-11-28（LED_WS2812 系列正式落地：只重新定義設定，driver 不變）
+
+**用家定案**：I80 16 線／WS2812 driver 一早支援；今次只係把「點定義」由舊 `LED` block
+改成 `LED_WS2812` 系列（每 item = 一條線），**唔重寫 driver**。
+
+**實作**：
+1. `driver.json` 新段：
+   ```json
+   "LED_WS2812": { "enable": 1, "list": [
+       { "bus": {"type":"i80","index":0}, "px":256, "order":"GRB", "d_stay":0 } ] }
+   ```
+   每 item 一條線；`bus.index` = 第幾條 data line；**冇 timing／format／backend／lanes**。
+2. `tools/ncportgen.py`：`LED_WS2812` → 生成 legacy `nc_led_cfg_t`（backend=I80、bus=0、
+   lanes=list 數、px=每線 px、fmt 由 order 決定、timing 0 = driver 預設）；舊 `LED` 段仍接受。
+3. `nc_cfg_load.c` runtime parser：同一套規則（`apply_led_ws2812()`），填 legacy cfg 給 render；
+   `LED_*` 系列加入 known device，唔再被當 unknown。
+4. schema：`LED_CLK`／`LED_BIT_CELLS` 的 min 改 **0 = 由 driver 預設**（新設定唔再寫 timing；
+   0 不會被 schema 當 bad）。schema crc 更新為 `0x8e9bdc45`。
+5. 兩個中央示範 pair（PSRAM 2 線×256、NoPSRAM 1 線×64）＋ presets 已遷移到 `LED_WS2812`；
+   `sync_*_presets`／`sync_preset_pairs --check` 全 OK。
+
+**驗證**：
+- Build：PSRAM pair **754.0 KB**、NoPSRAM **748.1 KB**（IDF 6.1.1）。
+- Zero 真機：上傳新格式 `/config/driver.json`（1 線 × 64 px）→ reboot：
+  `state.hit=1`、`n=19`、`bytes=137`、`schema.bad=0`、`act.units=usb,i80,led`；
+  render／encode 任務照跑（四層四任務不變）。
+- 之後已還原 Zero 原本 `driver.json`（舊 `LED` block），board 回 baseline。
+
+**限制（下一輪）**：
+- 同一 `LED_WS2812` 內所有線 px 必須相同（現時 I80 driver 一次 transaction 廣播同一幀）；
+  要 per-line 不同 px／不同內容 → 先做 frame segment。
+  → **2026-11-28 已由 §7.311 取代**：已支援每線不同 px／獨立內容（frame=Σ、DMA=max）。
+- `LED_PWM`／`LED_PCA9685`／`LED_APA102` 只有 config 形狀，未讀、未接 backend。
+- WS2812 真正協議仍在畫波層 `sw/pixel/nc_pixel_encode.c`；i80 driver 保持純驅動。
+
+---
+
+### 7.311 2026-11-28（LED_WS2812 每線獨立內容＋16×600 極限 benchmark）
+
+**用家要求**：每條線內容要唔同；唔可以推翻之前的畫波測試。跑 16×600（16 條線各自
+600 px 獨立內容）極限測試，把 encode 時間盡量壓低。
+
+**實作**（保留舊 API／舊測試）：
+- `LED_WS2812.list[]` 每 item 一條線；parser／`ncportgen` 記 `line_px[]`（可以不同）。
+- canonical frame 長度 = **Σ px**（每線一段；offset 累加）；I80 DMA 時間 = **max px**。
+- `nc_px_codec_pack_bus_seg()`：每條 lane 由 `frame + off[k]` 讀自己的 `px[k]`；
+  短線完成後該 lane 出 0（reset，`active mask` 處理 T0H 高位）；完全冇 list 的線＝0。
+- `nc_px_codec_pack_bus_seg_mask()`＋i80 DMA 槽**開機預填** `[active][mask][0]` pattern：
+  每幀只寫中間 mask word（少 2/3 輸出寫入）。
+- render 的 ring px = Σ；i80 backend 的 codec px／DMA units = max。
+- 舊 `pack_bus()`（廣播）同舊 host 測試**完全冇改**；新增 segment 對拍測試。
+
+**Host 驗證**：`pixel_test` 新增分段測試（3 線不同 px／內容，逐 tick 對拍獨立
+`wave_frame` 參考；mask-only 再對拍 full 路徑）；**402 checks 全過**，run_all 仍全綠。
+
+**真機快速驗證**：Zero 上傳 2 條線（px 64／32）新格式 config → reboot：
+render／encode task running、無 crash、state 重建正常；之後已還原 baseline。
+
+**16×600 benchmark（tests 映像、Zero、`0xF062`；payload `[lanes][px][frames][mode]`）**：
+
+| 路徑 | 時間／幀 | 備註 |
+|---|---:|---|
+| 同內容 broadcast `pack_bus`（舊） | **6.45 ms** | 無 lane transpose；同 §7.220 的 6.36 ms 一致 |
+| 每線獨立 segment（初版） | 19.44 ms | 逐 lane lane_px／full write |
+| 每線獨立 segment（mask-only＋fast16） | **10.37 ms** | `us_seg`；fast16 一次砌 3 組 64-bit lane word |
+| 16×300 獨立 | 4.36 ms | 8×600 4.97 ms → 約 **1.08 µs／px**，linear |
+| 失敗實驗 | — | 32-bit payload load 冇幫助；O3／pragma unroll 反而 10.97 ms |
+
+- 獨立內容 10.37 ms 仍在 50 FPS（20 ms）預算內；16 線並行線路時間約 18 ms（600 px），
+  encode 同 DMA 可以重疊。
+- 廣播 6.45 ms 同獨立 10.37 ms 的差＝16 lane transpose（廣播用 `all` mask，唔使逐 lane 排）；
+  **舊測試結果仍然有效**，只係新增「每線不同內容」多付 transpose 成本。
+- 量測用 `python3 tools/nc4.py --port <PORT> raw 0xF062 1058020a01`
+  （16 lane、600 px、10 frames、mode=1）。
+
+---
+
+### 7.312 2026-11-28（16 IO × 16×16 功能測試 project；每線不同燈效）
+
+**用家要求**：建立一個 16 IO 測試，每條 16×16，各自不同燈效；有幾個長時間運行；
+簡單為主，只測「每線獨立內容」呢個功能。
+
+**新增 pair**：
+- `ports/hardware/S3/ESP32-S3-Generic-16IO`＋`ports/project/S3/ESP32-S3-Generic-16IO`
+- 16 條 I80 直驅 lane（16-bit bus）：GPIO 1,2,4..17；每條 256 px（16×16）。
+- `driver.json`：`LED_WS2812.list` 16 條、px 256、GRB；`system.num_pixels=4096`。
+- pixel 四層：16 個 group（`0:256`…`3840:4096`）＋16 個 **不同 effect**（math_now／square_wave_now／keep，
+  F／l_max／phi 各不相同）；4 個 `end_Time` = 8,192／16,384／32,768 幀（長時間），
+  mode `led16test` `play_loop=-1`、`auto_play=true`。低亮度 l_max 64–384（避免 4096 顆全亮電流）。
+
+**驗證**：
+- `tools/show_upload.py --check --src ports/project/S3/ESP32-S3-Generic-16IO/data/pixel`
+  → **4 個檔全部 OK**（effects 16、map 16 groups、mode 16 項、registry auto_play）。
+- Build（IDF 6.1.1、`--fresh`）：**772.2 KB**（0xc10a0，分區剩 50%）。
+- `board.py check`：**0 error**（新增 LED_WS2812 專用驗證：每 item 一條線、index=線號、
+  px／order、wiring data 腳數夠）。
+- `sync_hardware/driver_presets --check` 對新板 OK；host tests 未受影響。
+
+**Zero OTA 實測（2026-11-28 追加）**：
+- 查證 [Waveshare wiki](https://www.waveshare.com/wiki/ESP32-S3-Zero)：Zero 有 **24 × GPIO** 引出，
+  GPIO33–37 唔引出（Octal PSRAM）；GPIO21 板載 WS2812。可用 16 支非保留腳做 16-bit I80：
+  `1,2,4,5,6,7,8,9,10,11,12,13,14,15,21,38`（避開 3／19-20／26-37／43-46）。
+- 16IO project 的 wiring／sdkconfig 已改呢組腳；**OTA 16IO image 上 Zero 成功**（app `0c22584b`），
+  `fs_format` 重新 seed 後：`act.match=1`、plan PSRAM **51,959 B**（4096 px ring）、
+  render／encode／paint／effect 四個 task 全部 `running=1`，冇 crash。
+- /pixel 內容（effects/map/mode/registry）已上傳；未有 16 條實體燈鏈，所以**視覺效果未驗**；
+  真硬件要再做 level shifter／電源／reset gap 驗證。
+- 因此之前講「Zero 只有 8 支 data 腳」係錯：8 支係**舊 wiring 的 dummy 排法**，唔係板上限。
+
+---
+
+### 7.314 2026-11-28（修正：單通道 write=r/g/b/w 殘留上一幀 RGB → 白／綠閃爍）
+
+**現象**：16IO 測試切去每條一個顏色（`write:"r"/"g"/"b"`）之後，GPIO1 panel 仍然白色、
+板載燈綠綠地，而且不停閃。
+
+**根因**：`nc_px_layout` 的 `write=R/G/B/W` **只寫自己那個通道**（註解明寫），其餘通道保留原位；
+環格會重用，上一版 `write:"rgb"`（白）在 G/B 通道的值冇清 → 新一幀只有 R 變，G/B 仍然高 →
+變成白色；板載燈同理變綠。閃爍係因為 R/B 在呼吸，而 G/B 殘留。
+
+**最終做法：保留配對層的「通道可組合」語義，paint 每幀按需要清 canvas。**
+
+- 配對層本來就允許 `write:"r"` 只寫 R、另一個 job 寫 G（`pxLayout_test`／`pxShow_test` 明確驗
+  「R 來自 job0、G 來自 job1，互不清走」）；所以**唔可以**在單通道 write 時把其他通道清零
+  （試過，2 支 host test 立即 fail）。
+- 正確做法：paint 每幀開始前由 `nc_px_layout_needs_clear()` 判斷：
+  - 有任何 `write=r/g/b/w`（只寫一個通道）→ 要清；
+  - flat 表未覆蓋全部 px → 要清；
+  - 全部 `rgb/rgbw/ww/wwww`＋full coverage → 唔使清（0 cost）。
+- 16IO 測試係 16 條單通道，所以會行 clear；實測：
+  - `clear = 762 µs`
+  - `apply = 2,353 µs`
+  - `pair = 3,124 µs`
+  - `render.enc = 9,490 µs`
+  - `frame_us = 19,955 µs`（50 fps 邊緣，`fps_x10=489`）
+- 呢 0.76 ms 係**正確性必要成本**；如果全部用 `write:"rgb"`（白色）就唔使清、pair 會回到 ~2.0 ms。
+- 唔會清 DMA slot／唔會重新 submit；只清 CPU 寫的環格。
+
+---
+
+### 7.315 2026-11-28（16IO 測試內容擴充：4 個 mode、全部效果類型、不同格數）
+
+**用家要求**：多一點變化和「格數分別」，所有不同效果都要試。
+
+**新增 content（同一塊 16IO project，pixel 四層）**：
+- **28 個 effect**，覆蓋全部 6 種 program type：`math_now`／`square_wave_now`／`pulse_wave`／
+  `pulse`／`keep`／`starter`；另有 grid cell（64 px／16 px）專用 effects。
+- **4 個 mode**（`0xF06D [id]` 切換）：
+  - id 2 `led16grid4`（預設）：每 panel 4 段、4 色／效果輪流；
+  - id 1 `led16test`：整塊空間波浪（蛇形），覆蓋全部六種 type（lane5 用 starter = 黑）；
+  - id 3 `led16grid16`：每 panel 16 段；
+  - id 4 `led16sync`：整塊同步呼吸（spacing=0）。
+- map：`led16`（16 group）、`led16grid4`（64 group）、`led16grid16`（256 group）。
+- `registry` auto_play 第一項改為 `led16grid4`。
+- `show_upload --check`：9 個檔全部 OK；已上傳 + reload 到 Zero；PIPESTATS 正常
+  （`pair≈2.12 ms`、`render.enc≈9.46 ms`、50 fps）。
+
+**注意**：group 的 `sel` 係**鏈上線性範圍**（16×16 row-major 時 64 px = 4 行），
+唔係 2D 幾何格；真 2D checkerboard 要 map 層支援多段 sel／座標映射，今次未做。

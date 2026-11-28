@@ -5,15 +5,23 @@
 >
 > 這裡**唔係** project（冇 `project.json`、唔參與 `make.py projects`）；
 > 要用的話 copy 去 `ports/project/<chip>/<board>/data/config/`，見下面 §3。
+>
+> **呢兩個就係「中央基準版本」**：所有 config 欄位以它們為完整示例；實際值＋驗證狀態由
+> [`STATUS.md`](STATUS.md) 生成（`python3 tools/preset_check.py --write-status`），
+> `run_all.sh` 用 `--check-status` 擋過期。改 preset／schema 之後要重跑生成。
 
 ---
 
 ## 1. 現有版本（暫時只有 S3）
 
-| preset | 適用 | pixel 幾何（示範值） | 大 buffer |
-|---|---|---|---|
-| [`s3-generic-psram/`](s3-generic-psram/) | S3 模組**有** PSRAM | 2 lane × 256 px | 環／packed 放 PSRAM |
-| [`s3-generic-nopsram/`](s3-generic-nopsram/) | S3 模組**冇** PSRAM | 1 lane × 64 px | 環／packed 放 internal |
+| preset | 適用 | pixel 幾何（示範值） | 大 buffer | 對應硬件＋project pair |
+|---|---|---|---|---|
+| [`s3-generic-psram/`](s3-generic-psram/) | S3 模組**有** PSRAM | 2 lane × 256 px | 環／packed 放 PSRAM | `S3/ESP32-S3-Generic-PSRAM` |
+| [`s3-generic-nopsram/`](s3-generic-nopsram/) | S3 模組**冇** PSRAM | 1 lane × 64 px | 環／packed 放 internal | `S3/ESP32-S3-Generic-NoPSRAM` |
+
+> **監察用 pair**：上面兩個 preset 各有一份完整的 hardware＋project（`ports/hardware/S3/ESP32-S3-Generic-*`
+> ＋`ports/project/S3/…`），可以直接 `make.py build`、OTA 上板、用 `status`／`state_dump.py` 睇最新情況。
+> `python3 tools/sync_preset_pairs.py --check` 會擋住「project 只更新一部分」的 drift（run_all 已加閘門）。
 
 - 兩個版本除了 PSRAM 相關 Kconfig 與 pixel 幾何，其餘設定一模一樣（方便對照）。
 - 腳位（GPIO14／15）係**示範**，換板要改 `hardware.json` 的 `I80.list[0].data`。
@@ -60,6 +68,9 @@ python3 tools/nc4.py --port <PORT> reboot
 ```bash
 # 靜態檢查：JSON 結構、schema 範圍、四層四任務、兩版差異
 python3 tools/preset_check.py
+# 狀態快照（生成 ports/presets/STATUS.md；run_all 會驗冇過期）
+python3 tools/preset_check.py --status
+python3 tools/preset_check.py --check-status
 
 # 上板
 python3 tools/nc4.py --port <PORT> status cfg    # schema.bad=0、state.hit
@@ -76,5 +87,5 @@ python3 tools/nc4.py --port <PORT> status mem    # 環／packed 在 PSRAM 定 in
 
 | preset | 狀態 | 登記日 |
 |---|---|---|
-| `s3-generic-psram` | 示範（未逐項上板；欄位已被 host check 驗） | 2026-11-26 |
-| `s3-generic-nopsram` | 示範（**未上板**：冇冇-PSRAM 的 S3 板） | 2026-11-26 |
+| `s3-generic-psram` | 中央基準（未逐項上板；欄位已被 host check 驗） | 2026-11-26（2026-11-27 重新驗證） |
+| `s3-generic-nopsram` | 中央基準（**未上板**：冇冇-PSRAM 的 S3 板） | 2026-11-26（2026-11-27 重新驗證） |

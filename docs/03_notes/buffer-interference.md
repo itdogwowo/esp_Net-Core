@@ -10,7 +10,7 @@
 | **Internal SRAM** | `static .bss/.data` 143,559 B、`usb.rx` 4,128、環（`i80.prd` 576／`mock.prd` 576）、任務 stack | CPU 快、DMA 可用；Wi-Fi／lwIP 亦喺度 |
 | **DMA-capable internal** | I80／SPI 後端槽（≤48 KB 才放） | **S3 唔可以 DMA 讀 PSRAM**；環唔係 DMA 讀的對象 |
 | **PSRAM** | `nc4.reply0` 2,615（每 decoder）、`ncm.arena`（有模組 32 KB 起）、`s_recs` 768 | 大／冷；回覆 JSON 每條最多 2,600 B |
-| **Flash（XIP）** | schema 字典 12,404 B、程式、資產 JSON | 0 RAM；但讀嘅時候爭 flash cache |
+| **Flash（XIP）** | schema 字典 29,735 B（keys 表 10,296＋字串）、程式、資產 JSON | 0 RAM；但讀嘅時候爭 flash cache |
 
 **Kconfig 政策**：環放邊由 `CONFIG_NETCORE_PIXEL_RING_PSRAM` 決定（build-time）。
 環係 CPU 寫、CPU 讀；DMA 讀的是**後端自己的 internal 槽**——所以環放 PSRAM 都唔會

@@ -4,7 +4,7 @@
 > 這個專案，**先由頭讀到落尾**，再開始改任何東西。細節文件在 `docs/`，但方向、鐵律、
 > 工作流程、最常踩的坑全部在這一份。
 >
-> **最後更新**：2026-11-26（schema registry＋config 圖／示範設定 `ports/presets`；host test 25 支；`--fresh` 陷阱）
+> **最後更新**：2026-11-27（`driver-config.md` 微調指南；`ports/presets/STATUS.md` 生成＋run_all 過期閘門；NCSTATE 286 key／16 unit；host test 25 支）
 > **維護規則**：每次架構／流程／工具改變，先改這份；過期內容直接覆蓋，唔好累積兩套講法。
 
 ---
@@ -107,9 +107,10 @@ python3 tools/nc4.py --port /dev/cu.usbmodemXXXX status tasks
 
 - 預期：`BEGIN` 2–4 s（同步抹分區）→ `WRITE` 約 150 KB/s → `END` 驗 SHA →
   `APPLY` 重啟；`status sys` 的 `app` hash 會變、`rst=3`。
-- **速度睇主機**：Windows 側 150–174 KB/s；**macOS 側只有 ~6.4 KB/s（＝64 B／10 ms）**，
-  729 KB image 要 **~110 s**。係 macOS 對 USB-Serial-JTAG VCP 的排程，唔關 hub／線材／
-  firmware 事，`--window 4` 也幫唔到（113.0 s vs 108.8 s）。見 status §7.290。
+- **速度睇主機／埠**：Windows 側 150–174 KB/s；macOS 側曾量到只有 ~6.4 KB/s（＝64 B／10 ms），
+  729 KB image 要 ~110 s（status §7.290）。**2026-11-27 同一部 Mac、Zero 板再測係 145.9 KB/s**
+  （777,904 B／5.2 s，status §7.304）——所以 macOS 慢唔係必然，同 USB 埠／hub／主機狀態有關；
+  兩個數字都留，量測時記錄 `port=`。`--window 4` 幫唔到 6.4 KB/s 嗰次（113.0 s vs 108.8 s）。
 - OTA 失敗先 `tools/ota.py --port <PORT> --abort`，再重推。
 - **唔好**因為 `esptool` 連不上就叫用家按 BOOT；見 §1 鐵律 1。
 
@@ -407,7 +408,7 @@ esp_Net-Core/
 ├─ ports/
 │  ├─ hardware/<chip>/<board>/   board.json／wiring.json／driver.json／sdkconfig
 │  ├─ project/<chip>/<board>/    project.json＋data/config＋data/pixel
-│  ├─ presets/                   中央示範設定（唔綁板；暫時 S3 有／冇 PSRAM 兩版）
+│  ├─ presets/                   中央示範設定（唔綁板；S3 有／冇 PSRAM 兩版＋STATUS.md 生成快照）
 │  └─ _profiles/                 能力碎片（eth-rmii、nc4-ws…）
 ├─ tools/                    主機工具（nc4.py、ota.py、layout_bench.py、hosttest/…）
 ├─ web_tools/                ESP WebMaster（REST／WS／檔案／OTA）
@@ -590,8 +591,8 @@ python3 tools/ota.py --port /dev/cu.usbmodemXXXX \
 1. `caps`／`state`：`idle=1`、`max_chunk=4096`。
 2. `BEGIN`：裝置先 `esp_ota_begin()` **同步抹目標分區**，663 KB 約 2.9 s；
    工具 timeout = `10 s + size/100 KB`。
-3. `WRITE`：4 KB chunk，stop-and-wait；Windows **150–174 KB/s**、**macOS ~6.4 KB/s**
-   （差異在主機側 USB 排程，唔係 firmware；見 status §7.290）。
+3. `WRITE`：4 KB chunk，stop-and-wait；Windows **150–174 KB/s**、macOS 曾 **~6.4 KB/s**，
+   但 2026-11-27 Zero 實測 **145.9 KB/s**（同埠／hub／主機狀態有關；見 status §7.290／§7.304）。
 4. `END`：`esp_ota_end()` 驗 SHA-256＋image；失敗回 `err_end_validate_fail`。
 5. `APPLY`：設 boot 分區＋重啟；`rst=3`。
 6. 驗證：`status sys` 的 `app` hash 變了、`up_s` 重新計、`status tasks` 正常。
@@ -669,8 +670,12 @@ python3 tools/ota.py --port /dev/cu.usbmodemXXXX \
 - **可以設定什麼＝一份表**：`docs/02_guides/config-schema.md`（key 一覽由
   `schema/state-keys.json` 生成）＋圖 [`config-layers.svg`](docs/00_pm/config-layers.svg)／
   [`schema-registry.svg`](docs/00_pm/schema-registry.svg)（`python3 tools/config_diagram.py`）。
-  開新 project 由 [`ports/presets/`](ports/presets/README.md) 起步；
-  `python3 tools/preset_check.py` 驗 JSON／schema 範圍（run_all 開頭也跑）。
+  開新 project 由 [`ports/presets/`](ports/presets/README.md) 起步（**中央基準版本**）；
+  `python3 tools/preset_check.py` 驗 JSON／schema 範圍；`--write-status` 生成
+  [`ports/presets/STATUS.md`](ports/presets/STATUS.md)（實際值／覆蓋率／driver LED），
+  run_all 用 `--check-status` 擋過期。
+  **driver.json 微調**（LED 10 個 key、實際 parser 範圍、範例、陷阱）→
+  [`docs/02_guides/driver-config.md`](docs/02_guides/driver-config.md)。
 - `driver.json` **只有 `LED` 段會被讀**（build 時 `ncportgen` → `nc_led_cfg_t`）；
   其餘段（TFT／SDcard／PCA9685…）仍然冇人讀。規矩：**driver 層唔准寫腳位**，
   腳位只在 hardware 層；`driver.json` 用 `bus:{type,index}` 引用。
@@ -1001,6 +1006,10 @@ python3 tools/nc4.py --port /dev/cu.usbmodemXXXX reboot
 # Host 測試
 bash tools/hosttest/run_all.sh
 
+# 中央示範設定（ports/presets）：狀態快照／驗過期
+python3 tools/preset_check.py --status
+python3 tools/preset_check.py --write-status    # 改 preset／schema 後重跑；run_all 會驗
+
 # 量測（EffectPerf 映像）
 python3 modules/lab/i80_pack_lab/run_ab.py --port /dev/cu.usbmodemXXXX --px 9600 --variant 17 --reps 8
 python3 tools/layout_bench.py --port /dev/cu.usbmodemXXXX --px 9600 --all
@@ -1072,6 +1081,19 @@ commit message 說明。
 | 2026-11-27 | **task 移出字典（用家指正）**：任務管理器會熱插拔（`.nct`）、效果器（`.nce`）同類——靜態 index 一插就錯位，字典一定失效。移除 task unit（60 key）→ **286 key／16 unit**、image −5,264 B；新增動態 key（`key = 0xF0<<24｜hash24(name)`、`nc_state_dyn_*`、prune 保留 0xF0 域）。設計見 [`state-dynamic-keys.md`](docs/03_notes/state-dynamic-keys.md)，status §7.297 | lead（AI） |
 | 2026-11-27 | **S2–S6 落地**：`nc_state_apply_to_cfg()`（B05 前套 override，render 手寫讀取刪走）；`nc_state_commit()`＋`STATUS_SET {"state"}` persist；**開機語義修正**（src_hash 同 → state 贏、唔同 → JSON 贏，否則回寫值一 reboot 就冇）；activation mask（未啟動→`not_active`，inactive=22）；大表 +185 key（rmt/pcnt/adc/twai/mcpwm/parlio/lcd/touch/cam）→ **346 key／17 unit**；`tools/schema_coverage.py`（覆蓋率＋模板）。上板：set 25 persist → reboot 仍然 25、LED→not_active。status §7.296 | lead（AI） |
 | 2026-11-27 | **字典覆蓋剩餘配置＋class（value／struct）**：新增 unit net（3）／link（64）／route（8）／task（60）＋`sys.cID`（value）；schema **25→161 key、4→8 unit**；字典表 900→**5,796 B**（仍 `.flash.rodata`、0 SRAM），value/struct＝26/135，store 不變（struct 唔入）。image +13,120 B；`preset_check` 容許數值 key 空字串（`cID:""`＝由 MAC 推導）。status §7.295 | lead（AI） |
+| 2026-11-27 | **儲存格式清點＋狀態預算工具**：新增 `docs/03_notes/state-storage-budget.md`（生成）＋`tools/state_budget.py`（由 schema 計 NCSTATE；26 個 value key＝**174–209 B**，典型 **187 B**；假設 286 key 全 value 會 1,981 B／store 3,436 B 超過 96 格）；`state-storage-format.md` 加 §1.5 全專案格式一覽（6 款 config JSON＋NCSTATE／NCLAYOUT／.nct／.bin 分工）；`run_all.sh` 加預算文件過期閘門 | lead（AI） |
+| 2026-11-28 | **16IO 測試內容擴充**：28 effects 覆蓋 6 種 program type；4 modes（grid4 預設／test 全 type／grid16／sync），map groups 16/64/256；`0xF06D` 切 mode。show_upload check 9 檔 OK、已 reload、50 fps。group 是線性 chain 分段，唔係 2D 幾何格。status §7.315 | lead（AI） |
+| 2026-11-28 | **修正單通道 write 殘留**：`nc_px_layout` 的 `write=r/g/b/w` 只寫自己通道，環格重用令上一幀 RGB 殘留 → 切色後仍然白／綠閃。保留配對層通道可組合語義（pxLayout/pxShow tests 驗 R 來自 job0、G 來自 job1）；paint 用 `nc_px_layout_needs_clear()` 按需要清 canvas：單通道 write／未覆蓋全部 px 才清，全 rgb/rgbw full coverage 唔清。16IO 實測 clear 0.76 ms、pair 3.12 ms、enc 9.49 ms、~49 fps；clear 係正確性必要成本，唔清 DMA、只清環格。status §7.314 | lead（AI） |
+| 2026-11-28 | **16 IO × 16×16 功能測試 project**：`S3/ESP32-S3-Generic-16IO`＋同名 project；16 條 I80 直驅 lane、每條 256 px、`LED_WS2812.list` 16 線；pixel 16 group／16 個不同 effect（4 個長 end_Time 8,192–32,768 幀、play_loop=-1、低亮度）。Build 772.2 KB、show_upload --check 4 檔全 OK、board check 0 error。已改 Zero 可用 16 腳（1,2,4..15,21,38）並 **OTA 上 Zero 成功**：act.match=1、四個 pixel task running、plan PSRAM 51,959 B；未有 16 條實體燈鏈所以視覺未驗。status §7.312 | lead（AI） |
+| 2026-11-28 | **LED_WS2812 每線獨立內容＋16×600 極限 benchmark**：frame=Σpx、DMA=maxpx；`pack_bus_seg` 逐線 offset／active mask；`pack_bus_seg_mask`＋DMA 槽預填（只寫中間 mask）；fast16 一次砌 3×64-bit lane word。host 402 checks；16×600 獨立 **10.37 ms**（舊同內容 6.45 ms；初版 19.44，32-bit/load、O3、unroll 皆冇幫助）。仍 <20ms 預算；舊 broadcast 測試全部保留。status §7.311 | lead（AI） |
+| 2026-11-28 | **LED_WS2812 系列正式落地（只改設定定義）**：driver.json `LED_WS2812.list[]` 每 item 一條線（`bus.index`=線號、`px`、`order`、`d_stay`；冇 timing/format/backend/lanes）；`ncportgen`／runtime parser 都轉成 legacy `nc_led_cfg_t` 餵現有 I80 16-line driver，driver 零改動。schema `LED_CLK/BIT_CELLS` min 0=driver 預設。新 pair（754.0／748.1 KB）＋presets 已遷移；Zero 實測新格式 `hit=1`、`bytes=137`、`schema.bad=0`。status §7.310 | lead（AI） |
+| 2026-11-28 | **兩個中央示範「監察 pair」**：新增 `ports/hardware/S3/ESP32-S3-Generic-{PSRAM,NoPSRAM}`＋同名 project（完整 6 檔、可 build／OTA／status），由 preset 作 runtime 真相；`tools/sync_preset_pairs.py --check` 擋 project 只更新一部分（run_all 閘門）。建置：PSRAM 752.4 KB、NoPSRAM 746.6 KB，`board.py check` 0 error；sync_hardware／driver 全部 OK。 | lead（AI） |
+| 2026-11-28 | **state store 改開機掃描→動態配置**（用家要求、呼應 §7.298）：`nc_state_store_t` 由固定 96 格（1,156 B）改成 pointer＋cap（8 B），B02 掃 records／舊 blob 筆數＋8 reserve 後 `heap_caps_malloc(INTERNAL)` 一次；`status cfg.state.cap` 可見。Zero 實測 static bss **104,208→103,056 B（−1,152）**、heap +324 B（cap 27），淨 +~808 B；state 19 筆／140 B、`hit=1` 不變；host 25/25。status §7.308 | lead（AI） |
+| 2026-11-28 | **遮罩機制前後拆解**：class 遮罩（286→26 value key）令 store 由 3,432 B→1,156 B（實際 228 B／全開 312 B）、blob 1,981→140／184 B；activation mask 只省 record／blob（固定 array 不變）；真正 SRAM 下降係 entry 32→12（−1,280）＋s_recs 搬 PSRAM（−764）＋96 格（+384）＝ 2,820→1,160 B。對比舊 JSON 模式最終仍 +2,640 B（§7.305）。status §7.307 | lead（AI） |
+| 2026-11-28 | **狀態前後對比工具＋真機實測**：新增 `tools/state_dump.py`（解 NCSTATE、逐 key 對 JSON 標 同／OVERRIDE／衍生、列未入 blob 的 key）＋`nc4_file.py get`（FILE_READ 下載）。Zero 實測：原狀 19 筆／140 B、全部同 JSON；`STATUS_SET state{key:2,value:25,persist:1}`→reboot：state 25 vs JSON 20（OVERRIDE、`cmp_ok=0`、JSON sha 不變、src_hash 不變、blob_crc 變、size 仍 140 B）；還原 20 後 blob CRC 同原狀完全一樣。status §7.306 | lead（AI） |
+| 2026-11-28 | **A/B 實測「舊 JSON vs NCSTATE」**：同板同 IDF 6.1.1 各建一次（舊 `bd70185` vs HEAD）→ **+2,640 B SRAM（bss）／+42,640 B flash**；SRAM＝s_store 1,156＋dirty 384＋crc 表 1,024＋雜項；flash＝state code ~10 KB＋schema 字典 29,735（keys 10,296＋字串 18,071）。FAT JSON 11,872 B 仍在＋state.ncst 140–184 B；cJSON 暫態一樣（hit 仍 parse）；現階段未省 RAM，未來 skip parse／store 取代 cfg 才省（−3.5 KB SRAM、−20–35 KB 暫態）。**更正**舊文件「flash 字典 12,404 B」漏字串；buffer 圖／note 已改。status §7.305 | lead（AI） |
+| 2026-11-27 | **真機驗證 6.1.1 ＋ NCSTATE 預算**：Zero 用 IDF **v6.1.1** 建置（759.7 KB）＋ OTA（777,904 B／5.2 s＝145.9 KB/s）→ `idf=v6.1.1`、`fw=1d75fea-dirty`、`app=263862e7`；`fs_format` 重新 seed 後 state **19 筆／140 B**、`hit=1`；把 hardware SPI 開齊後 **26 筆／184 B**、`inactive=0`——同 `tools/state_budget.py` 公式完全一致。新增 `tools/nc4_file.py put/delete`（NC4 FILE 協定）做真機上傳。status §7.304 | lead（AI） |
+| 2026-11-27 | **driver.json 微調指南＋中央示範「最新狀態」機制**：新增 `docs/02_guides/driver-config.md`（3 個位置／權威、LED 10 key、schema 與 parser 範圍差異、1／2 lane／SPI／mock 範例、驗證）；`tools/preset_check.py` 加 `--status／--write-status／--check-status` 生成 `ports/presets/STATUS.md`（檔案齊全、schema 覆蓋率、driver LED 實際值、兩版差異），`run_all.sh` 驗冇過期。修正「config 四個檔」舊講法（實際 6 個）、preset README 的 flat6 政策（PSRAM）。 | lead（AI） |
 | 2026-11-27 | **state 只存數值（entry 32→12 B）**：`LED_FMT` 由 `str` 改 `enum`（名字留字典）；`nc_state_ent_t` 去掉 `bytes[16]`、`u/i` 改 union → 12 B；BYTES 明示拒絕；新增 `nc_state_enum_id()`、`get_str/set_str` 退場。`nm` 量到 `s_store` **2,052→772 B**（−1,280 B RAM）、image +32 B；host 25/25、上板 `hit=1`／`bad=0`。Matrix 典型 70 筆 → 840 B，S4 要把上限提到 96 筆（1,156 B）。status §7.293 | lead（AI） |
 
 ---

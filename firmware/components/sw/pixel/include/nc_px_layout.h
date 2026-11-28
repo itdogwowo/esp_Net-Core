@@ -132,6 +132,10 @@ uint32_t nc_px_layout_apply(const nc_px_layout_t *l, uint16_t *const *vals, uint
 uint32_t nc_px_layout_apply_range(const nc_px_layout_t *l, uint16_t *const *vals,
                                   uint8_t *dst, uint32_t from, uint32_t count);
 
+// 這一幀開始前使唔使清 canvas？write=r/g/b/w（只寫一個通道）或 flat 表未覆蓋全部 px
+// 時要；全部 RGB／RGBW／WW／WWWW 且 full coverage 就唔使（可省 16 KB memset）。
+bool nc_px_layout_needs_clear(const nc_px_layout_t *l);
+
 // 時間抖動：一次掃描 runs，同時寫 subframes 份 8-bit 輸出。
 // 每份 = base 或 base+1，令 subframes 份平均 = 12-bit>>4（±1）。
 // phase 每幀 +1，令 +1 的子幀輪流，避免閃爍。只支援 rgb／rgbw。

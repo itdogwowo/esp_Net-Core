@@ -1,0 +1,92 @@
+{
+  "version": 1,
+  "id": 1,
+  "name": "led16test",
+  "index": 1,
+  "play_loop": -1,
+  "maxF": 0,
+  "mapping": "led16",
+  "white": 0,
+  "map": [
+    {
+      "group": "led16.g0",
+      "effect": "led16_e00",
+      "write": "r"
+    },
+    {
+      "group": "led16.g1",
+      "effect": "led16_e01",
+      "write": "g"
+    },
+    {
+      "group": "led16.g2",
+      "effect": "led16_e02",
+      "write": "b"
+    },
+    {
+      "group": "led16.g3",
+      "effect": "led16_e03",
+      "write": "rgb"
+    },
+    {
+      "group": "led16.g4",
+      "effect": "led16_e04",
+      "write": "r"
+    },
+    {
+      "group": "led16.g5",
+      "effect": "led16_e05",
+      "write": "g"
+    },
+    {
+      "group": "led16.g6",
+      "effect": "led16_e06",
+      "write": "b"
+    },
+    {
+      "group": "led16.g7",
+      "effect": "led16_e07",
+      "write": "rgb"
+    },
+    {
+      "group": "led16.g8",
+      "effect": "led16_e08",
+      "write": "r"
+    },
+    {
+      "group": "led16.g9",
+      "effect": "led16_e09",
+      "write": "g"
+    },
+    {
+      "group": "led16.g10",
+      "effect": "led16_e10",
+      "write": "b"
+    },
+    {
+      "group": "led16.g11",
+      "effect": "led16_e11",
+      "write": "rgb"
+    },
+    {
+      "group": "led16.g12",
+      "effect": "led16_e12",
+      "write": "g"
+    },
+    {
+      "group": "led16.g13",
+      "effect": "led16_e13",
+      "write": "r"
+    },
+    {
+      "group": "led16.g14",
+      "effect": "led16_e14",
+      "write": "b"
+    },
+    {
+      "group": "led16.g15",
+      "effect": "led16_e15",
+      "write": "rgb"
+    }
+  ]
+}

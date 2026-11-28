@@ -1,12 +1,28 @@
-// NCSTATE RAM store 實作（固定陣列、無 heap／PSRAM）。
+// NCSTATE RAM store 實作（buffer 由 nc_state_boot 開機一次配置；store 本身唔 malloc）。
 #include "nc_state_store.h"
 
 #include <string.h>
 
+bool nc_state_store_bind(nc_state_store_t *s, nc_state_ent_t *buf, uint16_t cap)
+{
+    if (s == NULL || buf == NULL || cap == 0 || cap > NC_STATE_STORE_MAX) {
+        return false;
+    }
+    s->e = buf;
+    s->n = 0;
+    s->cap = cap;
+    return true;
+}
+
+uint16_t nc_state_store_cap(const nc_state_store_t *s)
+{
+    return (s != NULL) ? s->cap : 0;
+}
+
 void nc_state_store_clear(nc_state_store_t *s)
 {
     if (s != NULL) {
-        memset(s, 0, sizeof(*s));
+        s->n = 0;      // buffer 內容唔使清；n 以外嘅 entry 唔會被讀
     }
 }
 
@@ -28,9 +44,12 @@ bool nc_state_store_put(nc_state_store_t *s, const nc_state_rec_t *r)
     if (r->type == NC_STATE_T_BYTES) {
         return false;   // state 只存數值：字串請留喺 config／另設字串池（明示，唔截斷）
     }
+    if (s->e == NULL || s->cap == 0) {
+        return false;   // 未 bind（開機配置失敗）→ 明示失敗
+    }
     nc_state_ent_t *e = find_mut(s, r->key);
     if (e == NULL) {
-        if (s->n >= NC_STATE_STORE_MAX) {
+        if (s->n >= s->cap) {
             return false;
         }
         e = &s->e[s->n++];

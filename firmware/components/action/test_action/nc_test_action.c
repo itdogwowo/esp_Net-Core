@@ -4150,6 +4150,7 @@ static void on_pxbench(nc4_ctx_t *ctx, const nc4_frame_t *f)
     uint8_t frames = f->data[3];
     if (frames == 0) { frames = 1; }
     if (frames > 50) { frames = 50; }
+    const uint8_t mode = (f->len >= 5) ? f->data[4] : 0;   // 0=共享 payload；1=每線獨立 segment
 
     nc_px_codec_cfg_t cc = { 0 };
     nc_px_format_t fmt = NC_PX_FMT_WS2812;
@@ -4173,27 +4174,40 @@ static void on_pxbench(nc4_ctx_t *ctx, const nc4_frame_t *f)
     }
     const uint32_t units = nc_px_codec_total_units(c0);
     nc_pixel_codec_t **cd = heap_caps_calloc(lanes, sizeof(*cd), MALLOC_CAP_INTERNAL);
-    uint8_t *payload = heap_caps_malloc((size_t)px * NC_PX_BPP, MALLOC_CAP_INTERNAL);
+    const uint32_t pay_px = (mode == 1) ? (uint32_t)lanes * px : px;
+    uint8_t *payload = heap_caps_malloc((size_t)pay_px * NC_PX_BPP, MALLOC_CAP_INTERNAL);
+    if (payload == NULL && mode == 1) {
+        payload = heap_caps_malloc((size_t)pay_px * NC_PX_BPP, MALLOC_CAP_SPIRAM);
+    }
     int int_cnt = 0;
     int int_expect = 0;
     uint8_t *scratch = bench_alloc(units, &int_cnt);
     int_expect++;
-    uint8_t *out0 = bench_alloc(units, &int_cnt);
+    // 16-bit bus 每個 tick 2 bytes → out0/out1 要預 units*2（廣播 pack_bus 會寫）。
+    uint8_t *out0 = bench_alloc(units * 2u, &int_cnt);
     int_expect++;
-    uint8_t *out1 = bench_alloc(units, &int_cnt);
+    uint8_t *out1 = bench_alloc(units * 2u, &int_cnt);
     int_expect++;
-    if (out0 != NULL) { memset(out0, 0, units); }
-    if (out1 != NULL) { memset(out1, 0, units); }
+    if (out0 != NULL) { memset(out0, 0, units * 2u); }
+    if (out1 != NULL) { memset(out1, 0, units * 2u); }
+    // mode=1 的 16-bit 輸出：每個 tick 2 bytes，另配一塊（唔好覆蓋 out0）。
+    uint8_t *out_seg = NULL;
+    if (mode == 1) {
+        out_seg = bench_alloc(units * 2u, &int_cnt);
+        int_expect++;
+        if (out_seg != NULL) { memset(out_seg, 0, units * 2u); }
+    }
     const uint32_t lb = nc_px_codec_lane_bytes(c0);
     const uint32_t bc = (CONFIG_NETCORE_PIXEL_BIT_CELLS > 0) ? CONFIG_NETCORE_PIXEL_BIT_CELLS : 3;
     const uint32_t pack_bytes = px * lb * ((bc * 8u + 7u) / 8u);
     uint8_t *pack[8];
     for (int i = 0; i < 8; i++) { pack[i] = NULL; }
-    bool ok = cd != NULL && payload != NULL && scratch != NULL && out0 != NULL && out1 != NULL;
+    bool ok = cd != NULL && payload != NULL && scratch != NULL && out0 != NULL &&
+              out1 != NULL && (mode != 1 || out_seg != NULL);
     if (ok) {
         // 唔可以用單一顏色：codec 有「同上一顆一樣就抄」的快取路徑，全灰會假快。
         // 用一條會變的pattern（每像素 4 個通道都唔同）逼近真實文字／圖案。
-        for (uint32_t i = 0; i < (uint32_t)px * NC_PX_BPP; i++) {
+        for (uint32_t i = 0; i < pay_px * NC_PX_BPP; i++) {
             payload[i] = (uint8_t)((i * 37u + (i >> 3)) & 0xFFu);
         }
         cd[0] = c0;
@@ -4214,6 +4228,8 @@ static void on_pxbench(nc4_ctx_t *ctx, const nc4_frame_t *f)
     int64_t us_packed = 0;
     int64_t us_pack = 0;
     int64_t us_merge = 0;
+    int64_t us_seg = 0;
+    int64_t us_bus = 0;
     if (ok) {
         // ① 只做編碼（寫 scratch），唔做 OR 合成
         const int64_t t0 = esp_timer_get_time();
@@ -4302,6 +4318,18 @@ static void on_pxbench(nc4_ctx_t *ctx, const nc4_frame_t *f)
             }
             us_pack = (esp_timer_get_time() - t4) / (int64_t)frames;
         }
+        // 參考：同一份 payload 的舊廣播 pack_bus（16 lane 共用內容）
+        if (ok) {
+            const uint8_t bw = (lanes > 8) ? 16u : 8u;
+            const int64_t tb = esp_timer_get_time();
+            for (uint8_t fr = 0; fr < frames; fr++) {
+                if (nc_px_codec_pack_bus(cd, payload, px, out0, lanes, bw) == 0) {
+                    ok = false;
+                    break;
+                }
+            }
+            us_bus = (esp_timer_get_time() - tb) / (int64_t)frames;
+        }
         if (ok) {
             memset(out0, 0, units);
             memset(out1, 0, units);
@@ -4313,6 +4341,38 @@ static void on_pxbench(nc4_ctx_t *ctx, const nc4_frame_t *f)
                 }
             }
             us_merge = (esp_timer_get_time() - t5) / (int64_t)frames;
+        }
+        // ⑥ 每線獨立 segment（mode=1）：同一個 frame 內每條 lane 讀自己 px 段；
+        //    內容唔同、長度可以唔同；用 max(px) 決定 DMA 時間。
+        if (ok && mode == 1) {
+            uint16_t lpx[16] = { 0 };
+            uint32_t off[16] = { 0 };
+            for (uint8_t k = 0; k < lanes; k++) {
+                lpx[k] = px;
+                off[k] = (uint32_t)k * px;
+            }
+            const uint8_t bw = (lanes > 8) ? 16u : 8u;
+            // production 模式：DMA 槽預填 [active][mask][0] pattern，每幀只寫 mask。
+            if (bw == 16) {
+                uint16_t *o16 = (uint16_t *)out_seg;
+                const uint16_t all = (uint16_t)((1u << lanes) - 1u);
+                for (uint32_t t = 0; t + 2u < units; t += 3u) {
+                    o16[t] = all;
+                    o16[t + 2u] = 0;
+                }
+            }
+            const int64_t t6 = esp_timer_get_time();
+            for (uint8_t fr = 0; fr < frames; fr++) {
+                for (uint8_t k = 0; k < lanes; k++) {
+                    nc_px_codec_frame(cd[k], (uint32_t)fr + 1u);
+                }
+                if (nc_px_codec_pack_bus_seg_mask(cd, payload, lpx, off, lanes, px,
+                                                  out_seg, bw) == 0) {
+                    ok = false;
+                    break;
+                }
+            }
+            us_seg = (esp_timer_get_time() - t6) / (int64_t)frames;
         }
     }
     if (!ok) {
@@ -4326,12 +4386,13 @@ static void on_pxbench(nc4_ctx_t *ctx, const nc4_frame_t *f)
         (void)snprintf(j, sizeof(j),
                        "{\"lanes\":%u,\"px\":%u,\"frames\":%u,\"units\":%u,"
                        "\"us_enc\":%u,\"us_mix\":%u,\"us_direct\":%u,\"us_packed\":%u,"
-                       "\"us_pack\":%u,\"us_merge\":%u,"
+                       "\"us_pack\":%u,\"us_merge\":%u,\"us_bus\":%u,\"mode\":%u,\"us_seg\":%u,"
                        "\"sram\":%d,\"sram_blocks\":%d,\"sram_expect\":%d,"
                        "\"max_fps_x10\":%u,\"pass50\":%u}",
                        (unsigned)lanes, (unsigned)px, (unsigned)frames, (unsigned)units,
                        (unsigned)enc, (unsigned)mix, (unsigned)direct, (unsigned)packed,
-                       (unsigned)us_pack, (unsigned)us_merge,
+                       (unsigned)us_pack, (unsigned)us_merge, (unsigned)us_bus,
+                       (unsigned)mode, (unsigned)us_seg,
                        (int_cnt == int_expect) ? 1 : 0, int_cnt, int_expect,
                        (unsigned)max_fps_x10, (max_fps_x10 >= 500u) ? 1u : 0u);
     }
@@ -4345,6 +4406,7 @@ static void on_pxbench(nc4_ctx_t *ctx, const nc4_frame_t *f)
     if (scratch != NULL) { heap_caps_free(scratch); }
     if (out0 != NULL) { heap_caps_free(out0); }
     if (out1 != NULL) { heap_caps_free(out1); }
+    if (out_seg != NULL) { heap_caps_free(out_seg); }
     for (int i = 0; i < 8; i++) {
         if (pack[i] != NULL) { heap_caps_free(pack[i]); }
     }

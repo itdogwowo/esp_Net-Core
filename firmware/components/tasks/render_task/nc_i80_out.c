@@ -31,8 +31,13 @@ static const char *TAG = "i80_out";
 typedef struct {
     nc_pixel_backend_t  be;
     nc_pixel_codec_t   *codec[I80_LANES_MAX]; // 每條 lane 一個（各自的抖動狀態）
-    uint32_t            px;
+    uint32_t            px;                 // DMA 時間 px（max line px）
+    uint32_t            ring_px;            // canonical frame px（Σ line px）
     uint32_t            units;              // 含 reset（= 一個 DMA 槽的大小）
+    uint8_t             n_line;             // >0 = 逐線獨立來源
+    bool                seg_mask;           // DMA 槽已預填 pattern → 只寫 mask word
+    uint16_t            line_px[16];
+    uint32_t            line_off[16];
     uint8_t             lanes;
     uint8_t             bus_width;           // 8 或 16
     uint8_t             slots;
@@ -60,7 +65,7 @@ static bool i80_acquire(nc_pixel_backend_t *b, uint32_t post_seq, uint32_t *slot
             d->pay[k] = p;          // 這一格在 release 之前不會被 writer 覆寫
             *slot = k;
             *payload = p;
-            *px = d->px;
+            *px = d->ring_px;
             return true;
         }
     }
@@ -87,6 +92,16 @@ static bool i80_encode(nc_pixel_backend_t *b, uint32_t slot)
             return false;
         }
         nc_px_codec_frame(d->codec[k], seq);
+    }
+    // 2026-11-28：逐線獨立來源（每條 lane 自己的 px／offset）。
+    if (d->n_line > 0) {
+        if (d->seg_mask) {
+            return nc_px_codec_pack_bus_seg_mask(d->codec, p, d->line_px, d->line_off,
+                                                 d->lanes, d->px, out,
+                                                 d->bus_width) != 0;
+        }
+        return nc_px_codec_pack_bus_seg(d->codec, p, d->line_px, d->line_off,
+                                        d->lanes, d->px, out, d->bus_width) != 0;
     }
     // 單 lane／8-bit：直接用「線材 byte → 波形 LUT」的 memcpy 路徑。
     // 廣播路徑係逐 tick 寫；1 lane 時舊 merge8 一次寫 8 tick 反而快（實測 64 px：
@@ -165,7 +180,20 @@ nc_pixel_backend_t *nc_px_backend_i80(const nc_px_i80_cfg_t *cfg)
     if (d->lanes > d->bus_width) {
         d->lanes = d->bus_width;               // 8-bit 最多 8 lane、16-bit 最多 16
     }
-    d->px = cfg->px;
+    d->px = (cfg->dma_px > 0) ? cfg->dma_px : cfg->px;
+    d->ring_px = (cfg->ring_px > 0) ? cfg->ring_px : d->px;
+    d->n_line = (cfg->n_line > 16) ? 16 : cfg->n_line;
+    if (d->n_line > 0) {
+        uint32_t off = 0;
+        for (uint8_t k = 0; k < d->n_line; k++) {
+            d->line_px[k] = cfg->line_px[k];
+            d->line_off[k] = off;
+            off += cfg->line_px[k];
+        }
+        if (off < d->ring_px) {
+            d->ring_px = off;      // Σ line px 才是 canonical frame
+        }
+    }
 
     nc_px_codec_cfg_t cc = {
         .fmt = cfg->fmt,
@@ -339,6 +367,26 @@ nc_pixel_backend_t *nc_px_backend_i80(const nc_px_i80_cfg_t *cfg)
     }
     d->slots = (uint8_t)nc_i80_drv_slots();
 
+    // 逐線獨立 + 最常見 WS2812 波形（bc=3、t0h=1、t1h=2）：
+    // 每個 bit 的 bus word 是 [active][mask][0]；[active] 同 [0] 固定，
+    // 開機把每個 DMA 槽預填一次，之後每幀只寫中間 mask（少 2/3 輸出寫入）。
+    if (d->n_line > 0 && d->bus_width == 16 &&
+        nc_px_codec_wave_is_3_1_2(d->codec[0])) {
+        {
+            const uint16_t active = (uint16_t)((1u << d->lanes) - 1u);
+            for (uint8_t sl = 0; sl < d->slots; sl++) {
+                uint16_t *o = (uint16_t *)nc_i80_drv_slot_buf((int)sl);
+                if (o == NULL) {
+                    continue;
+                }
+                for (uint32_t t = 0; t + 2u < d->units; t += 3u) {
+                    o[t] = active;
+                    o[t + 2u] = 0;
+                }
+            }
+            d->seg_mask = true;
+        }
+    }
 
     (void)snprintf(d->be.name, sizeof(d->be.name), "i80");
     d->be.lanes = d->lanes;

@@ -288,6 +288,10 @@ typedef struct {
     uint8_t  bit_cells;
     uint8_t  t0h;
     uint8_t  t1h;
+    // 2026-11-28：每條線獨立 px（LED_WS2812.list[]；0 = 舊 LED block／廣播模式）。
+    //   total px = Σ line_px；DMA 時間跟 max(line_px)；短線尾部由 codec 出 reset。
+    uint8_t  n_line;
+    uint16_t line_px[16];               // 每型最多 16 條線（I80 bus width 上限）
 } nc_led_cfg_t;
 
 // ── 應用硬件（device）層：`/data/config/devices.json`（runtime；driver.json 的鏡像）──

@@ -52,7 +52,40 @@ static nc_state_rec_t *recs_buf(void)
 static nc_state_rec_t s_recs[NC_STATE_RECS_MAX];
 static nc_state_rec_t *recs_buf(void) { return s_recs; }
 #endif
-static nc_state_store_t s_store;          // 常駐 RAM：blob 載入後的值（~576 B internal）
+static nc_state_store_t s_store;          // 常駐 store（pointer＋len＋cap；entries 開機配置）
+static nc_state_ent_t  *s_store_buf;      // 開機掃描後一次配置的 entries（internal；永不釋放）
+// 2026-11-28（用家要求）：開機先掃描「有幾多筆值」，再精確配置 store。
+//   · 仍然守鐵律：開機一次配置、永不釋放、runtime 唔租。
+//   · need = max(cfg records, 舊 blob 筆數) + 熱插拔 reserve；上限 NC_STATE_STORE_MAX。
+//   · 配置失敗 → 明示 log；state sync 跳過，cfg／JSON 仍然權威。
+static bool store_ensure(uint16_t need)
+{
+    if (s_store.e != NULL) {
+        return s_store.cap >= need;
+    }
+    uint16_t cap = need;
+    if (cap < 4) {
+        cap = 4;
+    }
+    if (cap > NC_STATE_STORE_MAX) {
+        cap = NC_STATE_STORE_MAX;   // 超出上限要明示（呼叫端 log）
+    }
+    s_store_buf = (nc_state_ent_t *)heap_caps_malloc(
+        sizeof(nc_state_ent_t) * cap, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    if (s_store_buf == NULL) {
+        ESP_LOGW(TAG, "state store：內部 RAM 唔夠（要 %u B）→ 跳過 state sync",
+                 (unsigned)(sizeof(nc_state_ent_t) * cap));
+        return false;
+    }
+    if (!nc_state_store_bind(&s_store, s_store_buf, cap)) {
+        ESP_LOGW(TAG, "state store：bind 失敗（cap=%u）", (unsigned)cap);
+        return false;
+    }
+    ESP_LOGI(TAG, "state store：掃到 %u 筆 → 開機配置 %u 格（%u B internal）",
+             (unsigned)need, (unsigned)cap, (unsigned)(sizeof(nc_state_ent_t) * cap));
+    return true;
+}
+
 static nc_state_boot_result_t s_result;
 static bool s_result_valid;
 static uint32_t s_src_hash;      // 值集 hash（commit 沿用）
@@ -248,6 +281,25 @@ esp_err_t nc_state_boot_sync(nc_state_boot_result_t *out)
     const esp_err_t pe = nc_state_file_peek(NC_STATE_PATH, &info);
     const bool hash_match = (pe == ESP_OK && info.src_hash == src_hash);
 
+    // 2026-11-28：掃描筆數（cfg records／舊 blob）→ 精確配置 store（唔再固定 96 格 standby）。
+    {
+        uint32_t need = s_result.n_records;
+        if (pe == ESP_OK && info.n_records > need) {
+            need = info.n_records;       // 舊 blob 可能有更多筆（未啟動 unit 的孤兒）
+        }
+        need += NC_STATE_DYN_RESERVE;
+        if (need > NC_STATE_STORE_MAX) {
+            ESP_LOGW(TAG, "state store：掃到 %u 筆（＋reserve）> 上限 %u → 夾到上限",
+                     (unsigned)need, (unsigned)NC_STATE_STORE_MAX);
+        }
+        if (!store_ensure((uint16_t)need)) {
+            if (out != NULL) {
+                *out = s_result;
+            }
+            return ESP_ERR_NO_MEM;       // 明示失敗；cfg／JSON 仍然權威
+        }
+    }
+
     // 無論 hash 是否對得上，都試載入舊 blob 對拍：
     //   - hash 對 + 值全中 → 真 hit；
     //   - hash 唔對但值一樣 → **唔重寫**（WL FAT 寫 124 B 實測要 ~762 ms，避免無謂寫盤）；
@@ -257,7 +309,7 @@ esp_err_t nc_state_boot_sync(nc_state_boot_result_t *out)
     uint32_t first = 0;
     if (pe == ESP_OK) {
         nc_state_info_t li;
-        memset(&s_store, 0, sizeof(s_store));
+        nc_state_store_clear(&s_store);
         const esp_err_t le = nc_state_file_load(NC_STATE_PATH, nc_state_store_cb,
                                                 &s_store, &li);
         if (le == ESP_OK) {

@@ -1,0 +1,2 @@
+# 中央示範 pair：project 層只放功能覆寫；板子事實（flash/PSRAM/腳位/幾何）在 hardware 層。
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192

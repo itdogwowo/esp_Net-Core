@@ -301,7 +301,7 @@ static bool content_frame_once(void)
                                 ? (uint32_t)esp_timer_get_time() - s_eff_frame.t_pub_us : 0;
 #if CONFIG_NETCORE_PIXEL_SUBFRAMES > 1
         const uint32_t ns = (uint32_t)CONFIG_NETCORE_PIXEL_SUBFRAMES;
-        uint32_t apply_us = 0, white_us = 0, commit_us = 0;
+        uint32_t apply_us = 0, white_us = 0, commit_us = 0, clear_us = 0;
         const int64_t t_all0 = esp_timer_get_time();
         if (s_eff_frame.seq != s_sf_seq) {
             s_sf_seq = s_eff_frame.seq;
@@ -314,6 +314,14 @@ static bool content_frame_once(void)
                 nc_pipe_stats_full();
                 return false;             // 環滿：已 commit 的子幀照用，下一輪再試
             }
+            // 唔使成格 clear：layout 的每個 write（r/g/b/w/ww/rgb/rgbw）現在都會
+            // 完整寫齊 4 個通道（單通道會把其餘設 0），所以環格重用都唔會殘留。
+            const int64_t tc0 = esp_timer_get_time();
+            if (nc_px_layout_needs_clear(&s_content.layout)) {
+                memset(sp, 0, (size_t)s_content.px * 4u);
+            }
+            const int64_t tc1 = esp_timer_get_time();
+            clear_us += (uint32_t)(tc1 - tc0);
             const int64_t t0 = esp_timer_get_time();
             nc_px_layout_apply_dither(&s_content.layout,
                                       (uint16_t *const *)s_eff_frame.vals,
@@ -337,7 +345,7 @@ static bool content_frame_once(void)
         }
         (void)t_all0;
         s_sf_done = 0;                     // 四個子幀交齊
-        nc_pipe_stats_pair(0, apply_us, white_us, commit_us, lat_us);
+        nc_pipe_stats_pair(clear_us, apply_us, white_us, commit_us, lat_us);
 #else
         nc_px_hdr_t *hdr = NULL;
         const int64_t a0 = esp_timer_get_time();
@@ -346,6 +354,13 @@ static bool content_frame_once(void)
             nc_pipe_stats_full();
             return false;                 // 環滿：下 tick 再試
         }
+        // write=r/g/b/w 或 flat 表未覆蓋全部 px 時，canvas 要由零開始；
+        // 全部 RGB/RGBW 且 full coverage 就唔使清。
+        const int64_t clr0 = esp_timer_get_time();
+        if (nc_px_layout_needs_clear(&s_content.layout)) {
+            memset(p, 0, (size_t)s_content.px * 4u);
+        }
+        const int64_t clr1 = esp_timer_get_time();
 #if CONFIG_NETCORE_PIXEL_APPLY_PIPE
         s_pipe.l = &s_content.layout;
         s_pipe.nflat = s_content.layout.nflat;
@@ -362,7 +377,7 @@ static bool content_frame_once(void)
             return false;
         }
         const int64_t c1 = esp_timer_get_time();
-        nc_pipe_stats_pair(0, (uint32_t)(a1 - a0), (uint32_t)(w1 - a1),
+        nc_pipe_stats_pair((uint32_t)(clr1 - clr0), (uint32_t)(a1 - a0), (uint32_t)(w1 - a1),
                            (uint32_t)(c1 - w1), lat_us);
         if (s_snap_wanted) {
             snapshot_publish(p, s_content.px, s_content.commits);

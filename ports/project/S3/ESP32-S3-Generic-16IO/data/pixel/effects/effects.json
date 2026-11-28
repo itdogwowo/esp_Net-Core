@@ -1,0 +1,573 @@
+{
+  "version": 1,
+  "effects": [
+    {
+      "id": 1,
+      "name": "led16_e00",
+      "pixel_n": 256,
+      "program": [
+        {
+          "type": "math_now",
+          "F": 10,
+          "l_max": 512,
+          "l_lim": 0,
+          "phi": 0,
+          "end_Time": 512
+        }
+      ],
+      "step": 1,
+      "spacing": 2,
+      "offset": 0,
+      "speed": 1,
+      "reverse": false
+    },
+    {
+      "id": 2,
+      "name": "led16_e01",
+      "pixel_n": 256,
+      "program": [
+        {
+          "type": "square_wave_now",
+          "F": 10,
+          "l_max": 384,
+          "l_lim": 0,
+          "phi": 512,
+          "end_Time": 512
+        }
+      ],
+      "step": 1,
+      "spacing": 2,
+      "offset": 0,
+      "speed": 1,
+      "reverse": false
+    },
+    {
+      "id": 3,
+      "name": "led16_e02",
+      "pixel_n": 256,
+      "program": [
+        {
+          "type": "pulse_wave",
+          "F": 10,
+          "l_max": 320,
+          "l_lim": 0,
+          "phi": 1024,
+          "end_Time": 256,
+          "pulse": 2048
+        }
+      ],
+      "step": 1,
+      "spacing": 1,
+      "offset": 0,
+      "speed": 1,
+      "reverse": false
+    },
+    {
+      "id": 4,
+      "name": "led16_e03",
+      "pixel_n": 256,
+      "program": [
+        {
+          "type": "pulse",
+          "F": 10,
+          "l_max": 448,
+          "l_lim": 0,
+          "phi": 1536,
+          "end_Time": 1024,
+          "pulse": 500
+        }
+      ],
+      "step": 1,
+      "spacing": 4,
+      "offset": 0,
+      "speed": 1,
+      "reverse": false
+    },
+    {
+      "id": 5,
+      "name": "led16_e04",
+      "pixel_n": 256,
+      "program": [
+        {
+          "type": "keep",
+          "F": 10,
+          "l_max": 256,
+          "l_lim": 16,
+          "phi": 2048,
+          "end_Time": 2048
+        }
+      ],
+      "step": 1,
+      "spacing": 0,
+      "offset": 0,
+      "speed": 1,
+      "reverse": false
+    },
+    {
+      "id": 6,
+      "name": "led16_e05",
+      "pixel_n": 256,
+      "program": [
+        {
+          "type": "starter",
+          "F": 10,
+          "l_max": 0,
+          "l_lim": 0,
+          "phi": 2560,
+          "end_Time": 512
+        }
+      ],
+      "step": 1,
+      "spacing": 0,
+      "offset": 0,
+      "speed": 1,
+      "reverse": false
+    },
+    {
+      "id": 7,
+      "name": "led16_e06",
+      "pixel_n": 256,
+      "program": [
+        {
+          "type": "math_now",
+          "F": 10,
+          "l_max": 384,
+          "l_lim": 0,
+          "phi": 3072,
+          "end_Time": 256
+        }
+      ],
+      "step": 1,
+      "spacing": 1,
+      "offset": 0,
+      "speed": 1,
+      "reverse": false
+    },
+    {
+      "id": 8,
+      "name": "led16_e07",
+      "pixel_n": 256,
+      "program": [
+        {
+          "type": "square_wave_now",
+          "F": 10,
+          "l_max": 320,
+          "l_lim": 0,
+          "phi": 3584,
+          "end_Time": 1024
+        }
+      ],
+      "step": 1,
+      "spacing": 4,
+      "offset": 0,
+      "speed": 1,
+      "reverse": false
+    },
+    {
+      "id": 9,
+      "name": "led16_e08",
+      "pixel_n": 256,
+      "program": [
+        {
+          "type": "pulse_wave",
+          "F": 10,
+          "l_max": 448,
+          "l_lim": 0,
+          "phi": 64,
+          "end_Time": 1024,
+          "pulse": 2048
+        }
+      ],
+      "step": 1,
+      "spacing": 4,
+      "offset": 0,
+      "speed": 1,
+      "reverse": false
+    },
+    {
+      "id": 10,
+      "name": "led16_e09",
+      "pixel_n": 256,
+      "program": [
+        {
+          "type": "pulse",
+          "F": 10,
+          "l_max": 288,
+          "l_lim": 0,
+          "phi": 768,
+          "end_Time": 2048,
+          "pulse": 500
+        }
+      ],
+      "step": 1,
+      "spacing": 8,
+      "offset": 0,
+      "speed": 1,
+      "reverse": false
+    },
+    {
+      "id": 11,
+      "name": "led16_e10",
+      "pixel_n": 256,
+      "program": [
+        {
+          "type": "math_now",
+          "F": 10,
+          "l_max": 256,
+          "l_lim": 0,
+          "phi": 1280,
+          "end_Time": 4096
+        }
+      ],
+      "step": 1,
+      "spacing": 16,
+      "offset": 0,
+      "speed": 1,
+      "reverse": false
+    },
+    {
+      "id": 12,
+      "name": "led16_e11",
+      "pixel_n": 256,
+      "program": [
+        {
+          "type": "square_wave_now",
+          "F": 10,
+          "l_max": 384,
+          "l_lim": 0,
+          "phi": 1792,
+          "end_Time": 512
+        }
+      ],
+      "step": 1,
+      "spacing": 2,
+      "offset": 0,
+      "speed": 1,
+      "reverse": false
+    },
+    {
+      "id": 13,
+      "name": "led16_e12",
+      "pixel_n": 256,
+      "program": [
+        {
+          "type": "keep",
+          "F": 10,
+          "l_max": 512,
+          "l_lim": 0,
+          "phi": 2304,
+          "end_Time": 2048
+        }
+      ],
+      "step": 1,
+      "spacing": 0,
+      "offset": 0,
+      "speed": 1,
+      "reverse": false
+    },
+    {
+      "id": 14,
+      "name": "led16_e13",
+      "pixel_n": 256,
+      "program": [
+        {
+          "type": "pulse_wave",
+          "F": 10,
+          "l_max": 256,
+          "l_lim": 0,
+          "phi": 2816,
+          "end_Time": 4096,
+          "pulse": 2048
+        }
+      ],
+      "step": 1,
+      "spacing": 16,
+      "offset": 0,
+      "speed": 1,
+      "reverse": false
+    },
+    {
+      "id": 15,
+      "name": "led16_e14",
+      "pixel_n": 256,
+      "program": [
+        {
+          "type": "math_now",
+          "F": 10,
+          "l_max": 320,
+          "l_lim": 0,
+          "phi": 3328,
+          "end_Time": 8192
+        }
+      ],
+      "step": 1,
+      "spacing": 32,
+      "offset": 0,
+      "speed": 1,
+      "reverse": false
+    },
+    {
+      "id": 16,
+      "name": "led16_e15",
+      "pixel_n": 256,
+      "program": [
+        {
+          "type": "square_wave_now",
+          "F": 10,
+          "l_max": 448,
+          "l_lim": 0,
+          "phi": 3840,
+          "end_Time": 16384
+        }
+      ],
+      "step": 1,
+      "spacing": 64,
+      "offset": 0,
+      "speed": 1,
+      "reverse": false
+    },
+    {
+      "id": 17,
+      "name": "sync_e0",
+      "pixel_n": 256,
+      "program": [
+        {
+          "type": "math_now",
+          "F": 10,
+          "l_max": 512,
+          "l_lim": 0,
+          "phi": 0,
+          "end_Time": 512
+        }
+      ],
+      "step": 1,
+      "spacing": 0,
+      "offset": 0,
+      "speed": 1,
+      "reverse": false
+    },
+    {
+      "id": 18,
+      "name": "sync_e1",
+      "pixel_n": 256,
+      "program": [
+        {
+          "type": "square_wave_now",
+          "F": 10,
+          "l_max": 384,
+          "l_lim": 0,
+          "phi": 512,
+          "end_Time": 512
+        }
+      ],
+      "step": 1,
+      "spacing": 0,
+      "offset": 0,
+      "speed": 1,
+      "reverse": false
+    },
+    {
+      "id": 19,
+      "name": "sync_e2",
+      "pixel_n": 256,
+      "program": [
+        {
+          "type": "pulse_wave",
+          "F": 10,
+          "l_max": 320,
+          "l_lim": 0,
+          "phi": 1024,
+          "end_Time": 512,
+          "pulse": 2048
+        }
+      ],
+      "step": 1,
+      "spacing": 0,
+      "offset": 0,
+      "speed": 1,
+      "reverse": false
+    },
+    {
+      "id": 20,
+      "name": "sync_e3",
+      "pixel_n": 256,
+      "program": [
+        {
+          "type": "keep",
+          "F": 10,
+          "l_max": 256,
+          "l_lim": 0,
+          "phi": 1536,
+          "end_Time": 512
+        }
+      ],
+      "step": 1,
+      "spacing": 0,
+      "offset": 0,
+      "speed": 1,
+      "reverse": false
+    },
+    {
+      "id": 21,
+      "name": "cell64_math",
+      "pixel_n": 64,
+      "program": [
+        {
+          "type": "math_now",
+          "F": 10,
+          "l_max": 448,
+          "l_lim": 0,
+          "phi": 0,
+          "end_Time": 256
+        }
+      ],
+      "step": 1,
+      "spacing": 4,
+      "offset": 0,
+      "speed": 1,
+      "reverse": false
+    },
+    {
+      "id": 22,
+      "name": "cell64_square",
+      "pixel_n": 64,
+      "program": [
+        {
+          "type": "square_wave_now",
+          "F": 10,
+          "l_max": 384,
+          "l_lim": 0,
+          "phi": 512,
+          "end_Time": 256
+        }
+      ],
+      "step": 1,
+      "spacing": 4,
+      "offset": 0,
+      "speed": 1,
+      "reverse": false
+    },
+    {
+      "id": 23,
+      "name": "cell64_pulse",
+      "pixel_n": 64,
+      "program": [
+        {
+          "type": "pulse_wave",
+          "F": 10,
+          "l_max": 320,
+          "l_lim": 0,
+          "phi": 1024,
+          "end_Time": 256,
+          "pulse": 2048
+        }
+      ],
+      "step": 1,
+      "spacing": 4,
+      "offset": 0,
+      "speed": 1,
+      "reverse": false
+    },
+    {
+      "id": 24,
+      "name": "cell64_keep",
+      "pixel_n": 64,
+      "program": [
+        {
+          "type": "keep",
+          "F": 10,
+          "l_max": 256,
+          "l_lim": 0,
+          "phi": 1536,
+          "end_Time": 256
+        }
+      ],
+      "step": 1,
+      "spacing": 4,
+      "offset": 0,
+      "speed": 1,
+      "reverse": false
+    },
+    {
+      "id": 25,
+      "name": "cell16_math",
+      "pixel_n": 16,
+      "program": [
+        {
+          "type": "math_now",
+          "F": 10,
+          "l_max": 448,
+          "l_lim": 0,
+          "phi": 0,
+          "end_Time": 256
+        }
+      ],
+      "step": 1,
+      "spacing": 1,
+      "offset": 0,
+      "speed": 1,
+      "reverse": false
+    },
+    {
+      "id": 26,
+      "name": "cell16_square",
+      "pixel_n": 16,
+      "program": [
+        {
+          "type": "square_wave_now",
+          "F": 10,
+          "l_max": 384,
+          "l_lim": 0,
+          "phi": 512,
+          "end_Time": 256
+        }
+      ],
+      "step": 1,
+      "spacing": 1,
+      "offset": 0,
+      "speed": 1,
+      "reverse": false
+    },
+    {
+      "id": 27,
+      "name": "cell16_pulse",
+      "pixel_n": 16,
+      "program": [
+        {
+          "type": "pulse",
+          "F": 10,
+          "l_max": 320,
+          "l_lim": 0,
+          "phi": 1024,
+          "end_Time": 256,
+          "pulse": 3
+        }
+      ],
+      "step": 1,
+      "spacing": 1,
+      "offset": 0,
+      "speed": 1,
+      "reverse": false
+    },
+    {
+      "id": 28,
+      "name": "cell16_keep",
+      "pixel_n": 16,
+      "program": [
+        {
+          "type": "keep",
+          "F": 10,
+          "l_max": 256,
+          "l_lim": 0,
+          "phi": 1536,
+          "end_Time": 256
+        }
+      ],
+      "step": 1,
+      "spacing": 1,
+      "offset": 0,
+      "speed": 1,
+      "reverse": false
+    }
+  ]
+}

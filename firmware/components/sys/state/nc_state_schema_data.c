@@ -2233,7 +2233,7 @@ const nc_state_keydef_t nc_state_schema_keys[NC_STATE_KEY_COUNT] = {
     {
         .id = 0x000c0007u, .unit = NC_UNIT_LED,
         .cls = NC_STATE_CLS_VALUE,
-        .type = NC_STATE_T_UINT, .min = 1000000, .max = 80000000,
+        .type = NC_STATE_T_UINT, .min = 0, .max = 80000000,
         .max_len = 0, .n_enum = 0,
         .enum_names = NULL,
         .name = "NC_KEY_LED_CLK", .path = "driver.json:LED.timing.pclk_hz",
@@ -2242,7 +2242,7 @@ const nc_state_keydef_t nc_state_schema_keys[NC_STATE_KEY_COUNT] = {
     {
         .id = 0x000c0008u, .unit = NC_UNIT_LED,
         .cls = NC_STATE_CLS_VALUE,
-        .type = NC_STATE_T_UINT, .min = 1, .max = 64,
+        .type = NC_STATE_T_UINT, .min = 0, .max = 64,
         .max_len = 0, .n_enum = 0,
         .enum_names = NULL,
         .name = "NC_KEY_LED_BIT_CELLS", .path = "driver.json:LED.timing.bit_cells",

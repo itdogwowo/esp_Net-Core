@@ -752,7 +752,7 @@ B06 掃描 /data/pixel/effects + /data/tasks（.nce／.nct）
 ### 12.4 緩衝地圖（2026-11-27）
 
 [`docs/00_pm/buffer-map.svg`](../00_pm/buffer-map.svg)（`tools/buffer_diagram.py`）：實測
-靜態 143,559 B（94.8%）／動態 **7,895 B（5.2%）**／flash 字典 12,404 B；逐項標明來源
+靜態 143,559 B（94.8%）／動態 **7,895 B（5.2%）**／flash 字典 29,735 B（2026-11-27 更正：舊 12,404 漏字串）；逐項標明來源
 （編譯期／cfg／掃描）同彈性。
 
 **同一個 region 唔重複登記**（2026-11-27）：`nc_buf_find_region()` 會回傳既有 wrapper；

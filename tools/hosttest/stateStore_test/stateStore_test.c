@@ -8,6 +8,7 @@
 #include "nc_state_store.h"
 
 static nc_state_store_t s_stub;
+static nc_state_ent_t   s_stub_e[NC_STATE_STORE_MAX];
 
 const nc_state_store_t *nc_state_boot_store(void)
 {
@@ -34,6 +35,9 @@ static int g_fail;
 int main(void)
 {
     nc_state_store_t s;
+    static nc_state_ent_t s_e[NC_STATE_STORE_MAX];
+    (void)nc_state_store_bind(&s, s_e, NC_STATE_STORE_MAX);
+    (void)nc_state_store_bind(&s_stub, s_stub_e, NC_STATE_STORE_MAX);
 
     printf("[1] put／get：uint／sint／bool／enum\n");
     nc_state_store_clear(&s);

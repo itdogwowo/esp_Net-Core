@@ -1,11 +1,14 @@
-// NCSTATE RAM store：把 blob decode 出嚟的值放喺固定陣列（唔用 PSRAM、唔用 heap）。
+// NCSTATE RAM store：把 blob decode 出嚟的值放喺 **開機掃描後精確配置** 的 buffer。
 //
 // 用途（P3 第一步）：
 //   - 開機 hit 時，由 state.ncst 載入 → RAM store；
 //   - 同「由 JSON parse 出嚟的 cfg record」**對拍**：全中才當 hit（防止舊 cache 靜默生效）；
 //   - 對拍唔中 → 當 miss 重寫（self-heal），並喺 status 顯示。
 //
-// 全部固定大小：24 筆 × ~24 B ≈ 576 B（實際 boot mirror 18 筆），internal RAM。
+// 2026-11-28（用家要求：開機先掃描有幾多值，再動態申請，減少靜態 standby）：
+//   `nc_state_store_t` 只保留 pointer＋len＋cap；真正 entries 由 `nc_state_boot`
+//   在 B02 掃完 records（＋舊 blob 筆數）之後 `heap_caps_malloc(MALLOC_CAP_INTERNAL)` 一次。
+//   仍然守鐵律：開機一次配置、永不釋放、runtime 唔租。
 #pragma once
 
 #include <stdbool.h>
@@ -19,7 +22,8 @@
 extern "C" {
 #endif
 
-#define NC_STATE_STORE_MAX        96   // 2026-11-27：64→96（Matrix 典型 70 筆；64 會截斷）
+#define NC_STATE_STORE_MAX        96   // 動態 capacity 上限（亦係 dirty 表上限）；2026-11-27 96
+#define NC_STATE_DYN_RESERVE      8    // 熱插拔任務／效果孤兒值 headroom（未接前預留）
 
 // 12 B／筆（2026-11-27）：state 只存**數值**。
 //   - key 4 + type 1 + pad 3 + union 4
@@ -37,9 +41,14 @@ typedef struct {
 } nc_state_ent_t;
 
 typedef struct {
-    nc_state_ent_t e[NC_STATE_STORE_MAX];
-    uint16_t n;
+    nc_state_ent_t *e;     // 指向開機配置的內部 buffer（永遠有效；NULL = 未配置）
+    uint16_t n;            // 已用筆數
+    uint16_t cap;          // 配置容量（≤ NC_STATE_STORE_MAX）
 } nc_state_store_t;
+
+// 綁定外部 buffer（由 nc_state_boot 開機掃描後配置；之後唔會再換）。
+bool nc_state_store_bind(nc_state_store_t *s, nc_state_ent_t *buf, uint16_t cap);
+uint16_t nc_state_store_cap(const nc_state_store_t *s);
 
 void nc_state_store_clear(nc_state_store_t *s);
 

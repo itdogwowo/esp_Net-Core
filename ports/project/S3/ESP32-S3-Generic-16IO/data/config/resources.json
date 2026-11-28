@@ -1,0 +1,9 @@
+{
+  "_comment": [
+    "中央示範（S3 通用）：resources.json = 任務之間的提供／需求表。",
+    "name：資源名；type：buf／cmd／hw／provide／module；provider：提供者。",
+    "留空 = 全部用固件預設；模組自己宣告的 provides 會自動合併。"
+  ],
+  "version": 1,
+  "resources": []
+}

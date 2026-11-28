@@ -23,6 +23,32 @@
 
 ---
 
+## 1.5 全專案「儲存格式」一覽（唔好同狀態格式撈亂）
+
+「格式多」多數係**人寫嘅 config JSON 有 6 款結構**，唔係 machine state 有 6 款：
+
+| 類 | 檔案／格式 | 結構／形狀 | 邊個處理 | 權威／快取 |
+|---|---|---|---|---|
+| 人改 config | `system.json` | `nc4.links[]／routes[]`、sys 值 | `nc_cfg_apply_system()`；schema 76 key（4 value／72 struct） | **L1 真相（最高 FAT live）** |
+| 人改 config | `hardware.json` | `ETH／SDIO／PIN／PWM／UART／I80／SPI` 等段 | `nc_cfg_apply_hardware()`；schema 197 key（12 value／185 struct） | 同上 |
+| 人改 config | `driver.json` | `LED` 段＋其他 device 段 | `apply_devices()`；schema 10 key（全 value） | 同上；只有 LED 有 driver |
+| 人改 config | `tasks.json` | `tasks[]`（level／affinity） | `nc_cfg_apply_tasks()`；**唔入 schema**（動態 key） | 任務管理器直接讀 |
+| 人改 config | `resources.json` | `resources[]`（provide／need） | `nc_cfg_apply_resources()`；**唔入 schema** | 直接讀 |
+| 人改 config | `network.json` | `wifi.*`（＋未實作 lan） | `nc_wifi.c` 自己讀；schema 3 key（全 struct） | 直接讀 |
+| 人改 pixel 內容 | `effects／map／modes／registry.json` | 四層 pixel JSON（program／group+sel／mode／list） | `nc_px_*` 掃描／編譯；**唔入 config schema** | pixel 自己的 `NCLAYOUT` 快取 |
+| **狀態值（machine）** | `/data/config/state.ncst` | **NCSTATE**：header＋TLV record（varint） | `nc_state_*` | 派生快取；可由 JSON 重建 |
+| **layout 快取（machine）** | `/pixel/cache/<key>.layout` | **NCLAYOUT**：aprog／job／runs | `nc_px_layout_*` | 純快取；刪咗自動重建 |
+| 模組容器 | `.nct`／`.nce` | manifest v1＋binary | `nc_mod`／`ncm` 工具 | 外掛任務／效果 |
+| 固件／分區 | `.bin`／`partitions.csv`／NVS | OTA image／build-time 分區／舊 NVS 世代 | `ota.py`／`make.py`／`nc_state.c`（v1） | 燒錄／build |
+
+> 一句：**machine 狀態只有 2 個格式（NCSTATE＋NCLAYOUT）**；6 款 JSON 係人寫輸入，
+> 靠 schema registry（4 款）＋逐個 parser（tasks／resources／network）理解。
+> 各 JSON 的結構／欄位語義見 [`config-layers.md`](config-layers.md)、
+> [`driver-config.md`](../02_guides/driver-config.md)；值會佔幾多見
+> [`state-storage-budget.md`](state-storage-budget.md)。
+
+---
+
 ## 2. `NCSTATE` 佈局（內部自描述）
 
 ### Header（26 B，固定）

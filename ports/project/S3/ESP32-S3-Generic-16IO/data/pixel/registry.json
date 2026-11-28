@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "auto_play": true,
+  "list": [
+    "led16grid4",
+    "led16test",
+    "led16grid16",
+    "led16sync"
+  ]
+}

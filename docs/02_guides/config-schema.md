@@ -4,7 +4,10 @@
 > **用咩驗**。設計理由見 [config-layers.md](../03_notes/config-layers.md)；
 > schema registry 契約見 [state-schema.md §8](../03_notes/state-schema.md)。
 >
-> 圖：[設定流轉與權威層](../00_pm/config-layers.svg)｜
+> **driver 微調**：[`driver-config.md`](driver-config.md)（LED 10 個 key、實際 parser 範圍、範例、陷阱）
+> ｜**中央基準實際值**：[`ports/presets/STATUS.md`](../../ports/presets/STATUS.md)（生成）
+> ｜**值會佔幾多**：[`state-storage-budget.md`](../03_notes/state-storage-budget.md)（生成；26 個 value key = 174–209 B blob）
+> ｜圖：[設定流轉與權威層](../00_pm/config-layers.svg)｜
 > [schema registry：可以設定什麼](../00_pm/schema-registry.svg)（兩張都由
 > `python3 tools/config_diagram.py` 生成）
 
@@ -265,8 +268,8 @@ state.ncst（稀疏快取，可重建）← nc_state_boot_sync() ← 派生自�
 | led | `NC_KEY_LED_LANES` | u8 | value | 1..16 | `driver.json:LED.lanes` | reboot |
 | led | `NC_KEY_LED_PX` | u16 | value | 1..65535 | `driver.json:LED.px` | reboot |
 | led | `NC_KEY_LED_FMT` | enum | value | enum：ws2812／ws2812w／ws2815／ws2801／apa102 | `driver.json:LED.format` | reboot |
-| led | `NC_KEY_LED_CLK` | u32 | value | 1000000..80000000 | `driver.json:LED.timing.pclk_hz` | reboot |
-| led | `NC_KEY_LED_BIT_CELLS` | u8 | value | 1..64 | `driver.json:LED.timing.bit_cells` | reboot |
+| led | `NC_KEY_LED_CLK` | u32 | value | 0..80000000 | `driver.json:LED.timing.pclk_hz` | reboot |
+| led | `NC_KEY_LED_BIT_CELLS` | u8 | value | 0..64 | `driver.json:LED.timing.bit_cells` | reboot |
 | led | `NC_KEY_LED_T0H` | u8 | value | 0..64 | `driver.json:LED.timing.t0h` | reboot |
 | led | `NC_KEY_LED_T1H` | u8 | value | 0..64 | `driver.json:LED.timing.t1h` | reboot |
 | parlio | `NC_KEY_PARLIO0_ENABLE` | bool | struct | 0..1 | `hardware.json:PARLIO.list[0].enable` | reboot |
@@ -346,25 +349,23 @@ python3 tools/gen_state_keys.py --doc
 
 ---
 
-## 2. 未入 schema 但可設定（仍然係 cfg struct）
+## 2. 三種「有冇入 schema」的狀態（2026-11-27）
 
-以下欄位由 `nc_cfg_load.c` 解析、B02 生效；改完 **reboot** 生效，但**未**納入
-schema registry（所以 `nc_state_set_*` 暫時改唔到，`status cfg.schema` 亦唔會顯示）。
-
-| 檔案 | 欄位（代表） | 效果 | 備註 |
+| 狀態 | 意思 | 邊啲欄位 | `nc_state_set_*`？ |
 |---|---|---|---|
-| `system.json` | `nc4.links[]`（kind／enable／port／rx） | 開邊條通道、buffer 幾大 | `enable=0` → 唔宣告緩衝、唔建 bus |
-| `system.json` | `nc4.routes[]`（in → decodeN） | 邊一核解碼／轉發 | 單核板自動收斂 decode1→decode0 |
-| `system.json` | `frame_interval_ms`、`num_pixels` | 節拍（FPS）、像素數 | 已入 schema（見上表） |
-| `system.json` | `usb.msc`、`usb.cdc_log`、`log_debug_mode` | USB 交碟／log 管道／除錯等級 | `log_debug_mode` 已入 schema |
-| `tasks.json` | `tasks[].level`／`affinity` | 任務開唔開、跑邊核 | `-1`＝唔開；`[0,0]`＝唔開 loop |
-| `resources.json` | `resources[]`（buf／cmd／hw） | 任務之間誰提供／需要 | 模組 `provides` 會合併 |
-| `network.json` | `wifi.enable`／`ssid`／`ssid_pw` | WiFi 開關與連線 | build 冇編 `CONFIG_NETCORE_WIFI` 就只會 warn |
-| `hardware.json` | `ETH`／`SDIO`／`PIN`／`PWM`／`UART`／`I80`／`SPI` | 腳位與週邊 | `I2C`／`I2S`／`ENC`／`XL9555` 未 typed（改咗唔生效） |
-| `driver.json` | `LED`（enable／backend／lanes／px／format／timing） | 燈鏈幾何與時序 | 已入 schema（10 個 key）；其他 device 未實作 |
+| **入 schema・`value`** | 開機由 cfg 造 record 入 store；可回寫；`apply_to_cfg()` 後消費者讀 cfg | `system.json` 4（cID／frame_interval_ms／num_pixels／log_debug_mode）、`hardware.json` 12（I80 5＋SPI 7）、`driver.json` 10（LED）＝**26 個** | ✅（只改 RAM；永久改仍要改 JSON） |
+| **入 schema・`struct`** | 只登記 path／型別／範圍；由 cfg 直接消費，**唔入 store**（唔佔 RAM） | `system.json` 72（links 64＋routes 8）、`network.json` 3（wifi）、`hardware.json` 185（RMT／PCNT／ADC／TWAI／MCPWM／PARLIO／LCD／touch／cam…未有 driver 消費） | ⚠ 唔喺 store；現時 set 意義有限 |
+| **未入 schema** | `nc_cfg_load.c` 有 parse，但 registry 冇呢個 key | `tasks.json`（level／affinity／prio，**刻意移除**：任務熱插拔，改走動態 key `0xF0` 域＋name hash）、`resources.json`（provide／need）、`hardware.json` 未 typed 段（I2C／I2S／ENC／XL9555）、`driver.json` 其他 device（TFT／PCA9685／SDcard…） | ❌ 改 JSON＋reboot |
 
-> **判斷法則**：`schema/state-keys.json` 搵到 → 屬 registry 管；
-> 搵唔到但 `nc_cfg_load.c` 有 parse → 屬 cfg struct；兩者都冇 → 改咗唔會生效。
+- **判斷法則**：`schema/state-keys.json` 搵到 → 有「名分」；再睇 `class`：
+  `value` 會入 store／blob，`struct` 只登記。
+- **tasks／effects 例外**：會熱插拔（`.nct`／`.nce`），字典靜態化一定失效；
+  用 `key = 0xF0<<24 | FNV-1a(name)`，由管理器提供身份（見
+  [`state-dynamic-keys.md`](../03_notes/state-dynamic-keys.md)）。
+- **pixel 內容**（effects／map／mode／registry）唔入 config／schema，係自己的
+  `NCLAYOUT` 快取；driver 只決定「燈幾何」，pixel JSON 決定「播咩」。
+- 逐 key 的實際範圍／enum 以 §1 生成表為準；**driver 的 parser 實際範圍另見
+  [`driver-config.md`](driver-config.md) §4**（schema 同 parser 未完全對齊）。
 
 ---
 
@@ -374,7 +375,7 @@ schema registry（所以 `nc_state_set_*` 暫時改唔到，`status cfg.schema` 
 |---|---|---|---|
 | **FAT live**（最高權威） | 用 USB MSC／WebMaster／`nc4_file.py` 改裝置 `/data/config/*.json` | **reboot** | 現場調參、唔想重燒 |
 | **build 預置** | 改 `ports/project/<chip>/<board>/data/config/*.json` 或 `sdkconfig.defaults` | **rebuild（`--fresh`）→ OTA**；裝置已有舊檔時要 `fs_format` 才會重新 seed | 出廠預設、換 project |
-| **runtime API**（RAM） | `nc_state_set_u32/i32/bool/str()`（driver／工具／測試） | **即時**（只改 RAM＋`dirty`）；reboot 由 JSON 重算 | 臨時調參、測試；永久改仍然要改 JSON |
+| **runtime API**（RAM） | `nc_state_set_u32/i32/bool()`（只存數值；`set_str` 已退場）；熱路徑用 `nc_state_bind_*()` 拿定位址 | **即時**（只改 RAM＋`dirty`）；`STATUS_SET {"state":…}` 排隊，reboot 前由 main 落盤；reboot 由 JSON 重算 | 臨時調參、測試；永久改仍然要改 JSON |
 
 - **build 預置只會在裝置缺檔時 seed**；檔案存在就唔會被覆蓋（`fs_format=1` 才會清 `/data` 重 seed）。
 - **改 `sdkconfig.defaults` 一定要 `--fresh`**，否則 build dir 會沿用舊 `sdkconfig`
@@ -387,9 +388,10 @@ schema registry（所以 `nc_state_set_*` 暫時改唔到，`status cfg.schema` 
 ```bash
 # 1) config 有冇 parse 問題、state 有冇 hit、schema drift
 python3 tools/nc4.py --port <PORT> status cfg
-#    state : {"hit":1,"cmp_ok":1,"rebuilt":0,"n":18,"bytes":124,...}
-#    act   : {"src":...,"en":4,"units":"usb,i2c,i80,led","fat":...,"match":1}
-#    schema: {"ver":2,"crc":...,"keys":25,"units":4,"bad":0,"dirty":0}
+#    state : {"hit":1,"cmp_ok":1,"rebuilt":0,"n":4,"bytes":50,"store":4,"apply":4,"inactive":22}
+#    act   : {"src":...,"en":4,"units":"usb,i80,led","fat":...,"match":1}
+#    schema: {"ver":2,"crc":...,"keys":286,"units":16,"bad":0,"dirty":0}
+#    （數字示例＝SuperMini／HEAD；舊 firmware 0.1.2 冇 state／schema 欄位，先重建 OTA）
 
 # 2) 任務開咗未（四層四任務要 level=4 started=1 running=1）
 python3 tools/nc4.py --port <PORT> status tasks
@@ -417,4 +419,5 @@ python3 tools/nc4.py --port <PORT> reboot
 | 圖 | 檔案 | 睇咩 |
 |---|---|---|
 | 設定流轉／權威層 | [config-layers.svg](../00_pm/config-layers.svg) | 三來源 → B02 → cfg → 消費者；state 快取角色；三種改法 |
-| schema registry | [schema-registry.svg](../00_pm/schema-registry.svg) | 一個 JSON → 三份生成檔 → 查表／API；四個 unit 的 key 與範圍 |
+| schema registry | [schema-registry.svg](../00_pm/schema-registry.svg) | 一個 JSON → 三份生成檔 → 查表／API；16 個 unit 的 key 與範圍 |
+| 動畫解釋（19 步） | [config-state-flow.html](../00_pm/config-state-flow.html) | config→state→pixel JSON→緩衝；含「6 個 config 檔邊個有遮罩」 |

@@ -1,0 +1,2 @@
+# 功能測試 project：板子事實（flash/PSRAM/16 lane/幾何）在 hardware 層。
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192

@@ -93,7 +93,7 @@ Record（自描述，逐筆）：
 | **codec** | `sys/state/nc_state_blob.c/h` | 統一格式 encode／decode；CRC／magic／ver／截斷檢查；未知 type 跳過；`nc_state_blob_rec_crc()`＝值集 CRC（cache 失效判斷） |
 | **檔案層** | `sys/state/nc_state_file.c/h` | FAT 讀寫；atomic（`.tmp`→舊檔 `.bak`→rename）；hash helpers |
 | **開機同步** | `sys/state/nc_state_boot.c/h` | 由 cfg 造 records → 對拍 → hit／重建；結果俾 status |
-| **RAM store** | `sys/state/nc_state_store.c/h` | 固定陣列（**96 筆 × 12 B**）＋對拍 cmp；`s_store` 實測 1,156 B；開機暫存 `s_recs` 768 B 已搬 PSRAM（只剩 4 B pointer） |
+| **RAM store** | `sys/state/nc_state_store.c/h` | **2026-11-28 起開機掃描後動態配置**（pointer＋cap，靜態 8 B；cap=筆數＋8，上限 96）；對拍 cmp；`s_recs` 768 B 已搬 PSRAM（只剩 4 B pointer） |
 | **讀寫 API** | `sys/state/nc_state_api.c/h` | `get_u32/i32/bool`＋`set_*`（set 只改 RAM＋dirty）；`bind_u32/i32()` 回傳 stable 位址給熱路徑。**只存數值**——字串不入 state（名字在 schema 字典） |
 | **schema registry** | `sys/state/nc_state_schema.c/h`＋`nc_state_schema_data.[ch]` | 查表（id↔name↔unit）、驗型別／範圍／enum、boot drift 檢查 |
 | **key schema** | `schema/state-keys.json`＋`tools/gen_state_keys.py` | **唯一 source of truth**：id／unit／型別／範圍／enum → 生成三份 C 檔＋同步檢查 |
@@ -182,6 +182,9 @@ python3 tools/nc4file.py …（或 WebMaster → IDE 刪 /config/state.ncst）�
 # 開機見 NCSTATE miss → 重建；舊檔會變 .bak
 
 # 想回復上次狀態：把 state.ncst.bak 改名覆蓋 state.ncst → reboot（hash 對就 hit）
+
+# 逐 key 對比「JSON 值 vs state 存的值」＋列出未入 blob 的 key
+python3 tools/state_dump.py --port /dev/cu.PORT   # 會下載 state.ncst＋/config/*.json
 ```
 
 - IDE（`http://127.0.0.1:8011/#ide`）可以見到 `/config/state.ncst` 同 `.bak`。

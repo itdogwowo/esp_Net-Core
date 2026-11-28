@@ -1,0 +1,332 @@
+{
+  "version": 1,
+  "id": 2,
+  "name": "led16grid4",
+  "index": 2,
+  "play_loop": -1,
+  "maxF": 0,
+  "mapping": "led16grid4",
+  "white": 0,
+  "map": [
+    {
+      "group": "led16grid4.c00_00",
+      "effect": "cell64_math",
+      "write": "r"
+    },
+    {
+      "group": "led16grid4.c00_01",
+      "effect": "cell64_square",
+      "write": "g"
+    },
+    {
+      "group": "led16grid4.c00_02",
+      "effect": "cell64_pulse",
+      "write": "b"
+    },
+    {
+      "group": "led16grid4.c00_03",
+      "effect": "cell64_keep",
+      "write": "rgb"
+    },
+    {
+      "group": "led16grid4.c01_00",
+      "effect": "cell64_square",
+      "write": "r"
+    },
+    {
+      "group": "led16grid4.c01_01",
+      "effect": "cell64_pulse",
+      "write": "g"
+    },
+    {
+      "group": "led16grid4.c01_02",
+      "effect": "cell64_keep",
+      "write": "b"
+    },
+    {
+      "group": "led16grid4.c01_03",
+      "effect": "cell64_math",
+      "write": "rgb"
+    },
+    {
+      "group": "led16grid4.c02_00",
+      "effect": "cell64_pulse",
+      "write": "r"
+    },
+    {
+      "group": "led16grid4.c02_01",
+      "effect": "cell64_keep",
+      "write": "g"
+    },
+    {
+      "group": "led16grid4.c02_02",
+      "effect": "cell64_math",
+      "write": "b"
+    },
+    {
+      "group": "led16grid4.c02_03",
+      "effect": "cell64_square",
+      "write": "rgb"
+    },
+    {
+      "group": "led16grid4.c03_00",
+      "effect": "cell64_keep",
+      "write": "r"
+    },
+    {
+      "group": "led16grid4.c03_01",
+      "effect": "cell64_math",
+      "write": "g"
+    },
+    {
+      "group": "led16grid4.c03_02",
+      "effect": "cell64_square",
+      "write": "b"
+    },
+    {
+      "group": "led16grid4.c03_03",
+      "effect": "cell64_pulse",
+      "write": "rgb"
+    },
+    {
+      "group": "led16grid4.c04_00",
+      "effect": "cell64_math",
+      "write": "r"
+    },
+    {
+      "group": "led16grid4.c04_01",
+      "effect": "cell64_square",
+      "write": "g"
+    },
+    {
+      "group": "led16grid4.c04_02",
+      "effect": "cell64_pulse",
+      "write": "b"
+    },
+    {
+      "group": "led16grid4.c04_03",
+      "effect": "cell64_keep",
+      "write": "rgb"
+    },
+    {
+      "group": "led16grid4.c05_00",
+      "effect": "cell64_square",
+      "write": "r"
+    },
+    {
+      "group": "led16grid4.c05_01",
+      "effect": "cell64_pulse",
+      "write": "g"
+    },
+    {
+      "group": "led16grid4.c05_02",
+      "effect": "cell64_keep",
+      "write": "b"
+    },
+    {
+      "group": "led16grid4.c05_03",
+      "effect": "cell64_math",
+      "write": "rgb"
+    },
+    {
+      "group": "led16grid4.c06_00",
+      "effect": "cell64_pulse",
+      "write": "r"
+    },
+    {
+      "group": "led16grid4.c06_01",
+      "effect": "cell64_keep",
+      "write": "g"
+    },
+    {
+      "group": "led16grid4.c06_02",
+      "effect": "cell64_math",
+      "write": "b"
+    },
+    {
+      "group": "led16grid4.c06_03",
+      "effect": "cell64_square",
+      "write": "rgb"
+    },
+    {
+      "group": "led16grid4.c07_00",
+      "effect": "cell64_keep",
+      "write": "r"
+    },
+    {
+      "group": "led16grid4.c07_01",
+      "effect": "cell64_math",
+      "write": "g"
+    },
+    {
+      "group": "led16grid4.c07_02",
+      "effect": "cell64_square",
+      "write": "b"
+    },
+    {
+      "group": "led16grid4.c07_03",
+      "effect": "cell64_pulse",
+      "write": "rgb"
+    },
+    {
+      "group": "led16grid4.c08_00",
+      "effect": "cell64_math",
+      "write": "r"
+    },
+    {
+      "group": "led16grid4.c08_01",
+      "effect": "cell64_square",
+      "write": "g"
+    },
+    {
+      "group": "led16grid4.c08_02",
+      "effect": "cell64_pulse",
+      "write": "b"
+    },
+    {
+      "group": "led16grid4.c08_03",
+      "effect": "cell64_keep",
+      "write": "rgb"
+    },
+    {
+      "group": "led16grid4.c09_00",
+      "effect": "cell64_square",
+      "write": "r"
+    },
+    {
+      "group": "led16grid4.c09_01",
+      "effect": "cell64_pulse",
+      "write": "g"
+    },
+    {
+      "group": "led16grid4.c09_02",
+      "effect": "cell64_keep",
+      "write": "b"
+    },
+    {
+      "group": "led16grid4.c09_03",
+      "effect": "cell64_math",
+      "write": "rgb"
+    },
+    {
+      "group": "led16grid4.c10_00",
+      "effect": "cell64_pulse",
+      "write": "r"
+    },
+    {
+      "group": "led16grid4.c10_01",
+      "effect": "cell64_keep",
+      "write": "g"
+    },
+    {
+      "group": "led16grid4.c10_02",
+      "effect": "cell64_math",
+      "write": "b"
+    },
+    {
+      "group": "led16grid4.c10_03",
+      "effect": "cell64_square",
+      "write": "rgb"
+    },
+    {
+      "group": "led16grid4.c11_00",
+      "effect": "cell64_keep",
+      "write": "r"
+    },
+    {
+      "group": "led16grid4.c11_01",
+      "effect": "cell64_math",
+      "write": "g"
+    },
+    {
+      "group": "led16grid4.c11_02",
+      "effect": "cell64_square",
+      "write": "b"
+    },
+    {
+      "group": "led16grid4.c11_03",
+      "effect": "cell64_pulse",
+      "write": "rgb"
+    },
+    {
+      "group": "led16grid4.c12_00",
+      "effect": "cell64_math",
+      "write": "r"
+    },
+    {
+      "group": "led16grid4.c12_01",
+      "effect": "cell64_square",
+      "write": "g"
+    },
+    {
+      "group": "led16grid4.c12_02",
+      "effect": "cell64_pulse",
+      "write": "b"
+    },
+    {
+      "group": "led16grid4.c12_03",
+      "effect": "cell64_keep",
+      "write": "rgb"
+    },
+    {
+      "group": "led16grid4.c13_00",
+      "effect": "cell64_square",
+      "write": "r"
+    },
+    {
+      "group": "led16grid4.c13_01",
+      "effect": "cell64_pulse",
+      "write": "g"
+    },
+    {
+      "group": "led16grid4.c13_02",
+      "effect": "cell64_keep",
+      "write": "b"
+    },
+    {
+      "group": "led16grid4.c13_03",
+      "effect": "cell64_math",
+      "write": "rgb"
+    },
+    {
+      "group": "led16grid4.c14_00",
+      "effect": "cell64_pulse",
+      "write": "r"
+    },
+    {
+      "group": "led16grid4.c14_01",
+      "effect": "cell64_keep",
+      "write": "g"
+    },
+    {
+      "group": "led16grid4.c14_02",
+      "effect": "cell64_math",
+      "write": "b"
+    },
+    {
+      "group": "led16grid4.c14_03",
+      "effect": "cell64_square",
+      "write": "rgb"
+    },
+    {
+      "group": "led16grid4.c15_00",
+      "effect": "cell64_keep",
+      "write": "r"
+    },
+    {
+      "group": "led16grid4.c15_01",
+      "effect": "cell64_math",
+      "write": "g"
+    },
+    {
+      "group": "led16grid4.c15_02",
+      "effect": "cell64_square",
+      "write": "b"
+    },
+    {
+      "group": "led16grid4.c15_03",
+      "effect": "cell64_pulse",
+      "write": "rgb"
+    }
+  ]
+}

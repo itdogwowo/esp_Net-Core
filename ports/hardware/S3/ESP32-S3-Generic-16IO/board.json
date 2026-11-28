@@ -1,0 +1,28 @@
+{
+  "_comment": "硬體事實（功能測試板：16 IO × 16×16）。",
+  "name": "ESP32-S3-Generic-16IO",
+  "chip": "esp32s3",
+  "flash": {
+    "size_mb": 4,
+    "freq_mhz": 80,
+    "mode": "dio"
+  },
+  "psram": {
+    "size_mb": 2,
+    "mode": "quad",
+    "speed_mhz": 80
+  },
+  "cpu_mhz": 240,
+  "console": "none",
+  "profiles": [],
+  "features": {
+    "eth": null,
+    "wifi": true,
+    "usb": true
+  },
+  "verified": null,
+  "notes": "功能測試：16 條獨立 WS2812 lane，每條 16×16（256 px）、內容可以不同；唔綁實體板。",
+  "aliases": [
+    "S3-16IO"
+  ]
+}

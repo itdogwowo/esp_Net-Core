@@ -1,0 +1,28 @@
+{
+  "_comment": "硬體事實（F.spec）。改這裡 = 要重新 build；runtime 可改的放 project 層的 data/config。",
+  "name": "ESP32-S3-Generic-PSRAM",
+  "chip": "esp32s3",
+  "flash": {
+    "size_mb": 4,
+    "freq_mhz": 80,
+    "mode": "dio"
+  },
+  "psram": {
+    "size_mb": 2048,
+    "mode": "quad",
+    "speed_mhz": 80
+  },
+  "cpu_mhz": 240,
+  "console": "none",
+  "profiles": [],
+  "features": {
+    "eth": null,
+    "wifi": true,
+    "usb": true
+  },
+  "verified": null,
+  "notes": "中央示範 pair（有 PSRAM）：S3 通用板，2 lane × 256 px WS2812，I80 直驅，資料腳 GPIO14/15。呢個 board+project 係「監察最新情況」的基準，唔綁任何實體板；改 wiring 要 rebuild。",
+  "aliases": [
+    "S3-Generic-psram"
+  ]
+}

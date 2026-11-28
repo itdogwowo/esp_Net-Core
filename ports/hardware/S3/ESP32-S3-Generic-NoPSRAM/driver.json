@@ -1,0 +1,32 @@
+{
+  "_comment": [
+    "中央示範（S3 通用，冇 PSRAM）：driver.json = 應用硬件（device）層。",
+    "**腳位只在 hardware.json**；這裡用 bus:{type,index} 引用，唔准寫腳位。",
+    "令 LED 真正生效的欄位：enable／backend／bus／lanes／px／format／timing。",
+    "其餘 device（TFT／PCA9685／SDcard…）firmware 未實作；寫 enable=1 會開機大聲 warn。"
+  ],
+  "version": 1,
+  "LED_WS2812": {
+    "enable": 1,
+    "list": [
+      {
+        "bus": {
+          "type": "i80",
+          "index": 0
+        },
+        "px": 64,
+        "order": "GRB",
+        "d_stay": 0
+      }
+    ]
+  },
+  "TFT": {
+    "enable": 0
+  },
+  "PCA9685": {
+    "enable": 0
+  },
+  "SDcard": {
+    "enable": 0
+  }
+}

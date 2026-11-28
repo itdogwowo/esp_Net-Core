@@ -16,6 +16,7 @@
 
 // ── boot 的 store stub（呢支測試唔拉 config／FAT） ──────────────
 static nc_state_store_t s_stub;
+static nc_state_ent_t   s_stub_e[NC_STATE_STORE_MAX];
 static bool s_ready;
 
 const nc_state_store_t *nc_state_boot_store(void)
@@ -42,6 +43,8 @@ static int g_fail;
 
 int main(void)
 {
+    (void)nc_state_store_bind(&s_stub, s_stub_e, NC_STATE_STORE_MAX);
+
     printf("[1] 查表：id／name／unit 一致、每個 key 有 path\n");
     CHECK(nc_state_key_count() == NC_STATE_KEY_COUNT, "count=%u", nc_state_key_count());
     CHECK(nc_state_unit_count() == NC_STATE_UNIT_COUNT, "units=%u", nc_state_unit_count());

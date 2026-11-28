@@ -17,6 +17,21 @@ if ! python3 "$ROOT/tools/preset_check.py" --quiet; then
     echo "—— ports/presets 檢查失敗"
     exit 1
 fi
+# STATUS.md 係生成物：preset／schema 改過就要 --write-status，否則呢個閘門會失敗
+if ! python3 "$ROOT/tools/preset_check.py" --check-status --quiet; then
+    echo "—— ports/presets/STATUS.md 過期（跑 python3 tools/preset_check.py --write-status）"
+    exit 1
+fi
+# 狀態儲存預算文件：schema／value key 改過就要 --write
+if ! python3 "$ROOT/tools/state_budget.py" --check >/dev/null; then
+    echo "—— docs/03_notes/state-storage-budget.md 過期（跑 python3 tools/state_budget.py --write）"
+    exit 1
+fi
+# 中央示範 preset ↔ 硬件＋project pair：防止 project 只更新一部分
+if ! python3 "$ROOT/tools/sync_preset_pairs.py" --check >/dev/null 2>&1; then
+    echo "—— preset pair drift（跑 python3 tools/sync_preset_pairs.py --check 睇詳情）"
+    exit 1
+fi
 TESTS="cfg_test cfgstruct_test ncd_test task_test router_test link_test mod_test hub_test plan_test buf_test portgen_test ncm_test pixel_test pxEngine_test pxAsset_test pxProgram_test pxLayer_test pxShow_test pxScan_test pxLayout_test stateBlob_test stateFile_test stateSchema_test stateStore_test fpsclock_test"
 fail=0
 for t in $TESTS; do

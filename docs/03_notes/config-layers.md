@@ -38,7 +38,7 @@ build 時優先嵌入它。改 `wiring.json` 後要跑一次 sync，否則 snaps
 > ＋ `index`；config **不寫 `iface`／`service`**；`name` 由 `kind + index` 生成，可 `name` 覆寫。
 > 舊 `kind:"tcp", iface:"eth"` 與 `cfg:{port,rx}` 仍然接受；新 seed 已全部正規化。
 > `main.c` 另有第 ① 層最小骨架（`k_min_system`／`k_min_network`／`k_min_tasks`），
-> 所以 `config/` 四個檔一定存在。
+> 所以 `config/` 六個檔一定存在（hardware／driver 由 ncportgen 保證；system／network／tasks／resources 缺 project 檔時用骨架）。
 
 > **參考**：mp_Net-Core 的 `config.json`（一個檔 24 個 section：System / Buffer / SPI / I2C / UART / TFT / WS2812 …）
 > **相關**：[decode-routes.md](decode-routes.md)、[writing-a-task.md](writing-a-task.md)、[component-layout.md](component-layout.md)
@@ -106,9 +106,10 @@ CDC／MSC／log 三樣都冇人要 → 連 TinyUSB 都唔裝。以前缺名會�
 把一條線從 `links[]` 刪掉記憶體照樣佔住 —— 2026-11-13 已改（`main.c` 的 `link_enabled()`）。
 
 > ✅ **2026-11-16 已補第 ① 層**：`main.c` 有 `k_min_system`／`k_min_network`／`k_min_tasks`
-> 三個最小骨架字串；`seed_presets()` 在「冇板級預置」時用它們，所以 `config/` 下四個檔
-> 一定會存在。`hardware` 由 `ncportgen` 的 `preset_hardware.json` 保證；`driver.json`
-> 仍然是 build-time 資料，runtime 未讀。
+> 四個最小骨架字串（system／network／tasks／resources）；`seed_presets()` 在「冇板級預置」時
+> 用它們，所以 `config/` 下六個檔（＋hardware／driver）一定會存在。`hardware` 由 `ncportgen` 的 `preset_hardware.json` 保證；
+> `driver.json` 由 `ncportgen` 生成並 seed；**runtime 會讀 FAT 的 `/data/config/driver.json`**（B02 `apply_devices()`，
+> 最高權威；目前只有 `LED` 段有 driver）。詳見 [driver-config.md](../02_guides/driver-config.md)。
 
 ---
 
@@ -223,7 +224,7 @@ ports/
     partitions.csv           ← 這塊 flash 的分割表（可選）
   project/<chip>/<board>/
     project.json             ← 項目選擇（hardware 指回哪塊板 / seed）
-    data/config/             ← 只放給用戶的 seed（hardware/system/network/tasks）
+    data/config/             ← 用戶 seed（hardware/system/driver/network/tasks/resources；driver／resources 可缺，開機會用生成／骨架補）
     sdkconfig.defaults       ← （選用）**只限外接裝置／能力開關**（例：pixel 燈具、
                                CONFIG_NETCORE_WIFI）；硬體事實由 board.py check 擋
 
@@ -242,7 +243,7 @@ ports/
 |---|---|---|---|
 | `wiring.json`（build-time） | 硬體層 | **build 時**（`ncportgen` → `nc_port.c`） | 用 `k_hw` 內建預設 |
 | `hardware.json`（user） | 硬體層 | **硬體 init 之前**（覆蓋 generated 預設） | 用 generated 預設 |
-| `driver.json`（build-time） | driver 層 | **build 時**（`ncportgen` → `nc_port.c` 的 `nc_led_cfg_t`） | 冇 LED 段 → render 用 Kconfig |
+| `driver.json` | driver 層 | **build 時**嵌入；**runtime B02 讀 FAT**（`apply_devices()`，最高權威；只有 LED 段生效） | 缺檔／壞檔 → 回 build-time 預設；冇 LED 段 → render 用 Kconfig |
 | `system.json` | 系統層（main） | **硬體起來之後**（分配要看實際硬體） | 只啟動硬體實際支援的通道 |
 | `network.json` | 網路層 | ETH/WiFi 起來前 | 用內建 IP 或 DHCP |
 | `tasks.json` | 任務管理器 | 任務登記前 | level／affinity；`prio`（1–6，可選）覆寫 loop 宣告值；`level=-1`=停用 |
@@ -288,7 +289,7 @@ nc_cfg_close(cfg);
 ```text
 ① NVS init
 ② hardware.json → 硬體 init（GPIO/SPI/I80/UART/ETH PHY；缺檔用 generated `nc_port.c`）
-③ driver.json   → **build 時**已編成 struct（只有 `LED` 段）；開機唔讀 JSON。
+③ driver.json   → **build 時**編成 `nc_led_cfg_t`（只有 `LED` 段）；**runtime B02 讀 FAT 版**（最高權威），其餘 device 只 warn 未實作。
                   LED 的腳位在 ② 的 `nc_hardware_cfg_t.i80[]`／`spi[]`，由 render 任務取用。
 ④ 硬體起來了，讀分配：
      system.json  → nc4.links[] / routes[]（引擎由 routes 推導，不寫 engines[]）

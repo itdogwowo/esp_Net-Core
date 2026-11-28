@@ -5,6 +5,9 @@
     tools/nc4_file.py --port /dev/cu.usbmodem* query /config.json
     tools/nc4_file.py --port /dev/cu.usbmodem* claim           # STATUS_SET file_mode=1
     tools/nc4_file.py --port /dev/cu.usbmodem* release         # STATUS_SET file_mode=0
+    tools/nc4_file.py --port /dev/cu.usbmodem* put <local> <remote>   # 上傳檔案（FILE 0x2001–0x2003）
+    tools/nc4_file.py --port /dev/cu.usbmodem* get <remote> <local>   # 下載檔案（FILE_READ 0x2007）
+    tools/nc4_file.py --port /dev/cu.usbmodem* delete <remote>        # 刪檔（0x2009）
     tools/nc4_file.py --port /dev/cu.usbmodem* set '{"System":{"fs_format":1}}' 1
         # STATUS_SET：寫 NVS 旗標；之後送 REBOOT，下次開機才會抹 data 分區＋重建 FAT
 
@@ -18,7 +21,10 @@ from __future__ import annotations
 
 import argparse
 import binascii
+import hashlib
 import json
+import os
+import random
 import struct
 import sys
 import time
@@ -27,15 +33,181 @@ import os
 
 # 協議實作只有一份：tools/nc4_demux.py（嚴格 CRC、失敗只前進 1 byte）
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from nc4_demux import parse_frames, pack  # noqa: E402
+from nc4_demux import Reader, parse_frames, pack  # noqa: E402
 
 STATUS_GET = 0x1101
 STATUS_RSP = 0x1102
 STATUS_SET = 0x1103
 STATUS_ACK = 0x1104
+FILE_BEGIN = 0x2001
+FILE_CHUNK = 0x2002
+FILE_END = 0x2003
+FILE_ACK = 0x2004
+FILE_READ = 0x2007
+FILE_CHUNK_RSP = FILE_CHUNK   # READ 的回覆都係 0x2002
 FILE_QUERY = 0x2005
 FILE_QUERY_RSP = 0x2006
+FILE_CONFIRM = 0x2008
+FILE_DELETE = 0x2009
+FILE_UNDO = 0x200A
 FILE_ERROR_RSP = 0x2010
+
+FILE_ERR_NAMES = ["err_no_space", "err_write_fail", "err_offset_mismatch", "err_id_mismatch",
+                  "err_sha_mismatch", "err_not_active", "err_busy"]
+
+
+def _enc_str(s: str) -> bytes:
+    b = s.encode()
+    return struct.pack("<H", len(b)) + b
+
+
+def _dec_str(p: bytes, off: int = 0) -> str:
+    if len(p) < off + 2:
+        return ""
+    n = struct.unpack_from("<H", p, off)[0]
+    return p[off + 2:off + 2 + n].decode("utf-8", "replace")
+
+
+def _err_name(p: bytes) -> str:
+    names = [n for i, n in enumerate(FILE_ERR_NAMES) if i < len(p) and p[i]]
+    failed = struct.unpack_from("<I", p, 7)[0] if len(p) >= 11 else 0
+    written = struct.unpack_from("<I", p, 11)[0] if len(p) >= 15 else 0
+    path = _dec_str(p, 15) if len(p) >= 17 else ""
+    return f"{'/'.join(names) or 'err'}" + (f" failed={failed}" if failed else "") + \
+           (f" written={written}" if written else "") + (f" path={path}" if path else "")
+
+
+def _wait(r: Reader, cmds: set[int], timeout: float):
+    f = r.wait_for(cmds, timeout)
+    if f is None:
+        return None
+    return f
+
+
+def cmd_get(port: str, baud: int, remote: str, local: str, chunk: int = 4096) -> int:
+    """FILE_READ（0x2007）：分塊下載直到 short read；回覆 0x2002（off u32 + data）。"""
+    import serial
+    data = bytearray()
+    with serial.Serial(port, baud, timeout=0.2) as ser:
+        time.sleep(0.6)
+        ser.reset_input_buffer()
+        r = Reader(ser)
+        off = 0
+        while True:
+            payload = _enc_str(remote) + struct.pack("<IH", off, chunk)
+            ser.write(pack(FILE_READ, payload))
+            f = _wait(r, {FILE_CHUNK_RSP, FILE_ERROR_RSP}, 8.0)
+            if f is None:
+                print(f"FILE_READ @{off} 冇回覆", file=sys.stderr)
+                return 1
+            if f[0] == FILE_ERROR_RSP:
+                print(f"FILE_READ 失敗：{_err_name(f[1])}", file=sys.stderr)
+                return 1
+            if len(f[1]) < 6:
+                print("FILE_READ 回覆太短", file=sys.stderr)
+                return 1
+            roff = struct.unpack_from("<I", f[1], 2)[0]
+            part = f[1][6:]
+            if roff != off:
+                print(f"FILE_READ offset 唔對：{roff} != {off}", file=sys.stderr)
+                return 1
+            if not part:
+                break
+            data.extend(part)
+            off += len(part)
+            if len(part) < chunk:
+                break
+    with open(local, "wb") as fp:
+        fp.write(data)
+    print(f"OK 下載 {remote} → {local}（{len(data)} B）")
+    return 0
+
+
+def cmd_put(port: str, baud: int, local: str, remote: str, chunk: int = 2048) -> int:
+    import serial
+    data = open(local, "rb").read()
+    sha = hashlib.sha256(data).digest()
+    fid = random.randint(1, 0xFFFF)
+    begin = struct.pack("<HIH", fid, len(data), chunk) + sha + _enc_str(remote)
+    with serial.Serial(port, baud, timeout=0.2) as ser:
+        time.sleep(0.6)
+        ser.reset_input_buffer()
+        r = Reader(ser)
+        ser.write(pack(FILE_BEGIN, begin))
+        f = _wait(r, {FILE_ACK, FILE_ERROR_RSP}, 8.0)
+        if f is None:
+            print("FILE_BEGIN 冇回覆（裝置 app 未起？）", file=sys.stderr)
+            return 1
+        if f[0] == FILE_ERROR_RSP:
+            print(f"FILE_BEGIN 失敗：{_err_name(f[1])}", file=sys.stderr)
+            return 1
+        off = 0
+        t0 = time.time()
+        while off < len(data):
+            part = data[off:off + chunk]
+            ser.write(pack(FILE_CHUNK, struct.pack("<HI", fid, off) + part))
+            f = _wait(r, {FILE_ACK, FILE_ERROR_RSP}, 8.0)
+            if f is None:
+                print(f"FILE_CHUNK @{off} 冇回覆", file=sys.stderr)
+                return 1
+            if f[0] == FILE_ERROR_RSP:
+                print(f"FILE_CHUNK @{off} 失敗：{_err_name(f[1])}", file=sys.stderr)
+                return 1
+            ack_off = struct.unpack_from("<I", f[1], 2)[0]
+            if ack_off != off:
+                print(f"FILE_CHUNK ACK offset 唔對：{ack_off} != {off}", file=sys.stderr)
+                return 1
+            off += len(part)
+        ser.write(pack(FILE_END, struct.pack("<H", fid)))
+        f = _wait(r, {FILE_QUERY_RSP, FILE_ERROR_RSP}, 8.0)
+        dt = time.time() - t0
+        if f is None:
+            print("FILE_END 冇回覆", file=sys.stderr)
+            return 1
+        if f[0] == FILE_ERROR_RSP:
+            print(f"FILE_END 失敗：{_err_name(f[1])}", file=sys.stderr)
+            return 1
+        print(f"OK 上傳 {local} → {remote}（{len(data)} B，{dt:.1f}s，"
+              f"{len(data) / max(dt, 0.001) / 1024:.1f} KiB/s）sha256={sha.hex()[:16]}…")
+        return 0
+
+
+def cmd_simple(port: str, baud: int, cmd: str, path: str) -> int:
+    """confirm（0x2008）／undo（0x200A）：payload = str_u16(path)。"""
+    import serial
+    op = FILE_CONFIRM if cmd == "confirm" else FILE_UNDO
+    with serial.Serial(port, baud, timeout=0.2) as ser:
+        time.sleep(0.6)
+        ser.reset_input_buffer()
+        r = Reader(ser)
+        ser.write(pack(op, _enc_str(path)))
+        f = _wait(r, {FILE_QUERY_RSP, FILE_ERROR_RSP}, 5.0)
+        if f is None:
+            print(f"{cmd} 冇回覆", file=sys.stderr)
+            return 1
+        if f[0] == FILE_ERROR_RSP:
+            print(f"{cmd} 失敗：{_err_name(f[1])}", file=sys.stderr)
+            return 1
+        print(f"OK {cmd} {path}")
+        return 0
+
+
+def cmd_delete(port: str, baud: int, remote: str) -> int:
+    import serial
+    with serial.Serial(port, baud, timeout=0.2) as ser:
+        time.sleep(0.6)
+        ser.reset_input_buffer()
+        r = Reader(ser)
+        ser.write(pack(FILE_DELETE, _enc_str(remote)))
+        f = _wait(r, {FILE_QUERY_RSP, FILE_ERROR_RSP}, 5.0)
+        if f is None:
+            print("FILE_DELETE 冇回覆", file=sys.stderr)
+            return 1
+        if f[0] == FILE_ERROR_RSP:
+            print(f"FILE_DELETE 失敗：{_err_name(f[1])}", file=sys.stderr)
+            return 1
+        print(f"OK 刪除 {remote}")
+        return 0
 
 
 def frames(buf: bytes):
@@ -76,9 +248,32 @@ def main() -> int:
     st.add_argument("persist", type=int, nargs="?", default=1)
     q = sub.add_parser("query")
     q.add_argument("path")
+    p = sub.add_parser("put", help="上傳檔案（FILE_BEGIN/CHUNK/END）")
+    p.add_argument("local")
+    p.add_argument("remote")
+    p.add_argument("--chunk", type=int, default=2048)
+    g = sub.add_parser("get", help="下載檔案（FILE_READ）")
+    g.add_argument("remote")
+    g.add_argument("local")
+    g.add_argument("--chunk", type=int, default=4096)
+    d = sub.add_parser("delete", help="刪檔（FILE_DELETE）")
+    d.add_argument("path")
+    c = sub.add_parser("confirm", help="確認新檔、刪 .bak（FILE_CONFIRM）")
+    c.add_argument("path")
+    u = sub.add_parser("undo", help="退回 .bak（FILE_UNDO）")
+    u.add_argument("path")
     args = ap.parse_args()
 
     import serial
+
+    if args.cmd == "put":
+        return cmd_put(args.port, args.baud, args.local, args.remote, args.chunk)
+    if args.cmd == "get":
+        return cmd_get(args.port, args.baud, args.remote, args.local, args.chunk)
+    if args.cmd == "delete":
+        return cmd_delete(args.port, args.baud, args.path)
+    if args.cmd in ("confirm", "undo"):
+        return cmd_simple(args.port, args.baud, args.cmd, args.path)
 
     if args.cmd == "query":
         cmd, payload = FILE_QUERY, enc_str(args.path)
