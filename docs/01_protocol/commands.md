@@ -229,7 +229,7 @@ Servo 由 LV2 映射成脈寬（`500 + pos × 2000/4095` µs、50 Hz）；工具
 | `cfg` | 兩層 config 的載入結果：`miss`（缺檔）/`bad`（壞 JSON）/`ver`/`def`（用預設）/`inv`（不合法）/`unk`（不認識的鍵） | ~200 B |
 | `log` | log 管道：`cap`（hook 裝了？）/`run`（consumer 起了？）/`lvl`/`mask`/`buf`/`used`/`peak`/`produced`/`sent`/`dropped`/`busy`/`offline` | ~250 B |
 | `rt` | 執行期 FreeRTOS task 表（name / prio / stack HWM），要 `CONFIG_FREERTOS_USE_TRACE_FACILITY` | ~500 B |
-| `ncm` | 每個 `.nct` / `.nce` 的 manifest（kind / core / fps / px / mem / 指令） | 1,000–2,600 B |
+| `ncm` | **模組診斷**（唔係播放模式）：`arena`／`used`／`live`／`frames`／`backend`／`period_ms`／`task_core`＋`modules[]`（`name`／`fmt`／`bytes`／`ok`／`bad`／`strikes`／`kind`／`core`／`layer`／`prio`／`fps`／`px`／`budget_us`／`manifest`／`cmds`／`attached`） | 1,000–2,600 B |
 | `net` | IP / MAC / link 狀態（只在 P4） | ~300 B |
 
 **空 KEY ＝ 全部**，所以加起來 ≈5.8 KB，而回覆幀上限是 `NC4_REPLY_JSON_MAX` = 2,600 B。
@@ -237,12 +237,17 @@ Servo 由 LV2 映射成脈寬（`500 + pos × 2000/4095` µs、50 Hz）；工具
 
 - 砌得落就照砌，砌唔落就**停手**，改回一個**合法**的物件
   `{"truncated":1,"cap":2600,"tips":"keys=sys,storage,cfg,log,mem,provides,tasks,ncm 分批問"}`。
-- 順序是**由便宜到貴**（sys → storage → cfg → log → rt → mem → provides → tasks → ncm → wifi → net），
-  所以截斷時你**一定**拿到便宜那幾份，貴的（`tasks` / `ncm`）才可能被切走。
+- 順序是**由便宜到貴**（sys → storage → cfg → log → rt → mem → provides → tasks → wifi → net），
+  之後才是**元件自註冊**的區塊（2026-11-28 起；目前只有 `ncm`，見 `nc_status_register()`）。
+  所以截斷時你**一定**拿到便宜那幾份，最貴的（`ncm`）最先被切走。
 - 想要全部就**分批問**：先 `keys=sys,storage`，再 `keys=cfg,log`，再 `keys=tasks`，再 `keys=ncm`。
   每份都遠低於 2,600 B，一定完整。
 - `keys=?` 回可用 KEY 清單（唔會回內容），用來探測這版 firmware 支援哪些區塊。
 
+> `ncm` 只喺 **ncm 任務真係起咗**（`/data` 掃到 `.nct`／`.nce`）才有這個 key；
+> release 映像冇 ncm，所以 `keys=ncm` 會回空。它答的是「模組載入器而家點」，
+> 同 pixel 的「播放模式」（`0xF06D SHOWMODE`／`registry.list`）係兩件完全唔同嘅事。
+>
 > 為什麼不把上限提到 8 KB？因為回覆幀要放進 `NC4_MAX_FRAME`（8,205 B），
 > 而那個 8,192 是**經驗參數**（見 [frame.md](frame.md)），不是可以隨便借的空間。
 > 一份 5.8 KB 的 status 會把整條線的 tx 佔住幾十 ms，其他回覆全部排隊 ——

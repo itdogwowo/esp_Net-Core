@@ -1130,3 +1130,4 @@ commit message 說明。
 > **最後一句**：呢個 repo 的默認狀態係「有計劃、有量測、有文件」。
 > 你加的每一行 code，最後都要能夠回答三個問題：
 > **為什麼這樣做？點證明它work？邊份文件記錄了？**
+| 2026-11-28 | **`.nce` 的 ABI descriptor**：`nc_plugin_src_t` 加 `px`／`mem_bytes`；`nc_plugin_desc_build()`（純函式）＋ WAMR backend instantiate 後寫 28 B 去 guest offset 0、`nce_init(0)` 帶參數。fb 放唔落 → 拒絕開插件（唔開一定會 trap 的）。`status ncm` 文件同步：欄位改成實際值、註明係模組診斷唔係播放模式、排喺內建區塊之後。host 28/28、tests ✔、release 799,376 B；未上板。 | lead（AI） |

@@ -20,6 +20,7 @@
 #include <stdint.h>
 
 #include "esp_err.h"
+#include "nc_mod_abi.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -47,7 +48,21 @@ typedef struct {
     size_t         size;
     uint8_t        fmt;       // NC_PLUGIN_FMT_*
     uint8_t        kind;      // NC_PLUGIN_KIND_*
+    uint16_t       px;        // effect：幀緩衝幾 px（task 可 0）
+    uint32_t       mem_bytes; // 線性記憶體上限（manifest 宣告；0 = 不限／用預設）
 } nc_plugin_src_t;
+
+// ABI v0 的 descriptor 佈局（見 nc_mod_abi.h）：
+//   0..32   descriptor（host 寫、guest 讀）
+//   96      scratch 起點（預設 4 KB）
+//   96+4K   framebuffer（px × 4 B，canonical R,G,B,W）
+#define NC_PLUGIN_SCRATCH_OFF   NC_MOD_DATA_OFF
+#define NC_PLUGIN_SCRATCH_BYTES (4u * 1024u)
+#define NC_PLUGIN_FB_OFF        (NC_PLUGIN_SCRATCH_OFF + NC_PLUGIN_SCRATCH_BYTES)
+
+// 砌 ABI v0 descriptor（純函式，host 可測）。回 false = px／mem 對唔上
+// （fb 放唔落線性記憶體）→ 呼叫者應該拒絕開這個插件。
+bool nc_plugin_desc_build(uint16_t px, uint32_t mem_bytes, nc_mod_desc_t *out);
 
 // 執行引擎插槽。上層只識這張表；換引擎唔使改上層。
 typedef struct {

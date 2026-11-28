@@ -603,6 +603,8 @@ esp_err_t nc_mod_load_ex(const char *path, int level)
             .size = slot->payload_size,
             .fmt = slot->fmt,
             .kind = slot->decl.kind,
+            .px = (uint16_t)slot->decl.px,
+            .mem_bytes = slot->decl.mem_bytes,
         };
         const esp_err_t lerr = nc_plugin_open(&slot->plugin, &src);
         if (lerr != ESP_OK) {

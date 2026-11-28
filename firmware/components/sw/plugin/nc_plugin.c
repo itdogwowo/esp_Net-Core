@@ -105,3 +105,26 @@ bool nc_plugin_paused(void)
 {
     return (s_pause_fn != NULL) && s_pause_fn();
 }
+
+// ABI v0 descriptor：guest 開機讀它才知道 px／fb 在哪。
+// 純函式（唔碰 WAMR），所以 host 測試可以直接驗佈局。
+bool nc_plugin_desc_build(uint16_t px, uint32_t mem_bytes, nc_mod_desc_t *out)
+{
+    if (out == NULL) {
+        return false;
+    }
+    memset(out, 0, sizeof(*out));
+    const uint32_t fb_bytes = (uint32_t)px * 4u;
+    const uint32_t need = NC_PLUGIN_FB_OFF + fb_bytes;
+    if (mem_bytes != 0 && need > mem_bytes) {
+        return false;                  // fb 放唔落：唔好開一個一定會 trap 的插件
+    }
+    out->px_count = px;
+    out->width = 0;
+    out->height = 0;
+    out->fb_off = NC_PLUGIN_FB_OFF;
+    out->fb_bytes = fb_bytes;
+    out->sc_off = NC_PLUGIN_SCRATCH_OFF;
+    out->sc_bytes = NC_PLUGIN_SCRATCH_BYTES;
+    return true;
+}

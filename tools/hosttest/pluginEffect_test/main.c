@@ -184,9 +184,22 @@ int main(void)
     CHECK(nc_mod_load(path) == ESP_OK, "nc_mod_load 成功");
     CHECK(s_opens == 1, "工具 open 一次（實際 %d）", s_opens);
     CHECK(s_src.kind == NC_PLUGIN_KIND_EFFECT, "kind=EFFECT（實際 %u）", (unsigned)s_src.kind);
+    CHECK(s_src.px == 64, "px=64 由 manifest 傳到工具（實際 %u）", (unsigned)s_src.px);
     CHECK(s_src.name != NULL && strcmp(s_src.name, "e") == 0, "name=e（實際 %s）",
           s_src.name ? s_src.name : "(null)");
     CHECK(nc_mod_live() != NULL, "效果自動 select");
+
+    case_begin("ABI v0 descriptor：fb 放喺 offset 96+4K，容量對得上");
+    nc_mod_desc_t d;
+    CHECK(nc_plugin_desc_build(64, 65536, &d), "64 px ＋ 64 KB → 砌得成");
+    CHECK(d.px_count == 64 && d.fb_bytes == 256, "px=%u fb_bytes=%u",
+          (unsigned)d.px_count, (unsigned)d.fb_bytes);
+    CHECK(d.fb_off == NC_PLUGIN_FB_OFF && d.sc_off == NC_PLUGIN_SCRATCH_OFF,
+          "fb_off=%u sc_off=%u", (unsigned)d.fb_off, (unsigned)d.sc_off);
+    CHECK(d.sc_bytes == NC_PLUGIN_SCRATCH_BYTES, "scratch=%u B", (unsigned)d.sc_bytes);
+    nc_mod_desc_t bad;
+    CHECK(!nc_plugin_desc_build(4096, 4096, &bad), "fb 放唔落 4 KB 線性記憶體 → 拒絕");
+    CHECK(nc_plugin_desc_build(64, 0, &bad), "mem=0 = 不限 → 照砌得成");
 
     case_begin("平常 tick：step(frame_id) 正常，唔會標 bad");
     nc_mod_tick();

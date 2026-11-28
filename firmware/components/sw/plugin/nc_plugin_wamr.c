@@ -415,6 +415,30 @@ static esp_err_t engine_open(nc_plugin_t *out, const nc_plugin_src_t *src)
     }
 
     const bool is_task = (src->kind == NC_NCD_KIND_TASK);
+
+    // ABI v0：descriptor 寫在 guest 線性記憶體 offset 0（host 寫、guest 讀）。
+    // effect 模組靠它才知道 px／framebuffer 在哪；task 模組唔用。
+    if (!is_task) {
+        nc_mod_desc_t desc;
+        if (!nc_plugin_desc_build(src->px, src->mem_bytes, &desc)) {
+            ESP_LOGE(TAG, "%s：px=%u 的 fb 放唔落 %u B 線性記憶體 → 拒絕",
+                     src->name, (unsigned)src->px, (unsigned)src->mem_bytes);
+            wasm_runtime_destroy_exec_env(env);
+            wasm_runtime_deinstantiate(inst);
+            wasm_runtime_unload(mod);
+            return ESP_ERR_INVALID_SIZE;
+        }
+        uint8_t *base = wasm_runtime_addr_app_to_native(inst, 0);
+        if (base == NULL) {
+            ESP_LOGE(TAG, "%s：拿不到 linear memory → 拒絕", src->name);
+            wasm_runtime_destroy_exec_env(env);
+            wasm_runtime_deinstantiate(inst);
+            wasm_runtime_unload(mod);
+            return ESP_ERR_INVALID_STATE;
+        }
+        memcpy(base, &desc, sizeof(desc));       // 0..28（28..32 係 padding）
+    }
+
     const char *tick_name = is_task ? NC_MOD_EXPORT_TASK_TICK : NC_MOD_EXPORT_RENDER;
     wasm_function_inst_t fn_tick = wasm_runtime_lookup_function(inst, tick_name);
     if (fn_tick == NULL) {
@@ -447,7 +471,9 @@ static esp_err_t engine_open(nc_plugin_t *out, const nc_plugin_src_t *src)
     wasm_function_inst_t fn_init = wasm_runtime_lookup_function(inst, init_name);
     if (fn_init != NULL) {
         uint32_t argv[2] = {0, 0};
-        if (call0_or_2(slot, fn_init, 0, argv, init_name) != ESP_OK) {
+        // effect 的 nce_init(desc_ptr)：desc 在 offset 0，所以傳 0。
+        const uint32_t argc = is_task ? 0 : 1;
+        if (call0_or_2(slot, fn_init, argc, argv, init_name) != ESP_OK) {
             ESP_LOGW(TAG, "%s：%s 出錯（照樣載入，tick 仍然會叫）",
                      slot->name, init_name);
         }

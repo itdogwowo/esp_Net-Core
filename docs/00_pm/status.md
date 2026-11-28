@@ -11571,3 +11571,26 @@ layout cache 改 name_id＋dictionary CRC；舊 cache 版本++。Phase 1 模組�
 **驗證（idf=v6.1.1 macOS）**
 - host tests **28/28**；`--tests` build ✔；release build ✔ **799,376 B**（−304 B）。
 - 未上板：模組載入／tick／status 真機未驗。
+
+---
+
+### 7.346 2026-11-28（`.nce` 的 ABI descriptor 落地；status ncm 文件同步）
+
+**做咗**
+- `nc_plugin_src_t` 加 `px`／`mem_bytes`（loader 由 manifest 填）。
+- `nc_plugin_desc_build()`（純函式，host 可測）：砌 ABI v0 descriptor
+  （`px_count`／`fb_off=96+4K`／`fb_bytes`／`sc_off`／`sc_bytes`）；
+  fb 放唔落線性記憶體 → 回 false，engine 拒絕開（唔會開一個一定 trap 的插件）。
+- WAMR backend：instantiate 後把 28 B descriptor 寫入 guest offset 0，
+  effect 的 `nce_init(0)` 帶一個參數（task 仍然 0 參數）。
+- `pluginEffect_test` 新增 descriptor 檢查（px／fb_off／scratch／容量拒絕）。
+
+**文件**
+- `commands.md`：`status` 的 `ncm` 區塊改成實際欄位；註明「模組診斷 ≠ 播放模式」、
+  只喺 ncm 任務起咗才有；`ncm` 而家排喺內建區塊之後（元件自註冊）。
+- `gap-review.md` §6.7：`.nce` 合成進度＋兩個待拍板決定（四條 aprog vs 一條；
+  邊個 tick 插件／FB 點交）。
+
+**驗證（idf=v6.1.1 macOS）**
+- host tests 28/28；`--tests` build ✔；release build ✔ 799,376 B。
+- 未上板：descriptor 寫入／`nce_init` 真機未驗。
