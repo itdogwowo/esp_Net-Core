@@ -82,6 +82,33 @@ typedef struct {
     void      (*deinit)(void);
 } nc_plugin_backend_t;
 
+
+// ── 通用緩衝介面（.nct 同 .nce 共用）──────────────────────────────
+// 模組（生產者）唔可以自己 malloc：它宣告要幾個 region，host 由 guest 線性記憶體
+// （＋ arena）切，再把 offset 寫回去。方向固定：IN = 模組只讀、OUT = 模組只寫。
+//
+// 這同現有任務的做法一致：任務用 nc_task_res_t 宣告、on_start 收 view；
+// 模組用 region 表宣告、init 收 offset 表。兩邊都係「申請 → 綁定 → 使用」。
+#define NC_PLUGIN_REGION_MAX 8
+
+typedef enum {
+    NC_PLUGIN_REGION_IN = 0,     // 控制器寫、模組讀
+    NC_PLUGIN_REGION_OUT = 1,    // 模組寫、消費者讀
+} nc_plugin_region_dir_t;
+
+typedef struct {
+    uint8_t  dir;        // nc_plugin_region_dir_t
+    uint8_t  align;      // 0 → 16 B
+    uint16_t name_id;    // 自描述：這個 region 代表什麼（name dictionary id）
+    uint32_t bytes;      // 要幾大（0 = 唔要）
+} nc_plugin_region_t;
+
+// 純函式（host 可測）：把 n 個 region 排入 [first_off, limit) 的線性記憶體，
+// 依序 16 B（或 align）對齊，寫入 offsets[0..n-1]。
+// 回 false = 放唔落（呼叫者要明示拒絕，唔可以靜默縮）。
+bool nc_plugin_regions_bind(const nc_plugin_region_t *r, int n,
+                            uint32_t first_off, uint32_t limit, uint32_t *offsets);
+
 // ── backend ──
 // arena 由 plan 給（caller 交一次；插件實例的 payload 住喺裡面）。
 // 可以早過 backend 設定，亦可以唔交（NULL → 引擎自己向 heap 要）。

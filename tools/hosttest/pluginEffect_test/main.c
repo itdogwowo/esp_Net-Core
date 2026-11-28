@@ -245,6 +245,22 @@ int main(void)
     CHECK(fb != NULL && nb == sizeof(s_fb), "fb=%p bytes=%u", (const void *)fb, (unsigned)nb);
     nc_plugin_close(h);
 
+    case_begin("通用 region 綁定（任務／效果共用）");
+    const nc_plugin_region_t regs[] = {
+        { .dir = NC_PLUGIN_REGION_IN,  .align = 0, .name_id = 1, .bytes = 3 },
+        { .dir = NC_PLUGIN_REGION_OUT, .align = 0, .name_id = 2, .bytes = 16 },
+        { .dir = NC_PLUGIN_REGION_OUT, .align = 0, .name_id = 3, .bytes = 1 },
+    };
+    uint32_t offs[NC_PLUGIN_REGION_MAX] = {0};
+    CHECK(nc_plugin_regions_bind(regs, 3, 4192, 8192, offs), "三個 region 放得落");
+    CHECK(offs[0] == 4192 && offs[1] == 4208 && offs[2] == 4224,
+          "對齊＋連排（%u / %u / %u）", (unsigned)offs[0], (unsigned)offs[1], (unsigned)offs[2]);
+    CHECK(!nc_plugin_regions_bind(regs, 3, 4192, 4224, offs), "放唔落 → 拒絕（唔縮）");
+    const nc_plugin_region_t bad_dir[] = {
+        { .dir = 7, .align = 0, .name_id = 0, .bytes = 1 },
+    };
+    CHECK(!nc_plugin_regions_bind(bad_dir, 1, 0, 64, offs), "方向唔合法 → 拒絕");
+
     case_begin("卸載：工具 close 一次");
     const int closes_before = s_closes;
     CHECK(nc_mod_unload("e") == ESP_OK, "unload 成功");

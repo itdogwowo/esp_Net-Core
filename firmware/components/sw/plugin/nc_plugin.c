@@ -140,3 +140,29 @@ bool nc_plugin_desc_build(uint16_t px, uint32_t mem_bytes, nc_mod_desc_t *out)
     out->sc_bytes = NC_PLUGIN_SCRATCH_BYTES;
     return true;
 }
+
+// 通用 region 綁定：純算術，唔碰 backend。方向／名字只係描述，唔影響排放。
+bool nc_plugin_regions_bind(const nc_plugin_region_t *r, int n,
+                            uint32_t first_off, uint32_t limit, uint32_t *offsets)
+{
+    if (r == NULL || offsets == NULL || n < 0 || n > NC_PLUGIN_REGION_MAX) {
+        return false;
+    }
+    uint32_t off = first_off;
+    for (int i = 0; i < n; i++) {
+        if (r[i].dir != NC_PLUGIN_REGION_IN && r[i].dir != NC_PLUGIN_REGION_OUT) {
+            return false;
+        }
+        uint32_t a = r[i].align ? r[i].align : 16u;
+        if (a & (a - 1u)) {                       // 只收 2 的次方
+            return false;
+        }
+        off = (off + a - 1u) & ~(a - 1u);
+        if (r[i].bytes > limit || off > limit - r[i].bytes) {
+            return false;                         // 放唔落：唔縮、唔覆蓋
+        }
+        offsets[i] = off;
+        off += r[i].bytes;
+    }
+    return true;
+}
