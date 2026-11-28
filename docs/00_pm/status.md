@@ -11489,6 +11489,8 @@ layout cache 改 name_id＋dictionary CRC；舊 cache 版本++。Phase 1 模組�
   唔寫入核心。
 - **可行性**：任務用 `NC_TASK_AUTO_REG`（constructor）同指令用 `NC_ACTION_TABLE_DEF`
   都係自註冊 → main 可以完全唔識 ncm。
-- **未定**：`.nct`（通用 WASM 任務）留唔留。今日 `modules/` 3 個模組全部係 `.nct`，
-  `.nce` 一個都冇；留就唔可以只住 `sw/pixel`。
-- 詳見 [`gap-review.md`](gap-review.md) §6.6。
+- **切法更正（用家指正）**：解碼器（容器＋meta）係**獨立一套工具**，唔可以同宿主混為
+  一談 —— `.nct`／`.nce` 兩種都要靠佢解。所以：`sw/ncd`（解碼器）／`sw/pixel/mod`
+  （宿主）／`sys`（資源＋status）／`test_ncm`（glue）。`.nct` 長期留唔留係產品問題，
+  唔影響分家。
+- 詳見 [`gap-review.md`](gap-review.md) §6.4（解碼器／宿主分家）。

@@ -188,84 +188,54 @@ OTA）確實冇基礎功能缺陷；但「支援的晶片都用得」未成立 �
 > 即係：「唔獨立存在」✅；「住 `components/driver/`」❌（原封搬一定破規則）。
 > 要用家講法成立，只有下面三條路。
 
-### 6.4 兩個合規落位
+### 6.4 用家方向 v2（2026-11-28）：解碼器／宿主分家
 
-**A（最小改動，建議先做）：`components/sys/ncm/` 整包搬**
+> 「解碼器還解碼器、解碼工具還解碼工具，為什麼會混為一談？`.nct/.nce` 是需要解碼器
+> 才能夠運作的，他們需要獨立的一套工具；但是其他東西就屬於 pixel。」
+> 「是你對模組的理解方式不準確。」
 
-- `host` 角色消失；引擎繼續用 vtable（將來換 AOT／其他 runtime 只換 `nc_mod_engine.c`）。
-- 技術可行：`components/sys` 係 container（冇 CMakeLists），`sys/nc4`／`sys/mem` 已經係咁；
-  `components/sys/ncm` 同樣唔會被 IDF 自動登記，`NC_ENABLE_NCM` gate 照舊。
-- sys → 自己子組件，冇新增依賴方向。
-- 代價：`sys` 多一個 optional ＋ WAMR 依賴。**文檔要補一句**「`sys/` 之下可以有
-  optional 子組件（目前唯一例外：ncm）」，否則下一個 AI 會以為 sys 全部開機必需。
-- 剩餘工作：把 `ota_action` 依賴剪走（改成 sys 層的 quiet flag／hook）—— 同 §5 第二行同一件事。
+**我之前切錯**：把「容器格式」同「宿主」當成一個叫 `ncm` 的整體，於是去問
+「`.nct` 留唔留」。正確切法係 **格式層**同**執行層**係兩件事：
 
-**B（最貼近「沙箱驅動」講法，較大）：拆兩件**
+| 層 | 內容 | 識唔識 |
+|---|---|---|
+| **格式層（解碼器，獨立一套工具）** | `nc_ncd.c`（容器 header／section 表）、`nc_meta.c`（meta 區）＋ host 側 `tools/ncm_build.py`、`docs/03_notes/ncm-format.md` | 只識 bytes → struct；唔識 WAMR、唔識 task、唔識 pixel |
+| **宿主（pixel 系列）** | `nc_mod.c`（掃描／arena／live／看門狗／tick／預算）、`nc_mod_engine.c`（WAMR） | 識 pixel 節奏；`.nct`／`.nce` 兩種 payload 都跑 |
+| **系統** | arena 帳、資源宣告、`status` | sys 機制（見下） |
+| **測試** | main 的 6 段 `#ifdef NC_ENABLE_TESTS` glue、`0xF0xx` | dev only |
 
-```text
-driver/drv_wamr/    只做 runtime 綁定：init／instantiate／call／imports（＋idf_component.yml）
-                    interface 唔識 nc_mod_t（傳 name／payload／decl＋callbacks）
-                    ota pause 搬走 → 呢層零 sys 依賴
-sys/ncm/            scan／容器解析／arena／live／看門狗／task／status
-```
-
-- `sys → driver` 係合法方向（`component-layout.md` §2），所以 B 守得規矩。
-- 代價：改 `nc_mod_backend_t` 介面＋`nc_mod.c` 呼叫點＋CMake／host test，估 1–2 日。
-- 好處：`driver/` 真係有一個可換的「沙箱驅動」；WAMR 完全隔離（連 header 都唔會漏上層）。
-
-**C（最貼近「`.nct／.nce` 格式工具」講法，成本最高）：連 parser 都拆出去**
+**目標樹（暫名）**
 
 ```text
-driver/drv_ncd/     容器解析（nc_ncd.c 164 行）：header／section／manifest → 純 struct
-driver/drv_wamr/    runtime 綁定
-sys/ncm/            scan／arena／live／看門狗／task／status
+sw/ncd/                解碼器（容器＋meta）—— 獨立工具，任何 runner 都用得
+sw/pixel/mod/          宿主：nc_mod.c ＋ nc_mod_engine.c（pixel 系列）
+sys/…                  資源宣告用現成 nc_plan_declare／nc_task_res_t；status 要 nc_status_register()
+.../test_ncm/          掃描／載入／tick 任務／0xF0xx（NC_TASK_AUTO_REG／NC_ACTION_TABLE_DEF 自註冊）
 ```
 
-- `driver/drv_ncd` 只依賴 `esp_rom`／`string`，可以 host test 直接 link，唔使拖 `sys`。
-- 前置：`nc_mod_decl_t` 等型別現時住 `nc_mod.h`，要先搬去共用 contract header。
-- 三個 component、三份 CMake＋idf_component.yml，改動最大。
+- 咁 §6.3 約束 4 自動消失：`sys` **唔需要**解碼器，只有 pixel 用 → 解碼器可以住 `sw/`。
+- `.nct` 留唔留係另一個（產品）問題，同解碼器獨立性無關；解碼器兩種格式都要識。
+- 約束 1／2／3 亦避開：宿主住 `sw/pixel`（`sw → sys` 合法），唔再碰 driver 層。
 
-**建議**：先 A（今日可完成、風險低，已經達成「唔獨立存在」）；B 留到
-（i）真要第二個 backend，或（ii）要上 P4 AOT 時才做；C 只有喺「想獨立測 parser」
-或「WAMR 要換」時才值得 —— 因為 B／C 的價值都要等第二個實作才出現。
+**可行性／阻礙（已核對）**
 
-### 6.6 用家方向 v2（2026-11-28）：三拆，唔要 `host` 角色
-
-> 「`nc_mod.c`／`nc_mod_engine.c` 這兩個都屬於 pixel 系列；甚至系統狀態也不應該是這裏，
-> 也應該是可以在系統當中的。應該在測試指令那裏寫，而不是寫進核心內容。」
-
-**方向**：`host` 整個角色取消，按三件事拆返原位。
-
-| 部份 | 今日位置 | 應該去邊 | 理由 |
-|---|---|---|---|
-| 容器／meta 解析（`nc_ncd.c` 164、`nc_meta.c` 54） | host | 跟 loader 一齊（見 §6.3 約束 4：`sw` 唔可以俾 `sys` include） | 純 function |
-| **runtime（`nc_mod_engine.c` 536）** | host | **pixel 系列**（用家定） | 產品上只服務 `.nce` 效果 |
-| **loader（`nc_mod.c` 1,199）** | host | **pixel 系列** | 同上 |
-| 資源表（`nc_res.c` 200）＋ arena 帳 | host | **應該消失**：由呼叫方直接叫 `sys` API（`nc_plan_declare`／`nc_task_res_t`） | 資源宣告本質係 sys 機制 |
-| status（`nc_mod_status_json`） | main 的 static `status_add`（`:1932`） | sys | **阻礙**：`status_add` 係 main 的 static，冇公開註冊 API |
-| main 的 glue（掃描／declare／載入／tick 任務／`0xF0xx`，6 段 `#ifdef NC_ENABLE_TESTS`） | main | **測試指令區**（自註冊 component） | 核心唔應該識模組 |
-
-**可行性（已核對）**
-
-- ✅ 任務自註冊：`NC_TASK_AUTO_REG`（`nc_task.h:170`，constructor）—— main 唔使識 ncm 任務。
-- ✅ 指令自註冊：`NC_ACTION_TABLE_DEF`（`test_action` 已經係咁）。
-- ⚠ status 冇公開 API：要加 `nc_status_register(key, fn)`（sys），否則 status 部份離唔開 `main.c`。
-- ⚠ `nc_res.c` 同 `nc_mod_merge_cfg()` 直接改 `tasks.json` 語義 → 要諗清楚邊個有權改租戶 config。
-
-**未定**：`.nct`（通用 WASM 任務）留唔留？今日 `modules/` 3 個模組全部係 `.nct`
-（`test_hello`、`bench_compare_lab`、`api_cost_lab`），**`.nce` 一個都冇**。
-留 → 引擎唔可以只住 `sw/pixel`（冇開 pixel 的板就冇模組）；唔留 → 純 `.nce`，可以入 pixel。
+- ✅ 任務自註冊 `NC_TASK_AUTO_REG`（`nc_task.h:170`）；指令自註冊 `NC_ACTION_TABLE_DEF`。
+- ⚠ `status` 冇公開 API：`status_add` 係 `main.c:1380` 的 static → 要加 `nc_status_register()`。
+- ⚠ `nc_res.c` 同 `nc_mod_merge_cfg()` 會改 `tasks.json` 語義 → 應該由測試 glue 做，或收窄成只讀。
+- ⚠ `nc_mod_engine.c:31` 仍 include `nc_ota_action.h` → 搬之前要剪（§5）。
 
 ### 6.5 遷移 checklist（未做）
 
-- [ ] `git mv firmware/components/host/ncm firmware/components/sys/ncm`
-- [ ] `firmware/CMakeLists.txt`：`NC_ENABLE_NCM` 段的 path（註解亦要改）
-- [ ] 全樹 `grep -rn "components/host"`：AGENTS §3、`component-layout.md` §1／§3、
-      `behavior-taxonomy.md` §2.4、`ncm-contract.md`、`ncm-loader.md`、`module-adoption.md`
-- [ ] `NC_ENABLE_NCM=ON`（tests）同 OFF（release）兩種 build 都過
-- [ ] `bash tools/hosttest/run_all.sh`
-- [ ] 真機：`status tasks` 見到 ncm 任務、載入一個 `.nct` 確認 tick 正常
-- [ ] `sys` optional 子組件規則寫入 `component-layout.md` §1
+- [ ] 開 `sw/ncd/`：`git mv` `nc_ncd.c`／`nc_meta.c`＋header；新 component
+- [ ] 開 `sw/pixel/mod/`：`git mv` `nc_mod.c`／`nc_mod_engine.c`；`sw/pixel` CMake 加路徑
+- [ ] 剪 `nc_mod_engine.c` 的 `nc_ota_action.h`（改成 sys 的 quiet flag／hook）
+- [ ] `nc_res.c` 拆走：資源宣告改由測試 glue 直接叫 `sys` API
+- [ ] 加 `nc_status_register(key, fn)`，把 `ncm` status 由 `main.c:1932` 搬走
+- [ ] 新 `test_ncm` component（自註冊任務＋指令）；刪 main 的 6 段 `#ifdef`
+- [ ] 取消 `NC_ENABLE_NCM`，只留 `NC_ENABLE_TESTS`
+- [ ] 文件：AGENTS §3／§5（NCM 唔再係核心）、`component-layout.md` §1／§3 刪 `host` 角色、
+      `behavior-taxonomy.md` §2.4 刪 host 列、`ncm-contract.md`／`ncm-loader.md` 的 path
+- [ ] `NC_ENABLE_TESTS=ON`／`OFF` 兩種 build ＋ `run_all.sh`
 
 ---
 
@@ -275,8 +245,7 @@ sys/ncm/            scan／arena／live／看門狗／task／status
 |---|---|---|---|
 | 1 | **RMT 後端** | 唯一「有板都用唔到」的硬缺口；C3 係完全受害者 | 要 C3 板／邏輯分析儀 |
 | 2 | **0x3400 dispatcher** | 細，令外掛功能閉環 | 無 |
-| 3 | **host → sys/ncm 搬位**（§6.4 A）＋剪 `ota_action` 依賴 | 架構債，改動細 | 無 |
-| 4 | **ncm 三拆**（§6.6）＋取消 `NC_ENABLE_NCM` | 令 release 同 code 一致（今日已經係 test-only，但樹同文件講反） | 要先答 `.nct` 留唔留 |
+| 3 | **解碼器／宿主分家**（§6.4）：開 `sw/ncd`＋`sw/pixel/mod`＋`test_ncm`，取消 `NC_ENABLE_NCM` | 令 tree 同 code 一致（今日 ncm 已經係 test-only，但文件講佢係核心） | 要先加 `nc_status_register()`；剪 `ota_action` 依賴 |
 | 5 | **量產 project 關 `PXBENCH`**（§5.5）＋清 `effects/` 死代碼 | 一行 sdkconfig／一個目錄；減少 image 同誤解 | 無 |
 | 4 | **OTA rollback** | 風險，唔係功能 | partition 已夠（1.5 MB × 2） |
 | 6 | **PARLIO** | 要 P4 板 | P4 板 |
