@@ -10955,3 +10955,30 @@ render／encode task running、無 crash、state 重建正常；之後已還原 
 
 **注意**：group 的 `sel` 係**鏈上線性範圍**（16×16 row-major 時 64 px = 4 行），
 唔係 2D 幾何格；真 2D checkerboard 要 map 層支援多段 sel／座標映射，今次未做。
+
+---
+
+### 7.317 2026-11-28（NCLAYOUT 快取：全系列上限、總預算＋LRU、開機預建上限）
+
+**用家問**：全系列是否已支援？組合多時快取會否佔大量空間、效果變差？
+
+**現況／上限（先講清楚）**
+- pixel 掃描表上限：`NC_PX_MAP_MAX=8`、`NC_PX_MODE_MAX=16`；
+  mode entries／group／sel 是動態 pool（16IO 的 256 entries 正常）。
+- 快取是 **每個 mode 一個 `.layout`**（key＝mode_hash＋map_hash＋px＋assets_hash＋ver），
+  不是 mode×map 的 full Cartesian product；每個 mode 只用自己的 mapping。
+- 原本做法：**開機預建所有 mode**，每個 layout 最多 32 KB；16 個 mode 最多 ~512 KB，
+  接近 FAT 640 KB free，而且每個 build 39–137 ms → 組合多時 boot 慢、FAT 食滿。
+- 冇 eviction：改 effects 後 assets_hash 改變，舊 key 的 `.layout` 永久留低。
+
+**已調整**
+- `NETCORE_PIXEL_LAYOUT_CACHE_KB`（預設 **128 KB**，0=不限）：`cache/*.layout` 總量上限。
+- 超預算：按 **mtime 刪最舊**（純快取；下次切 mode 重建），當前要寫的檔會 skip。
+- `NETCORE_PIXEL_LAYOUT_PREBUILD_MAX`（預設 **4**）：開機只預建 registry list 頭 4 個 mode；
+  其餘 0xF06D 切換時才 build／load，避免 16×（39–137 ms）開機 build。
+- 單張 >32 KB 仍然唔存（讀表同重建差不多）。
+- 真機 16IO（4 modes）：開機預建 `present=4、built=0、ms=35`；pixdiag 正常；
+  pipeline 50 fps。`apply` wall time 會含 encode 任務搶佔，唔係 cache 令每幀變慢。
+
+**仍然唔支援**：如果要「每一個 mode × 每一個 map」都預先 cache，現在係 mode 各自 mapping，
+唔會生成 Cartesian product；要真全組合要另立 mode，並受 16 modes／128 KB 預算限制。

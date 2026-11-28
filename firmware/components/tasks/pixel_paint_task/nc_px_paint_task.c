@@ -42,7 +42,10 @@
 #include <stdio.h>
 #include <string.h>
 #include <errno.h>
+#include <dirent.h>
 #include <sys/stat.h>
+#include <time.h>
+#include <unistd.h>
 
 #include "esp_heap_caps.h"
 #include "esp_log.h"
@@ -218,6 +221,105 @@ static struct {
     uint32_t present, built, too_big, failed, ms;
 } s_prebuild;
 static void cache_prebuild_missing(void);
+
+// ── NCLAYOUT 快取預算／LRU ──
+// 純快取，刪咗只係下次切 mode 重建；用 mtime 揀最舊，避免 mode／map 多時食滿 FAT。
+#define LAYOUT_CACHE_SUFFIX ".layout"
+#define LAYOUT_CACHE_FILE_OVERHEAD 128u
+
+static uint32_t layout_cache_budget(void)
+{
+#if defined(CONFIG_NETCORE_PIXEL_LAYOUT_CACHE_KB) && CONFIG_NETCORE_PIXEL_LAYOUT_CACHE_KB > 0
+    return (uint32_t)CONFIG_NETCORE_PIXEL_LAYOUT_CACHE_KB * 1024u;
+#else
+    return 0u;                                  // 0 = 不限
+#endif
+}
+
+// 掃 cache 目錄：files／bytes；oldest 回最舊的檔名（可選，skip 傳 NULL）。
+static void layout_cache_scan(uint32_t *files, uint32_t *bytes,
+                              char *oldest, size_t oldest_cap, const char *skip)
+{
+    if (files != NULL) *files = 0;
+    if (bytes != NULL) *bytes = 0;
+    if (oldest != NULL && oldest_cap > 0) oldest[0] = '\0';
+    time_t oldest_t = 0;
+    char cdir[96];
+    (void)snprintf(cdir, sizeof(cdir), "%s/cache", s_content.pixel_dir);
+    DIR *d = opendir(cdir);
+    if (d == NULL) {
+        return;
+    }
+    struct dirent *de;
+    while ((de = readdir(d)) != NULL) {
+        const size_t nl = strlen(de->d_name);
+        const size_t sl = sizeof(LAYOUT_CACHE_SUFFIX) - 1;
+        if (nl <= sl || strcmp(de->d_name + nl - sl, LAYOUT_CACHE_SUFFIX) != 0) {
+            continue;
+        }
+        char path[192];
+        (void)snprintf(path, sizeof(path), "%s/%s", cdir, de->d_name);
+        struct stat st;
+        if (stat(path, &st) != 0 || !S_ISREG(st.st_mode)) {
+            continue;
+        }
+        if (files != NULL) (*files)++;
+        if (bytes != NULL) *bytes += (uint32_t)st.st_size;
+        if (oldest != NULL && (oldest[0] == '\0' || st.st_mtime < oldest_t) &&
+            (skip == NULL || strcmp(path, skip) != 0)) {
+            oldest_t = st.st_mtime;
+            (void)snprintf(oldest, oldest_cap, "%s", path);
+        }
+    }
+    closedir(d);
+}
+
+static uint32_t s_cache_trimmed;
+
+// 確保再加 need bytes 之後唔超預算；超就刪最舊（skip=剛要寫的那個檔）。
+static bool layout_cache_trim(size_t need, const char *skip)
+{
+    const uint32_t budget = layout_cache_budget();
+    if (budget == 0u) {
+        return true;
+    }
+    for (;;) {
+        uint32_t files = 0, bytes = 0;
+        layout_cache_scan(&files, &bytes, NULL, 0, NULL);
+        if ((size_t)bytes + need <= (size_t)budget) {
+            return true;
+        }
+        char oldest[192];
+        layout_cache_scan(NULL, NULL, oldest, sizeof(oldest), skip);
+        if (oldest[0] == '\0') {
+            return false;                       // 得返自己／冇檔可刪
+        }
+        if (unlink(oldest) == 0) {
+            s_cache_trimmed++;
+            ESP_LOGI(TAG, "快取超預算（%u + %u > %u）→ 刪最舊 %s",
+                     (unsigned)bytes, (unsigned)need, (unsigned)budget, oldest);
+        } else {
+            ESP_LOGW(TAG, "快取超預算但刪唔到 %s（errno %d）", oldest, errno);
+            return false;
+        }
+    }
+}
+
+// 存一張 layout cache；need 已含 header overhead。回 ESP_ERR_NO_MEM = 超預算唔存。
+static esp_err_t layout_cache_save(const nc_px_layout_t *l, const char *path, uint32_t key,
+                                   size_t payload_bytes)
+{
+    const size_t need = payload_bytes + LAYOUT_CACHE_FILE_OVERHEAD;
+    if (!layout_cache_trim(need, path)) {
+        ESP_LOGW(TAG, "layout 快取 %u B 超出預算 → 唔存（下次重建）", (unsigned)need);
+        return ESP_ERR_NO_MEM;
+    }
+    char cdir[96];
+    (void)snprintf(cdir, sizeof(cdir), "%s/cache", s_content.pixel_dir);
+    (void)mkdir(cdir, 0777);                    // EEXIST 當成功
+    return nc_px_layout_save(l, path, key);
+}
+
 
 #if CONFIG_NETCORE_PIXEL_APPLY_PIPE
 #define PIPE_CHUNK_KB 16u
@@ -899,11 +1001,9 @@ static esp_err_t content_apply_mode_locked(const nc_px_mode_t *mode)
             // FAT 讀取同重建差不多，存表反而多一次寫入。門檻 32 KB。
             const size_t cache_bytes = nc_px_layout_cache_bytes(&s_content.layout);
             if (cache_bytes <= 32768u) {
-                char cdir[96];
-                (void)snprintf(cdir, sizeof(cdir), "%s/cache", s_content.pixel_dir);
-                (void)mkdir(cdir, 0777);      // EEXIST 當成功
                 const int64_t ts0 = esp_timer_get_time();
-                const esp_err_t se = nc_px_layout_save(&s_content.layout, cpath, ckey);
+                const esp_err_t se = layout_cache_save(&s_content.layout, cpath, ckey,
+                                                       cache_bytes);
                 const uint32_t save_us = (uint32_t)(esp_timer_get_time() - ts0);
                 ESP_LOGI(TAG, "組合重建：build %u us、快取 %u B、寫入 %u us（%s）",
                          build_us, (unsigned)cache_bytes, save_us,
@@ -1169,28 +1269,62 @@ static void content_start_pipeline(void)
     cache_prebuild_missing();          // 開機檢查一次，缺的組合表補建
 }
 
-// 開機檢查一次：把所有 mode 的組合表裡缺的補建（已有就跳過）。
-// 用臨時 asset 表，唔會影響正在播的那個組合的 pointer。
+// 開機只預建 registry list 頭 N 個 mode 的組合表（N=Kconfig，預設 4；0=唔預建）。
+// 其餘在 0xF06D 切 mode 時才 build／load。避免 mode 多時開機連續 build 39–137 ms × N，
+// 亦避免一次過寫滿 FAT；cache 總量另有 layout_cache_save() 的預算／LRU 把關。
 static void cache_prebuild_missing(void)
 {
+    const uint32_t max_modes = (uint32_t)CONFIG_NETCORE_PIXEL_LAYOUT_PREBUILD_MAX;
     const nc_px_mode_tbl_t *modes = nc_px_mode_table();
-    if (modes == NULL || modes->n == 0 || s_content.px == 0) {
+    if (max_modes == 0 || modes == NULL || modes->n == 0 || s_content.px == 0) {
         return;
     }
-    nc_px_asset_tbl_t *tmp = nc_px_asset_tbl_alloc(0);   // item 之後按 entry 數 reserve
+    const nc_px_show_t *reg = nc_px_show();
+    const nc_px_mode_t *cand[NC_PX_MODE_MAX];
+    uint32_t n = 0;
+    // 先跟 registry list（播放清單次序），再加其餘 mode（去重）。
+    if (reg != NULL) {
+        for (uint8_t i = 0; i < reg->nlist && n < NC_PX_MODE_MAX; i++) {
+            const nc_px_mode_t *m = nc_px_mode_find(reg->list[i]);
+            bool dup = false;
+            for (uint32_t k = 0; k < n; k++) {
+                if (cand[k] == m) {
+                    dup = true;
+                    break;
+                }
+            }
+            if (m != NULL && !dup) {
+                cand[n++] = m;
+            }
+        }
+    }
+    for (uint32_t i = 0; i < modes->n && n < NC_PX_MODE_MAX; i++) {
+        const nc_px_mode_t *m = &modes->item[i];
+        bool dup = false;
+        for (uint32_t k = 0; k < n; k++) {
+            if (cand[k] == m) {
+                dup = true;
+                break;
+            }
+        }
+        if (!dup) {
+            cand[n++] = m;
+        }
+    }
+    if (n > max_modes) {
+        n = max_modes;
+    }
+
+    nc_px_asset_tbl_t *tmp = nc_px_asset_tbl_alloc(0);
     if (tmp == NULL) {
         ESP_LOGW(TAG, "開機預建：臨時 asset 表配置失敗 → 略過");
         return;
     }
-    char cdir[96];
-    (void)snprintf(cdir, sizeof(cdir), "%s/cache", s_content.pixel_dir);
-    (void)mkdir(cdir, 0777);
-
     uint32_t present = 0, built = 0, too_big = 0, failed = 0;
     const int64_t t0 = esp_timer_get_time();
     const nc_px_hw_inv_t inv = { .hw = NC_PX_HW_WS2812, .base = 0, .px = s_content.px };
-    for (uint8_t i = 0; i < modes->n; i++) {
-        const nc_px_mode_t *m = &modes->item[i];
+    for (uint32_t ci = 0; ci < n; ci++) {
+        const nc_px_mode_t *m = cand[ci];
         const nc_px_map_t *map = select_map(m);
         if (map == NULL) {
             failed++;
@@ -1217,12 +1351,13 @@ static void cache_prebuild_missing(void)
             failed++;
             continue;
         }
-        if (nc_px_layout_cache_bytes(&lay) > 32768u) {
+        const size_t cache_bytes = nc_px_layout_cache_bytes(&lay);
+        if (cache_bytes > 32768u) {
             too_big++;
-        } else if (nc_px_layout_save(&lay, path, key) == ESP_OK) {
+        } else if (layout_cache_save(&lay, path, key, cache_bytes) == ESP_OK) {
             built++;
         } else {
-            failed++;
+            failed++;                        // 預算不足／寫入失敗
         }
         nc_px_layout_free(&lay);
     }
@@ -1232,9 +1367,14 @@ static void cache_prebuild_missing(void)
     s_prebuild.too_big = too_big;
     s_prebuild.failed = failed;
     s_prebuild.ms = (uint32_t)((esp_timer_get_time() - t0) / 1000);
-    ESP_LOGI(TAG, "開機預建組合表：已有 %u、新建 %u、太大跳過 %u、失敗 %u（%u ms）",
-             (unsigned)present, (unsigned)built, (unsigned)too_big, (unsigned)failed,
-             (unsigned)((esp_timer_get_time() - t0) / 1000));
+    uint32_t cfiles = 0, cbytes = 0;
+    layout_cache_scan(&cfiles, &cbytes, NULL, 0, NULL);
+    ESP_LOGI(TAG, "開機預建組合表：候選 %u／上限 %u、已有 %u、新建 %u、太大 %u、失敗 %u"
+                  "（%u ms、cache 預算 %u KB、現在 %u 檔／%u B、累計刪 %u）",
+             (unsigned)n, (unsigned)max_modes, (unsigned)present, (unsigned)built,
+             (unsigned)too_big, (unsigned)failed, (unsigned)s_prebuild.ms,
+             (unsigned)(layout_cache_budget() / 1024u), (unsigned)cfiles,
+             (unsigned)cbytes, (unsigned)s_cache_trimmed);
 }
 
 static esp_err_t content_start(const nc_task_res_view_t *res, int nres)
