@@ -11411,3 +11411,14 @@ layout cache 改 name_id＋dictionary CRC；舊 cache 版本++。Phase 1 模組�
 - 舊 `names.ncd`／`*.layout` 已自動清走。
 - `.part`／`.tmp`／`.bak` **唔係 cache**，係 atomic 寫入／last-known-good，
   刻意放喺目標檔旁邊；`.nce`／`.nct` 係編譯模組，亦唔係 cache。
+
+
+---
+
+### 7.337 2026-11-28（cache 自我描述：magic／version／key／CRC）
+
+- `.ncc` 只係 cache 外層分類；真正 type 在 header magic：
+  - `NCNAMES\0`：名稱字典（ver1、count、payload bytes、CRC）；
+  - `NCLAYOUT`：layout（ver3、key、px、naprog/njobs/nruns/nvals、payload bytes、CRC）。
+- loader 先驗 magic／version／key／長度／CRC；錯 type 或舊版會安全重建，唔會誤讀。
+- 文件加 header 對照表；可用 `xxd -l 16` 一眼看 magic。

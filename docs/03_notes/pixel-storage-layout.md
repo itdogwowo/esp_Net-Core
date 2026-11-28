@@ -53,6 +53,54 @@ pixel/cache/<key>.ncc
 - 刪 `names.ncc` = 重建字典；同時清 layout cache，避免舊 name_id 對錯；
 - 舊 `.layout`／`names.ncd` 由新 firmware 自動清走（migration）。
 
+## 3.1 每個 cache 檔會自我描述
+
+`.ncc` 只係「呢個係 cache」的外層分類；**真正 type 喺檔頭 magic**。
+兩個格式都係 little-endian header ＋ payload ＋ CRC：
+
+### `NCNAMES`（名稱字典）
+
+```text
+offset  size  field
+0       8     magic = "NCNAMES\0"
+8       2     version = 1
+10      2     flags
+12      4     count
+16      4     payload_bytes
+20      4     payload_crc
+24      ...   records: id u32 + len u16 + pad u16 + UTF-8 bytes
+```
+
+### `NCLAYOUT`（layout）
+
+```text
+offset  size  field
+0       8     magic = "NCLAYOUT"
+8       4     version = 3
+12      4     key（mode/map/px/assets/ver 的 hash）
+16      4     px
+20      4     naprog
+24      4     njobs
+28      4     nruns
+32      4     nvals
+36      4     payload_bytes
+40      4     crc32(payload)
+44      ...   aprog* + job* + run*
+```
+
+- 同一個 `.ncc` 副檔名，loader 用 `magic` 分辨；
+- `version` 唔夾 → 當舊格式重建；
+- layout 的 `key` 唔夾目前組合 → 重建；
+- payload 長度／CRC 唔對 → 當壞檔重建；
+- 所以改錯名／放錯 type 都唔會靜靜解讀成另一種表。
+
+快速檢查：
+
+```bash
+xxd -l 16 /pixel/cache/names.ncc     # NCNAMES
+xxd -l 16 /pixel/cache/<key>.ncc    # NCLAYOUT
+```
+
 ## 4. 為什麼 `.nce`／`.nct` 唔合併
 
 兩者都係 ncm 編譯產物，但 loader 用副檔名決定：
