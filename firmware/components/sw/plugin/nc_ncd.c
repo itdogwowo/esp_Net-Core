@@ -102,9 +102,11 @@ nc_ncd_err_t nc_ncd_parse(const void *buf, size_t len, uint32_t file_size, nc_nc
     }
 
     const uint16_t px = rd_u16(p + OFF_PX);
-    if (px > NC_NCD_MAX_PX) {
+#if NC_NCD_MAX_PX < 65535u
+    if (px > NC_NCD_MAX_PX) {          // uint16 欄位：上限放寬到 65535 時這段自動消失
         return NC_NCD_ERR_PX;
     }
+#endif
 
     const uint32_t budget = rd_u32(p + OFF_BUDGET);
     if (budget > NC_NCD_MAX_BUDGET_US) {

@@ -26,7 +26,9 @@ extern "C" {
 #define NC_NCD_HDR_SIZE   40
 
 // 上限（超過 = 拒絕載入；不要讓 manifest 決定系統上限）
-#define NC_NCD_MAX_PX       4096
+// `px` 對 effect 而言係「輸出值數」（每值 1 B），唔再綁 4 B/px；
+// 真正放唔放得落由 mem_bytes（線性記憶體）＋ descriptor 檢查決定。
+#define NC_NCD_MAX_PX       65535u
 #define NC_NCD_MAX_MEM      (128 * 1024)
 #define NC_NCD_MAX_FPS      240
 #define NC_NCD_MAX_CMDS     32

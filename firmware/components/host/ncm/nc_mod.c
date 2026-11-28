@@ -464,11 +464,13 @@ static esp_err_t validate_header(const nc_ncm_hdr_t *hdr, const char *name)
                  (unsigned)hdr->mem_bytes, (unsigned)NC_MOD_MAX_LINEAR);
         return ESP_ERR_INVALID_SIZE;
     }
+#if NC_MOD_MAX_PIXELS < 65535u
     if (hdr->px > NC_MOD_MAX_PIXELS) {
         ESP_LOGW(TAG, "%s：px=%u 超過上限 %u", name, (unsigned)hdr->px,
                  (unsigned)NC_MOD_MAX_PIXELS);
         return ESP_ERR_INVALID_SIZE;
     }
+#endif
     return ESP_OK;
 }
 

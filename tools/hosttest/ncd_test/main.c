@@ -188,11 +188,13 @@ int main(void)
     build(buf, s);
     CHECK(nc_ncd_parse(buf, NC_NCD_HDR_SIZE, NC_NCD_HDR_SIZE, &m) == NC_NCD_ERR_FPS,
           "fps=300 被拒");
+    // 2026-11-28：px 對 effect 而言係「輸出值數」（每值 1 B），上限放寬到 uint16；
+    // 真正放唔放得落由 mem_bytes ＋ descriptor 檢查把關（見 pluginEffect_test）。
     s = good_spec();
     s.px = 5000;
     build(buf, s);
-    CHECK(nc_ncd_parse(buf, NC_NCD_HDR_SIZE, NC_NCD_HDR_SIZE, &m) == NC_NCD_ERR_PX,
-          "px=5000 被拒（上限 4096）");
+    CHECK(nc_ncd_parse(buf, NC_NCD_HDR_SIZE, NC_NCD_HDR_SIZE, &m) == NC_NCD_OK,
+          "px=5000 收（值數，唔再綁 4096）");
     s = good_spec();
     s.mem_bytes = 200000;
     build(buf, s);

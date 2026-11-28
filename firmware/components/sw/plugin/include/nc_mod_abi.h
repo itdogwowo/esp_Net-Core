@@ -48,7 +48,8 @@ extern "C" {
 
 // ── 上限（超過就拒絕載入，不會中途撇除）──
 #define NC_MOD_MAX_LINEAR    (128 * 1024)   // 2 pages
-#define NC_MOD_MAX_PIXELS    4096           // fb 最大 16 KB
+// 值數上限（effect：每值 1 B）。fb 放唔放得落由 mem_bytes 同 descriptor 檢查把關。
+#define NC_MOD_MAX_PIXELS    65535u
 
 // host 寫、guest 讀。little-endian。
 typedef struct {
