@@ -218,12 +218,6 @@ if(NOT CMAKE_SCRIPT_MODE_FILE)
 # 應用硬件（device）層預置：由 ncportgen 由 driver.json 生成，一定有 → 1
 target_compile_definitions(${COMPONENT_LIB} PRIVATE NETCORE_HAS_PRESET_DRIVER=1)
     if(NC_ENABLE_TESTS)
-        # main 直接 include 載入器（nc_mod.h）同插件工具（nc_plugin.h）標頭。
-        target_include_directories(${COMPONENT_LIB} PRIVATE
-            "${CMAKE_CURRENT_LIST_DIR}/../components/host/ncm/include"
-            "${CMAKE_CURRENT_LIST_DIR}/../components/sw/plugin/include")
-    endif()
-    if(NC_ENABLE_TESTS)
         target_compile_definitions(${COMPONENT_LIB} PRIVATE NC_ENABLE_TESTS=1 ${NC_TEST_ID_DEFS})
         # main 直接 include 測試指令的標頭（nc_test_action.h）。
         # 不靠 PRIV_REQUIRES：組件掃描階段（component manager）睇唔到本專案的

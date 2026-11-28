@@ -213,7 +213,7 @@ OTA）確實冇基礎功能缺陷；但「支援的晶片都用得」未成立 �
 |---|---|---|---|
 | pixel | `.nce` → canonical frame | `sw/pixel/`（adapter 未寫） | ❌ 未接 |
 | task | `.nct` → `nc_task_t` 的 tick | `tasks/` | 只有 test 用 |
-| 測試 | 掃目錄、arena 帳、`0xF0xx`、status | `test_ncm/`（自註冊） | main 的 6 段 `#ifdef` |
+| 測試 | 掃目錄、arena 帳、status | `components/action/test_ncm_action/`（自註冊） | ✅ 已搬（2026-11-28） |
 
 `nc_mod.c`（1,199 行）今日把上面三樣混在一齊：scan／arena／live／預算（policy）＋
 attach 任務（task）＋status（sys）。搬嘅時候係**拆佢**，唔係搬佢。
@@ -245,9 +245,13 @@ tasks/...            .nct → nc_task_t 的 wrapper
 - [x] 開 `sw/plugin/`：`git mv` `nc_ncd.c`／`nc_meta.c`／`nc_mod_engine.c`（engine → `nc_plugin_wamr.c`）
 - [x] 定義 `nc_plugin_set_arena/set_backend/open/step/close/deinit`；engine 經 opaque handle
 - [x] 剪 `nc_ota_action.h`（暫停閘由呼叫方注入）
-- [ ] `nc_mod.c` 三拆：scan／arena → `test_ncm`；task attach → `tasks/`；status → sys
-- [ ] `.nce` adapter 入 `sw/pixel`（可以之後才做，唔阻塞搬位）
-- [ ] `test_ncm` 自註冊任務＋指令；刪 main 的 6 段 `#ifdef`
+- [x] ncm 接線搬出 main → `components/action/test_ncm_action/`（declare／on_start／
+      post-start／status 全部自註冊）；main 只剩 `nc_task_post_run()`＋`nc_status_append()`
+- [x] sys 接口：`nc_status_register()`（`sys/nc4`）＋`nc_task_post_register()`（`sys/task`）
+- [ ] `.nce` adapter 入 `sw/pixel`（唯一剩項；唔阻塞其他嘢）
+
+> `nc_mod.c` 冇再拆落去：attach 係載入器自己嘅工作（`nc_task_attach()`），
+> 佢已經只依賴 sys API，再拆只會多一層轉手。
 - [x] 取消 `NC_ENABLE_NCM`，只留 `NC_ENABLE_TESTS`（2026-11-28）
 - [ ] 文件：AGENTS §3／§5（NCM 唔再係核心）、`component-layout.md` §1／§3 刪 `host` 角色、
       `behavior-taxonomy.md` §2.4 刪 host 列、`ncm-contract.md`／`ncm-loader.md` 的 path
@@ -261,7 +265,7 @@ tasks/...            .nct → nc_task_t 的 wrapper
 |---|---|---|---|
 | 1 | **RMT 後端** | 唯一「有板都用唔到」的硬缺口；C3 係完全受害者 | 要 C3 板／邏輯分析儀 |
 | 2 | **0x3400 dispatcher** | 細，令外掛功能閉環 | 無 |
-| 3 | **解碼器／宿主分家**（§6.4）：開 `sw/ncd`＋`sw/pixel/mod`＋`test_ncm`，取消 `NC_ENABLE_NCM` | 令 tree 同 code 一致（今日 ncm 已經係 test-only，但文件講佢係核心） | 要先加 `nc_status_register()`；剪 `ota_action` 依賴 |
+| 3 | ~~解碼器／宿主分家＋取消 `NC_ENABLE_NCM`~~ ✅（2026-11-28：`sw/plugin`＋`test_ncm_action`） | `host` 角色已消失；release 零 ncm | 剩 `.nce` adapter |
 | 5 | **量產 project 關 `PXBENCH`**（§5.5）＋清 `effects/` 死代碼 | 一行 sdkconfig／一個目錄；減少 image 同誤解 | 無 |
 | 4 | **OTA rollback** | 風險，唔係功能 | partition 已夠（1.5 MB × 2） |
 | 6 | **PARLIO** | 要 P4 板 | P4 板 |

@@ -184,6 +184,14 @@ int nc_task_start_all(void);
 // ④ 依 layer 開 loop（0 先）。可重複呼叫，已開的跳過。
 int nc_task_boot(void);
 
+// ⑤ start_all 之後的一次性回呼：runtime 載入／引擎 init 要等所有 on_start 走完
+//    （attach 租戶會插入 registry，唔可以同 start_all 同時走）。
+//    component 喺自己 on_start 註冊；main 喺 nc_task_start_all() 之後叫 run 一次。
+#define NC_TASK_POST_MAX 4
+typedef void (*nc_task_post_fn)(void);
+esp_err_t nc_task_post_register(nc_task_post_fn fn);
+void      nc_task_post_run(void);
+
 // 反向：停 loop → on_stop → 收回 provide
 void nc_task_stop_all(void);
 

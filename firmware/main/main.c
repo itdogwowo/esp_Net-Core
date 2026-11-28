@@ -49,14 +49,7 @@
 #define NC_ROUTE_CORE1  ((NC_CORE_COUNT > 1) ? 1 : 0)
 
 // ── 大而冷的緩衝要放哪裡 ─────────────────────────────────────
-// 有 PSRAM 就放 PSRAM；沒有的晶片（C3／C6／H2）退回內部 RAM。
-// 以前這裡寫死 NC_PLAN_PSRAM → C3 開機 plan 直接 fail 2 項（回覆幀 2 x 2,615 B），
-// 結果 NC4 沒有回覆緩衝。宣告端只要用這個 macro 就兩種板都對。
-#if CONFIG_SPIRAM
-#  define NC_PLAN_CLS_BULK NC_PLAN_PSRAM
-#else
-#  define NC_PLAN_CLS_BULK NC_PLAN_INTERNAL
-#endif
+// macro 已搬去 nc_plan.h（2026-11-28）：ncm 接線搬出 main 之後兩邊都要用。
 
 #include <inttypes.h>
 #include <stdarg.h>
@@ -153,11 +146,7 @@ static uint8_t (*const s_usb_kind_lookup)(uint8_t) = nc_port_usb_kind;
 #include "nc_state_file.h"
 #include "nc_state_schema.h"
 #include "nc_file_action.h"
-#ifdef NC_ENABLE_TESTS
-#include "nc_mod.h"
-#include "nc_plugin.h"
-#include "nc_res.h"
-#endif
+#include "nc_status.h"
 #include "nc_wifi.h"
 #include "nc_core.h"
 #ifdef NC_ENABLE_TESTS
@@ -1929,11 +1918,6 @@ static void on_status_get(nc4_ctx_t *ctx, const nc4_frame_t *f)
     if (keys_want(keys, "task") || keys_want(keys, "tasks")) {
         status_add(json, cap, &off, &first, status_put_tasks);
     }
-#ifdef NC_ENABLE_TESTS
-    if (keys_want(keys, "ncm")) {
-        status_add(json, cap, &off, &first, nc_mod_status_json);
-    }
-#endif
     if (keys_want(keys, "wifi")) {
         status_add(json, cap, &off, &first, status_put_wifi);
     }
@@ -1943,6 +1927,9 @@ static void on_status_get(nc4_ctx_t *ctx, const nc4_frame_t *f)
     if (keys_want(keys, "net")) {
         status_add(json, cap, &off, &first, status_put_net);
     }
+    // 元件自註冊的區塊（例如測試能力 ncm）——main 唔識佢哋，
+    // 排喺內建區塊之後；2,600 B 上限照舊（放唔落就截）。
+    nc_status_append(keys, json, cap, &off, &first);
     if (off >= cap - 1) {
         // 放唔落：**唔可以送半截 JSON 出去**（主機一定 parse 失敗）。
         // 寧願回一個合法、講清楚發生咩事的物件，叫主機分批問。
@@ -2308,13 +2295,6 @@ static const nc_task_provide_t s_nc4_provides[] = {
     { .name = "nc4.busstats", .kind = NC_PROVIDE_JSON, .desc = "每條通道的 frames/copied",
       .json = nc4_bus_stats_json },
 };
-
-#ifdef NC_ENABLE_TESTS
-static const nc_task_provide_t s_ncm_provides[] = {
-    { .name = "ncm.info", .kind = NC_PROVIDE_JSON, .desc = "live 模組 / arena / 每個實例",
-      .json = nc_mod_info_json },
-};
-#endif
 
 // ── link 啟用狀態：config 是唯一真相 ──
 // system.json 的 nc4.links[] 每一條有 "enable"（缺省 = 1，向後相容）。
@@ -3680,88 +3660,6 @@ static void link_audit(void)
 }
 
 
-#ifdef NC_ENABLE_TESTS
-// ⑥ ncm（Normal L4）：**POC／原始形態**（2026-11-04 標記）—— arena + 實例表 + render task。
-//    運作方式未定義：核心、幀來源、同緩衝交換的接口都係待規劃，唔好當成正式功能。
-#define NC_MOD_TASK_CORE 1
-// ★ 測試任務的優先級要**低過** UART producer（prio 3）：同級會時間切片（10 ms/tick），
-//   ncm 每 10 ms 醒一次，剛好把 uart.rx 壓住一個 tick —— 1 KB 的 UART RX 環（11 ms）
-//   會因此偶發溢位（實測 15 分鐘 soak 4 次 CRC）。降到 2 之後 uart.rx 永遠先跑。
-//   （release 映像沒有 ncm，這個競爭本來就不存在。）
-#define NC_MOD_TASK_PRIO 2
-
-// 開機框架的掃描結果：B06 掃描 + 合併，B08 才載入 payload；
-// 亦係 arena 大小的來源（掃到幾多 → 宣告幾大）。
-static nc_mod_scan_t s_mod_scan;
-
-static esp_err_t task_ncm_start(const nc_task_res_view_t *res, int n)
-{
-    if (n < 1 || res == NULL) {
-        // 明示：冇宣告 arena = 冇模組，ncm 唔啟動（唔係錯誤，加 .nce 重開機就有）
-        ESP_LOGI(TAG, "ncm：冇模組 → 唔啟動（0 B arena；加 .nce／.nct 後重開機）");
-        return ESP_ERR_NOT_FOUND;
-    }
-    if (res[0].ptr == NULL) {
-        return ESP_ERR_NO_MEM;
-    }
-    nc_mod_set_task_placement(NC_MOD_TASK_CORE, NC_MOD_TASK_PRIO);
-    const esp_err_t e = nc_mod_init(res[0].ptr, res[0].len);
-    if (e != ESP_OK) {
-        return e;
-    }
-    // 掃目錄不在這裡做：載入 .nct / .nce = attach 租戶 = 會插入 registry，
-    // 而此刻 nc_task_start_all() 正在走同一張表（插入會搬動它）。
-    // main 在 start_all 之後呼叫 nc_mod_scan("/data/pixel/effects")。
-    return ESP_OK;
-}
-
-static const nc_task_loop_t s_ncm_loops[] = {
-    { .name = "ncm", .fn = nc_mod_task, .arg = NULL,
-      // 8 KB：tick 會經 wasm_runtime_call_wasm 入 WAMR 直譯器（C 棧），
-      // 4 KB 對 task_tick + native（print/gpio）太貼。exec env 自己的 operand
-      // stack 另計（WAMR_CALL_STACK）。
-      .stack = 8192, .prio = NC_MOD_TASK_PRIO, .core = NC_MOD_TASK_CORE,
-      // period_ms = 0：幀週期由 manifest 的 fps 決定，nc_mod_task 自己延遲。
-      // 兩邊都延遲會變成兩倍週期。
-      .layer = 3, .period_ms = 0 },
-};
-
-static int task_ncm_declare(nc_task_res_t *out, int max)
-{
-    if (max < 1) {
-        return 0;
-    }
-    // 2026-11-27：由「掃描結果」決定 arena 大小（唔再無條件預留 512 KB）。
-    // 掃到 N 個模組、檔案合計 B bytes → arena = clamp(B + N×1 KB, 32 KB, 512 KB)。
-    const size_t arena = nc_mod_arena_bytes(&s_mod_scan);
-    if (arena == 0) {
-        ESP_LOGI(TAG, "ncm arena：0 個模組 → 唔宣告（省 32 KB PSRAM；加 .nce 後重開機才要）");
-        return 0;       // ncm 任務冇資源 → 唔啟動（task_ncm_start 會講明）
-    }
-    ESP_LOGI(TAG, "ncm arena：掃到 %d 個模組、檔案 %u B → 宣告 %u B（上限 %u B）",
-             s_mod_scan.count, (unsigned)s_mod_scan.bytes, (unsigned)arena,
-             (unsigned)NC_MOD_ARENA_MAX);
-    out[0] = (nc_task_res_t){
-        .name = "ncm.arena", .bytes = arena,
-        .cls = NC_PLAN_CLS_BULK, .align = 32,
-        // 整塊 arena 是「一格」的緩衝區（`.nct` / `.nce` 之後用 nc_buf_carve 由它切）
-        .slot_bytes = arena, .n = 1, .flags = 0,
-    };
-    return 1;
-}
-
-static const nc_task_t s_task_ncm = {
-    // ncm 是載入器／renderer，屬核心基建（房東），不是租戶：唔寫入 tasks.json。
-    .name = "ncm", .kind = NC_TASK_SYSTEM, .level = 4, .order = 30,
-    .declare = task_ncm_declare, .on_start = task_ncm_start,
-    .loops = s_ncm_loops, .nloops = sizeof(s_ncm_loops) / sizeof(s_ncm_loops[0]),
-    .provides = s_ncm_provides,
-    .nprovides = sizeof(s_ncm_provides) / sizeof(s_ncm_provides[0]),
-};
-NC_TASK_AUTO_REG(ncm, &s_task_ncm);
-
-
-#endif
 #if NC_HAS_ETH
 // ── P4：RMII 乙太網（IP101）──
 // 腳位的真相在 ports/P4/ESP32-P4-ETH/data/config/hardware.json 的 ETH 段。
@@ -4479,17 +4377,8 @@ static esp_err_t ph_declare(void)
     // （量測用 0xF0xx 指令＋nc_net_raw，見 commands.md）。
 #endif
 
-#ifdef NC_ENABLE_TESTS
-    // ① 掃描 .nct / .nce：只讀 header + manifest + meta，不碰 payload / arena。
-    // ② 建外部任務資源表格：resources.json（系統預設）+ 模組 provides/requires。
-    // ③ 合併 tasks.json：缺的補 [0,0]，已有的套 level / affinity。
-    // ④ 之後才 declare_all —— 模組的 config 在啟動前就定好。
-    nc_mod_scan_all(&s_mod_scan);
-    nc_res_build();
-    nc_mod_declare_res(&s_mod_scan);
-    nc_res_merge();
-    nc_mod_merge_cfg(&s_mod_scan);
-#endif
+    // 外掛模組（.nct／.nce）的掃描／arena 宣告，由元件喺自己嘅 declare() 做
+    // （見 components/action/test_ncm_action）——main 唔知有 ncm。
     nc_task_declare_all();       // → nc_plan_declare + 帳本檢查
     return ESP_OK;
 }
@@ -4534,63 +4423,15 @@ static esp_err_t ph_commit(void)
 }
 
 // 開機階段：start
-#ifdef NC_ENABLE_TESTS
-// ncm 的開機載入：引擎 init + 模組實例化。
-// （整個區塊包喺 NC_ENABLE_TESTS：release 建置冇 ncm 模組／冇 WAMR 依賴。）
-//
-// **為什麼要另開 task**：main task 的棧只有 3,072 B（實測峰值 2.1 KB）。
-// WAMR 的 full_init／wasm_runtime_load／instantiate 會用幾 KB C 棧，
-// 喺 main task 度做會 stack overflow → panic → reboot loop，而且因為
-// console=none（S3 走 OTG），開機前段冇 log，症狀只係「USB 唔見咗」。
-// 用一個一次性的 8 KB task 做，做完即走，棧由 heap 來。
-// 仍然喺 B09（USB）之前 synchronous 完成：FAT 之後要交畀 host，模組要在
-// 交出去之前讀完。
-static SemaphoreHandle_t s_ncm_boot_done;
-
-static void ncm_boot_task(void *arg)
-{
-    (void)arg;
-    nc_plugin_set_pause_check(nc_ota_action_paused);   // OTA 期間唔跑插件
-    const esp_err_t berr = nc_plugin_set_backend(nc_plugin_wamr_backend());
-    if (berr == ESP_OK) {
-        const int n = nc_mod_load_all(&s_mod_scan);
-        ESP_LOGI(TAG, "ncm 模組載入：%d 個（%d 個被拒）", n, s_mod_scan.bad);
-    } else {
-        ESP_LOGW(TAG, "WAMR backend 起唔到（%s）→ 模組只登記、唔跑",
-                 esp_err_to_name(berr));
-        (void)nc_mod_load_all(&s_mod_scan);
-    }
-    if (s_ncm_boot_done != NULL) {
-        xSemaphoreGive(s_ncm_boot_done);
-    }
-    vTaskDelete(NULL);
-}
-#endif  // NC_ENABLE_TESTS（ncm 引擎／模組載入）
 
 static esp_err_t ph_start(void)
 {
     // ── ③ 任務啟動：資源 → on_start → 指令 → 準備 loop（還不開）──
     nc_task_start_all();
 
-    // ④ 效果租戶：載入 .nct / .nce → 解碼 manifest → attach 到 registry
-    //    （放在 start_all 之後：attach 會插入 registry，不能跟 start_all 同時走）
-#ifdef NC_ENABLE_TESTS
-    if (nc_task_started("ncm")) {
-        // ③ 載入 payload（arena 已 commit）。引擎 init 同實例化都喺 8 KB task 做，
-        //    原因見 ncm_boot_task 上面的註解。模組的 tasks.json 條目已在 B06 補寫；
-        //    不再呼叫 nc_task_sync_cfg()，否則 runtime 任務的 cfg_seen=false 會再補一次。
-        s_ncm_boot_done = xSemaphoreCreateBinary();
-        if (s_ncm_boot_done != NULL &&
-            xTaskCreate(ncm_boot_task, "ncm.boot", 8192, NULL, 3, NULL) == pdPASS) {
-            xSemaphoreTake(s_ncm_boot_done, portMAX_DELAY);
-        } else {
-            ESP_LOGW(TAG, "ncm.boot task 開唔到 → 喺 main task 直接載入（棧風險）");
-            ncm_boot_task(NULL);
-        }
-        vSemaphoreDelete(s_ncm_boot_done);
-        s_ncm_boot_done = NULL;
-    }
-#endif
+    // ④ 元件自註冊的 post-start（例如測試能力 ncm：載入 .nct / .nce 並 attach）。
+    //    必須喺 start_all 之後：attach 會插入 registry，唔可以同 start_all 同時走。
+    nc_task_post_run();
 
     {
         nc_task_ledger(s_boot_txt, sizeof(s_boot_txt));

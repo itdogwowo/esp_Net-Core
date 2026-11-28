@@ -400,6 +400,7 @@ esp_Net-Core/
 │  ├─ components/sys/task*/  任務模型＋管理器
 │  ├─ components/sys/mem/    nc_buf、plan arena
 │  ├─ components/host/ncm/   載入器政策：掃描／arena／live／預算／attach（test-only）
+│  ├─ components/action/test_ncm_action/  ncm 的開機接線：declare/post-start/status（test-only）
 │  ├─ components/action/     file／ota／test 指令表
 │  ├─ components/sw/pixel/   環、codec、layout、engine（純 C）
 │  ├─ components/sw/plugin/  插件工具：解碼 .nct／.nce ＋ 實例化 ＋ tick（唯一識 WAMR）
@@ -451,14 +452,16 @@ esp_Net-Core/
 - Log 例：`boot[B02] storage+cfg 126.92 ms ok`；摘要 `B01 9.66 | B02 126.92 | …`。
 - **B02 總閘**：storage+cfg 失敗 → CONFIG 唔 give；但壞 config ≠ storage 失敗，
   degraded 仍會開機（核心任務照跑）。
-- 核心任務（`nc4`／`net`／`core`／NCM 引擎）**不受 `tasks.json` 管**；
+- 核心任務（`nc4`／`net`／`core`）**不受 `tasks.json` 管**；
+  NCM 引擎唔再係核心：佢係 **test-only** component（`action/test_ncm_action`），release 完全冇。
   config 只管租戶。
 
 ---
 
 ## 5. 任務模型（房東／租戶）
 
-- **核心（房東）**：`nc4`、`net`、`core`、NCM 引擎；`kind=NC_TASK_SYSTEM`；
+- **核心（房東）**：`nc4`、`net`、`core`；`kind=NC_TASK_SYSTEM`；
+  （NCM 引擎自 2026-11-28 起係測試 component，唔喺核心清單。）
   C 宣告，唔寫入 `tasks.json`。
 - **租戶**：一般任務、`.nct` 載入的模組；`kind=NC_TASK_NORMAL`／`EFFECT`；
   `tasks.json` 管 `level`／`affinity`。
@@ -475,7 +478,8 @@ esp_Net-Core/
 ### `.nct` / `.nce`
 
 - `/data/pixel/effects/*.nce`（效果）、`/data/tasks/*.nct`（任務）。
-- 掃到 → NCM 引擎 `nc_mod_load()` → 驗證 → 切 arena → `nc_task_attach()`。
+- 掃到 → 載入器 `nc_mod_load()` → 驗證 → 切 arena → `nc_task_attach()`。
+  接去開機框架那一段住 `components/action/test_ncm_action/`（tasks-only）。
 - 改容器格式／manifest 先讀 `docs/03_notes/ncm-contract.md`、`ncm-loader.md`。
 
 ---

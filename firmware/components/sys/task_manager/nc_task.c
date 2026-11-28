@@ -286,11 +286,41 @@ static tm_slot_t *find_slot(const char *name)
     return NULL;
 }
 
+// ── start_all 之後的一次性回呼（見 nc_task.h ⑤）──
+static nc_task_post_fn s_post[NC_TASK_POST_MAX];
+static int  s_npost;
+static bool s_post_ran;
+
 void nc_task_reset(void)
 {
     memset(s_slots, 0, sizeof(s_slots));
     memset(s_provs, 0, sizeof(s_provs));
     s_count = 0;
+    s_npost = 0;
+    s_post_ran = false;
+}
+
+esp_err_t nc_task_post_register(nc_task_post_fn fn)
+{
+    if (fn == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (s_post_ran || s_npost >= NC_TASK_POST_MAX) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    s_post[s_npost++] = fn;
+    return ESP_OK;
+}
+
+void nc_task_post_run(void)
+{
+    if (s_post_ran) {
+        return;
+    }
+    s_post_ran = true;
+    for (int i = 0; i < s_npost; i++) {
+        s_post[i]();
+    }
 }
 
 static esp_err_t insert_slot(const nc_task_t *t, bool runtime)

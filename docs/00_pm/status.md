@@ -11548,3 +11548,26 @@ layout cache 改 name_id＋dictionary CRC；舊 cache 版本++。Phase 1 模組�
 - `bash tools/hosttest/run_all.sh` → **28/28**（新增 2 支全綠）。
 - `--tests` build ✔；release build ✔ `esp_net_core.bin` 799,680 B（同上一節一樣）。
 - 未上板：WAMR 實例化／tick 仍然未驗。
+
+---
+
+### 7.345 2026-11-28（ncm 接線搬出 main：`test_ncm_action`＋兩個 sys 接口）
+
+**搬走嘅嘢（main.c 冇再出現任何 `nc_mod_*`／`nc_plugin_*`）**
+- 新 `components/action/test_ncm_action/nc_ncm_boot.c`：掃描／arena 宣告（declare）、
+  `nc_mod_init`（on_start）、8 KB boot task（載入）、task 登記（`NC_TASK_AUTO_REG`）、
+  `ncm.info` provide、`"ncm"` status 區塊 —— 全部「元件自己現身」。
+- main 只剩兩行通用接線：`nc_task_post_run()`（start_all 之後）＋
+  `nc_status_append(keys, …)`（STATUS_GET 尾）。
+
+**新嘅兩個 sys 接口**
+- `sys/nc4/include/nc_status.h`：`nc_status_register(key, fn)`＋`nc_status_append()`；
+  provider 回「值」JSON，外層 key 由工具補；重名／滿額明示拒絕。
+  呢個係「元件唔使經 main 都可以有 status」的唯一辦法。
+- `sys/task`：`nc_task_post_register()`／`nc_task_post_run()` —— start_all 之後的一次性
+  回呼（runtime 載入要等 registry 唔再被搬動）。
+- `NC_PLAN_CLS_BULK` 由 main.c 搬入 `nc_plan.h`（ncm 接線搬出後兩邊都要用）。
+
+**驗證（idf=v6.1.1 macOS）**
+- host tests **28/28**；`--tests` build ✔；release build ✔ **799,376 B**（−304 B）。
+- 未上板：模組載入／tick／status 真機未驗。

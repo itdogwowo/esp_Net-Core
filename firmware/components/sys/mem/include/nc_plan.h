@@ -26,6 +26,20 @@ typedef enum {
     NC_PLAN_CLASSES
 } nc_plan_class_t;
 
+// 大而冷的緩衝要放哪裡：有 PSRAM 就 PSRAM，冇（C3／C6／H2）退內部 RAM。
+// 宣告端用呢個 macro 兩種板都對；寫死 NC_PLAN_PSRAM 會令 C3 開機 plan 直接 fail。
+// （原本住 main.c；2026-11-28 搬上來，因為 ncm 接線搬出 main 之後兩邊都要用。）
+#if defined(ESP_PLATFORM)
+#include "sdkconfig.h"
+#endif
+#if !defined(NC_PLAN_CLS_BULK)
+#  if defined(CONFIG_SPIRAM) && CONFIG_SPIRAM
+#    define NC_PLAN_CLS_BULK NC_PLAN_PSRAM
+#  else
+#    define NC_PLAN_CLS_BULK NC_PLAN_INTERNAL
+#  endif
+#endif
+
 typedef struct {
     const char *service;      // 「誰要的」：nc4 / probe / pixel …
     const char *name;         // 邏輯名："usb.rx" / "probe.hub"
