@@ -10,6 +10,29 @@
 //   熱路徑只讀 runs ＋ 每條值流。
 #include "nc_px_layout.h"
 
+// kept==0 的失敗路徑會 nc_px_layout_free(out)（清零），計數會消失 →
+// 失敗前先快照，由 paint 用 nc_px_layout_last_skip() 讀。
+static uint32_t s_last_skip[7];
+
+uint32_t nc_px_layout_last_skip(uint32_t i)
+{
+    return (i < 7u) ? s_last_skip[i] : 0u;
+}
+
+static void snapshot_skips(const nc_px_layout_t *out)
+{
+    if (out == NULL) {
+        return;
+    }
+    s_last_skip[0] = out->skip_no_asset;
+    s_last_skip[1] = out->skip_no_group;
+    s_last_skip[2] = out->skip_bad_write;
+    s_last_skip[3] = out->skip_empty;
+    s_last_skip[4] = out->skip_asset_full;
+    s_last_skip[5] = out->skip_prog;
+    s_last_skip[6] = out->skip_oom;
+}
+
 // `.nce` 的輸出值數由信箱提供；用 hook 避免 host 測試要 link nc_px_nce.c
 // （nc_px_nce.c 自己以 constructor 註冊）。冇註冊 = 0 → 照舊 skip。
 static uint32_t (*s_nce_values)(void);
@@ -544,6 +567,7 @@ esp_err_t nc_px_layout_build(const nc_px_mode_t *mode, const nc_px_map_t *map,
 
     out->njobs = kept;
     if (kept == 0) {
+        snapshot_skips(out);
         lfree(pool);
         lfree(tmp);
         lfree(counts);

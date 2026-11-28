@@ -11902,3 +11902,27 @@ status ncm → arena 32768, used 81, live "mini", backend wamr, frames 增加
   而 `mapping=led16`＋`mini` 可以出 aprog。下一步：
   1) 確認 NOT_FOUND 係嚟自 `find_map("t16")` 定 `layout_build`；
   2) 若係 map 表：查 map 掃描是否只收 `registry` 列出／id 衝突（t16 id=30）。
+
+---
+
+### 7.365 2026-11-28（重大：`.nce` framebuffer 一直被 memset 清走）
+
+**根因**：`engine_open()` 先寫 descriptor 並設 `slot->fb_bytes`，但**之後**才
+`memset(slot, 0, sizeof(*slot))`（正式初始化）→ `fb_bytes` 被清成 0 →
+`engine_frame()` 永遠回 `ESP_ERR_NOT_SUPPORTED` → ncm 從來冇 publish →
+`nc_px_nce_bytes()==0` → layout 對 NCE aprog 回 `skip_prog`（真機 `skips prog=1`）。
+
+**修法**：`fb_bytes` 先存 local，`memset` 之後再寫入 slot。
+
+**真機驗證**
+```
+plugin.wamr: 開 mini k=2 px=1024 task=0
+ncm: pub: err=ESP_OK fb=0x… bytes=1024 px=1024     ← 之前 NOT_SUPPORTED
+px_paint: build: mode=minitest5 nentry=1 px=4096    ← 之前 layout err=NOT_FOUND
+```
+
+**附帶修好**
+- `intern_name` 零 malloc（同一份 mode 時而 16 項時而 15 項）。
+- mode 切換回覆加 `"n":<entry 數>`（診斷）。
+- layout 失敗短行 log（`layout err=`、`skips a=…g=…`），長行會被 nclog 截斷。
+- `nc_plugin_wamr_open_info()` 回報最後一次 open 的 kind/px/mem。

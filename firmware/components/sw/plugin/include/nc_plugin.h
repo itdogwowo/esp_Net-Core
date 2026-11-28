@@ -135,6 +135,8 @@ bool nc_plugin_paused(void);
 const nc_plugin_backend_t *nc_plugin_wamr_backend(void);
 // 診斷用：WAMR backend 最後一個失敗階段（"wasm_load" / "instantiate" / …）
 const char *nc_plugin_wamr_last_error(void);
+// 診斷：最後一次 engine_open 的輸入（kind/px/mem）
+const char *nc_plugin_wamr_open_info(void);
 
 #ifdef __cplusplus
 }

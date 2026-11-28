@@ -1168,6 +1168,9 @@ static esp_err_t content_apply_mode_locked(const nc_px_mode_t *mode)
             nc_px_layout_free(&s_content.layout);
         }
         const int64_t tb0 = esp_timer_get_time();
+        ESP_LOGI(TAG, "build: mode=%s nentry=%u px=%u", 
+                 nc_px_name_dict_global_str(mode->name_id),
+                 (unsigned)mode->nentry, (unsigned)s_content.px);
         pe = nc_px_layout_build(mode, map, s_content.assets, &inv, 1, &s_content.layout);
         const uint32_t build_us = (uint32_t)(esp_timer_get_time() - tb0);
         if (pe == ESP_OK && s_content.layout.njobs > 0) {
@@ -1190,6 +1193,11 @@ static esp_err_t content_apply_mode_locked(const nc_px_mode_t *mode)
     }
     if (pe != ESP_OK || s_content.layout.njobs == 0) {
         ESP_LOGW(TAG, "layout err=%s", esp_err_to_name(pe));   // 短行（長行會被截斷）
+        ESP_LOGW(TAG, "skips a=%u g=%u w=%u e=%u full=%u prog=%u oom=%u",
+                 (unsigned)nc_px_layout_last_skip(0), (unsigned)nc_px_layout_last_skip(1),
+                 (unsigned)nc_px_layout_last_skip(2), (unsigned)nc_px_layout_last_skip(3),
+                 (unsigned)nc_px_layout_last_skip(4), (unsigned)nc_px_layout_last_skip(5),
+                 (unsigned)nc_px_layout_last_skip(6));
         ESP_LOGW(TAG, "layout 失敗：mode=%s map=%s jobs=%u runs=%u skipped=%u"
                       "（effect 唔存在 %u、group 唔存在 %u、write 唔識 %u、空 %u、"
                       "效果超上限 %u、program 壞 %u、記憶體 %u）（%s）",
@@ -1778,10 +1786,12 @@ static void on_showmode(nc4_ctx_t *ctx, const nc4_frame_t *f)
     }
     const nc_px_mode_tbl_t *tbl = nc_px_mode_table();
     bool found = false;
+    uint32_t nent = 0;
     if (tbl != NULL) {
         for (uint32_t i = 0; i < tbl->n; i++) {
             if (tbl->item[i].id == id) {
                 found = true;
+                nent = tbl->item[i].nentry;   // 診斷：mode 表裡實際幾條 entry
                 break;
             }
         }
@@ -1793,8 +1803,8 @@ static void on_showmode(nc4_ctx_t *ctx, const nc4_frame_t *f)
     s_pending_mode = id;
     char j[160];
     (void)snprintf(j, sizeof(j),
-                   "{\"ok\":1,\"queued\":%u,\"mode\":\"%s\",\"white\":%u}",
-                   (unsigned)id, s_content.mode_name, (unsigned)s_content.white);
+                   "{\"ok\":1,\"queued\":%u,\"n\":%u,\"mode\":\"%s\",\"white\":%u}",
+                   (unsigned)id, (unsigned)nent, s_content.mode_name, (unsigned)s_content.white);
     reply_json(ctx, NC4_CMD_SHOWMODE_RSP, j);
 }
 

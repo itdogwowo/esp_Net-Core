@@ -159,6 +159,8 @@ uint32_t nc_px_layout_apply12(const nc_px_layout_t *l, uint16_t *const *vals, ui
 // `.nce` 的輸出值數（信箱大小）由 nc_px_nce.c 以 constructor 註冊；
 // host 測試冇註冊就當 0（layout 照舊 skip，有計數）。
 void nc_px_layout_set_nce_values(uint32_t (*fn)(void));
+// 診斷：上一次 build 失敗（kept==0）時的 skip 計數（0=a 1=g 2=w 3=e 4=full 5=prog 6=oom）
+uint32_t nc_px_layout_last_skip(uint32_t i);
 
 uint32_t nc_px_aprog_vals(const nc_px_aprog_t *ap, uint32_t step, uint16_t *out, uint32_t cap);
 

@@ -53,6 +53,7 @@ typedef struct {
 static wamr_slot_t s_slots[NC_PLUGIN_MAX];
 static bool s_rt_up;
 static const char *s_last_err = "-";
+static char s_open_info[96] = "-";
 
 // 正在執行的插件：只給 log 前綴用（WAMR 的 native API 冇「模組自訂 user data」）。
 static wamr_slot_t *s_current;
@@ -420,9 +421,15 @@ static esp_err_t engine_open(nc_plugin_t *out, const nc_plugin_src_t *src)
     }
 
     const bool is_task = (src->kind == NC_NCD_KIND_TASK);
+    (void)snprintf(s_open_info, sizeof(s_open_info), "%s k=%u px=%u mem=%u task=%d",
+                   src->name, (unsigned)src->kind, (unsigned)src->px,
+                   (unsigned)src->mem_bytes, (int)is_task);
 
     // ABI v0：descriptor 寫在 guest 線性記憶體 offset 0（host 寫、guest 讀）。
     // effect 模組靠它才知道 px／framebuffer 在哪；task 模組唔用。
+    // ⚠ 用 local 記住 fb_bytes：下面 `memset(slot, 0, …)` 會清走 slot 的欄位，
+    //   以前直接寫 slot->fb_bytes 就被清成 0 → frame() 永遠 NOT_SUPPORTED。
+    uint32_t fb_bytes = 0;
     if (!is_task) {
         nc_mod_desc_t desc;
         if (!nc_plugin_desc_build(src->px, src->mem_bytes, &desc)) {
@@ -442,7 +449,7 @@ static esp_err_t engine_open(nc_plugin_t *out, const nc_plugin_src_t *src)
             return ESP_ERR_INVALID_STATE;
         }
         memcpy(base, &desc, sizeof(desc));       // 0..28（28..32 係 padding）
-        slot->fb_bytes = desc.fb_bytes;
+        fb_bytes = desc.fb_bytes;
     }
 
     const char *tick_name = is_task ? NC_MOD_EXPORT_TASK_TICK : NC_MOD_EXPORT_RENDER;
@@ -463,6 +470,7 @@ static esp_err_t engine_open(nc_plugin_t *out, const nc_plugin_src_t *src)
     slot->env = env;
     slot->fn_tick = fn_tick;
     slot->is_task = is_task;
+    slot->fb_bytes = fb_bytes;               // ← 一定要喺 memset 之後
     slot->used = true;
     // name 抄一份：src 的指標（loader 的 nc_mod_t）唔保證活過插件。
     size_t n = 0;
@@ -584,6 +592,11 @@ static const nc_plugin_backend_t s_wamr_backend = {
     .close = engine_close,
     .deinit = engine_deinit,
 };
+
+const char *nc_plugin_wamr_open_info(void)
+{
+    return s_open_info;
+}
 
 const char *nc_plugin_wamr_last_error(void)
 {

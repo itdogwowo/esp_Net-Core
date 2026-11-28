@@ -48,7 +48,16 @@ static void ncm_nce_publish(void *plugin)
 {
     const uint8_t *fb = NULL;
     uint32_t bytes = 0;
-    if (plugin == NULL || nc_plugin_frame((nc_plugin_t)plugin, &fb, &bytes) != ESP_OK) {
+    static uint32_t dbg_n;
+    const esp_err_t fe = (plugin == NULL)
+                             ? ESP_ERR_INVALID_ARG
+                             : nc_plugin_frame((nc_plugin_t)plugin, &fb, &bytes);
+    if ((dbg_n++ % 2000u) == 0u) {
+        ESP_LOGI(TAG, "pub: err=%s ready=%d p=%p fb=%p bytes=%u px=%u",
+                 esp_err_to_name(fe), (int)nc_plugin_ready(), plugin,
+                 (const void *)fb, (unsigned)bytes, (unsigned)nc_px_nce_bytes());
+    }
+    if (fe != ESP_OK) {
         return;
     }
     if (fb == NULL || bytes == 0) {
@@ -184,6 +193,7 @@ static void ncm_loop(void *arg)
     static bool logged;
     if (!logged) {
         logged = true;
+        ESP_LOGI(TAG, "open: %s", nc_plugin_wamr_open_info());
         ESP_LOGI(TAG, "ncm boot：scan n=%d bad=%d bytes=%u loaded=%d msg=%s",
                  s_scan.count, s_scan.bad, (unsigned)s_scan.bytes,
                  s_loaded, s_load_msg[0] ? s_load_msg : nc_plugin_wamr_last_error());
