@@ -1189,6 +1189,7 @@ static esp_err_t content_apply_mode_locked(const nc_px_mode_t *mode)
         }
     }
     if (pe != ESP_OK || s_content.layout.njobs == 0) {
+        ESP_LOGW(TAG, "layout err=%s", esp_err_to_name(pe));   // 短行（長行會被截斷）
         ESP_LOGW(TAG, "layout 失敗：mode=%s map=%s jobs=%u runs=%u skipped=%u"
                       "（effect 唔存在 %u、group 唔存在 %u、write 唔識 %u、空 %u、"
                       "效果超上限 %u、program 壞 %u、記憶體 %u）（%s）",

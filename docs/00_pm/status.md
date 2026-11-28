@@ -11876,3 +11876,16 @@ status ncm → arena 32768, used 81, live "mini", backend wamr, frames 增加
   RGB 漸變（mini 的 data segment：R=255、G=0..255、B=64 交錯）。
   備註：`0xF06B SHOWFRAME` 對 4096 px 會回 `{"err":"big"}`，睇唔到 hex；
   要細 mapping 才可以直接驗顏色。
+
+---
+
+### 7.363 2026-11-28（NCE 入 plan 確認；細 mapping 測試遇 NOT_FOUND）
+
+- `minitest2`（16 entry：15 個 program 效果 + 1 個 `mini`）→
+  `layout jobs=16 runs=16 aprog=16`；led16test 本身係 16 個 distinct program 效果
+  = 16 aprog → minitest2 有 16 aprog 即係 **mini 已入 distinct/aprog**。
+- 另做 `/data/pixel/map/t16.json`（1 組 16 px）＋ `minitest3`（單條 mini）
+  → `layout err=ESP_ERR_NOT_FOUND`。加短行 log 才睇到（長行被 nclog 截斷）。
+  `NOT_FOUND` = `nent==0`，即係 mode 的 map 條目**冇入到 nentry**（hooks 冇 fire）。
+  下一刀：查細 mapping 下 mode 解析為何 0 entry（可能 mapping t16 未入表／
+  掃描次序：map 檔先於 modes？）。
