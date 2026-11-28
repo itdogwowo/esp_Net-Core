@@ -13,6 +13,7 @@
   registry.json   來源
   cache/          names.ncc（名稱字典 cache）
                   <key>.ncc（layout cache）
+                  bench_layout.ncc（只喺跑 layout bench 時出現）
 ```
 
 ## 2. 副檔名

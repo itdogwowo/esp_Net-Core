@@ -11400,3 +11400,14 @@ layout cache 改 name_id＋dictionary CRC；舊 cache 版本++。Phase 1 模組�
 - 刪 names.ncc → reload 清 4 個舊 cache、重建、下次 4/4 hit。
 - `.json` 來源、`.nce/.nct` 編譯模組、`.part/.tmp/.bak` 暫存、`.bin` firmware 保持分類。
 - 文件：`docs/03_notes/pixel-storage-layout.md`。
+
+---
+
+### 7.336 2026-11-28（所有 pixel cache 集中在 `/pixel/cache`）
+
+- runtime cache：`names.ncc`＋`<key>.ncc` 全部喺 `/pixel/cache`。
+- bench 診斷 cache 亦由 `/data/bench_layout.layout` 搬去
+  `/pixel/cache/bench_layout.ncc`；只剩一個 cache 目錄。
+- 舊 `names.ncd`／`*.layout` 已自動清走。
+- `.part`／`.tmp`／`.bak` **唔係 cache**，係 atomic 寫入／last-known-good，
+  刻意放喺目標檔旁邊；`.nce`／`.nct` 係編譯模組，亦唔係 cache。
