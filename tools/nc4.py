@@ -77,11 +77,18 @@ def main() -> int:
                       file=sys.stderr)
                 return 1
             n = struct.unpack_from("<H", resp)[0]
-            text = resp[2:2 + n].decode("utf-8", "replace")
+            body = resp[2:2 + n]
+            # 協議尾段（schema: STATUS_RSP = status_json + more(u8) + timeout_ms(u16)）
+            more = body[n - 3] if n >= 3 else 0
+            tmo = struct.unpack_from("<H", body, n - 2)[0] if n >= 3 else 0
+            text = body[:max(0, n - 3)].decode("utf-8", "replace")
             try:
                 print(json.dumps(json.loads(text), indent=2, ensure_ascii=False))
             except json.JSONDecodeError:
                 print(text)
+            if more:
+                print(f"[more=1 timeout_ms={tmo}] 仲有資料；用 keys=… 分批問",
+                      file=sys.stderr)
             return 0
 
         elif args.action == "raw":

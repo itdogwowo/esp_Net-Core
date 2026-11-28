@@ -1884,7 +1884,9 @@ static void on_status_get(nc4_ctx_t *ctx, const nc4_frame_t *f)
     // 整份 JSON 砌在**回覆幀的 DATA 區**（呼叫者棧上），冇 static、冇中間 part 緩衝。
     nc4_reply_t r;
     char *json = reply_open(&r, ctx, NC4_CMD_STATUS_RSP);
-    const size_t cap = NC4_REPLY_JSON_MAX + 1;
+    // 尾段 3 B：more(u8) ＋ timeout_ms(u16 LE)。JSON **永遠唔准食到佢**
+    // （協議見 docs/03_notes/reply-paging.md；schema 在 mp_Net-Core/slave/schema/status.json）。
+    const size_t cap = NC4_REPLY_JSON_MAX + 1 - 3;
     size_t off = 0;
     bool first = true;
 
@@ -1930,9 +1932,12 @@ static void on_status_get(nc4_ctx_t *ctx, const nc4_frame_t *f)
     // 元件自註冊的區塊（例如測試能力 ncm）——main 唔識佢哋，
     // 排喺內建區塊之後；2,600 B 上限照舊（放唔落就截）。
     nc_status_append(keys, json, cap, &off, &first);
+    uint8_t more = 0;
     if (off >= cap - 1) {
         // 放唔落：**唔可以送半截 JSON 出去**（主機一定 parse 失敗）。
-        // 寧願回一個合法、講清楚發生咩事的物件，叫主機分批問。
+        // 寧願回一個合法、講清楚發生咩事的物件，叫主機分批問；
+        // more=1 話畀主機「仲有」，但 cursor 未做，主機照舊自己拆 keys。
+        more = 1;
         off = 0;
         jappend(json, cap, &off,
                 "{\"truncated\":1,\"cap\":%u,"
@@ -1941,7 +1946,12 @@ static void on_status_get(nc4_ctx_t *ctx, const nc4_frame_t *f)
     } else {
         jappend(json, cap, &off, "}");
     }
-    reply_send(&r, off);
+    // 協議尾段：more(u8) ＋ timeout_ms(u16 LE)。timeout 暫時 0（未開半雙工窗口）。
+    uint8_t *tail = (uint8_t *)json + off;
+    tail[0] = more;
+    tail[1] = 0;
+    tail[2] = 0;
+    reply_send(&r, off + 3);
 }
 
 
