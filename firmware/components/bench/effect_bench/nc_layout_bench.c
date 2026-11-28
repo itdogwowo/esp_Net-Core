@@ -78,7 +78,8 @@ static void reply_json(nc4_ctx_t *ctx, const char *json)
 static void fill_asset(nc_px_asset_t *a, uint16_t nvals)
 {
     memset(a, 0, sizeof(*a));
-    snprintf(a->name, sizeof(a->name), "lbench");
+    a->name_id = nc_px_name_dict_global_intern("lbench", 6);
+    a->name = nc_px_name_dict_global_str(a->name_id);
     a->kind = NC_PX_ASSET_PROGRAM;
     a->pixel_hint = nvals;
     a->step = 3;
@@ -101,7 +102,10 @@ static void build_groups(nc_px_group_t *groups, nc_px_group_sel_t *sels,
         nc_px_group_t *g = &groups[i];
         memset(g, 0, sizeof(*g));
         g->id = (uint16_t)(i + 1);
-        snprintf(g->name, sizeof(g->name), "g%u", (unsigned)i);
+        char nb[16];
+        snprintf(nb, sizeof(nb), "g%u", (unsigned)i);
+        g->name_id = nc_px_name_dict_global_intern(nb, strlen(nb));
+        g->name = nc_px_name_dict_global_str(g->name_id);
         g->sel = &sels[sel];
         g->nsel = 0;
 
@@ -411,7 +415,10 @@ static void on_layoutbench(nc4_ctx_t *ctx, const nc4_frame_t *f)
             nc_px_group_t *g = &groups[i];
             memset(g, 0, sizeof(*g));
             g->id = (uint16_t)(i + 1);
-            snprintf(g->name, sizeof(g->name), "g%u", (unsigned)i);
+            char nb[16];
+        snprintf(nb, sizeof(nb), "g%u", (unsigned)i);
+        g->name_id = nc_px_name_dict_global_intern(nb, strlen(nb));
+        g->name = nc_px_name_dict_global_str(g->name_id);
             g->sel = &sels[i];
             g->nsel = 1;
             sels[i].hw = NC_PX_HW_WS2812;
@@ -451,7 +458,10 @@ static void on_layoutbench(nc4_ctx_t *ctx, const nc4_frame_t *f)
             nc_px_group_t *g = &groups[i];
             memset(g, 0, sizeof(*g));
             g->id = (uint16_t)(i + 1);
-            snprintf(g->name, sizeof(g->name), "g%u", (unsigned)i);
+            char nb[16];
+        snprintf(nb, sizeof(nb), "g%u", (unsigned)i);
+        g->name_id = nc_px_name_dict_global_intern(nb, strlen(nb));
+        g->name = nc_px_name_dict_global_str(g->name_id);
             g->sel = &sels[k];
             g->nsel = 0;
             for (uint32_t j = 0; j < per_grp && k < px && k < nsel_cap; j++, k++) {
@@ -468,8 +478,12 @@ static void on_layoutbench(nc4_ctx_t *ctx, const nc4_frame_t *f)
     }
     for (uint32_t i = 0; i < ngroups; i++) {
         memset(&entries[i], 0, sizeof(entries[i]));
-        snprintf(entries[i].group, sizeof(entries[i].group), "g%u", (unsigned)i);
-        snprintf(entries[i].effect, sizeof(entries[i].effect), "lbench");
+        char gb[16];
+        snprintf(gb, sizeof(gb), "g%u", (unsigned)i);
+        entries[i].group_id = nc_px_name_dict_global_intern(gb, strlen(gb));
+        entries[i].group = nc_px_name_dict_global_str(entries[i].group_id);
+        entries[i].effect_id = nc_px_name_dict_global_intern("lbench", 6);
+        entries[i].effect = nc_px_name_dict_global_str(entries[i].effect_id);
         // 通道級隨機：entry i 只寫一個通道（R／G／B／W 輪住），同一粒燈的四個通道
         // 由四個唔同 entry 寫（重疊寫，後寫覆蓋 → 同 run 路徑一樣的語義）。
         entries[i].write = chan_layout ? (uint8_t)(i & 3u) : NC_PX_WRITE_RGB;

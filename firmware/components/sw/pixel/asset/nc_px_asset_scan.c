@@ -99,7 +99,10 @@ static void add_nce(const char *fn)
     nc_px_asset_t a;
     memset(&a, 0, sizeof(a));
     a.kind = NC_PX_ASSET_NCE;
-    file_stem(fn, a.name, sizeof(a.name));
+    char stem[SCAN_NAME_LEN];
+    file_stem(fn, stem, sizeof(stem));
+    a.name_id = nc_px_name_dict_global_intern(stem, strlen(stem));
+    a.name = nc_px_name_dict_global_str(a.name_id);
     (void)nc_px_asset_add(&a);
 }
 

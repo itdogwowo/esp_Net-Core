@@ -14,6 +14,7 @@ mkdir -p "$OUT"
     -I"$PXF/include" -I"$SHIM" -I"tools/hosttest/pxEngine_test/include" \
     "$PXF/asset/nc_px_json.c" \
     "$PXF/asset/nc_px_asset.c" \
+    "$PXF/asset/nc_px_name_dict.c" \
     "$PXF/asset/nc_px_layer.c" \
     "$PXF/asset/nc_px_show.c" \
     "$PXF/asset/nc_px_layout.c" \

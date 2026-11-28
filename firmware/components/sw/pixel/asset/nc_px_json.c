@@ -2,6 +2,7 @@
 #include "nc_px_json.h"
 #include "nc_px_utf8.h"
 
+#include <stdlib.h>
 #include <string.h>
 
 void nc_px_js_open(nc_px_js_t *j, const char *text, size_t len)
@@ -142,6 +143,86 @@ bool nc_px_js_str(nc_px_js_t *j, char *out, size_t cap)
         out[n] = '\0';
     }
     return true;
+}
+
+char *nc_px_js_str_dup(nc_px_js_t *j)
+{
+    if (j == NULL) {
+        return NULL;
+    }
+    nc_px_js_ws(j);
+    if (j->p >= j->end || *j->p != '"') {
+        return NULL;
+    }
+    j->p++;
+    size_t cap = 64, n = 0;
+    char *out = (char *)malloc(cap);
+    if (out == NULL) {
+        return NULL;
+    }
+    while (j->p < j->end && *j->p != '"') {
+        char ch = *j->p++;
+        uint32_t cp = 0;
+        bool have_cp = false;
+        if (ch == '\\') {
+            if (j->p >= j->end) {
+                free(out);
+                return NULL;
+            }
+            const char e = *j->p++;
+            switch (e) {
+            case '"': ch = '"'; break;
+            case '\\': ch = '\\'; break;
+            case '/': ch = '/'; break;
+            case 'n': ch = '\n'; break;
+            case 't': ch = '\t'; break;
+            case 'r': ch = '\r'; break;
+            case 'b': ch = '\b'; break;
+            case 'f': ch = '\f'; break;
+            case 'u':
+                if (json_hex4(j, &cp) != 0 || (cp >= 0xD800u && cp <= 0xDFFFu)) {
+                    free(out);
+                    return NULL;
+                }
+                have_cp = true;
+                break;
+            default:
+                free(out);
+                return NULL;
+            }
+        }
+        if (have_cp) {
+            size_t need = (cp <= 0x7Fu) ? 1u : (cp <= 0x7FFu) ? 2u : 3u;
+            while (n + need + 1u > cap) {
+                cap *= 2u;
+            }
+            char *p2 = (char *)realloc(out, cap);
+            if (p2 == NULL) {
+                free(out);
+                return NULL;
+            }
+            out = p2;
+            (void)nc_px_utf8_put(out, cap, &n, cp);
+        } else {
+            if (n + 2u > cap) {
+                cap *= 2u;
+                char *p2 = (char *)realloc(out, cap);
+                if (p2 == NULL) {
+                    free(out);
+                    return NULL;
+                }
+                out = p2;
+            }
+            out[n++] = ch;
+        }
+    }
+    if (j->p >= j->end) {
+        free(out);
+        return NULL;
+    }
+    j->p++;
+    out[n] = '\0';
+    return out;
 }
 
 // 讀整數（0..limit）。NC_PX_JSN_BAD 唔會前進；NC_PX_JSN_RANGE 已前進（呼叫者可以繼續讀落去）。

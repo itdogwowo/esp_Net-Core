@@ -333,14 +333,27 @@ static void test_utf8(void)
     nc_px_asset_clear();
     check(add("{\"name\":\"紅綠藍黃紫青白黑\",\"program\":[{\"type\":\"keep\",\"end_Time\":10}]}",
               "eight") == ESP_OK, "UTF-8：8 個中文字（24 B）照收");
-    const nc_px_asset_t *a = nc_px_asset_find("紅綠藍黃紫青白");
-    check(a != NULL && strlen(a->name) == 21 && utf8_ok(a->name),
-          "UTF-8：cap 24 截到 7 字（21 B），冇半個字");
+    const nc_px_asset_t *a = nc_px_asset_find("紅綠藍黃紫青白黑");
+    const char *an = (a != NULL) ? nc_px_name_dict_global_str(a->name_id) : NULL;
+    check(an != NULL && strlen(an) == 24 && utf8_ok(an),
+          "UTF-8：字典支援全部 8 個中文字（24 B）");
 
     nc_px_asset_clear();
     check(add("{\"name\":\"\\u7d05\\u8272\",\"program\":[{\"type\":\"keep\",\"end_Time\":10}]}",
               "escaped") == ESP_OK, "UTF-8：\\u 逃逸照收");
     check(nc_px_asset_find("紅色") != NULL, "UTF-8：\\u 解碼成中文名");
+
+    nc_px_asset_clear();
+    const char *longname = "紅橙黃綠藍靛紫黑白灰粉紅橙黃綠藍靛紫黑白";
+    char doc[256];
+    snprintf(doc, sizeof(doc),
+             "{\"name\":\"%s\",\"program\":[{\"type\":\"keep\",\"end_Time\":10}]}",
+             longname);
+    check(add(doc, "long") == ESP_OK, "UTF-8：18 個中文字（54 B）照收");
+    const nc_px_asset_t *la = nc_px_asset_find(longname);
+    check(la != NULL && la->name_id != NC_PX_NAME_DICT_BAD_ID &&
+          strlen(nc_px_name_dict_global_str(la->name_id)) == strlen(longname),
+          "UTF-8：字典完整保留 54 B 名，冇 24 B cap");
 }
 
 int main(void)

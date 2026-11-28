@@ -98,18 +98,20 @@ static void test_mode_demo_eyes(void)
     const esp_err_t e = MODE_PARSE(txt, n, &m);
     free(txt);
     check(e == ESP_OK, "解析成功");
-    check(m.id == 1 && strcmp(m.name, "demo_eyes") == 0, "id/name");
-    check(strcmp(m.mapping, "matrix") == 0, "mapping = matrix");
+    check(m.id == 1 && strcmp(nc_px_name_dict_global_str(m.name_id), "demo_eyes") == 0,
+          "id/name");
+    check(strcmp(nc_px_name_dict_global_str(m.mapping_id), "matrix") == 0,
+          "mapping = matrix");
     check(m.play_loop == -1, "play_loop = -1（無限）");
     check(m.maxF == 500, "maxF = 500");
     check(m.nentry == 2, "2 個委派項");
-    check(strcmp(m.entry[0].group, "matrix.full") == 0 &&
-          strcmp(m.entry[0].effect, "eyes") == 0 &&
+    check(strcmp(nc_px_name_dict_global_str(m.entry[0].group_id), "full") == 0 &&
+          strcmp(nc_px_name_dict_global_str(m.entry[0].effect_id), "eyes") == 0 &&
           m.entry[0].write == NC_PX_WRITE_RGB, "entry[0] = matrix.full/eyes/rgb");
     check(m.entry[0].has_range && m.entry[0].start == 0 && m.entry[0].stop == 16,
           "entry[0] range = 0:16");
-    check(strcmp(m.entry[1].group, "matrix.full") == 0 &&
-          strcmp(m.entry[1].effect, "wave") == 0 &&
+    check(strcmp(nc_px_name_dict_global_str(m.entry[1].group_id), "full") == 0 &&
+          strcmp(nc_px_name_dict_global_str(m.entry[1].effect_id), "wave") == 0 &&
           m.entry[1].write == NC_PX_WRITE_G, "entry[1] = matrix.full/wave/g");
     check(m.entry[1].has_range && m.entry[1].start == 16 && m.entry[1].stop == 32,
           "entry[1] range = 16:32");
@@ -128,8 +130,8 @@ static void test_mode_motor(void)
     free(txt);
     check(e == ESP_OK, "解析成功");
     check(m.nentry == 1, "1 個委派項");
-    check(strcmp(m.entry[0].group, "matrix.motors") == 0 &&
-          strcmp(m.entry[0].effect, "uart_motor_sine") == 0 &&
+    check(strcmp(nc_px_name_dict_global_str(m.entry[0].group_id), "motors") == 0 &&
+          strcmp(nc_px_name_dict_global_str(m.entry[0].effect_id), "uart_motor_sine") == 0 &&
           m.entry[0].write == NC_PX_WRITE_W, "matrix.motors/uart_motor_sine/w");
     check(!m.entry[0].has_range, "冇 range（整組）");
 }
@@ -152,7 +154,8 @@ static void test_show(void)
     // 合成一份有 list 的
     const char *doc = "{\"version\":1,\"auto_play\":true,\"list\":[\"demo_eyes\",2]}";
     check(nc_px_show_parse(doc, strlen(doc), &s) == ESP_OK, "合成版解析成功");
-    check(s.auto_play && s.nlist == 1 && strcmp(s.list[0], "demo_eyes") == 0,
+    check(s.auto_play && s.nlist == 1 &&
+          strcmp(s.list[0], "demo_eyes") == 0,
           "auto_play=true、list[0]=demo_eyes（數字項跳過）");
 }
 

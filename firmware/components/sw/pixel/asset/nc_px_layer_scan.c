@@ -10,6 +10,8 @@
 #include "nc_px_asset.h"
 
 #include <dirent.h>
+#include <sys/stat.h>
+#include <unistd.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -171,6 +173,8 @@ static char *read_all(const char *path, size_t *len)
 
 void nc_px_layer_clear(void)
 {
+    // 字典亦要 reset：load_all 之後會由 names.ncd 重新載入（或重建）。
+    nc_px_name_dict_global_reset();
     // ★ 效果表都要清：唔清就係「reload 之後仍然用舊效果」——
     //   nc_px_asset_scan() 會把同名效果當重複丟掉（log「撞名：…（保留第一個）」），
     //   結果改咗 effects.json 之後要 reboot 才生效，刪走的效果亦仍然留在 RAM。
@@ -270,19 +274,20 @@ esp_err_t nc_px_map_scan(const char *dir)
             s_maps.rejected++;
             continue;
         }
-        if (m.ngroups == 0 || m.name[0] == '\0') {
+        if (m.ngroups == 0 || m.name_id == NC_PX_NAME_DICT_BAD_ID) {
             ESP_LOGW(TAG, "%s：冇 groups／name，跳過", path);
             s_maps.rejected++;
             continue;
         }
         bool dup = false;
         for (uint32_t k = 0; k < s_maps.n; k++) {
-            if (s_maps.item[k].id == m.id || strcmp(s_maps.item[k].name, m.name) == 0) {
+            if (s_maps.item[k].id == m.id || s_maps.item[k].name_id == m.name_id) {
                 dup = true;
             }
         }
         if (dup) {
-            ESP_LOGW(TAG, "mapping 重複（id=%u name=%s）— 跳過", (unsigned)m.id, m.name);
+            ESP_LOGW(TAG, "mapping 重複（id=%u name=%s）— 跳過", (unsigned)m.id,
+                     nc_px_name_dict_global_str(m.name_id));
             s_maps.rejected++;
             continue;
         }
@@ -291,8 +296,8 @@ esp_err_t nc_px_map_scan(const char *dir)
             continue;
         }
         s_maps.item[s_maps.n++] = m;
-        ESP_LOGI(TAG, "mapping %u（%s）：%u group(s)", (unsigned)m.id, m.name,
-                 (unsigned)m.ngroups);
+        ESP_LOGI(TAG, "mapping %u（%s）：%u group(s)", (unsigned)m.id,
+                 nc_px_name_dict_global_str(m.name_id), (unsigned)m.ngroups);
     }
     free(names);
     return ESP_OK;
@@ -384,19 +389,20 @@ esp_err_t nc_px_mode_scan(const char *dir)
             s_modes.rejected++;
             continue;
         }
-        if (m.nentry == 0 || m.name[0] == '\0') {
+        if (m.nentry == 0 || m.name_id == NC_PX_NAME_DICT_BAD_ID) {
             ESP_LOGW(TAG, "%s：冇有效委派項／name，跳過", path);
             s_modes.rejected++;
             continue;
         }
         bool dup = false;
         for (uint32_t k = 0; k < s_modes.n; k++) {
-            if (s_modes.item[k].id == m.id || strcmp(s_modes.item[k].name, m.name) == 0) {
+            if (s_modes.item[k].id == m.id || s_modes.item[k].name_id == m.name_id) {
                 dup = true;
             }
         }
         if (dup) {
-            ESP_LOGW(TAG, "mode 重複（id=%u name=%s）— 跳過", (unsigned)m.id, m.name);
+            ESP_LOGW(TAG, "mode 重複（id=%u name=%s）— 跳過", (unsigned)m.id,
+                     nc_px_name_dict_global_str(m.name_id));
             s_modes.rejected++;
             continue;
         }
@@ -406,7 +412,8 @@ esp_err_t nc_px_mode_scan(const char *dir)
         }
         s_modes.item[s_modes.n++] = m;
         used += m.nentry;
-        ESP_LOGI(TAG, "mode %u（%s）：%u 項", (unsigned)m.id, m.name, (unsigned)m.nentry);
+        ESP_LOGI(TAG, "mode %u（%s）：%u 項", (unsigned)m.id,
+                 nc_px_name_dict_global_str(m.name_id), (unsigned)m.nentry);
     }
     free(names);
     qsort(s_modes.item, s_modes.n, sizeof(s_modes.item[0]), cmp_mode_index);
@@ -435,12 +442,107 @@ esp_err_t nc_px_show_load(const char *path)
     return ESP_OK;
 }
 
+#if defined(ESP_PLATFORM)
+static bool join_path(char *out, size_t cap, const char *a, const char *b)
+{
+    const size_t la = (a != NULL) ? strlen(a) : 0;
+    const size_t lb = (b != NULL) ? strlen(b) : 0;
+    if (la + 1u + lb + 1u > cap) {
+        return false;
+    }
+    memcpy(out, a, la);
+    out[la] = '/';
+    memcpy(out + la + 1u, b, lb + 1u);
+    return true;
+}
+#endif
+
+// 刪 cache 內所有 .layout（字典重建／ID 可能重排時用，避免舊 name_id 對錯）。
+#if defined(ESP_PLATFORM)
+static void drop_layout_cache(const char *base)
+{
+    char cdir[SCAN_PATH_LEN];
+    if (!join_path(cdir, sizeof(cdir), base, "cache")) {
+        return;
+    }
+    DIR *d = opendir(cdir);
+    if (d == NULL) {
+        return;
+    }
+    struct dirent *de;
+    uint32_t removed = 0;
+    while ((de = readdir(d)) != NULL) {
+        const size_t nl = strlen(de->d_name);
+        if (nl > 7 && strcmp(de->d_name + nl - 7, ".layout") == 0) {
+            char path[SCAN_PATH_LEN];
+            if (join_path(path, sizeof(path), cdir, de->d_name) && unlink(path) == 0) {
+                removed++;
+            }
+        }
+    }
+    closedir(d);
+    if (removed > 0) {
+        ESP_LOGW(TAG, "字典重建：清走 %u 個舊 layout cache", (unsigned)removed);
+    }
+}
+#endif
+
+static void names_load(const char *base)
+{
+#if defined(ESP_PLATFORM)
+    char cdir[SCAN_PATH_LEN];
+    if (!join_path(cdir, sizeof(cdir), base, "cache")) {
+        return;
+    }
+    (void)mkdir(cdir, 0777);
+    char path[SCAN_PATH_LEN];
+    if (!join_path(path, sizeof(path), cdir, "names.ncd")) {
+        return;
+    }
+    const esp_err_t e = nc_px_name_dict_load(nc_px_name_dict_global(), path);
+    if (e != ESP_OK) {
+        if (e == ESP_ERR_INVALID_STATE) {
+            ESP_LOGW(TAG, "names.ncd 壞檔 → 重建字典");
+        }
+        nc_px_name_dict_global_reset();
+        drop_layout_cache(base);
+    }
+#else
+    (void)base;
+#endif
+}
+
+static void names_save(const char *base)
+{
+#if defined(ESP_PLATFORM)
+    nc_px_name_dict_t *d = nc_px_name_dict_global();
+    if (!nc_px_name_dict_dirty(d)) {
+        return;
+    }
+    char cdir[SCAN_PATH_LEN];
+    if (!join_path(cdir, sizeof(cdir), base, "cache")) {
+        return;
+    }
+    (void)mkdir(cdir, 0777);
+    char path[SCAN_PATH_LEN];
+    if (!join_path(path, sizeof(path), cdir, "names.ncd")) {
+        return;
+    }
+    if (nc_px_name_dict_save(d, path) != ESP_OK) {
+        ESP_LOGW(TAG, "names.ncd 儲存失敗（%s）", path);
+    }
+#else
+    (void)base;
+#endif
+}
+
 esp_err_t nc_px_layer_load_all(const char *base)
 {
     if (base == NULL) {
         return ESP_ERR_INVALID_ARG;
     }
     nc_px_layer_clear();
+    names_load(base);
     char path[SCAN_PATH_LEN];
 
     (void)snprintf(path, sizeof(path), "%s/effects", base);
@@ -463,6 +565,7 @@ esp_err_t nc_px_layer_load_all(const char *base)
     ESP_LOGI(TAG, "pixel 樹：effects=%d maps=%u modes=%u list=%u",
              nc_px_asset_count(), (unsigned)s_maps.n, (unsigned)s_modes.n,
              (unsigned)s_show.nlist);
+    names_save(base);
     return (nc_px_asset_count() > 0) ? ESP_OK : ESP_ERR_NOT_FOUND;
 }
 
@@ -470,13 +573,10 @@ const nc_px_map_tbl_t  *nc_px_map_table(void) { return &s_maps; }
 const nc_px_mode_tbl_t *nc_px_mode_table(void) { return &s_modes; }
 const nc_px_show_t     *nc_px_show(void) { return &s_show; }
 
-static bool ref_matches(const char *ref, const char *name, uint16_t id)
+static bool ref_is_number(const char *ref, uint16_t id)
 {
-    if (ref == NULL) {
+    if (ref == NULL || ref[0] == '\0') {
         return false;
-    }
-    if (strcmp(ref, name) == 0) {
-        return true;
     }
     for (const char *p = ref; *p != '\0'; p++) {
         if (*p < '0' || *p > '9') {
@@ -486,10 +586,38 @@ static bool ref_matches(const char *ref, const char *name, uint16_t id)
     return (uint16_t)atoi(ref) == id;
 }
 
-const nc_px_map_t *nc_px_map_find(const char *ref)
+const nc_px_map_t *nc_px_map_find_id(uint32_t name_id)
 {
     for (uint32_t i = 0; i < s_maps.n; i++) {
-        if (ref_matches(ref, s_maps.item[i].name, s_maps.item[i].id)) {
+        if (s_maps.item[i].name_id == name_id) {
+            return &s_maps.item[i];
+        }
+    }
+    return NULL;
+}
+
+const nc_px_mode_t *nc_px_mode_find_id(uint32_t name_id)
+{
+    for (uint32_t i = 0; i < s_modes.n; i++) {
+        if (s_modes.item[i].name_id == name_id) {
+            return &s_modes.item[i];
+        }
+    }
+    return NULL;
+}
+
+const nc_px_map_t *nc_px_map_find(const char *ref)
+{
+    if (ref == NULL) {
+        return NULL;
+    }
+    const uint32_t id = nc_px_name_dict_find(nc_px_name_dict_global(), ref, strlen(ref));
+    const nc_px_map_t *m = nc_px_map_find_id(id);
+    if (m != NULL) {
+        return m;
+    }
+    for (uint32_t i = 0; i < s_maps.n; i++) {
+        if (ref_is_number(ref, s_maps.item[i].id)) {
             return &s_maps.item[i];
         }
     }
@@ -498,8 +626,16 @@ const nc_px_map_t *nc_px_map_find(const char *ref)
 
 const nc_px_mode_t *nc_px_mode_find(const char *ref)
 {
+    if (ref == NULL) {
+        return NULL;
+    }
+    const uint32_t id = nc_px_name_dict_find(nc_px_name_dict_global(), ref, strlen(ref));
+    const nc_px_mode_t *m = nc_px_mode_find_id(id);
+    if (m != NULL) {
+        return m;
+    }
     for (uint32_t i = 0; i < s_modes.n; i++) {
-        if (ref_matches(ref, s_modes.item[i].name, s_modes.item[i].id)) {
+        if (ref_is_number(ref, s_modes.item[i].id)) {
             return &s_modes.item[i];
         }
     }

@@ -15,60 +15,37 @@
 
 #define VAL_MAX 256
 
-static const nc_px_asset_t *find_asset(const nc_px_asset_tbl_t *tbl, const char *name)
+static uint32_t resolve_name_id(uint32_t id, const char *name)
 {
-    if (tbl == NULL || name == NULL) {
+    if (id != NC_PX_NAME_DICT_BAD_ID) {
+        return id;
+    }
+    if (name != NULL) {
+        return nc_px_name_dict_global_intern(name, strlen(name));
+    }
+    return NC_PX_NAME_DICT_BAD_ID;
+}
+
+static const nc_px_asset_t *find_asset(const nc_px_asset_tbl_t *tbl, uint32_t name_id)
+{
+    if (tbl == NULL || name_id == NC_PX_NAME_DICT_BAD_ID) {
         return NULL;
     }
     for (uint32_t i = 0; i < tbl->n; i++) {
-        if (strcmp(tbl->item[i].name, name) == 0) {
+        if (tbl->item[i].name_id == name_id) {
             return &tbl->item[i];
         }
     }
     return NULL;
 }
 
-static bool ref_is(const char *ref, const char *name, uint16_t id)
+static const nc_px_group_t *find_group(const nc_px_map_t *map, uint32_t name_id)
 {
-    if (ref == NULL || ref[0] == '\0') {
-        return false;
-    }
-    if (strcmp(ref, name) == 0) {
-        return true;
-    }
-    /* 數字 id：ref 全數字才當 id */
-    bool all_digit = true;
-    for (const char *p = ref; *p != '\0'; p++) {
-        if (*p < '0' || *p > '9') {
-            all_digit = false;
-            break;
-        }
-    }
-    return all_digit && (uint16_t)atoi(ref) == id;
-}
-
-static const nc_px_group_t *find_group(const nc_px_map_t *map, const char *ref, char *mapref_out,
-                                       size_t cap)
-{
-    if (map == NULL || ref == NULL) {
+    if (map == NULL || name_id == NC_PX_NAME_DICT_BAD_ID) {
         return NULL;
     }
-    const char *g = ref;
-    const char *dot = strchr(ref, '.');
-    if (dot != NULL) {
-        size_t n = (size_t)(dot - ref);
-        if (n + 1 >= cap) {
-            return NULL;
-        }
-        memcpy(mapref_out, ref, n);
-        mapref_out[n] = '\0';
-        g = dot + 1;
-        if (!ref_is(mapref_out, map->name, map->id)) {
-            return NULL;                     // 引用其他 mapping：呼叫端要揀啱 map
-        }
-    }
     for (uint32_t i = 0; i < map->ngroups; i++) {
-        if (ref_is(g, map->group[i].name, map->group[i].id)) {
+        if (map->group[i].name_id == name_id) {
             return &map->group[i];
         }
     }
@@ -215,10 +192,19 @@ esp_err_t nc_px_show_plan(const nc_px_mode_t *mode, const nc_px_map_t *map,
             continue;
         }
         const nc_px_mode_entry_t *en = &mode->entry[e];
-        const nc_px_asset_t *asset = find_asset(assets, en->effect);
-        char mapref[NC_PX_LAYER_NAME_MAX];
-        const nc_px_group_t *group = find_group(map, en->group, mapref, sizeof(mapref));
-        if (asset == NULL || group == NULL) {
+        const nc_px_asset_t *asset = find_asset(
+            assets, resolve_name_id(en->effect_id, en->effect));
+        if (asset == NULL && en->effect != NULL) {
+            asset = find_asset(assets, resolve_name_id(NC_PX_NAME_DICT_BAD_ID, en->effect));
+        }
+        const nc_px_group_t *group = find_group(
+            map, resolve_name_id(en->group_id, en->group));
+        if (group == NULL && en->group != NULL) {
+            group = find_group(map, resolve_name_id(NC_PX_NAME_DICT_BAD_ID, en->group));
+        }
+        if (asset == NULL || group == NULL ||
+            (en->map_id != NC_PX_NAME_DICT_BAD_ID && map != NULL &&
+             en->map_id != map->name_id)) {
             out->skipped++;
             continue;
         }

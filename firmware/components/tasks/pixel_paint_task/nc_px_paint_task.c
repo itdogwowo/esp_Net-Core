@@ -100,11 +100,15 @@ typedef struct {
     // 下一張（playlist 預測）：layout＋flat 預建好，切換時 swap（0 ms）
     nc_px_layout_t     next_layout;
     nc_px_asset_tbl_t *next_assets;
+    uint32_t           next_mode_name_id;
+    uint32_t           next_map_name_id;
     char               next_mode_name[NC_PX_LAYER_NAME_MAX];
     char               next_map_name[NC_PX_LAYER_NAME_MAX];
     bool               next_ready;
     uint32_t           next_us;
     uint8_t            next_why;      // 診斷：0=未試、1=ok、2=冇下一個、3=asset、4=map、5=build、6=no_ready
+    uint32_t          mode_name_id;
+    uint32_t          map_name_id;
     char              mode_name[NC_PX_LAYER_NAME_MAX];
     char              map_name[NC_PX_LAYER_NAME_MAX];
     char              pixel_dir[64];      // /data/pixel（reload 用）
@@ -123,6 +127,10 @@ typedef struct {
 
 static show_state_t s_content = {
     .lock = portMUX_INITIALIZER_UNLOCKED,
+    .mode_name_id = NC_PX_NAME_DICT_BAD_ID,
+    .map_name_id = NC_PX_NAME_DICT_BAD_ID,
+    .next_mode_name_id = NC_PX_NAME_DICT_BAD_ID,
+    .next_map_name_id = NC_PX_NAME_DICT_BAD_ID,
 };
 
 // 0xF06D：decode task 只排隊，真正 rebuild plan 由 paint loop 喺幀邊界做
@@ -192,8 +200,9 @@ static uint32_t assets_hash(const nc_px_asset_tbl_t *t)
     }
     for (uint16_t i = 0; i < t->n; i++) {
         const nc_px_asset_t *a = &t->item[i];
-        for (const char *c = a->name; *c != '\0'; c++) {
-            h = (h ^ (uint8_t)*c) * 16777619u;
+        const uint32_t nid = a->name_id;
+        for (int k = 0; k < 4; k++) {
+            h = (h ^ (uint8_t)(nid >> (k * 8))) * 16777619u;
         }
         const uint16_t small[6] = { a->nseg, a->step, a->spacing, a->offset, a->speed,
                                     (uint16_t)(a->reverse ? 1u : 0u) };
@@ -722,29 +731,20 @@ static const nc_px_map_t *select_map(const nc_px_mode_t *mode)
     const nc_px_map_tbl_t *maps = nc_px_map_table();
     const nc_px_map_t *map = NULL;
 
-    if (mode->mapping[0] != '\0') {
-        map = nc_px_map_find(mode->mapping);
+    if (mode->mapping_id != NC_PX_NAME_DICT_BAD_ID) {
+        map = nc_px_map_find_id(mode->mapping_id);
         if (map == NULL) {
-            ESP_LOGW(TAG, "mode %s 的 mapping=\"%s\" 搵唔到", mode->name, mode->mapping);
+            ESP_LOGW(TAG, "mode %s 的 mapping 搵唔到（id=%u）",
+                     nc_px_name_dict_global_str(mode->name_id), (unsigned)mode->mapping_id);
         }
     }
-    if (map == NULL && mode->nentry > 0) {
-        // "matrix.full" → "matrix"（mode 冇寫 mapping 時仍然可以指定 map）
-        const char *g = mode->entry[0].group;
-        const char *dot = strchr(g, '.');
-        if (dot != NULL && dot != g) {
-            char ref[NC_PX_LAYER_NAME_MAX];
-            const size_t n = (size_t)(dot - g);
-            if (n < sizeof(ref)) {
-                memcpy(ref, g, n);
-                ref[n] = '\0';
-                map = nc_px_map_find(ref);
-            }
-        }
+    if (map == NULL && mode->map_id != NC_PX_NAME_DICT_BAD_ID) {
+        map = nc_px_map_find_id(mode->map_id);
     }
     if (map == NULL && maps != NULL && maps->n > 0) {
         map = &maps->item[0];
-        ESP_LOGW(TAG, "唔到對應 map → 用 map 表第一個（%s）", map->name);
+        ESP_LOGW(TAG, "唔到對應 map → 用 map 表第一個（%s）",
+                 nc_px_name_dict_global_str(map->name_id));
     }
     return map;
 }
@@ -760,13 +760,18 @@ static esp_err_t build_asset_tbl_into(nc_px_asset_tbl_t *dst, const nc_px_mode_t
         return ESP_ERR_NO_MEM;
     }
     for (uint32_t i = 0; i < mode->nentry; i++) {
-        const nc_px_asset_t *a = nc_px_asset_find(mode->entry[i].effect);
+        uint32_t eid = mode->entry[i].effect_id;
+        if (eid == NC_PX_NAME_DICT_BAD_ID && mode->entry[i].effect != NULL) {
+            eid = nc_px_name_dict_global_intern(mode->entry[i].effect,
+                                                strlen(mode->entry[i].effect));
+        }
+        const nc_px_asset_t *a = nc_px_asset_find_id(eid);
         if (a == NULL) {
             continue;                     // 未知 effect：plan 會記入 skipped
         }
         bool dup = false;
         for (uint16_t k = 0; k < dst->n; k++) {
-            if (strcmp(dst->item[k].name, a->name) == 0) {
+            if (dst->item[k].name_id == a->name_id) {
                 dup = true;
                 break;
             }
@@ -917,12 +922,13 @@ static void ensure_pixel_dirs(const char *pixel_dir)
 static const nc_px_mode_t *playlist_next_mode(void)
 {
     const nc_px_show_t *reg = nc_px_show();
-    if (reg == NULL || reg->nlist < 2 || s_content.mode_name[0] == '\0') {
+    if (reg == NULL || reg->nlist < 2 ||
+        s_content.mode_name_id == NC_PX_NAME_DICT_BAD_ID) {
         return NULL;
     }
     int cur = -1;
     for (uint32_t i = 0; i < reg->nlist; i++) {
-        if (strcmp(reg->list[i], s_content.mode_name) == 0) {
+        if (reg->list_ids[i] == s_content.mode_name_id) {
             cur = (int)i;
             break;
         }
@@ -930,8 +936,8 @@ static const nc_px_mode_t *playlist_next_mode(void)
     const int start = (cur >= 0) ? (cur + 1) : 0;
     for (uint32_t n = 0; n < reg->nlist; n++) {
         const int idx = (start + n) % reg->nlist;
-        const nc_px_mode_t *m = nc_px_mode_find(reg->list[idx]);
-        if (m != NULL && strcmp(m->name, s_content.mode_name) != 0) {
+        const nc_px_mode_t *m = nc_px_mode_find_id(reg->list_ids[idx]);
+        if (m != NULL && m->name_id != s_content.mode_name_id) {
             return m;
         }
     }
@@ -964,13 +970,15 @@ static void content_prepare_next(void)
     }
     if (build_asset_tbl_into(s_content.next_assets, m) != ESP_OK) {
         s_content.next_why = 3;
-        ESP_LOGW(TAG, "預建下一張：%s 效果表失敗", m->name);
+        ESP_LOGW(TAG, "預建下一張：%s 效果表失敗",
+                 nc_px_name_dict_global_str(m->name_id));
         return;
     }
     const nc_px_map_t *map = select_map(m);
     if (map == NULL) {
         s_content.next_why = 4;
-        ESP_LOGW(TAG, "預建下一張：%s 冇 map", m->name);
+        ESP_LOGW(TAG, "預建下一張：%s 冇 map",
+                 nc_px_name_dict_global_str(m->name_id));
         return;
     }
     const int64_t t0 = esp_timer_get_time();
@@ -995,7 +1003,8 @@ static void content_prepare_next(void)
     if (e != ESP_OK || s_content.next_layout.njobs == 0) {
         nc_px_layout_free(&s_content.next_layout);
         s_content.next_why = 5;
-        ESP_LOGW(TAG, "預建下一張：%s 建表失敗（%s、jobs=%u）", m->name,
+        ESP_LOGW(TAG, "預建下一張：%s 建表失敗（%s、jobs=%u）",
+                 nc_px_name_dict_global_str(m->name_id),
                  esp_err_to_name(e), (unsigned)s_content.next_layout.njobs);
         return;
     }
@@ -1006,13 +1015,17 @@ static void content_prepare_next(void)
             (void)layout_cache_save(&s_content.next_layout, cpath, ckey, cache_bytes);
         }
     }
-    snprintf(s_content.next_mode_name, sizeof(s_content.next_mode_name), "%s", m->name);
-    snprintf(s_content.next_map_name, sizeof(s_content.next_map_name), "%s", map->name);
+    s_content.next_mode_name_id = m->name_id;
+    s_content.next_map_name_id = map->name_id;
+    snprintf(s_content.next_mode_name, sizeof(s_content.next_mode_name), "%s",
+             nc_px_name_dict_global_str(m->name_id));
+    snprintf(s_content.next_map_name, sizeof(s_content.next_map_name), "%s",
+             nc_px_name_dict_global_str(map->name_id));
     s_content.next_ready = true;
     s_content.next_why = 1;
     s_content.next_us = (uint32_t)(esp_timer_get_time() - t0);
     ESP_LOGI(TAG, "預建下一張：mode=%s、runs=%u、flat=%u B、%u us",
-             m->name, (unsigned)s_content.next_layout.nruns,
+             nc_px_name_dict_global_str(m->name_id), (unsigned)s_content.next_layout.nruns,
              (unsigned)nc_px_layout_flat_bytes(&s_content.next_layout),
              (unsigned)s_content.next_us);
 }
@@ -1027,8 +1040,11 @@ static esp_err_t content_swap_next(const nc_px_mode_t *mode)
     nc_px_asset_tbl_t *tmp = s_content.assets;
     s_content.assets = s_content.next_assets;
     s_content.next_assets = tmp;
+    s_content.map_name_id = s_content.next_map_name_id;
+    s_content.mode_name_id = mode->name_id;
     snprintf(s_content.map_name, sizeof(s_content.map_name), "%s", s_content.next_map_name);
-    snprintf(s_content.mode_name, sizeof(s_content.mode_name), "%s", mode->name);
+    snprintf(s_content.mode_name, sizeof(s_content.mode_name), "%s",
+             nc_px_name_dict_global_str(mode->name_id));
     (void)hot_flat_place(&s_content.layout);
     s_content.white = (mode->white > 100) ? 100 : mode->white;
     s_content.step = 0;
@@ -1045,7 +1061,8 @@ static esp_err_t content_swap_next(const nc_px_mode_t *mode)
     nc_pipe_aprog_publish(s_content.layout.aprog, s_content.layout.naprog, s_plan_gen);
     s_last_apply_us = (uint32_t)(esp_timer_get_time() - t0);
     s_last_swap_us = s_last_apply_us;
-    ESP_LOGI(TAG, "換場（預建 swap）：%s、%u us、runs=%u", mode->name,
+    ESP_LOGI(TAG, "換場（預建 swap）：%s、%u us、runs=%u",
+             nc_px_name_dict_global_str(mode->name_id),
              (unsigned)s_last_apply_us, (unsigned)s_content.layout.nruns);
     return ESP_OK;
 }
@@ -1055,7 +1072,7 @@ static esp_err_t content_apply_mode_locked(const nc_px_mode_t *mode)
     if (mode == NULL) {
         return ESP_ERR_INVALID_ARG;
     }
-    if (s_content.next_ready && strcmp(mode->name, s_content.next_mode_name) == 0) {
+    if (s_content.next_ready && mode->name_id == s_content.next_mode_name_id) {
         return content_swap_next(mode);
     }
     const int64_t t0 = esp_timer_get_time();
@@ -1063,10 +1080,13 @@ static esp_err_t content_apply_mode_locked(const nc_px_mode_t *mode)
     // map：mode.mapping → entry group 前綴 → map 表第一個。
     const nc_px_map_t *map = select_map(mode);
     if (map == NULL) {
-        ESP_LOGW(TAG, "mode %s 冇對應 map", mode->name);
+        ESP_LOGW(TAG, "mode %s 冇對應 map",
+                 nc_px_name_dict_global_str(mode->name_id));
         return ESP_ERR_NOT_FOUND;
     }
-    snprintf(s_content.map_name, sizeof(s_content.map_name), "%s", map->name);
+    s_content.map_name_id = map->name_id;
+    snprintf(s_content.map_name, sizeof(s_content.map_name), "%s",
+             nc_px_name_dict_global_str(map->name_id));
 
     // white：mode JSON 的 "white"／"white_mix"（0..100，預設 0）。
     s_content.white = (mode->white > 100) ? 100 : mode->white;
@@ -1074,7 +1094,8 @@ static esp_err_t content_apply_mode_locked(const nc_px_mode_t *mode)
     // plan：mode + map + assets + inventory（8×8 Matrix = 一條 WS2812、base 0）。
     const esp_err_t te = build_asset_tbl(mode);
     if (te != ESP_OK) {
-        ESP_LOGW(TAG, "mode %s：效果表配置失敗（entry=%u）", mode->name,
+        ESP_LOGW(TAG, "mode %s：效果表配置失敗（entry=%u）",
+                 nc_px_name_dict_global_str(mode->name_id),
                  (unsigned)mode->nentry);
         return te;
     }
@@ -1129,7 +1150,8 @@ static esp_err_t content_apply_mode_locked(const nc_px_mode_t *mode)
         ESP_LOGW(TAG, "layout 失敗：mode=%s map=%s jobs=%u runs=%u skipped=%u"
                       "（effect 唔存在 %u、group 唔存在 %u、write 唔識 %u、空 %u、"
                       "效果超上限 %u、program 壞 %u、記憶體 %u）（%s）",
-                 mode->name, map->name, (unsigned)s_content.layout.njobs,
+                 nc_px_name_dict_global_str(mode->name_id),
+                 nc_px_name_dict_global_str(map->name_id), (unsigned)s_content.layout.njobs,
                  (unsigned)s_content.layout.nruns, (unsigned)s_content.layout.skipped,
                  (unsigned)s_content.layout.skip_no_asset,
                  (unsigned)s_content.layout.skip_no_group,
@@ -1142,7 +1164,9 @@ static esp_err_t content_apply_mode_locked(const nc_px_mode_t *mode)
         return ESP_ERR_NOT_FOUND;
     }
 
-    snprintf(s_content.mode_name, sizeof(s_content.mode_name), "%s", mode->name);
+    s_content.mode_name_id = mode->name_id;
+    snprintf(s_content.mode_name, sizeof(s_content.mode_name), "%s",
+             nc_px_name_dict_global_str(mode->name_id));
     s_content.step = 0;
     s_content.mode_frames = 0;
     s_content.mode_limit = (mode->maxF > 0) ? mode->maxF : 500;
@@ -1161,9 +1185,11 @@ static esp_err_t content_apply_mode_locked(const nc_px_mode_t *mode)
     s_last_apply_us = (uint32_t)(esp_timer_get_time() - t0);
 
     ESP_LOGI(TAG, "選中 mode：%s（id=%u）mapping=%s white=%u%%；map=%s（%u groups）",
-             mode->name, (unsigned)mode->id,
-             (mode->mapping[0] != '\0') ? mode->mapping : "-",
-             (unsigned)s_content.white, map->name, (unsigned)map->ngroups);
+             nc_px_name_dict_global_str(mode->name_id), (unsigned)mode->id,
+             (mode->mapping_id != NC_PX_NAME_DICT_BAD_ID)
+                 ? nc_px_name_dict_global_str(mode->mapping_id) : "-",
+             (unsigned)s_content.white,
+             nc_px_name_dict_global_str(map->name_id), (unsigned)map->ngroups);
     // 記憶體預算（由實際 plan 計，唔用固定上限）：呢四個數加起來就是 pair 的 steady-state。
     ESP_LOGI(TAG, "pair 記憶體：canvas %u B、值流 %u B（×2）、runs %u × 16 B、"
                   "jobs %u × 8 B、aprog %u × %u B（全部 PSRAM）",
@@ -1213,11 +1239,11 @@ static esp_err_t content_reload(void)
     s_content.auto_play = (reg != NULL) ? reg->auto_play : false;
 
     const nc_px_mode_t *mode = NULL;
-    if (s_content.mode_name[0] != '\0') {
-        mode = nc_px_mode_find(s_content.mode_name);
+    if (s_content.mode_name_id != NC_PX_NAME_DICT_BAD_ID) {
+        mode = nc_px_mode_find_id(s_content.mode_name_id);
     }
     if (mode == NULL && reg != NULL && reg->nlist > 0) {
-        mode = nc_px_mode_find(reg->list[0]);
+        mode = nc_px_mode_find_id(reg->list_ids[0]);
     }
     if (mode == NULL) {
         const nc_px_mode_tbl_t *tbl = nc_px_mode_table();
@@ -1236,7 +1262,8 @@ static esp_err_t content_reload(void)
         content_set_fallback("reload：plan 失敗");
         return ae;
     }
-    ESP_LOGI(TAG, "reload 完成：mode=%s auto_play=%d", mode->name,
+    ESP_LOGI(TAG, "reload 完成：mode=%s auto_play=%d",
+             nc_px_name_dict_global_str(mode->name_id),
              s_content.auto_play ? 1 : 0);
     cache_prebuild_missing();        // reload 等同啟動：所有 mode 預建，runtime 唔再 build
     return ESP_OK;
@@ -1260,7 +1287,7 @@ static void content_auto_advance(void)
     }
     int cur = -1;
     for (uint32_t i = 0; i < reg->nlist; i++) {
-        if (strcmp(reg->list[i], s_content.mode_name) == 0) {
+        if (reg->list_ids[i] == s_content.mode_name_id) {
             cur = (int)i;
             break;
         }
@@ -1268,13 +1295,14 @@ static void content_auto_advance(void)
     const int start = (cur >= 0) ? (cur + 1) : 0;
     for (uint32_t n = 0; n < reg->nlist; n++) {
         const int idx = (start + n) % reg->nlist;
-        const nc_px_mode_t *mode = nc_px_mode_find(reg->list[idx]);
+        const nc_px_mode_t *mode = nc_px_mode_find_id(reg->list_ids[idx]);
         if (mode != NULL) {
             char old[NC_PX_LAYER_NAME_MAX];
             snprintf(old, sizeof(old), "%s", s_content.mode_name);
             if (content_apply_mode(mode) == ESP_OK) {
                 ESP_LOGI(TAG, "auto_play：%s → %s（每 %u 幀）", old,
-                         mode->name, (unsigned)s_content.mode_limit);
+                         nc_px_name_dict_global_str(mode->name_id),
+                         (unsigned)s_content.mode_limit);
                 return;
             }
         }
@@ -1359,10 +1387,10 @@ static void content_start_pipeline(void)
     const nc_px_mode_t *mode = NULL;
     const nc_px_show_t *show = nc_px_show();
     if (show != NULL && show->nlist > 0) {
-        mode = nc_px_mode_find(show->list[0]);
+        mode = nc_px_mode_find_id(show->list_ids[0]);
         if (mode == NULL) {
-            ESP_LOGW(TAG, "registry list[0]=\"%s\" 搵唔到 → 用 mode 表第一個",
-                     show->list[0]);
+            ESP_LOGW(TAG, "registry list[0]=%u 搵唔到 → 用 mode 表第一個",
+                     (unsigned)show->list_ids[0]);
         }
     }
     if (mode == NULL) {
@@ -1404,7 +1432,7 @@ static void cache_prebuild_missing(void)
     // 先跟 registry list（播放清單次序），再加其餘 mode（去重）。
     if (reg != NULL) {
         for (uint32_t i = 0; i < reg->nlist && n < modes->n; i++) {
-            const nc_px_mode_t *m = nc_px_mode_find(reg->list[i]);
+            const nc_px_mode_t *m = nc_px_mode_find_id(reg->list_ids[i]);
             bool dup = false;
             for (uint32_t k = 0; k < n; k++) {
                 if (cand[k] == m) {

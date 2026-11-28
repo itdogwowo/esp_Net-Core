@@ -20,6 +20,7 @@ mkdir -p "$OUT"
     -I"$PXF/include" -I"$T/include" -I"$T" -I"tools/hosttest/pxEngine_test/include" \
     "$PXF/asset/nc_px_json.c" \
     "$PXF/asset/nc_px_asset.c" \
+    "$PXF/asset/nc_px_name_dict.c" \
     "$PXF/engine/nc_px_engine_tables.c" \
     "$PXF/engine/nc_px_engine_program.c" \
     "$T/pxProgram_test.c" \

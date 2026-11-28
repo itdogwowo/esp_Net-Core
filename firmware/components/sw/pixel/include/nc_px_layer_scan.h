@@ -48,6 +48,8 @@ esp_err_t nc_px_layer_load_all(const char *base);
 // 找 mapping／mode（name 或數字 id）；搵唔到回 NULL。
 const nc_px_map_t  *nc_px_map_find(const char *ref);
 const nc_px_mode_t *nc_px_mode_find(const char *ref);
+const nc_px_map_t  *nc_px_map_find_id(uint32_t name_id);
+const nc_px_mode_t *nc_px_mode_find_id(uint32_t name_id);
 
 #ifdef __cplusplus
 }

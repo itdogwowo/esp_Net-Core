@@ -353,7 +353,7 @@ static void test_reject(void)
     nc_px_asset_t a;
     memset(&a, 0, sizeof(a));
     a.kind = NC_PX_ASSET_PROGRAM;
-    strcpy(a.name, "empty");
+    a.name_id = nc_px_name_dict_global_intern("empty", 5);
     check(nc_px_engine_program_compile(&a, &p) == ESP_ERR_INVALID_ARG, "冇段落 → INVALID_ARG");
     check(p.n == 0 && p.total == 0, "失敗時清空輸出");
 

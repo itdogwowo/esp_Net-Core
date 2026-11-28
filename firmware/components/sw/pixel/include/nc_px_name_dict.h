@@ -51,6 +51,13 @@ const char *nc_px_name_dict_name(const nc_px_name_dict_t *d, uint32_t id, uint16
 uint32_t    nc_px_name_dict_count(const nc_px_name_dict_t *d);
 bool        nc_px_name_dict_dirty(const nc_px_name_dict_t *d);
 
+// 全域字典（pixel layer 共用；生命週期跨 layer clear／reload）。
+nc_px_name_dict_t *nc_px_name_dict_global(void);
+void nc_px_name_dict_global_reset(void);   // 測試／reload 用
+const char *nc_px_name_dict_global_str(uint32_t id);
+uint32_t    nc_px_name_dict_global_intern(const char *name, size_t len);
+const char *nc_px_name_dict_global_intern_cstr(const char *name);
+
 #ifdef __cplusplus
 }
 #endif

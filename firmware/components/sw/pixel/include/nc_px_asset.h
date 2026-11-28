@@ -18,6 +18,7 @@
 #include <stdint.h>
 
 #include "esp_err.h"
+#include "nc_px_name_dict.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -57,7 +58,8 @@ typedef enum {
 } nc_px_asset_kind_t;
 
 typedef struct {
-    char        name[NC_PX_NAME_MAX];   // key；JSON 冇寫 = 檔名
+    uint32_t    name_id;                // name dictionary id（BAD = 未命名）
+    const char *name;                   // 顯示用 dict pointer（parser 填；可 NULL）
     uint8_t     kind;                   // nc_px_asset_kind_t
     uint16_t    nseg;                   // kind=PROGRAM 時有效（動態）
     uint32_t    seg_off;                // 第一個 segment 在全域 pool 的 index（>65k 都夠）
@@ -115,6 +117,7 @@ void                  nc_px_asset_clear(void);
 int                   nc_px_asset_count(void);
 const nc_px_asset_t  *nc_px_asset_at(int i);
 const nc_px_asset_t  *nc_px_asset_find(const char *name);
+const nc_px_asset_t  *nc_px_asset_find_id(uint32_t name_id);
 void                  nc_px_asset_stats(nc_px_asset_stat_t *out);
 
 // 直接加入一個已填好的資產（掃到 `.nce` 時用；`name` 空白 = 拒絕）。

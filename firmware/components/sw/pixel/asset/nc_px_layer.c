@@ -129,6 +129,20 @@ static void copy_str(char *dst, size_t cap, const char *src)
     dst[n] = '\0';
 }
 
+static bool intern_name(nc_px_js_t *j, uint32_t *out_id, const char **out_str)
+{
+    char *s = nc_px_js_str_dup(j);
+    if (s == NULL) {
+        return false;
+    }
+    *out_id = nc_px_name_dict_global_intern(s, strlen(s));
+    if (out_str != NULL) {
+        *out_str = nc_px_name_dict_global_str(*out_id);
+    }
+    free(s);
+    return *out_id != NC_PX_NAME_DICT_BAD_ID;
+}
+
 static const char *skip_bom(const char *json, const char *end)
 {
     if ((size_t)(end - json) >= 3 && (uint8_t)json[0] == 0xEF
@@ -336,11 +350,9 @@ static esp_err_t parse_group(nc_px_js_t *j, nc_px_map_pool_t *pool, nc_px_group_
                 return ESP_ERR_INVALID_ARG;
             }
         } else if (strcmp(key, "name") == 0) {
-            char nm[NC_PX_LAYER_NAME_MAX];
-            if (!nc_px_js_str(j, nm, sizeof(nm))) {
+            if (!intern_name(j, &g->name_id, &g->name)) {
                 return ESP_ERR_INVALID_ARG;
             }
-            copy_str(g->name, sizeof(g->name), nm);
         } else if (strcmp(key, "sel") == 0) {
             if (!nc_px_js_eat(j, '[')) {
                 return ESP_ERR_INVALID_ARG;
@@ -411,11 +423,9 @@ esp_err_t nc_px_map_parse(const char *json, size_t len, nc_px_map_pool_t *pool,
                     return ESP_ERR_INVALID_ARG;
                 }
             } else if (strcmp(key, "name") == 0) {
-                char nm[NC_PX_LAYER_NAME_MAX];
-                if (!nc_px_js_str(&j, nm, sizeof(nm))) {
+                if (!intern_name(&j, &out->name_id, &out->name)) {
                     return ESP_ERR_INVALID_ARG;
                 }
-                copy_str(out->name, sizeof(out->name), nm);
             } else if (strcmp(key, "groups") == 0) {
                 if (!nc_px_js_eat(&j, '[')) {
                     return ESP_ERR_INVALID_ARG;
@@ -473,17 +483,25 @@ static bool parse_entry(nc_px_js_t *j, nc_px_mode_entry_t *e, bool *valid)
                 return false;
             }
             if (strcmp(key, "group") == 0) {
-                char v[NC_PX_LAYER_NAME_MAX + 8];
-                if (!nc_px_js_str(j, v, sizeof(v))) {
+                char *v = nc_px_js_str_dup(j);
+                if (v == NULL) {
                     return false;
                 }
-                copy_str(e->group, sizeof(e->group), v);
+                char *dot = strchr(v, '.');
+                if (dot != NULL) {
+                    *dot = '\0';
+                    e->map_id = nc_px_name_dict_global_intern(v, strlen(v));
+                    e->group_id = nc_px_name_dict_global_intern(dot + 1, strlen(dot + 1));
+                    e->group = nc_px_name_dict_global_str(e->group_id);
+                } else {
+                    e->group_id = nc_px_name_dict_global_intern(v, strlen(v));
+                    e->group = nc_px_name_dict_global_str(e->group_id);
+                }
+                free(v);
             } else if (strcmp(key, "effect") == 0) {
-                char v[NC_PX_LAYER_NAME_MAX];
-                if (!nc_px_js_str(j, v, sizeof(v))) {
+                if (!intern_name(j, &e->effect_id, &e->effect)) {
                     return false;
                 }
-                copy_str(e->effect, sizeof(e->effect), v);
             } else if (strcmp(key, "write") == 0) {
                 char v[12];
                 if (!nc_px_js_str(j, v, sizeof(v))) {
@@ -509,8 +527,9 @@ static bool parse_entry(nc_px_js_t *j, nc_px_mode_entry_t *e, bool *valid)
             return false;
         }
     }
-    *valid = (e->group[0] != '\0') && (e->effect[0] != '\0')
-          && (e->write < NC_PX_WRITE_COUNT);
+    *valid = (e->group_id != NC_PX_NAME_DICT_BAD_ID) &&
+             (e->effect_id != NC_PX_NAME_DICT_BAD_ID) &&
+             (e->write < NC_PX_WRITE_COUNT);
     return true;
 }
 
@@ -609,6 +628,9 @@ esp_err_t nc_px_mode_parse(const char *json, size_t len, nc_px_mode_entry_t *poo
         return ESP_ERR_INVALID_ARG;
     }
     memset(out, 0, sizeof(*out));
+    out->name_id = NC_PX_NAME_DICT_BAD_ID;
+    out->mapping_id = NC_PX_NAME_DICT_BAD_ID;
+    out->map_id = NC_PX_NAME_DICT_BAD_ID;
     out->play_loop = 1;
     const char *const end = json + len;
     const char *const body = skip_bom(json, end);
@@ -631,17 +653,14 @@ esp_err_t nc_px_mode_parse(const char *json, size_t len, nc_px_mode_entry_t *poo
                     return ESP_ERR_INVALID_ARG;
                 }
             } else if (strcmp(key, "name") == 0) {
-                char v[NC_PX_LAYER_NAME_MAX];
-                if (!nc_px_js_str(&j, v, sizeof(v))) {
+                if (!intern_name(&j, &out->name_id, &out->name)) {
                     return ESP_ERR_INVALID_ARG;
                 }
-                copy_str(out->name, sizeof(out->name), v);
             } else if (strcmp(key, "mapping") == 0) {
-                char v[NC_PX_LAYER_NAME_MAX];
-                if (!nc_px_js_str(&j, v, sizeof(v))) {
+                if (!intern_name(&j, &out->mapping_id, &out->mapping)) {
                     return ESP_ERR_INVALID_ARG;
                 }
-                copy_str(out->mapping, sizeof(out->mapping), v);
+                out->map_id = out->mapping_id;
             } else if (strcmp(key, "play_loop") == 0) {
                 if (!parse_play_loop(&j, &out->play_loop) && !nc_px_js_skip(&j)) {
                     return ESP_ERR_INVALID_ARG;
@@ -669,6 +688,9 @@ esp_err_t nc_px_mode_parse(const char *json, size_t len, nc_px_mode_entry_t *poo
                         nc_px_mode_entry_t *e = &pool[out->nentry];
                         bool valid = false;
                         memset(e, 0, sizeof(*e));
+                        e->group_id = NC_PX_NAME_DICT_BAD_ID;
+                        e->effect_id = NC_PX_NAME_DICT_BAD_ID;
+                        e->map_id = NC_PX_NAME_DICT_BAD_ID;
                         if (!parse_entry(&j, e, &valid)) {
                             return ESP_ERR_INVALID_ARG;
                         }
@@ -697,6 +719,9 @@ esp_err_t nc_px_mode_parse(const char *json, size_t len, nc_px_mode_entry_t *poo
         }
     }
     out->entry = pool;                 // 指入呼叫端 pool（nentry = 有效條目數）
+    if (out->map_id == NC_PX_NAME_DICT_BAD_ID && out->nentry > 0) {
+        out->map_id = out->entry[0].map_id;   // entry 的 "map.group" prefix
+    }
     out->hash = json_hash(json, len);
     return ESP_OK;
 }
@@ -707,7 +732,8 @@ void nc_px_show_free(nc_px_show_t *show)
     if (show == NULL) {
         return;
     }
-    free(show->list);
+    free((void *)show->list);
+    free(show->list_ids);
     memset(show, 0, sizeof(*show));
 }
 
@@ -740,19 +766,32 @@ esp_err_t nc_px_show_parse(const char *json, size_t len, nc_px_show_t *out)
                 }
                 if (!nc_px_js_eat(&j, ']')) {
                     for (;;) {
-                        char v[NC_PX_LAYER_NAME_MAX];
-                        if (nc_px_js_str(&j, v, sizeof(v))) {
+                        char *v = nc_px_js_str_dup(&j);
+                        if (v != NULL) {
                             if (out->nlist == out->cap) {
                                 const uint32_t cap = (out->cap != 0) ? out->cap * 2u : 8u;
-                                char (*nl)[NC_PX_LAYER_NAME_MAX] = realloc(
-                                    out->list, (size_t)cap * NC_PX_LAYER_NAME_MAX);
-                                if (nl == NULL) {
+                                const char **nl = (const char **)realloc(
+                                    out->list, (size_t)cap * sizeof(*nl));
+                                uint32_t *id = (uint32_t *)realloc(
+                                    out->list_ids, (size_t)cap * sizeof(*id));
+                                if (nl == NULL || id == NULL) {
+                                    free((void *)nl);
+                                    free(id);
+                                    free(v);
                                     return ESP_ERR_NO_MEM;
                                 }
                                 out->list = nl;
+                                out->list_ids = id;
                                 out->cap = cap;
                             }
-                            copy_str(out->list[out->nlist++], NC_PX_LAYER_NAME_MAX, v);
+                            const uint32_t id =
+                                nc_px_name_dict_global_intern(v, strlen(v));
+                            out->list_ids[out->nlist] =
+                                id;
+                            out->list[out->nlist] =
+                                nc_px_name_dict_global_str(id);
+                            out->nlist++;
+                            free(v);
                         } else if (!nc_px_js_skip(&j)) {
                             return ESP_ERR_INVALID_ARG;
                         }

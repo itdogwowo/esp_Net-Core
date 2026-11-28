@@ -97,20 +97,21 @@
 | driver | `LED_WS2812`、16 線、每線 256 px、i80 index 0–15 |
 | active tasks | render／encode／paint／effect 全部 enabled |
 | px | 4,096（16 lanes×256） |
-| frame | **20.00 ms（約 50 fps）** |
-| pair | **3.11 ms**（clear 0.75＋apply 2.34＋white／commit） |
-| apply | 2.34 ms |
-| encode | 9.37 ms |
+| frame | **19.99 ms（約 50 fps）** |
+| pair | **3.12 ms**（clear 0.80＋apply 2.35＋white／commit） |
+| apply | 2.35 ms |
+| encode | 9.39 ms |
 | tx | 0.83 ms |
 | 0xF07F A/B | internal 0.716 ms／PSRAM 1.249 ms |
 | flatify | 0.312–0.343 ms |
 | active cache | 1,600–7,456 B |
 | prebuild | **present=4、built=0、26 ms**（第二次開機） |
+| names.ncd | 5,244 B（369 名） |
 | fs_format 後首開 | built 3、總共 4 張、約 1,238 ms |
 | cache hit swap | 188–206 µs |
 | FAT | total 872,448 B／free 663,552 B（648 KiB） |
 | internal free | 125–196 KB |
-| PSRAM free | 1.81 MB |
+| PSRAM free | 1.82 MB |
 
 ### 3.3 16×600 極限（9,600 px、16 lanes 並行）
 
@@ -193,7 +194,8 @@
 
 | 項目 | 說明 |
 |---|---|
-| 名稱 24 字／檔名 64 字 | struct 固定 char array（storage format） |
+| 名稱長度 | **已改 name dictionary（names.ncd）**，冇 24 B cap；字串只存一份 |
+| 檔名 64 B | FATFS／VFS 路徑限制；建議 ASCII |
 | map/mode id 0–65535 | uint16；protocol 已支援 2-byte |
 | 單一 asset segments 65,535 | uint16 欄位；總 pool offset 已 uint32 |
 | FAT 容量 | cache 太多／FAT 滿仍會 save 失敗 |
@@ -228,6 +230,15 @@
 - 65,535 modes／effects：約 **+0.4 MB**（仍在 PSRAM 容量內，但屬上限附近）。
 - 重測 frame **20.00 ms／50 fps**、pair 3.11 ms、apply 2.34 ms；
   PSRAM free **1.81 MB**、FAT free 648 KiB → 冇性能／容量回歸。
+
+## 6.7 最終驗證（name dictionary 接入後）
+
+- **18/18 project build 成功**（最後一輪，含 EffectPerf bench 名寫入修正）。
+- host tests 全部通過（nameDict／pxAsset／pxLayer／pxShow／pxScan／pxLayout…）。
+- 真機最後一輪：cache **present=4、built=0、26 ms**；frame **19.99 ms／50 fps**；
+  pair 3.12 ms、apply 2.35 ms、encode 9.39 ms；PSRAM free **1.82 MB**、internal free 196 KB。
+- names.ncd **5,244 B／369 名**；手動刪檔重建實測會清 4 個舊 `.layout`，再 reload 4/4 hit。
+- 長中文名：pxAsset_test 18 字（54 B）完整保留；冇 24 B cap。
 
 ## 7. 結論
 

@@ -14,6 +14,7 @@ mkdir -p "$OUT"
     -I"$PXF/include" -I"$SHIM" \
     "$PXF/asset/nc_px_json.c" \
     "$PXF/asset/nc_px_asset.c" \
+    "$PXF/asset/nc_px_name_dict.c" \
     "$PXF/asset/nc_px_asset_scan.c" \
     "$PXF/asset/nc_px_layer.c" \
     "$PXF/asset/nc_px_layer_scan.c" \

@@ -29,6 +29,7 @@ void          nc_px_js_open(nc_px_js_t *j, const char *text, size_t len);
 void          nc_px_js_ws(nc_px_js_t *j);
 bool          nc_px_js_eat(nc_px_js_t *j, char c);
 bool          nc_px_js_str(nc_px_js_t *j, char *out, size_t cap);
+char         *nc_px_js_str_dup(nc_px_js_t *j);   // malloc；呼叫者 free；失敗 NULL
 nc_px_jnum_t  nc_px_js_num(nc_px_js_t *j, uint32_t limit, uint32_t *out);
 bool          nc_px_js_skip(nc_px_js_t *j);
 bool          nc_px_js_key(nc_px_js_t *j, char *key, size_t cap);

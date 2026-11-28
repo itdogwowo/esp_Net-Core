@@ -39,7 +39,8 @@ static double now_ms(void)
 static void make_asset(nc_px_asset_t *a, const char *name, uint16_t pixel_n)
 {
     memset(a, 0, sizeof(*a));
-    snprintf(a->name, sizeof(a->name), "%s", name);
+    a->name_id = nc_px_name_dict_global_intern(name, strlen(name));
+    a->name = nc_px_name_dict_global_str(a->name_id);
     a->kind = NC_PX_ASSET_PROGRAM;
     a->pixel_hint = pixel_n;
     a->step = 1;
@@ -289,12 +290,14 @@ static void test_500_groups(void)
         snprintf(names[i], sizeof(names[i]), "g%d", i);
         snprintf(eff[i], sizeof(eff[i]), "breathe");
         groups[i].id = (uint8_t)(i & 0xFF);
-        memcpy(groups[i].name, names[i], sizeof(groups[i].name));
+        groups[i].name_id = nc_px_name_dict_global_intern(names[i], strlen(names[i]));
+        groups[i].name = nc_px_name_dict_global_str(groups[i].name_id);
         groups[i].sel = &sels[i];
         groups[i].nsel = 1;
-        entries[i].group[0] = '\0';
-        memcpy(entries[i].group, names[i], sizeof(entries[i].group));
-        memcpy(entries[i].effect, eff[i], sizeof(entries[i].effect));
+        entries[i].group_id = nc_px_name_dict_global_intern(names[i], strlen(names[i]));
+        entries[i].group = nc_px_name_dict_global_str(entries[i].group_id);
+        entries[i].effect_id = nc_px_name_dict_global_intern(eff[i], strlen(eff[i]));
+        entries[i].effect = nc_px_name_dict_global_str(entries[i].effect_id);
         entries[i].write = NC_PX_WRITE_RGB;
         pos += ln;
     }
@@ -722,14 +725,20 @@ static void test_many_effects(void)
     }
     for (uint16_t i = 0; i < n; i++) {
         grp[i].id = (uint16_t)(i + 1);
-        snprintf(grp[i].name, sizeof(grp[i].name), "g%u", (unsigned)i);
+        char nb[24], eb[24];
+        snprintf(nb, sizeof(nb), "g%u", (unsigned)i);
+        snprintf(eb, sizeof(eb), "e%u", (unsigned)i);
+        grp[i].name = nc_px_name_dict_global_intern_cstr(nb);
+        grp[i].name_id = nc_px_name_dict_global_intern(nb, strlen(nb));
         grp[i].sel = &sels[i];
         grp[i].nsel = 1;
         sels[i].hw = NC_PX_HW_WS2812;
         snprintf(sels[i].slice, sizeof(sels[i].slice), "%u:%u",
                  (unsigned)(i * 4u), (unsigned)(i * 4u + 4u));
-        snprintf(en[i].group, sizeof(en[i].group), "g%u", (unsigned)i);
-        snprintf(en[i].effect, sizeof(en[i].effect), "e%u", (unsigned)i);
+        en[i].group = nc_px_name_dict_global_intern_cstr(nb);
+        en[i].group_id = nc_px_name_dict_global_intern(nb, strlen(nb));
+        en[i].effect = nc_px_name_dict_global_intern_cstr(eb);
+        en[i].effect_id = nc_px_name_dict_global_intern(eb, strlen(eb));
         en[i].write = NC_PX_WRITE_RGB;
     }
     nc_px_map_t map = { .id = 1, .name = "m", .group = grp, .ngroups = n };

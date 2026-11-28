@@ -7,7 +7,7 @@ T=tools/hosttest/nameDict_test
 OUT="$T/build"
 mkdir -p "$OUT"
 "$CC" -std=c17 -Wall -Wextra -Werror -O1 \
-    -I"$PXF/include" -I"$PXF/asset" -I"tools/hosttest/pxAsset_test/include" \
+    -I"$PXF/include" -I"tools/hosttest/pxAsset_test/include" \
     "$PXF/asset/nc_px_name_dict.c" \
     "$T/nameDict_test.c" \
     -o "$OUT/nameDict_test"

@@ -191,17 +191,26 @@ const nc_px_asset_t *nc_px_asset_at(int i)
     return &s_tbl.item[i];
 }
 
+const nc_px_asset_t *nc_px_asset_find_id(uint32_t name_id)
+{
+    if (name_id == NC_PX_NAME_DICT_BAD_ID) {
+        return NULL;
+    }
+    for (uint32_t i = 0; i < s_tbl.n; i++) {
+        if (s_tbl.item[i].name_id == name_id) {
+            return &s_tbl.item[i];
+        }
+    }
+    return NULL;
+}
+
 const nc_px_asset_t *nc_px_asset_find(const char *name)
 {
     if (name == NULL) {
         return NULL;
     }
-    for (uint16_t i = 0; i < s_tbl.n; i++) {
-        if (strcmp(s_tbl.item[i].name, name) == 0) {
-            return &s_tbl.item[i];
-        }
-    }
-    return NULL;
+    const uint32_t id = nc_px_name_dict_find(nc_px_name_dict_global(), name, strlen(name));
+    return nc_px_asset_find_id(id);
 }
 
 void nc_px_asset_stats(nc_px_asset_stat_t *out)
@@ -213,13 +222,18 @@ void nc_px_asset_stats(nc_px_asset_stat_t *out)
 
 static esp_err_t tbl_add(const nc_px_asset_t *a)
 {
-    if (a->name[0] == '\0') {
+    uint32_t nid = a->name_id;
+    if (nid == NC_PX_NAME_DICT_BAD_ID && a->name != NULL) {
+        nid = nc_px_name_dict_global_intern(a->name, strlen(a->name));
+    }
+    if (nid == NC_PX_NAME_DICT_BAD_ID) {
         s_stat.rejected++;
         return ESP_ERR_INVALID_ARG;
     }
-    if (nc_px_asset_find(a->name) != NULL) {
+    if (nc_px_asset_find_id(nid) != NULL) {
         s_stat.dup++;
-        ESP_LOGW(TAG, "撞名：%s（保留第一個）", a->name);
+        ESP_LOGW(TAG, "撞名：%s（保留第一個）",
+                 nc_px_name_dict_global_str(nid));
         return ESP_ERR_INVALID_STATE;
     }
     // 冇固定上限：要幾多配幾多（倍增）。配唔到（真係冇記憶體）才拒。
@@ -227,10 +241,14 @@ static esp_err_t tbl_add(const nc_px_asset_t *a)
     if (s_tbl.n == 0xFFFFu ||
         nc_px_asset_tbl_reserve(&s_tbl, (uint16_t)(s_tbl.n + 1u)) != ESP_OK) {
         s_stat.rejected++;
-        ESP_LOGW(TAG, "無記憶體／表滿（已有 %u 個）：%s 唔載入", (unsigned)s_tbl.n, a->name);
+        ESP_LOGW(TAG, "無記憶體／表滿（已有 %u 個）：%s 唔載入", (unsigned)s_tbl.n,
+                 nc_px_name_dict_global_str(a->name_id));
         return ESP_ERR_NO_MEM;
     }
-    s_tbl.item[s_tbl.n++] = *a;
+    s_tbl.item[s_tbl.n] = *a;
+    s_tbl.item[s_tbl.n].name_id = nid;
+    s_tbl.item[s_tbl.n].name = nc_px_name_dict_global_str(nid);
+    s_tbl.n++;
     s_stat.loaded++;
     return ESP_OK;
 }
@@ -358,7 +376,7 @@ static bool parse_program(nc_px_js_t *j, nc_px_asset_t *a, bool *ok)
         const uint16_t prev_end = (prev_seg != NULL) ? prev_seg->end_f : 0;
         if (seg.end_f <= prev_end) {
             ESP_LOGW(TAG, "%s：end_Time 必須嚴格遞增（%u <= %u）",
-                     a->name[0] != '\0' ? a->name : "(未命名)",
+                     nc_px_name_dict_global_str(a->name_id),
                      (unsigned)seg.end_f, (unsigned)prev_end);
             *ok = false;
         }
@@ -367,7 +385,7 @@ static bool parse_program(nc_px_js_t *j, nc_px_asset_t *a, bool *ok)
         if (dst == NULL) {
             if (!warned) {
                 ESP_LOGW(TAG, "%s：program segment pool 冇記憶體",
-                         a->name[0] != '\0' ? a->name : "(未命名)");
+                         nc_px_name_dict_global_str(a->name_id));
                 warned = true;
             }
             *ok = false;
@@ -409,6 +427,7 @@ static bool parse_object(nc_px_js_t *j, nc_px_asset_t *a, bool *ok, bool *touche
                     memset(&item, 0, sizeof(item));
                     item.kind = NC_PX_ASSET_PROGRAM;
                     item.speed = 1;
+                    item.name_id = NC_PX_NAME_DICT_BAD_ID;
                     bool item_ok = true, item_touched = false, dummy = false;
                     if (!parse_object(j, &item, &item_ok, &item_touched, false, &dummy)) {
                         return false;
@@ -429,9 +448,13 @@ static bool parse_object(nc_px_js_t *j, nc_px_asset_t *a, bool *ok, bool *touche
             }
             *batch = true;
         } else if (strcmp(key, "name") == 0) {
-            if (!nc_px_js_str(j, a->name, sizeof(a->name))) {
+            char *nm = nc_px_js_str_dup(j);
+            if (nm == NULL) {
                 return false;
             }
+            a->name_id = nc_px_name_dict_global_intern(nm, strlen(nm));
+            a->name = nc_px_name_dict_global_str(a->name_id);
+            free(nm);
             *touched = true;
         } else if (strcmp(key, "program") == 0) {
             *touched = true;
@@ -495,16 +518,6 @@ static bool parse_object(nc_px_js_t *j, nc_px_asset_t *a, bool *ok, bool *touche
     }
 }
 
-static void copy_name(char *dst, size_t cap, const char *src)
-{
-    size_t i = 0;
-    for (; src[i] != '\0' && i + 1 < cap; i++) {
-        dst[i] = src[i];
-    }
-    i = nc_px_utf8_trim(dst, i);
-    dst[i] = '\0';
-}
-
 esp_err_t nc_px_asset_add_json(const char *json, size_t len, const char *name_hint)
 {
     if (json == NULL || len == 0) {
@@ -523,6 +536,7 @@ esp_err_t nc_px_asset_add_json(const char *json, size_t len, const char *name_hi
     memset(&a, 0, sizeof(a));
     a.kind = NC_PX_ASSET_PROGRAM;
     a.speed = 1;
+    a.name_id = NC_PX_NAME_DICT_BAD_ID;
 
     bool touched = false, ok = true, batch = false;
     if (!parse_object(&j, &a, &ok, &touched, true, &batch)) {
@@ -545,8 +559,9 @@ esp_err_t nc_px_asset_add_json(const char *json, size_t len, const char *name_hi
         s_stat.rejected++;
         return ESP_ERR_INVALID_ARG;
     }
-    if (a.name[0] == '\0' && name_hint != NULL) {
-        copy_name(a.name, sizeof(a.name), name_hint);
+    if (a.name_id == NC_PX_NAME_DICT_BAD_ID && name_hint != NULL) {
+        a.name_id = nc_px_name_dict_global_intern(name_hint, strlen(name_hint));
+        a.name = nc_px_name_dict_global_str(a.name_id);
     }
     return tbl_add(&a);
 }
@@ -568,7 +583,8 @@ size_t nc_px_asset_json(char *out, size_t cap)
     for (uint16_t i = 0; i < s_tbl.n; i++) {
         n = snprintf(out + u, cap - u, "%s{\"name\":\"%s\",\"kind\":%u,\"seg\":%u}",
                      (i == 0) ? "" : ",",
-                     s_tbl.item[i].name, (unsigned)s_tbl.item[i].kind,
+                     nc_px_name_dict_global_str(s_tbl.item[i].name_id),
+                     (unsigned)s_tbl.item[i].kind,
                      (unsigned)s_tbl.item[i].nseg);
         if (n < 0 || (size_t)n >= cap - u) {
             return 0;

@@ -15,6 +15,7 @@
 #include <stdint.h>
 
 #include "esp_err.h"
+#include "nc_px_name_dict.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -51,14 +52,16 @@ typedef struct {
 
 typedef struct {
     uint16_t id;                             // 500 組以上要用 16-bit（舊 8-bit 會撞）
-    char     name[NC_PX_LAYER_NAME_MAX];
+    uint32_t name_id;                        // name dictionary id
+    const char *name;                        // 顯示用
     const nc_px_group_sel_t *sel;            // 指入呼叫端的 pool（生命週期由呼叫端管）
     uint32_t nsel;
 } nc_px_group_t;
 
 typedef struct {
     uint16_t id;                             // 0..65535（舊 uint8 只到 255）
-    char     name[NC_PX_LAYER_NAME_MAX];
+    uint32_t name_id;                        // name dictionary id
+    const char *name;                        // 顯示用
     const nc_px_group_t *group;              // 指入呼叫端的 pool
     uint32_t ngroups;
     uint32_t hash;                           // 檔案內容 hash（快取 key 用）
@@ -90,8 +93,11 @@ typedef enum {
 } nc_px_write_t;
 
 typedef struct {
-    char    group[NC_PX_LAYER_NAME_MAX + 8];  // 原始引用："matrix.full" / "3.full" / "full"
-    char    effect[NC_PX_LAYER_NAME_MAX];
+    uint32_t group_id;                       // name dictionary id（已解析 group 名）
+    uint32_t effect_id;                      // name dictionary id
+    const char *group;                       // 顯示／舊測試用
+    const char *effect;                      // 顯示／舊測試用
+    uint32_t map_id;                         // 引用帶 map prefix 時記住；BAD = 跟 mode
     uint8_t write;                           // nc_px_write_t
     bool    has_range;
     int16_t start;                           // range 省略 = 0（整組）
@@ -101,8 +107,11 @@ typedef struct {
 
 typedef struct {
     uint16_t           id;                   // 0..65535（舊 uint8 只到 255）
-    char               name[NC_PX_LAYER_NAME_MAX];
-    char               mapping[NC_PX_LAYER_NAME_MAX];  // mode 預設 mapping（可空）
+    uint32_t           name_id;
+    const char        *name;                 // 顯示用
+    uint32_t           mapping_id;           // mode 預設 mapping（BAD = 空）
+    const char        *mapping;              // 顯示用
+    uint32_t           map_id;               // 已解析 map；BAD = 未指定
     int16_t            play_loop;            // -1 = 無限
     uint16_t           maxF;                 // 0 = 唔限
     // 白混合（production Show 用）：0..100；JSON `"white"` 或 `"white_mix"`。
@@ -120,7 +129,8 @@ typedef struct {
     bool        auto_play;
     uint32_t    nlist;
     uint32_t    cap;
-    char      (*list)[NC_PX_LAYER_NAME_MAX];   // 動態；nc_px_show_parse() 配置
+    const char **list;                         // 顯示字串（舊測試／log）
+    uint32_t    *list_ids;                     // name dictionary ids
 } nc_px_show_t;
 
 // ═══════════════════════ API ═══════════════════════

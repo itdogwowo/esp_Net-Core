@@ -176,7 +176,8 @@ static uint32_t ns_per_frame(int64_t t0, uint32_t frames)
 static void fill_asset(nc_px_asset_t *a, uint16_t nv)
 {
     memset(a, 0, sizeof(*a));
-    strcpy(a->name, "ebench");
+    a->name_id = nc_px_name_dict_global_intern("ebench", 6);
+    a->name = nc_px_name_dict_global_str(a->name_id);
     a->kind = NC_PX_ASSET_PROGRAM;
     a->pixel_hint = nv;
     a->step = 3;
@@ -427,7 +428,8 @@ static bool evals_alloc(uint32_t n)
 static void fill_wave_asset(nc_px_asset_t *a, uint8_t type)
 {
     memset(a, 0, sizeof(*a));
-    strcpy(a->name, "wave");
+    a->name_id = nc_px_name_dict_global_intern("wave", 4);
+    a->name = nc_px_name_dict_global_str(a->name_id);
     a->kind = NC_PX_ASSET_PROGRAM;
     a->pixel_hint = EB_WAVE_TOTAL;
     a->step = 1;

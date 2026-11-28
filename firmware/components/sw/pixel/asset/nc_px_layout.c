@@ -63,13 +63,24 @@ static const nc_px_hw_inv_t *find_inv(const nc_px_hw_inv_t *inv, uint32_t ninv, 
     return NULL;
 }
 
-static const nc_px_asset_t *find_asset(const nc_px_asset_tbl_t *tbl, const char *name)
+static uint32_t resolve_name_id(uint32_t id, const char *name)
 {
-    if (tbl == NULL || name == NULL) {
+    if (id != NC_PX_NAME_DICT_BAD_ID) {
+        return id;
+    }
+    if (name != NULL) {
+        return nc_px_name_dict_global_intern(name, strlen(name));
+    }
+    return NC_PX_NAME_DICT_BAD_ID;
+}
+
+static const nc_px_asset_t *find_asset(const nc_px_asset_tbl_t *tbl, uint32_t name_id)
+{
+    if (tbl == NULL || name_id == NC_PX_NAME_DICT_BAD_ID) {
         return NULL;
     }
-    for (uint16_t i = 0; i < tbl->n; i++) {
-        if (strcmp(tbl->item[i].name, name) == 0) {
+    for (uint32_t i = 0; i < tbl->n; i++) {
+        if (tbl->item[i].name_id == name_id) {
             return &tbl->item[i];
         }
     }
@@ -209,11 +220,11 @@ static uint32_t group_fill(const nc_px_group_t *g, const nc_px_hw_inv_t *inv, ui
 // 為什麼要：mode 條目引用 group 名，線性掃描係 O(entries × groups)；
 // 500 組 × 500 條目 = 25 萬次 strcmp，而且名字在 PSRAM → 板上 build 64 ms。
 // hash 之後 O(entries)，build 只受實際展開成本限制。
-static uint32_t name_hash(const char *s)
+static uint32_t name_hash(uint32_t id)
 {
     uint32_t h = 2166136261u;
-    while (s != NULL && *s != '\0') {
-        h ^= (uint8_t)(*s++);
+    for (int i = 0; i < 4; i++) {
+        h ^= (uint8_t)(id >> (i * 8));
         h *= 16777619u;
     }
     return h;
@@ -236,7 +247,7 @@ static void hash_build(const nc_px_map_t *map, int32_t *ht, uint32_t cap)
         ht[i] = 0;
     }
     for (uint32_t g = 0; g < map->ngroups; g++) {
-        const char *nm = map->group[g].name;
+        const uint32_t nm = resolve_name_id(map->group[g].name_id, map->group[g].name);
         uint32_t pos = name_hash(nm) & (cap - 1u);
         for (uint32_t probe = 0; probe < cap; probe++) {
             if (ht[pos] == 0) {
@@ -249,23 +260,20 @@ static void hash_build(const nc_px_map_t *map, int32_t *ht, uint32_t cap)
 }
 
 static const nc_px_group_t *hash_find(const nc_px_map_t *map, const int32_t *ht, uint32_t cap,
-                                      const char *ref)
+                                      uint32_t name_id, const char *name)
 {
-    if (map == NULL || ht == NULL || ref == NULL) {
+    name_id = resolve_name_id(name_id, name);
+    if (map == NULL || ht == NULL || name_id == NC_PX_NAME_DICT_BAD_ID) {
         return NULL;
     }
-    const char *g = ref;
-    const char *dot = strchr(ref, '.');
-    if (dot != NULL && dot != ref) {
-        g = dot + 1;
-    }
-    uint32_t pos = name_hash(g) & (cap - 1u);
+    uint32_t pos = name_hash(name_id) & (cap - 1u);
     for (uint32_t probe = 0; probe < cap; probe++) {
         const int32_t idx = ht[pos];
         if (idx == 0) {
             return NULL;
         }
-        if (strcmp(map->group[idx - 1].name, g) == 0) {
+        if (resolve_name_id(map->group[idx - 1].name_id,
+                            map->group[idx - 1].name) == name_id) {
             return &map->group[idx - 1];
         }
         pos = (pos + 1u) & (cap - 1u);
@@ -325,8 +333,16 @@ esp_err_t nc_px_layout_build(const nc_px_mode_t *mode, const nc_px_map_t *map,
     uint32_t total_need = 0;
     for (uint32_t e = 0; e < mode->nentry; e++) {
         const nc_px_mode_entry_t *en = &mode->entry[e];
-        const nc_px_asset_t *asset = find_asset(assets, en->effect);
-        const nc_px_group_t *group = hash_find(map, ht, hcap, en->group);
+        const nc_px_asset_t *asset = find_asset(
+            assets, resolve_name_id(en->effect_id, en->effect));
+        if (asset == NULL && en->effect != NULL) {
+            asset = find_asset(assets, resolve_name_id(NC_PX_NAME_DICT_BAD_ID, en->effect));
+        }
+        const nc_px_group_t *group = hash_find(
+            map, ht, hcap, en->group_id, en->group);
+        if (group == NULL && en->group != NULL) {
+            group = hash_find(map, ht, hcap, NC_PX_NAME_DICT_BAD_ID, en->group);
+        }
         if (asset == NULL) {
             out->skipped++;
             out->skip_no_asset++;
@@ -1325,7 +1341,7 @@ uint32_t nc_px_layout_cache_key(uint32_t mode_hash, uint32_t map_hash, uint32_t 
 
 // 一條 aprog 的存檔形狀（asset 用名字；program 的 segments 另段 variable-length 存）
 typedef struct {
-    char     name[NC_PX_NAME_MAX];
+    uint32_t name_id;
     uint32_t nv;
     uint32_t vals_off;
     uint16_t nseg;
@@ -1372,7 +1388,7 @@ esp_err_t nc_px_layout_save(const nc_px_layout_t *l, const char *path, uint32_t 
     for (uint32_t i = 0; i < l->naprog; i++) {
         pxlt_aprog_t a;
         memset(&a, 0, sizeof(a));
-        snprintf(a.name, sizeof(a.name), "%s", l->aprog[i].asset ? l->aprog[i].asset->name : "");
+        a.name_id = l->aprog[i].asset ? l->aprog[i].asset->name_id : NC_PX_NAME_DICT_BAD_ID;
         a.nv = l->aprog[i].nv;
         a.vals_off = l->aprog[i].vals_off;
         a.nseg = l->aprog[i].prog.n;
@@ -1485,13 +1501,7 @@ esp_err_t nc_px_layout_load(nc_px_layout_t *out, const char *path, uint32_t key,
         pxlt_aprog_t a;
         memcpy(&a, buf + off, sizeof(a));
         off += sizeof(a);
-        const nc_px_asset_t *asset = NULL;
-        for (uint16_t k = 0; k < assets->n; k++) {
-            if (strcmp(assets->item[k].name, a.name) == 0) {
-                asset = &assets->item[k];
-                break;
-            }
-        }
+        const nc_px_asset_t *asset = find_asset(assets, a.name_id);
         if (asset == NULL || a.nseg == 0 ||
             off + (size_t)a.nseg * sizeof(nc_px_prog_seg_t) > h.payload_bytes) {
             nc_px_layout_free(out);

@@ -427,3 +427,39 @@ bool nc_px_name_dict_dirty(const nc_px_name_dict_t *d)
 {
     return (d != NULL) && d->dirty;
 }
+
+static nc_px_name_dict_t *s_global;
+
+nc_px_name_dict_t *nc_px_name_dict_global(void)
+{
+    if (s_global == NULL) {
+        s_global = nc_px_name_dict_create();
+    }
+    return s_global;
+}
+
+void nc_px_name_dict_global_reset(void)
+{
+    nc_px_name_dict_destroy(s_global);
+    s_global = NULL;
+}
+
+uint32_t nc_px_name_dict_global_intern(const char *name, size_t len)
+{
+    return nc_px_name_dict_intern(nc_px_name_dict_global(), name, len, NULL);
+}
+
+const char *nc_px_name_dict_global_str(uint32_t id)
+{
+    const char *s = nc_px_name_dict_name(nc_px_name_dict_global(), id, NULL);
+    return (s != NULL) ? s : "";
+}
+
+const char *nc_px_name_dict_global_intern_cstr(const char *name)
+{
+    if (name == NULL) {
+        return "";
+    }
+    const uint32_t id = nc_px_name_dict_global_intern(name, strlen(name));
+    return nc_px_name_dict_global_str(id);
+}

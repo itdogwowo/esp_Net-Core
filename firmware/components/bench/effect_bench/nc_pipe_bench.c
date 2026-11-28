@@ -69,7 +69,8 @@ static uint32_t us_per_frame(int64_t t0, uint32_t frames)
 static void fill_asset(nc_px_asset_t *a, uint16_t nvals)
 {
     memset(a, 0, sizeof(*a));
-    strcpy(a->name, "pipe");
+    a->name_id = nc_px_name_dict_global_intern("pipe", 4);
+    a->name = nc_px_name_dict_global_str(a->name_id);
     a->kind = NC_PX_ASSET_PROGRAM;
     a->pixel_hint = nvals;
     a->step = 3;
