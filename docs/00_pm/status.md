@@ -11840,3 +11840,21 @@ status ncm → arena 32768, used 81, live "mini", backend wamr, frames 增加
   group 像素數），以及 `s_nce_values()` 在 plan build 時是否已 >0（信箱 init 時序）。
 
 **已驗證**：`.nce` 掃描→解碼→WAMR→每 tick→status 全通（真機）。
+
+---
+
+### 7.361 2026-11-28（mode 引用 `.nce`：16 條 entry 只出 15 job，且 skipped=0）
+
+- 新 mode `minitest2`（copy led16test、16 條 map，第一條改成
+  `{group:"led16.g0", effect:"mini", write:"rgb"}`）上傳成功。
+- `0xF06D 21` → 選中 mode；paint 報
+  `layout：px=4096 jobs=15 runs=15 aprog=15 skipped=0`。
+- 即係 **16 條 entry 只出 15 個 job，而 `skipped` 係 0** —— 有一條 entry 無聲消失，
+  計數器完全冇反映（違反「唔可以靜默」）。`aprog=15` 亦表示 mini 冇被算入 distinct。
+
+**下一步（已定位方向）**
+1. 在 `nc_px_layout_build` 收尾加「`kept != nent` 時硬性 log（含兩數）」——唔用 ESP_LOG
+   （該檔要 host 可編），改成回傳錯誤或經 paint 側比較 `njobs` vs `mode->nentry`；
+2. 查 `find_asset("mini")` 為何解析唔到（名字字典 id？`.nce` 掃描只 intern stem，
+   而 mode 用 name→id 解析；可能係 dict 未包含，或 asset 表未收 NCE）；
+3. 修完再上板驗 `jobs=16`、`0xF06B` 有顏色。
