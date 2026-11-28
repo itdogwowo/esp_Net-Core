@@ -79,6 +79,27 @@ uint32_t nc_px_nce_bytes(void)
     return s_bytes;
 }
 
+uint32_t nc_px_nce_seq(void)
+{
+    return s_seq;
+}
+
+uint32_t nc_px_nce_last(uint8_t *out, uint32_t n)
+{
+    if (out == NULL || n == 0 || s_buf[0] == NULL || s_seq == 0) {
+        return 0;
+    }
+    if (n > s_bytes) {
+        n = s_bytes;
+    }
+    const int last = s_wr ^ 1;
+    if (s_buf[last] == NULL) {
+        return 0;
+    }
+    memcpy(out, s_buf[last], n);
+    return n;
+}
+
 bool nc_px_nce_publish(const uint8_t *src, uint32_t bytes)
 {
     if (src == NULL || bytes == 0 || s_bytes == 0) {

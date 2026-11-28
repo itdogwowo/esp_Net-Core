@@ -147,6 +147,7 @@ static uint8_t (*const s_usb_kind_lookup)(uint8_t) = nc_port_usb_kind;
 #include "nc_state_schema.h"
 #include "nc_file_action.h"
 #include "nc_status.h"
+#include "nc_px_nce.h"
 #include "nc_wifi.h"
 #include "nc_core.h"
 #ifdef NC_ENABLE_TESTS
@@ -1907,6 +1908,7 @@ static bool keys_want(const char *keys, const char *name)
 // ── 0x1101 STATUS_GET → 0x1102 STATUS_RSP ──
 // keys 語義照 mp 版：空 = 全部、"? "= 目錄、其餘逗號分隔
 static size_t status_put_ncm(char *buf, size_t cap);   // 定義喺下面（自註冊區塊）
+static size_t status_put_nce(char *buf, size_t cap);   // .nce 值流信箱（診斷）
 
 // status 區塊的固定次序（＝分頁次序）。主機只靠 `more` 決定仲要唔要收下一幀，
 // 所以次序一定要穩定：唔可以跟容量或時間變。
@@ -1932,12 +1934,29 @@ static const status_block_t k_status_blocks[] = {
     { "wifi", status_put_wifi, 0 },
     { "cmds", status_put_cmds, 5000 },
     { "net", status_put_net, 0 },
+    { "nce", status_put_nce, 0 },      // .nce 值流信箱：pub 次數＋頭幾個值
     { "ncm", status_put_ncm, 0 },      // 自註冊區塊（test-only）排最後，頁界穩定
 };
 #define NC_STATUS_BLOCKS (sizeof(k_status_blocks) / sizeof(k_status_blocks[0]))
 
 // 元件自註冊的區塊（目前只有 ncm，test-only）。值由 nc_status 取，
 // main 唔需要識佢係邊個 —— 冇註冊就寫 {}（合法性優先）。
+static size_t status_put_nce(char *buf, size_t cap)
+{
+    uint8_t v[12] = {0};
+    const uint32_t n = nc_px_nce_last(v, sizeof(v));
+    int k = snprintf(buf, cap, "\"nce\":{\"pub\":%u,\"px\":%u,\"v\":[",
+                     (unsigned)nc_px_nce_seq(), (unsigned)nc_px_nce_bytes());
+    if (k < 0 || (size_t)k >= cap) {
+        return 0;
+    }
+    for (uint32_t i = 0; i < n && (size_t)k + 8u < cap; i++) {
+        k += snprintf(buf + k, cap - (size_t)k, (i == 0) ? "%u" : ",%u", (unsigned)v[i]);
+    }
+    k += snprintf(buf + k, cap - (size_t)k, "]}");
+    return (k > 0) ? (size_t)k : 0;
+}
+
 static size_t status_put_ncm(char *buf, size_t cap)
 {
     // ⚠ 契約：每個 status_put_* **自己寫 "key":**（jchain 只接字串，唔補 key）。

@@ -36,6 +36,9 @@ typedef struct {
 bool nc_px_nce_init(uint32_t bytes);
 void nc_px_nce_deinit(void);
 uint32_t nc_px_nce_bytes(void);
+// 診斷：publish 次數／把最新一份頭 n 個值複製出來（回實際複製數）
+uint32_t nc_px_nce_seq(void);
+uint32_t nc_px_nce_last(uint8_t *out, uint32_t n);
 
 // writer：ncm task 每 tick 交一份。src 可以係插件 linear memory 的指標（會即刻複製）。
 bool nc_px_nce_publish(const uint8_t *src, uint32_t bytes);

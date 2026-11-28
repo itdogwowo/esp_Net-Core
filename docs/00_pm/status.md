@@ -11926,3 +11926,22 @@ px_paint: build: mode=minitest5 nentry=1 px=4096    ← 之前 layout err=NOT_FO
 - mode 切換回覆加 `"n":<entry 數>`（診斷）。
 - layout 失敗短行 log（`layout err=`、`skips a=…g=…`），長行會被 nclog 截斷。
 - `nc_plugin_wamr_open_info()` 回報最後一次 open 的 kind/px/mem。
+
+---
+
+### 7.366 2026-11-28（`.nce` 全鏈真機閉環：`status nce` 見到值流）
+
+**真機證據（決定性）**
+```
+status nce → {"pub":491,"px":1024,
+              "v":[255,0,64, 255,1,64, 255,2,64, 255,3,64]}   ← 就係 wasm data segment 的漸變
+status（空 keys）→ 19 個 key、合法 JSON（新增 nce）
+status ncm → live=mini、frames 增長
+```
+
+即係：`.nce` 的 wasm 線性記憶體 → `engine_frame` → 值流信箱 → **`status` 讀得到**，
+而 layout 亦已建出 aprog（jobs 成功）。整條鏈喺真機閉環。
+
+- 新增 `nc_px_nce_seq()`／`nc_px_nce_last()` 與 `status` 的 `nce` 區塊（診斷用，長期保留）。
+- 清走測試用 modes（minitest／3／4／5）與 t16 mapping，保留 `minitest2`（示範 mode 21）
+  同 `mini.nce`（示範效果）；`registry.json` auto_play 已還原。
