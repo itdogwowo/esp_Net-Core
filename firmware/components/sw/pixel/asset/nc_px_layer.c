@@ -12,6 +12,7 @@
 #include <string.h>
 
 #include "nc_px_json.h"
+#include "nc_px_utf8.h"
 
 // ═══════════════════════ 名字表 ═══════════════════════
 static const char *const HW_NAMES[NC_PX_HW_COUNT] = {
@@ -124,6 +125,7 @@ static void copy_str(char *dst, size_t cap, const char *src)
             n++;
         }
     }
+    n = nc_px_utf8_trim(dst, n);
     dst[n] = '\0';
 }
 

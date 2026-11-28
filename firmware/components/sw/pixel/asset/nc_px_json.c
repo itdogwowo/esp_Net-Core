@@ -1,5 +1,6 @@
 // nc_px_json.c — 迷你 JSON 讀取器（見 nc_px_json.h）。
 #include "nc_px_json.h"
+#include "nc_px_utf8.h"
 
 #include <string.h>
 
@@ -65,6 +66,30 @@ bool nc_px_js_eat(nc_px_js_t *j, char c)
 }
 
 // 讀一個 JSON string；out 可以係 NULL（只食位）。太長就截斷。
+static int json_hex4(nc_px_js_t *j, uint32_t *out)
+{
+    uint32_t v = 0;
+    for (int i = 0; i < 4; i++) {
+        if (j->p >= j->end) {
+            return -1;
+        }
+        const char c = *j->p++;
+        uint32_t d;
+        if (c >= '0' && c <= '9') {
+            d = (uint32_t)(c - '0');
+        } else if (c >= 'a' && c <= 'f') {
+            d = (uint32_t)(c - 'a' + 10);
+        } else if (c >= 'A' && c <= 'F') {
+            d = (uint32_t)(c - 'A' + 10);
+        } else {
+            return -1;
+        }
+        v = (v << 4) | d;
+    }
+    *out = v;
+    return 0;
+}
+
 bool nc_px_js_str(nc_px_js_t *j, char *out, size_t cap)
 {
     nc_px_js_ws(j);
@@ -89,15 +114,17 @@ bool nc_px_js_str(nc_px_js_t *j, char *out, size_t cap)
             case 'r':  ch = '\r'; break;
             case 'b':  ch = '\b'; break;
             case 'f':  ch = '\f'; break;
-            case 'u':                       // 只食位：路徑名唔會用到
-                for (int k = 0; k < 4; k++) {
-                    if (j->p >= j->end) {
-                        return false;
-                    }
-                    j->p++;
+            case 'u': {                     // JSON \uXXXX → UTF-8（BMP；surrogate 暫不支援）
+                uint32_t cp = 0;
+                if (json_hex4(j, &cp) != 0 ||
+                    (cp >= 0xD800u && cp <= 0xDFFFu)) {
+                    return false;
                 }
-                ch = '?';
-                break;
+                if (!nc_px_utf8_put(out, cap, &n, cp)) {
+                    // 空間不足：乾淨截斷，唔寫半個 codepoint；之後字元全部跳過
+                }
+                continue;
+            }
             default:
                 return false;
             }
@@ -111,6 +138,7 @@ bool nc_px_js_str(nc_px_js_t *j, char *out, size_t cap)
     }
     j->p++;                                  // 收尾 "
     if (out != NULL) {
+        n = nc_px_utf8_trim(out, n);
         out[n] = '\0';
     }
     return true;

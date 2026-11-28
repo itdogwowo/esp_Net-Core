@@ -8,6 +8,7 @@
 //
 // 呼叫端（pixel_task）自己決定根路徑：APP 模式 = `nc_store_fs_base()` ＋ `/pixel/effects`。
 #include "nc_px_asset.h"
+#include "nc_px_utf8.h"
 
 #include <dirent.h>
 #include <stdio.h>
@@ -39,6 +40,7 @@ static void file_stem(const char *name, char *out, size_t cap)
     for (; name[i] != '\0' && name[i] != '.' && i + 1 < cap; i++) {
         out[i] = name[i];
     }
+    i = nc_px_utf8_trim(out, i);
     out[i] = '\0';
 }
 

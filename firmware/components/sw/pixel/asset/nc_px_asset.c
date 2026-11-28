@@ -13,6 +13,7 @@
 // JSON 只喺呢度讀一次，之後全 project（引擎／任務）只行 struct。
 #include "nc_px_asset.h"
 #include "nc_px_json.h"
+#include "nc_px_utf8.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -500,6 +501,7 @@ static void copy_name(char *dst, size_t cap, const char *src)
     for (; src[i] != '\0' && i + 1 < cap; i++) {
         dst[i] = src[i];
     }
+    i = nc_px_utf8_trim(dst, i);
     dst[i] = '\0';
 }
 

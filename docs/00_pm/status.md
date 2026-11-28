@@ -11320,3 +11320,18 @@ free_int 125–196 KB、PSRAM free 1.80 MB、FAT free 648 KiB。
   cache present4/built0/26 ms、FAT free648 KiB、PSRAM free1.80 MB。
 - 體檢修正：uint8 溢位、id 截斷、mode id 2-byte、seg_off uint32、cache pre-clean。
 - **驗收狀態：PASS**。
+
+
+---
+
+### 7.331 2026-11-28（UTF-8 中文＋結構改寬後重測）
+
+- name／JSON 字串支援 raw UTF-8；`\uXXXX` 已解碼；固定 array 截斷加 UTF-8 邊界 trim，
+  8 個中文字（24 B）會乾淨截成 7 字（21 B），唔會切半個 codepoint。
+- 檔名仍建議 ASCII；中文檔名視 FATFS LFN／VFS，未列保證。
+- 結構尺寸：asset 42→44 B（+2）；map/mode 在 host 因 padding 不變；
+  MCU 估算 mode 約 +4 B、asset +2 B。16IO 約 +76 B；1,000 modes 約 +6 KB；
+  65,535 modes 約 +0.4 MB。
+- 重測 16IO：frame **20.00 ms／50 fps**、pair 3.11 ms、apply 2.34 ms、
+  encode 9.37 ms、PSRAM free 1.81 MB、FAT free 648 KiB；冇回歸。
+- pxAsset_test 新增 UTF-8 測試：raw 中文／7 字／8 字截斷／`\u` 逃逸全部 PASS。

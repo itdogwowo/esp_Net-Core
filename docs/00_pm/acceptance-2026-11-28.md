@@ -97,10 +97,10 @@
 | driver | `LED_WS2812`、16 線、每線 256 px、i80 index 0–15 |
 | active tasks | render／encode／paint／effect 全部 enabled |
 | px | 4,096（16 lanes×256） |
-| frame | **20.59 ms（約 50 fps）** |
-| pair | **3.01 ms**（clear 0.74＋apply 2.26＋white／commit） |
-| apply | 2.26 ms |
-| encode | 9.96 ms |
+| frame | **20.00 ms（約 50 fps）** |
+| pair | **3.11 ms**（clear 0.75＋apply 2.34＋white／commit） |
+| apply | 2.34 ms |
+| encode | 9.37 ms |
 | tx | 0.83 ms |
 | 0xF07F A/B | internal 0.716 ms／PSRAM 1.249 ms |
 | flatify | 0.312–0.343 ms |
@@ -110,7 +110,7 @@
 | cache hit swap | 188–206 µs |
 | FAT | total 872,448 B／free 663,552 B（648 KiB） |
 | internal free | 125–196 KB |
-| PSRAM free | 1.80 MB |
+| PSRAM free | 1.81 MB |
 
 ### 3.3 16×600 極限（9,600 px、16 lanes 並行）
 
@@ -200,6 +200,34 @@
 | cache cleanup | 只在全部 mode 成功預建時執行（保守） |
 | 16×600 margin | 約 2–5 ms；CPU 大突發可能掉幀 |
 | `next_us` | wall time 含 encode／paint 搶佔，不是純 CPU |
+
+## 6.4 UTF-8 中文字支援（新測試）
+
+| 項目 | 結果 |
+|---|---|
+| JSON 內 **raw UTF-8** 中文名 | ✅ 支援（name 長度以 byte 計） |
+| `\uXXXX` 逃逸 | ✅ 已解碼成 UTF-8（BMP；surrogate pair 暫不支援） |
+| 24 B name 的容量 | 中文 3 B／字 → **7 個完整中文字（21 B）** |
+| 8 個中文字（24 B） | ✅ 乾淨截到 7 字；**唔會切半個 codepoint**（新增 UTF-8 邊界 trim） |
+| 檔名 64 B | 建議 ASCII；中文檔名要視 FATFS／VFS LFN 支援，未列為保證 |
+| 測試 | pxAsset_test 新增 raw 中文、7 字、8 字截斷、`\u` 逃逸，全部 PASS |
+
+**注意**：`name[24]` 係 **byte cap 不是「字數」**；要更多中文字需改 dynamic string 或加大欄位。
+
+## 6.5 結構尺寸增量重測（id／seg_off 改寬後）
+
+| 結構 | 之前 | 現在 | 增量 |
+|---|---:|---:|---:|
+| `nc_px_asset_t` | 42 B | **44 B** | +2 B |
+| `nc_px_map_t`（host） | 48 B | 48 B | 0（padding 吸收） |
+| `nc_px_mode_t`（host） | 80 B | 80 B | 0（padding 吸收） |
+| MCU 32-bit 估算 | — | — | mode 約 +4 B／個、map 0、asset +2 B |
+
+- 16IO 實際：3 maps＋4 modes＋28 assets ≈ **+76 B**，量唔到；
+- 1,000 modes／effects：約 **+6 KB**；
+- 65,535 modes／effects：約 **+0.4 MB**（仍在 PSRAM 容量內，但屬上限附近）。
+- 重測 frame **20.00 ms／50 fps**、pair 3.11 ms、apply 2.34 ms；
+  PSRAM free **1.81 MB**、FAT free 648 KiB → 冇性能／容量回歸。
 
 ## 7. 結論
 

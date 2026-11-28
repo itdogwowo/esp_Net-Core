@@ -295,6 +295,54 @@ static void test_scan(void)
     (void)RMDIR(TMPDIR_NAME);
 }
 
+
+// ── UTF-8：中文字名、byte cap 截斷要停在 codepoint 邊界 ─────────────
+static bool utf8_ok(const char *s)
+{
+    const unsigned char *p = (const unsigned char *)s;
+    while (*p != '\0') {
+        if (*p < 0x80u) {
+            p++;
+        } else if ((*p & 0xE0u) == 0xC0u && (p[1] & 0xC0u) == 0x80u) {
+            p += 2;
+        } else if ((*p & 0xF0u) == 0xE0u && (p[1] & 0xC0u) == 0x80u &&
+                   (p[2] & 0xC0u) == 0x80u) {
+            p += 3;
+        } else if ((*p & 0xF8u) == 0xF0u && (p[1] & 0xC0u) == 0x80u &&
+                   (p[2] & 0xC0u) == 0x80u && (p[3] & 0xC0u) == 0x80u) {
+            p += 4;
+        } else {
+            return false;
+        }
+    }
+    return true;
+}
+
+static void test_utf8(void)
+{
+    nc_px_asset_clear();
+    check(add("{\"name\":\"紅色波浪\",\"program\":[{\"type\":\"keep\",\"end_Time\":10}]}",
+              "raw") == ESP_OK, "UTF-8：raw 中文名照收");
+    check(nc_px_asset_find("紅色波浪") != NULL, "UTF-8：raw 中文名搵得到");
+
+    nc_px_asset_clear();
+    check(add("{\"name\":\"紅綠藍黃紫青白\",\"program\":[{\"type\":\"keep\",\"end_Time\":10}]}",
+              "seven") == ESP_OK, "UTF-8：7 個中文字（21 B）");
+    check(nc_px_asset_find("紅綠藍黃紫青白") != NULL, "UTF-8：7 字完整");
+
+    nc_px_asset_clear();
+    check(add("{\"name\":\"紅綠藍黃紫青白黑\",\"program\":[{\"type\":\"keep\",\"end_Time\":10}]}",
+              "eight") == ESP_OK, "UTF-8：8 個中文字（24 B）照收");
+    const nc_px_asset_t *a = nc_px_asset_find("紅綠藍黃紫青白");
+    check(a != NULL && strlen(a->name) == 21 && utf8_ok(a->name),
+          "UTF-8：cap 24 截到 7 字（21 B），冇半個字");
+
+    nc_px_asset_clear();
+    check(add("{\"name\":\"\\u7d05\\u8272\",\"program\":[{\"type\":\"keep\",\"end_Time\":10}]}",
+              "escaped") == ESP_OK, "UTF-8：\\u 逃逸照收");
+    check(nc_px_asset_find("紅色") != NULL, "UTF-8：\\u 解碼成中文名");
+}
+
 int main(void)
 {
     test_batch();
@@ -306,6 +354,7 @@ int main(void)
     test_status();
     test_program_rules();
     test_scan();
+    test_utf8();
 
     printf("%s\n", g_fail ? "FAIL" : "OK");
     return g_fail ? 1 : 0;
