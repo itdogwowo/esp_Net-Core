@@ -146,6 +146,17 @@ menu "esp_Net-Core"
             內容缺失（/data/pixel 未上傳）時只 log warning 並填黑，
             不會讓開機失敗。量產映像預設關閉。
 
+    config NETCORE_PIXEL_HOT_SRAM_KB
+        int "pixel active flat 表的 internal SRAM 預算（KB）"
+        depends on NETCORE_CONTENT
+        default 64
+        range 0 256
+        help
+            只有「當前 mode 的 6 B flat 表」可以放 internal（每幀 apply 的短板）；
+            其他 map／mode／asset／layout／program／inactive mode 一律 PSRAM。
+            這個值係上限，實際會再扣 internal reserve（48 KB）同 free size；
+            唔夠位自動 fallback PSRAM，唔會失敗。設 0 = 唔用 internal（全 PSRAM）。
+
     config NETCORE_PIXEL_LAYOUT_CACHE_KB
         int "NCLAYOUT 快取總預算（KB）"
         depends on NETCORE_CONTENT

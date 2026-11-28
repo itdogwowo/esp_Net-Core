@@ -11043,3 +11043,46 @@ render／encode task running、無 crash、state 重建正常；之後已還原 
 - host tests 全部通過；pxAsset 的「20 段」測試改為**完整保留 20 段**。
 - 16IO build 成功；OTA 後 50 fps、pixdiag 正常；舊 cache ver1 重建（首次 3 個 mode，
   1,183 ms），之後直接讀。
+
+---
+
+### 7.320 2026-11-28（熱／冷分層策略：只有 active flat 表入 internal；A/B 重測）
+
+**用家定案**：靈活性優先；唔係所有設定都要最好性能，只將「短板」放 internal／最好資源，
+其他唔影響大流程的就 PSRAM。要有明確 SRAM 上限，但唔可以失控。
+
+**實作**
+- 新增 Kconfig `NETCORE_PIXEL_HOT_SRAM_KB`（預設 **64 KB**，0 = 全 PSRAM）。
+- `nc_px_paint_task.c` 新增 `hot_flat_place()`：
+  - **只處理「當前 mode 的 6 B flat 表」**（每幀 apply 的短板）；
+  - budget = min(Kconfig, `free_internal − 48 KB reserve`)；flat bytes 超過 budget → PSRAM；
+  - internal 配置失敗 → 明示 fallback PSRAM，唔會留低冇 flat；
+  - 在 `content_apply_mode`、`content_swap_next`、`0xF07F` 之後套用。
+- 其他一律留 PSRAM：map／mode／asset／group／sel／segment／layout aprog／job／run／
+  program／inactive mode／FAT cache。next mode flat 仍然 PSRAM（warm），換場時才重新
+  hotify 當前那張。
+
+**A/B 重測（同一 layout，5 次取最小；`0xF07F`，現行 4fad835-dirty）**
+
+| px | mode/runs | flat internal | flat PSRAM | 差距 |
+|---|---:|---:|---:|---:|
+| 4,096 | led16test／16 runs | **716–726 µs** | **1,787–1,853 µs** | 約 2.5× |
+| 9,600 | full256／1 run（9600 project） | **2,439 µs** | **4,443 µs** | 約 1.82× |
+
+- 4,096 → 9,600：internal **3.4×**、PSRAM **2.4×**；兩者都在 20 ms 內。
+- PIPESTATS：16IO 熱 flat 後 `apply avg ≈1,519 µs`（之前 PSRAM 約 2,009）；
+  9600 apply ≈2,883 µs（9600 project 物理 frame 288 ms，量 apply 本身）。
+- 舊文件「4096 719 µs vs 9600 3.07 ms」係不同 mode／runs／舊 build 的數字，唔係同一條件；
+  現行同一 A/B 量到 4096 internal 726 µs、9600 internal 2,439 µs，按 px 比例合理。
+- 格式更新（動態 segments／cache ver2）**唔影響 flat 6 B 熱路徑**；差距來自 mode／runs／量測條件。
+
+**策略排序（由最重要到最不重要）**
+1. **active flat 表**：唯一每幀掃全 px 的短板 → 有 budget 就 internal，否則 PSRAM（fallback）。
+2. next mode flat／layout：warm PSRAM；換場時 activate（copy/flatify）一次，不長期佔 SRAM。
+3. value pool／task stack／encode 小 buffer：internal（現狀）。
+4. asset／map／mode／segment／inactive layout／program：PSRAM（冷／換場才用）。
+5. JSON／FAT layout cache：FAT cold；開機／換場才讀。
+
+**未做（下一步可選）**
+- next-mode flat 的背景 activate／預取（現時只 hotify 當前）。
+- 依播放歷史動態調整 budget（目前固定 64 KB＋free reserve）。

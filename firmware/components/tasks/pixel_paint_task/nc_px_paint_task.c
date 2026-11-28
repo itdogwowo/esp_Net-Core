@@ -324,6 +324,44 @@ static esp_err_t layout_cache_save(const nc_px_layout_t *l, const char *path, ui
     return nc_px_layout_save(l, path, key);
 }
 
+// ── 熱／冷分層：只有「當前 mode 的 flat 表」值得放 internal ──
+// 每幀 apply 係短板；其他資料只喺換場／build 用，一律留 PSRAM（flexibility 優先）。
+// 預算 = min(Kconfig, free_internal - reserve)；唔夠就 fallback PSRAM，唔會失敗。
+#define PIXEL_INTERNAL_RESERVE (48u * 1024u)
+
+static bool hot_flat_place(nc_px_layout_t *l)
+{
+    if (l == NULL || l->nflat == 0 || l->flat == NULL) {
+        return false;
+    }
+#if defined(CONFIG_NETCORE_PIXEL_HOT_SRAM_KB) && CONFIG_NETCORE_PIXEL_HOT_SRAM_KB > 0
+    const uint32_t cfg_budget = (uint32_t)CONFIG_NETCORE_PIXEL_HOT_SRAM_KB * 1024u;
+    const uint32_t free_int = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+    if (free_int <= PIXEL_INTERNAL_RESERVE) {
+        return false;
+    }
+    uint32_t budget = free_int - PIXEL_INTERNAL_RESERVE;
+    if (budget > cfg_budget) {
+        budget = cfg_budget;
+    }
+    const size_t bytes = (size_t)l->nflat * sizeof(nc_px_flat6_t);
+    if (bytes > budget) {
+        return false;
+    }
+    if (nc_px_layout_flatify_place(l, false) == ESP_OK && !l->flat_psram) {
+        return true;
+    }
+    // internal 失敗：明示 fallback PSRAM，唔好留低「冇 flat」狀態
+    if (nc_px_layout_flatify_place(l, true) != ESP_OK) {
+        ESP_LOGW(TAG, "hot flat：internal／PSRAM 都失敗（px=%u）", (unsigned)l->px);
+    }
+    return false;
+#else
+    (void)l;
+    return false;
+#endif
+}
+
 
 #if CONFIG_NETCORE_PIXEL_APPLY_PIPE
 #define PIPE_CHUNK_KB 16u
@@ -924,6 +962,7 @@ static esp_err_t content_swap_next(const nc_px_mode_t *mode)
     s_content.next_assets = tmp;
     snprintf(s_content.map_name, sizeof(s_content.map_name), "%s", s_content.next_map_name);
     snprintf(s_content.mode_name, sizeof(s_content.mode_name), "%s", mode->name);
+    (void)hot_flat_place(&s_content.layout);
     s_content.white = (mode->white > 100) ? 100 : mode->white;
     s_content.step = 0;
     s_content.mode_frames = 0;
@@ -1043,6 +1082,7 @@ static esp_err_t content_apply_mode_locked(const nc_px_mode_t *mode)
         ESP_LOGW(TAG, "6 B 表建唔到（%s）：行 runs（熱路徑會慢）",
                  esp_err_to_name((esp_err_t)s_content.layout.flat_err));
     }
+    (void)hot_flat_place(&s_content.layout);
     s_content.ready = true;
     s_content.fallback = false;
     s_last_eff_seq = 0;
@@ -1848,6 +1888,7 @@ static void on_applytime(nc4_ctx_t *ctx, const nc4_frame_t *f)
     heap_caps_free(dst);
     heap_caps_free(vbuf);
     heap_caps_free(vp);
+    (void)hot_flat_place(&s_content.layout);
     char j[192];
     (void)snprintf(j, sizeof(j),
                    "{\"runs\":%u,\"nflat\":%u,\"apply_int_us\":%u,\"apply_ps_us\":%u,"
