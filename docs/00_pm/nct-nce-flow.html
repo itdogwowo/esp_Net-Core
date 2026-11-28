@@ -58,7 +58,7 @@
 <body>
 <header>
   <h1>.nct ／ .nce 運作流程</h1>
-  <div class="sub">容器 → 解碼 → 插件工具 → 任務／效果 → 值流 → 配對 → 環 → 燈　（實際數值以 code 為準）</div>
+  <div class="sub">容器＝身分＋資源＋<b>介面</b>（輸入唯讀／輸出唯寫）→ 解碼 → 插件工具 → 任務／效果 → 值流 → 配對 → 環 → 燈</div>
 </header>
 
 <div class="tabs">
@@ -146,9 +146,10 @@ const EFFECT = [
  {t:"③ manifest kind=2", d:"effect：每個 tick 走 nce_render。core 必須等於 ncm task 嗰核（否則拒絕）。",
   hl:["man"], seg:1,
   v:[["kind","2 (effect)"],["core","必須 = ncm task core"],["fps","30 → 每 33 ms 一幀"]], note:"效果唔可以跑喺第 2 個核：framebuffer 由 ncm task 直接叫。"},
- {t:"④ open → descriptor", d:"寫 28 B descriptor（px_count／fb_off=4192／fb_bytes=px／sc）→ nce_init(0)。",
+ {t:"④ open：交輸入 → 模組算輸出", d:"host 交輸入參數（例如 px）→ 模組算出需要多少緩衝 → 寫 28 B descriptor（fb_off／fb_bytes 由模組回報）→ nce_init(0)。",
   hl:["desc","open"], seg:4,
-  v:[["fb_off","4192"],["fb_bytes","64（值數）"],["每值","1 B（0–255）"]], note:"buffer 住喺 guest linear memory：零拷貝，host 直接讀。"},
+  v:[["輸入","px＝64（用户設定）"],["輸出","fb_bytes = 64（模組算出）"],["fb_off","4192"],["每值","1 B（0–255）"]],
+  note:"大小係**算出來**的，唔係 manifest 寫死；唔夠記憶體就明示拒絕（唔會靜默縮）。"},
  {t:"⑤ nce_render：填緩衝區", d:"插件只管填：由第 0 格寫到滿（0–255）就停；冇幀率、冇節奏概念。",
   hl:["tick"], seg:3,
   v:[["fb[0..px-1]","0–255"],["格式","唔描述自己"],["節奏","唔關插件事"]],
@@ -222,9 +223,9 @@ function render(){
     ["payload_off/size","48 / N"],["payload_crc","crc32(init=0)"],["target_id","0=wasm／1=P4 AOT／2=S3 AOT"],
     ["mem_bytes","linear memory 上限"],["manifest_off/size","0 = 冇 manifest"],["（冇 px／fps）","任務唔需要"]]
     :[
-    ["magic","0x314D434E"],["flags","bit1=manifest（effect 一定有）"],["px","＝fb 值數（每值 1 B）"],
+    ["magic","0x314D434E"],["flags","bit1=manifest（effect 一定有）"],["介面","輸入參數＋輸出緩衝（大小由輸入算）"],
     ["mem_bytes","≥ 96 + 4096 + px"],["kind","2 = effect"],["core","必須 = ncm task core"],
-    ["descriptor","px_count／fb_off=4192／fb_bytes"],["nce_init(0)","讀 offset 0"],["nce_render","填滿就停"],["fb","0–255，唔描述格式"]])
+    ["descriptor","fb_off=4192；fb_bytes 由模組回報"],["nce_init(0)","讀 offset 0"],["nce_render","填滿就停"],["fb","0–255，唔描述格式"]])
     .map(([k,v])=>`<div class="row"><span>${k}</span><b>${v}</b></div>`).join("");
   $("#leftNote").innerHTML = mode==="task"
     ? "容器只有兩種 payload：wasm（預設）與 AOT（綁架構）。<code>task_tick()</code> 每 tick 被叫一次。"

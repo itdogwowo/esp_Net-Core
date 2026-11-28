@@ -11721,3 +11721,17 @@ layout cache 改 name_id＋dictionary CRC；舊 cache 版本++。Phase 1 模組�
 - **wire format 仍然有 `px`／`fps` 欄位**（manifest v1）：`fps` 而家係「可選、
   唔應該用嚟控制效果」；下一步要收窄（v2 或標 deprecated）。`px` 保留只作
   「緩衝區值數」（effect），task 忽略。
+
+---
+
+### 7.354 2026-11-28（模型再更正：manifest 是「介面」，不是固定參數）
+
+用家指正：模組會**提供可輸入的參數**同**輸出的緩衝**（亦可能有輸入緩衝）；
+交手全部經這個介面。例如 `px` 係**輸入參數**：模組用它自己算「需要幾多緩衝、交幾多」，
+所以 px／大小**唔應該係 manifest 固定欄位**，而係「介面描述＋執行時計算」。
+方向：**輸入唯讀、輸出唯寫**。
+
+- 動畫已更新：manifest 一步改成「介面（輸入參數／輸出緩衝，大小由輸入算出）」；
+  open 一步改成「交輸入 → 模組算輸出 → descriptor 的 fb_bytes 由模組回報」。
+- **wire format 仍未改**（manifest v1 有 px／fps）：下一步要換成 interface 描述
+  （input params ＋ output buffers），並由模組在 open 時回報實際大小。
