@@ -193,6 +193,18 @@ int main(void)
     CHECK(s_steps == 2 && s_last_frame == 2, "tick 2 → steps=%d frame=%u",
           s_steps, (unsigned)s_last_frame);
 
+    case_begin("任務的 region 介面（同效果共用同一套）");
+    // 任務：in = 參數（控制器寫）；out = 它交給別人的緩衝（狀態／日誌）。
+    const nc_plugin_region_t regs[] = {
+        { .dir = NC_PLUGIN_REGION_IN,  .align = 0, .name_id = 10, .bytes = 8 },
+        { .dir = NC_PLUGIN_REGION_OUT, .align = 0, .name_id = 11, .bytes = 12 },
+    };
+    uint32_t offs[NC_PLUGIN_REGION_MAX] = {0};
+    CHECK(nc_plugin_regions_bind(regs, 2, 4192, 65536, offs), "任務 2 個 region 放得落");
+    CHECK(offs[0] == 4192 && offs[1] == 4208, "連排對齊（%u / %u）",
+          (unsigned)offs[0], (unsigned)offs[1]);
+    CHECK(!nc_plugin_regions_bind(regs, 2, 4192, 4200, offs), "放唔落 → 拒絕");
+
     case_begin("卸載 → close 一次；live 清空");
     CHECK(nc_mod_unload("t") == ESP_OK, "unload 成功");
     CHECK(s_closes == 1, "工具 close 一次（實際 %d）", s_closes);
