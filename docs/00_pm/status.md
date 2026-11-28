@@ -11086,3 +11086,36 @@ render／encode task running、無 crash、state 重建正常；之後已還原 
 **未做（下一步可選）**
 - next-mode flat 的背景 activate／預取（現時只 hotify 當前）。
 - 依播放歷史動態調整 budget（目前固定 64 KB＋free reserve）。
+
+---
+
+### 7.322 2026-11-28（NCLAYOUT 哈希／重建邏輯審查＋修正；binary cache vs rebuild；SRAM 容量預測）
+
+**「壓縮版本」定義釐清**：NCLAYOUT 本身就是 binary（唔係 JSON），即用家講嘅壓縮版；
+15.9 ms 係 FAT 讀 **57.6 KB flat 表**，唔係 layout cache。layout cache 實測：
+- 16IO grid16 mode：`cache_b = 7,456 B`；
+- FAT 以 3.6 MB/s 計，讀一張約 **2.0 ms**；
+- 加 flatify **631 µs** → cache hit 約 **2.6 ms**；
+- cache miss build **39–137 ms**；預熱 swap 實測 **817 µs**。
+
+**發現並修正兩個 hash／cache bug**
+1. `content_prepare_next()` 同 `cache_prebuild_missing()` 的 cache key 用咗
+   `assets_hash(s_content.assets)`（當前 mode），但實際 build 用 next mode 的 asset 表
+   （`next_assets`／`tmp`）→ key 同內容唔一致，會 miss／讀錯。已改用對應 asset 表。
+2. `content_prepare_next()` 建完 next layout 後**冇 save cache**，所以每次預建都係 cache miss；
+   已補 `layout_cache_save()`（≤32 KB 且預算內）。
+- 實測：首次 `next_us=23.9 ms`（miss＋build＋save）；之後 cache hit `next_us=6.85 ms`
+  （包 asset 表 build／cache 讀／flatify，不只是 swap）。
+- `content_swap_next()` 實測 `last_swap_us=817 µs`（含 hot_flat_place re-flatify）；
+  新增 `0xF07F` 回覆 `last_swap_us`、`0xF07D` 回覆 `cache_b` 方便再量。
+
+**SRAM 容量預測（真機當前）**
+- `free_int = 148,671 B`（約 145 KiB）；policy reserve 48 KiB；
+  hot budget = min(64 KiB, free_int−48 KiB) = **64 KiB**。
+- 16IO flat：24,576 B → **可放 2 張**（48 KiB，current＋next）；
+  9600 flat：57,600 B → **只可放 1 張**（2 張 115 KiB 超 budget）。
+- 目前 policy 只 hotify current flat（16IO 24 KiB）；其他 aprog／program／segments 仍是 KB 級，
+  可以選擇放入，但每幀影響極細，暫不放。
+
+**結論**：cache hit 換場 0.8–2.6 ms，真係唔需要複雜預熱；預熱只對 cache miss（39–137 ms）
+有意義。hash 修正後 next prefetch 有效，cache 亦會持久化。

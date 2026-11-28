@@ -224,6 +224,7 @@ static uint32_t assets_hash(const nc_px_asset_tbl_t *t)
 static struct {
     uint32_t present, built, too_big, failed, ms;
 } s_prebuild;
+static uint32_t s_last_swap_us;
 static void cache_prebuild_missing(void);
 
 // ── NCLAYOUT 快取預算／LRU ──
@@ -917,12 +918,13 @@ static void content_prepare_next(void)
     const int64_t t0 = esp_timer_get_time();
     nc_px_layout_free(&s_content.next_layout);
     const uint32_t ckey = nc_px_layout_cache_key(m->hash, map->hash, s_content.px,
-                                                   assets_hash(s_content.assets));
+                                                   assets_hash(s_content.next_assets));
     char cpath[96];
     (void)snprintf(cpath, sizeof(cpath), "%s/cache/%08lx.layout", s_content.pixel_dir,
                    (unsigned long)ckey);
     esp_err_t e = nc_px_layout_load(&s_content.next_layout, cpath, ckey,
                                     s_content.next_assets);
+    bool next_from_build = false;
     if (e != ESP_OK || s_content.next_layout.njobs == 0) {
         if (e == ESP_OK) {
             nc_px_layout_free(&s_content.next_layout);
@@ -930,6 +932,7 @@ static void content_prepare_next(void)
         const nc_px_hw_inv_t inv = { .hw = NC_PX_HW_WS2812, .base = 0, .px = s_content.px };
         e = nc_px_layout_build(m, map, s_content.next_assets, &inv, 1,
                                &s_content.next_layout);
+        next_from_build = (e == ESP_OK && s_content.next_layout.njobs > 0);
     }
     if (e != ESP_OK || s_content.next_layout.njobs == 0) {
         nc_px_layout_free(&s_content.next_layout);
@@ -939,6 +942,12 @@ static void content_prepare_next(void)
         return;
     }
     (void)nc_px_layout_flatify(&s_content.next_layout);   // 默認 PSRAM
+    if (next_from_build) {
+        const size_t cache_bytes = nc_px_layout_cache_bytes(&s_content.next_layout);
+        if (cache_bytes <= 32768u) {
+            (void)layout_cache_save(&s_content.next_layout, cpath, ckey, cache_bytes);
+        }
+    }
     snprintf(s_content.next_mode_name, sizeof(s_content.next_mode_name), "%s", m->name);
     snprintf(s_content.next_map_name, sizeof(s_content.next_map_name), "%s", map->name);
     s_content.next_ready = true;
@@ -977,6 +986,7 @@ static esp_err_t content_swap_next(const nc_px_mode_t *mode)
     s_plan_gen++;
     nc_pipe_aprog_publish(s_content.layout.aprog, s_content.layout.naprog, s_plan_gen);
     s_last_apply_us = (uint32_t)(esp_timer_get_time() - t0);
+    s_last_swap_us = s_last_apply_us;
     ESP_LOGI(TAG, "換場（預建 swap）：%s、%u us、runs=%u", mode->name,
              (unsigned)s_last_apply_us, (unsigned)s_content.layout.nruns);
     return ESP_OK;
@@ -1384,7 +1394,7 @@ static void cache_prebuild_missing(void)
             continue;
         }
         const uint32_t key = nc_px_layout_cache_key(m->hash, map->hash, s_content.px,
-                                                   assets_hash(s_content.assets));
+                                                   assets_hash(tmp));
         char path[96];
         (void)snprintf(path, sizeof(path), "%s/cache/%08lx.layout", s_content.pixel_dir,
                        (unsigned long)key);
@@ -1825,10 +1835,12 @@ static void on_flattime(nc4_ctx_t *ctx, const nc4_frame_t *f)
     const uint32_t us = (uint32_t)(esp_timer_get_time() - t0);
     char j[192];
     (void)snprintf(j, sizeof(j),
-                   "{\"rc\":%d,\"runs\":%u,\"nflat\":%u,\"nflat_b\":%u,\"us\":%u,\"px\":%u}",
+                   "{\"rc\":%d,\"runs\":%u,\"nflat\":%u,\"nflat_b\":%u,\"us\":%u,"
+                   "\"cache_b\":%u,\"px\":%u}",
                    (int)e, (unsigned)runs, (unsigned)s_content.layout.nflat,
                    (unsigned)nc_px_layout_flat_bytes(&s_content.layout),
-                   (unsigned)us, (unsigned)s_content.px);
+                   (unsigned)us, (unsigned)nc_px_layout_cache_bytes(&s_content.layout),
+                   (unsigned)s_content.px);
     reply_json(ctx, NC4_CMD_FLATTIME_RSP, j);
 }
 
@@ -1892,8 +1904,9 @@ static void on_applytime(nc4_ctx_t *ctx, const nc4_frame_t *f)
     char j[192];
     (void)snprintf(j, sizeof(j),
                    "{\"runs\":%u,\"nflat\":%u,\"apply_int_us\":%u,\"apply_ps_us\":%u,"
-                   "\"px\":%u}", (unsigned)runs, (unsigned)nflat,
-                   (unsigned)int_us, (unsigned)ps_us, (unsigned)s_content.px);
+                   "\"last_swap_us\":%u,\"px\":%u}", (unsigned)runs, (unsigned)nflat,
+                   (unsigned)int_us, (unsigned)ps_us, (unsigned)s_last_swap_us,
+                   (unsigned)s_content.px);
     reply_json(ctx, NC4_CMD_APPLYTIME_RSP, j);
 }
 
