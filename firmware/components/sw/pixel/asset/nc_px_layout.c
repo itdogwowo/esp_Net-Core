@@ -1305,7 +1305,7 @@ typedef struct {
     uint32_t crc;
 } pxlt_hdr_t;
 
-// 格式名：NCLAYOUT（NetCore Layout）；檔案：<key>.layout
+// 格式名：NCLAYOUT（NetCore Layout）；檔案：/data/cache/<key>.ncc
 // magic 用 8 byte ASCII，唔使用代號。舊 .pxlt／.nclt 會自動當壞檔重建
 // （純快取，刪咗只係慢一次，唔影響資料）。
 static const char NC_LAYOUT_MAGIC[8] = {'N', 'C', 'L', 'A', 'Y', 'O', 'U', 'T'};

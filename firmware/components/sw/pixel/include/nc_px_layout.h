@@ -105,6 +105,7 @@ void nc_px_layout_free(nc_px_layout_t *l);
 // 讀取時用 assets 表把 asset 名稱指回真實 asset（program 已編譯，原樣帶回）。
 #define NC_PX_LAYOUT_CACHE_VER 3u   // 2: program segments 動態（variable-length cache）
 // 所有 derived cache 共用一個副檔名；內容用 header magic 分辨。
+#define NC_CACHE_ROOT             "/data/cache"   // 全系統 derived cache（pixel＋config 共用）
 #define NC_PX_CACHE_EXT          ".ncc"
 #define NC_PX_CACHE_NAMES        "names.ncc"
 #define NC_PX_CACHE_OLD_LAYOUT   ".layout"

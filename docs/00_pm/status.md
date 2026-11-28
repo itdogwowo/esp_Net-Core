@@ -6788,7 +6788,7 @@ free_ps=1,519,256、lanes=[mock]` —— **i80 唔喺 lanes 入面**，即係「
 用家指正：唔可以用攤分邏輯——每個組合時間唔同，做同步時不可控。所以改成**永久儲存**：
 同一組合只建立一次，寫成檔案；下次直接讀（時間固定，只取決於檔案大小）。
 
-- 檔案：`/pixel/cache/<key>.pxlt`（**每個組合一個**；key = mode 內容 hash ＋ map 內容 hash
+- 檔案：`/data/cache/<key>.pxlt`（**每個組合一個**；key = mode 內容 hash ＋ map 內容 hash
   ＋ px ＋ 格式版本，FNV/CRC 校驗）。
 - 內容一改或 px 一改 → key 唔夾 → 自動重建並覆寫（唔會誤用舊組合）。
 - 格式自描述：header（magic/ver/key/px/各表長度/crc）＋ 效果（名稱、值流長度、已編譯 program）
@@ -9404,7 +9404,7 @@ Matrix 7 個 config/asset 檔由 13,971 B → **8,788 B（省 37.1%）**；固�
 用家問「`.pxlt` 係咩？好似同舊專案撞名」+ 提供舊 repo `tools/PC/`（有 `PXLDv3Splitter.py`）。
 
 **`.pxlt` 係咩**：firmware 自己生成嘅 **layout 二進位快取**（magic `PXLT`），
-放喺裝置 `/data/pixel/cache/<key>.pxlt`；內容係「mode＋map＋px＋assets」編譯後嘅
+放喺裝置 `/data/cache/<key>.pxlt`；內容係「mode＋map＋px＋assets」編譯後嘅
 aprog／job／runs 表。**唔係 repo 資產**（git 冇），純快取：刪咗只會下次重建、慢一次。
 舊專案冇 `.pxlt`，但有 `tools/PC/PXLDv3Splitter.py`（**PXLD** v3，MicroPython 年代的
 layout 打包器）——字頭太似，容易混淆。
@@ -9631,7 +9631,7 @@ boot log／`status hw` 可核對。
 | 檔案 | 格式 magic | 做咩 | 狀態 |
 |---|---|---|---|
 | `/data/config/state.ncst` | `"NCSTATE1"` | 設定值嘅機器版（sparse id＋值＋CRC） | ✅ 唯一新格式（未做，P1） |
-| `/pixel/cache/<key>.layout` | `"NCLAYOUT"` | layout 計算結果快取 | ✅ **已改好、上板驗證** |
+| `/data/cache/<key>.layout` | `"NCLAYOUT"` | layout 計算結果快取 | ✅ **已改好、上板驗證** |
 
 **改動（code）**
 - `nc_px_layout.c`：header magic 由 `uint32_t "NCLT"` → **8-byte ASCII `"NCLAYOUT"`**；
@@ -9658,7 +9658,7 @@ state manager 只有一個格式。並問「為什麼 NCSTATE1 有個 1」——
 
 **最終只有兩個格式**（[`state-storage-format.md`](docs/03_notes/state-storage-format.md) 重寫）：
 - `/data/config/state.ncst`：magic **`"NCSTATE\0"`**，state manager **唯一格式**；
-- `/pixel/cache/<key>.layout`：magic **`"NCLAYOUT"`**，pixel layout 大表（例外）；
+- `/data/cache/<key>.layout`：magic **`"NCLAYOUT"`**，pixel layout 大表（例外）；
 - 舊 `NCB2`／`NCC2`／`PXA2`／`NCS1`／`NCLT` **全部作廢**。
 
 **NCSTATE 佈局**：header 24 B（magic 8＋ver/flags/count 6＋src_hash/len/crc 12）
@@ -11205,7 +11205,7 @@ cache ≈ 44B header
 
 **新增：cache 舊 key 清理**
 - `cache_prebuild_missing()` 全部 mode 預建時收集目前有效 key；
-  完成後 `cache_cleanup_stale()` 掃 `/pixel/cache/*.layout`，唔喺有效 key 清單就刪。
+  完成後 `cache_cleanup_stale()` 掃 `/data/cache/*.layout`，唔喺有效 key 清單就刪。
 - 效果／map／mode 一改，key 變；舊 cache 唔再佔 128 KB 預算，亦唔會被 LRU 誤用。
 - 真機驗證：手動放入 `deadbeef.layout` → reload 後 **exists=0**；
   4 個有效 cache 仍然 `present=4、built=0`。
@@ -11394,7 +11394,7 @@ layout cache 改 name_id＋dictionary CRC；舊 cache 版本++。Phase 1 模組�
 
 ### 7.335 2026-11-28（cache 副檔名統一 `.ncc`）
 
-- `names.ncd` ＋ `<key>.layout` → **`names.ncc` ＋ `<key>.ncc`**，全部 derived cache 放 `pixel/cache/`。
+- `names.ncd` ＋ `<key>.layout` → **`names.ncc` ＋ `<key>.ncc`**，全部 derived cache 放 `/data/cache/`。
 - header magic `NCNAMES`／`NCLAYOUT` 分辨；cleanup／trim 跳過 `names.ncc`。
 - 舊 `.layout`／`names.ncd` 自動清走（migration）；實測 OTA 後 names.ncc 5,244 B、cache present=4／built=0。
 - 刪 names.ncc → reload 清 4 個舊 cache、重建、下次 4/4 hit。
@@ -11403,11 +11403,11 @@ layout cache 改 name_id＋dictionary CRC；舊 cache 版本++。Phase 1 模組�
 
 ---
 
-### 7.336 2026-11-28（所有 pixel cache 集中在 `/pixel/cache`）
+### 7.336 2026-11-28（所有 pixel cache 集中在 `/data/cache`）
 
-- runtime cache：`names.ncc`＋`<key>.ncc` 全部喺 `/pixel/cache`。
+- runtime cache：`names.ncc`＋`<key>.ncc` 全部喺 `/data/cache`。
 - bench 診斷 cache 亦由 `/data/bench_layout.layout` 搬去
-  `/pixel/cache/bench_layout.ncc`；只剩一個 cache 目錄。
+  `/data/cache/bench_layout.ncc`；只剩一個 cache 目錄。
 - 舊 `names.ncd`／`*.layout` 已自動清走。
 - `.part`／`.tmp`／`.bak` **唔係 cache**，係 atomic 寫入／last-known-good，
   刻意放喺目標檔旁邊；`.nce`／`.nct` 係編譯模組，亦唔係 cache。
@@ -11422,3 +11422,14 @@ layout cache 改 name_id＋dictionary CRC；舊 cache 版本++。Phase 1 模組�
   - `NCLAYOUT`：layout（ver3、key、px、naprog/njobs/nruns/nvals、payload bytes、CRC）。
 - loader 先驗 magic／version／key／長度／CRC；錯 type 或舊版會安全重建，唔會誤讀。
 - 文件加 header 對照表；可用 `xxd -l 16` 一眼看 magic。
+
+
+---
+
+### 7.338 2026-11-28（cache 根升至 `/data/cache`，全系統共用）
+
+- cache 由 `/data/pixel/cache` 升至 **`/data/cache`**；pixel cache 只住這裡。
+- `/data/cache/names.ncc`、`/data/cache/<key>.ncc`、`/data/cache/bench_layout.ncc`。
+- 舊 `/data/pixel/cache` 由 migration helper 清空並 rmdir；實測舊 path names.ncc exists=0。
+- config／state 之後可直接用 `/data/cache`（同一個 root），唔需要再開新 cache 目錄。
+- 真機：cache present=4／built=0、26 ms；names.ncc 5,244 B；PSRAM free 1.82 MB。

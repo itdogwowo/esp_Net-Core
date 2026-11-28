@@ -443,7 +443,6 @@ esp_err_t nc_px_show_load(const char *path)
     return ESP_OK;
 }
 
-#if defined(ESP_PLATFORM)
 static bool join_path(char *out, size_t cap, const char *a, const char *b)
 {
     const size_t la = (a != NULL) ? strlen(a) : 0;
@@ -456,16 +455,13 @@ static bool join_path(char *out, size_t cap, const char *a, const char *b)
     memcpy(out + la + 1u, b, lb + 1u);
     return true;
 }
-#endif
 
 // 刪 cache 內所有 .layout（字典重建／ID 可能重排時用，避免舊 name_id 對錯）。
 #if defined(ESP_PLATFORM)
 static void drop_layout_cache(const char *base)
 {
     char cdir[SCAN_PATH_LEN];
-    if (!join_path(cdir, sizeof(cdir), base, "cache")) {
-        return;
-    }
+    (void)snprintf(cdir, sizeof(cdir), "%s", NC_CACHE_ROOT);
     DIR *d = opendir(cdir);
     if (d == NULL) {
         return;
@@ -498,9 +494,7 @@ static void names_load(const char *base)
 {
 #if defined(ESP_PLATFORM)
     char cdir[SCAN_PATH_LEN];
-    if (!join_path(cdir, sizeof(cdir), base, "cache")) {
-        return;
-    }
+    (void)snprintf(cdir, sizeof(cdir), "%s", NC_CACHE_ROOT);
     (void)mkdir(cdir, 0777);
     char path[SCAN_PATH_LEN];
     if (!join_path(path, sizeof(path), cdir, NC_PX_CACHE_NAMES)) {
@@ -530,9 +524,7 @@ static void names_save(const char *base)
         return;
     }
     char cdir[SCAN_PATH_LEN];
-    if (!join_path(cdir, sizeof(cdir), base, "cache")) {
-        return;
-    }
+    (void)snprintf(cdir, sizeof(cdir), "%s", NC_CACHE_ROOT);
     (void)mkdir(cdir, 0777);
     char path[SCAN_PATH_LEN];
     if (!join_path(path, sizeof(path), cdir, NC_PX_CACHE_NAMES)) {
@@ -544,6 +536,37 @@ static void names_save(const char *base)
 #else
     (void)base;
 #endif
+}
+
+// 舊 cache 曾住 pixel/cache；搬去 /data/cache 後只留一個 cache 根。
+// 呢個 helper 清走舊 dir 的檔案（全部都係 cache，可重建），然後 rmdir。
+static void cleanup_legacy_pixel_cache(const char *base)
+{
+    char cdir[128];
+    if (!join_path(cdir, sizeof(cdir), base, "cache")) {
+        return;
+    }
+    DIR *d = opendir(cdir);
+    if (d == NULL) {
+        return;
+    }
+    struct dirent *de;
+    uint32_t removed = 0;
+    while ((de = readdir(d)) != NULL) {
+        if (de->d_name[0] == '.') {
+            continue;
+        }
+        char path[192];
+        if (join_path(path, sizeof(path), cdir, de->d_name) && unlink(path) == 0) {
+            removed++;
+        }
+    }
+    closedir(d);
+    (void)rmdir(cdir);
+    if (removed > 0) {
+        ESP_LOGW(TAG, "舊 pixel/cache：清走 %u 個 cache 檔（已搬去 %s）",
+                 (unsigned)removed, NC_CACHE_ROOT);
+    }
 }
 
 esp_err_t nc_px_layer_load_all(const char *base)
@@ -576,6 +599,7 @@ esp_err_t nc_px_layer_load_all(const char *base)
              nc_px_asset_count(), (unsigned)s_maps.n, (unsigned)s_modes.n,
              (unsigned)s_show.nlist);
     names_save(base);
+    cleanup_legacy_pixel_cache(base);
     return (nc_px_asset_count() > 0) ? ESP_OK : ESP_ERR_NOT_FOUND;
 }
 

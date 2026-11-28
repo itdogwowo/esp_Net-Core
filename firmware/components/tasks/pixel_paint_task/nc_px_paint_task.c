@@ -283,7 +283,7 @@ static void layout_cache_scan(uint32_t *files, uint32_t *bytes,
     if (oldest != NULL && oldest_cap > 0) oldest[0] = '\0';
     time_t oldest_t = 0;
     char cdir[96];
-    (void)snprintf(cdir, sizeof(cdir), "%s/cache", s_content.pixel_dir);
+    (void)snprintf(cdir, sizeof(cdir), "%s", NC_CACHE_ROOT);
     DIR *d = opendir(cdir);
     if (d == NULL) {
         return;
@@ -357,7 +357,7 @@ static bool layout_cache_trim(size_t need, const char *skip)
 }
 
 // 存一張 layout cache；need 已含 header overhead。回 ESP_ERR_NO_MEM = 超預算唔存。
-// 掃描 cache 目錄，刪走「唔屬於目前任何 mode」的舊 .layout（effects／map／mode
+// 掃描 cache 目錄，刪走「唔屬於目前任何 mode」的舊 .ncc（effects／map／mode
 // 一改，key 就變；舊 key 唔應該繼續佔 128 KB 預算）。keys 係目前所有 mode 的 key。
 static void cache_cleanup_stale(const uint32_t *keys, uint32_t nkeys)
 {
@@ -365,7 +365,7 @@ static void cache_cleanup_stale(const uint32_t *keys, uint32_t nkeys)
         return;
     }
     char cdir[96];
-    (void)snprintf(cdir, sizeof(cdir), "%s/cache", s_content.pixel_dir);
+    (void)snprintf(cdir, sizeof(cdir), "%s", NC_CACHE_ROOT);
     DIR *d = opendir(cdir);
     if (d == NULL) {
         return;
@@ -382,8 +382,9 @@ static void cache_cleanup_stale(const uint32_t *keys, uint32_t nkeys)
         }
         if (nl > ol && strcmp(fn + nl - ol, LAYOUT_CACHE_OLD) == 0) {
             char legacy[192];
-            (void)snprintf(legacy, sizeof(legacy), "%s/cache/%s", s_content.pixel_dir, fn);
-            (void)unlink(legacy);
+            if (cache_join(legacy, sizeof(legacy), cdir, fn)) {
+                (void)unlink(legacy);
+            }
             continue;
         }
         if (nl <= sl || strcmp(fn + nl - sl, LAYOUT_CACHE_SUFFIX) != 0) {
@@ -424,7 +425,7 @@ static esp_err_t layout_cache_save(const nc_px_layout_t *l, const char *path, ui
         return ESP_ERR_NO_MEM;
     }
     char cdir[96];
-    (void)snprintf(cdir, sizeof(cdir), "%s/cache", s_content.pixel_dir);
+    (void)snprintf(cdir, sizeof(cdir), "%s", NC_CACHE_ROOT);
     (void)mkdir(cdir, 0777);                    // EEXIST 當成功
     return nc_px_layout_save(l, path, key);
 }
@@ -1023,7 +1024,7 @@ static void content_prepare_next(void)
     const uint32_t ckey = nc_px_layout_cache_key(m->hash, map->hash, s_content.px,
                                                    assets_hash(s_content.next_assets));
     char cpath[96];
-    (void)snprintf(cpath, sizeof(cpath), "%s/cache/%08lx.ncc", s_content.pixel_dir,
+    (void)snprintf(cpath, sizeof(cpath), "%s/%08lx.ncc", NC_CACHE_ROOT,
                    (unsigned long)ckey);
     esp_err_t e = nc_px_layout_load(&s_content.next_layout, cpath, ckey,
                                     s_content.next_assets);
@@ -1149,7 +1150,7 @@ static esp_err_t content_apply_mode_locked(const nc_px_mode_t *mode)
     const uint32_t ckey = nc_px_layout_cache_key(mode->hash, map->hash, s_content.px,
                                                       assets_hash(s_content.assets));
     char cpath[96];
-    (void)snprintf(cpath, sizeof(cpath), "%s/cache/%08lx.ncc", s_content.pixel_dir,
+    (void)snprintf(cpath, sizeof(cpath), "%s/%08lx.ncc", NC_CACHE_ROOT,
                    (unsigned long)ckey);
     const int64_t t_load0 = esp_timer_get_time();
     esp_err_t pe = nc_px_layout_load(&s_content.layout, cpath, ckey, s_content.assets);
@@ -1546,7 +1547,7 @@ static void cache_prebuild_missing(void)
             ? valid_keys[ci]
             : nc_px_layout_cache_key(m->hash, map->hash, s_content.px, assets_hash(tmp));
         char path[96];
-        (void)snprintf(path, sizeof(path), "%s/cache/%08lx.ncc", s_content.pixel_dir,
+        (void)snprintf(path, sizeof(path), "%s/%08lx.ncc", NC_CACHE_ROOT,
                        (unsigned long)key);
         nc_px_layout_t probe;
         if (nc_px_layout_load(&probe, path, key, tmp) == ESP_OK) {

@@ -247,7 +247,7 @@
 | `.json` | 來源／設定 | effects／map／modes／registry／config | 唔好隨手刪 |
 | `.nce` | 編譯 effect | effects | 可重編 |
 | `.nct` | 編譯 task | tasks | 可重編 |
-| `.ncc` | derived cache（names＋layout） | pixel/cache | 可刪，自動重建 |
+| `.ncc` | derived cache（names＋layout） | /data/cache | 可刪，自動重建 |
 | `.part`／`.tmp`／`.bak` | atomic 暫存／備份 | 目標旁 | 可刪 |
 | `.bin` | firmware | artifacts／OTA | 可 rebuild |
 | `.md` | 文件 | docs | 唔掃 |
