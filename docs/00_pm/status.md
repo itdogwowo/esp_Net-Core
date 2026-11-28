@@ -11945,3 +11945,16 @@ status ncm → live=mini、frames 增長
 - 新增 `nc_px_nce_seq()`／`nc_px_nce_last()` 與 `status` 的 `nce` 區塊（診斷用，長期保留）。
 - 清走測試用 modes（minitest／3／4／5）與 t16 mapping，保留 `minitest2`（示範 mode 21）
   同 `mini.nce`（示範效果）；`registry.json` auto_play 已還原。
+
+---
+
+### 7.367 2026-11-28（清走重複的 PXBENCH：0xF062 只剩一份實作）
+
+- 以前 0xF062 有兩份：`test_action`（tests）＋ `main`（`CONFIG_NETCORE_PXBENCH`）；
+  重複註冊 → 先到先得，行為取決於連結次序。
+- 刪走 `test_action` 內整段（`bench_alloc`＋`on_pxbench`＋表項），0xF062 只由 main 提供；
+  main 的守衛改為 `CONFIG_NETCORE_PXBENCH || defined(NC_TEST_ALLOW_0)` ——
+  測試映像一定有（`NC_TEST_ALLOW_0` 係 CMake 在 `NC_ENABLE_TESTS=ON` 時必定義），
+  量產映像維持 `CONFIG_NETCORE_PXBENCH` 控制（預設關）。
+- 真機驗證（tests 映像）：`raw 0xF062 0108000a` → `{"lanes":1,"px":8,…,"pass50":1}`。
+- 兩個 release 映像建置綠（Zero-Show、Matrix-LED-Textkit）。

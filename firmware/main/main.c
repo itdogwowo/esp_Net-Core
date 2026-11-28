@@ -1343,7 +1343,9 @@ static void on_reboot(nc4_ctx_t *ctx, const nc4_frame_t *f)
     esp_restart();
 }
 
-#if CONFIG_NETCORE_PXBENCH
+// 測試映像一定要有 PXBENCH（以前的測試實作已刪，改由這裡提供；NC_TEST_ALLOW_0
+// 係 CMake 喺 NC_ENABLE_TESTS=ON 時一定定義的宏）。
+#if CONFIG_NETCORE_PXBENCH || defined(NC_TEST_ALLOW_0)
 // 0xF062 PXBENCH：像素編碼吞吐量測（release 映像也可用；見 nc_pixel_bench.c）。
 // payload [lanes:u8][px:u16 LE][frames:u8] → {"…","sram":1/0,…}
 #define NC4_CMD_PXBENCH 0xF062
