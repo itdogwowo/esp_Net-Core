@@ -155,7 +155,10 @@ static esp_err_t ncm_on_start(const nc_task_res_view_t *res, int n)
     // 主機之後才問 STATUS_GET。
     nc_mod_set_tick_hook(ncm_nce_publish);
     (void)nc_task_post_register(ncm_post_start);
-    (void)nc_status_register("ncm", nc_mod_status_json);
+    // ⚠ 契約：nc_status 的 provider 只回「值」，key 由 status_add 補。
+    // nc_mod_status_json() 會自帶 "ncm": 前綴（給舊 status_add 用），
+    // 所以在這裡註冊的是 nc_mod_info_json()（純物件）。
+    (void)nc_status_register("ncm", nc_mod_info_json);
     return ESP_OK;
 }
 

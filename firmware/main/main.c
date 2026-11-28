@@ -1261,14 +1261,14 @@ static void reply_send(nc4_reply_t *r, size_t len)
 
 // 跟 schema 的 STATUS_RSP：payload = [len:u16][json][more:u8][timeout_ms:u16 LE]
 // len 只包 JSON；尾段喺字串之外（mp_Net-Core/slave/schema/status.json）。
-static void reply_send_tail(nc4_reply_t *r, size_t json_len, uint8_t more, uint16_t timeout_ms)
+static esp_err_t reply_send_tail(nc4_reply_t *r, size_t json_len, uint8_t more, uint16_t timeout_ms)
 {
     if (r->ctx == NULL || r->ctx->send == NULL || r->frame == NULL) {
-        return;
+        return ESP_ERR_INVALID_STATE;
     }
     if (json_len + 3 > NC4_REPLY_JSON_MAX) {
         reply_send(r, json_len);              // 超限：交返舊路徑（會回錯誤物件）
-        return;
+        return ESP_ERR_INVALID_SIZE;
     }
     uint8_t *data = r->frame + NC4_HDR_LEN;
     data[0] = (uint8_t)json_len;
@@ -1279,9 +1279,12 @@ static void reply_send_tail(nc4_reply_t *r, size_t json_len, uint8_t more, uint1
     tail[2] = (uint8_t)(timeout_ms >> 8);
     const int total = nc4_pack_into(r->frame, NC4_REPLY_FRAME_MAX, r->cmd,
                                     nc4_reply_addr(r->ctx), data, 2 + json_len + 3);
-    if (total > 0) {
-        r->ctx->send(r->ctx->send_arg, r->frame, (size_t)total);
+    if (total <= 0) {
+        return ESP_ERR_INVALID_SIZE;
     }
+    // ★ 一定要檢查：link TX 滿了會回錯誤（nc4_link_send 會 drops++）。
+    //   以前丟棄回傳值 → 頁面靜靜消失，主機只收到前面幾頁。
+    return r->ctx->send(r->ctx->send_arg, r->frame, (size_t)total);
 }
 
 // 舊介面：已經有現成字串的（多數 handler）走這條
@@ -1998,7 +2001,30 @@ static void on_status_get(nc4_ctx_t *ctx, const nc4_frame_t *f)
             return;
         }
         jappend(j, cap, &o, "}");
-        reply_send_tail(&rr, o, (sent < wanted) ? 1 : 0, 0);
+        // 逐頁送；TX 滿就讓一讓（vTaskDelay(1)）再試，最多 8 次。
+        // timeout_ms 報 10 ms：主機見到 more=1 就等呢個時間再收。
+        const uint8_t more = (sent < wanted) ? 1 : 0;
+        // 主機會一直等「下一頁」或者「冇了」。所以**唔用重試次數**（魔法數字）：
+        // 一直重試到 link 接受為止（本地 link，正常幾 ms 就排空），上限用**時間**
+        // 而唔係次數。真係送唔出 → 一定要補一頁 more=0 講清楚，唔可以無聲消失。
+        esp_err_t serr = reply_send_tail(&rr, o, more, 10);
+        const int64_t t_begin = esp_timer_get_time();
+        while (serr != ESP_OK && (esp_timer_get_time() - t_begin) < 2000000) {
+            vTaskDelay(1);
+            serr = reply_send_tail(&rr, o, more, 10);
+        }
+        if (serr != ESP_OK) {
+            ESP_LOGW(TAG, "status：第 %u 頁送唔出（%s）→ 補一頁 more=0 收尾",
+                     (unsigned)sent, esp_err_to_name(serr));
+            nc4_reply_t ra;
+            char *ja = reply_open(&ra, ctx, NC4_CMD_STATUS_RSP);
+            if (ja != NULL) {
+                size_t oa = 0;
+                jappend(ja, cap, &oa, "{\"err\":\"paging_abort\"}");
+                (void)reply_send_tail(&ra, oa, 0, 0);
+            }
+            return;
+        }
     }
 }
 
