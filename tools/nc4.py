@@ -71,24 +71,28 @@ def main() -> int:
             kb = args.keys.encode()
             payload = struct.pack("<H", len(kb)) + kb      # str_u16len
             s.write(pack(CMD_STATUS_GET, payload, args.addr))
-            resp = wait_for(s, CMD_STATUS_RSP, 3.0)
-            if resp is None:
-                print("沒有收到 STATUS_RSP（裝置沒開？還是這條通道不支援回覆）",
-                      file=sys.stderr)
-                return 1
-            n = struct.unpack_from("<H", resp)[0]
-            # schema: STATUS_RSP = status_json(str_u16len) + more(u8) + timeout_ms(u16 LE)
-            text = resp[2:2 + n].decode("utf-8", "replace")
-            more = resp[2 + n] if len(resp) >= 2 + n + 1 else 0
-            tmo = (struct.unpack_from("<H", resp, 2 + n)[0]
-                   if len(resp) >= 2 + n + 3 else 0)
-            try:
-                print(json.dumps(json.loads(text), indent=2, ensure_ascii=False))
-            except json.JSONDecodeError:
-                print(text)
-            if more:
-                print(f"[more=1 timeout_ms={tmo}] 仲有資料；用 keys=… 分批問",
-                      file=sys.stderr)
+            # 裝置推頁：見到 more=1 就繼續收，唔再發嘢（半雙工）。
+            merged = {}
+            for _ in range(32):                     # 保險：最多 32 幀
+                resp = wait_for(s, CMD_STATUS_RSP, 3.0)
+                if resp is None:
+                    print("沒有收到 STATUS_RSP（裝置沒開？還是這條通道不支援回覆）",
+                          file=sys.stderr)
+                    return 1
+                n = struct.unpack_from("<H", resp)[0]
+                # schema: status_json(str_u16len) + more(u8) + timeout_ms(u16 LE)
+                text = resp[2:2 + n].decode("utf-8", "replace")
+                more = resp[2 + n] if len(resp) >= 2 + n + 1 else 0
+                try:
+                    obj = json.loads(text)
+                except json.JSONDecodeError:
+                    print(text)
+                    return 1
+                if isinstance(obj, dict):
+                    merged.update(obj)
+                if not more:
+                    break
+            print(json.dumps(merged, indent=2, ensure_ascii=False))
             return 0
 
         elif args.action == "raw":
