@@ -1898,23 +1898,26 @@ static size_t status_put_ncm(char *buf, size_t cap);   // 定義喺下面（自�
 typedef struct {
     const char *name;
     size_t (*fn)(char *buf, size_t cap);
+    // 已知可能超過一頁的 block（實測上限）。大過 cap 就**唔叫 fn**，
+    // 直接回 block_too_big —— 唔係省時間，係防止 fn 寫爆 frame（會令後面的頁消失）。
+    uint16_t known_max;
 } status_block_t;
 
 static const status_block_t k_status_blocks[] = {
-    { "sys",      status_put_sys },
-    { "storage",  status_put_storage },
-    { "cfg",      status_put_cfg },
-    { "log",      status_put_log },
+    { "sys", status_put_sys, 0 },
+    { "storage", status_put_storage, 0 },
+    { "cfg", status_put_cfg, 0 },
+    { "log", status_put_log, 0 },
 #if CONFIG_FREERTOS_USE_TRACE_FACILITY
-    { "rt",       status_put_rt },
+    { "rt", status_put_rt, 0 },
 #endif
-    { "mem",      status_put_mem },
-    { "provides", status_put_provides },
-    { "tasks",    status_put_tasks },
-    { "wifi",     status_put_wifi },
-    { "cmds",     status_put_cmds },
-    { "net",      status_put_net },
-    { "ncm",      status_put_ncm },      // 自註冊區塊（test-only）排最後，頁界穩定
+    { "mem", status_put_mem, 1700 },
+    { "provides", status_put_provides, 0 },
+    { "tasks", status_put_tasks, 3200 },
+    { "wifi", status_put_wifi, 0 },
+    { "cmds", status_put_cmds, 5000 },
+    { "net", status_put_net, 0 },
+    { "ncm", status_put_ncm, 0 },      // 自註冊區塊（test-only）排最後，頁界穩定
 };
 #define NC_STATUS_BLOCKS (sizeof(k_status_blocks) / sizeof(k_status_blocks[0]))
 
@@ -1928,12 +1931,16 @@ static size_t status_put_ncm(char *buf, size_t cap)
     if (k < 0 || (size_t)k >= cap) {
         return 0;
     }
-    const size_t n = nc_status_value("ncm", buf + k, cap - (size_t)k);
-    if (n > 0) {
+    const size_t room = cap - (size_t)k;
+    const size_t n = nc_status_value("ncm", buf + k, room);
+    // 防禦：provider 回的長度一定要 < room（唔可以等於／超過），否則整頁會爆界、
+    // 之後的 jappend 會踩到 frame 外面 → 主機一頁都收唔到（真機 sys,ncm 就係咁）。
+    if (n > 0 && n < room) {
+        buf[k + n] = '\0';
         return (size_t)k + n;
     }
-    const int e = snprintf(buf + k, cap - (size_t)k, "{}");
-    return (e > 0) ? ((size_t)k + (size_t)e) : 0;
+    const int e = snprintf(buf + k, room, "{}");
+    return (e > 0 && (size_t)e < room) ? ((size_t)k + (size_t)e) : 0;
 }
 
 static bool status_block_wanted(const status_block_t *b, const char *keys)
@@ -1998,17 +2005,25 @@ static void on_status_get(nc4_ctx_t *ctx, const nc4_frame_t *f)
         size_t o = 0;
         bool f1 = true;
         jappend(j, cap, &o, "{");
-        status_add(j, cap, &o, &f1, k_status_blocks[i].fn);
+        if (k_status_blocks[i].known_max != 0 && k_status_blocks[i].known_max > cap - 32) {
+            // 已知放唔落：唔叫 fn（佢可能寫爆 frame）；明示、但仍然繼續下一頁。
+            jappend(j, cap, &o, "\"err\":\"block_too_big\",\"key\":\"%s\"",
+                    k_status_blocks[i].name);
+            jappend(j, cap, &o, "}");
+        } else {
+            status_add(j, cap, &o, &f1, k_status_blocks[i].fn);
+        }
         if (o >= cap - 1) {
-            // 單一 block 都放唔落：回合法錯誤、more=0（唔可以令主機無限等）
+            // 單一 block 自己就爆（例如 cmds 4.9 KB）：**唔可以 return**，
+            // 否則後面所有 key（net／ncm）永遠收唔到。回一個合法錯誤頁，
+            // 但仍然保留 more（仲有下一頁）。
             o = 0;
             jappend(j, cap, &o, "{\"err\":\"block_too_big\",\"key\":\"%s\"}",
                     k_status_blocks[i].name);
-            reply_send_tail(&rr, o, 0, 0);
-            return;
+        } else {
+            jappend(j, cap, &o, "}");
         }
-        jappend(j, cap, &o, "}");
-        // 逐頁送；TX 滿就讓一讓（vTaskDelay(1)）再試，最多 8 次。
+        // 逐頁送；TX 滿就讓一讓（vTaskDelay(1)）再試。
         // timeout_ms 報 10 ms：主機見到 more=1 就等呢個時間再收。
         const uint8_t more = (sent < wanted) ? 1 : 0;
         // 主機會一直等「下一頁」或者「冇了」。所以**唔用重試次數**（魔法數字）：
