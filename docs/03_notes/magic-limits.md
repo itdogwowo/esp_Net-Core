@@ -7,7 +7,7 @@
 
 | 常數 | 值 | 為何固定 |
 |---|---|---|
-| `NC4_REPLY_JSON_MAX` | 2,600 | 回覆幀要塞入 `NC4_MAX_FRAME`（8,205）；改咗所有主機工具要跟 |
+| `NC4_REPLY_JSON_MAX` | ~~2,600~~ → **`NC4_MAX_PAYLOAD - 2`**（2026-11-28 改） | 由 frame 容量推導，一個真相；reply 幀有 `_Static_assert <= NC4_MAX_FRAME` |
 | `NCM_HDR_SIZE` / `NC_NCD_HDR_SIZE` | 48 / 40 | 容器格式；改 = 版本升級 |
 | 12-bit 值域、`.ncc` magic／version | — | 存檔格式 |
 

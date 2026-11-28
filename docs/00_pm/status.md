@@ -11639,3 +11639,30 @@ layout cache 改 name_id＋dictionary CRC；舊 cache 版本++。Phase 1 模組�
 9,600 px × rgbw = 38,400 值會被拒 → 要為 EFFECT 提高上限，或者 manifest 另開 `values`。
 
 **驗證**：host 29/29；`--tests` build ✔。未上板。
+
+---
+
+### 7.349 2026-11-28（回覆 JSON 上限改由 frame 容量推導）
+
+**問題**：`NC4_REPLY_JSON_MAX = 2600` 係 2026-11-08 的經驗值（AI 揀）。frame 容量
+8,205，即係**明明載得落，卻被個數字卡停**。回覆緩衝亦因此固定 2,615 B／decoder。
+
+**改法（一個真相）**
+- `NC4_REPLY_JSON_MAX = NC4_MAX_PAYLOAD - 2`（cmd echo 2 B）；`NC4_REPLY_FRAME_MAX`
+  跟住推導，並加 `_Static_assert(NC4_REPLY_FRAME_MAX <= NC4_MAX_FRAME)`。
+- 移除 `nc_test_action.c` 自己再 `#define NC4_REPLY_JSON_MAX 2600` 的重複定義
+  （呢個就係「同一個數字有兩個真相」）。
+- 行為：handler 仍然「滿就停」——砌唔落回合法 `reply_too_big`／`truncated`，
+  唔會切半；分別只係「滿」由 2,600 變成真正 frame 容量。
+
+**代價（要知）**
+- 每個 decoder 的回覆緩衝 2,615 → 8,211 B；兩個 decoder＝plan 多 **~11 KB**（BULK class，
+  有 PSRAM 就 PSRAM）。C3（冇 PSRAM）落 internal。
+- status 全 key 而家真的一次過塞滿一條線 → 「分批問」仍然要保留，理由變成頻寬。
+
+**未做（測試重點）**
+- host 冇 status 砌 JSON 的 harness（全部喺 main.c）。要把「砌到滿」抽成可測函式，
+  再加：剛好滿／差一 byte／細緩衝 三個 case，斷言**合法 JSON＋完整的區塊**。
+  呢個係下一步，唔係已經有。
+
+**驗證**：host 29/29；`--tests` build ✔；release build ✔。未上板。

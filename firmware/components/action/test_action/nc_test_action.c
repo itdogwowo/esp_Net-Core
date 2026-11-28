@@ -61,7 +61,6 @@
 
 static const char *TAG = "test_action";
 
-#define NC4_REPLY_JSON_MAX 2600
 #define NC4_CMD_DEV_BENCH  0xF001
 #define NC4_CMD_DEV_RSP    0xF002
 #define NC4_CMD_HUB_BENCH  0xF003

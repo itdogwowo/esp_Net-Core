@@ -38,12 +38,19 @@ extern "C" {
 // 指令表的格數。**要對得起實際註冊量**：core 5 + test 11 + test bench 9 +
 // ota 9 + file 10 = 44（測試映像）。曾經是 32 → 最後 4 條靜靜咁註冊失敗
 // （STATUS_SET / FILE_QUERY 永遠答不到）。塞爆會印 ESP_LOGE（見 nc4.c）。
-// 回覆幀的 JSON 上限。完整的 STATUS_GET（sys+mem+tasks+provides+storage+ncm）
-// 大約 2.4 KB，用小了會**靜靜截斷成無效 JSON**。
-// 這塊緩衝由 decoder 持有（每個 decoder 一份，預設放 PSRAM），**不再放任務棧**：
-// 以前它是 handler 的區域變數，一個 decode 任務的 5,120 B 棧裡面有 2,615 B 就是它。
-#define NC4_REPLY_JSON_MAX   2600
+// 回覆幀的 JSON 上限＝**由 frame 容量推導**，唔再人手揀一個數。
+// 2026-11-28：原本寫死 2,600（2026-11-08 的經驗值），比 frame 細 3 倍 ——
+// 結果係「明明條線載得落，卻被個數字卡停」。現在只有一個真相：
+// 回覆 JSON 可以佔滿 payload（減 2 B 的 cmd echo），滿就停（handler 會回合法
+// 的 reply_too_big／truncated，唔會切半）。
+// 這塊緩衝由 decoder 持有（每個 decoder 一份，plan 的 BULK class → 有 PSRAM 就 PSRAM），
+// **不放任務棧**：以前它是 handler 的區域變數，一個 decode 任務的 5,120 B 棧裡面
+// 有 2,615 B 就是它。
+#define NC4_REPLY_JSON_MAX   (NC4_MAX_PAYLOAD - 2)
 #define NC4_REPLY_FRAME_MAX  (NC4_HDR_LEN + 2 + NC4_REPLY_JSON_MAX + NC4_CRC_LEN)
+
+// 不變量：回覆幀永遠唔可以大過協議容許的 frame（推導錯就會喺編譯期爆）。
+_Static_assert(NC4_REPLY_FRAME_MAX <= NC4_MAX_FRAME, "回覆幀大過 NC4_MAX_FRAME");
 #define NC4_MAX_HANDLERS     48
 #define NC4_ADDR_BROADCAST   0xFFFF
 
