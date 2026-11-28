@@ -9621,7 +9621,7 @@ boot log／`status hw` 可核對。
 **下一步**維持：A1（firmware 讀 activation 表、只裝 enabled）＋P1（NCSTATE codec）——
 而 P1 就係實現嗰「唯一新格式」。
 
-### 7.274 2026-11-26（命名清楚化：`state.ncst` 與 `<key>.layout`；唔再用代號）
+### 7.274 2026-11-26（命名清楚化：`state.ncst` 與 `<key>.ncc`；唔再用代號）
 
 用家：「NCS1／NCLT 不一定要四個字，但一定要描述清楚，現在根本不清不楚。」
 → 全部改成**自述式命名**，magic 直接用 ASCII 全名。
@@ -11364,12 +11364,12 @@ layout cache 改 name_id＋dictionary CRC；舊 cache 版本++。Phase 1 模組�
 
 - `nc_px_name_dict` 已接入 asset／map／group／mode／entry／show：
   - 內部用 uint32 name_id；entry 用 group_id／effect_id；
-  - `names.ncd` load/lookup／append／同 id 覆蓋／atomic save；
-  - 手動刪 names.ncd → reload 重建並清舊 `.layout`。
+  - `names.ncc` load/lookup／append／同 id 覆蓋／atomic save；
+  - 手動刪 names.ncc → reload 重建並清舊 `.ncc`。
 - 名長度：冇 24 B cap；pxAsset_test 18 個中文字（54 B）完整保留；
   8 字亦完整（唔再截 7 字）。
 - 真機：
-  - names.ncd 5,244 B／369 名；
+  - names.ncc 5,244 B／369 名；
   - 正常 reload／開機 cache **present=4、built=0、26 ms**；
   - 刪 names 後 reload：清 4 個舊 cache、重建、下次 reload 4/4；
   - frame 19.99 ms／約50fps、pair 3.12 ms、apply 2.35 ms、encode 9.39 ms；
@@ -11383,8 +11383,20 @@ layout cache 改 name_id＋dictionary CRC；舊 cache 版本++。Phase 1 模組�
 ### 7.334 2026-11-28（name dictionary 最終驗證：18/18 build、host 全綠、真機 cache 4/4）
 
 - 最後一輪 18/18 project build 成功；host tests 全部通過；board.py 0 errors／22 warnings。
-- 真機：names.ncd 5,244 B／369 名；prebuild present=4、built=0、26 ms；
+- 真機：names.ncc 5,244 B／369 名；prebuild present=4、built=0、26 ms；
   frame 19.99 ms／50 fps、pair 3.12 ms、apply 2.35 ms、encode 9.39 ms；
   PSRAM free 1.82 MB、internal free 196 KB。
-- 手動刪 names.ncd：清 4 個舊 .layout、重建字典；下一次 reload 4/4 cache hit。
+- 手動刪 names.ncc：清 4 個舊 .layout、重建字典；下一次 reload 4/4 cache hit。
 - 名長：54 B 中文名完整保留；24 B 限制已移除；檔名仍受 FATFS 64 B／建議 ASCII。
+
+
+---
+
+### 7.335 2026-11-28（cache 副檔名統一 `.ncc`）
+
+- `names.ncd` ＋ `<key>.layout` → **`names.ncc` ＋ `<key>.ncc`**，全部 derived cache 放 `pixel/cache/`。
+- header magic `NCNAMES`／`NCLAYOUT` 分辨；cleanup／trim 跳過 `names.ncc`。
+- 舊 `.layout`／`names.ncd` 自動清走（migration）；實測 OTA 後 names.ncc 5,244 B、cache present=4／built=0。
+- 刪 names.ncc → reload 清 4 個舊 cache、重建、下次 4/4 hit。
+- `.json` 來源、`.nce/.nct` 編譯模組、`.part/.tmp/.bak` 暫存、`.bin` firmware 保持分類。
+- 文件：`docs/03_notes/pixel-storage-layout.md`。

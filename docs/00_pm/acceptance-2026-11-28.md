@@ -26,7 +26,7 @@
 | G4 | pixel 設定唔受 8／16／32 magic limit | map／mode／show／entry／effect／segment 全動態；舊 legacy 常數改名 | ✅ |
 | G5 | hash 相同直接讀、不同才重建 | NCLAYOUT key＝mode＋map＋px＋assets＋ver；hit/load、miss/build | ✅ |
 | G6 | 啟動／reload 完成全部建表 | `PREBUILD_MAX=0` 全部預建；reload 後再跑 | ✅ |
-| G7 | 舊 cache key 唔累積 | 有效 key 清單＋pre-clean stale `.layout` | ✅ |
+| G7 | 舊 cache key 唔累積 | 有效 key 清單＋pre-clean stale `.ncc` | ✅ |
 | G8 | pixel 全 PSRAM、唔佔 SRAM | `HOT_SRAM_KB=0`；tables／layout／flat 全 PSRAM | ✅ |
 | G9 | 16IO 50 fps | frame 約 19.97–20.59 ms | ✅ |
 | G10 | 16×600 極限 | 線路18 ms、CPU約14.8–17.6 ms；margin約2–5 ms | ✅ 偏緊 |
@@ -106,7 +106,7 @@
 | flatify | 0.312–0.343 ms |
 | active cache | 1,600–7,456 B |
 | prebuild | **present=4、built=0、26 ms**（第二次開機） |
-| names.ncd | 5,244 B（369 名） |
+| names.ncc | 5,244 B（369 名） |
 | fs_format 後首開 | built 3、總共 4 張、約 1,238 ms |
 | cache hit swap | 188–206 µs |
 | FAT | total 872,448 B／free 663,552 B（648 KiB） |
@@ -194,7 +194,7 @@
 
 | 項目 | 說明 |
 |---|---|
-| 名稱長度 | **已改 name dictionary（names.ncd）**，冇 24 B cap；字串只存一份 |
+| 名稱長度 | **已改 name dictionary（names.ncc）**，冇 24 B cap；字串只存一份 |
 | 檔名 64 B | FATFS／VFS 路徑限制；建議 ASCII |
 | map/mode id 0–65535 | uint16；protocol 已支援 2-byte |
 | 單一 asset segments 65,535 | uint16 欄位；總 pool offset 已 uint32 |
@@ -237,8 +237,27 @@
 - host tests 全部通過（nameDict／pxAsset／pxLayer／pxShow／pxScan／pxLayout…）。
 - 真機最後一輪：cache **present=4、built=0、26 ms**；frame **19.99 ms／50 fps**；
   pair 3.12 ms、apply 2.35 ms、encode 9.39 ms；PSRAM free **1.82 MB**、internal free 196 KB。
-- names.ncd **5,244 B／369 名**；手動刪檔重建實測會清 4 個舊 `.layout`，再 reload 4/4 hit。
+- names.ncc **5,244 B／369 名**；手動刪檔重建實測會清 4 個舊 `.ncc`，再 reload 4/4 hit。
 - 長中文名：pxAsset_test 18 字（54 B）完整保留；冇 24 B cap。
+
+## 6.8 副檔名／檔案分類（2026-11-28 整理）
+
+| 副檔名 | 類別 | 位置 | 刪除 |
+|---|---|---|---|
+| `.json` | 來源／設定 | effects／map／modes／registry／config | 唔好隨手刪 |
+| `.nce` | 編譯 effect | effects | 可重編 |
+| `.nct` | 編譯 task | tasks | 可重編 |
+| `.ncc` | derived cache（names＋layout） | pixel/cache | 可刪，自動重建 |
+| `.part`／`.tmp`／`.bak` | atomic 暫存／備份 | 目標旁 | 可刪 |
+| `.bin` | firmware | artifacts／OTA | 可 rebuild |
+| `.md` | 文件 | docs | 唔掃 |
+
+- cache 由 `names.ncd`＋`<key>.layout` 統一成 **`names.ncc`＋`<key>.ncc`**；
+- header magic（`NCNAMES`／`NCLAYOUT`）分辨內容；
+- cleanup／trim 跳過 `names.ncc`；刪它才重建字典並清 layout cache；
+- 舊 `.layout`／`names.ncd` 自動 migration 清走；
+- `.nce`／`.nct` 保留，因為 loader 用副檔名分 effect／task；
+- 詳細：[pixel-storage-layout.md](../03_notes/pixel-storage-layout.md)。
 
 ## 7. 結論
 

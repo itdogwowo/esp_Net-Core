@@ -8,6 +8,7 @@
 #include "nc_px_layer_scan.h"
 
 #include "nc_px_asset.h"
+#include "nc_px_layout.h"
 
 #include <dirent.h>
 #include <sys/stat.h>
@@ -473,7 +474,13 @@ static void drop_layout_cache(const char *base)
     uint32_t removed = 0;
     while ((de = readdir(d)) != NULL) {
         const size_t nl = strlen(de->d_name);
-        if (nl > 7 && strcmp(de->d_name + nl - 7, ".layout") == 0) {
+        if (strcmp(de->d_name, NC_PX_CACHE_NAMES) == 0) {
+            continue;
+        }
+        const size_t el = sizeof(NC_PX_CACHE_EXT) - 1;
+        const size_t ol = sizeof(NC_PX_CACHE_OLD_LAYOUT) - 1;
+        if ((nl > el && strcmp(de->d_name + nl - el, NC_PX_CACHE_EXT) == 0) ||
+            (nl > ol && strcmp(de->d_name + nl - ol, NC_PX_CACHE_OLD_LAYOUT) == 0)) {
             char path[SCAN_PATH_LEN];
             if (join_path(path, sizeof(path), cdir, de->d_name) && unlink(path) == 0) {
                 removed++;
@@ -496,15 +503,18 @@ static void names_load(const char *base)
     }
     (void)mkdir(cdir, 0777);
     char path[SCAN_PATH_LEN];
-    if (!join_path(path, sizeof(path), cdir, "names.ncd")) {
+    if (!join_path(path, sizeof(path), cdir, NC_PX_CACHE_NAMES)) {
         return;
     }
     const esp_err_t e = nc_px_name_dict_load(nc_px_name_dict_global(), path);
     if (e != ESP_OK) {
         if (e == ESP_ERR_INVALID_STATE) {
-            ESP_LOGW(TAG, "names.ncd 壞檔 → 重建字典");
+            ESP_LOGW(TAG, "names cache 壞檔 → 重建字典");
         }
         nc_px_name_dict_global_reset();
+        if (join_path(path, sizeof(path), cdir, NC_PX_CACHE_OLD_NAMES)) {
+            (void)unlink(path);
+        }
         drop_layout_cache(base);
     }
 #else
@@ -525,11 +535,11 @@ static void names_save(const char *base)
     }
     (void)mkdir(cdir, 0777);
     char path[SCAN_PATH_LEN];
-    if (!join_path(path, sizeof(path), cdir, "names.ncd")) {
+    if (!join_path(path, sizeof(path), cdir, NC_PX_CACHE_NAMES)) {
         return;
     }
     if (nc_px_name_dict_save(d, path) != ESP_OK) {
-        ESP_LOGW(TAG, "names.ncd 儲存失敗（%s）", path);
+        ESP_LOGW(TAG, "names cache 儲存失敗（%s）", path);
     }
 #else
     (void)base;

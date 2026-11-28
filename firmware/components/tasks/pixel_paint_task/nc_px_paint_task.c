@@ -238,7 +238,9 @@ static void cache_prebuild_missing(void);
 
 // ── NCLAYOUT 快取預算／LRU ──
 // 純快取，刪咗只係下次切 mode 重建；用 mtime 揀最舊，避免 mode／map 多時食滿 FAT。
-#define LAYOUT_CACHE_SUFFIX ".layout"
+#define LAYOUT_CACHE_SUFFIX NC_PX_CACHE_EXT
+#define LAYOUT_CACHE_NAMES  NC_PX_CACHE_NAMES
+#define LAYOUT_CACHE_OLD    NC_PX_CACHE_OLD_LAYOUT
 #define LAYOUT_CACHE_FILE_OVERHEAD 128u
 
 static size_t layout_cache_file_max(void)
@@ -259,6 +261,19 @@ static uint32_t layout_cache_budget(void)
 #endif
 }
 
+static bool cache_join(char *out, size_t cap, const char *dir, const char *name)
+{
+    const size_t a = strlen(dir);
+    const size_t b = strlen(name);
+    if (a + 1u + b + 1u > cap) {
+        return false;
+    }
+    memcpy(out, dir, a);
+    out[a] = '/';
+    memcpy(out + a + 1u, name, b + 1u);
+    return true;
+}
+
 // 掃 cache 目錄：files／bytes；oldest 回最舊的檔名（可選，skip 傳 NULL）。
 static void layout_cache_scan(uint32_t *files, uint32_t *bytes,
                               char *oldest, size_t oldest_cap, const char *skip)
@@ -277,11 +292,21 @@ static void layout_cache_scan(uint32_t *files, uint32_t *bytes,
     while ((de = readdir(d)) != NULL) {
         const size_t nl = strlen(de->d_name);
         const size_t sl = sizeof(LAYOUT_CACHE_SUFFIX) - 1;
-        if (nl <= sl || strcmp(de->d_name + nl - sl, LAYOUT_CACHE_SUFFIX) != 0) {
+        const size_t ol = sizeof(LAYOUT_CACHE_OLD) - 1;
+        if (strcmp(de->d_name, LAYOUT_CACHE_NAMES) == 0) {
             continue;
         }
         char path[192];
-        (void)snprintf(path, sizeof(path), "%s/%s", cdir, de->d_name);
+        if (!cache_join(path, sizeof(path), cdir, de->d_name)) {
+            continue;
+        }
+        if (nl > ol && strcmp(de->d_name + nl - ol, LAYOUT_CACHE_OLD) == 0) {
+            (void)unlink(path);
+            continue;
+        }
+        if (nl <= sl || strcmp(de->d_name + nl - sl, LAYOUT_CACHE_SUFFIX) != 0) {
+            continue;
+        }
         struct stat st;
         if (stat(path, &st) != 0 || !S_ISREG(st.st_mode)) {
             continue;
@@ -291,7 +316,10 @@ static void layout_cache_scan(uint32_t *files, uint32_t *bytes,
         if (oldest != NULL && (oldest[0] == '\0' || st.st_mtime < oldest_t) &&
             (skip == NULL || strcmp(path, skip) != 0)) {
             oldest_t = st.st_mtime;
-            (void)snprintf(oldest, oldest_cap, "%s", path);
+            const size_t pl = strlen(path);
+            if (pl + 1u <= oldest_cap) {
+                memcpy(oldest, path, pl + 1u);
+            }
         }
     }
     closedir(d);
@@ -348,6 +376,16 @@ static void cache_cleanup_stale(const uint32_t *keys, uint32_t nkeys)
         const char *fn = de->d_name;
         const size_t nl = strlen(fn);
         const size_t sl = sizeof(LAYOUT_CACHE_SUFFIX) - 1;
+        const size_t ol = sizeof(LAYOUT_CACHE_OLD) - 1;
+        if (strcmp(fn, LAYOUT_CACHE_NAMES) == 0) {
+            continue;
+        }
+        if (nl > ol && strcmp(fn + nl - ol, LAYOUT_CACHE_OLD) == 0) {
+            char legacy[192];
+            (void)snprintf(legacy, sizeof(legacy), "%s/cache/%s", s_content.pixel_dir, fn);
+            (void)unlink(legacy);
+            continue;
+        }
         if (nl <= sl || strcmp(fn + nl - sl, LAYOUT_CACHE_SUFFIX) != 0) {
             continue;
         }
@@ -365,8 +403,7 @@ static void cache_cleanup_stale(const uint32_t *keys, uint32_t nkeys)
         }
         if (!valid) {
             char path[192];
-            (void)snprintf(path, sizeof(path), "%s/%s", cdir, fn);
-            if (unlink(path) == 0) {
+            if (cache_join(path, sizeof(path), cdir, fn) && unlink(path) == 0) {
                 removed++;
             }
         }
@@ -986,7 +1023,7 @@ static void content_prepare_next(void)
     const uint32_t ckey = nc_px_layout_cache_key(m->hash, map->hash, s_content.px,
                                                    assets_hash(s_content.next_assets));
     char cpath[96];
-    (void)snprintf(cpath, sizeof(cpath), "%s/cache/%08lx.layout", s_content.pixel_dir,
+    (void)snprintf(cpath, sizeof(cpath), "%s/cache/%08lx.ncc", s_content.pixel_dir,
                    (unsigned long)ckey);
     esp_err_t e = nc_px_layout_load(&s_content.next_layout, cpath, ckey,
                                     s_content.next_assets);
@@ -1112,7 +1149,7 @@ static esp_err_t content_apply_mode_locked(const nc_px_mode_t *mode)
     const uint32_t ckey = nc_px_layout_cache_key(mode->hash, map->hash, s_content.px,
                                                       assets_hash(s_content.assets));
     char cpath[96];
-    (void)snprintf(cpath, sizeof(cpath), "%s/cache/%08lx.layout", s_content.pixel_dir,
+    (void)snprintf(cpath, sizeof(cpath), "%s/cache/%08lx.ncc", s_content.pixel_dir,
                    (unsigned long)ckey);
     const int64_t t_load0 = esp_timer_get_time();
     esp_err_t pe = nc_px_layout_load(&s_content.layout, cpath, ckey, s_content.assets);
@@ -1509,7 +1546,7 @@ static void cache_prebuild_missing(void)
             ? valid_keys[ci]
             : nc_px_layout_cache_key(m->hash, map->hash, s_content.px, assets_hash(tmp));
         char path[96];
-        (void)snprintf(path, sizeof(path), "%s/cache/%08lx.layout", s_content.pixel_dir,
+        (void)snprintf(path, sizeof(path), "%s/cache/%08lx.ncc", s_content.pixel_dir,
                        (unsigned long)key);
         nc_px_layout_t probe;
         if (nc_px_layout_load(&probe, path, key, tmp) == ESP_OK) {

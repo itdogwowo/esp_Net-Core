@@ -104,6 +104,11 @@ void nc_px_layout_free(nc_px_layout_t *l);
 // key = 檔案內容 hash ＋ px ＋ 格式版本；唔夾就當快取失效（回 ESP_ERR_INVALID_STATE）。
 // 讀取時用 assets 表把 asset 名稱指回真實 asset（program 已編譯，原樣帶回）。
 #define NC_PX_LAYOUT_CACHE_VER 3u   // 2: program segments 動態（variable-length cache）
+// 所有 derived cache 共用一個副檔名；內容用 header magic 分辨。
+#define NC_PX_CACHE_EXT          ".ncc"
+#define NC_PX_CACHE_NAMES        "names.ncc"
+#define NC_PX_CACHE_OLD_LAYOUT   ".layout"
+#define NC_PX_CACHE_OLD_NAMES    "names.ncd"
 uint32_t nc_px_layout_cache_key(uint32_t mode_hash, uint32_t map_hash, uint32_t px,
                                 uint32_t assets_hash);
 size_t    nc_px_layout_cache_bytes(const nc_px_layout_t *l);
