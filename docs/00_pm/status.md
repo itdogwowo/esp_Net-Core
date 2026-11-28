@@ -11152,3 +11152,28 @@ render／encode task running、無 crash、state 重建正常；之後已還原 
 **結論**：pixel 全 PSRAM；internal free 約 100–148 KB、FAT 640 KiB free；
 現時與 16×600 極限都仍在 20 ms 預算內。要更高 px／fps 才再考慮 hot flat，
 但預設唔會佔 SRAM。
+
+---
+
+### 7.324 2026-11-28（啟動階段預建**全部** mode；runtime 不再 build）
+
+**用家定案**：cache miss build／完整 build **唔應該喺 runtime 出現**，啟動階段就要做完。
+
+**改動**
+- `NETCORE_PIXEL_LAYOUT_PREBUILD_MAX` 預設 **0 = 全部 mode**（舊 default 4）；
+  16IO project 明寫 0。
+- `cache_prebuild_missing()`：limit=0 時用 `modes->n`，逐個 mode 預建＋save；
+  reload（0xF06F）成功後亦再跑一次，等同重新啟動。
+- 仍受 cache 總預算（128 KB）／單張 32 KB 限制；如果總 cache 超過預算，LRU 仍可能
+  淘汰，要調高 `NETCORE_PIXEL_LAYOUT_CACHE_KB` 或 0=不限。
+
+**真機（16IO 4 modes）**
+| 情況 | 結果 |
+|---|---|
+| fs_format 後第一次開機 | `present=1、built=3、1,238 ms`（總共 4 張） |
+| 第二次開機 | **`present=4、built=0、25 ms`** |
+| next 預建 cache hit | **5.8 ms** |
+| 預熱 swap | **206 us** |
+
+→ runtime 切 mode 只讀 cache／swap，冇 build；只有 cache 被預算淘汰或 layout >32 KB
+例外仍會重建（16IO 4 個 mode 合共遠低於 128 KB，唔會發生）。

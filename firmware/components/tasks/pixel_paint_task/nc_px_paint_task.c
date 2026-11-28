@@ -1180,6 +1180,7 @@ static esp_err_t content_reload(void)
     }
     ESP_LOGI(TAG, "reload 完成：mode=%s auto_play=%d", mode->name,
              s_content.auto_play ? 1 : 0);
+    cache_prebuild_missing();        // reload 等同啟動：所有 mode 預建，runtime 唔再 build
     return ESP_OK;
 }
 
@@ -1330,9 +1331,11 @@ static void cache_prebuild_missing(void)
 {
     const uint32_t max_modes = (uint32_t)CONFIG_NETCORE_PIXEL_LAYOUT_PREBUILD_MAX;
     const nc_px_mode_tbl_t *modes = nc_px_mode_table();
-    if (max_modes == 0 || modes == NULL || modes->n == 0 || s_content.px == 0) {
+    if (modes == NULL || modes->n == 0 || s_content.px == 0) {
         return;
     }
+    // 0 = 全部（預設）；>0 = 只前 N 個。runtime 不再 build 係用家定案。
+    const uint32_t limit = (max_modes == 0) ? modes->n : max_modes;
     const nc_px_show_t *reg = nc_px_show();
     const nc_px_mode_t **cand = (const nc_px_mode_t **)malloc(
         (size_t)(modes->n ? modes->n : 1u) * sizeof(*cand));
@@ -1369,8 +1372,8 @@ static void cache_prebuild_missing(void)
             cand[n++] = m;
         }
     }
-    if (n > max_modes) {
-        n = max_modes;
+    if (n > limit) {
+        n = limit;
     }
 
     nc_px_asset_tbl_t *tmp = nc_px_asset_tbl_alloc(0);
@@ -1431,7 +1434,7 @@ static void cache_prebuild_missing(void)
     layout_cache_scan(&cfiles, &cbytes, NULL, 0, NULL);
     ESP_LOGI(TAG, "開機預建組合表：候選 %u／上限 %u、已有 %u、新建 %u、太大 %u、失敗 %u"
                   "（%u ms、cache 預算 %u KB、現在 %u 檔／%u B、累計刪 %u）",
-             (unsigned)n, (unsigned)max_modes, (unsigned)present, (unsigned)built,
+             (unsigned)n, (unsigned)limit, (unsigned)present, (unsigned)built,
              (unsigned)too_big, (unsigned)failed, (unsigned)s_prebuild.ms,
              (unsigned)(layout_cache_budget() / 1024u), (unsigned)cfiles,
              (unsigned)cbytes, (unsigned)s_cache_trimmed);

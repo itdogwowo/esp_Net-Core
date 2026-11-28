@@ -169,14 +169,14 @@ menu "esp_Net-Core"
             mode／map 多時把 FAT 食滿。單張 >32 KB 仍然唔存（讀表同重建差不多）。
 
     config NETCORE_PIXEL_LAYOUT_PREBUILD_MAX
-        int "開機預建 NCLAYOUT 的 mode 數上限"
+        int "開機預建 NCLAYOUT 的 mode 數上限（0=全部）"
         depends on NETCORE_CONTENT
-        default 4
-        range 0 16
+        default 0
+        range 0 1024
         help
-            開機只預建 registry list 頭 N 個 mode 的 layout 表；其餘在 0xF06D
-            切 mode 時才建。0 = 唔預建（只建目前 mode）。避免組合多時開機
-            連續 build 39–137 ms × N，拖慢 boot。
+            用家定案：**runtime 不應該再 build**，所有 mode 在啟動階段完成。
+            0 = 預建全部 mode（預設）；>0 = 只預建 registry 頭 N 個（舊行為）。
+            全部預建會令開機多 39–137 ms × mode 數；之後 runtime 只讀 cache。
 
     config NETCORE_PIXEL_LEDS
         int "每道 lane 的燈數"
