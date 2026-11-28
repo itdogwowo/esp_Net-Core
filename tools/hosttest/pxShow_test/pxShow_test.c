@@ -92,10 +92,10 @@ int main(void)
         { .hw = NC_PX_HW_UARTMOTOR1, .base = 32, .px = 1 },
     };
     static nc_px_plan_t plan;
-    static nc_px_job_t plan_jobs[NC_PX_MODE_ENTRY_MAX];
+    static nc_px_job_t plan_jobs[NC_PX_LEGACY_JOB_MAX];
     const esp_err_t ep = nc_px_show_plan(&mode, &map, tbl, inv,
                                          (uint8_t)(sizeof(inv) / sizeof(inv[0])), &plan,
-                                         plan_jobs, NC_PX_MODE_ENTRY_MAX);
+                                         plan_jobs, NC_PX_LEGACY_JOB_MAX);
     check(ep == ESP_OK, "plan 成功");
     check(plan.px == 33, "合成鏈長度 33（ws2812 32 ＋ uartMotor1 1）");
     check(plan.njobs == 2, "2 個 job");
@@ -155,7 +155,7 @@ int main(void)
         // uart_motor_sine 用自訂段型別（唔係六工具）→ 唔會入 program 資產表；
         // 呢個 mode 要等 .nce 後端，plan 應該「搵唔到有效 job」而唔係亂畫。
         check(nc_px_show_plan(&m2, &map, tbl, inv, 2, &plan,
-                              plan_jobs, NC_PX_MODE_ENTRY_MAX) == ESP_ERR_NOT_FOUND,
+                              plan_jobs, NC_PX_LEGACY_JOB_MAX) == ESP_ERR_NOT_FOUND,
               "motor_sine：自訂型別未支援 → NOT_FOUND（唔會亂畫）");
         free(motor);
     }

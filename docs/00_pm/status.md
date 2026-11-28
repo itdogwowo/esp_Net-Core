@@ -11255,3 +11255,28 @@ cache ≈ 44B header
   可把 `CACHE_FILE_KB` 設回 32（保留舊行為）。
 
 **真機**：16IO `present=4、built=0、28 ms`；free_int 125 KB；50 fps。
+
+---
+
+### 7.328 2026-11-28（清走最後一批 cache 魔法數字）
+
+**用家定案**：重建策略已經有；唔要奇奇怪怪的固定數字限制。
+
+**已清**
+- 單張 32 KB：改成 Kconfig `CACHE_FILE_KB`，預設 **0=不限**。
+- 總量 128 KB：改成 Kconfig `CACHE_KB`，預設 **0=不限**。
+- `layout_cache_file_max()` 不再 clamp 1 MB。
+- NCLAYOUT load 的 **payload 1 MB 魔法上限移除**：改用實際檔案大小驗證
+  （`file_size >= header + payload`），payload 太大只會 lalloc 失敗；
+  save 亦唔再被 1 MB 擋。
+- 舊名 `NC_PX_MODE_ENTRY_MAX`／`NC_PX_LAYOUT_ASSET_MAX` 改成
+  `NC_PX_LEGACY_JOB_MAX`／`NC_PX_BENCH_ASSET_MAX`，只留舊 show／bench 用；
+  production 動態，唔再似用戶限制。
+
+**仍然存在（真格式／硬件）**
+- 名稱／slice 的固定 char array（`NC_PX_LAYER_NAME_MAX=24` 等）——storage format；
+- FAT free（現板 648 KiB）；
+- PSRAM／internal RAM、DMI／線路速度。
+
+**驗證**：16IO build 成功、host tests 全綠；cache `present=4、built=0、28 ms`，
+50 fps 不變。

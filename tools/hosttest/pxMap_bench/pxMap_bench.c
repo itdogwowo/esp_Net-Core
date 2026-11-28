@@ -80,10 +80,10 @@ static void bench_size(uint16_t px, int jobs, const nc_px_asset_tbl_t *tbl)
     // [1] plan（排版）
     const int reps = 200;
     double t0 = now_us();
-    nc_px_job_t plan_jobs[NC_PX_MODE_ENTRY_MAX];
+    nc_px_job_t plan_jobs[NC_PX_LEGACY_JOB_MAX];
     for (int i = 0; i < reps; i++) {
         (void)nc_px_show_plan(&mode, &map, tbl, inv, 1, &plan,
-                              plan_jobs, NC_PX_MODE_ENTRY_MAX);
+                              plan_jobs, NC_PX_LEGACY_JOB_MAX);
     }
     const double plan_us = (now_us() - t0) / reps;
     if (plan.njobs == 0) {

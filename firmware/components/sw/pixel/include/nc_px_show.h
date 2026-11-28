@@ -22,7 +22,7 @@ extern "C" {
 #endif
 
 #define NC_PX_HW_INV_MAX   8
-#define NC_PX_JOB_MAX      NC_PX_MODE_ENTRY_MAX
+#define NC_PX_JOB_MAX      NC_PX_LEGACY_JOB_MAX
 #define NC_PX_JOB_RANGE_MAX 4
 
 typedef struct {

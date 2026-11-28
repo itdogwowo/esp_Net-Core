@@ -515,7 +515,7 @@ static void on_layoutbench(nc4_ctx_t *ctx, const nc4_frame_t *f)
     for (uint32_t i = 0; i < 64; i++) {
         vals[i] = (uint16_t)((i * 71u + 13u) & 0xFFFu);
     }
-    uint16_t *vptrs[NC_PX_LAYOUT_ASSET_MAX] = { vals };
+    uint16_t *vptrs[NC_PX_BENCH_ASSET_MAX] = { vals };
 
     // 效果層每幀的成本：生成一條值流（production 由 effect task 做）。
     uint32_t vals_us = 0xFFFFFFFFu;

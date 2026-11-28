@@ -27,7 +27,7 @@ extern "C" {
 // 正常超過只會令 pool 配置失敗（ESP_ERR_NO_MEM），唔會靜默丟資料。
 #define NC_PX_GROUP_MAX     65535u
 #define NC_PX_GROUP_SEL_MAX 4194304u
-#define NC_PX_MODE_ENTRY_MAX  8   // legacy show/bench 固定 array；production paint 唔用呢個上限
+#define NC_PX_LEGACY_JOB_MAX  8   // 只係舊 show／bench 固定 array；production 動態，唔係限制
 
 // ── 硬體型別（registry 的 key；同 pixel_task.py 的 TYPE_MAP 一致）──
 typedef enum {

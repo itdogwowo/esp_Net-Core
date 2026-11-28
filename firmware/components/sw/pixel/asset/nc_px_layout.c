@@ -1433,10 +1433,21 @@ esp_err_t nc_px_layout_load(nc_px_layout_t *out, const char *path, uint32_t key,
     }
     pxlt_hdr_t h;
     if (fread(&h, sizeof(h), 1, f) != 1 || memcmp(h.magic, NC_LAYOUT_MAGIC, sizeof(h.magic)) != 0 ||
-        h.ver != NC_PX_LAYOUT_CACHE_VER || h.key != key || h.payload_bytes == 0 ||
-        h.payload_bytes > (1u << 20)) {
+        h.ver != NC_PX_LAYOUT_CACHE_VER || h.key != key || h.payload_bytes == 0) {
         fclose(f);
         return ESP_ERR_INVALID_STATE;     // 版本／組合／損壞 → 由呼叫端重建
+    }
+    // 唔用固定 1 MB 魔法上限：以「實際檔案大小」驗證 payload 夠唔夠；
+    // payload 再大只會 lalloc 失敗（記憶體回答），唔會靜默截斷。
+    if (fseek(f, 0, SEEK_END) != 0) {
+        fclose(f);
+        return ESP_ERR_INVALID_STATE;
+    }
+    const long fsz = ftell(f);
+    if (fsz < 0 || (uint64_t)fsz < (uint64_t)sizeof(h) + (uint64_t)h.payload_bytes ||
+        fseek(f, (long)sizeof(h), SEEK_SET) != 0) {
+        fclose(f);
+        return ESP_ERR_INVALID_STATE;
     }
     uint8_t *buf = (uint8_t *)lalloc(h.payload_bytes);
     if (buf == NULL) {

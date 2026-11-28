@@ -29,7 +29,7 @@
 extern "C" {
 #endif
 
-#define NC_PX_LAYOUT_ASSET_MAX 32
+#define NC_PX_BENCH_ASSET_MAX 32   // 只係 effect_bench 的固定 vptrs；production 動態
 
 // 一個用到的效果（program 只編一次；同一 asset 的多個 group 共用）
 typedef struct {

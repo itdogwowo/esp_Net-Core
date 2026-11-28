@@ -4503,7 +4503,7 @@ static void on_sinbench(nc4_ctx_t *ctx, const nc4_frame_t *f)
 static volatile uint32_t s_prog_sink;
 static nc_px_asset_t     s_bpa;
 static nc_px_plan_t      s_bpp;
-static nc_px_job_t       s_bpp_job[NC_PX_MODE_ENTRY_MAX];
+static nc_px_job_t       s_bpp_job[NC_PX_LEGACY_JOB_MAX];
 
 static void prog_fill_asset(nc_px_asset_t *a, uint8_t type)
 {
@@ -4583,7 +4583,7 @@ static void on_progbench(nc4_ctx_t *ctx, const nc4_frame_t *f)
         }
         memset(&s_bpp, 0, sizeof(s_bpp));
         s_bpp.job = s_bpp_job;          // job 陣列由呼叫端提供（唔再固定 8 條）
-        s_bpp.jobcap = NC_PX_MODE_ENTRY_MAX;
+        s_bpp.jobcap = NC_PX_LEGACY_JOB_MAX;
         const int64_t p0 = esp_timer_get_time();
         s_bpp.njobs = 1;
         s_bpp.job[0].asset = &s_bpa;
@@ -4624,7 +4624,7 @@ static void on_progbench(nc4_ctx_t *ctx, const nc4_frame_t *f)
         prog_fill_asset(&s_bpa, NC_PX_SEG_MATH_NOW);
         memset(&s_bpp, 0, sizeof(s_bpp));
         s_bpp.job = s_bpp_job;
-        s_bpp.jobcap = NC_PX_MODE_ENTRY_MAX;
+        s_bpp.jobcap = NC_PX_LEGACY_JOB_MAX;
         s_bpp.njobs = 1;
         s_bpp.job[0].asset = &s_bpa;
         s_bpp.job[0].write = NC_PX_WRITE_RGB;

@@ -235,13 +235,9 @@ static void cache_prebuild_missing(void);
 static size_t layout_cache_file_max(void)
 {
 #if defined(CONFIG_NETCORE_PIXEL_LAYOUT_CACHE_FILE_KB) && CONFIG_NETCORE_PIXEL_LAYOUT_CACHE_FILE_KB > 0
-    size_t v = (size_t)CONFIG_NETCORE_PIXEL_LAYOUT_CACHE_FILE_KB * 1024u;
-    if (v > (1024u * 1024u)) {
-        v = 1024u * 1024u;          // layout cache load 的 payload 安全上限
-    }
-    return v;
+    return (size_t)CONFIG_NETCORE_PIXEL_LAYOUT_CACHE_FILE_KB * 1024u;
 #else
-    return 1024u * 1024u;           // 0 = 不限，但受 payload 1 MB 安全上限
+    return SIZE_MAX;                 // 0 = 不限；真正上限係 FAT free
 #endif
 }
 
@@ -753,7 +749,7 @@ static const nc_px_map_t *select_map(const nc_px_mode_t *mode)
     return map;
 }
 
-// plan 只需要 mode 引用到的 asset（最多 NC_PX_MODE_ENTRY_MAX 個）；
+// plan 只需要 mode 引用到的 asset；production 按 entry 數動態配置。
 // asset 表本身係 sw/pixel 的私有表，只公開 find/at，所以在這裡建一份小表。
 // 按 entry 數配置（distinct 效果一定 ≤ entry 數），所以冇固定上限，
 // 亦唔會靜靜 drop 第 33 個效果。
