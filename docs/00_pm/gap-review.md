@@ -129,6 +129,8 @@ OTA）確實冇基礎功能缺陷；但「支援的晶片都用得」未成立 �
 | `main.c` 仍係裝配＋handler 大雜燴 | 5,091 行、24 個 `on_*` handler | `component-layout.md` §10 自己問「main.c 有冇 if/for/字串解析」 |
 | host → action 反向依賴 | `nc_mod_engine.c:31` include `nc_ota_action.h`、`:456` 讀 pause | 全樹唯一一條這種依賴；睇 §6.3 |
 | 冇 loop 停滯偵測 | `next-steps.md` §1：`monitor` 2026-11-04 已刪、`epoch` 已移除 | task WDT 仍在，但卡 loop 唔會報 |
+| **`NC_ENABLE_NCM` 開關係 inert** | `main.c` 所有 ncm 段落都在 `#ifdef NC_ENABLE_TESTS`（`:4476`／`:4482`／`:4527`／`:4537`／`:4567`）；單獨開 `NC_ENABLE_NCM` 只會編 component、冇人用 | release 其實完全冇 ncm |
+| **AGENTS §5 把 NCM 列做核心（房東）** | 原文「核心：nc4、net、core、NCM 引擎」；實際 code 係 test-only | 文件同 code 相反，係「位置錯」觀感的來源 |
 | **模式管理住喺 paint task** | `nc_px_paint_task.c` 2,117 行同時有 mode 選擇／輪播／plan／cache／`0xF06x` | policy 同 mechanism 混在一齊；睇 §4.2 |
 | **`0xF062` PXBENCH 喺生產 project 開住** | `NETCORE_PXBENCH` 預設 n，但 6 個 project 明開（含 `Matrix-LED-Textkit`、`Zero-Show*`） | 見 §5.5 |
 | `0xF062` 有兩份實作 | `main.c:1313`（`CONFIG_NETCORE_PXBENCH`）＋`nc_test_action.c:4125`（`NC_ENABLE_TESTS`）；兩者同時開 → `nc_action.c:115` 丟後來者並 `ESP_LOGE` | 只影響 tests build 的 log，唔影響行為 |
@@ -227,6 +229,33 @@ sys/ncm/            scan／arena／live／看門狗／task／status
 （i）真要第二個 backend，或（ii）要上 P4 AOT 時才做；C 只有喺「想獨立測 parser」
 或「WAMR 要換」時才值得 —— 因為 B／C 的價值都要等第二個實作才出現。
 
+### 6.6 用家方向 v2（2026-11-28）：三拆，唔要 `host` 角色
+
+> 「`nc_mod.c`／`nc_mod_engine.c` 這兩個都屬於 pixel 系列；甚至系統狀態也不應該是這裏，
+> 也應該是可以在系統當中的。應該在測試指令那裏寫，而不是寫進核心內容。」
+
+**方向**：`host` 整個角色取消，按三件事拆返原位。
+
+| 部份 | 今日位置 | 應該去邊 | 理由 |
+|---|---|---|---|
+| 容器／meta 解析（`nc_ncd.c` 164、`nc_meta.c` 54） | host | 跟 loader 一齊（見 §6.3 約束 4：`sw` 唔可以俾 `sys` include） | 純 function |
+| **runtime（`nc_mod_engine.c` 536）** | host | **pixel 系列**（用家定） | 產品上只服務 `.nce` 效果 |
+| **loader（`nc_mod.c` 1,199）** | host | **pixel 系列** | 同上 |
+| 資源表（`nc_res.c` 200）＋ arena 帳 | host | **應該消失**：由呼叫方直接叫 `sys` API（`nc_plan_declare`／`nc_task_res_t`） | 資源宣告本質係 sys 機制 |
+| status（`nc_mod_status_json`） | main 的 static `status_add`（`:1932`） | sys | **阻礙**：`status_add` 係 main 的 static，冇公開註冊 API |
+| main 的 glue（掃描／declare／載入／tick 任務／`0xF0xx`，6 段 `#ifdef NC_ENABLE_TESTS`） | main | **測試指令區**（自註冊 component） | 核心唔應該識模組 |
+
+**可行性（已核對）**
+
+- ✅ 任務自註冊：`NC_TASK_AUTO_REG`（`nc_task.h:170`，constructor）—— main 唔使識 ncm 任務。
+- ✅ 指令自註冊：`NC_ACTION_TABLE_DEF`（`test_action` 已經係咁）。
+- ⚠ status 冇公開 API：要加 `nc_status_register(key, fn)`（sys），否則 status 部份離唔開 `main.c`。
+- ⚠ `nc_res.c` 同 `nc_mod_merge_cfg()` 直接改 `tasks.json` 語義 → 要諗清楚邊個有權改租戶 config。
+
+**未定**：`.nct`（通用 WASM 任務）留唔留？今日 `modules/` 3 個模組全部係 `.nct`
+（`test_hello`、`bench_compare_lab`、`api_cost_lab`），**`.nce` 一個都冇**。
+留 → 引擎唔可以只住 `sw/pixel`（冇開 pixel 的板就冇模組）；唔留 → 純 `.nce`，可以入 pixel。
+
 ### 6.5 遷移 checklist（未做）
 
 - [ ] `git mv firmware/components/host/ncm firmware/components/sys/ncm`
@@ -247,10 +276,11 @@ sys/ncm/            scan／arena／live／看門狗／task／status
 | 1 | **RMT 後端** | 唯一「有板都用唔到」的硬缺口；C3 係完全受害者 | 要 C3 板／邏輯分析儀 |
 | 2 | **0x3400 dispatcher** | 細，令外掛功能閉環 | 無 |
 | 3 | **host → sys/ncm 搬位**（§6.4 A）＋剪 `ota_action` 依賴 | 架構債，改動細 | 無 |
-| 4 | **量產 project 關 `PXBENCH`**（§5.5）＋清 `effects/` 死代碼 | 一行 sdkconfig／一個目錄；減少 image 同誤解 | 無 |
+| 4 | **ncm 三拆**（§6.6）＋取消 `NC_ENABLE_NCM` | 令 release 同 code 一致（今日已經係 test-only，但樹同文件講反） | 要先答 `.nct` 留唔留 |
+| 5 | **量產 project 關 `PXBENCH`**（§5.5）＋清 `effects/` 死代碼 | 一行 sdkconfig／一個目錄；減少 image 同誤解 | 無 |
 | 4 | **OTA rollback** | 風險，唔係功能 | partition 已夠（1.5 MB × 2） |
-| 5 | **PARLIO** | 要 P4 板 | P4 板 |
-| 6 | **跨機同步** | 產品級，最大 | 要兩塊同款板 |
+| 6 | **PARLIO** | 要 P4 板 | P4 板 |
+| 7 | **跨機同步** | 產品級，最大 | 要兩塊同款板 |
 
 ---
 

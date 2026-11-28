@@ -11472,3 +11472,23 @@ layout cache 改 name_id＋dictionary CRC；舊 cache 版本++。Phase 1 模組�
   `nc_action.c:115` 丟後來者並報錯。
 - **`/host/` 加第三個落位 C**：`driver/drv_ncd`（純容器解析）＋`driver/drv_wamr`＋
   `sys/ncm`；原因係 `sw → sys` 方向令 parser 唔可以住 `sw/`。
+
+---
+
+### 7.341 2026-11-28（ncm 定位糾正：test-only 事實＋三拆方向）
+
+- **事實查清**：`main.c` 所有 ncm 段落本來已經包喺 `#ifdef NC_ENABLE_TESTS`
+  （`:4476`／`:4482`／`:4527`／`:4537`／`:4567`）；單獨開 `NC_ENABLE_NCM` 只會編
+  component、冇人用 → **release 完全冇 ncm**。但 `AGENTS.md` §5 仍把「NCM 引擎」
+  列做核心（房東）→ 文件同 code 相反，係「位置錯」觀感的來源。
+- **用家方向（2026-11-28）**：`host` 角色取消，三拆 ——
+  (1) `nc_mod.c`／`nc_mod_engine.c` 屬 **pixel 系列**；
+  (2) 資源表／arena 帳／status 屬 **sys**（`nc_res.c` 應該消失，由呼叫方叫 sys API；
+  status 要加 `nc_status_register()`，因為而家係 main 的 static `status_add`）；
+  (3) main 的 glue（掃描／declare／載入／tick／`0xF0xx`）寫喺 **測試指令區**，
+  唔寫入核心。
+- **可行性**：任務用 `NC_TASK_AUTO_REG`（constructor）同指令用 `NC_ACTION_TABLE_DEF`
+  都係自註冊 → main 可以完全唔識 ncm。
+- **未定**：`.nct`（通用 WASM 任務）留唔留。今日 `modules/` 3 個模組全部係 `.nct`，
+  `.nce` 一個都冇；留就唔可以只住 `sw/pixel`。
+- 詳見 [`gap-review.md`](gap-review.md) §6.6。
