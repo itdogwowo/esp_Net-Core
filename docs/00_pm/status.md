@@ -11489,8 +11489,9 @@ layout cache 改 name_id＋dictionary CRC；舊 cache 版本++。Phase 1 模組�
   唔寫入核心。
 - **可行性**：任務用 `NC_TASK_AUTO_REG`（constructor）同指令用 `NC_ACTION_TABLE_DEF`
   都係自註冊 → main 可以完全唔識 ncm。
-- **切法更正（用家指正）**：解碼器（容器＋meta）係**獨立一套工具**，唔可以同宿主混為
-  一談 —— `.nct`／`.nce` 兩種都要靠佢解。所以：`sw/ncd`（解碼器）／`sw/pixel/mod`
-  （宿主）／`sys`（資源＋status）／`test_ncm`（glue）。`.nct` 長期留唔留係產品問題，
-  唔影響分家。
+- **切法更正（用家兩次指正）**：唔係「解碼器獨立、其餘 pixel」，而係
+  **「解碼＋運行」成套係一個插件工具**（`sw/plugin/`：`open`／`tick`／`render`／`close`）。
+  `.nct`／`.nce` 只係 payload 兩種（`task_tick` vs `nce_render`），工具兩種都要跑；
+  工具唔識 pixel／task／status。客戶端：`.nce` → `sw/pixel` adapter、`.nct` → `tasks/`、
+  掃描／arena／`0xF0xx`／status → `test_ncm`。`nc_mod.c` 要**拆**，唔係搬。
 - 詳見 [`gap-review.md`](gap-review.md) §6.4（解碼器／宿主分家）。

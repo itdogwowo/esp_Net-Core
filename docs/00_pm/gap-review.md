@@ -188,50 +188,67 @@ OTA）確實冇基礎功能缺陷；但「支援的晶片都用得」未成立 �
 > 即係：「唔獨立存在」✅；「住 `components/driver/`」❌（原封搬一定破規則）。
 > 要用家講法成立，只有下面三條路。
 
-### 6.4 用家方向 v2（2026-11-28）：解碼器／宿主分家
+### 6.4 用家方向 v3（2026-11-28）：一套「插件工具」＝解碼＋運行
 
-> 「解碼器還解碼器、解碼工具還解碼工具，為什麼會混為一談？`.nct/.nce` 是需要解碼器
-> 才能夠運作的，他們需要獨立的一套工具；但是其他東西就屬於 pixel。」
-> 「是你對模組的理解方式不準確。」
+> 「解碼器……其實並不單止解碼功能，因為解碼完後他們都要嘗試去運作插件；
+> 所以真實需要的工具，是應該有一個工具來運作插件。」
 
-**我之前切錯**：把「容器格式」同「宿主」當成一個叫 `ncm` 的整體，於是去問
-「`.nct` 留唔留」。正確切法係 **格式層**同**執行層**係兩件事：
+**即係「獨立的一套工具」唔止 decode，而係 decode ＋ 實例化 ＋ 跑 ＋ 收工。**
+`.nct`／`.nce` 係同一件事的兩種 payload（分別只在 manifest `kind` 同 entry 名：
+`task_tick()` vs `nce_render()`），所以係**一個工具**，唔係兩個。
 
-| 層 | 內容 | 識唔識 |
+| 工具內部 | 檔 | 識咩 |
 |---|---|---|
-| **格式層（解碼器，獨立一套工具）** | `nc_ncd.c`（容器 header／section 表）、`nc_meta.c`（meta 區）＋ host 側 `tools/ncm_build.py`、`docs/03_notes/ncm-format.md` | 只識 bytes → struct；唔識 WAMR、唔識 task、唔識 pixel |
-| **宿主（pixel 系列）** | `nc_mod.c`（掃描／arena／live／看門狗／tick／預算）、`nc_mod_engine.c`（WAMR） | 識 pixel 節奏；`.nct`／`.nce` 兩種 payload 都跑 |
-| **系統** | arena 帳、資源宣告、`status` | sys 機制（見下） |
-| **測試** | main 的 6 段 `#ifdef NC_ENABLE_TESTS` glue、`0xF0xx` | dev only |
+| 解碼 | `nc_ncd.c`＋`nc_meta.c` | bytes → 容器／manifest／meta |
+| 實例 | 新 `nc_plugin_open/close` | 由 caller 給的 arena 切 linear memory、instantiate |
+| 執行 | 新 `nc_plugin_tick/render` | 叫 entry、拿回傳值／framebuffer |
+| backend | `nc_mod_engine.c`（WAMR） | **唯一**識 WAMR 的地方（已有 vtable，可換 AOT） |
 
-**目標樹（暫名）**
+**對外只係四個函式**：`open(payload, size, decl)`／`tick(h)`／`render(h, fid, t)`／`close(h)`。
+工具**唔識** pixel、**唔識** `nc_task_t`、**唔識** status、**唔管**幾時跑、為邊個跑。
+
+#### 6.4.1 客戶端（工具唔管政策）
+
+| 客戶端 | 用途 | 落位 | 今日 |
+|---|---|---|---|
+| pixel | `.nce` → canonical frame | `sw/pixel/`（adapter 未寫） | ❌ 未接 |
+| task | `.nct` → `nc_task_t` 的 tick | `tasks/` | 只有 test 用 |
+| 測試 | 掃目錄、arena 帳、`0xF0xx`、status | `test_ncm/`（自註冊） | main 的 6 段 `#ifdef` |
+
+`nc_mod.c`（1,199 行）今日把上面三樣混在一齊：scan／arena／live／預算（policy）＋
+attach 任務（task）＋status（sys）。搬嘅時候係**拆佢**，唔係搬佢。
+
+#### 6.4.2 目標樹（暫名）
 
 ```text
-sw/ncd/                解碼器（容器＋meta）—— 獨立工具，任何 runner 都用得
-sw/pixel/mod/          宿主：nc_mod.c ＋ nc_mod_engine.c（pixel 系列）
-sys/…                  資源宣告用現成 nc_plan_declare／nc_task_res_t；status 要 nc_status_register()
-.../test_ncm/          掃描／載入／tick 任務／0xF0xx（NC_TASK_AUTO_REG／NC_ACTION_TABLE_DEF 自註冊）
+sw/plugin/           解碼＋實例＋執行（唯一識 WAMR，vtable 包住）
+sw/pixel/...         .nce → canonical frame 的 adapter（未寫）
+tasks/...            .nct → nc_task_t 的 wrapper
+.../test_ncm/        scan／arena／0xF0xx／status（NC_TASK_AUTO_REG／NC_ACTION_TABLE_DEF）
 ```
 
-- 咁 §6.3 約束 4 自動消失：`sys` **唔需要**解碼器，只有 pixel 用 → 解碼器可以住 `sw/`。
-- `.nct` 留唔留係另一個（產品）問題，同解碼器獨立性無關；解碼器兩種格式都要識。
-- 約束 1／2／3 亦避開：宿主住 `sw/pixel`（`sw → sys` 合法），唔再碰 driver 層。
+- 依賴方向全部合法：`sw → sys`；`effects`／`tasks`／`action` → `sw`。
+- `sys` 唔需要呢個工具（arena 由 caller 給）→ §6.3 約束 4 自動消失。
+- `CONFIG_NETCORE_PIXEL=n` 的板仍然可以有 `.nct`（工具唔綁 pixel）。
+- 同 v2 的分別：v2 把「解碼器獨立、其餘入 pixel」；v3 係「解碼＋運行成套工具獨立，
+  pixel 只係其中一個客戶端」。
 
-**可行性／阻礙（已核對）**
+**阻礙（已核對）**
 
-- ✅ 任務自註冊 `NC_TASK_AUTO_REG`（`nc_task.h:170`）；指令自註冊 `NC_ACTION_TABLE_DEF`。
-- ⚠ `status` 冇公開 API：`status_add` 係 `main.c:1380` 的 static → 要加 `nc_status_register()`。
-- ⚠ `nc_res.c` 同 `nc_mod_merge_cfg()` 會改 `tasks.json` 語義 → 應該由測試 glue 做，或收窄成只讀。
-- ⚠ `nc_mod_engine.c:31` 仍 include `nc_ota_action.h` → 搬之前要剪（§5）。
+- ⚠ 引擎直接叫 `nc_mod_name()`／`nc_mod_payload()`／`nc_mod_decl()`（`nc_mod.h:75-80`）
+  → 要改成經 handle 拿，唔再依賴 `nc_mod_t`。
+- ⚠ 引擎 include `nc_ota_action.h`（`:31`／`:456`）→ 搬之前剪走。
+- ⚠ `status_add` 係 `main.c:1380` 的 static → 要加 `nc_status_register()`。
+- ⚠ `nc_res.c` 改 `tasks.json` 語義 → 應該由測試 glue／task 側做，唔入工具。
 
 ### 6.5 遷移 checklist（未做）
 
-- [ ] 開 `sw/ncd/`：`git mv` `nc_ncd.c`／`nc_meta.c`＋header；新 component
-- [ ] 開 `sw/pixel/mod/`：`git mv` `nc_mod.c`／`nc_mod_engine.c`；`sw/pixel` CMake 加路徑
-- [ ] 剪 `nc_mod_engine.c` 的 `nc_ota_action.h`（改成 sys 的 quiet flag／hook）
-- [ ] `nc_res.c` 拆走：資源宣告改由測試 glue 直接叫 `sys` API
-- [ ] 加 `nc_status_register(key, fn)`，把 `ncm` status 由 `main.c:1932` 搬走
-- [ ] 新 `test_ncm` component（自註冊任務＋指令）；刪 main 的 6 段 `#ifdef`
+- [ ] 開 `sw/plugin/`：`git mv` `nc_ncd.c`／`nc_meta.c`／`nc_mod_engine.c`
+- [ ] 定義 `nc_plugin_open/tick/render/close`；engine 改為經 handle（唔再食 `nc_mod_t`）
+- [ ] 剪 `nc_ota_action.h`（改成 sys 的 quiet flag／hook）
+- [ ] `nc_mod.c` 三拆：scan／arena → `test_ncm`；task attach → `tasks/`；status → sys
+- [ ] `.nce` adapter 入 `sw/pixel`（可以之後才做，唔阻塞搬位）
+- [ ] `test_ncm` 自註冊任務＋指令；刪 main 的 6 段 `#ifdef`
 - [ ] 取消 `NC_ENABLE_NCM`，只留 `NC_ENABLE_TESTS`
 - [ ] 文件：AGENTS §3／§5（NCM 唔再係核心）、`component-layout.md` §1／§3 刪 `host` 角色、
       `behavior-taxonomy.md` §2.4 刪 host 列、`ncm-contract.md`／`ncm-loader.md` 的 path
