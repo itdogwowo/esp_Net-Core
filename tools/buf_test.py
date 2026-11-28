@@ -79,7 +79,7 @@ def main() -> int:
             return 1
 
         if args.status:
-            st = call(s, CMD_STATUS_GET, struct.pack("<H", 3) + b"mem", CMD_STATUS_RSP)
+            st = call(s, CMD_STATUS_GET, struct.pack("<H", 3) + b"mem" + struct.pack("<H", 0), CMD_STATUS_RSP)
             if st is None:
                 print("沒有收到 STATUS_RSP", file=sys.stderr)
                 return 1
