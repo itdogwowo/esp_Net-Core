@@ -1,0 +1,487 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>esp_Net-Core 驗收清單（逐項剔）</title>
+<style>
+  :root{
+    --bg:#0f1115; --panel:#171a21; --panel2:#1d2129; --line:#2a3038;
+    --fg:#e6e9ef; --dim:#98a2b3; --acc:#4f9cf9; --ok:#2fbf71; --bad:#e5484d;
+    --warn:#f5a524; --chip:#222833;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--bg);color:var(--fg);
+    font:15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans TC",Helvetica,Arial,sans-serif}
+  header{position:sticky;top:0;z-index:10;background:rgba(15,17,21,.92);
+    backdrop-filter:blur(8px);border-bottom:1px solid var(--line);padding:14px 20px}
+  h1{margin:0 0 6px;font-size:19px;letter-spacing:.3px}
+  .sub{color:var(--dim);font-size:13px}
+  .wrap{max-width:1040px;margin:0 auto;padding:18px 20px 80px}
+  .bar{height:10px;background:var(--chip);border-radius:99px;overflow:hidden;margin:12px 0 6px}
+  .bar>i{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--acc),var(--ok));
+    transition:width .2s}
+  .barrow{display:flex;gap:16px;flex-wrap:wrap;align-items:center;font-size:13px;color:var(--dim)}
+  .tools{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0 4px}
+  button{background:var(--panel2);color:var(--fg);border:1px solid var(--line);
+    border-radius:8px;padding:7px 12px;font-size:13px;cursor:pointer}
+  button:hover{border-color:var(--acc)}
+  button.primary{background:var(--acc);border-color:var(--acc);color:#08121f;font-weight:600}
+  input[type=text]{background:var(--panel2);border:1px solid var(--line);color:var(--fg);
+    border-radius:8px;padding:7px 10px;font-size:13px;font-family:ui-monospace,Menlo,monospace}
+  section{margin-top:26px}
+  section>h2{font-size:15px;margin:0 0 4px;display:flex;align-items:center;gap:10px}
+  section>.sechint{color:var(--dim);font-size:12.5px;margin:0 0 10px}
+  .secbar{height:6px;background:var(--chip);border-radius:99px;overflow:hidden;margin:0 0 12px}
+  .secbar>i{display:block;height:100%;width:0;background:var(--ok);transition:width .2s}
+  .item{background:var(--panel);border:1px solid var(--line);border-radius:12px;
+    padding:14px 16px;margin:10px 0;display:grid;grid-template-columns:30px 1fr;gap:12px}
+  .item.done{border-color:rgba(47,191,113,.55);background:rgba(47,191,113,.06)}
+  .item.fail{border-color:rgba(229,72,77,.6);background:rgba(229,72,77,.06)}
+  .state{display:flex;flex-direction:column;gap:6px;align-items:center;padding-top:2px}
+  .state button{width:26px;height:26px;padding:0;border-radius:50%;font-size:15px;line-height:1;
+    display:flex;align-items:center;justify-content:center}
+  .state button.on{background:var(--ok);border-color:var(--ok);color:#04120a}
+  .state button.bad.on{background:var(--bad);border-color:var(--bad);color:#fff}
+  .t{font-weight:600;margin:0 0 4px}
+  .id{color:var(--dim);font-weight:400;font-size:12px;margin-right:6px;
+    font-family:ui-monospace,Menlo,monospace}
+  .how,.exp{font-size:13.5px;margin:6px 0}
+  .exp b{color:var(--ok);font-weight:600}
+  code,pre{font-family:ui-monospace,Menlo,Consolas,monospace}
+  pre{background:#0b0d11;border:1px solid var(--line);border-radius:8px;
+    padding:9px 11px;margin:6px 0;overflow:auto;font-size:12.5px;white-space:pre-wrap;
+    word-break:break-all}
+  .cmdrow{display:flex;gap:8px;align-items:flex-start}
+  .cmdrow pre{flex:1;margin:6px 0}
+  .cmdrow button{flex:0 0 auto;margin-top:6px}
+  textarea{width:100%;min-height:44px;background:#0b0d11;border:1px solid var(--line);
+    color:var(--fg);border-radius:8px;padding:8px 10px;font-size:13px;resize:vertical;
+    font-family:inherit}
+  .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:8px}
+  .badge{font-size:11.5px;padding:2px 8px;border-radius:99px;background:var(--chip);color:var(--dim)}
+  .badge.ok{background:rgba(47,191,113,.15);color:#7ee2ab}
+  footer{position:fixed;left:0;right:0;bottom:0;background:rgba(15,17,21,.95);
+    border-top:1px solid var(--line);padding:10px 20px;display:flex;gap:14px;
+    flex-wrap:wrap;align-items:center;font-size:13px;color:var(--dim);backdrop-filter:blur(8px)}
+  footer .grow{flex:1}
+  footer .big{color:var(--fg);font-weight:600}
+  .saved{color:var(--dim)}
+  @media print{
+    header,footer,.tools,.state button,.copy{display:none!important}
+    body{background:#fff;color:#000}
+    .item{break-inside:avoid;border-color:#bbb;background:#fff}
+    .item.done{background:#f2fff7}
+    .item.fail{background:#fff2f2}
+    pre,textarea{background:#f7f7f7;color:#000;border-color:#ccc}
+    .wrap{max-width:none;padding:0}
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>esp_Net-Core 驗收清單 <span class="bulb">🧪</span></h1>
+  <div class="sub">逐項剔：按「? →」可以做一次自動對照；每項都可以寫備註。進度存喺瀏覽器（localStorage），可以匯出 JSON／Markdown。</div>
+  <div class="bar"><i id="barAll"></i></div>
+  <div class="barrow">
+    <span>總進度 <b id="cntAll">0 / 0</b></span>
+    <span id="lastSaved" class="saved">未儲存</span>
+    <span class="grow"></span>
+    <label class="sub" for="port">Serial port</label>
+    <input id="port" type="text" size="30" spellcheck="false">
+  </div>
+  <div class="tools">
+    <button class="primary" id="btnExport">匯出 JSON</button>
+    <button id="btnMarkdown">匯出 Markdown</button>
+    <button id="btnImport">匯入 JSON</button>
+    <input type="file" id="fileIn" accept="application/json,.json" hidden>
+    <button id="btnReset">重設</button>
+    <button id="btnExpand">全部展開／收起</button>
+  </div>
+</header>
+
+<div class="wrap" id="wrap"></div>
+
+<footer>
+  <span class="grow">提示：<code>? →</code> 只係幫你跑命令，命令結果仍要你自己對照「預期」。</span>
+  <span>通過 <b class="big" id="cntOk">0</b> · 失敗 <b class="big" id="cntBad">0</b></span>
+  <button id="btnSave">立即儲存</button>
+</footer>
+
+<script>
+"use strict";
+/* ───────────────────────── 題庫 ─────────────────────────
+   id      : 穩定 id（改 id 會令舊記錄失效）
+   sec     : 分區 id
+   t       : 標題
+   how     : 做法（可含 {port}）
+   cmd     : 要跑的指令（可含 {port}）；按 ? → 會複製到剪貼簿
+   exp     : 預期（HTML，可用 <b>）
+   need    : 額外提示（可選）
+*/
+const SECTIONS = [
+  ["conn", "A. 連線與版本", "先確認板在線、映像版本正確，之後每項才有意義。"],
+  ["paging", "B. STATUS 分頁", "裝置推頁，主機保持沉默；more=0 就係最後一頁。"],
+  ["nce", "C. .nce 全鏈（值流）", "呢組係今次核心：wasm → framebuffer → 信箱 → status。"],
+  ["mode", "D. mode 與燈", "引用 .nce 的 mode 要出得到 aprog；燈要睇得到漸變。"],
+  ["tests", "E. 測試分組與清除", "test_action 按 NC_TEST_ALLOW_<id> 收錄；重複實作已清。"],
+  ["build", "F. 建置與自動測試", "release／tests 都要綠；host 30/30。"],
+  ["close", "G. 收尾", "記錄、匯出、交接。"]
+];
+
+const ITEMS = [
+  { id:"conn-board", sec:"conn", t:"板在線、晶片正確",
+    how:"讀 <code>sys</code> 區塊。",
+    cmd:'python3 tools/nc4.py --port {port} status sys',
+    exp:'<code>chip</code> = <b>esp32s3</b>，<code>idf</code> = <b>v6.1.1</b>，有 <code>up_s</code> 遞增。' },
+
+  { id:"conn-fw", sec:"conn", t:"fw 版本符合今次交付",
+    how:"同一個 <code>sys</code> 回覆。",
+    cmd:'python3 tools/nc4.py --port {port} status sys',
+    exp:'<code>fw</code> 係今次 OTA 的版本（例如 <b>b49a267-dirty</b>／<b>5bdcafa-dirty</b>），唔係舊 hash。',
+    need:"版本字串由建置時的 PROJECT_VER 決定，會隨 commit 變。" },
+
+  { id:"conn-rst", sec:"conn", t:"唔係 reboot loop",
+    how:"連續問兩次 <code>sys</code>，睇 <code>up_s</code>。",
+    cmd:'python3 tools/nc4.py --port {port} status sys',
+    exp:'兩次 <code>up_s</code> <b>遞增</b>、<code>rst</code> 唔變。' },
+
+  { id:"paging-all", sec:"paging", t:"空 keys 收到全部頁、合法 JSON",
+    how:"唔帶 keys 問一次；工具會自動收多幀再合併。",
+    cmd:'python3 tools/nc4.py --port {port} status',
+    exp:'輸出係<b>合法 JSON</b>（可以 parse）、key 數 <b>≥ 19</b>（實測 20）。' },
+
+  { id:"paging-more", sec:"paging", t:"more／timeout 尾段正確",
+    how:"用 raw 睇尾段：回應 payload = [len][json][more][timeout_ms LE]。",
+    cmd:'python3 tools/nc4.py --port {port} raw 0x1101 0000',
+    exp:'最後一頁 <b>more = 0</b>；中間頁 <b>more = 1</b>，timeout = <b>10</b>（0x0a 0x00）。' },
+
+  { id:"paging-hint", sec:"paging", t:"超頁 block 有 hint",
+    how:"單獨問 <code>tasks</code>（3.1 KB，一頁放唔落）。",
+    cmd:'python3 tools/nc4.py --port {port} status tasks',
+    exp:'回 <code>{"err":"block_too_big","key":"tasks","hint":"0x1005"}</code> 之類，<b>唔會靜默</b>。' },
+
+  { id:"paging-ncm", sec:"paging", t:"ncm 頁有值（唔係 {{}}）",
+    how:"單獨問 <code>ncm</code>。",
+    cmd:'python3 tools/nc4.py --port {port} status ncm',
+    exp:'合法物件；有 <code>"ncm":{…}</code>，含 <code>arena</code>／<code>live</code>／<code>backend</code>。' },
+
+  { id:"nce-values", sec:"nce", t:"值流有真值（核心證據）",
+    how:"問 <code>nce</code>；<code>v</code> 係最新一份值流的頭 12 個值。",
+    cmd:'python3 tools/nc4.py --port {port} status nce',
+    exp:'<code>pub</code> 持續增加、<code>px</code> = <b>1024</b>，<code>v</code> 開頭係 <b>255,0,64,255,1,64,255,2,64…</b>（R=255、G 遞增、B=64）。',
+    need:"呢個就係 wasm data segment 的 RGB 漸變；見到就代表 framebuffer→信箱 全通。" },
+
+  { id:"nce-pub", sec:"nce", t:"publish 次數會動",
+    how:"隔 2 秒問兩次 <code>nce</code>。",
+    cmd:'python3 tools/nc4.py --port {port} status nce',
+    exp:'<code>pub</code> <b>增加</b>（例如 300 → 360），代表 ncm tick 一直餵值。' },
+
+  { id:"nce-live", sec:"nce", t:"ncm 載入到模組",
+    how:"問 <code>ncm</code>。",
+    cmd:'python3 tools/nc4.py --port {port} status ncm',
+    exp:'<code>live</code> = <b>mini</b>、<code>backend</code> = <b>wamr</b>、<code>modules[]</code> 有 <code>kind=effect</code>、<code>ok=1</code>、<code>px=1024</code>。' },
+
+  { id:"mode-select", sec:"mode", t:"切去引用 .nce 的 mode",
+    how:"送 0xF06D，payload = mode id（LE u16）。示範 mode 21 = minitest2。",
+    cmd:'python3 tools/nc4.py --port {port} raw 0xF06D 1500',
+    exp:'回 <code>{"ok":1,"queued":21,…}</code>；之後 paint log 會見 <b>選中 mode：minitest2</b>。' },
+
+  { id:"mode-layout", sec:"mode", t:"layout 建得出 aprog",
+    how:"切 mode 之後睇裝置 log（或 0xF06F reload）。",
+    cmd:'python3 tools/nc4.py --port {port} raw 0xF06F',
+    exp:'log 見 <code>layout：px=4096 jobs=16 runs=16 aprog=16 skipped=0</code>（唔會 <code>layout err=…</code>）。' },
+
+  { id:"mode-leds", sec:"mode", t:"肉眼：g0 見 RGB 漸變",
+    how:"切 mode 21，睇燈（led16.g0，16 顆）。",
+    cmd:'python3 tools/nc4.py --port {port} raw 0xF06D 1500',
+    exp:'第一組 16 顆見 <b>紅→黃→綠 的漸變</b>（R=255、G=0..255、B=64）。',
+    need:"呢項一定要你肉眼確認；我冇相機。" },
+
+  { id:"mode-frame", sec:"mode", t:"SHOWFRAME 對大 px 明示錯誤",
+    how:"問 0xF06B（快照）。",
+    cmd:'python3 tools/nc4.py --port {port} raw 0xF06B',
+    exp:'回 <code>{"err":"big","px":4096}</code>（4096 > 512 上限），<b>唔係</b>亂碼。' },
+
+  { id:"tests-pxbench", sec:"tests", t:"0xF062 只剩一份實作、可用",
+    how:"payload = lanes:u8、px:u16、frames:u8。",
+    cmd:'python3 tools/nc4.py --port {port} raw 0xF062 0108000a',
+    exp:'回 JSON，含 <code>pass50</code>／<code>us_packed</code>／<code>sram</code> 等欄位。' },
+
+  { id:"tests-host", sec:"tests", t:"host 測試 30/30",
+    how:"在本機 repo 根目錄跑。",
+    cmd:'bash tools/hosttest/run_all.sh',
+    exp:'尾行 <b>全部通過</b>（或 <b>ALL PASS</b>），0 失敗。' },
+
+  { id:"tests-ids", sec:"tests", t:"測試 ID 分組雙向都編得過",
+    how:"預設 NC_TEST_IDS=0（唔收 measure/network/pixel）；另用獨立 build dir 試 0,1,2,3。",
+    cmd:'cd firmware && idf.py -B /tmp/ncb_ids -DPORT=S3/ESP32-S3-Zero -DPROJECT=S3/ESP32-S3-Zero-Show -DIDF_TARGET=esp32s3 -DPROJECT_VER=ids -DSDKCONFIG=/tmp/ncb_ids/sdkconfig -DNC_ENABLE_TESTS=ON -DNC_TEST_IDS=0,1,2,3 build',
+    exp:'終端印 <b>測試 ID：0;1;2;3</b>，最後 <b>Project build complete</b>。' },
+
+  { id:"build-release", sec:"build", t:"release 映像建置綠（兩個板）",
+    how:"兩個 release 各 build 一次。",
+    cmd:'python3 make.py build ESP32-S3-Zero --project ESP32-S3-Zero-Show && python3 make.py build ESP32-S3-Matrix --project ESP32-S3-Matrix-LED-Textkit',
+    exp:'兩行都見 <b>建置完成</b>，冇 <code>error:</code>。' },
+
+  { id:"build-tests", sec:"build", t:"tests 映像建置綠",
+    how:"加 --tests。",
+    cmd:'python3 make.py build ESP32-S3-Zero --project ESP32-S3-Zero-Show --tests',
+    exp:'見 <b>建置完成</b>；binary size 一行正常。' },
+
+  { id:"close-registry", sec:"close", t:"registry auto_play 已還原",
+    how:"讀裝置上的 registry。",
+    cmd:'python3 tools/nc4_file.py --port {port} get /pixel/registry.json /tmp/reg_check.json && cat /tmp/reg_check.json',
+    exp:'<code>"auto_play": true</code>，list 有 4 個 led16 系列 mode。' },
+
+  { id:"close-docs", sec:"close", t:"文件同步",
+    how:"睇 status 文件最後幾節。",
+    cmd:'tail -60 docs/00_pm/status.md',
+    exp:'見到 §7.356–§7.370 的記錄（.nce 全鏈、paging、測試分組、hint）。' },
+
+  { id:"close-export", sec:"close", t:"匯出今次記錄",
+    how:"下面「匯出 JSON」→ 存檔（預設會包括所有備註與時間）。",
+    cmd:'',
+    exp:'檔案可以再「匯入 JSON」還原，方便下次繼續。' }
+];
+
+/* ───────────────────────── 狀態 ───────────────────────── */
+const LS_KEY = "nc_verify_v1";
+const PORT_DEFAULT = "/dev/cu.usbmodem50787D188F501";
+let state = load();
+
+function load(){
+  try{
+    const raw = localStorage.getItem(LS_KEY);
+    if(raw){
+      const s = JSON.parse(raw);
+      if(s && s.items) return s;
+    }
+  }catch(e){}
+  return { items:{}, port:PORT_DEFAULT, updatedAt:"" };
+}
+function save(){
+  state.updatedAt = new Date().toISOString();
+  localStorage.setItem(LS_KEY, JSON.stringify(state));
+  const el = document.getElementById("lastSaved");
+  el.textContent = "已儲存 " + new Date().toLocaleTimeString();
+}
+function itemState(id){
+  const r = state.items[id];
+  return r || { v:0, note:"" };   // v: 0 未做 / 1 通過 / 2 失敗
+}
+
+/* ───────────────────────── 渲染 ───────────────────────── */
+const wrap = document.getElementById("wrap");
+
+function esc(s){
+  return String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+}
+function fillPort(s){
+  return String(s).replaceAll("{port}", document.getElementById("port").value || PORT_DEFAULT);
+}
+function el(html){
+  const d = document.createElement("div");
+  d.innerHTML = html.trim();
+  return d.firstElementChild;
+}
+
+const secEls = {};
+for(const [sid, title, hint] of SECTIONS){
+  const sec = el(`<section data-sec="${sid}">
+    <h2>${esc(title)} <span class="badge" data-badge="${sid}">0 / 0</span></h2>
+    <div class="sechint">${esc(hint)}</div>
+    <div class="secbar"><i data-secbar="${sid}"></i></div>
+    <div data-items="${sid}"></div>
+  </section>`);
+  wrap.appendChild(sec);
+  secEls[sid] = sec;
+}
+
+for(const it of ITEMS){
+  const st = itemState(it.id);
+  const card = el(`<div class="item ${st.v===1?'done':st.v===2?'fail':''}" data-card="${it.id}">
+    <div class="state">
+      <button class="ok ${st.v===1?'on':''}" data-set="${it.id}" data-v="1" title="通過">✓</button>
+      <button class="bad ${st.v===2?'on':''}" data-set="${it.id}" data-v="2" title="失敗">✕</button>
+    </div>
+    <div>
+      <p class="t"><span class="id">${it.id}</span>${it.t}</p>
+      <div class="how">${it.how}</div>
+      ${it.cmd ? `<div class="cmdrow"><pre data-cmd="${it.id}">${esc(fillPort(it.cmd))}</pre>
+        <button class="copy" data-copy="${it.id}">複製</button></div>` : ""}
+      <div class="exp"><span class="sub">預期：</span>${it.exp}</div>
+      ${it.need ? `<div class="exp sub" style="color:var(--dim)">${esc(it.need)}</div>` : ""}
+      <textarea data-note="${it.id}" placeholder="備註（例如實際輸出、時間、fw hash）…">${esc(st.note||"")}</textarea>
+      <div class="row"><span class="badge" data-state="${it.id}">${
+        st.v===1?'通過':st.v===2?'失敗':'未做'}</span></div>
+    </div>
+  </div>`);
+  (secEls[it.sec] ? secEls[it.sec].querySelector(`[data-items="${it.sec}"]`) : wrap).appendChild(card);
+}
+
+/* ───────────────────────── 互動 ───────────────────────── */
+wrap.addEventListener("click", async (ev) => {
+  const t = ev.target;
+  if(t.dataset.set){
+    const id = t.dataset.set;
+    const v = Number(t.dataset.v);
+    const cur = itemState(id);
+    cur.v = (cur.v === v) ? 0 : v;          // 再按一次 = 取消
+    cur.note = cur.note || "";
+    state.items[id] = cur;
+    refresh(); save();
+    return;
+  }
+  if(t.dataset.copy){
+    const id = t.dataset.copy;
+    const pre = wrap.querySelector(`[data-cmd="${id}"]`);
+    if(!pre) return;
+    try{
+      await navigator.clipboard.writeText(pre.textContent);
+      const old = t.textContent; t.textContent = "已複製";
+      setTimeout(()=>{ t.textContent = old; }, 900);
+    }catch(e){
+      const r = document.createRange(); r.selectNodeContents(pre);
+      const sel = getSelection(); sel.removeAllRanges(); sel.addRange(r);
+      t.textContent = "已選取";
+    }
+  }
+});
+wrap.addEventListener("input", (ev) => {
+  if(ev.target.dataset.note){
+    const id = ev.target.dataset.note;
+    const cur = itemState(id);
+    cur.note = ev.target.value;
+    state.items[id] = cur;
+    refresh(); save();
+  }
+});
+document.getElementById("port").addEventListener("change", () => {
+  state.port = document.getElementById("port").value.trim() || PORT_DEFAULT;
+  refreshCmds(); save();
+});
+
+function refreshCmds(){
+  const port = document.getElementById("port").value.trim() || PORT_DEFAULT;
+  for(const it of ITEMS){
+    if(!it.cmd) continue;
+    const pre = wrap.querySelector(`[data-cmd="${it.id}"]`);
+    if(pre) pre.textContent = it.cmd.replaceAll("{port}", port);
+  }
+}
+
+/* 分區小計／總計 */
+function refresh(){
+  let ok=0, bad=0, total=0;
+  const per = {};
+  for(const it of ITEMS){
+    total++;
+    const st = itemState(it.id).v;
+    if(st===1) ok++;
+    if(st===2) bad++;
+    per[it.sec] = per[it.sec] || {ok:0, total:0};
+    per[it.sec].total++;
+    if(st===1) per[it.sec].ok++;
+    const card = wrap.querySelector(`[data-card="${it.id}"]`);
+    card.classList.toggle("done", st===1);
+    card.classList.toggle("fail", st===2);
+    card.querySelector(`[data-set="${it.id}"][data-v="1"]`).classList.toggle("on", st===1);
+    card.querySelector(`[data-set="${it.id}"][data-v="2"]`).classList.toggle("on", st===2);
+    card.querySelector(`[data-state="${it.id}"]`).textContent = st===1?'通過':st===2?'失敗':'未做';
+  }
+  document.getElementById("cntAll").textContent = `${total - perDone()} / ${total}`;
+  document.getElementById("cntOk").textContent = ok;
+  document.getElementById("cntBad").textContent = bad;
+  document.getElementById("barAll").style.width = ((total - perDone()) / total * 100).toFixed(1) + "%";
+  for(const [sid] of SECTIONS){
+    const p = per[sid] || {ok:0, total:0};
+    const badge = document.querySelector(`[data-badge="${sid}"]`);
+    if(badge) badge.textContent = `${p.ok} / ${p.total}`;
+    const bar = document.querySelector(`[data-secbar="${sid}"]`);
+    if(bar) bar.style.width = p.total ? (p.ok / p.total * 100).toFixed(1) + "%" : "0%";
+  }
+}
+function perDone(){
+  let d = 0;
+  for(const it of ITEMS){
+    if(itemState(it.id).v !== 0) d++;
+  }
+  return d;
+}
+
+/* 匯出／匯入 */
+function download(name, text, type){
+  const blob = new Blob([text], {type: type || "application/json"});
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = name;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(()=>URL.revokeObjectURL(a.href), 2000);
+}
+function stamp(){
+  const d = new Date();
+  const p = n => String(n).padStart(2,"0");
+  return `${d.getFullYear()}${p(d.getMonth()+1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}`;
+}
+document.getElementById("btnExport").onclick = () => {
+  state.port = document.getElementById("port").value;
+  download(`nc-verify-${stamp()}.json`, JSON.stringify({...state, exportedAt:new Date().toISOString()}, null, 2));
+  save();
+};
+document.getElementById("btnMarkdown").onclick = () => {
+  const port = document.getElementById("port").value;
+  let md = `# esp_Net-Core 驗收記錄\n\n`;
+  md += `- 時間：${new Date().toLocaleString()}\n- Port：${port}\n- 版本：${state.items['conn-fw']?.note || ""}\n\n`;
+  for(const [sid, title] of SECTIONS){
+    md += `## ${title}\n\n| 結果 | 項目 | 備註 |\n|---|---|---|\n`;
+    for(const it of ITEMS){
+      if(it.sec !== sid) continue;
+      const st = itemState(it.id);
+      const mark = st.v===1?"✅":st.v===2?"❌":"⬜";
+      const note = (st.note||"").replaceAll("|","\\|").replaceAll("\n"," ");
+      md += `| ${mark} | ${it.t}（${it.id}） | ${note} |\n`;
+    }
+    md += "\n";
+  }
+  download(`nc-verify-${stamp()}.md`, md, "text/markdown");
+  save();
+};
+document.getElementById("btnImport").onclick = () => document.getElementById("fileIn").click();
+document.getElementById("fileIn").onchange = async (ev) => {
+  const f = ev.target.files && ev.target.files[0];
+  if(!f) return;
+  try{
+    const s = JSON.parse(await f.text());
+    if(!s || typeof s !== "object" || !s.items) throw new Error("格式唔啱");
+    state = { items:s.items || {}, port:s.port || PORT_DEFAULT, updatedAt:s.updatedAt || "" };
+    document.getElementById("port").value = state.port;
+    refresh();
+    save();
+    alert("已匯入；備註與狀態都還原了。");
+  }catch(e){
+    alert("匯入失敗：" + e.message);
+  }finally{
+    ev.target.value = "";
+  }
+};
+document.getElementById("btnReset").onclick = () => {
+  if(!confirm("清空所有狀態與備註？呢個不可復原。")) return;
+  state = { items:{}, port:document.getElementById("port").value || PORT_DEFAULT, updatedAt:"" };
+  refresh(); save();
+};
+document.getElementById("btnSave").onclick = () => { save(); };
+document.getElementById("btnExpand").onclick = () => {
+  document.body.classList.toggle("compact");
+  document.querySelectorAll("textarea").forEach(t => { t.hidden = document.body.classList.contains("compact"); });
+};
+
+/* 起動 */
+document.getElementById("port").value = state.port || PORT_DEFAULT;
+refresh(); refreshCmds();
+setTimeout(() => {
+  document.getElementById("lastSaved").textContent =
+    state.updatedAt ? ("上次儲存 " + new Date(state.updatedAt).toLocaleString()) : "未儲存";
+}, 0);
+</script>
+</body>
+</html>

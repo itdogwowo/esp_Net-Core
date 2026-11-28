@@ -1,0 +1,55 @@
+{
+  "items": {
+    "conn-board": {
+      "v": 1,
+      "note": "chip=esp32s3 idf=v6.1.1"
+    },
+    "conn-fw": {
+      "v": 1,
+      "note": "fw=8c08c97-dirty app=b191a36d"
+    },
+    "conn-rst": {
+      "v": 1,
+      "note": "up_s 303→305、rst=1（冇重開機）"
+    },
+    "paging-all": {
+      "v": 1,
+      "note": "20 個 key：sys, storage, cfg, t, act, fm, dirty, state, schema, log, rt, mem, provides, err, key, hint, wifi, net, nce, ncm"
+    },
+    "paging-more": {
+      "v": 1,
+      "note": "13 幀；中間頁 timeout=[10]；最後 more=0 tmo=10"
+    },
+    "paging-hint": {
+      "v": 1,
+      "note": "tasks 回：{\"err\": \"block_too_big\", \"key\": \"tasks\", \"hint\": \"0x1005\"}"
+    },
+    "paging-ncm": {
+      "v": 1,
+      "note": "{\"ncm\": {\"arena\": 32768, \"used\": 860, \"live\": \"mini\", \"frames\": 7768, \"backend\": \"wamr\", \"period_ms\": 33, \"task_core\": 1, \"modules\": [{\"name\": \"mini\", \"fmt\": \"w"
+    },
+    "nce-values": {
+      "v": 1,
+      "note": "pub=7785 px=1024 v=[255, 0, 64, 255, 1, 64, 255, 2, 64]"
+    },
+    "nce-pub": {
+      "v": 1,
+      "note": "pub 7785→7852（相隔 2s）"
+    },
+    "nce-live": {
+      "v": 1,
+      "note": "live=mini modules=1"
+    },
+    "mode-frame": {
+      "v": 1,
+      "note": "SHOWFRAME：{\"err\": \"big\", \"px\": 4096}"
+    },
+    "tests-host": {
+      "v": 1,
+      "note": "run_all.sh：—— 全部通過"
+    }
+  },
+  "port": "/dev/cu.usbmodem50787D188F501",
+  "updatedAt": "2026-11-28T21:36:39",
+  "generatedBy": "tools/verify_checks.py"
+}

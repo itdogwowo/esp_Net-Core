@@ -12003,3 +12003,15 @@ status ncm → live=mini、frames 增長
 
 **交付狀態**：paging、`.nce` 全鏈、測試分組、重複測試清理、hint 全部完成；
 剩 `tasks`／`cmds` 的 item 級分頁（現有專用指令可用）＋ 肉眼驗證。
+
+---
+
+### 7.371 2026-11-28（驗收工具：逐項剔的網頁＋自動預填）
+
+- `docs/00_pm/verify.html`：單檔網頁（無依賴），把今次交付拆成 A–G 七組共 23 項，
+  每項有「做法／可複製指令／預期／備註」；✓ 通過、✕ 失敗、再按取消；
+  進度存 localStorage、可分區看完成度、可匯出 JSON／Markdown、可匯入續做、可列印。
+- `tools/verify_checks.py`：唯讀自動檢查（status／raw 查詢＋host 測試），
+  輸出 `docs/00_pm/verify-results.json`（verify.html 可直接匯入）。
+- 真機跑一次：**12 項自動檢查全過**（連線／分頁 13 幀收齊／hint／ncm／nce 值流／publish 增長／
+  SHOWFRAME big／host 30-30）。肉眼（mode 燈色）同建置項目仍留給人手剔。
