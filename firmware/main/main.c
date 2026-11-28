@@ -1067,11 +1067,13 @@ static esp_err_t cdc_send(void *arg, const uint8_t *frame, size_t len)
     portENTER_CRITICAL(&s_tx_mux);
     s_tx_reply = false;
     portEXIT_CRITICAL(&s_tx_mux);
-    const esp_err_t r = tinyusb_cdcacm_write_flush(TINYUSB_CDC_ACM_0, 0);
+    // flush(timeout=0) 回 ESP_ERR_TIMEOUT 係「未 flush 完」，唔等於未送到 ——
+    // 資料已經入咗 FIFO。以前當成失敗 → 上一層重送 → 頁面長度越疊越大。
+    (void)tinyusb_cdcacm_write_flush(TINYUSB_CDC_ACM_0, 0);
     if (s_cdc_tx_lock != NULL) {
         xSemaphoreGive(s_cdc_tx_lock);
     }
-    return r;
+    return ESP_OK;
 }
 
 // 轉寄出口：cdc_send 本身就係「整幀 copy 入 TinyUSB FIFO 就返回」
@@ -1225,7 +1227,9 @@ static char *reply_open(nc4_reply_t *r, nc4_ctx_t *ctx, uint16_t cmd)
         return NULL;      // decoder 建立時已經配置好，正常唔會發生
     }
     char *json = (char *)r->frame + NC4_HDR_LEN + 2;
-    json[0] = '\0';
+    // ★ 整段清空：分頁會重用同一塊 frame，上一頁較長的殘留會令 strnlen 量到
+    //   舊資料（真機見到 n=416 = 新 JSON 404 + 上一頁殘留 12 B → extra data）。
+    memset(json, 0, NC4_REPLY_JSON_MAX + 1);
     return json;
 }
 
@@ -1271,9 +1275,9 @@ static esp_err_t reply_send_tail(nc4_reply_t *r, size_t json_len, uint8_t more, 
     {
         const char *jb = (const char *)r->frame + NC4_HDR_LEN + 2;
         const size_t real = strnlen(jb, NC4_REPLY_JSON_MAX);
-        if (real != json_len) {
+        if (real < json_len) {
             ESP_LOGW(TAG, "status：頁長度校正 %u → %u", (unsigned)json_len, (unsigned)real);
-            json_len = real;
+            json_len = real;          // 只准縮：尾段本身會令 strnlen 多 2，唔可以跟佢脹
         }
     }
     if (json_len + 3 > NC4_REPLY_JSON_MAX) {
@@ -1284,6 +1288,7 @@ static esp_err_t reply_send_tail(nc4_reply_t *r, size_t json_len, uint8_t more, 
     data[0] = (uint8_t)json_len;
     data[1] = (uint8_t)(json_len >> 8);
     uint8_t *tail = data + 2 + json_len;
+    memset(tail, 0, 4);               // 舊尾段殘留會令下一頁 strnlen 量錯
     tail[0] = more;
     tail[1] = (uint8_t)timeout_ms;
     tail[2] = (uint8_t)(timeout_ms >> 8);
@@ -2019,7 +2024,7 @@ static void on_status_get(nc4_ctx_t *ctx, const nc4_frame_t *f)
             // 已知放唔落：唔叫 fn（佢可能寫爆 frame）；明示、但仍然繼續下一頁。
             jappend(j, cap, &o, "\"err\":\"block_too_big\",\"key\":\"%s\"",
                     k_status_blocks[i].name);
-            jappend(j, cap, &o, "}");
+            // 唔喺度收尾：下面統一的 else 會補 "}"（重複會變 extra data）。
         } else {
             status_add(j, cap, &o, &f1, k_status_blocks[i].fn);
         }

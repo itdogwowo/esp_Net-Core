@@ -73,8 +73,12 @@ def main() -> int:
             s.write(pack(CMD_STATUS_GET, payload, args.addr))
             # 裝置推頁：見到 more=1 就繼續收，唔再發嘢（半雙工）。
             merged = {}
-            for _ in range(32):                     # 保險：最多 32 幀
-                resp = wait_for(s, CMD_STATUS_RSP, 3.0)
+            # ★ 整個 loop 用**同一個 Reader**：一個 read() 可能帶兩幀返嚟，
+            #   每次新建 Reader 會丟棄它 buffer 內剩餘的幀（真機 char 404 extra data 就係咁）。
+            rd = Reader(s)
+            for _ in range(64):                     # 保險：最多 64 幀
+                f = rd.wait_for({CMD_STATUS_RSP}, 3.0)
+                resp = None if f is None else f[1]
                 if resp is None:
                     print("沒有收到 STATUS_RSP（裝置沒開？還是這條通道不支援回覆）",
                           file=sys.stderr)
