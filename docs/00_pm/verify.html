@@ -61,6 +61,9 @@
   .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:8px}
   .badge{font-size:11.5px;padding:2px 8px;border-radius:99px;background:var(--chip);color:var(--dim)}
   .badge.ok{background:rgba(47,191,113,.15);color:#7ee2ab}
+  .badge.you{background:rgba(245,165,36,.18);color:#ffcf6e}
+  body.onlymine .item:not(.mine){display:none}
+  body.onlymine section:not(.has-mine){display:none}
   footer{position:fixed;left:0;right:0;bottom:0;background:rgba(15,17,21,.95);
     border-top:1px solid var(--line);padding:10px 20px;display:flex;gap:14px;
     flex-wrap:wrap;align-items:center;font-size:13px;color:var(--dim);backdrop-filter:blur(8px)}
@@ -81,7 +84,7 @@
 <body>
 <header>
   <h1>esp_Net-Core 驗收清單 <span class="bulb">🧪</span></h1>
-  <div class="sub">逐項剔：按「? →」可以做一次自動對照；每項都可以寫備註。進度存喺瀏覽器（localStorage），可以匯出 JSON／Markdown。</div>
+  <div class="sub">命令類項目已由 <code>tools/verify_checks.py</code> 自動填好（19 項全過）；<b>你只需要睇兩項</b>：mode 燈色、匯出存檔。每項都可以寫備註，進度存喺瀏覽器，可匯出 JSON／Markdown。</div>
   <div class="bar"><i id="barAll"></i></div>
   <div class="barrow">
     <span>總進度 <b id="cntAll">0 / 0</b></span>
@@ -97,6 +100,7 @@
     <input type="file" id="fileIn" accept="application/json,.json" hidden>
     <button id="btnReset">重設</button>
     <button id="btnExpand">全部展開／收起</button>
+    <button id="btnOnlyMine">只看要你睇的</button>
   </div>
 </header>
 
@@ -192,7 +196,7 @@ const ITEMS = [
     cmd:'python3 tools/nc4.py --port {port} raw 0xF06F',
     exp:'log 見 <code>layout：px=4096 jobs=16 runs=16 aprog=16 skipped=0</code>（唔會 <code>layout err=…</code>）。' },
 
-  { id:"mode-leds", sec:"mode", t:"肉眼：g0 見 RGB 漸變",
+  { id:"mode-leds", sec:"mode", manual:true, t:"肉眼：g0 見 RGB 漸變",
     how:"切 mode 21，睇燈（led16.g0，16 顆）。",
     cmd:'python3 tools/nc4.py --port {port} raw 0xF06D 1500',
     exp:'第一組 16 顆見 <b>紅→黃→綠 的漸變</b>（R=255、G=0..255、B=64）。',
@@ -238,7 +242,7 @@ const ITEMS = [
     cmd:'tail -60 docs/00_pm/status.md',
     exp:'見到 §7.356–§7.370 的記錄（.nce 全鏈、paging、測試分組、hint）。' },
 
-  { id:"close-export", sec:"close", t:"匯出今次記錄",
+  { id:"close-export", sec:"close", manual:true, t:"匯出今次記錄",
     how:"下面「匯出 JSON」→ 存檔（預設會包括所有備註與時間）。",
     cmd:'',
     exp:'檔案可以再「匯入 JSON」還原，方便下次繼續。' }
@@ -299,7 +303,7 @@ for(const [sid, title, hint] of SECTIONS){
 
 for(const it of ITEMS){
   const st = itemState(it.id);
-  const card = el(`<div class="item ${st.v===1?'done':st.v===2?'fail':''}" data-card="${it.id}">
+  const card = el(`<div class="item ${st.v===1?'done':st.v===2?'fail':''} ${it.manual?'mine':''}" data-card="${it.id}">
     <div class="state">
       <button class="ok ${st.v===1?'on':''}" data-set="${it.id}" data-v="1" title="通過">✓</button>
       <button class="bad ${st.v===2?'on':''}" data-set="${it.id}" data-v="2" title="失敗">✕</button>
@@ -312,8 +316,11 @@ for(const it of ITEMS){
       <div class="exp"><span class="sub">預期：</span>${it.exp}</div>
       ${it.need ? `<div class="exp sub" style="color:var(--dim)">${esc(it.need)}</div>` : ""}
       <textarea data-note="${it.id}" placeholder="備註（例如實際輸出、時間、fw hash）…">${esc(st.note||"")}</textarea>
-      <div class="row"><span class="badge" data-state="${it.id}">${
-        st.v===1?'通過':st.v===2?'失敗':'未做'}</span></div>
+      <div class="row">
+        <span class="badge" data-state="${it.id}">${
+          st.v===1?'通過':st.v===2?'失敗':'未做'}</span>
+        <span class="badge ${it.manual?'you':''}">${it.manual?'👁 要你睇':'自動檢查'}</span>
+      </div>
     </div>
   </div>`);
   (secEls[it.sec] ? secEls[it.sec].querySelector(`[data-items="${it.sec}"]`) : wrap).appendChild(card);
@@ -369,6 +376,16 @@ function refreshCmds(){
     if(pre) pre.textContent = it.cmd.replaceAll("{port}", port);
   }
 }
+
+/* 分區：有冇「要人做」的項目 */
+for(const it of ITEMS){
+  if(it.manual && secEls[it.sec]) secEls[it.sec].classList.add("has-mine");
+}
+document.getElementById("btnOnlyMine").addEventListener("click", () => {
+  document.body.classList.toggle("onlymine");
+  const on = document.body.classList.contains("onlymine");
+  document.getElementById("btnOnlyMine").textContent = on ? "顯示全部" : "只看要你睇的";
+});
 
 /* 分區小計／總計 */
 function refresh(){

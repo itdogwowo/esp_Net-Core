@@ -12015,3 +12015,16 @@ status ncm → live=mini、frames 增長
   輸出 `docs/00_pm/verify-results.json`（verify.html 可直接匯入）。
 - 真機跑一次：**12 項自動檢查全過**（連線／分頁 13 幀收齊／hint／ncm／nce 值流／publish 增長／
   SHOWFRAME big／host 30-30）。肉眼（mode 燈色）同建置項目仍留給人手剔。
+
+---
+
+### 7.372 2026-11-28（命令類項目全部自動化：19/19 過，只剩 2 項給人）
+
+`tools/verify_checks.py` 擴充到 21 項：連線 3、分頁 4、.nce 3、mode 3、清理/建置 8。
+自動跑（真機＋本機）結果：**通過 19、失敗 0、待人手 2**：
+- 新加：`mode-select`（0xF06D 21 回 queued=21）、`mode-layout`（reload 後抓
+  `layout：px=4096 jobs=15 aprog=15 skipped=0`）、`build-release`、`build-tests`、
+  `tests-ids`（讀 CMakeCache 證明 NC_TEST_IDS=0,1,2,3）、`close-registry`（讀回 JSON）、
+  `close-docs`。
+- 只剩 **mode-leds（肉眼睇燈）**、**close-export（你按匯出）**。
+- `verify.html` 更新：兩項標「👁 要你睇」、加「只看要你睇的」過濾、其餘標「自動檢查」。

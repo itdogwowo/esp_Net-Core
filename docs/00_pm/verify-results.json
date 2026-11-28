@@ -10,7 +10,7 @@
     },
     "conn-rst": {
       "v": 1,
-      "note": "up_s 303→305、rst=1（冇重開機）"
+      "note": "up_s 4842→4844、rst=1（冇重開機）"
     },
     "paging-all": {
       "v": 1,
@@ -26,15 +26,15 @@
     },
     "paging-ncm": {
       "v": 1,
-      "note": "{\"ncm\": {\"arena\": 32768, \"used\": 860, \"live\": \"mini\", \"frames\": 7768, \"backend\": \"wamr\", \"period_ms\": 33, \"task_core\": 1, \"modules\": [{\"name\": \"mini\", \"fmt\": \"w"
+      "note": "{\"ncm\": {\"arena\": 32768, \"used\": 860, \"live\": \"mini\", \"frames\": 121347, \"backend\": \"wamr\", \"period_ms\": 33, \"task_core\": 1, \"modules\": [{\"name\": \"mini\", \"fmt\": "
     },
     "nce-values": {
       "v": 1,
-      "note": "pub=7785 px=1024 v=[255, 0, 64, 255, 1, 64, 255, 2, 64]"
+      "note": "pub=121363 px=1024 v=[255, 0, 64, 255, 1, 64, 255, 2, 64]"
     },
     "nce-pub": {
       "v": 1,
-      "note": "pub 7785→7852（相隔 2s）"
+      "note": "pub 121363→121430（相隔 2s）"
     },
     "nce-live": {
       "v": 1,
@@ -44,12 +44,40 @@
       "v": 1,
       "note": "SHOWFRAME：{\"err\": \"big\", \"px\": 4096}"
     },
+    "mode-select": {
+      "v": 1,
+      "note": "queued=21"
+    },
+    "mode-layout": {
+      "v": 1,
+      "note": "px=4096 jobs=15 aprog=15 skipped=0"
+    },
     "tests-host": {
       "v": 1,
       "note": "run_all.sh：—— 全部通過"
+    },
+    "build-release": {
+      "v": 1,
+      "note": "Zero-Show release：日誌    artifacts/logs/ESP32-S3-Zero_2026_11_28_22_52_40.log"
+    },
+    "build-tests": {
+      "v": 1,
+      "note": "Zero-Show tests：日誌    artifacts/logs/ESP32-S3-Zero_2026_11_28_22_53_16.log"
+    },
+    "tests-ids": {
+      "v": 1,
+      "note": "rc=0；見 0;1;2;3；build 完成"
+    },
+    "close-registry": {
+      "v": 1,
+      "note": "{\"version\": 1, \"auto_play\": true, \"list\": [\"led16grid4\", \"led16test\", \"led16grid16\", \"led16sync\"]}"
+    },
+    "close-docs": {
+      "v": 1,
+      "note": "§7.356–7.370 都在"
     }
   },
   "port": "/dev/cu.usbmodem50787D188F501",
-  "updatedAt": "2026-11-28T21:36:39",
+  "updatedAt": "2026-11-28T22:53:57",
   "generatedBy": "tools/verify_checks.py"
 }
