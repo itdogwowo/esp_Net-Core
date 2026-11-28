@@ -4,7 +4,7 @@
 > 這個專案，**先由頭讀到落尾**，再開始改任何東西。細節文件在 `docs/`，但方向、鐵律、
 > 工作流程、最常踩的坑全部在這一份。
 >
-> **最後更新**：2026-11-27（`driver-config.md` 微調指南；`ports/presets/STATUS.md` 生成＋run_all 過期閘門；NCSTATE 286 key／16 unit；host test 25 支）
+> **最後更新**：2026-11-28（插件工具 `sw/plugin` 拆出；host test **28 支**（新增 `pluginTask_test`／`pluginEffect_test`）；`--tests` 映像修好）
 > **維護規則**：每次架構／流程／工具改變，先改這份；過期內容直接覆蓋，唔好累積兩套講法。
 
 ---
@@ -117,7 +117,7 @@ python3 tools/nc4.py --port /dev/cu.usbmodemXXXX status tasks
 ### 做測試
 
 ```bash
-# 主機測試（唔需要板；25 支，全部 -Werror）
+# 主機測試（唔需要板；28 支，全部 -Werror）
 bash tools/hosttest/run_all.sh
 
 # 上板 smoke
@@ -247,7 +247,7 @@ python3 tools/ota.py --port /dev/cu.usbmodemXXXX \
 bash tools/hosttest/run_all.sh
 ```
 
-- 25 支測試（`cfg_test` … `fpsclock_test`；最新加入 `stateSchema_test`），全部 `-Wall -Wextra -Werror`。
+- 28 支測試（`cfg_test` … `fpsclock_test`；最新加入 `pluginTask_test`／`pluginEffect_test`），全部 `-Wall -Wextra -Werror`。
 - 每次跑之前會 `rm -rf <test>/build`，所以 header 改動唔會被舊 binary 遮住。
 - **唔好只跑你改的那一支**；共用 header／codec／config 的影響經常在別處爆。
 - 測試失敗先修，唔好「先 commit 再算」。
@@ -847,16 +847,16 @@ render_task（公用輸出層；core1，order 10；環／lane／節拍的主人�
 bash tools/hosttest/run_all.sh
 ```
 
-- 25 支：`cfg_test`、`cfgstruct_test`、`ncd_test`、`task_test`、`router_test`、
-  `link_test`、`mod_test`、`hub_test`、`plan_test`、`buf_test`、`portgen_test`、
+- 28 支：`cfg_test`、`cfgstruct_test`、`ncd_test`、`task_test`、`router_test`、
+  `link_test`、`mod_test`、`pluginTask_test`、`pluginEffect_test`、`hub_test`、`plan_test`、`buf_test`、`portgen_test`、
   `ncm_test`、`pixel_test`、`pxEngine_test`、`pxAsset_test`、`pxProgram_test`、
   `pxLayer_test`、`pxShow_test`、`pxScan_test`、`pxLayout_test`、`stateBlob_test`、
   `stateFile_test`、`stateSchema_test`、`stateStore_test`、`fpsclock_test`。
 - 全部 `-Werror`；失敗先修，唔好選擇性跑。
-- ⚠ 數字要講清楚：`tools/hosttest/*/run.sh` 有 **29 支**，但 `run_all.sh` 只跑
-  **25 支**測試；其餘 4 支係**量測 bench**（`gamma_bench`、`program_bench`、
+- ⚠ 數字要講清楚：`tools/hosttest/*/run.sh` 有 **32 支**，但 `run_all.sh` 只跑
+  **28 支**測試；其餘 4 支係**量測 bench**（`gamma_bench`、`program_bench`、
   `pxMap_bench`、`sin_bench`），唔係正確性測試，所以唔入 run_all。
-  講「25/25」係指 run_all；唔好講成「全部 29 支」。
+  講「28/28」係指 run_all；唔好講成「全部 32 支」。
 
 ### 12.2 上板 smoke test
 
@@ -945,7 +945,7 @@ python3 tools/nc4.py --port <PORT> status mem
 > 先 `python3 tools/tenv.py brief`；plan 說 `blocked`／`unknown` 的 lane **唔可以當驗證過**。
 > 回報時貼 `python3 tools/tenv.py stamp`。
 
-1. `bash tools/hosttest/run_all.sh` → 25/25。
+1. `bash tools/hosttest/run_all.sh` → 28/28。
 2. `make.py build ...` → rc=0。
 3. `tools/ota.py` → 推上板（唔使 BOOT）。
 4. `status sys`／`status tasks`／相關 0xF0xx → 數字＋正確性閘門。
@@ -962,7 +962,7 @@ python3 tools/nc4.py --port <PORT> status mem
 ### 14.5 Definition of Done
 
 - [ ] 功能／修正符合原 Task 的驗收條件。
-- [ ] Host tests 全綠（25/25）。
+- [ ] Host tests 全綠（28/28）。
 - [ ] 目標 board／project 建置成功。
 - [ ] 有上板驗證（或明确標示未上板）。
 - [ ] 逐 byte／checksum 類正確性閘門有過。

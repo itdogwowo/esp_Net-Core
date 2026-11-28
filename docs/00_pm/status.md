@@ -11524,3 +11524,27 @@ layout cache 改 name_id＋dictionary CRC；舊 cache 版本++。Phase 1 模組�
 - `make.py build …`（release，NC_ENABLE_NCM=OFF）：✔ `esp_net_core.bin` **799,680 B**
 - **未上板**（serial 被 sandbox 擋）：WAMR 真的 instantiate／tick 仍然未驗；
   下一步係 `nc_mod.c` 三拆（scan／arena → `test_ncm`、status → sys）＋ `.nce` adapter。
+
+---
+
+### 7.344 2026-11-28（兩支插件測試；`NC_ENABLE_NCM` 取消）
+
+**新增 host 測試（兩個世界各一支）**
+- `tools/hosttest/pluginTask_test/`：`.nct`（無 manifest → kind 由副檔名）→
+  工具收到 `kind=TASK`／payload size／name；每 tick 一次 `step(frame_id)`；
+  `unload` 時 `close` 一次；重新載入 arena 回收後再走得通。
+- `tools/hosttest/pluginEffect_test/`：`.nce` → `kind=EFFECT`；status 見到
+  `"kind":"effect"`；**連續 3 次超支 17 ms → 標 bad、live=NULL**（效果唔可以拖死輸出）；
+  unload 時 close。
+- 兩支都用假 backend（唔需要 WAMR），所以 CI 跑得；真 WAMR 行為仍然要上板。
+- host shim（`esp_*`／`dirent`／`mod_host.c`）由 `mod_test/include` 搬去
+  `tools/hosttest/hostshim/`，三支測試共用。
+
+**建置閘簡化**
+- 取消 `NC_ENABLE_NCM`（佢一直只係跟 `NC_ENABLE_TESTS` 走，單獨開係 inert）。
+  而家 `sw/plugin` ＋ `host/ncm` 都只喺 `NC_ENABLE_TESTS` 加入 → release 完全冇。
+
+**驗證（idf=v6.1.1 macOS）**
+- `bash tools/hosttest/run_all.sh` → **28/28**（新增 2 支全綠）。
+- `--tests` build ✔；release build ✔ `esp_net_core.bin` 799,680 B（同上一節一樣）。
+- 未上板：WAMR 實例化／tick 仍然未驗。

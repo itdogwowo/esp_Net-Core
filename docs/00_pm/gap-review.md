@@ -248,7 +248,7 @@ tasks/...            .nct → nc_task_t 的 wrapper
 - [ ] `nc_mod.c` 三拆：scan／arena → `test_ncm`；task attach → `tasks/`；status → sys
 - [ ] `.nce` adapter 入 `sw/pixel`（可以之後才做，唔阻塞搬位）
 - [ ] `test_ncm` 自註冊任務＋指令；刪 main 的 6 段 `#ifdef`
-- [ ] 取消 `NC_ENABLE_NCM`，只留 `NC_ENABLE_TESTS`
+- [x] 取消 `NC_ENABLE_NCM`，只留 `NC_ENABLE_TESTS`（2026-11-28）
 - [ ] 文件：AGENTS §3／§5（NCM 唔再係核心）、`component-layout.md` §1／§3 刪 `host` 角色、
       `behavior-taxonomy.md` §2.4 刪 host 列、`ncm-contract.md`／`ncm-loader.md` 的 path
 - [ ] `NC_ENABLE_TESTS=ON`／`OFF` 兩種 build ＋ `run_all.sh`

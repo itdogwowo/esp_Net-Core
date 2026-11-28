@@ -193,10 +193,12 @@ P4 預設 **DHCP**（舊版寫死的 `10.10.1.50/16` 已移除）；量測前先
 用 `cc` 直接把同一個 `.c` 編進來跑，驗證純邏輯，不用燒板子：
 
 ```bash
-bash tools/hosttest/run_all.sh     # 一次跑全部（12 套；每套印 OK / FAIL）
+bash tools/hosttest/run_all.sh     # 一次跑全部（28 支；每支印 OK / FAIL）
 tools/hosttest/hub_test/run.sh     # nc_hub.c：格子交換 / 自動歸還
 tools/hosttest/plan_test/run.sh    # nc_plan.c：宣告 / commit / 重名
 tools/hosttest/mod_test/run.sh      # nc_mod.c：載入 / 選 / 兩幀釋放 / trap / 超支 / 掃描→合併→載入
+tools/hosttest/pluginTask_test/run.sh   # 插件工具 × .nct：kind=TASK 傳到 backend、step/frame、close
+tools/hosttest/pluginEffect_test/run.sh # 插件工具 × .nce：kind=EFFECT、3 次超支→bad、status
 tools/hosttest/ncd_test/run.sh     # `.nct` / `.nce` manifest：解碼 / 範圍 / 指令表
 tools/hosttest/ncm_test/run.sh     # ncm.py：pack / dump / 副檔名 / magic / manifest / crc（格式標準）
 tools/hosttest/task_test/run.sh    # 任務管理器：level 排序 / 帳本 / attach / detach / provides / config

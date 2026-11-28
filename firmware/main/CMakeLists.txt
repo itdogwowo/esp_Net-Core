@@ -185,7 +185,7 @@ endif()
 if(IDF_TARGET STREQUAL "esp32s3" OR IDF_TARGET STREQUAL "esp32s2" OR IDF_TARGET STREQUAL "esp32p4")
     list(APPEND _nc_priv_extra espressif__esp_tinyusb)
 endif()
-# 外部任務宿主（ncm）只在 NC_ENABLE_NCM=ON 時存在；OFF 時連 component 都冇。
+# 外部任務宿主（plugin＋ncm）只在 NC_ENABLE_TESTS 時存在；release 連 component 都冇。
 # （原本還有一個 `_nc_test_reqs` 變數收集 ncm／test_*_tasks，但佢從來冇進
 #   PRIV_REQUIRES，2026-11-19 清掉。）
 
@@ -217,7 +217,7 @@ if(NOT CMAKE_SCRIPT_MODE_FILE)
     target_compile_definitions(${COMPONENT_LIB} PRIVATE NETCORE_HAS_PRESET_RESOURCES=${_has_resources_preset})
 # 應用硬件（device）層預置：由 ncportgen 由 driver.json 生成，一定有 → 1
 target_compile_definitions(${COMPONENT_LIB} PRIVATE NETCORE_HAS_PRESET_DRIVER=1)
-    if(NC_ENABLE_NCM)
+    if(NC_ENABLE_TESTS)
         # main 直接 include 載入器（nc_mod.h）同插件工具（nc_plugin.h）標頭。
         target_include_directories(${COMPONENT_LIB} PRIVATE
             "${CMAKE_CURRENT_LIST_DIR}/../components/host/ncm/include"

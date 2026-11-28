@@ -88,12 +88,8 @@ if(NC_ENABLE_TESTS)
 endif()
 option(NC_STACK_ANALYSIS "產生 .su/.ci（給 tools/stack_depth.py 算最壞棧深）" OFF)
 
-# 外部任務宿主（ncm：loader＋WAMR engine）。現階段測試映像先開；
-# 將來 production 要支援外掛就單獨開 NC_ENABLE_NCM（唔使連測試任務一齊）。
-option(NC_ENABLE_NCM "外部任務宿主（ncm：loader＋WAMR 引擎）" OFF)
-if(NC_ENABLE_TESTS)
-    set(NC_ENABLE_NCM ON)   # 測試映像一定要有動態加載能力（測試用外掛做）
-endif()
+# 外部任務宿主（plugin＋ncm）＝測試能力，唔再有獨立開關。
+# 2026-11-28 用家定案：模組系統只作測試／開發用，release 映像完全冇（亦唔 fetch WAMR）。
 
 # 正式組件（永遠編譯）
 set(_nc_extra_dirs
@@ -133,13 +129,13 @@ if(DEFINED ENV{NC_PROJECT} AND "$ENV{NC_PROJECT}" MATCHES "EffectPerf")
     list(APPEND _nc_extra_dirs
          "${CMAKE_CURRENT_LIST_DIR}/components/bench/effect_bench")
 endif()
-# 外部任務宿主（ncm）。NC_ENABLE_NCM=OFF 時連 component 都唔加入 →
-# 唔編譯、唔 link、唔 fetch WAMR 依賴（components/host/ncm/idf_component.yml）。
-# 注意：一定要放喺 components 之下第二層（components/*/ncm）—— IDF 會自動把
+# 外部任務宿主：插件工具（sw/plugin）＋載入器（host/ncm）。只喺 NC_ENABLE_TESTS 編，
+# 唔編譯、唔 link、唔 fetch WAMR 依賴（components/sw/plugin/idf_component.yml）。
+# 注意：一定要放喺 components 之下第二層（components/*/...）—— IDF 會自動把
 # components/ 第一層有 CMakeLists.txt 的目錄當 component，放第一層會連 release
 # 都拉入嚟（C3/P4 冇 WAMR rule → resolve 失敗）。
-if(NC_ENABLE_NCM)
-    # 先插件工具（解碼＋運行），再載入器（政策）。兩者都只喺呢個閘內編。
+if(NC_ENABLE_TESTS)
+    # 先插件工具（解碼＋運行），再載入器（政策）。
     list(APPEND _nc_extra_dirs
          "${CMAKE_CURRENT_LIST_DIR}/components/sw/plugin"
          "${CMAKE_CURRENT_LIST_DIR}/components/host/ncm")
