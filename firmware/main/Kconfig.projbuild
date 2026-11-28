@@ -149,10 +149,11 @@ menu "esp_Net-Core"
     config NETCORE_PIXEL_HOT_SRAM_KB
         int "pixel active flat 表的 internal SRAM 預算（KB）"
         depends on NETCORE_CONTENT
-        default 64
+        default 0
         range 0 256
         help
-            只有「當前 mode 的 6 B flat 表」可以放 internal（每幀 apply 的短板）；
+            預設 0 = **全部 PSRAM**（用家定案：容量焦慮優先消除；實測 PSRAM 仍在
+            20 ms 內）。設 >0 時只有「當前 mode 的 6 B flat 表」可以放 internal；
             其他 map／mode／asset／layout／program／inactive mode 一律 PSRAM。
             這個值係上限，實際會再扣 internal reserve（48 KB）同 free size；
             唔夠位自動 fallback PSRAM，唔會失敗。設 0 = 唔用 internal（全 PSRAM）。

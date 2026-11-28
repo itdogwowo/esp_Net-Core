@@ -11119,3 +11119,36 @@ render／encode task running、無 crash、state 重建正常；之後已還原 
 
 **結論**：cache hit 換場 0.8–2.6 ms，真係唔需要複雜預熱；預熱只對 cache miss（39–137 ms）
 有意義。hash 修正後 next prefetch 有效，cache 亦會持久化。
+
+---
+
+### 7.323 2026-11-28（用家定案：**全 PSRAM**，消除容量焦慮；極限時間量測）
+
+**決定**：`NETCORE_PIXEL_HOT_SRAM_KB` 預設改 **0**（全 PSRAM）；16IO project 亦明寫 0。
+理由：實測 PSRAM 已經在 20 ms 內；internal SRAM 唔需要為 pixel 容量負責，亦避免容量焦慮。
+
+**16IO 4,096 px 全 PSRAM 實測（真機）**
+| 指標 | 值 |
+|---|---:|
+| pair（clear+apply+white+commit） | 3.08 ms |
+| clear | 0.73 ms |
+| apply | 2.33 ms |
+| encode | 9.41 ms |
+| tx | 0.80 ms |
+| frame | 19.97 ms（50 fps） |
+| 0xF07F A/B | internal 716 µs／PSRAM 1,900 µs |
+| cache hit swap | 193 µs（冇 hotify 成本） |
+
+**9,600 px**
+- 單 lane：線路 288 ms／幀，apply PSRAM 4.44 ms → 線路主導。
+- 16 lanes×600 並行（估算）：線路 18 ms、encode 10.4 ms、apply 4.44 ms；
+  CPU 合計 14.8 ms <20 ms，margin 約 2–5 ms，全 PSRAM 仍然可行。
+
+**Cache／換場（一次性）**
+- cache hit 讀取約 2 ms＋flatify 0.34–0.63 ms ≈2.6 ms；
+- 預熱 swap 193 µs；next cache hit 6.85 ms；cache miss 23.9 ms；
+- cache miss build 39–137 ms／mode（只建一次）。
+
+**結論**：pixel 全 PSRAM；internal free 約 100–148 KB、FAT 640 KiB free；
+現時與 16×600 極限都仍在 20 ms 預算內。要更高 px／fps 才再考慮 hot flat，
+但預設唔會佔 SRAM。
