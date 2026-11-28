@@ -22,6 +22,7 @@
 | 文件 | 內容 |
 |---|---|
 | [status.md](00_pm/status.md) | **單頁現況**：已驗證的數字（各通道吞吐／RTT／上限）、已定案架構、未完成事項、待測場景 |
+| [gap-review.md](00_pm/gap-review.md) | **固件缺口清單（2026-11-28）**：10 條硬缺口（RMT／PARLIO／真面板／ETH-SPI／NC4 轉發／外掛指令／device 層／OTA rollback／跨機同步／UI-BLE）＋半成品＋工程債；§6 記錄「`host` 唔應該獨立存在」的方向同兩個合規落位 |
 | [effect-perf.md](00_pm/effect-perf.md) | **純效果效能專案（EffectPerf）**：只測 program／配對／12→8／抖動／分塊／多 job，不開 render／pixel／tests；64／960／4,096／9,600 px 的 internal vs PSRAM 真機數字 |
 | [next-steps.md](00_pm/next-steps.md) | **下一步計劃（依序）**：已完成／已撤回／待決定的項目、每項的大小與風險、需要使用者拍板的清單。**§9 是緩衝工具收斂（`nc_buf`）的 P0–P5** |
 | [roadmap.md](00_pm/roadmap.md) | **重寫計劃（歷史分期）**：背景、已定案、非目標、Phase 0–5 現況、開放決策。Phase 0／1 已完成，近期清單看 status.md §7 |

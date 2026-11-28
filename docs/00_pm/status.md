@@ -11433,3 +11433,21 @@ layout cache 改 name_id＋dictionary CRC；舊 cache 版本++。Phase 1 模組�
 - 舊 `/data/pixel/cache` 由 migration helper 清空並 rmdir；實測舊 path names.ncc exists=0。
 - config／state 之後可直接用 `/data/cache`（同一個 root），唔需要再開新 cache 目錄。
 - 真機：cache present=4／built=0、26 ms；names.ncc 5,244 B；PSRAM free 1.82 MB。
+
+---
+
+### 7.339 2026-11-28（固件缺口清單：10 條硬缺口＋`/host/` 定位）
+
+- 新增 [`gap-review.md`](gap-review.md)：逐個 component 讀 code 對文件，列出 10 條
+  硬缺口（RMT／PARLIO／真面板／ETH-SPI＋static IP／NC4 `out` 轉發／外掛
+  0x3400 指令／device 層只有 LED／OTA rollback／跨機同步／UI-BLE）、半成品、工程債、
+  文件漂移（AGENTS §2.2 誇大 transport、roadmap 過時）。
+- **今次冇上板**：sandbox 開唔到 serial（Operation not permitted），全部係 code／文件
+  證據，唔係即場 `status` 數字；凡標「未驗」維持未驗。
+- 結論：核心路徑（S3＋I80＋NC4＋config/state＋OTA）冇基礎缺陷；「支援晶片都用得」
+  未成立 —— C3 冇任何後端出到 WS2812（冇 LCD_CAM、RMT 未實作）。
+- **`/host/` 定位（用家方向）**：唔應該做獨立角色／頂層目錄；本質係一個沙盒 backend
+  （`nc_mod_backend_t` 只有 WAMR 一個實作）。但**唔可以原封搬入 `driver/`**
+  （`driver` 只准 include `esp_driver_*`／`soc`；`nc_mod.c` 用 task_manager／config／mem），
+  兩個合規落位：**(A)** `sys/ncm` 整包搬（建議先做）；**(B)** `driver/drv_wamr`＋`sys/ncm`
+  分拆（要改 backend 介面，等第二個 backend／P4 AOT 才做）。遷移 checklist 見 gap-review §6.5。

@@ -25,6 +25,7 @@
 | 文件 | 性質 | 更新時機 |
 |---|---|---|
 | [status.md](status.md) | **快照**：現在的數字與狀態 | 每次量測 / 每個 Phase 結束 |
+| [gap-review.md](gap-review.md) | **缺口清單**：固件功能面 10 條硬缺口、半成品、工程債；§6 是 `/host/` 定位與遷移方案 | 每次補完一條缺口時 |
 | [roadmap.md](roadmap.md) | **計劃**：Phase 0–5 現況（0／1 已完成）、非目標、開放決策 | 改變優先順序時 |
 | [test-register.md](test-register.md) | **測試冊**：每個功能／測試的收納層級（L0–L3）、驗證證據、性能數字 | 每次驗證／收納時追加 |
 | [goal-hardware-acceleration.md](goal-hardware-acceleration.md) | **終極目標**：L3 硬件加速的定義、S3/P4 能力表、里程碑 M1–M5、量測方法 | 里程碑推進時 |
