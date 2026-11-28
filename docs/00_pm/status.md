@@ -11679,3 +11679,14 @@ layout cache 改 name_id＋dictionary CRC；舊 cache 版本++。Phase 1 模組�
   C 側要跟同一佈局：`[len][json][more][timeout_ms LE]`，**唔可以**塞入 JSON body。
 - 未做：C 側 `on_status_get` 先量後砌＋尾段 3 B；`timeout_ms` 暫 0（半雙工未啟用）。
 - 驗證：host 29/29；`--tests` build ✔。
+
+---
+
+### 7.351 2026-11-28（STATUS_GET 裝置推頁；ncm 歸位；status_test）
+
+- status 區塊改**固定次序表**，一頁一個 key、逐幀送出（裝置推）。
+  尾段 `more=1` 直到最後一幀；主機見到就繼續收（`nc4.py` 已跟）。
+- 一頁上限 2,597 B（`NC4_REPLY_JSON_MAX - 3`）；**總內容冇上限**。
+- `nc_status_value(key,…)`：自註冊區塊（ncm）回到 key 表最後一頁，頁界穩定。
+- 新 host 測試 `status_test`（註冊／重名／NULL／取値／append／keys 過濾）→ **30/30**。
+- 已知：`timeout_ms` 暫 0（burst）；頁界測試（拼接 == 一次砌晒）未做。
