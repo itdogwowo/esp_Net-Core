@@ -232,6 +232,19 @@ static void cache_prebuild_missing(void);
 #define LAYOUT_CACHE_SUFFIX ".layout"
 #define LAYOUT_CACHE_FILE_OVERHEAD 128u
 
+static size_t layout_cache_file_max(void)
+{
+#if defined(CONFIG_NETCORE_PIXEL_LAYOUT_CACHE_FILE_KB) && CONFIG_NETCORE_PIXEL_LAYOUT_CACHE_FILE_KB > 0
+    size_t v = (size_t)CONFIG_NETCORE_PIXEL_LAYOUT_CACHE_FILE_KB * 1024u;
+    if (v > (1024u * 1024u)) {
+        v = 1024u * 1024u;          // layout cache load 的 payload 安全上限
+    }
+    return v;
+#else
+    return 1024u * 1024u;           // 0 = 不限，但受 payload 1 MB 安全上限
+#endif
+}
+
 static uint32_t layout_cache_budget(void)
 {
 #if defined(CONFIG_NETCORE_PIXEL_LAYOUT_CACHE_KB) && CONFIG_NETCORE_PIXEL_LAYOUT_CACHE_KB > 0
@@ -993,7 +1006,7 @@ static void content_prepare_next(void)
     (void)nc_px_layout_flatify(&s_content.next_layout);   // 默認 PSRAM
     if (next_from_build) {
         const size_t cache_bytes = nc_px_layout_cache_bytes(&s_content.next_layout);
-        if (cache_bytes <= 32768u) {
+        if (cache_bytes <= layout_cache_file_max()) {
             (void)layout_cache_save(&s_content.next_layout, cpath, ckey, cache_bytes);
         }
     }
@@ -1100,9 +1113,9 @@ static esp_err_t content_apply_mode_locked(const nc_px_mode_t *mode)
         const uint32_t build_us = (uint32_t)(esp_timer_get_time() - tb0);
         if (pe == ESP_OK && s_content.layout.njobs > 0) {
             // 快取只對「表細」的組合有意義：表大（例如完全隨機 ~230 KB）時，
-            // FAT 讀取同重建差不多，存表反而多一次寫入。門檻 32 KB。
+            // 舊版門檻 32 KB；現在由 Kconfig 控制（預設 0=不限，flash 容量以 MB 計）。
             const size_t cache_bytes = nc_px_layout_cache_bytes(&s_content.layout);
-            if (cache_bytes <= 32768u) {
+            if (cache_bytes <= layout_cache_file_max()) {
                 const int64_t ts0 = esp_timer_get_time();
                 const esp_err_t se = layout_cache_save(&s_content.layout, cpath, ckey,
                                                        cache_bytes);
@@ -1111,8 +1124,8 @@ static esp_err_t content_apply_mode_locked(const nc_px_mode_t *mode)
                          build_us, (unsigned)cache_bytes, save_us,
                          (se == ESP_OK) ? "ok" : esp_err_to_name(se));
             } else {
-                ESP_LOGW(TAG, "組合重建：build %u us、快取表 %u B 太大（>32 KB）→ 唔存"
-                              "（讀表同重建差不多）", build_us, (unsigned)cache_bytes);
+                ESP_LOGW(TAG, "組合重建：build %u us、快取表 %u B 超過單張上限 → 唔存",
+                         build_us, (unsigned)cache_bytes);
             }
         }
     }
@@ -1471,7 +1484,7 @@ static void cache_prebuild_missing(void)
             continue;
         }
         const size_t cache_bytes = nc_px_layout_cache_bytes(&lay);
-        if (cache_bytes > 32768u) {
+        if (cache_bytes > layout_cache_file_max()) {
             too_big++;
         } else if (layout_cache_save(&lay, path, key, cache_bytes) == ESP_OK) {
             built++;

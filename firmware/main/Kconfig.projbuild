@@ -158,6 +158,17 @@ menu "esp_Net-Core"
             這個值係上限，實際會再扣 internal reserve（48 KB）同 free size；
             唔夠位自動 fallback PSRAM，唔會失敗。設 0 = 唔用 internal（全 PSRAM）。
 
+    config NETCORE_PIXEL_LAYOUT_CACHE_FILE_KB
+        int "單張 NCLAYOUT cache 上限（KB，0=不限）"
+        depends on NETCORE_CONTENT
+        default 0
+        range 0 1024
+        help
+            預設 0 = 不限：cache 係 FAT/flash 檔案，flash 以 MB 計；用家定案唔需要
+            32 KB 的單張上限。舊版 32 KB 係「讀表 vs 重建」的效能取捨，唔係格式上限。
+            設 >0 可保留舊政策（例如超大表讀取慢過重建時）。真正硬上限係 payload
+            1 MB 安全檢查同 FAT free。
+
     config NETCORE_PIXEL_LAYOUT_CACHE_KB
         int "NCLAYOUT 快取總預算（KB，0=不限）"
         depends on NETCORE_CONTENT

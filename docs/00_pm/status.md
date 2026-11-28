@@ -11233,3 +11233,25 @@ cache ≈ 44B header
 - `prebuild present=4、built=0、28 ms`；`pair=3.11 ms、apply=2.34 ms、
   frame=19.99 ms、50 fps`；
 - FAT free 663,552 B（約 648 KiB），4 個 cache 遠低於容量。
+
+---
+
+### 7.327 2026-11-28（單張 32 KB 門檻也改為可調；預設不限）
+
+**用家追問**：32 KB 限制呢？cache 在 flash（MB 計），唔需要容量上限。
+
+**結論**：32 KB 從來唔係格式上限，只係「讀 cache 快唔快過重建」的效能政策。
+已改成 Kconfig：
+
+- `NETCORE_PIXEL_LAYOUT_CACHE_FILE_KB` 預設 **0 = 不限**；
+- 設 >0 可保留舊政策（例如超大表讀取慢過重建時）；
+- **真正硬上限**只剩：payload 1 MB 安全檢查、FAT free；
+- 總量上限亦已預設 0（不限），舊 key 仍由 cleanup 清。
+
+**影響**
+- 16IO 現有 layout 1.6–7.5 KB，完全低於舊 32 KB，行為不變；
+- 巨型 layout（幾千 runs）現在都會存 cache，啟動時建好，runtime 直接讀；
+- 代價：>32 KB 的 cache 由 FAT 讀取可能比即場重建慢；如果某 project 真係咁，
+  可把 `CACHE_FILE_KB` 設回 32（保留舊行為）。
+
+**真機**：16IO `present=4、built=0、28 ms`；free_int 125 KB；50 fps。
