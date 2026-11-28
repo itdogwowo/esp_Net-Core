@@ -112,8 +112,8 @@ const TASK = [
   note:"只讀 header＋manifest（B06 掃描），不碰 payload、不切 arena。"},
  {t:"③ manifest 40 B", d:"kind(1=task／2=effect)、core、layer、prio、fps、px（＝輸出值數）、stack、budget_us、mem_bytes、cmds、meta。",
   hl:["man"], seg:1,
-  v:[["kind","1 (task)"],["core","-1 不限／0／1"],["layer / prio","3 / 2"],["fps","30"],["px","64（值數）"],["budget_us","16000"]],
-  note:"kind=0（system）一律拒絕：載入的檔案不能自稱不可卸載的那一層。"},
+  v:[["kind","1 (task)"],["core","-1 不限／0／1"],["layer / prio","3 / 2"],["stack / mem","4096 / 65536"],["budget_us","16000（可省）"]],
+  note:"任務只有「身分＋資源」：**冇 px、冇 fps**。跑幾快由任務自己阻塞決定，唔由 manifest 控制。"},
  {t:"④ 掃描 → arena 大小", d:"掃到 N 個模組、檔案合計 B → arena = clamp(B + N×1 KB, 32 KB, 512 KB)。冇模組 = 0 B。",
   hl:["arena"], seg:2,
   v:[["arena","32 KB – 512 KB"],["0 個模組","唔宣告（省 PSRAM）"]], note:"arena 由 plan 一次 carve；開機後不可以加大。"},
@@ -127,9 +127,9 @@ const TASK = [
   hl:["desc"], seg:4,
   v:[["px_count","64"],["fb_off","96 + 4096 = 4192"],["fb_bytes","px × 1 B = 64"],["sc_off/sc_bytes","96 / 4096"],["nce_init(0)","帶一個參數"]],
   note:"喂幾多位由 mem_bytes 把關：fb 放唔落 → 拒絕開插件（唔會開一個一定 trap 的）。"},
- {t:"⑧ 每 tick", d:"任務：`task_tick()`。效果：`nce_render(frame_id, time_us)`。節奏由 manifest fps 決定。",
+ {t:"⑧ 每 tick", d:"任務：`task_tick()`；跑幾快由任務自己阻塞決定（manifest 唔管節奏）。效果：`nce_render()` 只負責往緩衝區填。",
   hl:["tick"], seg:3,
-  v:[["frame_id","1,2,3…"],["time_us","esp_timer_get_time()"],["回傳","0=ok；非 0 → 標 bad"],["預算","> budget_us 連續 3 次 → 停用"]],
+  v:[["frame_id","1,2,3…"],["time_us","esp_timer_get_time()"],["回傳","0=ok；非 0 → 標 bad"],["預算","超 budget_us 連續 3 次 → 停用（可省）"]],
   note:"import 白名單：nc_print／nc_print_i32／nc_print2／nc_gpio_read/write/toggle／nc_now_us。"},
  {t:"⑨ status", d:"`status ncm` 看 arena／used／live／backend／modules[]（kind、px、ok、bad、strikes、attached）。",
   hl:["status"], seg:5,
@@ -149,9 +149,10 @@ const EFFECT = [
  {t:"④ open → descriptor", d:"寫 28 B descriptor（px_count／fb_off=4192／fb_bytes=px／sc）→ nce_init(0)。",
   hl:["desc","open"], seg:4,
   v:[["fb_off","4192"],["fb_bytes","64（值數）"],["每值","1 B（0–255）"]], note:"buffer 住喺 guest linear memory：零拷貝，host 直接讀。"},
- {t:"⑤ nce_render 每幀", d:"插件寫 fb（0–255）。值數 = manifest px（例如 led_n × 通道數）。",
+ {t:"⑤ nce_render：填緩衝區", d:"插件只管填：由第 0 格寫到滿（0–255）就停；冇幀率、冇節奏概念。",
   hl:["tick"], seg:3,
-  v:[["fb[0..63]","0–255"],["格式","唔描述自己"]], note:"格式（r/g/b/w/rgb/rgbw）由配對層 write 決定，唔關插件事。"},
+  v:[["fb[0..px-1]","0–255"],["格式","唔描述自己"],["節奏","唔關插件事"]],
+  note:"控制器（配對層／mode）可以指定「讀到邊一格停」或者「跳到邊一格」；插件唔需要知。"},
  {t:"⑥ 交去值流信箱", d:"nc_mod tick hook → nc_plugin_frame() → nc_px_nce_init(bytes)（冪等）→ publish（雙緩衝＋原子換手）。",
   hl:["mbox"], seg:6,
   v:[["writer","ncm task（core1）"],["reader","pixel_effect_task（core0）"],["seq","每次 publish +1"],["bytes","px × 1 B"]],
@@ -163,9 +164,10 @@ const EFFECT = [
   hl:["pair"], seg:7,
   v:[["write=rgb","每顆讀 v[k],v[k+1],v[k+2]"],["write=rgbw","每顆讀 v[k..k+3]"],["單通道","只寫自己通道，其餘保留"]],
   note:"「操作模式 = 值流的消費形狀，不猜設備」——同 mp_Net-Core 的 scatter 一樣。"},
- {t:"⑨ 寫環 → 編碼 → 燈", d:"layout 逐 run 寫環（4 B/px R,G,B,W）→ white mix → commit → encode（I80/SPI bus word）→ DMA → 燈。",
+ {t:"⑨ 讀 → 配對 → 環 → 燈", d:"pixel 管線每幀由緩衝區讀值（可指定停在哪格／跳到哪格）→ 配對 write → 寫環 → encode → DMA → 燈。",
   hl:["ring"], seg:8,
-  v:[["環格","4 B/px"],["encode","i80／spi"],["節拍","esp_timer 20 ms（50 fps）"]], note:"NCE 產出節奏 = ncm fps；同 pixel 50 fps 唔同步，會重複格（已知）。"},
+  v:[["環格","4 B/px"],["encode","i80／spi"],["節拍","esp_timer 20 ms（50 fps）"],["讀取","由控制器決定，唔由 .nce 決定"]],
+  note:"插件冇 fps：同一份緩衝區可以被 50 fps 的管線讀，亦可以被慢速讀；重複格係正常。"},
  {t:"⑩ 現況", d:"產出側已接（ncm tick → 信箱）；消費側（layout aprog／effect task 取值）未接 → 引用 .nce 的 mode 仍然 skip_prog。",
   hl:["status"], seg:5,
   v:[["已完成","descriptor／信箱／publish"],["未完成","layout aprog／effect task 取值"],["預期","mode 引用 .nce 會黑（有 skip 計數，不會靜默）"]],
@@ -218,11 +220,11 @@ function render(){
   $("#leftRows").innerHTML = (mode==="task"?[
     ["magic","0x314D434E ('NCM1')"],["abi / flags","0 / bit1=manifest"],["total_size","48 + payload + manifest"],
     ["payload_off/size","48 / N"],["payload_crc","crc32(init=0)"],["target_id","0=wasm／1=P4 AOT／2=S3 AOT"],
-    ["mem_bytes","linear memory 上限"],["px","輸出值數"],["fps","每 tick 節奏"],["manifest_off/size","0 = 冇 manifest"]]
+    ["mem_bytes","linear memory 上限"],["manifest_off/size","0 = 冇 manifest"],["（冇 px／fps）","任務唔需要"]]
     :[
     ["magic","0x314D434E"],["flags","bit1=manifest（effect 一定有）"],["px","＝fb 值數（每值 1 B）"],
     ["mem_bytes","≥ 96 + 4096 + px"],["kind","2 = effect"],["core","必須 = ncm task core"],
-    ["descriptor","px_count／fb_off=4192／fb_bytes"],["nce_init(0)","讀 offset 0"],["nce_render","每 tick 寫 fb"],["fb","0–255，唔描述格式"]])
+    ["descriptor","px_count／fb_off=4192／fb_bytes"],["nce_init(0)","讀 offset 0"],["nce_render","填滿就停"],["fb","0–255，唔描述格式"]])
     .map(([k,v])=>`<div class="row"><span>${k}</span><b>${v}</b></div>`).join("");
   $("#leftNote").innerHTML = mode==="task"
     ? "容器只有兩種 payload：wasm（預設）與 AOT（綁架構）。<code>task_tick()</code> 每 tick 被叫一次。"

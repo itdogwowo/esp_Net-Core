@@ -11707,3 +11707,17 @@ layout cache 改 name_id＋dictionary CRC；舊 cache 版本++。Phase 1 模組�
    注意 host 測試（pxLayout_test）冇 link `nc_px_nce.c`，要 weak reference 或者補 shim。
 
 **驗證**：`--tests` build ✔；host 30/30。未上板。
+
+---
+
+### 7.353 2026-11-28（更正模型：`.nct` 冇 px／fps；`.nce` 冇 fps）
+
+用家指正：**fps 唔應該由插件控制**。`.nce` 只係「往緩衝區填，滿了就停」；
+控制器（配對層／mode）先決定讀到邊一格停、或者跳到邊一格。`.nct` 亦唔需要 px／fps
+（跑幾快由任務自己阻塞決定）。
+
+- 動畫 `docs/00_pm/nct-nce-flow.html` 已按此更正（兩邊都冇 fps；效果冇幀率概念，
+  只講「填滿就停」＋「控制器指定停／跳」）。
+- **wire format 仍然有 `px`／`fps` 欄位**（manifest v1）：`fps` 而家係「可選、
+  唔應該用嚟控制效果」；下一步要收窄（v2 或標 deprecated）。`px` 保留只作
+  「緩衝區值數」（effect），task 忽略。
