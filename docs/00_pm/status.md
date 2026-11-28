@@ -11735,3 +11735,16 @@ layout cache 改 name_id＋dictionary CRC；舊 cache 版本++。Phase 1 模組�
   open 一步改成「交輸入 → 模組算輸出 → descriptor 的 fb_bytes 由模組回報」。
 - **wire format 仍未改**（manifest v1 有 px／fps）：下一步要換成 interface 描述
   （input params ＋ output buffers），並由模組在 open 時回報實際大小。
+
+---
+
+### 7.355 2026-11-28（模組緩衝介面定案：申請→分區→說明→產出）
+
+用家定案：模組開機時向系統申請輸入緩衝、自己分區、說明每區代表什麼；輸出緩衝一樣。
+即生產者／消費者模式，向緩衝管理器申請（arena／nc_buf），唔可以自己 malloc。
+
+- 三階段：`declare`（guest 寫 N 個 region）→ `bind`（host 由 arena 切、寫回位置）
+  → `init`（guest 拿最終表）。
+- 方向固定：in 唯讀、out 唯寫；唔夠記憶體明示拒絕，唔縮。
+- `px` 係 **in region 的一個參數**（唔係 manifest 欄位）；`fps` 刪除。
+- 設計文件：`docs/03_notes/module-buffer-interface.md`（含要改嘅 5 處）。
