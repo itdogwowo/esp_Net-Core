@@ -11762,3 +11762,23 @@ layout cache 改 name_id＋dictionary CRC；舊 cache 版本++。Phase 1 模組�
 
 **驗證**：`--tests` build ✔；host **30/30**。**未上板**（板跑舊 firmware，
 未確認 board／project，所以未 flash）。
+
+---
+
+### 7.357 2026-11-28（STATUS_GET 分頁真機打通：18 key）
+
+**真機（ESP32-S3-Zero，tests 映像 fw=b49a267-dirty）**
+- `status`（空 keys）→ **18 個 key、合法 JSON**：sys/storage/cfg(+t,act,fm,dirty,
+  state,schema)/log/rt/mem/provides/wifi/net/**ncm**；`ncm={}`（冇模組）。
+- 逐個 key 全部 OK；`tasks`／`cmds` 超過一頁（3.1 KB／4.9 KB）→ 回
+  `{"err":"block_too_big","key":…}`（明示，唔會靜默漏）。
+
+**修咗三個真機 bug（都係靠逐幀計數捉出嚟）**
+1. `tinyusb_cdcacm_write_flush(…,0)` 回 `ESP_ERR_TIMEOUT` 被當成送失敗 → 重送；
+2. `reply_send_tail` 用 `strnlen` 校正長度時**跟住尾段膨脹**（每重送 +2 B）；
+3. `cdc_send` 忽略 flush 結果 → 回 `ESP_OK`。
+
+**已知限制**
+- `tasks`／`cmds` 仍要 item 級分頁（下一刀）；查任務可先用 `0x1005`。
+- `.nce` 真機驗證卡在 payload：`tools/poc/mod_poc/mod.wasm` 係 v0 契約
+  （`nce_render` 4 個參數、fb 4 B/px），同現行 1 B/值 不一致。
