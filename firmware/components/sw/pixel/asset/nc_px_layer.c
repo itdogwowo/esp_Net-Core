@@ -470,6 +470,18 @@ esp_err_t nc_px_map_parse(const char *json, size_t len, nc_px_map_pool_t *pool,
 }
 
 // ═══════════════════════ mode ═══════════════════════
+static uint32_t s_mode_dropped;
+static char s_mode_drop_name[32];
+
+static void (*s_drop_hook)(const char *mode, const char *effect);
+void nc_px_layer_set_drop_hook(void (*fn)(const char *mode, const char *effect))
+{
+    s_drop_hook = fn;
+}
+
+uint32_t nc_px_mode_last_dropped(void) { return s_mode_dropped; }
+const char *nc_px_mode_last_dropped_name(void) { return s_mode_drop_name; }
+
 static bool parse_entry(nc_px_js_t *j, nc_px_mode_entry_t *e, bool *valid)
 {
     *valid = false;
@@ -624,6 +636,8 @@ esp_err_t nc_px_mode_count(const char *json, size_t len, uint32_t *nentry)
 esp_err_t nc_px_mode_parse(const char *json, size_t len, nc_px_mode_entry_t *pool,
                            uint32_t cap, nc_px_mode_t *out)
 {
+    s_mode_dropped = 0;
+    s_mode_drop_name[0] = '\0';
     if (json == NULL || out == NULL || (pool == NULL && cap > 0)) {
         return ESP_ERR_INVALID_ARG;
     }
@@ -694,7 +708,15 @@ esp_err_t nc_px_mode_parse(const char *json, size_t len, nc_px_mode_entry_t *poo
                         if (!parse_entry(&j, e, &valid)) {
                             return ESP_ERR_INVALID_ARG;
                         }
-                        if (valid) {
+                        if (!valid) {
+                            // 保留相容（唔令整份 mode 壞），但要**記住**掉了什麼，
+                            // 由 paint 大聲報（以前靜靜 drop → jobs 少咗都唔知）。
+                            s_mode_dropped++;
+                            if (s_mode_drop_name[0] == '\0') {
+                                snprintf(s_mode_drop_name, sizeof(s_mode_drop_name), "%s",
+                                         e->effect ? e->effect : "?");
+                            }
+                        } else {
                             out->nentry++;
                         }
                         if (nc_px_js_eat(&j, ',')) {
@@ -724,6 +746,9 @@ esp_err_t nc_px_mode_parse(const char *json, size_t len, nc_px_mode_entry_t *poo
     }
     out->hash = json_hash(json, len);
     return ESP_OK;
+    if (s_mode_dropped > 0 && s_drop_hook != NULL) {
+        s_drop_hook(nc_px_name_dict_global_str(out->name_id), s_mode_drop_name);
+    }
 }
 
 // ═══════════════════════ registry（show）═══════════════════════

@@ -11858,3 +11858,21 @@ status ncm → arena 32768, used 81, live "mini", backend wamr, frames 增加
 2. 查 `find_asset("mini")` 為何解析唔到（名字字典 id？`.nce` 掃描只 intern stem，
    而 mode 用 name→id 解析；可能係 dict 未包含，或 asset 表未收 NCE）；
 3. 修完再上板驗 `jobs=16`、`0xF06B` 有顏色。
+
+---
+
+### 7.362 2026-11-28（mode 引用 `.nce`：layout jobs=16 通過）
+
+- 新增「mode 解析丟 entry」診斷：`nc_px_layer_set_drop_hook()`（parse 時即刻回報）
+  ＋ `nc_px_mode_last_dropped()`；paint 註冊 hook → `ESP_LOGW`。舊版係**靜默**丟。
+- 真機 reload 後：
+  ```
+  px_layer: mode 9（minitest）：1 項
+  px_layer: mode 21（minitest2）：16 項
+  px_paint: layout：px=4096 jobs=16 runs=16 aprog=16 skipped=0
+  ```
+  → **NCE entry 已入 plan（aprog 由 15 → 16）**，冇再丟 entry。
+- 視覺驗證方法（留給人手）：`0xF06D 15 00` 選 minitest2，group g0 應見
+  RGB 漸變（mini 的 data segment：R=255、G=0..255、B=64 交錯）。
+  備註：`0xF06B SHOWFRAME` 對 4096 px 會回 `{"err":"big"}`，睇唔到 hex；
+  要細 mapping 才可以直接驗顏色。

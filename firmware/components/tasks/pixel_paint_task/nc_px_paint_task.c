@@ -536,6 +536,10 @@ static bool content_frame_once(void)
     if (s_content.q == NULL) {
         return false;
     }
+    if (nc_px_mode_last_dropped() > 0) {
+        ESP_LOGW(TAG, "mode 解析：丟棄 %u 條 entry（第一條 effect=%s）",
+                 (unsigned)nc_px_mode_last_dropped(), nc_px_mode_last_dropped_name());
+    }
     if (s_content.ready && s_content.layout.njobs > 0) {
         // pair 只讀 effect 的最新 fixed frame；effect 不會直接碰 canvas/ring。
         if (!nc_pipe_effect_copy(&s_eff_frame)) {

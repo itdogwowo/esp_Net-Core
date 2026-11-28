@@ -142,6 +142,11 @@ void      nc_px_show_free(nc_px_show_t *show);
 esp_err_t nc_px_map_count(const char *json, size_t len, uint32_t *ngroups, uint32_t *nsels);
 esp_err_t nc_px_map_parse(const char *json, size_t len, nc_px_map_pool_t *pool,
                           nc_px_map_t *out);
+// 上一次 mode 解析被丟棄的 entry 數／第一個被丟的名字（診斷用：唔可以靜默）
+void nc_px_layer_set_drop_hook(void (*fn)(const char *mode, const char *effect));
+uint32_t nc_px_mode_last_dropped(void);
+const char *nc_px_mode_last_dropped_name(void);
+
 esp_err_t nc_px_mode_count(const char *json, size_t len, uint32_t *nentry);
 esp_err_t nc_px_mode_parse(const char *json, size_t len, nc_px_mode_entry_t *pool,
                            uint32_t cap, nc_px_mode_t *out);
