@@ -133,7 +133,7 @@ static esp_err_t fake_step(nc_plugin_t plugin, uint32_t frame_id)
     return ESP_OK;
 }
 
-static uint8_t s_fb[256];
+static uint8_t s_fb[64];
 
 static esp_err_t fake_frame(nc_plugin_t plugin, const uint8_t **fb, uint32_t *bytes)
 {
@@ -203,7 +203,7 @@ int main(void)
     case_begin("ABI v0 descriptor：fb 放喺 offset 96+4K，容量對得上");
     nc_mod_desc_t d;
     CHECK(nc_plugin_desc_build(64, 65536, &d), "64 px ＋ 64 KB → 砌得成");
-    CHECK(d.px_count == 64 && d.fb_bytes == 256, "px=%u fb_bytes=%u",
+    CHECK(d.px_count == 64 && d.fb_bytes == 64, "px=%u fb_bytes=%u（每值 1 B）",
           (unsigned)d.px_count, (unsigned)d.fb_bytes);
     CHECK(d.fb_off == NC_PLUGIN_FB_OFF && d.sc_off == NC_PLUGIN_SCRATCH_OFF,
           "fb_off=%u sc_off=%u", (unsigned)d.fb_off, (unsigned)d.sc_off);

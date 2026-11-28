@@ -41,7 +41,7 @@ static void case_begin(const char *name)
 int main(void)
 {
     const uint32_t px = 16;
-    const uint32_t bytes = px * NC_PX_NCE_BPP;      // 每 px 4 B（現有固定格式）
+    const uint32_t bytes = px * NC_PX_NCE_BPP;      // 每值 1 B；16 值 = 16 B
 
     case_begin("未初始化／未 publish");
     nc_px_nce_deinit();
@@ -55,7 +55,7 @@ int main(void)
     CHECK(nc_px_nce_init(bytes), "同一個大小再 init 都成功（唔會重複要記憶體）");
     CHECK(!nc_px_nce_latest(&f), "未 publish 過 → false");
 
-    uint8_t a[64];
+    uint8_t a[32];
     for (uint32_t i = 0; i < sizeof(a); i++) {
         a[i] = (uint8_t)(i * 3u + 1u);
     }
@@ -66,7 +66,7 @@ int main(void)
 
     case_begin("第二次 publish → 換手，舊 pointer 仍然完整");
     const uint8_t *old = f.data;
-    uint8_t b[64];
+    uint8_t b[32];
     memset(b, 0xAA, sizeof(b));
     CHECK(nc_px_nce_publish(b, bytes), "第二次 publish 成功");
     CHECK(nc_px_nce_latest(&f) && f.seq == 2, "seq=2");
@@ -75,7 +75,7 @@ int main(void)
     CHECK(memcmp(old, a, bytes) == 0, "舊 pointer 冇被覆蓋（雙緩衝有效）");
 
     case_begin("publish 大過信箱 → 截短，唔會寫爆");
-    uint8_t big[128];
+    uint8_t big[64];
     memset(big, 0x5A, sizeof(big));
     CHECK(nc_px_nce_publish(big, sizeof(big)), "過大仍然 publish（截短）");
     CHECK(nc_px_nce_latest(&f) && f.bytes == bytes, "latest 仍然係信箱大小");

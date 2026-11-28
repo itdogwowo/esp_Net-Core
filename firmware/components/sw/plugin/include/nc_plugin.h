@@ -48,14 +48,14 @@ typedef struct {
     size_t         size;
     uint8_t        fmt;       // NC_PLUGIN_FMT_*
     uint8_t        kind;      // NC_PLUGIN_KIND_*
-    uint16_t       px;        // effect：幀緩衝幾 px（task 可 0）
+    uint16_t       px;        // effect：輸出**值數**（1 值 = 1 B；同 program 的 pixel_hint 同義）
     uint32_t       mem_bytes; // 線性記憶體上限（manifest 宣告；0 = 不限／用預設）
 } nc_plugin_src_t;
 
 // ABI v0 的 descriptor 佈局（見 nc_mod_abi.h）：
 //   0..32   descriptor（host 寫、guest 讀）
 //   96      scratch 起點（預設 4 KB）
-//   96+4K   framebuffer（px × 4 B，canonical R,G,B,W）
+//   96+4K   framebuffer（px × 1 B，0–255；點排列由配對層 write 決定）
 #define NC_PLUGIN_SCRATCH_OFF   NC_MOD_DATA_OFF
 #define NC_PLUGIN_SCRATCH_BYTES (4u * 1024u)
 #define NC_PLUGIN_FB_OFF        (NC_PLUGIN_SCRATCH_OFF + NC_PLUGIN_SCRATCH_BYTES)

@@ -291,8 +291,9 @@ tasks/...            .nct → nc_task_t 的 wrapper
 | 掃描／容器／manifest | ✅ `nc_px_asset_scan`（kind=NCE）＋ `nc_ncd` |
 | 真的跑起來（WAMR） | ✅ `nc_plugin_open/step`（`.nce` 走 `nce_render`） |
 | ABI descriptor（guest 知 fb 喺邊） | ✅ 2026-11-28（`fb_off = 96+4K`、28 B 寫 guest offset 0、`nce_init(0)`） |
-| **buffer 長度** | ✅ 用現有固定格式（用家 2026-11-28）：每 px 4 B → `px×4`；唔使問、唔使 manifest v2 |
+| **buffer 長度** | ✅ 由效果自己決定（例：`led_n × 通道數`）＝ manifest 的 `px`＝**值數**；每值 **1 B**。*唔係* 4 B/px |
 | **FB → 值流** | 🟡 信箱（`nc_px_nce`：雙緩衝／seq／`<<4`）＋ 工具 `nc_plugin_frame()` 已有、host 測過；**未接** layout／effect task |
+| **值數上限** | ⚠ `NC_NCD_MAX_PX`／`NC_MOD_MAX_PIXELS` 仍然 4,096；9,600 px × rgbw = 38,400 值會**被拒**。接線前要為 EFFECT 提高（或另開 `values` 欄位）|
 | **配對層驗證** | ⬜ 建 job 時驗 `nv` 夠 `write` 用（唔夠 = 明示 `skip`，唔好靜默黑） |
 
 > 唔再考慮「四條 aprog」：值流模型已經係配對層的語言，四條 aprog 反而係把格式重新

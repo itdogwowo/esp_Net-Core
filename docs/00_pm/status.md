@@ -11620,3 +11620,22 @@ layout cache 改 name_id＋dictionary CRC；舊 cache 版本++。Phase 1 模組�
 > 接線之前，引用 `.nce` 的 mode 仍然係「skip_prog（有數冇畫面）」——唔會靜默黑。
 
 **驗證（idf=v6.1.1 macOS）**：host 29/29；`--tests` build ✔。未上板。
+
+---
+
+### 7.348 2026-11-28（更正：`.nce` 是「值流」，不是 4 B/px）
+
+用家指正：**現有 program 效果係「一個正弦值／每 px」，配對層再決定寫去邊個通道**；
+`.nce` 一樣 —— 佢交的是一串 **0–255 值**，長度由效果自己（例如 `led_n × 通道數`）決定，
+排列方式（`rgb` / `r` / `g` / `b` / `w` / `ww`）由用户層透過配對層決定。
+
+**所以 §7.347 的「每 px 4 B」係錯的**，已改：
+- `nc_plugin_src_t.px` 語義＝**輸出值數**（同 program 的 `pixel_hint` 同義）；
+- descriptor `fb_bytes = px`（每值 **1 B**），唔再 ×4；
+- `NC_PX_NCE_BPP` = 1；信箱大小＝值數；
+- 測試期望跟住改（64 值 → 64 B）。
+
+**已知限制（接線前要處理）**：`NC_NCD_MAX_PX`／`NC_MOD_MAX_PIXELS` 仍然 4,096；
+9,600 px × rgbw = 38,400 值會被拒 → 要為 EFFECT 提高上限，或者 manifest 另開 `values`。
+
+**驗證**：host 29/29；`--tests` build ✔。未上板。

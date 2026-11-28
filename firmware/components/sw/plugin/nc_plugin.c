@@ -125,7 +125,8 @@ bool nc_plugin_desc_build(uint16_t px, uint32_t mem_bytes, nc_mod_desc_t *out)
         return false;
     }
     memset(out, 0, sizeof(*out));
-    const uint32_t fb_bytes = (uint32_t)px * 4u;
+    // `.nce` 交的是「一串 0–255」，每值 1 B；格式（r/g/b/w/rgb/rgbw）由配對層決定。
+    const uint32_t fb_bytes = (uint32_t)px;
     const uint32_t need = NC_PLUGIN_FB_OFF + fb_bytes;
     if (mem_bytes != 0 && need > mem_bytes) {
         return false;                  // fb 放唔落：唔好開一個一定會 trap 的插件
