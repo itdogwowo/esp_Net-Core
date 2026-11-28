@@ -291,8 +291,8 @@ tasks/...            .nct → nc_task_t 的 wrapper
 | 掃描／容器／manifest | ✅ `nc_px_asset_scan`（kind=NCE）＋ `nc_ncd` |
 | 真的跑起來（WAMR） | ✅ `nc_plugin_open/step`（`.nce` 走 `nce_render`） |
 | ABI descriptor（guest 知 fb 喺邊） | ✅ 2026-11-28（`fb_off = 96+4K`、28 B 寫 guest offset 0、`nce_init(0)`） |
-| **buffer 長度** | ⬜ 要定：manifest 宣告 `values`（要 bump manifest v2）定暫時 `px×4` |
-| **FB → 值流** | ⬜ adapter：每幀把 buffer `<<4` 入 aprog 值流（`nv` = buffer 值數） |
+| **buffer 長度** | ✅ 用現有固定格式（用家 2026-11-28）：每 px 4 B → `px×4`；唔使問、唔使 manifest v2 |
+| **FB → 值流** | 🟡 信箱（`nc_px_nce`：雙緩衝／seq／`<<4`）＋ 工具 `nc_plugin_frame()` 已有、host 測過；**未接** layout／effect task |
 | **配對層驗證** | ⬜ 建 job 時驗 `nv` 夠 `write` 用（唔夠 = 明示 `skip`，唔好靜默黑） |
 
 > 唔再考慮「四條 aprog」：值流模型已經係配對層的語言，四條 aprog 反而係把格式重新

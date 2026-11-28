@@ -11594,3 +11594,29 @@ layout cache 改 name_id＋dictionary CRC；舊 cache 版本++。Phase 1 模組�
 **驗證（idf=v6.1.1 macOS）**
 - host tests 28/28；`--tests` build ✔；release build ✔ 799,376 B。
 - 未上板：descriptor 寫入／`nce_init` 真機未驗。
+
+---
+
+### 7.347 2026-11-28（`.nce` 值流信箱＋工具交 framebuffer；格式用現有 px×4）
+
+**用家定案**：`.nce` 交一串 0–255，buffer **唔描述格式**；格式由配對層 `write` 決定。
+長度就用**現有固定格式**：每 px 4 B（R,G,B,W）→ `px×4`，唔使另外定（唔使 manifest v2）。
+
+**做咗**
+- `sw/plugin`：`nc_plugin_frame(p, &fb, &bytes)`（vtable 加 `frame` hook）；
+  WAMR backebd 用 descriptor 的 `fb_off`／`fb_bytes`（`wasm_runtime_addr_app_to_native`），
+  slot 記住 `fb_bytes`。
+- `sw/pixel/nc_px_nce.{h,c}`：**值流信箱**（雙緩衝＋原子換手＋seq；writer ncm task、
+  reader effect task）＋ `nc_px_nce_to_vals()`（0–255 → `<<4` → 12-bit，`>>4` 復原無損）。
+- 測試：新增 `nce_test`（信箱 init／publish/latest／換手／截短／轉換／deinit）；
+  `pluginEffect_test` 加 `frame()` 檢查。host **29/29**。
+- `sw/pixel` CMake 加 `nc_px_nce.c`。
+
+**未做（接線）**
+1. `nc_px_layout` 為 NCE asset 建 aprog（`nv = px×4`，唔 compile program）；
+2. `pixel_effect_task` 見到 NCE aprog 就由信箱取值（`nc_px_nce_to_vals`），唔用 program；
+3. ncm task 每 tick 之後 `nc_plugin_frame()` → `nc_px_nce_publish()`。
+
+> 接線之前，引用 `.nce` 的 mode 仍然係「skip_prog（有數冇畫面）」——唔會靜默黑。
+
+**驗證（idf=v6.1.1 macOS）**：host 29/29；`--tests` build ✔。未上板。

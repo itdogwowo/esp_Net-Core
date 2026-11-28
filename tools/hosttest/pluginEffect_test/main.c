@@ -133,6 +133,16 @@ static esp_err_t fake_step(nc_plugin_t plugin, uint32_t frame_id)
     return ESP_OK;
 }
 
+static uint8_t s_fb[256];
+
+static esp_err_t fake_frame(nc_plugin_t plugin, const uint8_t **fb, uint32_t *bytes)
+{
+    (void)plugin;
+    *fb = s_fb;
+    *bytes = sizeof(s_fb);
+    return ESP_OK;
+}
+
 static void fake_close(nc_plugin_t plugin)
 {
     (void)plugin;
@@ -144,6 +154,7 @@ static const nc_plugin_backend_t FAKE = {
     .init = fake_init,
     .open = fake_open,
     .step = fake_step,
+    .frame = fake_frame,
     .close = fake_close,
     .deinit = NULL,
 };
@@ -220,9 +231,25 @@ int main(void)
     CHECK(strstr(buf, "\"bad\":1") != NULL, "status bad=1（存在但被停用）");
     CHECK(strstr(buf, "\"ok\":0") != NULL, "status ok=0");
 
+    case_begin("工具交 framebuffer（0–255，px×4）");
+    nc_plugin_t h = NULL;
+    const nc_plugin_src_t src2 = {
+        .name = "e2", .payload = (const uint8_t *)"x", .size = 1,
+        .fmt = NC_PLUGIN_FMT_WASM, .kind = NC_PLUGIN_KIND_EFFECT,
+        .px = 64, .mem_bytes = 65536,
+    };
+    CHECK(nc_plugin_open(&h, &src2) == ESP_OK, "直接開一個插件");
+    const uint8_t *fb = NULL;
+    uint32_t nb = 0;
+    CHECK(nc_plugin_frame(h, &fb, &nb) == ESP_OK, "frame() 成功");
+    CHECK(fb != NULL && nb == sizeof(s_fb), "fb=%p bytes=%u", (const void *)fb, (unsigned)nb);
+    nc_plugin_close(h);
+
     case_begin("卸載：工具 close 一次");
+    const int closes_before = s_closes;
     CHECK(nc_mod_unload("e") == ESP_OK, "unload 成功");
-    CHECK(s_closes == 1, "close 一次（實際 %d）", s_closes);
+    CHECK(s_closes == closes_before + 1, "close 多一次（實際 %d → %d）",
+          closes_before, s_closes);
 
     printf("\n%s（%d 個失敗）\n", s_fail ? "FAIL" : "ALL PASS", s_fail);
     return s_fail ? 1 : 0;

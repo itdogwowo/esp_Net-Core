@@ -6,6 +6,7 @@
 # 這一層的 .c 同時被 firmware 與 host 測試編譯（tools/hosttest/pixel_test、pxEngine_test、pxProgram_test）。
 idf_component_register(
     SRCS "nc_pixel_q.c" "nc_pixel_encode.c" "nc_pixel_registry.c" "nc_pixel_bench.c"
+         "nc_px_nce.c"
          "engine/nc_px_engine_core.c" "engine/nc_px_engine_tables.c"
          "engine/nc_px_engine_program.c"
          "asset/nc_px_asset.c" "asset/nc_px_asset_scan.c" "asset/nc_px_json.c"

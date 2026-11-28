@@ -45,6 +45,7 @@ typedef struct {
     wasm_exec_env_t      env;
     wasm_function_inst_t fn_tick;
     char                 name[NC_PLUGIN_NAME_MAX];
+    uint32_t             fb_bytes;      // effect：framebuffer 大小（0 = 冇）
     bool                 is_task;
     bool                 used;
 } wamr_slot_t;
@@ -437,6 +438,7 @@ static esp_err_t engine_open(nc_plugin_t *out, const nc_plugin_src_t *src)
             return ESP_ERR_INVALID_STATE;
         }
         memcpy(base, &desc, sizeof(desc));       // 0..28（28..32 係 padding）
+        slot->fb_bytes = desc.fb_bytes;
     }
 
     const char *tick_name = is_task ? NC_MOD_EXPORT_TASK_TICK : NC_MOD_EXPORT_RENDER;
@@ -521,6 +523,21 @@ static esp_err_t engine_step(nc_plugin_t p, uint32_t frame_id)
     return ESP_OK;
 }
 
+static esp_err_t engine_frame(nc_plugin_t p, const uint8_t **fb, uint32_t *bytes)
+{
+    wamr_slot_t *slot = slot_of(p);
+    if (slot == NULL || slot->fb_bytes == 0 || slot->inst == NULL) {
+        return ESP_ERR_NOT_SUPPORTED;
+    }
+    uint8_t *base = wasm_runtime_addr_app_to_native(slot->inst, NC_PLUGIN_FB_OFF);
+    if (base == NULL) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    *fb = base;
+    *bytes = slot->fb_bytes;
+    return ESP_OK;
+}
+
 static void engine_close(nc_plugin_t p)
 {
     wamr_slot_t *slot = slot_of(p);
@@ -558,6 +575,7 @@ static const nc_plugin_backend_t s_wamr_backend = {
     .init = engine_init,
     .open = engine_open,
     .step = engine_step,
+    .frame = engine_frame,
     .close = engine_close,
     .deinit = engine_deinit,
 };

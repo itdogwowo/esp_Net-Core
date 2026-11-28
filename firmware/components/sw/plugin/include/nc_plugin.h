@@ -73,6 +73,9 @@ typedef struct {
     esp_err_t (*open)(nc_plugin_t *out, const nc_plugin_src_t *src);
     // 每次 tick 叫一次（效果＝一幀；任務＝一次 task_tick）。非 0 → 客戶端標 bad。
     esp_err_t (*step)(nc_plugin_t p, uint32_t frame_id);
+    // 可選：效果插件交 framebuffer（guest linear memory 內，位址固定到下一幀）。
+    // 回非 0 = 冇 drawable（任務模組／未 instantiate）。
+    esp_err_t (*frame)(nc_plugin_t p, const uint8_t **fb, uint32_t *bytes);
     // 回收（deinstantiate／unload）。可以 NULL。
     void      (*close)(nc_plugin_t p);
     // 收工（destroy runtime）。可以 NULL。
@@ -92,6 +95,8 @@ const char *nc_plugin_backend_name(void);   // 冇 backend → "none"
 // ── 實例 ──
 esp_err_t nc_plugin_open(nc_plugin_t *out, const nc_plugin_src_t *src);
 esp_err_t nc_plugin_step(nc_plugin_t p, uint32_t frame_id);
+// 效果插件的 framebuffer（0–255 × px × 4）。任務插件／冇 backend → ESP_ERR_NOT_SUPPORTED。
+esp_err_t nc_plugin_frame(nc_plugin_t p, const uint8_t **fb, uint32_t *bytes);
 void      nc_plugin_close(nc_plugin_t p);
 void      nc_plugin_deinit(void);           // 所有實例已 close 之後才叫
 

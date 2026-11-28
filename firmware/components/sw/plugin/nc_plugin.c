@@ -80,6 +80,17 @@ esp_err_t nc_plugin_step(nc_plugin_t p, uint32_t frame_id)
     return s_be->step(p, frame_id);
 }
 
+esp_err_t nc_plugin_frame(nc_plugin_t p, const uint8_t **fb, uint32_t *bytes)
+{
+    if (fb == NULL || bytes == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (!nc_plugin_ready() || p == NULL || s_be->frame == NULL) {
+        return ESP_ERR_NOT_SUPPORTED;
+    }
+    return s_be->frame(p, fb, bytes);
+}
+
 void nc_plugin_close(nc_plugin_t p)
 {
     if (p != NULL && s_be != NULL && s_be->close != NULL) {
