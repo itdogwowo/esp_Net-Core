@@ -23,6 +23,7 @@
 #include "nc_plan.h"
 #include "nc_ota_action.h"
 #include "nc_plugin.h"
+#include "nc_px_nce.h"
 #include "nc_res.h"
 #include "nc_status.h"
 #include "nc_task.h"
@@ -38,6 +39,22 @@ static const char *TAG = "ncm";
 // 掃描結果：declare 時掃一次，載入時用同一份（B06 → B08 之間唔會變）。
 static nc_mod_scan_t s_scan;
 static SemaphoreHandle_t s_boot_done;
+
+// 每 tick：效果插件的 framebuffer → pixel 值流信箱（`.nce` 合成）。
+// （消費端 wiring 見 gap-review §6.7；呢一步只做「產出」。）
+static void ncm_nce_publish(void *plugin)
+{
+    const uint8_t *fb = NULL;
+    uint32_t bytes = 0;
+    if (plugin == NULL || nc_plugin_frame((nc_plugin_t)plugin, &fb, &bytes) != ESP_OK) {
+        return;
+    }
+    if (fb == NULL || bytes == 0) {
+        return;
+    }
+    (void)nc_px_nce_init(bytes);           // 冪等：同一個大小唔會重新要記憶體
+    (void)nc_px_nce_publish(fb, bytes);
+}
 
 static const nc_task_provide_t s_provides[] = {
     { .name = "ncm.info", .kind = NC_PROVIDE_JSON, .desc = "live 模組 / arena / 每個實例",
@@ -136,6 +153,7 @@ static esp_err_t ncm_on_start(const nc_task_res_view_t *res, int n)
     }
     // 兩個註冊都要喺 start_all 之內完成：main 之後才 nc_task_post_run()、
     // 主機之後才問 STATUS_GET。
+    nc_mod_set_tick_hook(ncm_nce_publish);
     (void)nc_task_post_register(ncm_post_start);
     (void)nc_status_register("ncm", nc_mod_status_json);
     return ESP_OK;

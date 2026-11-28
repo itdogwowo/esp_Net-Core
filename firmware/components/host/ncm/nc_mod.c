@@ -133,6 +133,7 @@ static nc_mod_t *volatile s_live;
 static volatile uint32_t s_frame;
 static char     s_retire[NC_MOD_NAME_MAX];   // 等兩幀才釋放的模組
 static uint32_t s_retire_at;
+static nc_mod_tick_hook_t s_tick_hook;
 static int      s_task_core = 1;
 static int      s_task_prio = 3;
 
@@ -947,6 +948,11 @@ nc_mod_t *nc_mod_live(void)
     return s_live;
 }
 
+void nc_mod_set_tick_hook(nc_mod_tick_hook_t fn)
+{
+    s_tick_hook = fn;
+}
+
 uint32_t nc_mod_frame_id(void)
 {
     return s_frame;
@@ -1008,6 +1014,9 @@ uint32_t nc_mod_tick(void)
 
     const int64_t t0 = mod_now_us();
     const esp_err_t err = nc_plugin_step(ncm->plugin, s_frame);
+    if (err == ESP_OK && s_tick_hook != NULL) {
+        s_tick_hook(ncm->plugin);          // 例如把 .nce framebuffer 交去值流信箱
+    }
     const int64_t dt = mod_now_us() - t0;
 
     if (err != ESP_OK) {

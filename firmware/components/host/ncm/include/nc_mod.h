@@ -130,6 +130,11 @@ esp_err_t nc_mod_load_ex(const char *path, int level);
 // ── task ──
 void nc_mod_task(void *arg);          // FreeRTOS 迴圈（host 測試不編）
 uint32_t nc_mod_tick(void);           // 一幀：退休 + render + 預算；host 測試直接呼叫
+
+// 每 tick step 完之後叫一次（給上層把 framebuffer 交出去，例如 .nce 值流）。
+// plugin 係插件把手（opaque），上層自己轉做 nc_plugin_frame()。
+typedef void (*nc_mod_tick_hook_t)(void *plugin);
+void nc_mod_set_tick_hook(nc_mod_tick_hook_t fn);
 uint32_t nc_mod_frame_id(void);
 
 // ── 狀態 / 診斷 ──

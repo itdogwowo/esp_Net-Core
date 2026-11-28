@@ -5,5 +5,5 @@
 idf_component_register(
     SRCS "nc_ncm_boot.c"
     INCLUDE_DIRS "."
-    REQUIRES nc4 task_manager mem ncm plugin ota_action esp_timer freertos log
+    REQUIRES nc4 task_manager mem ncm plugin pixel ota_action esp_timer freertos log
 )

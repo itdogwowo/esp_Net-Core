@@ -292,7 +292,7 @@ tasks/...            .nct → nc_task_t 的 wrapper
 | 真的跑起來（WAMR） | ✅ `nc_plugin_open/step`（`.nce` 走 `nce_render`） |
 | ABI descriptor（guest 知 fb 喺邊） | ✅ 2026-11-28（`fb_off = 96+4K`、28 B 寫 guest offset 0、`nce_init(0)`） |
 | **buffer 長度** | ✅ 由效果自己決定（例：`led_n × 通道數`）＝ manifest 的 `px`＝**值數**；每值 **1 B**。*唔係* 4 B/px |
-| **FB → 值流** | 🟡 信箱（`nc_px_nce`：雙緩衝／seq／`<<4`）＋ 工具 `nc_plugin_frame()` 已有、host 測過；**未接** layout／effect task |
+| **FB → 值流** | 🟡 信箱＋工具已 host 測過；**產出**已接（ncm tick → `nc_plugin_frame()` → `nc_px_nce_publish()`）；**消費**（layout aprog／effect task）未接 |
 | **值數上限** | ⚠ `NC_NCD_MAX_PX`／`NC_MOD_MAX_PIXELS` 仍然 4,096；9,600 px × rgbw = 38,400 值會**被拒**。接線前要為 EFFECT 提高（或另開 `values` 欄位）|
 | **配對層驗證** | ⬜ 建 job 時驗 `nv` 夠 `write` 用（唔夠 = 明示 `skip`，唔好靜默黑） |
 

@@ -11690,3 +11690,20 @@ layout cache 改 name_id＋dictionary CRC；舊 cache 版本++。Phase 1 模組�
 - `nc_status_value(key,…)`：自註冊區塊（ncm）回到 key 表最後一頁，頁界穩定。
 - 新 host 測試 `status_test`（註冊／重名／NULL／取値／append／keys 過濾）→ **30/30**。
 - 已知：`timeout_ms` 暫 0（burst）；頁界測試（拼接 == 一次砌晒）未做。
+
+---
+
+### 7.352 2026-11-28（`.nce` 產出側接線：ncm tick → 值流信箱）
+
+- `nc_mod` 加 tick hook：`nc_mod_set_tick_hook(fn)`，每次 `nc_plugin_step()` 成功後
+  用插件把手叫一次（唔識 pixel）。
+- `test_ncm_action` 註冊 `ncm_nce_publish()`：`nc_plugin_frame()` →
+  `nc_px_nce_init(bytes)`（冪等）→ `nc_px_nce_publish()`。
+- CMake：test_ncm_action 加 `pixel` 依賴。
+
+**未接（消費側）**：
+1. `nc_px_layout` 為 NCE asset 建 aprog（`nv = nc_px_nce_bytes()`；信箱未 init → 照舊 skip_prog）；
+2. `pixel_effect_task` 由信箱取值（`nc_px_nce_to_vals`）而唔係 program_value。
+   注意 host 測試（pxLayout_test）冇 link `nc_px_nce.c`，要 weak reference 或者補 shim。
+
+**驗證**：`--tests` build ✔；host 30/30。未上板。
