@@ -197,21 +197,21 @@ static void bench_report(nc4_ctx_t *ctx)
     }
 }
 
-static void on_bench_ready(nc4_ctx_t *ctx, const nc4_frame_t *f)
+static void __attribute__((unused)) on_bench_ready(nc4_ctx_t *ctx, const nc4_frame_t *f)
 {
     (void)f;
     s_bench_ok = 0;
     bench_report(ctx);
 }
 
-static void on_bench_data(nc4_ctx_t *ctx, const nc4_frame_t *f)
+static void __attribute__((unused)) on_bench_data(nc4_ctx_t *ctx, const nc4_frame_t *f)
 {
     (void)ctx;
     (void)f;
     s_bench_ok++;   // CRC 已在 parser 驗過；到這裡就是「收到一包合法資料」
 }
 
-static void on_bench_result(nc4_ctx_t *ctx, const nc4_frame_t *f)
+static void __attribute__((unused)) on_bench_result(nc4_ctx_t *ctx, const nc4_frame_t *f)
 {
     (void)f;
     bench_report(ctx);
@@ -219,7 +219,7 @@ static void on_bench_result(nc4_ctx_t *ctx, const nc4_frame_t *f)
 }
 
 // ── 0xF001 專屬測試：解碼 / 組包（純 CPU）──
-static void on_dev_bench(nc4_ctx_t *ctx, const nc4_frame_t *f)
+static void __attribute__((unused)) on_dev_bench(nc4_ctx_t *ctx, const nc4_frame_t *f)
 {
     uint16_t size = 8192, iters = 100;
     uint8_t mode = 0;
@@ -415,7 +415,7 @@ static void hub_bench_reader(void *arg)
     vTaskDelete(NULL);
 }
 
-static void on_hub_bench(nc4_ctx_t *ctx, const nc4_frame_t *f)
+static void __attribute__((unused)) on_hub_bench(nc4_ctx_t *ctx, const nc4_frame_t *f)
 {
     uint32_t iters = 20000;
     if (f->len >= 4) {
@@ -505,14 +505,14 @@ static void on_hub_bench(nc4_ctx_t *ctx, const nc4_frame_t *f)
 
 static volatile uint32_t s_loop_rx;
 
-static void on_loop_ping(nc4_ctx_t *ctx, const nc4_frame_t *f)
+static void __attribute__((unused)) on_loop_ping(nc4_ctx_t *ctx, const nc4_frame_t *f)
 {
     (void)ctx;
     (void)f;
     __atomic_add_fetch(&s_loop_rx, 1, __ATOMIC_RELAXED);
 }
 
-static void on_uart_loop(nc4_ctx_t *ctx, const nc4_frame_t *f)
+static void __attribute__((unused)) on_uart_loop(nc4_ctx_t *ctx, const nc4_frame_t *f)
 {
     uint16_t frames = 50, size = 32;
     if (f->len >= 2) frames = (uint16_t)(f->data[0] | (f->data[1] << 8));
@@ -580,7 +580,7 @@ static void uart_stream_task(void *arg)
     vTaskDelete(NULL);
 }
 
-static void on_uart_stream(nc4_ctx_t *ctx, const nc4_frame_t *f)
+static void __attribute__((unused)) on_uart_stream(nc4_ctx_t *ctx, const nc4_frame_t *f)
 {
     uint16_t frames = 200, size = 64;
     if (f->len >= 2) frames = (uint16_t)(f->data[0] | (f->data[1] << 8));
@@ -608,7 +608,7 @@ static void on_uart_stream(nc4_ctx_t *ctx, const nc4_frame_t *f)
 #define NC4_CMD_UART_INJECT 0xF00F
 #define UART_INJECT_PORT    UART_NUM_1
 
-static void on_uart_inject(nc4_ctx_t *ctx, const nc4_frame_t *f)
+static void __attribute__((unused)) on_uart_inject(nc4_ctx_t *ctx, const nc4_frame_t *f)
 {
     if (f->len < 1) {
         reply_json(ctx, NC4_CMD_HUB_RSP, "{\"err\":\"args\"}");
@@ -621,7 +621,7 @@ static void on_uart_inject(nc4_ctx_t *ctx, const nc4_frame_t *f)
     reply_json(ctx, NC4_CMD_HUB_RSP, json);
 }
 
-static void on_loop_stat(nc4_ctx_t *ctx, const nc4_frame_t *f)
+static void __attribute__((unused)) on_loop_stat(nc4_ctx_t *ctx, const nc4_frame_t *f)
 {
     (void)f;
     char json[96];
@@ -632,7 +632,7 @@ static void on_loop_stat(nc4_ctx_t *ctx, const nc4_frame_t *f)
 }
 
 // ── 0xF008 匯流排統計（證明 copy 有沒有真的消失）──
-static void on_bus_stats(nc4_ctx_t *ctx, const nc4_frame_t *f)
+static void __attribute__((unused)) on_bus_stats(nc4_ctx_t *ctx, const nc4_frame_t *f)
 {
     if (f->len >= 1 && f->data[0] != 0) {
         nc4_bus_stats_reset();
@@ -655,7 +655,7 @@ static void on_bus_stats(nc4_ctx_t *ctx, const nc4_frame_t *f)
 
 
 // 0xF00A：改 rx_split / rx_core / frame_align（寫 NVS，下次開機生效）
-static void on_net_tune(nc4_ctx_t *ctx, const nc4_frame_t *f)
+static void __attribute__((unused)) on_net_tune(nc4_ctx_t *ctx, const nc4_frame_t *f)
 {
     if (f->len < 2) {
         reply_json(ctx, NC4_CMD_HUB_RSP, "{\"err\":\"args\"}");
@@ -737,7 +737,7 @@ static void tx_bench_packer(void *arg)
     vTaskDelete(NULL);
 }
 
-static void on_tx_bench(nc4_ctx_t *ctx, const nc4_frame_t *f)
+static void __attribute__((unused)) on_tx_bench(nc4_ctx_t *ctx, const nc4_frame_t *f)
 {
     uint32_t frames = 2000;
     uint16_t size = 8192;
@@ -878,7 +878,7 @@ static void on_tx_bench(nc4_ctx_t *ctx, const nc4_frame_t *f)
 // 以前會回半截 JSON，主機 parse 失敗之餘，完全唔知係「截斷」。
 #define NC4_CMD_BIG_REPLY  0xF01A
 
-static void on_big_reply(nc4_ctx_t *ctx, const nc4_frame_t *f)
+static void __attribute__((unused)) on_big_reply(nc4_ctx_t *ctx, const nc4_frame_t *f)
 {
     uint16_t n = 3000;
     if (f->len >= 2) {
@@ -904,7 +904,7 @@ static void on_big_reply(nc4_ctx_t *ctx, const nc4_frame_t *f)
 //（配合 0xF00C 看 UART 迴路的 rx 計數）。
 #define NC4_CMD_LINK_FWD   0xF01B
 
-static void on_link_fwd(nc4_ctx_t *ctx, const nc4_frame_t *f)
+static void __attribute__((unused)) on_link_fwd(nc4_ctx_t *ctx, const nc4_frame_t *f)
 {
     if (f->len < 4) {
         reply_json(ctx, NC4_CMD_HUB_RSP, "{\"err\":\"args\"}");
@@ -960,7 +960,7 @@ static uint32_t bench_mbps(size_t bytes, int iters, int64_t us)
     return (uint32_t)((double)bytes * (double)iters / (double)us);
 }
 
-static void on_mem_bench(nc4_ctx_t *ctx, const nc4_frame_t *f)
+static void __attribute__((unused)) on_mem_bench(nc4_ctx_t *ctx, const nc4_frame_t *f)
 {
     uint16_t kb = 256;
     uint16_t iters = 4;
@@ -1058,7 +1058,7 @@ static void on_mem_bench(nc4_ctx_t *ctx, const nc4_frame_t *f)
 // 這是 surface/audio 要不要分塊、要不要內部 staging 的實測依據。
 #define NC4_CMD_TILE_BENCH  0xF01D
 
-static void on_tile_bench(nc4_ctx_t *ctx, const nc4_frame_t *f)
+static void __attribute__((unused)) on_tile_bench(nc4_ctx_t *ctx, const nc4_frame_t *f)
 {
     uint16_t total_kb = 40;
     uint16_t tile_kb = 8;
@@ -1222,7 +1222,7 @@ static void stage_competitor_end(stage_competitor_t *c)
     }
 }
 
-static void on_stage_bench(nc4_ctx_t *ctx, const nc4_frame_t *f)
+static void __attribute__((unused)) on_stage_bench(nc4_ctx_t *ctx, const nc4_frame_t *f)
 {
     uint32_t bytes = 64 * 1024;
     uint16_t iters = 8;
@@ -1561,7 +1561,7 @@ static bool hub_stress_case(hub_stress_t *s, uint32_t n, uint32_t iters,
 // 每核一份，避免兩核同時進來時共用同一塊。
 static char s_hub_stress_json[2][1200];
 
-static void on_hub_stress(nc4_ctx_t *ctx, const nc4_frame_t *f)
+static void __attribute__((unused)) on_hub_stress(nc4_ctx_t *ctx, const nc4_frame_t *f)
 {
     static volatile bool busy;
     if (busy) {
@@ -1762,7 +1762,7 @@ static bool duplex_run(uint32_t slot, uint32_t n, uint32_t ms, duplex_result_t *
     return true;
 }
 
-static void on_hub_duplex(nc4_ctx_t *ctx, const nc4_frame_t *f)
+static void __attribute__((unused)) on_hub_duplex(nc4_ctx_t *ctx, const nc4_frame_t *f)
 {
     if (s_duplex_busy) {
         reply_json(ctx, NC4_CMD_HUB_RSP, "{\"err\":\"busy\"}");
@@ -1826,7 +1826,7 @@ static const struct {
     { 64, 2 },   { 64, 3 },  { 64, 16 },
 };
 
-static void on_hub_sweep(nc4_ctx_t *ctx, const nc4_frame_t *f)
+static void __attribute__((unused)) on_hub_sweep(nc4_ctx_t *ctx, const nc4_frame_t *f)
 {
     if (s_duplex_busy) {
         reply_json(ctx, NC4_CMD_HUB_RSP, "{\"err\":\"busy\"}");
@@ -1970,7 +1970,7 @@ static void d4_rx_task(void *arg)
 
 static char s_d4_json[2][1400];
 
-static void on_hub_duplex4(nc4_ctx_t *ctx, const nc4_frame_t *f)
+static void __attribute__((unused)) on_hub_duplex4(nc4_ctx_t *ctx, const nc4_frame_t *f)
 {
     if (s_duplex_busy) {
         reply_json(ctx, NC4_CMD_HUB_RSP, "{\"err\":\"busy\"}");
@@ -2111,7 +2111,7 @@ static void on_hub_duplex4(nc4_ctx_t *ctx, const nc4_frame_t *f)
 
 static char s_single_json[2][1000];
 
-static void on_hub_single(nc4_ctx_t *ctx, const nc4_frame_t *f)
+static void __attribute__((unused)) on_hub_single(nc4_ctx_t *ctx, const nc4_frame_t *f)
 {
     if (s_duplex_busy) {
         reply_json(ctx, NC4_CMD_HUB_RSP, "{\"err\":\"busy\"}");
@@ -2324,7 +2324,7 @@ static void mesh_task(void *arg)
     vTaskDelete(NULL);
 }
 
-static void on_hub_mesh(nc4_ctx_t *ctx, const nc4_frame_t *f)
+static void __attribute__((unused)) on_hub_mesh(nc4_ctx_t *ctx, const nc4_frame_t *f)
 {
     if (s_duplex_busy) {
         reply_json(ctx, NC4_CMD_HUB_RSP, "{\"err\":\"busy\"}");
@@ -2490,7 +2490,7 @@ static bool gpio_pin_ok(int pin)
 // 用嚟同外掛 wasm 模組做「同 workload」對照（見 docs/03_notes/module-adoption.md）。
 // payload: iters(u32)；回 0xF004 {"iters":N,"us":X,"sum":Y}
 #define NC4_CMD_CPU_BURN 0xF050
-static void on_cpu_burn(nc4_ctx_t *ctx, const nc4_frame_t *f)
+static void __attribute__((unused)) on_cpu_burn(nc4_ctx_t *ctx, const nc4_frame_t *f)
 {
     uint32_t iters = 50000;
     if (f->len >= 4) {
@@ -2518,7 +2518,7 @@ static void on_cpu_burn(nc4_ctx_t *ctx, const nc4_frame_t *f)
     reply_json(ctx, NC4_CMD_HUB_RSP, json);
 }
 
-static void on_gpio_cfg(nc4_ctx_t *ctx, const nc4_frame_t *f)
+static void __attribute__((unused)) on_gpio_cfg(nc4_ctx_t *ctx, const nc4_frame_t *f)
 {
     if (f->len < 4) {
         reply_json(ctx, NC4_CMD_HUB_RSP, "{\"err\":\"args\"}");
@@ -2550,7 +2550,7 @@ static void on_gpio_cfg(nc4_ctx_t *ctx, const nc4_frame_t *f)
     reply_json(ctx, NC4_CMD_HUB_RSP, json);
 }
 
-static void on_gpio_set(nc4_ctx_t *ctx, const nc4_frame_t *f)
+static void __attribute__((unused)) on_gpio_set(nc4_ctx_t *ctx, const nc4_frame_t *f)
 {
     if (f->len < 2) {
         reply_json(ctx, NC4_CMD_HUB_RSP, "{\"err\":\"args\"}");
@@ -2568,7 +2568,7 @@ static void on_gpio_set(nc4_ctx_t *ctx, const nc4_frame_t *f)
     reply_json(ctx, NC4_CMD_HUB_RSP, json);
 }
 
-static void on_gpio_get(nc4_ctx_t *ctx, const nc4_frame_t *f)
+static void __attribute__((unused)) on_gpio_get(nc4_ctx_t *ctx, const nc4_frame_t *f)
 {
     if (f->len < 1) {
         reply_json(ctx, NC4_CMD_HUB_RSP, "{\"err\":\"args\"}");
@@ -2604,7 +2604,7 @@ static void on_gpio_get(nc4_ctx_t *ctx, const nc4_frame_t *f)
 #define NC4_CMD_HW_SNAP  0xF036
 #define NC4_CMD_HW_INFO  0xF037
 
-static void on_hw_gpio(nc4_ctx_t *ctx, const nc4_frame_t *f)
+static void __attribute__((unused)) on_hw_gpio(nc4_ctx_t *ctx, const nc4_frame_t *f)
 {
     if (f->len < 2) {
         reply_json(ctx, NC4_CMD_HUB_RSP, "{\"err\":\"args\"}");
@@ -2639,7 +2639,7 @@ static void on_hw_gpio(nc4_ctx_t *ctx, const nc4_frame_t *f)
     reply_json(ctx, NC4_CMD_HUB_RSP, j);
 }
 
-static void on_hw_snap(nc4_ctx_t *ctx, const nc4_frame_t *f)
+static void __attribute__((unused)) on_hw_snap(nc4_ctx_t *ctx, const nc4_frame_t *f)
 {
     (void)f;
     nc_hw_gpio_snap_t s;
@@ -2656,7 +2656,7 @@ static void on_hw_snap(nc4_ctx_t *ctx, const nc4_frame_t *f)
     reply_json(ctx, NC4_CMD_HUB_RSP, j);
 }
 
-static void on_hw_info(nc4_ctx_t *ctx, const nc4_frame_t *f)
+static void __attribute__((unused)) on_hw_info(nc4_ctx_t *ctx, const nc4_frame_t *f)
 {
     (void)f;
     char j[768];
@@ -2683,7 +2683,7 @@ static void pwm_report(nc4_ctx_t *ctx, int idx, esp_err_t e)
     reply_json(ctx, NC4_CMD_HUB_RSP, j);
 }
 
-static void on_pwm_stay(nc4_ctx_t *ctx, const nc4_frame_t *f)
+static void __attribute__((unused)) on_pwm_stay(nc4_ctx_t *ctx, const nc4_frame_t *f)
 {
     if (f->len < 1) {
         reply_json(ctx, NC4_CMD_HUB_RSP, "{\"err\":\"args\"}");
@@ -2693,7 +2693,7 @@ static void on_pwm_stay(nc4_ctx_t *ctx, const nc4_frame_t *f)
     pwm_report(ctx, idx, nc_pwm_drv_stay(idx));
 }
 
-static void on_pwm_zero(nc4_ctx_t *ctx, const nc4_frame_t *f)
+static void __attribute__((unused)) on_pwm_zero(nc4_ctx_t *ctx, const nc4_frame_t *f)
 {
     if (f->len < 1) {
         reply_json(ctx, NC4_CMD_HUB_RSP, "{\"err\":\"args\"}");
@@ -2705,7 +2705,7 @@ static void on_pwm_zero(nc4_ctx_t *ctx, const nc4_frame_t *f)
 
 #define NC4_CMD_UART_INFO 0xF03B
 
-static void on_uart_info(nc4_ctx_t *ctx, const nc4_frame_t *f)
+static void __attribute__((unused)) on_uart_info(nc4_ctx_t *ctx, const nc4_frame_t *f)
 {
     (void)f;
     char j[160];
@@ -2741,7 +2741,7 @@ static uint32_t nb_u32(const uint8_t *p)
            ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
 }
 
-static void on_netbench(nc4_ctx_t *ctx, const nc4_frame_t *f)
+static void __attribute__((unused)) on_netbench(nc4_ctx_t *ctx, const nc4_frame_t *f)
 {
     if (f->len < 1) {
         reply_json(ctx, NC4_CMD_HUB_RSP, "{\"err\":\"args\"}");
@@ -2816,7 +2816,7 @@ static void on_netbench(nc4_ctx_t *ctx, const nc4_frame_t *f)
 #define NC4_CMD_PWM_SET   0xF039
 #define NC4_CMD_PWM_INFO  0xF03A
 
-static void on_pwm_set(nc4_ctx_t *ctx, const nc4_frame_t *f)
+static void __attribute__((unused)) on_pwm_set(nc4_ctx_t *ctx, const nc4_frame_t *f)
 {
     if (f->len < 4) {
         reply_json(ctx, NC4_CMD_HUB_RSP, "{\"err\":\"args\"}");
@@ -2833,7 +2833,7 @@ static void on_pwm_set(nc4_ctx_t *ctx, const nc4_frame_t *f)
     reply_json(ctx, NC4_CMD_HUB_RSP, j);
 }
 
-static void on_pwm_info(nc4_ctx_t *ctx, const nc4_frame_t *f)
+static void __attribute__((unused)) on_pwm_info(nc4_ctx_t *ctx, const nc4_frame_t *f)
 {
     (void)f;
     char j[256];
@@ -2857,7 +2857,7 @@ static void on_pwm_info(nc4_ctx_t *ctx, const nc4_frame_t *f)
 //   [3] clear
 #define NC4_CMD_WIFI_CRED  0xF038
 
-static void on_wifi_cred(nc4_ctx_t *ctx, const nc4_frame_t *f)
+static void __attribute__((unused)) on_wifi_cred(nc4_ctx_t *ctx, const nc4_frame_t *f)
 {
     if (f->len < 1) {
         reply_json(ctx, NC4_CMD_HUB_RSP, "{\"err\":\"args\"}");
@@ -3130,7 +3130,7 @@ static esp_err_t now_ensure(uint8_t ch, nc4_decoder_t *dec)
     return ESP_OK;
 }
 
-static void on_espnow_init(nc4_ctx_t *ctx, const nc4_frame_t *f)
+static void __attribute__((unused)) on_espnow_init(nc4_ctx_t *ctx, const nc4_frame_t *f)
 {
     const uint8_t ch = (f->len >= 1) ? f->data[0] : 1;
     const esp_err_t e = now_ensure(ch, ctx->decoder);
@@ -3145,7 +3145,7 @@ static void on_espnow_init(nc4_ctx_t *ctx, const nc4_frame_t *f)
     reply_json(ctx, NC4_CMD_HUB_RSP, json);
 }
 
-static void on_espnow_send(nc4_ctx_t *ctx, const nc4_frame_t *f)
+static void __attribute__((unused)) on_espnow_send(nc4_ctx_t *ctx, const nc4_frame_t *f)
 {
     if (!s_now_ready) {
         reply_json(ctx, NC4_CMD_HUB_RSP, "{\"err\":\"not_init\"}");
@@ -3168,7 +3168,7 @@ static void on_espnow_send(nc4_ctx_t *ctx, const nc4_frame_t *f)
     reply_json(ctx, NC4_CMD_HUB_RSP, json);
 }
 
-static void on_espnow_stats(nc4_ctx_t *ctx, const nc4_frame_t *f)
+static void __attribute__((unused)) on_espnow_stats(nc4_ctx_t *ctx, const nc4_frame_t *f)
 {
     (void)f;
     char hex[2 * 16 + 1];
@@ -3275,7 +3275,7 @@ static esp_err_t wifi_bringup_once(nc4_decoder_t *dec)
 #endif
 }
 
-static void on_wifi_sta(nc4_ctx_t *ctx, const nc4_frame_t *f)
+static void __attribute__((unused)) on_wifi_sta(nc4_ctx_t *ctx, const nc4_frame_t *f)
 {
     if (f->len < 2) {
         reply_json(ctx, NC4_CMD_HUB_RSP, "{\"err\":\"args\"}");
@@ -3318,7 +3318,7 @@ static void on_wifi_sta(nc4_ctx_t *ctx, const nc4_frame_t *f)
     reply_json(ctx, NC4_CMD_HUB_RSP, json);
 }
 
-static void on_wifi_ap(nc4_ctx_t *ctx, const nc4_frame_t *f)
+static void __attribute__((unused)) on_wifi_ap(nc4_ctx_t *ctx, const nc4_frame_t *f)
 {
     if (f->len < 3) {
         reply_json(ctx, NC4_CMD_HUB_RSP, "{\"err\":\"args\"}");
@@ -3364,7 +3364,7 @@ static void on_wifi_ap(nc4_ctx_t *ctx, const nc4_frame_t *f)
     reply_json(ctx, NC4_CMD_HUB_RSP, json);
 }
 
-static void on_wifi_info(nc4_ctx_t *ctx, const nc4_frame_t *f)
+static void __attribute__((unused)) on_wifi_info(nc4_ctx_t *ctx, const nc4_frame_t *f)
 {
     (void)f;
     esp_netif_ip_info_t ip4; memset(&ip4, 0, sizeof(ip4));
@@ -3419,7 +3419,7 @@ static void stress_task(void *arg)
     vTaskDelete(NULL);
 }
 
-static void on_stress(nc4_ctx_t *ctx, const nc4_frame_t *f)
+static void __attribute__((unused)) on_stress(nc4_ctx_t *ctx, const nc4_frame_t *f)
 {
     if (f->len < 1) {
         reply_json(ctx, NC4_CMD_HUB_RSP, "{\"err\":\"args\"}");
@@ -3468,7 +3468,7 @@ static bool i80_done_cb(esp_lcd_panel_io_handle_t io, esp_lcd_panel_io_event_dat
     return false;
 }
 
-static void on_i80_dma(nc4_ctx_t *ctx, const nc4_frame_t *f)
+static void __attribute__((unused)) on_i80_dma(nc4_ctx_t *ctx, const nc4_frame_t *f)
 {
     uint16_t iters = 3;
     if (f->len >= 2) iters = (uint16_t)(f->data[0] | (f->data[1] << 8));
@@ -3611,7 +3611,7 @@ static esp_err_t rxb_sink(void *arg, const uint8_t *frame, size_t len)
     return ESP_OK;
 }
 
-static void on_rx_noop(nc4_ctx_t *ctx, const nc4_frame_t *f)
+static void __attribute__((unused)) on_rx_noop(nc4_ctx_t *ctx, const nc4_frame_t *f)
 {
     (void)ctx;
     (void)f;
@@ -3654,7 +3654,7 @@ static void rxb_task(void *arg)
     vTaskDelete(NULL);
 }
 
-static void on_rx_bench(nc4_ctx_t *ctx, const nc4_frame_t *f)
+static void __attribute__((unused)) on_rx_bench(nc4_ctx_t *ctx, const nc4_frame_t *f)
 {
     if (s_rxb_busy) {
         reply_json(ctx, NC4_CMD_RX_BENCH, "{\"err\":\"busy\"}");
@@ -3690,7 +3690,7 @@ static void on_rx_bench(nc4_ctx_t *ctx, const nc4_frame_t *f)
     reply_json(ctx, NC4_CMD_RX_BENCH, js);
 }
 
-static void on_rx_result(nc4_ctx_t *ctx, const nc4_frame_t *f)
+static void __attribute__((unused)) on_rx_result(nc4_ctx_t *ctx, const nc4_frame_t *f)
 {
     (void)f;
     const uint64_t us = s_rxb.us;
@@ -3734,7 +3734,7 @@ static void buf_drain(nc_buf_t *b)
     }
 }
 
-static void on_buf_test(nc4_ctx_t *ctx, const nc4_frame_t *f)
+static void __attribute__((unused)) on_buf_test(nc4_ctx_t *ctx, const nc4_frame_t *f)
 {
     (void)f;
     nc4_reply_t r;
@@ -3918,7 +3918,7 @@ static void on_buf_test(nc4_ctx_t *ctx, const nc4_frame_t *f)
 // payload [iters:u32]（預設 1,000,000）→ ns_pair = take+give 一對
 #define NC4_CMD_MUTEX_BENCH 0xF042
 
-static void on_mutex_bench(nc4_ctx_t *ctx, const nc4_frame_t *f)
+static void __attribute__((unused)) on_mutex_bench(nc4_ctx_t *ctx, const nc4_frame_t *f)
 {
     uint32_t iters = 1000000;
     if (f->len >= 4) {
@@ -3984,7 +3984,7 @@ static void on_mutex_bench(nc4_ctx_t *ctx, const nc4_frame_t *f)
 #define NC4_CMD_MATRIX 0xF060
 
 #if defined(NC_TEST_ALLOW_3) && NC_TEST_ALLOW_3
-static void on_matrix(nc4_ctx_t *ctx, const nc4_frame_t *f)
+static void __attribute__((unused)) on_matrix(nc4_ctx_t *ctx, const nc4_frame_t *f)
 {
     static char j[900];
     if (f->len < 1) {
@@ -4086,7 +4086,7 @@ bad_args:
 // 把渲染器欄位塞進去會破壞那份；分開之後各自可以加欄位。
 #define NC4_CMD_RENDER 0xF061
 
-static void on_render(nc4_ctx_t *ctx, const nc4_frame_t *f)
+static void __attribute__((unused)) on_render(nc4_ctx_t *ctx, const nc4_frame_t *f)
 {
     // 兩份 JSON 各自可達 600–800 B，合起來連鍵名要 ~1.6 KB
     static char pj[900];
@@ -4174,7 +4174,7 @@ static uint32_t sinbench_err(void)
     return (uint32_t)(m * 100.0 + 0.5);
 }
 
-static void on_sinbench(nc4_ctx_t *ctx, const nc4_frame_t *f)
+static void __attribute__((unused)) on_sinbench(nc4_ctx_t *ctx, const nc4_frame_t *f)
 {
     static char j[160];
     uint32_t iters = 50000;
@@ -4255,7 +4255,7 @@ static uint32_t prog_value_ns(uint8_t type, uint32_t iters)
     return best;
 }
 
-static void on_progbench(nc4_ctx_t *ctx, const nc4_frame_t *f)
+static void __attribute__((unused)) on_progbench(nc4_ctx_t *ctx, const nc4_frame_t *f)
 {
     static char j[512];
     uint16_t px = 960;
@@ -4537,7 +4537,7 @@ static size_t nc_tcp_fetch_stats(int fd, char *out, size_t cap)
     return 0;
 }
 
-static void on_tcp_send(nc4_ctx_t *ctx, const nc4_frame_t *f)
+static void __attribute__((unused)) on_tcp_send(nc4_ctx_t *ctx, const nc4_frame_t *f)
 {
     if (f->len < 11) {
         reply_json(ctx, NC4_CMD_HUB_RSP, "{\"err\":\"args\"}");
@@ -5004,7 +5004,7 @@ static int bb_put(char *buf, size_t cap, const char *name,
                     name, (unsigned long long)us, ns, mb_s, (unsigned)chk);
 }
 
-static void on_buf_bench(nc4_ctx_t *ctx, const nc4_frame_t *f)
+static void __attribute__((unused)) on_buf_bench(nc4_ctx_t *ctx, const nc4_frame_t *f)
 {
     uint32_t iters = 30000;
     if (f->len >= 4) {
@@ -5065,7 +5065,7 @@ static void on_buf_bench(nc4_ctx_t *ctx, const nc4_frame_t *f)
 // ── 0xF02F PARSER_SELFTEST：環形 parser 的跨環 frame ──
 #define NC4_CMD_PARSER_SELFTEST 0xF02F
 
-static void on_parser_selftest(nc4_ctx_t *ctx, const nc4_frame_t *f)
+static void __attribute__((unused)) on_parser_selftest(nc4_ctx_t *ctx, const nc4_frame_t *f)
 {
     (void)f;
     const bool ok = nc4_parser_selftest();
@@ -5084,11 +5084,26 @@ static void on_parser_selftest(nc4_ctx_t *ctx, const nc4_frame_t *f)
 }
 
 static const nc_action_t k_actions[] = {
+#if defined(NC_TEST_ALLOW_1) && NC_TEST_ALLOW_1
     { NC4_CMD_DEV_BENCH, on_dev_bench, "test" },
+#endif  // DEV_BENCH
+#if defined(NC_TEST_ALLOW_1) && NC_TEST_ALLOW_1
+
     { NC4_CMD_HUB_BENCH, on_hub_bench, "test" },
+#endif  // HUB_BENCH
+#if defined(NC_TEST_ALLOW_1) && NC_TEST_ALLOW_1
+
     { NC4_CMD_TX_BENCH, on_tx_bench, "test" },
+#endif  // TX_BENCH
+#if defined(NC_TEST_ALLOW_1) && NC_TEST_ALLOW_1
+
     { NC4_CMD_BUS_STATS, on_bus_stats, "test" },
+#endif  // BUS_STATS
+#if defined(NC_TEST_ALLOW_2) && NC_TEST_ALLOW_2
+
     { NC4_CMD_NET_TUNE, on_net_tune, "test" },
+#endif  // NET_TUNE
+
     { NC4_CMD_BENCH_READY, on_bench_ready, "test" },
     { NC4_CMD_BENCH_DATA, on_bench_data, "test" },
     { NC4_CMD_BENCH_RESULT, on_bench_result, "test" },
@@ -5099,15 +5114,42 @@ static const nc_action_t k_actions[] = {
     { NC4_CMD_LOOP_PING, on_loop_ping, "test" },
     { NC4_CMD_BIG_REPLY, on_big_reply, "test" },
     { NC4_CMD_LINK_FWD, on_link_fwd, "test" },
+#if defined(NC_TEST_ALLOW_1) && NC_TEST_ALLOW_1
     { NC4_CMD_MEM_BENCH, on_mem_bench, "test" },
+#endif  // MEM_BENCH
+#if defined(NC_TEST_ALLOW_1) && NC_TEST_ALLOW_1
+
     { NC4_CMD_TILE_BENCH, on_tile_bench, "test" },
+#endif  // TILE_BENCH
+#if defined(NC_TEST_ALLOW_1) && NC_TEST_ALLOW_1
+
     { NC4_CMD_STAGE_BENCH, on_stage_bench, "test" },
+#endif  // STAGE_BENCH
+#if defined(NC_TEST_ALLOW_1) && NC_TEST_ALLOW_1
+
     { NC4_CMD_HUB_STRESS, on_hub_stress, "test" },
+#endif  // HUB_STRESS
+#if defined(NC_TEST_ALLOW_1) && NC_TEST_ALLOW_1
+
     { NC4_CMD_HUB_DUPLEX, on_hub_duplex, "test" },
+#endif  // HUB_DUPLEX
+#if defined(NC_TEST_ALLOW_1) && NC_TEST_ALLOW_1
+
     { NC4_CMD_HUB_DUPLEX_SWEEP, on_hub_sweep, "test" },
+#endif  // HUB_DUPLEX_SWEEP
+#if defined(NC_TEST_ALLOW_1) && NC_TEST_ALLOW_1
+
     { NC4_CMD_HUB_DUPLEX4, on_hub_duplex4, "test" },
+#endif  // HUB_DUPLEX4
+#if defined(NC_TEST_ALLOW_1) && NC_TEST_ALLOW_1
+
     { NC4_CMD_HUB_SINGLE, on_hub_single, "test" },
+#endif  // HUB_SINGLE
+#if defined(NC_TEST_ALLOW_1) && NC_TEST_ALLOW_1
+
     { NC4_CMD_HUB_MESH, on_hub_mesh, "test" },
+#endif  // HUB_MESH
+
     { NC4_CMD_GPIO_CFG, on_gpio_cfg, "test" },
     { NC4_CMD_GPIO_SET, on_gpio_set, "test" },
     { NC4_CMD_GPIO_GET, on_gpio_get, "test" },
@@ -5120,28 +5162,70 @@ static const nc_action_t k_actions[] = {
     { NC4_CMD_UART_INFO, on_uart_info, "test" },
     { NC4_CMD_PWM_STAY, on_pwm_stay, "test" },
     { NC4_CMD_PWM_ZERO, on_pwm_zero, "test" },
+#if defined(NC_TEST_ALLOW_2) && NC_TEST_ALLOW_2
     { NC4_CMD_NETBENCH, on_netbench, "test" },
+#endif  // NETBENCH
+#if defined(NC_TEST_ALLOW_2) && NC_TEST_ALLOW_2
+
     { NC4_CMD_NETBENCH_RESULT, on_netbench, "test" },
+#endif  // NETBENCH_RESULT
+#if defined(NC_TEST_ALLOW_2) && NC_TEST_ALLOW_2
+
     { NC4_CMD_TCP_SEND, on_tcp_send, "test" },
+#endif  // TCP_SEND
+
 #if NC_HAVE_ESPNOW
+#if defined(NC_TEST_ALLOW_2) && NC_TEST_ALLOW_2
     { NC4_CMD_ESPNOW_INIT, on_espnow_init, "test" },
+#endif  // ESPNOW_INIT
+#if defined(NC_TEST_ALLOW_2) && NC_TEST_ALLOW_2
+
     { NC4_CMD_ESPNOW_SEND, on_espnow_send, "test" },
+#endif  // ESPNOW_SEND
+#if defined(NC_TEST_ALLOW_2) && NC_TEST_ALLOW_2
+
     { NC4_CMD_ESPNOW_STATS, on_espnow_stats, "test" },
+#endif  // ESPNOW_STATS
+
 #endif
 #if CONFIG_NETCORE_WIFI
+#if defined(NC_TEST_ALLOW_2) && NC_TEST_ALLOW_2
     { NC4_CMD_WIFI_STA, on_wifi_sta, "test" },
+#endif  // WIFI_STA
+#if defined(NC_TEST_ALLOW_2) && NC_TEST_ALLOW_2
+
     { NC4_CMD_WIFI_AP, on_wifi_ap, "test" },
+#endif  // WIFI_AP
+#if defined(NC_TEST_ALLOW_2) && NC_TEST_ALLOW_2
+
     { NC4_CMD_WIFI_INFO, on_wifi_info, "test" },
+#endif  // WIFI_INFO
+
 #endif
+#if defined(NC_TEST_ALLOW_2) && NC_TEST_ALLOW_2
     { NC4_CMD_WIFI_CRED, on_wifi_cred, "test" },
+#endif  // WIFI_CRED
+
 #if SOC_LCD_I80_SUPPORTED && !CONFIG_IDF_TARGET_ESP32P4
     { NC4_CMD_I80_DMA, on_i80_dma, "test" },
 #endif
+#if defined(NC_TEST_ALLOW_1) && NC_TEST_ALLOW_1
     { NC4_CMD_STRESS, on_stress, "test" },
+#endif  // STRESS
+
     { NC4_CMD_BUF_TEST, on_buf_test, "test" },
+#if defined(NC_TEST_ALLOW_1) && NC_TEST_ALLOW_1
     { NC4_CMD_BUF_BENCH, on_buf_bench, "test" },
+#endif  // BUF_BENCH
+#if defined(NC_TEST_ALLOW_1) && NC_TEST_ALLOW_1
+
     { NC4_CMD_PARSER_SELFTEST, on_parser_selftest, "test" },
+#endif  // PARSER_SELFTEST
+
+#if defined(NC_TEST_ALLOW_1) && NC_TEST_ALLOW_1
     { NC4_CMD_MUTEX_BENCH, on_mutex_bench, "test" },
+#endif  // MUTEX_BENCH
+
 #if CONFIG_NETCORE_PIXEL
 #if defined(NC_TEST_ALLOW_3) && NC_TEST_ALLOW_3
     { NC4_CMD_MATRIX, on_matrix, "test" },

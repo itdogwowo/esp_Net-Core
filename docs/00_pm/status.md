@@ -11972,3 +11972,19 @@ status ncm → live=mini、frames 增長
   - `NC_TEST_IDS=0,3`（獨立 build dir）→ `-- 測試 ID：0;3`、建置綠（證明 enabled 時可編）。
 - 其餘組（1=measure、2=network、4=ncm）未包；network handlers 唔連續
   （2744–3410 中間夾住其他測試、`on_tcp_send` 喺 4540），要逐段包／先確認邊界。
+
+---
+
+### 7.369 2026-11-28（`test_action` 分組完成：ID 1 measure、ID 2 network）
+
+- 58 個 `on_*` handler 全部加 `__attribute__((unused))`：容許只閘表項（指令收起）
+  而唔會觸發 `-Wunused-function`（-Werror 綠）。
+- 表項閘：
+  - **ID 1 measure（17 條）**：DEV/HUB/TX_BENCH、BUS_STATS、MEM/TILE/STAGE_BENCH、
+    HUB_STRESS/DUPLEX×4/SINGLE/MESH、STRESS、MUTEX_BENCH、BUF_BENCH、PARSER_SELFTEST；
+  - **ID 2 network（11 條）**：NET_TUNE、NETBENCH(+RESULT)、TCP_SEND、ESPNOW×3、WIFI×4；
+- 雙向驗證：
+  - `NC_TEST_IDS=0`（預設）→ 建置綠、28 條指令唔收錄；
+  - `NC_TEST_IDS=0,1,2,3` → `測試 ID：0;1;2;3`、建置綠。
+- 加上上一輪 pixel（ID 3）整段包（function＋表項），`test_action` 的選配機制已齊；
+  ID 4（ncm）喺 `test_action` 冇對應指令（ncm 測試喺 `test_ncm_action`，本身只喺 tests 編）。
