@@ -260,32 +260,43 @@ tasks/...            .nct → nc_task_t 的 wrapper
 
 ---
 
-### 6.7 `.nce` 合成：做到邊，剩咩
+### 6.7 `.nce` 合成：用家定案（2026-11-28）＝值流＋配對層決定格式
 
-`.nce`（WASM 效果）同 `.nct` 用**同一套工具**（`sw/plugin`），但佢要接落 pixel 的值流，
-所以比 task 多一層。現況：
+> 「我會申請一個緩衝區、返回一個緩衝區，然後由配對層去做配對。……格式這部分我應該是
+> 透過配對層的設定來控制的，我只會交出很多很多 0 至 255 的緩衝。」
+
+**舊項目（`mp_Net-Core`）就係咁做**（`slave/lib/sw/pixel_layout.py`）：
+效果 `next()` 交一串值（`array('H')`，0–4095），配對層 `scatter(…, write)` 用 **write 模式**
+決定「點食」：
+
+| write | 消費形狀 |
+|---|---|
+| `r`／`g`／`b`／`w` | 每顆 1 值，只寫自己通道（其餘保留，可以疊加） |
+| `ww` | 每顆 1 值 → 4 B 全寫 |
+| `rgb` | 每顆 3 值（連續）→ R,G,B |
+| `rgbw` | 每顆 4 值 → R,G,B,W |
+| `wwww` | 每顆 1 值 → 四通道同值 |
+
+註釋原文：「操作模式 = 值流的消費形狀，不猜設備」。值流不足 → 取模重用；過長 → 丟棄多餘。
+
+**所以 `.nce` 唔需要固定 RGBW，亦唔需要 buffer 自描述格式**：
+- buffer 只係一串 **0–255**；**格式＝配對層 `write`**。
+- C 這邊已經係同一模型：`nc_px_flat6_t.src` 係**值索引**，`rgb`／`rgbw` 讀 `v[c..c+3]`；
+  `nc_px_layout` 建 run 時按 `write` 的 `need`（1／3／4）推進 `src`。
+- 唯一要補的是 **8-bit → 12-bit**：C 的值流係 12-bit（`>>4` 出 8-bit），
+  `.nce` 交 0–255 → adapter `<<4` 即等價（`>>4` 復原無損），之後所有 write 模式一行都唔使改。
 
 | 步 | 狀態 |
 |---|---|
 | 掃描／容器／manifest | ✅ `nc_px_asset_scan`（kind=NCE）＋ `nc_ncd` |
 | 真的跑起來（WAMR） | ✅ `nc_plugin_open/step`（`.nce` 走 `nce_render`） |
-| **ABI descriptor**（guest 要知 px／fb 在哪） | ✅ 2026-11-28：engine 喺 instantiate 後寫 28 B 去 guest offset 0，`nce_init(0)`；`px`／`mem_bytes` 由 loader 經 `nc_plugin_src_t` 傳入 |
-| **FB → 值流**（效果任務每幀取值） | ⬜ 未接 |
-| **mode 引用 `.nce`** | ⬜ 未接（而家 `nc_px_engine_program_compile` 會回 `INVALID_ARG` → 計入 `skip_prog`，即係「有數但冇畫面」） |
+| ABI descriptor（guest 知 fb 喺邊） | ✅ 2026-11-28（`fb_off = 96+4K`、28 B 寫 guest offset 0、`nce_init(0)`） |
+| **buffer 長度** | ⬜ 要定：manifest 宣告 `values`（要 bump manifest v2）定暫時 `px×4` |
+| **FB → 值流** | ⬜ adapter：每幀把 buffer `<<4` 入 aprog 值流（`nv` = buffer 值數） |
+| **配對層驗證** | ⬜ 建 job 時驗 `nv` 夠 `write` 用（唔夠 = 明示 `skip`，唔好靜默黑） |
 
-剩返兩個**要拍板**的決定：
-
-1. **一條 aprog 定四條？** `.nce` 的 framebuffer 係 RGBW 四通道（每 px 4 B），
-   而 aprog 係「一條值流」（12-bit）。兩個模型：
-   - **四條 aprog**（R／G／B／W 各一條，`write` 各寫自己通道）→ 直接對上現有 layout／apply，
-     代價係值流 ×4（9,600 px 多 76.8 KB）。
-   - **一條 aprog ＋ 四個值區**（改 aprog 語義）→ 省記憶體，但 layout／apply 要改。
-2. **邊個 tick 插件、FB 點交去 effect task？** 插件喺 ncm task（core1）、值流喺
-   effect task（core0）。要一個 mailbox（雙緩衝＋原子換手）或者 pin 住 FB 兩幀；
-   現時 `nc_pipe_effect_*` 只傳 program 值，冇「外部影像來源」的概念。
-
-> 建議：先做「四條 aprog」模型（唔改 layout），再做 mailbox；`.nce` 的 `pixel_hint`
-> 由 manifest 的 `px` 決定，同 mode 的 px 對唔上就明示拒絕（唔好靜默縮放）。
+> 唔再考慮「四條 aprog」：值流模型已經係配對層的語言，四條 aprog 反而係把格式重新
+> 寫死喺插件側 —— 同用家方向相反。
 
 ## 7. 建議次序
 
