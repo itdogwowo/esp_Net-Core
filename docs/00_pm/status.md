@@ -11335,3 +11335,24 @@ free_int 125–196 KB、PSRAM free 1.80 MB、FAT free 648 KiB。
 - 重測 16IO：frame **20.00 ms／50 fps**、pair 3.11 ms、apply 2.34 ms、
   encode 9.37 ms、PSRAM free 1.81 MB、FAT free 648 KiB；冇回歸。
 - pxAsset_test 新增 UTF-8 測試：raw 中文／7 字／8 字截斷／`\u` 逃逸全部 PASS。
+
+---
+
+### 7.332 2026-11-28（Phase 1：pixel name dictionary 模組＋持久化＋更新政策）
+
+**用家定案**：外部 JSON 保留完整 UTF-8 名；掃描後建 name→id 字典，內部只存 id；
+正常只 lookup，不存在才 append；用 id 找到但實際 name 與實時值不同 → **直接覆蓋**；
+手動刪字典檔才重建。
+
+**已實作（Phase 1，尚未接入 struct）**
+- `nc_px_name_dict.{h,c}`：
+  - UTF-8 bytes→id，hash lookup＋open addressing；
+  - `find`／`intern`（不存在 append、dirty）／`intern_id`（同 id 不同名直接覆蓋）；
+  - atomic `save`（tmp→rename）＋`load`（magic/ver/CRC；缺失 NOT_FOUND、壞檔 INVALID_STATE）；
+  - 手動刪檔 → 下次由 scan 重新加入。
+- `nameDict_test` host 測試：中文、重複、同 id 同名/不同名覆蓋、save/load、
+  缺失/壞檔，全部 PASS；已加入 run_all。
+- 16IO build 成功。
+
+**下一步 Phase 2**：asset／map／mode／group／entry／show 的 name 改存 id，
+layout cache 改 name_id＋dictionary CRC；舊 cache 版本++。Phase 1 模組未改變現有行為。

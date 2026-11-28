@@ -32,7 +32,7 @@ if ! python3 "$ROOT/tools/sync_preset_pairs.py" --check >/dev/null 2>&1; then
     echo "—— preset pair drift（跑 python3 tools/sync_preset_pairs.py --check 睇詳情）"
     exit 1
 fi
-TESTS="cfg_test cfgstruct_test ncd_test task_test router_test link_test mod_test hub_test plan_test buf_test portgen_test ncm_test pixel_test pxEngine_test pxAsset_test pxProgram_test pxLayer_test pxShow_test pxScan_test pxLayout_test stateBlob_test stateFile_test stateSchema_test stateStore_test fpsclock_test"
+TESTS="cfg_test cfgstruct_test ncd_test task_test router_test link_test mod_test hub_test plan_test buf_test portgen_test ncm_test pixel_test pxEngine_test pxAsset_test nameDict_test pxProgram_test pxLayer_test pxShow_test pxScan_test pxLayout_test stateBlob_test stateFile_test stateSchema_test stateStore_test fpsclock_test"
 fail=0
 for t in $TESTS; do
     printf '%-12s ' "$t"

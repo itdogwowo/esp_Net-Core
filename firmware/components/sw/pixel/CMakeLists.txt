@@ -9,6 +9,7 @@ idf_component_register(
          "engine/nc_px_engine_core.c" "engine/nc_px_engine_tables.c"
          "engine/nc_px_engine_program.c"
          "asset/nc_px_asset.c" "asset/nc_px_asset_scan.c" "asset/nc_px_json.c"
+         "asset/nc_px_name_dict.c"
          "asset/nc_px_layer.c"
          "asset/nc_px_show.c"
          "asset/nc_px_layout.c"
