@@ -11302,3 +11302,21 @@ free_int 125–196 KB、PSRAM free 1.80 MB、FAT free 648 KiB。
 **驗收**：build matrix（16IO／Generic-PSRAM／Zero-Show／Matrix-Show／EffectPerf／C3／P4）
 全通過；host tests 全綠；preset gates 全綠；stale cleanup 真機驗證。
 **狀態：PASS**，已知非阻塞限制見 acceptance 文件 §5。
+
+
+---
+
+### 7.330 2026-11-28（全會話全面驗收：18 projects build、host/gates 全綠；報告 PASS）
+
+完整報告：[acceptance-2026-11-28.md](acceptance-2026-11-28.md)。
+
+- **18 個 project 全部 build 成功**（C3×1、P4×3、S3×14）。
+- host tests／preset pair／schema／state budget／id／pixel config gates 全通過。
+- `board.py check`：**0 errors、22 warnings**（舊 sdkconfig artifacts、P4 舊 WS2812 單線 enable0、
+  舊 project `USB` 鍵等，非阻塞）。
+- `selftest.py --skip-ota`：18/21；3 fail 係 16IO project 冇 hub／test bench，屬環境預期。
+- 真機：cfg 29.8 ms、state 9.8 ms、NCSTATE hit、19 records/139 B、schema286；
+  pixel frame 20.59 ms（約50fps）、pair 3.01 ms、apply 2.26、encode 9.96、
+  cache present4/built0/26 ms、FAT free648 KiB、PSRAM free1.80 MB。
+- 體檢修正：uint8 溢位、id 截斷、mode id 2-byte、seg_off uint32、cache pre-clean。
+- **驗收狀態：PASS**。

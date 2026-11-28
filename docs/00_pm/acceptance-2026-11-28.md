@@ -1,47 +1,120 @@
-# Pixel 子系統驗收報告（2026-11-28）
+# 全會話全面驗收報告（2026-11-28）
 
-> 本報告以**最新一次真機量測**為準；舊 status 章節的 128 KB／32 KB／4-mode 預建數字係歷史政策，
+> 範圍：本次對話由「配置／狀態格式」到「LED 系列」、「每線獨立 pixel」、
+> 「16IO / 16×600 測試」、「動態上限／cache／PSRAM」全部工作。
+> 數字以**最新一次真機量測**為準；舊 status 章節的歷史政策數字（128 KB／32 KB／4-mode 預建）
 > 已被 §7.323–7.328 取代。
 
-## 1. 驗收目標
+## 0. 總結
 
-| # | 目標 | 驗收結果 |
-|---|---|---|
-| G1 | 用戶設定唔受 8／16／32 等 magic number 限制 | ✅ map／mode／show／segment／entry／effect 全部動態 |
-| G2 | layout cache 用內容 hash：相同直接讀、不同才重建 | ✅ key＝mode＋map＋px＋assets＋ver；hit/load；miss/build |
-| G3 | 啟動／reload 完成全部 mode 建表；runtime 不再 build | ✅ 預設 PREBUILD_MAX=0（全部）；reload 後亦全部預建 |
-| G4 | 舊 cache key（effects／map／mode 改動）唔會累積 | ✅ 有效 key 清單＋pre-clean stale `.layout` |
-| G5 | pixel 全部 PSRAM；唔佔 SRAM／唔用容量焦慮 | ✅ `HOT_SRAM_KB=0`；active flat、tables、layout 全 PSRAM |
-| G6 | 16IO 4,096 px 達 50 fps | ✅ 實測 frame≈19.97–20.59 ms、fps≈50 |
-| G7 | 16×600 極限仍有 50 fps 空間 | ✅ 線路18 ms、CPU≈14.8–17.6 ms（保守）；margin 約2–5 ms |
-| G8 | 換場 cache hit 唔需要複雜預熱 | ✅ cache hit swap≈188 µs；next cache hit≈5.8–6.9 ms（wall 可能被 encode 搶佔） |
-| G9 | 格式／cache 上限只由真實資源決定 | ✅ 32 KB／128 KB／1 MB 魔法限制已移除；只剩 FAT free、RAM、field 寬度 |
+**驗收狀態：PASS（有已知、非阻塞的警告與環境限制，見 §6）。**
 
-## 2. 最新真機數字（ESP32-S3-Zero、16IO project、全 PSRAM）
+- 18 個 project 全部 build 成功；
+- host tests 全部通過；
+- preset／schema／pixel config gates 全部通過；
+- 16IO 真機 50 fps、cache 4/4 hit、狀態 NCSTATE hit；
+- 發現並修正 5 個動態化後的隱藏問題（uint8 溢位、id 截斷、1-byte mode id、
+  segment offset、cache 清理時序）。
 
-| 指標 | 最新量測 |
+## 1. 對話目標 vs 實際行為
+
+| # | 目標 | 實際行為 | 結果 |
+|---|---|---|---|
+| G1 | 配置／狀態格式統一、可持久化 | 6 款 config JSON → typed cfg；NCSTATE sparse cache；schema 286 keys | ✅ |
+| G2 | LED 用系列 `LED_*`，唔再逐 driver 魔法設定 | `LED_WS2812` 中央 class；每線 `bus{type,index}`、px、order、d_stay；無 timing／lanes | ✅ |
+| G3 | 每線獨立內容、px 可不同 | i80 segmented codec；frame=Σpx、DMA=max px；16 lanes 已跑 | ✅ |
+| G4 | pixel 設定唔受 8／16／32 magic limit | map／mode／show／entry／effect／segment 全動態；舊 legacy 常數改名 | ✅ |
+| G5 | hash 相同直接讀、不同才重建 | NCLAYOUT key＝mode＋map＋px＋assets＋ver；hit/load、miss/build | ✅ |
+| G6 | 啟動／reload 完成全部建表 | `PREBUILD_MAX=0` 全部預建；reload 後再跑 | ✅ |
+| G7 | 舊 cache key 唔累積 | 有效 key 清單＋pre-clean stale `.layout` | ✅ |
+| G8 | pixel 全 PSRAM、唔佔 SRAM | `HOT_SRAM_KB=0`；tables／layout／flat 全 PSRAM | ✅ |
+| G9 | 16IO 50 fps | frame 約 19.97–20.59 ms | ✅ |
+| G10 | 16×600 極限 | 線路18 ms、CPU約14.8–17.6 ms；margin約2–5 ms | ✅ 偏緊 |
+| G11 | 16 IO 功能測試（不同效果／格數） | 4 modes、28 effects、grid4/grid16/sync/test | ✅ |
+| G12 | 文件數字同步 | 本報告＋status §7.329 為最新 | ✅（歷史章節保留） |
+
+## 2. Build／測試矩陣
+
+### 2.1 所有 project build
+
+| project | build |
+|---|---|
+| C3/ESP32-C3-DevKitM | ✅ |
+| P4/ESP32-P4-ETH | ✅ |
+| P4/ESP32-P4-FireBeetle2 | ✅ |
+| P4/ESP32-P4-WIFI6-DB | ✅ |
+| S3/Generic-16IO | ✅ |
+| S3/Generic-NoPSRAM | ✅ |
+| S3/Generic-PSRAM | ✅ |
+| S3/Matrix | ✅ |
+| S3/Matrix-EffectPerf | ✅ |
+| S3/Matrix-LED-Textkit | ✅ |
+| S3/Matrix-Show | ✅ |
+| S3/Mini-Nano | ✅ |
+| S3/N16R8 | ✅ |
+| S3/SuperMini | ✅ |
+| S3/SuperMini-LED-Textkit | ✅ |
+| S3/Zero-Show | ✅ |
+| S3/Zero-Show2400 | ✅ |
+| S3/Zero-Show9600 | ✅ |
+
+### 2.2 Host／gate／檢查
+
+| 檢查 | 結果 |
+|---|---|
+| `tools/hosttest/run_all.sh` | ✅ 全部通過 |
+| `sync_preset_pairs.py --check` | ✅ 2 對 preset↔hardware↔project |
+| `preset_check.py --check` | ✅ 2 presets、286 schema keys 範圍 OK |
+| `state_budget.py --check` | ✅ 文件冇過期 |
+| `sync_driver_presets.py --check` | ✅ |
+| `sync_hardware_presets.py --check` | ✅ |
+| `schema_coverage.py` | ✅ 286 keys、270 未用（正常） |
+| `id_check.py` | ✅ 20 個 ID token 全部指得到 code |
+| pixel config（7 個 project） | ✅ `show_upload --check` 全部 OK |
+| `board.py check` | **0 錯誤、22 警告**（見 §6） |
+| `selftest.py --skip-ota` | **18/21**；3 個係專案環境預期（見 §6） |
+
+## 3. 真機驗收（ESP32-S3-Zero、16IO project、全 PSRAM）
+
+### 3.1 系統／配置／狀態
+
+| 項目 | 值 |
 |---|---:|
+| cfg 載入 | 29.8 ms |
+| state 載入 | 9.8 ms |
+| NCSTATE hit | **1（cmp_ok=1、rebuilt=0）** |
+| state records | **19 筆／139 B** |
+| store cap／used | 27／19 |
+| state apply | 19 |
+| schema | **286 keys、16 units、bad=0** |
+| activation | n=22、en=3、units=`usb,i80,led`、match=1 |
+| dirty | 0 |
+
+### 3.2 LED／pixel
+
+| 項目 | 值 |
+|---|---:|
+| driver | `LED_WS2812`、16 線、每線 256 px、i80 index 0–15 |
+| active tasks | render／encode／paint／effect 全部 enabled |
 | px | 4,096（16 lanes×256） |
-| frame | **20.59 ms（≈50 fps）** |
-| pair（clear+apply+white+commit） | **3.01 ms** |
-| clear | 0.74 ms |
-| apply | **2.26 ms** |
-| encode | **9.96 ms** |
+| frame | **20.59 ms（約 50 fps）** |
+| pair | **3.01 ms**（clear 0.74＋apply 2.26＋white／commit） |
+| apply | 2.26 ms |
+| encode | 9.96 ms |
 | tx | 0.83 ms |
 | 0xF07F A/B | internal 0.716 ms／PSRAM 1.249 ms |
-| 0xF07D flatify | 0.312–0.343 ms |
-| active cache payload | 1,600–7,456 B（視 mode） |
-| prebuild（4 modes） | **present=4、built=0、26 ms**（第二次開機） |
-| fs_format 後第一次開機 | built 3 個、總共 4 張、約 1,238 ms |
-| cache hit 讀取＋flatify | 約 2–2.6 ms |
-| cache hit swap | **188–206 µs** |
-| FAT | total 872,448 B；free 663,552 B（約648 KiB） |
-| internal free | 約 125–196 KB |
-| PSRAM free | 約 1.80 MB |
+| flatify | 0.312–0.343 ms |
+| active cache | 1,600–7,456 B |
+| prebuild | **present=4、built=0、26 ms**（第二次開機） |
+| fs_format 後首開 | built 3、總共 4 張、約 1,238 ms |
+| cache hit swap | 188–206 µs |
+| FAT | total 872,448 B／free 663,552 B（648 KiB） |
+| internal free | 125–196 KB |
+| PSRAM free | 1.80 MB |
 
-### 16×600（9,600 px、16 lanes 並行）
+### 3.3 16×600 極限（9,600 px、16 lanes 並行）
 
-| 項目 | 時間 |
+| 階段 | 時間 |
 |---|---:|
 | 線路（硬底） | **18.0 ms** |
 | encode（16 條獨立內容） | **10.37 ms** |
@@ -50,57 +123,89 @@
 | CPU 保守合計 | **~17.6 ms** |
 | 20 ms margin | **~2.4 ms**（50 fps 可行、偏緊） |
 
-## 3. 測試矩陣
+## 4. 本次體檢修正的隱藏問題
 
-| 檢查 | 結果 |
-|---|---|
-| host tests `tools/hosttest/run_all.sh` | ✅ 全部通過 |
-| preset pair sync `sync_preset_pairs.py --check` | ✅ 2 對 OK |
-| preset/schema `preset_check.py --check` | ✅ 286 keys、範圍 OK |
-| build 16IO | ✅ |
-| build Generic-PSRAM | ✅ |
-| build Zero-Show | ✅ |
-| build Matrix-Show | ✅ |
-| build Matrix-EffectPerf（bench） | ✅ |
-| build C3-DevKitM | ✅ |
-| build P4-ETH | ✅ |
-| 16IO OTA／runtime | ✅ 50 fps、cache 4/4、pixdiag/0xF07F 正常 |
-| stale cache cleanup | ✅ 手動 `deadbeef.layout` reload 後 exists=0；有效 cache 保留 |
-| 全 PSRAM hot flat=0 | ✅ apply 仍 2.26 ms，frame 50 fps |
-
-## 4. 今次體檢發現並修正的隱藏問題
-
-1. **uint8 迴圈溢出**：`find_asset()`、paint 的 map/mode 掃描、program value 等用
-   `uint8_t i < tbl->n`；表已改 uint32，當 >255 會 wrap／越界。已全部改 uint32／uint16。
-2. **數字 id 查找截斷**：`ref_is()` 將 atoi 結果 cast 成 uint8，id>255 數字查找錯。
-   已改 uint16。
-3. **mode 切換 protocol 只 1 byte**：`0xF06D` 只能 id 0–255；已支援 1／2 byte LE，
+1. **uint8 迴圈溢出**：`find_asset()`、paint map/mode 掃描、program value 等用
+   `uint8_t i < tbl->n`；表已 uint32，>255 會 wrap／越界。已全部改 uint32/uint16。
+2. **數字 id 截斷**：`ref_is()` cast uint8，id>255 數字查找錯；已改 uint16。
+3. **mode 切換只支援 1-byte id**：`0xF06D` 只能 0–255；已支援 1／2 byte LE，
    `s_pending_mode` 改 uint16（0xFFFF = 無 pending）。
 4. **segment pool offset uint16**：全域 segment 總數 >65,535 會 wrap；`seg_off` 改 uint32。
-5. **cache cleanup 時機**：原本先 prebuild、後清舊 key；FAT 被舊 cache 佔滿時新 save 會失敗。
+5. **cache cleanup 時機**：原本先 prebuild 後清舊 key；舊 cache 佔滿 FAT 會令新 save 失敗。
    已改成先收集有效 key → **pre-clean** → 再 prebuild。
-6. **prefetch cache key**（較早前）：prefetch/prebuild 錯用 active mode 的 assets_hash；已改 next/tmp。
-7. **next layout 建完冇 save**（較早前）：已補 `layout_cache_save()`，所以第二次起 cache hit。
+6. 之前已修：prefetch/prebuild 的 `assets_hash` 錯用 active mode；next layout build 後冇 save。
 
-## 5. 仍然存在的限制／風險（非 magic number）
+## 5. 功能域逐項核對
+
+### 5.1 配置／狀態
+
+- 6 款 config JSON（hardware／driver／system／network／tasks／resources）由 `sys/config` 讀；
+- NCSTATE header/record、src_hash、CRC、atomic tmp→bak；
+- state store 動態配置、schema 286 keys、LED 預設 min0；
+- host tests：cfg／cfgstruct／stateBlob／stateFile／stateSchema／stateStore 全部通過；
+- 真機 NCSTATE hit、19 records/139 B、dirty0。
+
+### 5.2 LED 系列／driver
+
+- `LED_WS2812` 中央模型：每 item 一條線、`bus{type,index}`、px、order、d_stay；
+- 無 `timing`／`lanes`、無每線 backend；
+- 真機 driver.json 16 線、px256、i80 0–15；pixdiag render lanes=16；
+- `ncportgen`／board.py 驗證；build matrix 全通過。
+
+### 5.3 Pixel renderer／content
+
+- canonical RGBW 4 channel；單通道 write 只寫自己通道，paint 按 needs_clear 清 canvas；
+- 動態 map/mode/show/entries/effects/segments；
+- NCLAYOUT binary cache：hash key、version2、variable segments、CRC；
+- startup/reload 全 mode 預建；舊 key pre-clean；
+- 16IO 4 modes／28 effects；grid4／grid16／sync／test；
+- 真機 50 fps、cache 4/4、stale cleanup 已驗證。
+
+### 5.4 Presets／pairs／projects
+
+- `sync_preset_pairs.py`：2 對 generic pair 同步；
+- 16IO／Generic pair 等 project build 全綠；
+- 7 個 pixel project 本機 JSON 檢查全部 OK；
+- board.py 0 errors。
+
+## 6. 已知警告／限制（非阻塞）
+
+### 6.1 board.py 22 個警告
+
+| 類別 | 說明 |
+|---|---|
+| 舊 artifacts sdkconfig 未 fresh | 改 sdkconfig.defaults 後要 `--fresh`（提示） |
+| 部分 project sdkconfig.defaults 覆寫 NETCORE_PIXEL_* | 外接燈鏈由 project Kconfig 決定；正常 |
+| P4-ETH hardware driver `WS2812.list[0]` 舊單線寫法 | `enable=0`、firmware 未讀；未影響 build／runtime |
+| 部分 project driver.json 有未知鍵 `USB` | board.py 警告；runtime `unk=0`；屬舊 project 鏡像 |
+| USB-only 板冇 build-time driver.json | 允許 |
+
+**沒有 error。**
+
+### 6.2 selftest 18/21
+
+3 個 fail 係專案環境，不是 regression：
+
+1. `hub 有 probe`：16IO project 冇 hub；
+2. `BENCH_READY`／`BENCH`：16IO project 冇開 test/bench action。
+
+### 6.3 真正限制
 
 | 項目 | 說明 |
 |---|---|
-| 名稱 24 字、檔名 64 字 | struct 固定 char array；要改要變 storage format |
+| 名稱 24 字／檔名 64 字 | struct 固定 char array（storage format） |
 | map/mode id 0–65535 | uint16；protocol 已支援 2-byte |
 | 單一 asset segments 65,535 | uint16 欄位；總 pool offset 已 uint32 |
-| FAT 容量 | 真正上限；cache 太多／FAT 滿會 save 失敗，runtime 可能 rebuild |
-| cache cleanup 只覆蓋全部 mode 成功預建的情況 | 如果某 mode map／asset build 失敗，會跳過 cleanup（保守，避免刪有效 cache） |
-| layout cache 格式 ABI | 只限同一 firmware 版本；`NC_PX_LAYOUT_CACHE_VER` 會 bump |
-| 16×600 margin | 約2–5 ms；CPU 突發 >ring 60 ms 仍可能掉幀 |
-| `next_us` wall time | 會包含 encode／paint 搶佔；唔係純 CPU 時間 |
+| FAT 容量 | cache 太多／FAT 滿仍會 save 失敗 |
+| cache cleanup | 只在全部 mode 成功預建時執行（保守） |
+| 16×600 margin | 約 2–5 ms；CPU 大突發可能掉幀 |
+| `next_us` | wall time 含 encode／paint 搶佔，不是純 CPU |
 
-## 6. 結論
+## 7. 結論
 
-- 用戶設定層面：**冇固定 count magic limit**；只剩 RAM／FAT／field 寬度。
-- 重建策略：**startup/reload 全部建好、hash hit 直接讀、舊 key 自動清**；runtime 正常只 swap。
-- 記憶體：**全 PSRAM**；SRAM 冇 pixel 數據；容量焦慮可以消除。
-- 性能：16IO 50 fps；16×600 並行仍在 20 ms 內（margin 約2–5 ms）。
-- 今次體檢修正了 5 個新發現的隱藏溢出／時序問題；現有測試全綠。
+- **功能目標與實際代碼行為一致**：設定動態、LED 系列、每線獨立、cache hash/rebuild、
+  startup 預建、全 PSRAM、16IO 50 fps；
+- **今次體檢額外修正 5 個隱藏問題**；所有 build／host／gate 全綠；
+- 剩餘問題屬已知格式上限、FAT 容量、環境警告，不阻塞交付。
 
-**驗收狀態：PASS（有已知非阻塞限制，見 §5）。**
+**驗收：PASS。**
