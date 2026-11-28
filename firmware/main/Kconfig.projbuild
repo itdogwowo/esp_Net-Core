@@ -159,14 +159,16 @@ menu "esp_Net-Core"
             唔夠位自動 fallback PSRAM，唔會失敗。設 0 = 唔用 internal（全 PSRAM）。
 
     config NETCORE_PIXEL_LAYOUT_CACHE_KB
-        int "NCLAYOUT 快取總預算（KB）"
+        int "NCLAYOUT 快取總預算（KB，0=不限）"
         depends on NETCORE_CONTENT
-        default 128
-        range 0 1024
+        default 0
+        range 0 4096
         help
-            /data/pixel/cache/*.layout 的總大小上限。0 = 不限（唔建議）。
-            超出時按 mtime 刪最舊的（純快取，刪咗下次切 mode 重建），避免
-            mode／map 多時把 FAT 食滿。單張 >32 KB 仍然唔存（讀表同重建差不多）。
+            預設 0 = **不限**：cache 係 FAT／flash 上的檔案，唔係 RAM；用家定案
+            flash 容量以 MB 計，唔需要 128 KB 的 disk cache 上限。
+            舊 key 由 cache_cleanup_stale() 清，唔會無限累積；真正上限係 FAT free。
+            >0 時保留舊的 LRU 預算（按 mtime 刪最舊，純快取）。
+            單張 >32 KB 仍然唔存（係「讀表 vs 重建」效能取捨，唔係容量上限）。
 
     config NETCORE_PIXEL_LAYOUT_PREBUILD_MAX
         int "開機預建 NCLAYOUT 的 mode 數上限（0=全部）"

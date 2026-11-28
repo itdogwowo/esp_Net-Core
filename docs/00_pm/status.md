@@ -11212,3 +11212,24 @@ cache ≈ 44B header
 
 **未改**：單張 >32 KB 仍然唔存（效能政策）；如果將來要保證所有 mode 零 runtime build，
 可以調高門檻或改存大表。
+
+---
+
+### 7.326 2026-11-28（FAT cache 總量預設不限；32 KB 只保留效能門檻）
+
+**用家定案**：cache 係 Flash／FAT 上的檔案，而 flash 以 MB 計（複雜板可 16 MB），
+唔需要 128 KB 的 disk cache 總量上限；PSRAM／SRAM 容量同呢個數無關。
+
+**改動**
+- `NETCORE_PIXEL_LAYOUT_CACHE_KB` 預設 **0 = 不限**（不再 LRU 按總量刪）；
+  16IO project 明寫 0。
+- 舊 key 由 `cache_cleanup_stale()` 清，所以「不限」唔等於無限累積。
+- 單張 >32 KB 仍然唔存：呢個係**讀表 vs 重建的效能取捨**，唔係容量上限。
+- 真正上限只剩 FAT free（現板 data 分區 total 872,448 B、free 663,552 B；
+  flash 本身係 4 MB，app／NVS／data 分區切分，唔係全部可放 cache）。
+- PSRAM（~1.7 MB free）同 internal SRAM 都唔受 128 KB 影響。
+
+**真機驗證（16IO）**
+- `prebuild present=4、built=0、28 ms`；`pair=3.11 ms、apply=2.34 ms、
+  frame=19.99 ms、50 fps`；
+- FAT free 663,552 B（約 648 KiB），4 個 cache 遠低於容量。
