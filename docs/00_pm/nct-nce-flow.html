@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>.nct / .nce 運作流程（動畫）</title>
+<style>
+  :root{
+    --bg:#0d1117; --panel:#161b22; --line:#30363d; --fg:#e6edf3; --dim:#8b949e;
+    --acc:#58a6ff; --ok:#3fb950; --warn:#d29922; --bad:#f85149; --vio:#bc8cff;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);
+       font:14px/1.6 "SF Mono",Menlo,Consolas,"Noto Sans TC",monospace}
+  header{padding:18px 22px 10px;border-bottom:1px solid var(--line)}
+  h1{margin:0 0 6px;font-size:20px}
+  .sub{color:var(--dim);font-size:13px}
+  .tabs{display:flex;gap:8px;padding:12px 22px 0}
+  .tab{padding:6px 14px;border:1px solid var(--line);border-radius:8px 8px 0 0;
+       cursor:pointer;background:#11161d;color:var(--dim);user-select:none}
+  .tab.on{background:var(--panel);color:var(--fg);border-bottom-color:var(--panel);font-weight:600}
+  main{display:grid;grid-template-columns:minmax(320px,1fr) minmax(340px,1.05fr) minmax(300px,.9fr);
+       gap:14px;padding:14px 22px 26px}
+  section{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px}
+  section h2{margin:0 0 10px;font-size:13px;color:var(--dim);font-weight:600;letter-spacing:.06em}
+  .row{display:flex;justify-content:space-between;gap:10px;padding:3px 6px;border-radius:6px;
+       transition:background .25s,color .25s}
+  .row b{font-weight:600;color:var(--acc)}
+  .row.hl{background:#1f6feb22;outline:1px solid #1f6feb66}
+  .bar{height:34px;border-radius:8px;border:1px solid var(--line);display:flex;
+       overflow:hidden;margin:6px 0 10px;font-size:11px}
+  .seg{display:flex;align-items:center;justify-content:center;color:#0d1117;
+       font-weight:700;white-space:nowrap;overflow:hidden;transition:filter .3s,transform .3s}
+  .seg.hl{filter:brightness(1.5) saturate(1.3);transform:scaleY(1.12);outline:2px solid #fff2}
+  .ruler{display:flex;color:var(--dim);font-size:10px;justify-content:space-between}
+  .step{opacity:.35;transition:opacity .3s,border-color .3s;border-left:3px solid transparent;
+        padding:6px 10px;margin:6px 0;border-radius:6px}
+  .step.on{opacity:1;border-left-color:var(--acc);background:#0f1620}
+  .step .t{font-weight:600}
+  .step .d{color:var(--dim);font-size:12.5px}
+  .pulse{animation:p 1.2s ease-in-out infinite}
+  @keyframes p{0%,100%{box-shadow:0 0 0 0 #58a6ff00}50%{box-shadow:0 0 0 6px #58a6ff33}}
+  .kv{display:grid;grid-template-columns:auto 1fr;gap:2px 12px;font-size:12.5px}
+  .kv .k{color:var(--dim)}
+  .kv .v{color:var(--fg)}
+  .ctl{display:flex;gap:8px;align-items:center;padding:0 22px 10px}
+  button{background:#21262d;color:var(--fg);border:1px solid var(--line);border-radius:8px;
+         padding:6px 12px;cursor:pointer;font:inherit}
+  button:hover{border-color:var(--acc)}
+  .prog{height:3px;background:#21262d;border-radius:2px;flex:1;overflow:hidden}
+  .prog i{display:block;height:100%;width:0;background:var(--acc)}
+  code{background:#0b0f14;border:1px solid var(--line);border-radius:4px;padding:0 4px;font-size:12px}
+  .note{color:var(--dim);font-size:12px;margin-top:10px}
+  .tag{display:inline-block;font-size:11px;padding:1px 7px;border-radius:999px;border:1px solid var(--line);color:var(--dim)}
+  .ok{color:var(--ok)} .warn{color:var(--warn)} .bad{color:var(--bad)} .vio{color:var(--vio)}
+</style>
+</head>
+<body>
+<header>
+  <h1>.nct ／ .nce 運作流程</h1>
+  <div class="sub">容器 → 解碼 → 插件工具 → 任務／效果 → 值流 → 配對 → 環 → 燈　（實際數值以 code 為準）</div>
+</header>
+
+<div class="tabs">
+  <div class="tab on" data-tab="task">.nct　任務</div>
+  <div class="tab" data-tab="effect">.nce　效果</div>
+</div>
+
+<div class="ctl">
+  <button id="play">⏸ 暫停</button>
+  <button id="prev">← 上一步</button>
+  <button id="next">下一步 →</button>
+  <div class="prog"><i id="bar"></i></div>
+  <span id="cnt" class="tag">1 / 1</span>
+</div>
+
+<main>
+  <!-- 左：容器位元組圖 -->
+  <section>
+    <h2 id="leftTitle">容器佈局（位元組）</h2>
+    <div class="bar" id="barTop"></div>
+    <div class="ruler"><span>0</span><span>48</span><span>manifest</span><span>payload</span></div>
+    <div id="leftRows"></div>
+    <div class="note" id="leftNote"></div>
+  </section>
+
+  <!-- 中：流程 -->
+  <section>
+    <h2>流程</h2>
+    <div id="steps"></div>
+  </section>
+
+  <!-- 右：這一步的數值 -->
+  <section>
+    <h2 id="rightTitle">這一步的數值</h2>
+    <div class="kv" id="vals"></div>
+    <div class="note" id="vnote"></div>
+  </section>
+</main>
+
+<script>
+// ─────────────────────────────────────────────────────────────
+// 每一步：{t:標題, d:描述, hl:[高亮 id], v:[[key,value],…], note, seg:高亮 bar 段}
+// ─────────────────────────────────────────────────────────────
+const TASK = [
+ {t:"① 檔案落地", d:"`.nct` 放 /data/tasks/；`.nce` 放 /data/pixel/effects/。掃描只看檔頭，不讀 payload。",
+  hl:["magic","abi"], seg:0,
+  v:[["檔名","t.nct"],["大小","48 B + payload + manifest"]], note:"副檔名只是分類標籤；真正 kind 由 manifest 決定。"},
+ {t:"② 檔頭 48 B", d:"magic 'NCM1'、abi、flags、total_size、payload_off/size/crc、target_id、mem_bytes、px、fps、manifest_off/size。",
+  hl:["hdr"], seg:0,
+  v:[["magic","0x314D434E"],["abi","0"],["flags","bit0=AOT bit1=manifest"],["payload_crc","esp_rom_crc32_le(0,…)"],["mem_bytes","例如 65536"]],
+  note:"只讀 header＋manifest（B06 掃描），不碰 payload、不切 arena。"},
+ {t:"③ manifest 40 B", d:"kind(1=task／2=effect)、core、layer、prio、fps、px（＝輸出值數）、stack、budget_us、mem_bytes、cmds、meta。",
+  hl:["man"], seg:1,
+  v:[["kind","1 (task)"],["core","-1 不限／0／1"],["layer / prio","3 / 2"],["fps","30"],["px","64（值數）"],["budget_us","16000"]],
+  note:"kind=0（system）一律拒絕：載入的檔案不能自稱不可卸載的那一層。"},
+ {t:"④ 掃描 → arena 大小", d:"掃到 N 個模組、檔案合計 B → arena = clamp(B + N×1 KB, 32 KB, 512 KB)。冇模組 = 0 B。",
+  hl:["arena"], seg:2,
+  v:[["arena","32 KB – 512 KB"],["0 個模組","唔宣告（省 PSRAM）"]], note:"arena 由 plan 一次 carve；開機後不可以加大。"},
+ {t:"⑤ 驗證 payload", d:"讀 payload 到 arena → CRC32 比對 → 大小／AOT target／px 上限（65535）逐項檢查。",
+  hl:["payload"], seg:2,
+  v:[["CRC","不符 → ESP_ERR_INVALID_CRC"],["AOT","target 不符 → 拒絕（唔可以俾它 illegal instruction）"]], note:"失敗唔會消失：留在表裡標 bad，status 見得到。"},
+ {t:"⑥ 插件工具 open", d:"`nc_plugin_open(src)`：src = {name, payload, size, fmt, kind, px, mem_bytes}。工具唔識 pixel、唔識任務。",
+  hl:["open"], seg:3,
+  v:[["backend","wamr"],["handle","nc_plugin_t（opaque）"],["實例上限","NC_PLUGIN_MAX 8"]], note:"工具 = 解碼＋實例＋執行；`.nct`／`.nce` 係同一工具的兩種 payload。"},
+ {t:"⑦ 寫 ABI descriptor", d:"instantiate 後，host 把 28 B descriptor 寫入 guest linear memory offset 0（只有 effect 用）。",
+  hl:["desc"], seg:4,
+  v:[["px_count","64"],["fb_off","96 + 4096 = 4192"],["fb_bytes","px × 1 B = 64"],["sc_off/sc_bytes","96 / 4096"],["nce_init(0)","帶一個參數"]],
+  note:"喂幾多位由 mem_bytes 把關：fb 放唔落 → 拒絕開插件（唔會開一個一定 trap 的）。"},
+ {t:"⑧ 每 tick", d:"任務：`task_tick()`。效果：`nce_render(frame_id, time_us)`。節奏由 manifest fps 決定。",
+  hl:["tick"], seg:3,
+  v:[["frame_id","1,2,3…"],["time_us","esp_timer_get_time()"],["回傳","0=ok；非 0 → 標 bad"],["預算","> budget_us 連續 3 次 → 停用"]],
+  note:"import 白名單：nc_print／nc_print_i32／nc_print2／nc_gpio_read/write/toggle／nc_now_us。"},
+ {t:"⑨ status", d:"`status ncm` 看 arena／used／live／backend／modules[]（kind、px、ok、bad、strikes、attached）。",
+  hl:["status"], seg:5,
+  v:[["live","現在跑哪個"],["ok/bad","開得成／被停用"],["strikes","連續超支次數"]], note:"release 完全冇 ncm（test-only）→ 冇這個 key 係正常。"},
+];
+
+const EFFECT = [
+ {t:"① 檔案落地", d:"`.nce` 放 /data/pixel/effects/；掃描只登記名字（manifest 由 ncm 解析）。",
+  hl:["magic"], seg:0,
+  v:[["檔名","e.nce"],["掃描","nc_px_asset_scan → kind=NCE"]], note:"`.nce` 在效果層係一個 asset，同 program 效果同一個位置。"},
+ {t:"② 檔頭 48 B", d:"同 .nct 同一個容器：magic／payload／crc／mem_bytes／px。",
+  hl:["hdr"], seg:0,
+  v:[["px","64（＝輸出值數）"],["mem_bytes","≥ 96+4K+px"]], note:"px 唔再綁 4 B/px：每值 1 B。"},
+ {t:"③ manifest kind=2", d:"effect：每個 tick 走 nce_render。core 必須等於 ncm task 嗰核（否則拒絕）。",
+  hl:["man"], seg:1,
+  v:[["kind","2 (effect)"],["core","必須 = ncm task core"],["fps","30 → 每 33 ms 一幀"]], note:"效果唔可以跑喺第 2 個核：framebuffer 由 ncm task 直接叫。"},
+ {t:"④ open → descriptor", d:"寫 28 B descriptor（px_count／fb_off=4192／fb_bytes=px／sc）→ nce_init(0)。",
+  hl:["desc","open"], seg:4,
+  v:[["fb_off","4192"],["fb_bytes","64（值數）"],["每值","1 B（0–255）"]], note:"buffer 住喺 guest linear memory：零拷貝，host 直接讀。"},
+ {t:"⑤ nce_render 每幀", d:"插件寫 fb（0–255）。值數 = manifest px（例如 led_n × 通道數）。",
+  hl:["tick"], seg:3,
+  v:[["fb[0..63]","0–255"],["格式","唔描述自己"]], note:"格式（r/g/b/w/rgb/rgbw）由配對層 write 決定，唔關插件事。"},
+ {t:"⑥ 交去值流信箱", d:"nc_mod tick hook → nc_plugin_frame() → nc_px_nce_init(bytes)（冪等）→ publish（雙緩衝＋原子換手）。",
+  hl:["mbox"], seg:6,
+  v:[["writer","ncm task（core1）"],["reader","pixel_effect_task（core0）"],["seq","每次 publish +1"],["bytes","px × 1 B"]],
+  note:"reader 拿到指標最多被下一次 publish 覆蓋；同幀內讀完就安全。"},
+ {t:"⑦ 0–255 → 12-bit", d:"nc_px_nce_to_vals()：值 <<4（0–255 → 0–4080），配對層之後 >>4 出 8-bit（無損）。",
+  hl:["conv"], seg:6,
+  v:[["0 → 0"],["255 → 4080"],[">>4","復原原值"]], note:"同 program 效果的值域（12-bit）一致，所以 write 模式一行都唔使改。"},
+ {t:"⑧ 配對層 write", d:"r/g/b/w（每顆 1 值）、rgb（3 值）、rgbw（4 值）、ww／wwww。值流不足取模，過長丟棄。",
+  hl:["pair"], seg:7,
+  v:[["write=rgb","每顆讀 v[k],v[k+1],v[k+2]"],["write=rgbw","每顆讀 v[k..k+3]"],["單通道","只寫自己通道，其餘保留"]],
+  note:"「操作模式 = 值流的消費形狀，不猜設備」——同 mp_Net-Core 的 scatter 一樣。"},
+ {t:"⑨ 寫環 → 編碼 → 燈", d:"layout 逐 run 寫環（4 B/px R,G,B,W）→ white mix → commit → encode（I80/SPI bus word）→ DMA → 燈。",
+  hl:["ring"], seg:8,
+  v:[["環格","4 B/px"],["encode","i80／spi"],["節拍","esp_timer 20 ms（50 fps）"]], note:"NCE 產出節奏 = ncm fps；同 pixel 50 fps 唔同步，會重複格（已知）。"},
+ {t:"⑩ 現況", d:"產出側已接（ncm tick → 信箱）；消費側（layout aprog／effect task 取值）未接 → 引用 .nce 的 mode 仍然 skip_prog。",
+  hl:["status"], seg:5,
+  v:[["已完成","descriptor／信箱／publish"],["未完成","layout aprog／effect task 取值"],["預期","mode 引用 .nce 會黑（有 skip 計數，不會靜默）"]],
+  note:"下一步：layout 用 nc_px_nce_bytes() 做 nv、effect task 由信箱取值。"},
+];
+
+let mode="task", idx=0, timer=null, playing=true;
+const $=s=>document.querySelector(s);
+
+function stepsOf(){ return mode==="task"?TASK:EFFECT; }
+
+function segs(defs){
+  return defs.map((d,i)=>`<div class="seg" id="seg${i}" style="flex:${d.f};background:${d.c}">${d.n}</div>`).join("");
+}
+const SEG_TASK=[
+ {f:6,c:"#58a6ff",n:"檔頭 48 B"},
+ {f:3,c:"#bc8cff",n:"manifest 40 B"},
+ {f:5,c:"#3fb950",n:"payload"},
+ {f:3,c:"#d29922",n:"插件工具"},
+ {f:3,c:"#f778ba",n:"descriptor"},
+ {f:3,c:"#79c0ff",n:"status"},
+];
+const SEG_EFFECT=[
+ {f:5,c:"#58a6ff",n:"檔頭 48 B"},
+ {f:3,c:"#bc8cff",n:"manifest(kind=2)"},
+ {f:4,c:"#3fb950",n:"payload(wasm)"},
+ {f:3,c:"#d29922",n:"nce_render"},
+ {f:3,c:"#f778ba",n:"fb @4192"},
+ {f:3,c:"#79c0ff",n:"status"},
+ {f:3,c:"#3fb950",n:"信箱＋<<4"},
+ {f:3,c:"#bc8cff",n:"配對 write"},
+ {f:3,c:"#ffa657",n:"環→encode→燈"},
+];
+
+function render(){
+  const st=stepsOf()[idx];
+  $("#barTop").innerHTML = segs(mode==="task"?SEG_TASK:SEG_EFFECT);
+  $("#steps").innerHTML = stepsOf().map((s,i)=>
+    `<div class="step ${i===idx?"on":""}" data-i="${i}">
+       <div class="t">${s.t}</div><div class="d">${s.d}</div></div>`).join("");
+  $("#vals").innerHTML = st.v.map(([k,v])=>`<div class="k">${k}</div><div class="v">${v}</div>`).join("");
+  $("#vnote").textContent = st.note||"";
+  $("#cnt").textContent = `${idx+1} / ${stepsOf().length}`;
+  $("#bar").style.width = ((idx+1)/stepsOf().length*100)+"%";
+  document.querySelectorAll(".step").forEach(el=>el.onclick=()=>{idx=+el.dataset.i;render();restart();});
+  // 高亮對應的 bar 段
+  const segIdx = st.seg;
+  document.querySelectorAll(".seg").forEach(el=>el.classList.remove("hl","pulse"));
+  const s=$("#seg"+segIdx); if(s){ s.classList.add("hl","pulse"); }
+  $("#leftRows").innerHTML = (mode==="task"?[
+    ["magic","0x314D434E ('NCM1')"],["abi / flags","0 / bit1=manifest"],["total_size","48 + payload + manifest"],
+    ["payload_off/size","48 / N"],["payload_crc","crc32(init=0)"],["target_id","0=wasm／1=P4 AOT／2=S3 AOT"],
+    ["mem_bytes","linear memory 上限"],["px","輸出值數"],["fps","每 tick 節奏"],["manifest_off/size","0 = 冇 manifest"]]
+    :[
+    ["magic","0x314D434E"],["flags","bit1=manifest（effect 一定有）"],["px","＝fb 值數（每值 1 B）"],
+    ["mem_bytes","≥ 96 + 4096 + px"],["kind","2 = effect"],["core","必須 = ncm task core"],
+    ["descriptor","px_count／fb_off=4192／fb_bytes"],["nce_init(0)","讀 offset 0"],["nce_render","每 tick 寫 fb"],["fb","0–255，唔描述格式"]])
+    .map(([k,v])=>`<div class="row"><span>${k}</span><b>${v}</b></div>`).join("");
+  $("#leftNote").innerHTML = mode==="task"
+    ? "容器只有兩種 payload：wasm（預設）與 AOT（綁架構）。<code>task_tick()</code> 每 tick 被叫一次。"
+    : "效果多一段：descriptor 告訴 guest framebuffer 在哪；值流交配對層決定點用。";
+  $("#leftTitle").textContent = mode==="task" ? "容器佈局：.nct" : "容器佈局：.nce";
+  $("#rightTitle").textContent = "這一步的數值";
+}
+
+function restart(){ if(timer)clearInterval(timer); if(!playing)return;
+  timer=setInterval(()=>{ idx=(idx+1)%stepsOf().length; render(); }, 3800); }
+
+document.querySelectorAll(".tab").forEach(t=>t.onclick=()=>{
+  document.querySelectorAll(".tab").forEach(x=>x.classList.remove("on"));
+  t.classList.add("on"); mode=t.dataset.tab; idx=0; render(); restart();
+});
+$("#play").onclick=()=>{ playing=!playing; $("#play").textContent=playing?"⏸ 暫停":"▶ 播放"; restart(); };
+$("#prev").onclick=()=>{ idx=(idx-1+stepsOf().length)%stepsOf().length; render(); restart(); };
+$("#next").onclick=()=>{ idx=(idx+1)%stepsOf().length; render(); restart(); };
+addEventListener("keydown",e=>{
+  if(e.key==="ArrowRight"){ idx=(idx+1)%stepsOf().length; render(); restart(); }
+  if(e.key==="ArrowLeft"){ idx=(idx-1+stepsOf().length)%stepsOf().length; render(); restart(); }
+  if(e.key===" "){ e.preventDefault(); $("#play").click(); }
+});
+render(); restart();
+</script>
+</body>
+</html>
