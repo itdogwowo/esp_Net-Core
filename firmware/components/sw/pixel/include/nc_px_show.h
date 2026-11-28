@@ -49,8 +49,8 @@ typedef struct {
 // **唔再有 `job[8]` 固定上限**：job 陣列由呼叫端提供（容量 = mode->nentry 就夠），
 // 超容量會計入 skipped，唔會靜靜 drop。
 typedef struct {
-    uint8_t     njobs;
-    uint8_t     skipped;                // 解析唔到／容量唔夠而跳過的 entry 數
+    uint32_t    njobs;
+    uint32_t    skipped;                // 解析唔到／容量唔夠而跳過的 entry 數
     uint16_t    px;                     // 合成鏈總長（由 inventory 推）
     uint16_t    jobcap;                 // 呼叫端給的 job 容量
     nc_px_job_t *job;                   // jobcap 個（呼叫端配置，生命週期由呼叫端管）

@@ -106,7 +106,7 @@ uint16_t nc_px_engine_program_value(const nc_px_prog_t *p, uint32_t g)
     }
     g %= p->total;
 
-    for (uint8_t i = 0; i < p->n; i++) {
+    for (uint16_t i = 0; i < p->n; i++) {
         const nc_px_prog_seg_t *s = &p->seg[i];
         if (g >= s->end) {
             continue;                            // 唔喺這段

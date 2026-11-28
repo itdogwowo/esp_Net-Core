@@ -127,7 +127,7 @@ static show_state_t s_content = {
 
 // 0xF06D：decode task 只排隊，真正 rebuild plan 由 paint loop 喺幀邊界做
 // （plan／asset table 係 content task 擁有，唔可以同 decode task 同時改）。
-static volatile uint8_t s_pending_mode = 0xFF;
+static volatile uint16_t s_pending_mode = 0xFFFF;
 static volatile bool    s_pending_reload;
 static uint32_t s_last_apply_us;
 
@@ -634,13 +634,13 @@ static void content_loop(void *arg)
             (void)content_reload();
         }
         // 0xF06D 排隊：喺幀邊界 rebuild plan；唔會同 decode task 同時改 plan。
-        const uint8_t pending = s_pending_mode;
-        if (pending != 0xFF) {
-            s_pending_mode = 0xFF;
+        const uint16_t pending = s_pending_mode;
+        if (pending != 0xFFFF) {
+            s_pending_mode = 0xFFFF;
             const nc_px_mode_tbl_t *tbl = nc_px_mode_table();
             const nc_px_mode_t *next = NULL;
             if (tbl != NULL) {
-                for (uint8_t i = 0; i < tbl->n; i++) {
+                for (uint32_t i = 0; i < tbl->n; i++) {
                     if (tbl->item[i].id == pending) {
                         next = &tbl->item[i];
                         break;
@@ -1440,10 +1440,28 @@ static void cache_prebuild_missing(void)
         free(cand);
         return;
     }
-    // 全部 mode 預建時，順便收集有效 key，之後清走舊 key 的 cache。
+    // 全部 mode 預建時，先收集有效 key，**先清舊 cache** 再建新表：
+    // 否則舊 cache 可能先佔滿 FAT，令新 cache save 失敗。
     uint32_t *valid_keys = NULL;
+    bool keys_ok = false;
     if (n == modes->n) {
         valid_keys = (uint32_t *)malloc((size_t)n * sizeof(*valid_keys));
+        if (valid_keys != NULL) {
+            keys_ok = true;
+            for (uint32_t ci = 0; ci < n; ci++) {
+                const nc_px_mode_t *m = cand[ci];
+                const nc_px_map_t *map = select_map(m);
+                if (map == NULL || build_asset_tbl_into(tmp, m) != ESP_OK) {
+                    keys_ok = false;
+                    break;
+                }
+                valid_keys[ci] = nc_px_layout_cache_key(m->hash, map->hash, s_content.px,
+                                                        assets_hash(tmp));
+            }
+            if (keys_ok) {
+                cache_cleanup_stale(valid_keys, n);
+            }
+        }
     }
     uint32_t present = 0, built = 0, too_big = 0, failed = 0;
     const int64_t t0 = esp_timer_get_time();
@@ -1459,11 +1477,9 @@ static void cache_prebuild_missing(void)
             failed++;
             continue;
         }
-        const uint32_t key = nc_px_layout_cache_key(m->hash, map->hash, s_content.px,
-                                                   assets_hash(tmp));
-        if (valid_keys != NULL) {
-            valid_keys[ci] = key;
-        }
+        const uint32_t key = keys_ok
+            ? valid_keys[ci]
+            : nc_px_layout_cache_key(m->hash, map->hash, s_content.px, assets_hash(tmp));
         char path[96];
         (void)snprintf(path, sizeof(path), "%s/cache/%08lx.layout", s_content.pixel_dir,
                        (unsigned long)key);
@@ -1490,12 +1506,7 @@ static void cache_prebuild_missing(void)
         nc_px_layout_free(&lay);
     }
     nc_px_asset_tbl_free(tmp);
-    if (valid_keys != NULL) {
-        if (failed == 0) {
-            cache_cleanup_stale(valid_keys, n);
-        }
-        free(valid_keys);
-    }
+    free(valid_keys);
     free(cand);
     s_prebuild.present = present;
     s_prebuild.built = built;
@@ -1690,11 +1701,14 @@ static void on_showmode(nc4_ctx_t *ctx, const nc4_frame_t *f)
         reply_json(ctx, NC4_CMD_SHOWMODE_RSP, "{\"err\":\"mode_id\"}");
         return;
     }
-    const uint8_t id = f->data[0];
+    uint16_t id = f->data[0];
+    if (f->len >= 2) {
+        memcpy(&id, f->data, 2);          // 1-byte 舊協議／2-byte 新協議都收
+    }
     const nc_px_mode_tbl_t *tbl = nc_px_mode_table();
     bool found = false;
     if (tbl != NULL) {
-        for (uint8_t i = 0; i < tbl->n; i++) {
+        for (uint32_t i = 0; i < tbl->n; i++) {
             if (tbl->item[i].id == id) {
                 found = true;
                 break;

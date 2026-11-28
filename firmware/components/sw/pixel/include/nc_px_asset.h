@@ -60,7 +60,7 @@ typedef struct {
     char        name[NC_PX_NAME_MAX];   // key；JSON 冇寫 = 檔名
     uint8_t     kind;                   // nc_px_asset_kind_t
     uint16_t    nseg;                   // kind=PROGRAM 時有效（動態）
-    uint16_t    seg_off;                // 第一個 segment 在全域 pool 的 index
+    uint32_t    seg_off;                // 第一個 segment 在全域 pool 的 index（>65k 都夠）
     uint16_t    pixel_hint;             // 只作提示：真正 px 由環的事實決定，唔信呢個
     // 空間／時間分布（同 MP effects.json 同名）：phase = (t/speed)*step + i*spacing + offset
     uint16_t    step;                   // 每次時間推進幾格（預設 1）

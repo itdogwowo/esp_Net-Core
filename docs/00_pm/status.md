@@ -11280,3 +11280,25 @@ cache ≈ 44B header
 
 **驗證**：16IO build 成功、host tests 全綠；cache `present=4、built=0、28 ms`，
 50 fps 不變。
+
+
+---
+
+### 7.329 2026-11-28（全面體檢／驗收：修正 5 個隱藏問題，數字以最新量測為準）
+
+詳見 [acceptance-2026-11-28.md](acceptance-2026-11-28.md)。
+
+**最新真機（16IO、全 PSRAM）**：frame 20.59 ms（≈50 fps）、pair 3.01 ms、apply 2.26 ms、
+encode 9.96 ms、prebuild present=4/built=0/26 ms、cache hit swap 188 µs、
+free_int 125–196 KB、PSRAM free 1.80 MB、FAT free 648 KiB。
+
+**今次修正的隱藏問題**
+1. dynamic table 的 uint8 迴圈（>255 會 wrap）→ uint32/uint16；
+2. `ref_is()` 數字 id cast uint8 → uint16；
+3. `0xF06D` mode id 只 1 byte → 支援 2-byte LE，`s_pending_mode` uint16；
+4. asset segment pool offset uint16 → uint32（總 segment >65,535）；
+5. cache cleanup 改為 **pre-clean（先清舊 key 再 prebuild）**，避免舊 cache 佔滿 FAT 令新 save 失敗。
+
+**驗收**：build matrix（16IO／Generic-PSRAM／Zero-Show／Matrix-Show／EffectPerf／C3／P4）
+全通過；host tests 全綠；preset gates 全綠；stale cleanup 真機驗證。
+**狀態：PASS**，已知非阻塞限制見 acceptance 文件 §5。

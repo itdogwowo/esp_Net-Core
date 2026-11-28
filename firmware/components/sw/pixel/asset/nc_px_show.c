@@ -20,7 +20,7 @@ static const nc_px_asset_t *find_asset(const nc_px_asset_tbl_t *tbl, const char 
     if (tbl == NULL || name == NULL) {
         return NULL;
     }
-    for (uint8_t i = 0; i < tbl->n; i++) {
+    for (uint32_t i = 0; i < tbl->n; i++) {
         if (strcmp(tbl->item[i].name, name) == 0) {
             return &tbl->item[i];
         }
@@ -44,7 +44,7 @@ static bool ref_is(const char *ref, const char *name, uint16_t id)
             break;
         }
     }
-    return all_digit && (uint8_t)atoi(ref) == id;
+    return all_digit && (uint16_t)atoi(ref) == id;
 }
 
 static const nc_px_group_t *find_group(const nc_px_map_t *map, const char *ref, char *mapref_out,
@@ -272,7 +272,7 @@ void nc_px_show_plan_free(nc_px_plan_t *plan)
         return;
     }
     if (plan->job != NULL) {
-        for (uint8_t i = 0; i < plan->njobs; i++) {
+        for (uint32_t i = 0; i < plan->njobs; i++) {
             nc_px_engine_program_free(&plan->job[i].prog);
         }
     }
@@ -489,7 +489,7 @@ void nc_px_show_frame(const nc_px_plan_t *plan, uint32_t step, uint8_t *dst)
         return;
     }
     uint16_t vals[VAL_MAX];
-    for (uint8_t j = 0; j < plan->njobs; j++) {
+    for (uint32_t j = 0; j < plan->njobs; j++) {
         const uint16_t nv = nc_px_job_vals(&plan->job[j], step, vals, VAL_MAX);
         nc_px_pair_apply(&plan->job[j], vals, nv, dst);
     }
