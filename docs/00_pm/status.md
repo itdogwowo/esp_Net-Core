@@ -11823,3 +11823,20 @@ status ncm → arena 32768, used 81, live "mini", backend wamr, frames 增加
 - `nc_plugin_wamr_last_error()` 回報 WAMR 失敗階段（wasm_load／instantiate／exec_env／export）。
 
 **未做**：效果要喺 mode 引用 `.nce` 才見光（下一個測試）；`tasks`／`cmds` 仍要 item 級分頁。
+
+---
+
+### 7.360 2026-11-28（`.nce` 上板：模組 live、mode 可選，layout 仍 0 jobs）
+
+- 用家自製 `.nce`（wasm 帶 data segment：fb @4192 放 256 顆 RGB 交錯漸變，
+  `px=1024`）→ 上傳 `/data/pixel/effects/mini.nce` → `status ncm`：
+  `live=mini, px=1024, ok=1, used=860`。
+- 新增 `/data/pixel/modes/minitest.json`（mapping=led16、map 一條
+  `{group:"led16.g0", effect:"mini", write:"rgb"}`）。
+- `0xF06D 0900` → 回 `{"ok":1,"queued":9,"mode":"led16grid16"}`；
+  之後 paint 報：`layout 失敗：mode=minitest map=led16 jobs=0 runs=0 skipped=0`
+  → **mode 認得、effect 認得（冇「唔存在」計數），但 layout 0 job**。
+- 下一刀：查 `nc_px_layout` 對 NCE aprog 的處理（jobs 何時 +1、vs 效果數量／
+  group 像素數），以及 `s_nce_values()` 在 plan build 時是否已 >0（信箱 init 時序）。
+
+**已驗證**：`.nce` 掃描→解碼→WAMR→每 tick→status 全通（真機）。
