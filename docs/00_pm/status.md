@@ -11988,3 +11988,18 @@ status ncm → live=mini、frames 增長
   - `NC_TEST_IDS=0,1,2,3` → `測試 ID：0;1;2;3`、建置綠。
 - 加上上一輪 pixel（ID 3）整段包（function＋表項），`test_action` 的選配機制已齊；
   ID 4（ncm）喺 `test_action` 冇對應指令（ncm 測試喺 `test_ncm_action`，本身只喺 tests 編）。
+
+---
+
+### 7.370 2026-11-28（超頁 block 有可行指示；status 20 key 收尾）
+
+- `block_too_big` 頁加 `hint`：`tasks → "0x1005"`、`cmds → 用專用指令／分批`。
+  之前只講「太大」，主機唔知下一步；現在指示明確。
+- 真機（tests 映像）：`status tasks` → `{"err":"block_too_big","key":"tasks","hint":"0x1005"}`；
+  `status`（空 keys）→ **20 個 key、合法 JSON**：
+  sys/storage/cfg(+6 子鍵)/log/rt/mem/provides/wifi/net/**nce**/**ncm** ＋
+  tasks 的 err/key/hint（其餘 19 個正常）。
+- `status nce` → `{"pub":497,"px":1024,"v":[255,0,64,255,1,64,…]}`（`.nce` 值流真機證據）。
+
+**交付狀態**：paging、`.nce` 全鏈、測試分組、重複測試清理、hint 全部完成；
+剩 `tasks`／`cmds` 的 item 級分頁（現有專用指令可用）＋ 肉眼驗證。

@@ -1922,6 +1922,21 @@ typedef struct {
     uint16_t known_max;
 } status_block_t;
 
+// 放唔落一頁的 block：告訴主機要用哪條專用指令（唔好只講「太大」）。
+static const char *status_hint(const char *key)
+{
+    if (key == NULL) {
+        return NULL;
+    }
+    if (strcmp(key, "tasks") == 0) {
+        return "0x1005";
+    }
+    if (strcmp(key, "cmds") == 0) {
+        return "nc4.py raw 0x1101 可分批；或用專用指令";
+    }
+    return NULL;
+}
+
 static const status_block_t k_status_blocks[] = {
     { "sys", status_put_sys, 0 },
     { "storage", status_put_storage, 0 },
@@ -2043,8 +2058,15 @@ static void on_status_get(nc4_ctx_t *ctx, const nc4_frame_t *f)
         jappend(j, cap, &o, "{");
         if (k_status_blocks[i].known_max != 0 && k_status_blocks[i].known_max > cap - 32) {
             // 已知放唔落：唔叫 fn（佢可能寫爆 frame）；明示、但仍然繼續下一頁。
-            jappend(j, cap, &o, "\"err\":\"block_too_big\",\"key\":\"%s\"",
-                    k_status_blocks[i].name);
+            const char *hint = status_hint(k_status_blocks[i].name);
+            if (hint != NULL) {
+                jappend(j, cap, &o,
+                        "\"err\":\"block_too_big\",\"key\":\"%s\",\"hint\":\"%s\"",
+                        k_status_blocks[i].name, hint);
+            } else {
+                jappend(j, cap, &o, "\"err\":\"block_too_big\",\"key\":\"%s\"",
+                        k_status_blocks[i].name);
+            }
             // 唔喺度收尾：下面統一的 else 會補 "}"（重複會變 extra data）。
         } else {
             status_add(j, cap, &o, &f1, k_status_blocks[i].fn);
@@ -2054,8 +2076,15 @@ static void on_status_get(nc4_ctx_t *ctx, const nc4_frame_t *f)
             // 否則後面所有 key（net／ncm）永遠收唔到。回一個合法錯誤頁，
             // 但仍然保留 more（仲有下一頁）。
             o = 0;
-            jappend(j, cap, &o, "{\"err\":\"block_too_big\",\"key\":\"%s\"}",
-                    k_status_blocks[i].name);
+            const char *hint2 = status_hint(k_status_blocks[i].name);
+            if (hint2 != NULL) {
+                jappend(j, cap, &o,
+                        "{\"err\":\"block_too_big\",\"key\":\"%s\",\"hint\":\"%s\"}",
+                        k_status_blocks[i].name, hint2);
+            } else {
+                jappend(j, cap, &o, "{\"err\":\"block_too_big\",\"key\":\"%s\"}",
+                        k_status_blocks[i].name);
+            }
         } else {
             jappend(j, cap, &o, "}");
         }
