@@ -58,7 +58,7 @@
 <body>
 <header>
   <h1>.nct ／ .nce 運作流程</h1>
-  <div class="sub">容器＝身分＋資源＋<b>介面</b>（輸入唯讀／輸出唯寫）→ 解碼 → 插件工具 → 任務／效果 → 值流 → 配對 → 環 → 燈</div>
+  <div class="sub">容器＝身分＋資源＋<b>介面</b>（region：in 唯讀／out 唯寫）→ declare／bind／init → 任務／效果 → 值流 → 配對 → 環 → 燈</div>
 </header>
 
 <div class="tabs">
@@ -120,9 +120,10 @@ const TASK = [
  {t:"⑤ 驗證 payload", d:"讀 payload 到 arena → CRC32 比對 → 大小／AOT target／px 上限（65535）逐項檢查。",
   hl:["payload"], seg:2,
   v:[["CRC","不符 → ESP_ERR_INVALID_CRC"],["AOT","target 不符 → 拒絕（唔可以俾它 illegal instruction）"]], note:"失敗唔會消失：留在表裡標 bad，status 見得到。"},
- {t:"⑥ 插件工具 open", d:"`nc_plugin_open(src)`：src = {name, payload, size, fmt, kind, px, mem_bytes}。工具唔識 pixel、唔識任務。",
+ {t:"⑥ 插件工具 open：declare → bind → init", d:"模組宣告 N 個 region（in 唯讀／out 唯寫）；host 由線性記憶體依序對齊切，寫回 offset；之後才 init。",
   hl:["open"], seg:3,
-  v:[["backend","wamr"],["handle","nc_plugin_t（opaque）"],["實例上限","NC_PLUGIN_MAX 8"]], note:"工具 = 解碼＋實例＋執行；`.nct`／`.nce` 係同一工具的兩種 payload。"},
+  v:[["region","dir＋align＋name_id＋bytes"],["綁定","16 B 對齊、連排；放唔落 → 拒絕（唔縮）"],["backend","wamr"],["handle","nc_plugin_t（opaque）"]],
+  note:"任務同效果同一條路：同 nc_task_res_t（宣告→on_start 收 view）一樣模式。"},
  {t:"⑦ 寫 ABI descriptor", d:"instantiate 後，host 把 28 B descriptor 寫入 guest linear memory offset 0（只有 effect 用）。",
   hl:["desc"], seg:4,
   v:[["px_count","64"],["fb_off","96 + 4096 = 4192"],["fb_bytes","px × 1 B = 64"],["sc_off/sc_bytes","96 / 4096"],["nce_init(0)","帶一個參數"]],
@@ -146,10 +147,10 @@ const EFFECT = [
  {t:"③ manifest kind=2", d:"effect：每個 tick 走 nce_render。core 必須等於 ncm task 嗰核（否則拒絕）。",
   hl:["man"], seg:1,
   v:[["kind","2 (effect)"],["core","必須 = ncm task core"],["fps","30 → 每 33 ms 一幀"]], note:"效果唔可以跑喺第 2 個核：framebuffer 由 ncm task 直接叫。"},
- {t:"④ open：交輸入 → 模組算輸出", d:"host 交輸入參數（例如 px）→ 模組算出需要多少緩衝 → 寫 28 B descriptor（fb_off／fb_bytes 由模組回報）→ nce_init(0)。",
+ {t:"④ open：declare → bind → init", d:"模組宣告 region（out：framebuffer；可能有 in：參數）→ host 對齊切位、寫回 offset → 寫 descriptor → nce_init(0)。",
   hl:["desc","open"], seg:4,
-  v:[["輸入","px＝64（用户設定）"],["輸出","fb_bytes = 64（模組算出）"],["fb_off","4192"],["每值","1 B（0–255）"]],
-  note:"大小係**算出來**的，唔係 manifest 寫死；唔夠記憶體就明示拒絕（唔會靜默縮）。"},
+  v:[["in region","參數（px＝64），控制器寫"],["out region","framebuffer，模組寫"],["fb_off","由 binder 算（16 B 對齊）"],["每值","1 B（0–255）"]],
+  note:"大小由模組用輸入算出、宣告；放唔落就明示拒絕，唔會靜默縮。"},
  {t:"⑤ nce_render：填緩衝區", d:"插件只管填：由第 0 格寫到滿（0–255）就停；冇幀率、冇節奏概念。",
   hl:["tick"], seg:3,
   v:[["fb[0..px-1]","0–255"],["格式","唔描述自己"],["節奏","唔關插件事"]],
@@ -228,7 +229,7 @@ function render(){
     ["descriptor","fb_off=4192；fb_bytes 由模組回報"],["nce_init(0)","讀 offset 0"],["nce_render","填滿就停"],["fb","0–255，唔描述格式"]])
     .map(([k,v])=>`<div class="row"><span>${k}</span><b>${v}</b></div>`).join("");
   $("#leftNote").innerHTML = mode==="task"
-    ? "容器只有兩種 payload：wasm（預設）與 AOT（綁架構）。<code>task_tick()</code> 每 tick 被叫一次。"
+    ? "容器只有兩種 payload：wasm（預設）與 AOT（綁架構）。任務同樣用 region 宣告 in/out 緩衝，再 <code>task_tick()</code>。"
     : "效果多一段：descriptor 告訴 guest framebuffer 在哪；值流交配對層決定點用。";
   $("#leftTitle").textContent = mode==="task" ? "容器佈局：.nct" : "容器佈局：.nce";
   $("#rightTitle").textContent = "這一步的數值";
