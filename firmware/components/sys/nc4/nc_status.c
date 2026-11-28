@@ -67,6 +67,19 @@ static bool key_wanted(const char *keys, const char *name)
     return false;
 }
 
+size_t nc_status_value(const char *key, char *buf, size_t cap)
+{
+    if (key == NULL || buf == NULL || cap == 0) {
+        return 0;
+    }
+    for (int i = 0; i < s_n; i++) {
+        if (strcmp(s_e[i].key, key) == 0) {
+            return s_e[i].fn(buf, cap);
+        }
+    }
+    return 0;
+}
+
 void nc_status_append(const char *keys, char *buf, size_t cap, size_t *off, bool *first)
 {
     if (buf == NULL || off == NULL || first == NULL || cap == 0) {

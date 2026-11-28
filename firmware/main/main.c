@@ -1888,6 +1888,8 @@ static bool keys_want(const char *keys, const char *name)
 
 // ── 0x1101 STATUS_GET → 0x1102 STATUS_RSP ──
 // keys 語義照 mp 版：空 = 全部、"? "= 目錄、其餘逗號分隔
+static size_t status_put_ncm(char *buf, size_t cap);   // 定義喺下面（自註冊區塊）
+
 // status 區塊的固定次序（＝分頁次序）。主機只靠 `more` 決定仲要唔要收下一幀，
 // 所以次序一定要穩定：唔可以跟容量或時間變。
 typedef struct {
@@ -1909,8 +1911,20 @@ static const status_block_t k_status_blocks[] = {
     { "wifi",     status_put_wifi },
     { "cmds",     status_put_cmds },
     { "net",      status_put_net },
+    { "ncm",      status_put_ncm },      // 自註冊區塊（test-only）排最後，頁界穩定
 };
 #define NC_STATUS_BLOCKS (sizeof(k_status_blocks) / sizeof(k_status_blocks[0]))
+
+// 元件自註冊的區塊（目前只有 ncm，test-only）。值由 nc_status 取，
+// main 唔需要識佢係邊個 —— 冇註冊就寫 {}（合法性優先）。
+static size_t status_put_ncm(char *buf, size_t cap)
+{
+    const size_t n = nc_status_value("ncm", buf, cap);
+    if (n > 0) {
+        return n;
+    }
+    return (size_t)snprintf(buf, cap, "{}");
+}
 
 static bool status_block_wanted(const status_block_t *b, const char *keys)
 {

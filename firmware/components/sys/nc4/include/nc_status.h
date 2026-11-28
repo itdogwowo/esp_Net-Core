@@ -30,6 +30,10 @@ typedef size_t (*nc_status_fn_t)(char *buf, size_t cap);
 esp_err_t nc_status_register(const char *key, nc_status_fn_t fn);
 int       nc_status_count(void);
 
+// 只取某一個 key 的**值**（唔含 `"key":`）。冇這個 key → 0。
+// 給分頁用：status 每個 block 一頁，main 唔識註冊者是誰。
+size_t nc_status_value(const char *key, char *buf, size_t cap);
+
 // 依 keys（逗號分隔；空／"all" = 全部）把已註冊的區塊接到 JSON 尾巴。
 // `*off`／`*first` 同 main 的 status_add 同一套語義。
 void nc_status_append(const char *keys, char *buf, size_t cap, size_t *off, bool *first);
