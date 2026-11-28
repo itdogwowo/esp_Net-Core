@@ -39,6 +39,8 @@ static const char *TAG = "ncm";
 // 掃描結果：declare 時掃一次，載入時用同一份（B06 → B08 之間唔會變）。
 static nc_mod_scan_t s_scan;
 static SemaphoreHandle_t s_boot_done;
+static int  s_loaded;                 // 成功載入幾個（給 loop 第一 tick 印）
+static char s_load_msg[128];          // 最後一個失敗原因（log 會掉失，所以留住）
 
 // 每 tick：效果插件的 framebuffer → pixel 值流信箱（`.nce` 合成）。
 // （消費端 wiring 見 gap-review §6.7；呢一步只做「產出」。）
@@ -100,8 +102,20 @@ static void ncm_boot(void)
     nc_plugin_set_pause_check(nc_ota_action_paused);   // OTA 期間唔跑插件
     const esp_err_t berr = nc_plugin_set_backend(nc_plugin_wamr_backend());
     if (berr == ESP_OK) {
-        const int n = nc_mod_load_all(&s_scan);
-        ESP_LOGI(TAG, "ncm 模組載入：%d 個（%d 個被拒）", n, s_scan.bad);
+        // 自己逐個載入：失敗原因要留住，等 loop 第一 tick 印返出嚟
+        // （post-start 其實喺 nclog 起來之前，log 會掉失）。
+        s_loaded = 0;
+        for (int i = 0; i < s_scan.count; i++) {
+            const nc_mod_entry_t *e = &s_scan.entries[i];
+            const esp_err_t le = nc_mod_load_ex(e->path, (e->level >= 0) ? e->level : 5);
+            if (le == ESP_OK) {
+                s_loaded++;
+            } else {
+                (void)snprintf(s_load_msg, sizeof(s_load_msg), "%s=%s",
+                               e->probe.name, esp_err_to_name(le));
+            }
+        }
+        ESP_LOGI(TAG, "ncm 模組載入：%d 個（%d 個被拒）", s_loaded, s_scan.bad);
     } else {
         ESP_LOGW(TAG, "WAMR backend 起唔到（%s）→ 模組只登記、唔跑",
                  esp_err_to_name(berr));
@@ -162,8 +176,22 @@ static esp_err_t ncm_on_start(const nc_task_res_view_t *res, int n)
     return ESP_OK;
 }
 
+// 包一層：loop 喺 B10 之後才跑（nclog 已起），所以第一次 tick 才印掃描統計，
+// 唔會好似 declare 階段嗰啲 log 咁樣掉失。
+static void ncm_loop(void *arg)
+{
+    static bool logged;
+    if (!logged) {
+        logged = true;
+        ESP_LOGI(TAG, "ncm boot：scan n=%d bad=%d bytes=%u loaded=%d msg=%s",
+                 s_scan.count, s_scan.bad, (unsigned)s_scan.bytes,
+                 s_loaded, s_load_msg[0] ? s_load_msg : "-");
+    }
+    nc_mod_task(arg);
+}
+
 static const nc_task_loop_t s_loops[] = {
-    { .name = "ncm", .fn = nc_mod_task, .arg = NULL,
+    { .name = "ncm", .fn = ncm_loop, .arg = NULL,
       // 8 KB：tick 會經 wasm_runtime_call_wasm 入 WAMR 直譯器（C 棧），
       // 4 KB 對 task_tick + native（print/gpio）太貼。exec env 自己的 operand
       // stack 另計（WAMR_CALL_STACK）。

@@ -6,4 +6,7 @@ idf_component_register(
     SRCS "nc_ncm_boot.c"
     INCLUDE_DIRS "."
     REQUIRES nc4 task_manager mem ncm plugin pixel ota_action esp_timer freertos log
+    # ★ WHOLE_ARCHIVE：這個 component 靠 constructor（NC_TASK_AUTO_REG）自己現身，
+    #   冇任何符號被引用 → 一般靜態庫會被 linker 整包丟棄（任務永遠唔會登記）。
+    WHOLE_ARCHIVE
 )

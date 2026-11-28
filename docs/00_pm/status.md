@@ -11782,3 +11782,21 @@ layout cache 改 name_id＋dictionary CRC；舊 cache 版本++。Phase 1 模組�
 - `tasks`／`cmds` 仍要 item 級分頁（下一刀）；查任務可先用 `0x1005`。
 - `.nce` 真機驗證卡在 payload：`tools/poc/mod_poc/mod.wasm` 係 v0 契約
   （`nce_render` 4 個參數、fb 4 B/px），同現行 1 B/值 不一致。
+
+---
+
+### 7.358 2026-11-28（ncm 真機跑起：scan 見到模組，載入卡 NO_MEM）
+
+**真機（Zero，tests 映像 fw=5bdcafa-dirty）**
+- `status ncm`：`arena=32768, backend=wamr, frames` 持續增加 → 任務真跑。
+- 加臨時診斷（loop 第一 tick 印，因為 post-start 早於 nclog）：
+  `scan n=2 bad=0 bytes=338 loaded=0 msg=mini=ESP_ERR_NO_MEM`
+  → **掃描正常**（.nce + .nct 都收到），係 **載入** 失敗：WAMR 在這塊板
+  （tests 映像 internal heap ~78 KB）不夠 instantiate。
+- 修過：`test_ncm_action` 加 `WHOLE_ARCHIVE`（constructor 才會被 link，之前任務根本冇登記）；
+  `nc_mod_load_all` 對 kind=effect 唔再因為 tasks.json 冇條目而跳過。
+
+**已知**
+- `.nce` 檔案上傳要用 **FAT 相對路徑**（例：`/pixel/effects/x.nce`），
+  用 `/data/pixel/...` 會 `err_write_fail`；上傳後要 `confirm`。
+- 大 block（tasks／cmds）仍然 `block_too_big`（要 item 級分頁）。

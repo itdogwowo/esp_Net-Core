@@ -810,6 +810,7 @@ int nc_mod_scan_all(nc_mod_scan_t *out)
     n += nc_mod_scan_dir("/data/pixel/effects", out);
     n += nc_mod_scan_dir("/data/tasks", out);
     return n;
+
 }
 
 int nc_mod_merge_cfg(nc_mod_scan_t *scan)
@@ -864,7 +865,10 @@ int nc_mod_load_all(const nc_mod_scan_t *scan)
     int ok = 0;
     for (int i = 0; i < scan->count; i++) {
         const nc_mod_entry_t *e = &scan->entries[i];
-        if (!e->enabled) {
+        // `.nce`（kind=effect）唔係租戶任務：由 ncm tick 驅動，唔應該因為
+        // tasks.json 冇條目（affinity=[0,0]）就被跳過。
+        const bool is_effect = (e->probe.decl.kind == NC_NCD_KIND_EFFECT);
+        if (!e->enabled && !is_effect) {
             ESP_LOGI(TAG, "跳過 %s（level=%d aff=(%d,%d)）", e->probe.name,
                      e->level, e->aff[0], e->aff[1]);
             continue;
@@ -874,7 +878,7 @@ int nc_mod_load_all(const nc_mod_scan_t *scan)
             ESP_LOGW(TAG, "跳過 %s：%s", e->probe.name, why);
             continue;
         }
-        if (nc_mod_load_ex(e->path, e->level) == ESP_OK) {
+        if (nc_mod_load_ex(e->path, (e->level >= 0) ? e->level : 5) == ESP_OK) {
             ok++;
         }
     }
@@ -1150,7 +1154,7 @@ size_t nc_mod_info_json(char *buf, size_t cap)
         /* 放唔落：丟掉已寫的模組，重寫一個**合法**的精簡物件。
          * "truncated":1 是給人看的訊號；"mods" 是表上實際有幾個。 */
         return mod_append(buf, cap, 0,
-                         "{\"arena\":%u,\"used\":%u,\"live\":\"%s\","
+                         "{\"scan\":{\"n\":%d,\"bad\":%d},\"arena\":%u,\"used\":%u,\"live\":\"%s\","
                          "\"frames\":%u,\"backend\":\"%s\",\"period_ms\":%u,"
                          "\"truncated\":1,\"mods\":%d,\"modules\":[]}",
                          (unsigned)s_arena_bytes, (unsigned)s_arena_used,
