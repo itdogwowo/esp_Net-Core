@@ -16,6 +16,9 @@
 OTA）確實冇基礎功能缺陷；但「支援的晶片都用得」未成立 —— 10 條硬缺口，其中 3 條係
 **有板都用唔到**（RMT／PARLIO／真面板）。
 
+另外兩個「唔應該存在」候選：`components/effects/` 5 個 C 效果（**零呼叫，死代碼**，§4.1）
+同 production project 仍然開住的 `0xF062` PXBENCH（§5.5）。
+
 ---
 
 ## 1. 兩層判斷
@@ -52,6 +55,7 @@ OTA）確實冇基礎功能缺陷；但「支援的晶片都用得」未成立 �
 |---|---|---|
 | 16 lane 視覺 | build＋計時都過，但**未有 16 條實體燈鏈**，視覺未驗 | status §7.312 |
 | `.nce` 合成 | program interpreter 只認 6 種段型別（`nc_px_asset.h:32-38`）；`.nce` 資產唔會合成入 show | `show-pipeline.md` §6 |
+| **內建 C 效果係死代碼** | `components/effects/pixel_effects/` 5 個 `nc_effect_*`（~166 行）＋ `nc_effect_table.c`；`nc_pixel_effects_register()` **零呼叫**（只有 header 註解同 `pxEngine_test`），`nc_px_engine_frame()` 同理只 test 用 | 見 §4.1；仍然每塊板都編 |
 | `0xF06B` 預覽 | >315 px 會 `err=big`（2,600 B 回覆上限） | `show-pipeline.md` §6 |
 | white mix | 整幀統一套用；per-mode 動畫／fade 未做 | `show-pipeline.md` §6 |
 | NCM 平台 | 只 S3（`idf_component.yml` rules `target == esp32s3`）；release 預設 OFF，只 `--tests` 開 | `firmware/CMakeLists.txt` |
@@ -62,10 +66,56 @@ OTA）確實冇基礎功能缺陷；但「支援的晶片都用得」未成立 �
 
 ## 4. 效果層（pixel）專項
 
+### 4.1 「效果」呢個字實際係四樣材料
+
+| 名 | 位置 | 係咩 | production 行唔行 |
+|---|---|---|---|
+| **引擎** | `sw/pixel/engine/`（`core` 717＋`program` 272＋`tables` 81 行） | program interpreter（6 種段型別）、sin／gamma 表、registry | ✅ `program_value()`／`tables_init()`／`gamma` 由 `pixel_effect_task` 叫 |
+| **內建效果實作** | `components/effects/pixel_effects/`（5 個 `nc_effect_*`，合共 ~166 行） | 填 registry 的實作 | ❌ **零呼叫**（見 §3 最後一行） |
+| **資產** | `/data/pixel/effects/*.json` | program（段型別＋顏色／區段） | ✅ 真正行呢條 |
+| **`.nce`** | `/data/**/effects/*.nce` | WASM 效果（USER 平面） | ❌ 未合成 |
+
+> 所以「引擎由 `effects/` 操作」係倒轉：`effects/` 只係實作，交去引擎 registry；
+> 而 registry 條路（舊 8×8 引擎）2026-11-25 退役時，登記嗰句一齊冇咗 →
+> 5 個 C 效果變成**死代碼**，但仍然每塊板都編。
+
+### 4.2 模式（mode）住邊
+
+「模式管理」**冇獨立 component**，全部住喺 `tasks/pixel_paint_task/`（2,117 行）：
+
+| 動作 | 位置 |
+|---|---|
+| 掃 `modes/*.json`、解析成 `nc_px_mode_tbl_t` | `sw/pixel/asset/nc_px_asset_scan.c`、`nc_px_asset.c` |
+| 現在播邊個 mode | paint task `s_content.mode_name_id` |
+| 手動切 mode（`0xF06D`） | paint task `s_pending_mode` → 幀邊界 rebuild |
+| 自動輪播（registry `list[]`） | paint task `mode_frames`／`mode_limit`（`maxF`） |
+| reload（`0xF06F`） | paint task |
+| plan／6 B layout／`.ncc` cache | paint task |
+
+> 呢個係結構問題：paint task 同時做「播咩」（policy）同「點上色」（mechanism）。
+
+### 4.3 一幀的真實流程
+
+```text
+/data/pixel/{registry.json,modes/,map/,effects/}
+   │ paint task（reload／切 mode 才做）：掃描 → 建 plan（groups→entries→asset 引用）
+   │                                   → 6 B layout（runs）＋ .ncc cache
+   ├─ nc_pipe_aprog_publish(aprog) ──────────────► effect task
+   │                                                 每 px：nc_px_engine_program_value()
+   │                                                 → 12-bit 值流（雙 pool＋ack）
+   ◄──────────── nc_pipe_effect_copy（只傳指標，唔複製值流）
+   │ paint task：nc_px_layout_apply_dither() 寫環（4 B/px，R,G,B,W）
+   │             → white mix → nc_px_ring_commit()
+   ▼ 環
+   encode task：環格 → 該後端 bus word／bitstream（i80／spi）
+   ▼
+   render task：DMA 完成 → submit → 燈
+```
+
+### 4.4 量測／缺口
+
 - **效果種類**：28（16IO）／40（驗證過）全部係 program 型（sine／square／pulse 組合），
   **冇 image／video 類**；hex／text 走 textkit project。
-- **三層分家做得清**：引擎 `sw/pixel/engine/`、實作 `effects/pixel_effects/`（6 個 C 效果）、
-  資產 `/data/pixel/`；`.nce` 係第四種（USER 平面），但合成未做。
 - **量測齊**：frame 19.99 ms／50 fps、pair 3.12、apply 2.35、encode 9.39、PSRAM 1.82 MB free；
   16×600 極限 CPU ~17.6 ms vs 20 ms 預算（margin 2–5 ms，偏緊）。
 - **真缺口**：RMT／PARLIO（同 §2 #1／#2）；16 lane 視覺；`.nce` 合成。
@@ -79,10 +129,25 @@ OTA）確實冇基礎功能缺陷；但「支援的晶片都用得」未成立 �
 | `main.c` 仍係裝配＋handler 大雜燴 | 5,091 行、24 個 `on_*` handler | `component-layout.md` §10 自己問「main.c 有冇 if/for/字串解析」 |
 | host → action 反向依賴 | `nc_mod_engine.c:31` include `nc_ota_action.h`、`:456` 讀 pause | 全樹唯一一條這種依賴；睇 §6.3 |
 | 冇 loop 停滯偵測 | `next-steps.md` §1：`monitor` 2026-11-04 已刪、`epoch` 已移除 | task WDT 仍在，但卡 loop 唔會報 |
+| **模式管理住喺 paint task** | `nc_px_paint_task.c` 2,117 行同時有 mode 選擇／輪播／plan／cache／`0xF06x` | policy 同 mechanism 混在一齊；睇 §4.2 |
+| **`0xF062` PXBENCH 喺生產 project 開住** | `NETCORE_PXBENCH` 預設 n，但 6 個 project 明開（含 `Matrix-LED-Textkit`、`Zero-Show*`） | 見 §5.5 |
+| `0xF062` 有兩份實作 | `main.c:1313`（`CONFIG_NETCORE_PXBENCH`）＋`nc_test_action.c:4125`（`NC_ENABLE_TESTS`）；兩者同時開 → `nc_action.c:115` 丟後來者並 `ESP_LOGE` | 只影響 tests build 的 log，唔影響行為 |
 | `AGENTS.md` §2.2 誇大 transport | 寫「USB／UART／TCP／UDP／WS／ESP-NOW／I2C／SPI／CAN 收幀」；實際 `nc_link_kind_t` 只有 CDC／USBJTAG／UART／TCP／UDP／WS／HTTP | 建議下次改 AGENTS 時修正 |
 | `roadmap.md` 過時 | 仍寫「Phase 2 pixel pipeline 未開始」 | 實際已 production |
 | `next-steps.md` 過時 | 2026-11-04 版，多數已完成 |  |
 | `hw-coverage.md` | 4 個 unit 上限寫錯（I80 2→1、I2S 1→3、UART 3→6、I2C 2→3）；缺 9 類資源 ≈ +185 key；S3 寫 `ETH driver=rmii` 係真 bug 級風險 | 該文自己已列 |
+
+### 5.5 bench：邊個真係入 firmware
+
+| bench | 位置 | 幾時入 image | 建議 |
+|---|---|---|---|
+| `0xF062` PXBENCH | `sw/pixel/nc_pixel_bench.c`（178 行）＋`main.c:1313` | `CONFIG_NETCORE_PXBENCH`（預設 n）；**6 個 project 明開**，含 `Matrix-LED-Textkit`（production） | 唯一「量產 image 都有 bench」的；量產 project 應該關，或搬入 `NC_ENABLE_TESTS` |
+| `0xF065/67/69/77` | `components/bench/effect_bench/`（4 檔，3,190 行） | 只 `EffectPerf` project（`NC_PROJECT MATCHES EffectPerf`）→ release 一定冇 | 係唯一真機量測手段；刪 = 以後冇回歸數字。要清就整包刪 ＋ 停用 `effect_bench.py`／`layout_bench.py` |
+| `gamma/sin/program/pxMap` | `tools/hosttest/*_bench/` | 唔入 firmware | 唔關 firmware 事；4 支唔在 `run_all` |
+
+> 判準（`AGENTS.md` 鐵律 11）：`firmware/` 只放「需要跟 firmware 一起編」的量測。
+> 所以 bench 唔可以搬去 `modules/lab/`（lab 係主機側 orchestration）；
+> 要「唔存在」就只有兩個做法：**Kconfig 永久關** 或 **整段刪**。
 
 ---
 
@@ -109,16 +174,17 @@ OTA）確實冇基礎功能缺陷；但「支援的晶片都用得」未成立 �
 `host` 係七個 CORE 角色入面唯一一個「得一個實作、又只係一個 backend」的角色，
 為佢開一個位，等於用目錄表達「有一個 runtime」——但 runtime 本質係可換的實作。
 
-### 6.3 但唔可以原封搬入 `driver/`（三條硬約束）
+### 6.3 但唔可以原封搬入 `driver/`（四條硬約束）
 
 | # | 約束 | 證據 |
 |---|---|---|
 | 1 | `component-layout.md` §1 規則 1：**driver 只准 include `esp_driver_*`／`soc`** | `nc_mod.c` 用 `task_manager`／`config`／`mem`／`ota_action` → 直接違反 |
 | 2 | 開機次序：ncm 要喺 B06 declare／B07 commit／B08 start **之後**（`main.c:4553`） | 本質係 sys 層生命週期，唔係 leaf driver |
 | 3 | 引擎自己都未係 leaf | `nc_mod_engine.c:31` include `nc_ota_action.h`；又用 `nc_mod_name()`／`nc_mod_payload()`／`nc_mod_decl()`（`nc_mod.h:75-80`）→ 要落 driver 先要解耦 |
+| 4 | 「格式工具」直覺撞依賴方向 | `nc_ncd.c`（容器解析 164 行）係純 function，最想放 `sw/`；但 `sw → sys`，loader 喺 `sys` 就唔可以 include `sw` → parser 只可以**同 loader 一齊住 `sys`**，或者**沉到 `driver/`** |
 
 > 即係：「唔獨立存在」✅；「住 `components/driver/`」❌（原封搬一定破規則）。
-> 要用家講法成立，只有下面兩條路。
+> 要用家講法成立，只有下面三條路。
 
 ### 6.4 兩個合規落位
 
@@ -145,8 +211,21 @@ sys/ncm/            scan／容器解析／arena／live／看門狗／task／stat
 - 代價：改 `nc_mod_backend_t` 介面＋`nc_mod.c` 呼叫點＋CMake／host test，估 1–2 日。
 - 好處：`driver/` 真係有一個可換的「沙箱驅動」；WAMR 完全隔離（連 header 都唔會漏上層）。
 
+**C（最貼近「`.nct／.nce` 格式工具」講法，成本最高）：連 parser 都拆出去**
+
+```text
+driver/drv_ncd/     容器解析（nc_ncd.c 164 行）：header／section／manifest → 純 struct
+driver/drv_wamr/    runtime 綁定
+sys/ncm/            scan／arena／live／看門狗／task／status
+```
+
+- `driver/drv_ncd` 只依賴 `esp_rom`／`string`，可以 host test 直接 link，唔使拖 `sys`。
+- 前置：`nc_mod_decl_t` 等型別現時住 `nc_mod.h`，要先搬去共用 contract header。
+- 三個 component、三份 CMake＋idf_component.yml，改動最大。
+
 **建議**：先 A（今日可完成、風險低，已經達成「唔獨立存在」）；B 留到
-（i）真要第二個 backend，或（ii）要上 P4 AOT 時才做 —— 因為 B 的價值要等第二個實作才出現。
+（i）真要第二個 backend，或（ii）要上 P4 AOT 時才做；C 只有喺「想獨立測 parser」
+或「WAMR 要換」時才值得 —— 因為 B／C 的價值都要等第二個實作才出現。
 
 ### 6.5 遷移 checklist（未做）
 
@@ -168,6 +247,7 @@ sys/ncm/            scan／容器解析／arena／live／看門狗／task／stat
 | 1 | **RMT 後端** | 唯一「有板都用唔到」的硬缺口；C3 係完全受害者 | 要 C3 板／邏輯分析儀 |
 | 2 | **0x3400 dispatcher** | 細，令外掛功能閉環 | 無 |
 | 3 | **host → sys/ncm 搬位**（§6.4 A）＋剪 `ota_action` 依賴 | 架構債，改動細 | 無 |
+| 4 | **量產 project 關 `PXBENCH`**（§5.5）＋清 `effects/` 死代碼 | 一行 sdkconfig／一個目錄；減少 image 同誤解 | 無 |
 | 4 | **OTA rollback** | 風險，唔係功能 | partition 已夠（1.5 MB × 2） |
 | 5 | **PARLIO** | 要 P4 板 | P4 板 |
 | 6 | **跨機同步** | 產品級，最大 | 要兩塊同款板 |
@@ -176,9 +256,14 @@ sys/ncm/            scan／容器解析／arena／live／看門狗／task／stat
 
 ## 8. 來源（今次睇過的檔）
 
-- `firmware/CMakeLists.txt`、`firmware/main/main.c`、`firmware/main/nc_wifi.c`
+- `firmware/CMakeLists.txt`、`firmware/main/main.c`、`firmware/main/nc_wifi.c`、
+  `firmware/main/Kconfig.projbuild`
 - `firmware/components/host/ncm/*`、`firmware/components/tasks/render_task/*`、
   `firmware/components/sys/config/nc_cfg_load.c`、`firmware/components/driver/*`
+- 效果／模式：`firmware/components/sw/pixel/{engine,asset}/*`、
+  `firmware/components/effects/pixel_effects/*`、
+  `firmware/components/tasks/pixel_{paint,effect}_task/*`、
+  `firmware/components/sw/pixel/nc_pixel_bench.c`、`firmware/components/bench/effect_bench/*`
 - `docs/03_notes/component-layout.md`、`behavior-taxonomy.md`、`pixel-output-backends.md`、
   `hw-coverage.md`、`ncm-contract.md`、`show-pipeline.md`、`effect-language.md`
 - `docs/00_pm/acceptance-2026-11-28.md`、`status.md`（§7.31x–§7.338）、

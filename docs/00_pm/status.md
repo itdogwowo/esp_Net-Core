@@ -11451,3 +11451,24 @@ layout cache 改 name_id＋dictionary CRC；舊 cache 版本++。Phase 1 模組�
   （`driver` 只准 include `esp_driver_*`／`soc`；`nc_mod.c` 用 task_manager／config／mem），
   兩個合規落位：**(A)** `sys/ncm` 整包搬（建議先做）；**(B)** `driver/drv_wamr`＋`sys/ncm`
   分拆（要改 backend 介面，等第二個 backend／P4 AOT 才做）。遷移 checklist 見 gap-review §6.5。
+
+---
+
+### 7.340 2026-11-28（效果／模式歸屬釐清＋bench 清單）
+
+- **四樣材料**（`gap-review.md` §4.1）：引擎＝`sw/pixel/engine/`（`program_value` 由
+  `pixel_effect_task` 叫）；`components/effects/pixel_effects/` 5 個 C 效果
+  **零呼叫**（`nc_pixel_effects_register()` 只有 header 註解＋`pxEngine_test`），
+  係舊 8×8 引擎退役後留低嘅死代碼，但仍然每塊板都編。
+- **模式管理冇獨立 component**：解析喺 `sw/pixel/asset`，選擇／`0xF06D`／輪播／
+  reload／plan／cache 全部喺 `pixel_paint_task`（2,117 行）→ policy 同 mechanism 混住。
+- **一幀流程**：paint task 建 plan → `nc_pipe_aprog_publish` → effect task 每 px
+  `program_value()` 出 12-bit → `nc_pipe_effect_copy` → paint 寫環＋white mix →
+  encode task 出 bus word → render task DMA → 燈。
+- **bench 三種**：`0xF062` PXBENCH（`sw/pixel/nc_pixel_bench.c` 178 行，`NETCORE_PXBENCH`
+  預設 n 但 6 個 project 明開，含 Matrix-LED-Textkit）；`0xF065/67/69/77`
+  （`components/bench/effect_bench/`，只 EffectPerf 編）；`tools/hosttest/*_bench`
+  （唔入 firmware）。`0xF062` 另有 test_action 第二份實作，兩者同時開會被
+  `nc_action.c:115` 丟後來者並報錯。
+- **`/host/` 加第三個落位 C**：`driver/drv_ncd`（純容器解析）＋`driver/drv_wamr`＋
+  `sys/ncm`；原因係 `sw → sys` 方向令 parser 唔可以住 `sw/`。
