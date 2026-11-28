@@ -1922,11 +1922,18 @@ static const status_block_t k_status_blocks[] = {
 // main 唔需要識佢係邊個 —— 冇註冊就寫 {}（合法性優先）。
 static size_t status_put_ncm(char *buf, size_t cap)
 {
-    const size_t n = nc_status_value("ncm", buf, cap);
-    if (n > 0) {
-        return n;
+    // ⚠ 契約：每個 status_put_* **自己寫 "key":**（jchain 只接字串，唔補 key）。
+    // 之前只回 "{}" → 整頁變成 {{}}（非法 JSON）。
+    const int k = snprintf(buf, cap, "\"ncm\":");
+    if (k < 0 || (size_t)k >= cap) {
+        return 0;
     }
-    return (size_t)snprintf(buf, cap, "{}");
+    const size_t n = nc_status_value("ncm", buf + k, cap - (size_t)k);
+    if (n > 0) {
+        return (size_t)k + n;
+    }
+    const int e = snprintf(buf + k, cap - (size_t)k, "{}");
+    return (e > 0) ? ((size_t)k + (size_t)e) : 0;
 }
 
 static bool status_block_wanted(const status_block_t *b, const char *keys)
