@@ -399,8 +399,10 @@ esp_Net-Core/
 │  ├─ components/sys/nc4/    framing、decoder、bus、router、link
 │  ├─ components/sys/task*/  任務模型＋管理器
 │  ├─ components/sys/mem/    nc_buf、plan arena
+│  ├─ components/host/ncm/   載入器政策：掃描／arena／live／預算／attach（test-only）
 │  ├─ components/action/     file／ota／test 指令表
 │  ├─ components/sw/pixel/   環、codec、layout、engine（純 C）
+│  ├─ components/sw/plugin/  插件工具：解碼 .nct／.nce ＋ 實例化 ＋ tick（唯一識 WAMR）
 │  ├─ components/tasks/      pixel_effect_task、pixel_paint_task、pixel_encode_task、render_task（公用輸出層）
 │  ├─ components/effects/    內建效果
 │  ├─ components/driver/     drv_i80、drv_spi_led
@@ -1116,6 +1118,8 @@ commit message 說明。
 | 2026-11-27 | **真機驗證 6.1.1 ＋ NCSTATE 預算**：Zero 用 IDF **v6.1.1** 建置（759.7 KB）＋ OTA（777,904 B／5.2 s＝145.9 KB/s）→ `idf=v6.1.1`、`fw=1d75fea-dirty`、`app=263862e7`；`fs_format` 重新 seed 後 state **19 筆／140 B**、`hit=1`；把 hardware SPI 開齊後 **26 筆／184 B**、`inactive=0`——同 `tools/state_budget.py` 公式完全一致。新增 `tools/nc4_file.py put/delete`（NC4 FILE 協定）做真機上傳。status §7.304 | lead（AI） |
 | 2026-11-27 | **driver.json 微調指南＋中央示範「最新狀態」機制**：新增 `docs/02_guides/driver-config.md`（3 個位置／權威、LED 10 key、schema 與 parser 範圍差異、1／2 lane／SPI／mock 範例、驗證）；`tools/preset_check.py` 加 `--status／--write-status／--check-status` 生成 `ports/presets/STATUS.md`（檔案齊全、schema 覆蓋率、driver LED 實際值、兩版差異），`run_all.sh` 驗冇過期。修正「config 四個檔」舊講法（實際 6 個）、preset README 的 flat6 政策（PSRAM）。 | lead（AI） |
 | 2026-11-27 | **state 只存數值（entry 32→12 B）**：`LED_FMT` 由 `str` 改 `enum`（名字留字典）；`nc_state_ent_t` 去掉 `bytes[16]`、`u/i` 改 union → 12 B；BYTES 明示拒絕；新增 `nc_state_enum_id()`、`get_str/set_str` 退場。`nm` 量到 `s_store` **2,052→772 B**（−1,280 B RAM）、image +32 B；host 25/25、上板 `hit=1`／`bad=0`。Matrix 典型 70 筆 → 840 B，S4 要把上限提到 96 筆（1,156 B）。status §7.293 | lead（AI） |
+| 2026-11-28 | **拆出插件工具 `sw/plugin`**：`nc_ncd`／`nc_meta`／WAMR 引擎由 `host/ncm` 搬入，新 `nc_plugin.c` 做 backend 註冊／暫停閘／四個動詞（`set_arena`／`set_backend`／`open`／`step`／`close`）；插件把手係 opaque `nc_plugin_t`，引擎唔再識 `nc_mod_t`、唔再 include `ota_action`（最後一條反向依賴消失）。`nc_mod.c` 只剩政策（掃描／arena／live／預算／attach）。順手修好 `--tests` 映像：`nc_test_action.c` 的 `0xF064` 仍在用 `asset.seg[]`（已改 `nc_px_asset_seg_add()`）。驗證：host 26/26、tests build ✔、release build 799,680 B；未上板。 | lead（AI） |
+
 
 ---
 

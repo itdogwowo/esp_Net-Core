@@ -1,20 +1,19 @@
-// WAMR 執行引擎（ncm backend）—— 「模組怎麼跑」那一層。
+// nc_plugin_wamr.c — 插件工具的 WAMR backend：「payload 怎麼跑」那一層。
 //
-// 三層（docs/03_notes/ncm-loader.md §10）：
-//   wasm   runtime 能力（init / instantiate）         ← 這支（WAMR）
-//   ncm    政策：arena + live 指標 + 看門狗 + task     ← nc_mod.c
-//   module 一個模組                                    ← 實例表
+// 工具分兩邊（見 nc_plugin.h）：
+//   外殼 nc_plugin.c     backend 註冊、暫停閘、四個動詞轉發
+//   backend 這支          WAMR runtime 能力（init／instantiate／call／回收）
 //
-// 這支只實作 nc_mod_backend_t 的五個 hook，上層（loader／status／task）唔識
-// WAMR。要換引擎（AOT、其他 runtime）就換這支，上層唔動。
+// 這支只實作 `nc_plugin_backend_t` 的 hooks；客戶端（loader／status／task）
+// 唔識 WAMR。要換引擎（AOT、其他 runtime）就換這支，上層唔動。
 //
-// 支援兩種模組（同一個 .nct／.nce 容器，靠 manifest 的 kind 分）：
+// 支援兩種 payload（同一個 .nct／.nce 容器，靠 manifest 的 kind 分）：
 //   effect（.nce）→ 每 tick 叫 nce_render(frame_id, time_us)
 //   task  （.nct）→ 每 tick 叫 task_tick()（節奏 = manifest fps）
 //
 // host imports（白名單，見 nc_mod_abi.h）：nc_print / nc_print_i32 /
 // nc_gpio_read / nc_gpio_write / nc_gpio_toggle。guest 碰不到其他任何東西。
-#include "nc_mod_engine.h"
+#include "nc_plugin.h"
 
 #include <string.h>
 
@@ -25,17 +24,60 @@
 #include "soc/soc_caps.h"
 #include "wasm_export.h"
 
-#include "nc_mod.h"
 #include "nc_mod_abi.h"
-#include "nc_ncd.h"     // NC_NCD_KIND_TASK / EFFECT
-#include "nc_ota_action.h"  // OTA session 期間暫停 tick
+#include "nc_ncd.h"     // NC_NCD_KIND_TASK
 
-static const char *TAG = "ncm.wamr";
+static const char *TAG = "plugin.wamr";
 
 // 每次呼叫的 wasm operand stack。模組自己 recursion 太深會先撞到這個。
 #define WAMR_CALL_STACK   8192
 // 大過呢個數就優先由 PSRAM 要（linear memory 最少 64 KB）。
 #define WAMR_SMALL_ALLOC  (24 * 1024)
+
+// ───────────────────────── 實例（slot）─────────────────────────
+//
+// 一個插件一個 slot（module／instance／exec env／tick function）。
+// 把手指向 slot 本身：客戶端只負責原封不動傳返入來，唔需要知裡面係咩。
+// name 係 loader 抄過來的（src 的指標生命週期唔一定長過插件）。
+typedef struct {
+    wasm_module_t        module;
+    wasm_module_inst_t   inst;
+    wasm_exec_env_t      env;
+    wasm_function_inst_t fn_tick;
+    char                 name[NC_PLUGIN_NAME_MAX];
+    bool                 is_task;
+    bool                 used;
+} wamr_slot_t;
+
+static wamr_slot_t s_slots[NC_PLUGIN_MAX];
+static bool s_rt_up;
+
+// 正在執行的插件：只給 log 前綴用（WAMR 的 native API 冇「模組自訂 user data」）。
+static wamr_slot_t *s_current;
+
+static const char *cur_name(void)
+{
+    return (s_current != NULL) ? s_current->name : "?";
+}
+
+static wamr_slot_t *slot_alloc(void)
+{
+    for (int i = 0; i < NC_PLUGIN_MAX; i++) {
+        if (!s_slots[i].used) {
+            return &s_slots[i];
+        }
+    }
+    return NULL;
+}
+
+static wamr_slot_t *slot_of(nc_plugin_t p)
+{
+    wamr_slot_t *slot = (wamr_slot_t *)p;
+    if (slot < &s_slots[0] || slot >= &s_slots[NC_PLUGIN_MAX] || !slot->used) {
+        return NULL;
+    }
+    return slot;
+}
 
 // ───────────────────────── 記憶體：WAMR → IDF heap ─────────────────────────
 // WAMR 用 Alloc_With_Allocator，所有 allocation（含 linear memory）都經這裡。
@@ -87,14 +129,6 @@ static void wamr_free(void *ptr)
 }
 
 // ───────────────────────── host imports（白名單）─────────────────────────
-
-// 正在執行的模組：只給 log 前綴用（WAMR 的 native API 冇「模組自訂 user data」）。
-static nc_mod_t *s_current;
-
-static const char *cur_name(void)
-{
-    return (s_current != NULL) ? nc_mod_name(s_current) : "?";
-}
 
 // 只准安全腳位。呢條白名單係「能力邊界」的一部分，唔係建議：
 //   0／3／45／46 = boot／JTAG strap   7／8 = 本板 UART
@@ -287,47 +321,17 @@ static NativeSymbol s_native[] = {
     { NC_MOD_IMPORT_NOW_US,      (void *)host_now_us,      "()I",   NULL },
 };
 
-// ───────────────────────── runtime / 實例 ─────────────────────────
-
-static bool s_rt_up;
-
-// 每個模組一個 slot（module／instance／exec env／tick function）。
-// owner 是 loader 的 nc_mod_t 指標：模組 lifetime 內指標不變，兩邊互相對應。
-typedef struct {
-    wasm_module_t        module;
-    wasm_module_inst_t   inst;
-    wasm_exec_env_t      env;
-    wasm_function_inst_t fn_tick;
-    const nc_mod_t      *owner;
-    bool                 used;
-} wamr_slot_t;
-
-static wamr_slot_t s_slots[NC_MOD_MAX_MODULES];
-
-static wamr_slot_t *slot_find(const nc_mod_t *ncm, bool alloc)
-{
-    wamr_slot_t *free_slot = NULL;
-    for (int i = 0; i < NC_MOD_MAX_MODULES; i++) {
-        if (s_slots[i].used && s_slots[i].owner == ncm) {
-            return &s_slots[i];
-        }
-        if (!s_slots[i].used && free_slot == NULL) {
-            free_slot = &s_slots[i];
-        }
-    }
-    return alloc ? free_slot : NULL;
-}
+// ───────────────────────── backend hooks ─────────────────────────
 
 static esp_err_t call0_or_2(wamr_slot_t *slot, wasm_function_inst_t fn,
                             uint32_t argc, uint32_t *argv, const char *what)
 {
-    s_current = (nc_mod_t *)slot->owner;
+    s_current = slot;
     const bool ok = wasm_runtime_call_wasm(slot->env, fn, argc, argv);
     s_current = NULL;
     if (!ok) {
         const char *ex = wasm_runtime_get_exception(slot->inst);
-        ESP_LOGE(TAG, "[%s] %s trap：%s", nc_mod_name(slot->owner), what,
-                 ex ? ex : "(unknown)");
+        ESP_LOGE(TAG, "[%s] %s trap：%s", slot->name, what, ex ? ex : "(unknown)");
         wasm_runtime_clear_exception(slot->inst);
         return ESP_FAIL;
     }
@@ -366,56 +370,55 @@ static esp_err_t engine_init(void *arena, size_t bytes)
     return ESP_OK;
 }
 
-static esp_err_t engine_load(nc_mod_t *ncm)
+static esp_err_t engine_open(nc_plugin_t *out, const nc_plugin_src_t *src)
 {
+    if (out == NULL || src == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    *out = NULL;
     if (!s_rt_up) {
         return ESP_ERR_INVALID_STATE;
     }
-    if (nc_mod_module_format(ncm) != NC_MOD_FMT_WASM) {
-        ESP_LOGW(TAG, "%s：AOT payload 未接（P3）→ 只收 wasm", nc_mod_name(ncm));
+    if (src->fmt != NC_PLUGIN_FMT_WASM) {
+        ESP_LOGW(TAG, "%s：AOT payload 未接（P3）→ 只收 wasm", src->name);
         return ESP_ERR_NOT_SUPPORTED;
     }
-    size_t payload_size = 0;
-    const uint8_t *payload = nc_mod_payload(ncm, &payload_size);
-    if (payload == NULL || payload_size == 0) {
+    if (src->payload == NULL || src->size == 0) {
         return ESP_ERR_INVALID_ARG;
     }
-    wamr_slot_t *slot = slot_find(ncm, true);
+    wamr_slot_t *slot = slot_alloc();
     if (slot == NULL) {
-        ESP_LOGW(TAG, "實例表滿了（%d）", NC_MOD_MAX_MODULES);
+        ESP_LOGW(TAG, "實例表滿了（%d）", NC_PLUGIN_MAX);
         return ESP_ERR_NO_MEM;
     }
 
     char err[128] = {0};
-    wasm_module_t mod = wasm_runtime_load((uint8_t *)payload, (uint32_t)payload_size,
+    wasm_module_t mod = wasm_runtime_load((uint8_t *)src->payload, (uint32_t)src->size,
                                           err, sizeof(err));
     if (mod == NULL) {
-        ESP_LOGE(TAG, "%s：wasm_runtime_load 失敗：%s", nc_mod_name(ncm), err);
+        ESP_LOGE(TAG, "%s：wasm_runtime_load 失敗：%s", src->name, err);
         return ESP_ERR_INVALID_STATE;
     }
     wasm_module_inst_t inst = wasm_runtime_instantiate(mod, WAMR_CALL_STACK, 0,
                                                        err, sizeof(err));
     if (inst == NULL) {
-        ESP_LOGE(TAG, "%s：instantiate 失敗：%s", nc_mod_name(ncm), err);
+        ESP_LOGE(TAG, "%s：instantiate 失敗：%s", src->name, err);
         wasm_runtime_unload(mod);
         return ESP_ERR_NO_MEM;
     }
     wasm_exec_env_t env = wasm_runtime_create_exec_env(inst, WAMR_CALL_STACK);
     if (env == NULL) {
-        ESP_LOGE(TAG, "%s：create_exec_env 失敗", nc_mod_name(ncm));
+        ESP_LOGE(TAG, "%s：create_exec_env 失敗", src->name);
         wasm_runtime_deinstantiate(inst);
         wasm_runtime_unload(mod);
         return ESP_ERR_NO_MEM;
     }
 
-    nc_mod_decl_t decl;
-    memset(&decl, 0, sizeof(decl));
-    (void)nc_mod_decl(ncm, &decl);
-    const bool is_task = (decl.kind == NC_NCD_KIND_TASK);
+    const bool is_task = (src->kind == NC_NCD_KIND_TASK);
     const char *tick_name = is_task ? NC_MOD_EXPORT_TASK_TICK : NC_MOD_EXPORT_RENDER;
     wasm_function_inst_t fn_tick = wasm_runtime_lookup_function(inst, tick_name);
     if (fn_tick == NULL) {
-        ESP_LOGE(TAG, "%s：缺 export %s（%s）", nc_mod_name(ncm), tick_name,
+        ESP_LOGE(TAG, "%s：缺 export %s（%s）", src->name, tick_name,
                  is_task ? "任務模組" : "效果模組");
         wasm_runtime_destroy_exec_env(env);
         wasm_runtime_deinstantiate(inst);
@@ -428,8 +431,16 @@ static esp_err_t engine_load(nc_mod_t *ncm)
     slot->inst = inst;
     slot->env = env;
     slot->fn_tick = fn_tick;
-    slot->owner = ncm;
+    slot->is_task = is_task;
     slot->used = true;
+    // name 抄一份：src 的指標（loader 的 nc_mod_t）唔保證活過插件。
+    size_t n = 0;
+    if (src->name != NULL) {
+        for (; n + 1 < sizeof(slot->name) && src->name[n] != '\0'; n++) {
+            slot->name[n] = src->name[n];
+        }
+    }
+    slot->name[n] = '\0';
 
     // 可選 init（一次）。冇就唔叫。
     const char *init_name = is_task ? NC_MOD_EXPORT_TASK_INIT : NC_MOD_EXPORT_INIT;
@@ -438,60 +449,55 @@ static esp_err_t engine_load(nc_mod_t *ncm)
         uint32_t argv[2] = {0, 0};
         if (call0_or_2(slot, fn_init, 0, argv, init_name) != ESP_OK) {
             ESP_LOGW(TAG, "%s：%s 出錯（照樣載入，tick 仍然會叫）",
-                     nc_mod_name(ncm), init_name);
+                     slot->name, init_name);
         }
     }
 
-    ESP_LOGI(TAG, "模組 %s 已實例化（%s，payload %u B，tick=%s）",
-             nc_mod_name(ncm), is_task ? "task" : "effect",
-             (unsigned)payload_size, tick_name);
+    ESP_LOGI(TAG, "插件 %s 已實例化（%s，payload %u B，tick=%s）",
+             slot->name, is_task ? "task" : "effect", (unsigned)src->size, tick_name);
+    *out = slot;
     return ESP_OK;
 }
 
-static esp_err_t engine_render(nc_mod_t *ncm, uint32_t frame_id)
+static esp_err_t engine_step(nc_plugin_t p, uint32_t frame_id)
 {
     // OTA 進行中（BEGIN 抹分區 → END 驗證完）就跳過：WAMR 喺 flash 執行程式碼，
     // 同時間 flash erase/write 會 park 另一核、暫停 cache → 實測 task watchdog
     // 5 s 到期 reboot（2026-11-17）。模組唔會 miss 任何嘢：host 呢段時間只等 ACK。
-    if (nc_ota_action_paused()) {
+    if (nc_plugin_paused()) {
         return ESP_OK;
     }
 
-    wamr_slot_t *slot = slot_find(ncm, false);
-    if (slot == NULL || !slot->used || slot->fn_tick == NULL) {
+    wamr_slot_t *slot = slot_of(p);
+    if (slot == NULL || slot->fn_tick == NULL) {
         return ESP_ERR_INVALID_STATE;
     }
 
-    nc_mod_decl_t decl;
-    memset(&decl, 0, sizeof(decl));
-    (void)nc_mod_decl(ncm, &decl);
-
     uint32_t argv[2] = {0, 0};
     uint32_t argc = 0;
-    if (decl.kind != NC_NCD_KIND_TASK) {
+    if (!slot->is_task) {
         // 效果：nce_render(frame_id, time_us)
         argc = 2;
         argv[0] = frame_id;
         argv[1] = (uint32_t)esp_timer_get_time();
     }
 
-    const char *what = (decl.kind == NC_NCD_KIND_TASK) ? NC_MOD_EXPORT_TASK_TICK
-                                                       : NC_MOD_EXPORT_RENDER;
+    const char *what = slot->is_task ? NC_MOD_EXPORT_TASK_TICK : NC_MOD_EXPORT_RENDER;
     const esp_err_t err = call0_or_2(slot, slot->fn_tick, argc, argv, what);
     if (err != ESP_OK) {
         return err;
     }
     // 回傳值：0 = ok；非 0 = 模組自報錯誤（契約見 ncm-contract §5）。
     if (argv[0] != 0) {
-        ESP_LOGW(TAG, "[%s] %s 回 %d", nc_mod_name(ncm), what, (int)argv[0]);
+        ESP_LOGW(TAG, "[%s] %s 回 %d", slot->name, what, (int)argv[0]);
         return ESP_FAIL;
     }
     return ESP_OK;
 }
 
-static void engine_unload(nc_mod_t *ncm)
+static void engine_close(nc_plugin_t p)
 {
-    wamr_slot_t *slot = slot_find(ncm, false);
+    wamr_slot_t *slot = slot_of(p);
     if (slot == NULL) {
         return;
     }
@@ -504,15 +510,15 @@ static void engine_unload(nc_mod_t *ncm)
     if (slot->module != NULL) {
         wasm_runtime_unload(slot->module);
     }
+    ESP_LOGI(TAG, "插件 %s 的 WAMR 資源已回收", slot->name);
     memset(slot, 0, sizeof(*slot));
-    ESP_LOGI(TAG, "模組 %s 的 WAMR 資源已回收", nc_mod_name(ncm));
 }
 
 static void engine_deinit(void)
 {
-    for (int i = 0; i < NC_MOD_MAX_MODULES; i++) {
-        if (s_slots[i].used && s_slots[i].owner != NULL) {
-            engine_unload((nc_mod_t *)s_slots[i].owner);
+    for (int i = 0; i < NC_PLUGIN_MAX; i++) {
+        if (s_slots[i].used) {
+            engine_close(&s_slots[i]);
         }
     }
     if (s_rt_up) {
@@ -521,16 +527,16 @@ static void engine_deinit(void)
     }
 }
 
-static const nc_mod_backend_t s_wamr_backend = {
+static const nc_plugin_backend_t s_wamr_backend = {
     .name = "wamr",
     .init = engine_init,
-    .load = engine_load,
-    .render = engine_render,
-    .unload = engine_unload,
+    .open = engine_open,
+    .step = engine_step,
+    .close = engine_close,
     .deinit = engine_deinit,
 };
 
-const nc_mod_backend_t *nc_mod_wamr_backend(void)
+const nc_plugin_backend_t *nc_plugin_wamr_backend(void)
 {
     return &s_wamr_backend;
 }

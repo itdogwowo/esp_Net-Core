@@ -22,11 +22,11 @@
 | **hw** | 晶片 | 一顆具體晶片的寄存器序列／封包（用 bus 讀寫） | bus |
 | **bus** | 線路 | 一條線的統一讀寫語義 | driver |
 | **sys** | 系統 | 協議、設定、FS、記憶體、任務、節拍 | driver、bus、`esp_*` |
-| **sw** | 共用工具 | 環、編碼、抖動、layout、**效果引擎**（registry／interpreter；**唔養行為、唔放具體效果**） | sys |
+| **sw** | 共用工具 | 環、編碼、抖動、layout、**效果引擎**（registry／interpreter）、**插件工具**（`sw/plugin/`：解碼＋運行 `.nct`／`.nce`；唯一識 WAMR） | sys |
 | **effects** | 效果實作 | （時間, 參數, 幾何）→ canonical 畫面（引擎在 `sw/pixel/engine/`） | sw（只 include 契約 header） |
 | **action** | 政策 | 參數怎麼驗、選哪個機制、回什麼 | sys、sw、effects（只設參數） |
 | **tasks** | 迴圈 | 誰在什麼核心上、跑多久 | sys、sw、effects（＋後端轉接例外） |
-| **host** | 宿主 | 載入並執行外部模組（ncm／WAMR） | sys |
+| **host** | 載入器（政策） | 掃描／arena／live／預算／attach 租戶（`host/ncm/`）；「怎麼跑」已搬到 `sw/plugin/` | sys |
 | **ui** | 介面 | 頁面、觸控 | sys、sw（觸發指令走 service） |
 | **schema** | 契約 | 指令表（build 時生成） | 無 |
 
@@ -77,11 +77,11 @@ esp_Net-Core/
 │  │  ├─ hw/                          # ⬜ 具體晶片（TFT／PCA9685／XL9555）；等第二顆晶片才建
 │  │  ├─ bus/                         # ✅ bus_core/ bus_net/ bus_uart/
 │  │  ├─ sys/                         # ✅ nc4/ mem/ config/ task/ store/ hw/ state/ nclog/ core/
-│  │  ├─ sw/                          # 🟡 pixel/（環＋編碼＋engine/；ring/·encode/ 仍平放）
+│  │  ├─ sw/                          # 🟡 pixel/（環＋編碼＋engine/）＋ plugin/（解碼＋運行插件）
 │  │  ├─ effects/                     # ✅ pixel_effects/（5 個效果實作＋登記表）
 │  │  ├─ action/                      # 🟡 ota_action/ file_action/ test_action/（dev）
 │  │  ├─ tasks/                       # 🟡 hw_gpio/、pixel_effect_task/、pixel_paint_task/、pixel_encode_task/、render_task/（公用輸出層）
-│  │  ├─ host/                        # 🟡 ncm/（模組載入＋WAMR）
+│  │  ├─ host/                        # 🟡 ncm/（載入器政策；WAMR 引擎已搬 sw/plugin）
 │  │  ├─ ui/                          # ⬜ pages/
 │  │  └─ schema/                      # ⬜ （生成物）
 │  ├─ sdkconfig.defaults              #   晶片層建置配置

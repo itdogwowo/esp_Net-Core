@@ -155,7 +155,7 @@ static uint8_t (*const s_usb_kind_lookup)(uint8_t) = nc_port_usb_kind;
 #include "nc_file_action.h"
 #ifdef NC_ENABLE_TESTS
 #include "nc_mod.h"
-#include "nc_mod_engine.h"
+#include "nc_plugin.h"
 #include "nc_res.h"
 #endif
 #include "nc_wifi.h"
@@ -4550,7 +4550,8 @@ static SemaphoreHandle_t s_ncm_boot_done;
 static void ncm_boot_task(void *arg)
 {
     (void)arg;
-    const esp_err_t berr = nc_mod_set_backend(nc_mod_wamr_backend());
+    nc_plugin_set_pause_check(nc_ota_action_paused);   // OTA 期間唔跑插件
+    const esp_err_t berr = nc_plugin_set_backend(nc_plugin_wamr_backend());
     if (berr == ESP_OK) {
         const int n = nc_mod_load_all(&s_mod_scan);
         ESP_LOGI(TAG, "ncm 模組載入：%d 個（%d 個被拒）", n, s_mod_scan.bad);

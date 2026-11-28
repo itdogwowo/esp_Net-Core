@@ -11,8 +11,8 @@ if errorlevel 1 (
 )
 
 cl /nologo /utf-8 /std:c11 /W4 ^
-  /I firmware\components\tasks\test_mod_tasks\include ^
-  firmware\components\tasks\test_mod_tasks\nc_ncd.c ^
+  /I firmware\components\sw\plugin\include ^
+  firmware\components\sw\plugin\nc_ncd.c ^
   tools\hosttest\ncd_test\main.c ^
   /Fe:"%TEMP%\ncd_test.exe" /Fo:"%TEMP%\\"
 if errorlevel 1 exit /b 1

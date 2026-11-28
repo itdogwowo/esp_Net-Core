@@ -233,19 +233,18 @@ tasks/...            .nct → nc_task_t 的 wrapper
 - 同 v2 的分別：v2 把「解碼器獨立、其餘入 pixel」；v3 係「解碼＋運行成套工具獨立，
   pixel 只係其中一個客戶端」。
 
-**阻礙（已核對）**
+**阻礙（2026-11-28 核對；✅ = 已清）**
 
-- ⚠ 引擎直接叫 `nc_mod_name()`／`nc_mod_payload()`／`nc_mod_decl()`（`nc_mod.h:75-80`）
-  → 要改成經 handle 拿，唔再依賴 `nc_mod_t`。
-- ⚠ 引擎 include `nc_ota_action.h`（`:31`／`:456`）→ 搬之前剪走。
-- ⚠ `status_add` 係 `main.c:1380` 的 static → 要加 `nc_status_register()`。
-- ⚠ `nc_res.c` 改 `tasks.json` 語義 → 應該由測試 glue／task 側做，唔入工具。
+- ✅ 引擎唔再叫 `nc_mod_name/payload/decl`：改收 `nc_plugin_src_t`（name／payload／size／fmt／kind）。
+- ✅ 引擎唔再 include `nc_ota_action.h`：暫停閘改由呼叫方注入（`nc_plugin_set_pause_check`）。
+- ⬜ `status_add` 係 `main.c:1380` 的 static → 要加 `nc_status_register()`（未做）。
+- ⬜ `nc_res.c` 改 `tasks.json` 語義 → 應該由測試 glue／task 側做，唔入工具（未做）。
 
 ### 6.5 遷移 checklist（未做）
 
-- [ ] 開 `sw/plugin/`：`git mv` `nc_ncd.c`／`nc_meta.c`／`nc_mod_engine.c`
-- [ ] 定義 `nc_plugin_open/tick/render/close`；engine 改為經 handle（唔再食 `nc_mod_t`）
-- [ ] 剪 `nc_ota_action.h`（改成 sys 的 quiet flag／hook）
+- [x] 開 `sw/plugin/`：`git mv` `nc_ncd.c`／`nc_meta.c`／`nc_mod_engine.c`（engine → `nc_plugin_wamr.c`）
+- [x] 定義 `nc_plugin_set_arena/set_backend/open/step/close/deinit`；engine 經 opaque handle
+- [x] 剪 `nc_ota_action.h`（暫停閘由呼叫方注入）
 - [ ] `nc_mod.c` 三拆：scan／arena → `test_ncm`；task attach → `tasks/`；status → sys
 - [ ] `.nce` adapter 入 `sw/pixel`（可以之後才做，唔阻塞搬位）
 - [ ] `test_ncm` 自註冊任務＋指令；刪 main 的 6 段 `#ifdef`

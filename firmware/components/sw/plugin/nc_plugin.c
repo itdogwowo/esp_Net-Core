@@ -1,0 +1,107 @@
+// nc_plugin.c — 插件工具的外殼：backend 註冊、暫停閘、四個動詞的轉發。
+//
+// 這裡刻意冇政策：冇 scan、冇 arena、冇 live 指標、冇預算、冇 task attach。
+// 那些屬於客戶端（見 gap-review §6.4.1）；工具只答「開得成唔成、跑得成唔成」。
+#include "nc_plugin.h"
+
+#include <string.h>
+
+#include "esp_log.h"
+
+static const char *TAG = "plugin";
+
+static const nc_plugin_backend_t *s_be;
+static bool s_init_ok;
+static bool (*s_pause_fn)(void);
+static void *s_arena;
+static size_t s_arena_bytes;
+
+void nc_plugin_set_arena(void *arena, size_t bytes)
+{
+    s_arena = arena;
+    s_arena_bytes = bytes;
+}
+
+esp_err_t nc_plugin_set_backend(const nc_plugin_backend_t *be)
+{
+    s_be = NULL;
+    s_init_ok = false;
+
+    if (be == NULL) {
+        return ESP_OK;                  // 明確清除（host 測試／換引擎）
+    }
+    if (be->open == NULL || be->step == NULL) {
+        ESP_LOGE(TAG, "backend %s 唔完整（open／step 必填）", be->name ? be->name : "?");
+        return ESP_ERR_INVALID_ARG;
+    }
+    s_be = be;
+    if (be->init != NULL) {
+        const esp_err_t err = be->init(s_arena, s_arena_bytes);
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "backend %s init 失敗：%s", be->name ? be->name : "?",
+                     esp_err_to_name(err));
+            s_be = NULL;
+            return err;
+        }
+    }
+    s_init_ok = true;
+    ESP_LOGI(TAG, "backend=%s%s", be->name ? be->name : "?",
+             (s_arena != NULL) ? "（已 init）" : "（冇 arena）");
+    return ESP_OK;
+}
+
+bool nc_plugin_ready(void)
+{
+    return s_init_ok && s_be != NULL;
+}
+
+const char *nc_plugin_backend_name(void)
+{
+    return (s_be != NULL && s_be->name != NULL) ? s_be->name : "none";
+}
+
+esp_err_t nc_plugin_open(nc_plugin_t *out, const nc_plugin_src_t *src)
+{
+    if (out == NULL || src == NULL || src->payload == NULL || src->size == 0) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    *out = NULL;
+    if (!nc_plugin_ready()) {
+        return ESP_ERR_INVALID_STATE;   // 冇引擎：載入得但跑唔到（客戶端自己決定）
+    }
+    return s_be->open(out, src);
+}
+
+esp_err_t nc_plugin_step(nc_plugin_t p, uint32_t frame_id)
+{
+    if (!nc_plugin_ready() || p == NULL) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    return s_be->step(p, frame_id);
+}
+
+void nc_plugin_close(nc_plugin_t p)
+{
+    if (p != NULL && s_be != NULL && s_be->close != NULL) {
+        s_be->close(p);
+    }
+}
+
+void nc_plugin_deinit(void)
+{
+    if (s_be != NULL && s_be->deinit != NULL) {
+        s_be->deinit();
+    }
+    s_init_ok = false;
+    s_be = NULL;
+}
+
+void nc_plugin_set_pause_check(bool (*fn)(void))
+{
+    s_pause_fn = fn;
+}
+
+bool nc_plugin_paused(void)
+{
+    return (s_pause_fn != NULL) && s_pause_fn();
+}

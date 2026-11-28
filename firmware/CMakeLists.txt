@@ -139,7 +139,10 @@ endif()
 # components/ 第一層有 CMakeLists.txt 的目錄當 component，放第一層會連 release
 # 都拉入嚟（C3/P4 冇 WAMR rule → resolve 失敗）。
 if(NC_ENABLE_NCM)
-    list(APPEND _nc_extra_dirs "${CMAKE_CURRENT_LIST_DIR}/components/host/ncm")
+    # 先插件工具（解碼＋運行），再載入器（政策）。兩者都只喺呢個閘內編。
+    list(APPEND _nc_extra_dirs
+         "${CMAKE_CURRENT_LIST_DIR}/components/sw/plugin"
+         "${CMAKE_CURRENT_LIST_DIR}/components/host/ncm")
 endif()
 # 測試元件：唔逐一列出 —— 名字 `test_` 開頭就係登記。
 # 位置由後綴決定（test_*_action 在 action/、test_*_tasks 在 tasks/），

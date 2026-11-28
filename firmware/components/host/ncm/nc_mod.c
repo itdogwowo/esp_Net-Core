@@ -1,5 +1,6 @@
 #include "nc_mod.h"
 #include "nc_mod_abi.h"
+#include "nc_plugin.h"
 #include "nc_ncd.h"
 #include "nc_res.h"
 
@@ -106,6 +107,7 @@ struct nc_mod {
     int      level;            // 合併後的 level（-1 = 停用；attach 時用）
     uint16_t flags;
     uint8_t  fmt;              // NC_MOD_FMT_WASM / NC_MOD_FMT_AOT
+    nc_plugin_t plugin;        // 插件工具的實例把手（NULL = 冇開／冇引擎）
     bool     used;
     bool     ok;               // 驗證通過、且有執行引擎
     bool     bad;              // trap 或連續超支 → 不再選用
@@ -131,7 +133,6 @@ static nc_mod_t *volatile s_live;
 static volatile uint32_t s_frame;
 static char     s_retire[NC_MOD_NAME_MAX];   // 等兩幀才釋放的模組
 static uint32_t s_retire_at;
-static const nc_mod_backend_t *s_backend;
 static int      s_task_core = 1;
 static int      s_task_prio = 3;
 
@@ -201,23 +202,14 @@ static void arena_compact(void)
     }
 }
 
-// backend 決定「能不能跑」。載入時就判斷，之後改 backend 要重算。
-static void refresh_ok(void)
-{
-    for (int i = 0; i < NC_MOD_MAX_MODULES; i++) {
-        if (s_mods[i].used) {
-            s_mods[i].ok = (s_backend != NULL) && !s_mods[i].bad;
-        }
-    }
-}
-
 // 真的放掉一個實例：先拆租戶（指令/任務），再清表。
 // 拆不掉就不要清 —— 模組宣告還活在這個 slot 裡，清了會是 use-after-free。
 static esp_err_t release_slot(nc_mod_t *m)
 {
     // 先收引擎那邊的資源（instance／module／exec env），之後才清 loader 的資料。
-    if (s_backend != NULL && s_backend->unload != NULL) {
-        s_backend->unload(m);
+    if (m->plugin != NULL) {
+        nc_plugin_close(m->plugin);
+        m->plugin = NULL;
     }
 #ifndef NC_MOD_HOST_TEST
     if (m->attached) {
@@ -248,13 +240,14 @@ esp_err_t nc_mod_init(void *arena, size_t bytes)
     s_frame = 0;
     s_retire[0] = '\0';
     memset(s_mods, 0, sizeof(s_mods));
+    nc_plugin_set_arena(arena, bytes);     // 插件實例的 payload 住喺這塊 arena
 
     if (s_arena == NULL) {
         ESP_LOGW(TAG, "拿不到 arena（plan 沒給）→ ncm 停用");
         return ESP_ERR_NO_MEM;
     }
     ESP_LOGI(TAG, "arena %u B（backend=%s, task core=%d prio=%d）",
-             (unsigned)bytes, s_backend ? s_backend->name : "none",
+             (unsigned)bytes, nc_plugin_backend_name(),
              s_task_core, s_task_prio);
     return ESP_OK;
 }
@@ -268,21 +261,6 @@ void nc_mod_set_task_placement(int core, int prio)
 int nc_mod_task_core(void)
 {
     return s_task_core;
-}
-
-// 之後接 WAMR 或 host 測試用；不能在 render 中途換（loader 端負責時機）。
-esp_err_t nc_mod_set_backend(const nc_mod_backend_t *backend)
-{
-    s_backend = backend;
-    if (backend != NULL && backend->init != NULL) {
-        const esp_err_t err = backend->init(s_arena, s_arena_bytes);
-        if (err != ESP_OK) {
-            s_backend = NULL;
-            return err;
-        }
-    }
-    refresh_ok();
-    return ESP_OK;
 }
 
 // ───────────────────────── 載入 / 卸載 ─────────────────────────
@@ -613,14 +591,22 @@ esp_err_t nc_mod_load_ex(const char *path, int level)
     slot->flags = hdr.flags;
     slot->fmt = is_aot ? NC_MOD_FMT_AOT : NC_MOD_FMT_WASM;
     slot->used = true;
-    slot->ok = (s_backend != NULL);        // 沒有執行引擎時「載入成功但不能跑」
+    slot->ok = nc_plugin_ready();          // 沒有執行引擎時「載入成功但不能跑」
+    slot->plugin = NULL;
 
     // 有引擎就即刻實例化（payload／CRC 已驗）。失敗唔踢走：留在表裡標 bad，
-    // 主機可以由 status 看到「呢個模組存在但載入引擎時失敗」，唔會靜靜消失。
-    if (slot->ok && s_backend->load != NULL) {
-        const esp_err_t lerr = s_backend->load(slot);
+    // 主機可以由 status 看到「呢個模組存在但開唔成」，唔會靜靜消失。
+    if (slot->ok) {
+        nc_plugin_src_t src = {
+            .name = slot->name,
+            .payload = slot->payload,
+            .size = slot->payload_size,
+            .fmt = slot->fmt,
+            .kind = slot->decl.kind,
+        };
+        const esp_err_t lerr = nc_plugin_open(&slot->plugin, &src);
         if (lerr != ESP_OK) {
-            ESP_LOGE(TAG, "%s：執行引擎載入失敗（%s）→ 標記 bad（唔會跑）",
+            ESP_LOGE(TAG, "%s：插件開唔成（%s）→ 標記 bad（唔會跑）",
                      name, esp_err_to_name(lerr));
             slot->bad = true;
             slot->ok = false;
@@ -952,31 +938,6 @@ esp_err_t nc_mod_unload(const char *name)
     return release_slot(m);
 }
 
-uint8_t nc_mod_module_format(const nc_mod_t *ncm)
-{
-    return ncm ? ncm->fmt : NC_MOD_FMT_WASM;
-}
-
-const char *nc_mod_name(const nc_mod_t *ncm)
-{
-    return ncm ? ncm->name : "?";
-}
-
-// payload 由 loader 從 arena 複製好，lifetime = 模組 lifetime（unload 才回收）。
-const uint8_t *nc_mod_payload(const nc_mod_t *ncm, size_t *size)
-{
-    if (ncm == NULL) {
-        if (size != NULL) {
-            *size = 0;
-        }
-        return NULL;
-    }
-    if (size != NULL) {
-        *size = ncm->payload_size;
-    }
-    return ncm->payload;
-}
-
 nc_mod_t *nc_mod_live(void)
 {
     return s_live;
@@ -1037,12 +998,12 @@ uint32_t nc_mod_tick(void)
     }
 
     nc_mod_t *ncm = s_live;
-    if (ncm == NULL || !ncm->ok || s_backend == NULL || s_backend->render == NULL) {
+    if (ncm == NULL || !ncm->ok || ncm->plugin == NULL) {
         return s_frame;
     }
 
     const int64_t t0 = mod_now_us();
-    const esp_err_t err = s_backend->render(ncm, s_frame);
+    const esp_err_t err = nc_plugin_step(ncm->plugin, s_frame);
     const int64_t dt = mod_now_us() - t0;
 
     if (err != ESP_OK) {
@@ -1134,7 +1095,7 @@ size_t nc_mod_info_json(char *buf, size_t cap)
                     "\"backend\":\"%s\",\"period_ms\":%u,\"task_core\":%d,\"modules\":[",
                     (unsigned)s_arena_bytes, (unsigned)s_arena_used,
                     s_live ? s_live->name : "",
-                    (unsigned)s_frame, s_backend ? s_backend->name : "none",
+                    (unsigned)s_frame, nc_plugin_backend_name(),
                     (unsigned)nc_mod_period_ms(), s_task_core);
 
     bool first = true;
@@ -1181,7 +1142,7 @@ size_t nc_mod_info_json(char *buf, size_t cap)
                          "\"truncated\":1,\"mods\":%d,\"modules\":[]}",
                          (unsigned)s_arena_bytes, (unsigned)s_arena_used,
                          s_live ? s_live->name : "", (unsigned)s_frame,
-                         s_backend ? s_backend->name : "none",
+                         nc_plugin_backend_name(),
                          (unsigned)nc_mod_period_ms(), n_used);
     }
     return mod_append(buf, cap, off, "]}");

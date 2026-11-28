@@ -19,6 +19,7 @@
 #include "esp_rom_crc.h"
 #include "mod_host.h"
 #include "nc_mod.h"
+#include "nc_plugin.h"
 #include "nc_mod_abi.h"
 #include "nc_ncd.h"
 #include "nc_res.h"
@@ -120,9 +121,9 @@ static int s_mode = RENDER_OK;
 static int s_renders;
 static uint32_t s_last_frame;
 
-static esp_err_t fake_render(nc_mod_t *ncm, uint32_t frame_id)
+static esp_err_t fake_step(nc_plugin_t plugin, uint32_t frame_id)
 {
-    (void)ncm;
+    (void)plugin;
     s_renders++;
     s_last_frame = frame_id;
     if (s_mode == RENDER_FAIL) {
@@ -146,10 +147,24 @@ static esp_err_t fake_init(void *arena, size_t bytes)
     return ESP_OK;
 }
 
-static const nc_mod_backend_t FAKE = {
+static esp_err_t fake_open(nc_plugin_t *out, const nc_plugin_src_t *src)
+{
+    (void)src;
+    *out = (void *)(uintptr_t)0x1;        // 假把手（唔會 deref）
+    return ESP_OK;
+}
+
+static void fake_close(nc_plugin_t plugin)
+{
+    (void)plugin;
+}
+
+static const nc_plugin_backend_t FAKE = {
     .name = "fake",
     .init = fake_init,
-    .render = fake_render,
+    .open = fake_open,
+    .step = fake_step,
+    .close = fake_close,
     .deinit = NULL,
 };
 
@@ -292,7 +307,7 @@ int main(void)
 
     CHECK(nc_mod_init(NULL, 0) == ESP_ERR_NO_MEM, "沒有 arena → 明確失敗");
     CHECK(nc_mod_init(arena, sizeof(arena)) == ESP_OK, "arena 64 KB 就緒");
-    CHECK(nc_mod_set_backend(&FAKE) == ESP_OK, "backend 裝上");
+    CHECK(nc_plugin_set_backend(&FAKE) == ESP_OK, "backend 裝上");
 
     case_begin("壞檔全部被拒，且不留空槽");
     CHECK(nc_mod_load(bad_magic) == ESP_ERR_INVALID_ARG, "magic 錯 → ERR_INVALID_ARG");

@@ -11495,3 +11495,32 @@ layout cache 改 name_id＋dictionary CRC；舊 cache 版本++。Phase 1 模組�
   工具唔識 pixel／task／status。客戶端：`.nce` → `sw/pixel` adapter、`.nct` → `tasks/`、
   掃描／arena／`0xF0xx`／status → `test_ncm`。`nc_mod.c` 要**拆**，唔係搬。
 - 詳見 [`gap-review.md`](gap-review.md) §6.4（解碼器／宿主分家）。
+
+---
+
+### 7.343 2026-11-28（拆出插件工具 `sw/plugin`：解碼＋運行；ncm 只剩政策）
+
+**做咗（第一步，唔搬 main 的 glue）**
+- 新 component `components/sw/plugin/`：`nc_ncd`／`nc_meta`／WAMR 引擎（由 `host/ncm` 搬入）
+  ＋新外殼 `nc_plugin.c`（backend 註冊／暫停閘／四個動詞）。
+- 對外 API：`nc_plugin_set_arena`／`set_backend`／`open`／`step`／`close`／`deinit`；
+  把手係 opaque `nc_plugin_t`（WAMR 版 = slot 指標）。
+- 引擎唔再識 `nc_mod_t`：改收 `nc_plugin_src_t`（name／payload／size／fmt／kind）；
+  `nc_mod_name/payload/module_format` 三條 accessor 刪除。
+- OTA 暫停改由呼叫方注入：`nc_plugin_set_pause_check(nc_ota_action_paused)` →
+  **`plugin` 唔再 include `ota_action`**（全樹最後一條反向依賴消失）。
+- `nc_mod.c` 只剩政策：掃描／arena／live／預算／attach；`nc_mod_set_backend()` 刪除。
+- `main.c`：`nc_plugin_set_backend(nc_plugin_wamr_backend())`。
+- CMake：`sw/plugin` 同 `host/ncm` 同一個 `NC_ENABLE_NCM` 閘；WAMR 依賴搬去 plugin。
+
+**順手修好嘅既有問題**
+- `--tests` 映像其實一直編唔過：`nc_test_action.c` 的 `0xF064 PROGBENCH` 仍在用
+  `asset.seg[]`（2026-11-28 已改成全域 segment pool）＋`strcpy(name)`。
+  已改用 `nc_px_asset_seg_add()`／`a->name = "bench"`。release 唔編 tests，之前驗收冇撞到。
+
+**驗證（idf=v6.1.1 macOS）**
+- `bash tools/hosttest/run_all.sh`：**26 支全過**（含 `mod_test`／`ncd_test`）。
+- `make.py build ESP32-S3-Matrix --project ESP32-S3-Matrix-LED-Textkit --tests`：✔
+- `make.py build …`（release，NC_ENABLE_NCM=OFF）：✔ `esp_net_core.bin` **799,680 B**
+- **未上板**（serial 被 sandbox 擋）：WAMR 真的 instantiate／tick 仍然未驗；
+  下一步係 `nc_mod.c` 三拆（scan／arena → `test_ncm`、status → sys）＋ `.nce` adapter。

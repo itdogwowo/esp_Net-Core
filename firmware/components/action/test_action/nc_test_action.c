@@ -4508,18 +4508,23 @@ static nc_px_job_t       s_bpp_job[NC_PX_LEGACY_JOB_MAX];
 static void prog_fill_asset(nc_px_asset_t *a, uint8_t type)
 {
     memset(a, 0, sizeof(*a));
-    strcpy(a->name, "bench");
+    a->name_id = NC_PX_NAME_DICT_BAD_ID;
+    a->name = "bench";
     a->kind = NC_PX_ASSET_PROGRAM;
-    a->nseg = 1;
     a->pixel_hint = 64;
     a->speed = 1;
-    a->seg[0].type = type;
-    a->seg[0].f = 10;
-    a->seg[0].l_max = 4095;
-    a->seg[0].l_lim = 100;
-    a->seg[0].phi = 0;
-    a->seg[0].end_f = 100;
-    a->seg[0].pulse = 2047;
+    // 2026-11-28：program 段改全域 pool（seg 唔再 inline）—— 追加一段再填。
+    nc_px_seg_t *seg = nc_px_asset_seg_add(a);
+    if (seg == NULL) {
+        return;
+    }
+    seg->type = type;
+    seg->f = 10;
+    seg->l_max = 4095;
+    seg->l_lim = 100;
+    seg->phi = 0;
+    seg->end_f = 100;
+    seg->pulse = 2047;
 }
 
 static uint32_t prog_value_ns(uint8_t type, uint32_t iters)
