@@ -22,9 +22,8 @@
 
 static const char *TAG = "px_layer";
 
-#define SCAN_FILE_MAX (256*1024)   // 500 組 map 就 ~58 KB；8 KB 會失敗
-#define SCAN_NAME_LEN 32
-#define SCAN_PATH_LEN 192
+#define SCAN_NAME_LEN 64
+#define SCAN_PATH_LEN 256
 
 static nc_px_map_tbl_t  s_maps;
 static nc_px_mode_tbl_t s_modes;
@@ -150,10 +149,11 @@ static char *read_all(const char *path, size_t *len)
         return NULL;
     }
     const long end = ftell(f);
-    if (end <= 0 || (size_t)end > SCAN_FILE_MAX) {
+    if (end <= 0) {
         fclose(f);
         return NULL;
     }
+    // 唔再固定 256 KB：由檔案實際大小決定；唯一失敗原因係 malloc 冇記憶體。
     if (fseek(f, 0, SEEK_SET) != 0) {
         fclose(f);
         return NULL;
@@ -470,7 +470,7 @@ const nc_px_map_tbl_t  *nc_px_map_table(void) { return &s_maps; }
 const nc_px_mode_tbl_t *nc_px_mode_table(void) { return &s_modes; }
 const nc_px_show_t     *nc_px_show(void) { return &s_show; }
 
-static bool ref_matches(const char *ref, const char *name, uint8_t id)
+static bool ref_matches(const char *ref, const char *name, uint16_t id)
 {
     if (ref == NULL) {
         return false;
@@ -483,7 +483,7 @@ static bool ref_matches(const char *ref, const char *name, uint8_t id)
             return false;
         }
     }
-    return (uint8_t)atoi(ref) == id;
+    return (uint16_t)atoi(ref) == id;
 }
 
 const nc_px_map_t *nc_px_map_find(const char *ref)

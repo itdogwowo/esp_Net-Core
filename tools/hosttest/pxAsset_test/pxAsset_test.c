@@ -57,16 +57,16 @@ static void test_batch(void)
     if (a != NULL) {
         check(a->kind == NC_PX_ASSET_PROGRAM, "batch：kind = PROGRAM");
         check(a->nseg == 1, "batch：breathing 1 段");
-        check(a->seg[0].type == NC_PX_SEG_MATH_NOW, "batch：段型別 math_now");
-        check(a->seg[0].f == 2, "batch：F = 2");
-        check(a->seg[0].l_max == 4095, "batch：l_max = 4095");
-        check(a->seg[0].l_lim == 100, "batch：l_lim = 100");
-        check(a->seg[0].end_f == 200, "batch：end_Time = 200");
+        check(nc_px_asset_seg(a, 0)->type == NC_PX_SEG_MATH_NOW, "batch：段型別 math_now");
+        check(nc_px_asset_seg(a, 0)->f == 2, "batch：F = 2");
+        check(nc_px_asset_seg(a, 0)->l_max == 4095, "batch：l_max = 4095");
+        check(nc_px_asset_seg(a, 0)->l_lim == 100, "batch：l_lim = 100");
+        check(nc_px_asset_seg(a, 0)->end_f == 200, "batch：end_Time = 200");
         check(a->pixel_hint == 64, "batch：pixel_n = 64（只作提示）");
     }
     const nc_px_asset_t *w = nc_px_asset_find("wave");
-    check(w != NULL && w->seg[0].phi == 3071, "batch：wave 的 phi = 3071");
-    check(w != NULL && w->seg[0].l_lim == 0, "batch：wave 的 l_lim = 0");
+    check(w != NULL && nc_px_asset_seg(w, 0)->phi == 3071, "batch：wave 的 phi = 3071");
+    check(w != NULL && nc_px_asset_seg(w, 0)->l_lim == 0, "batch：wave 的 l_lim = 0");
 }
 
 // ── 2. 單一效果檔（一檔一效果）──────────────────────────────────────
@@ -78,7 +78,7 @@ static void test_single(void)
           "single：回 ESP_OK");
     const nc_px_asset_t *f = nc_px_asset_find("fire");
     check(f != NULL && f->nseg == 1, "single：fire 1 段");
-    check(f != NULL && f->seg[0].type == NC_PX_SEG_SQUARE_WAVE_NOW, "single：段型別 square_wave_now");
+    check(f != NULL && nc_px_asset_seg(f, 0)->type == NC_PX_SEG_SQUARE_WAVE_NOW, "single：段型別 square_wave_now");
 
     // 冇寫 name → 用檔名（name_hint）
     nc_px_asset_clear();
@@ -155,9 +155,9 @@ static void test_limits(void)
                               (i == 0) ? "" : ",", i + 1);
     }
     snprintf(buf + u, sizeof(buf) - u, "]}");
-    check(add(buf, "many") == ESP_OK, "20 段：照收（截斷）");
+    check(add(buf, "many") == ESP_OK, "20 段：照收");
     const nc_px_asset_t *m = nc_px_asset_find("many");
-    check(m != NULL && m->nseg == NC_PX_SEG_MAX, "20 段：只留 NC_PX_SEG_MAX 段");
+    check(m != NULL && m->nseg == 20, "20 段：全部保留（動態 pool）");
 
     // 冇固定上限（舊版 32）：要 200 個就收 200 個，而且係倍增配置
     nc_px_asset_clear();
@@ -209,14 +209,14 @@ static void test_program_rules(void)
               "pulse_def") == ESP_OK,
           "pulse：冇寫照收");
     const nc_px_asset_t *a = nc_px_asset_find("pulse_def");
-    check(a != NULL && a->seg[0].pulse == 2047, "pulse：缺省 2047（同 MP 一致）");
+    check(a != NULL && nc_px_asset_seg(a, 0)->pulse == 2047, "pulse：缺省 2047（同 MP 一致）");
 
     nc_px_asset_clear();
     check(add("{\"name\":\"pulse_set\",\"program\":[{\"type\":\"pulse_wave\","
               "\"pulse\":1200,\"end_Time\":10}]}", "pulse_set") == ESP_OK,
           "pulse：明寫照收");
     a = nc_px_asset_find("pulse_set");
-    check(a != NULL && a->seg[0].pulse == 1200, "pulse：明寫 = 1200");
+    check(a != NULL && nc_px_asset_seg(a, 0)->pulse == 1200, "pulse：明寫 = 1200");
 
     nc_px_asset_clear();
     check(add("{\"name\":\"flat\",\"program\":[{\"type\":\"keep\",\"end_Time\":10},"

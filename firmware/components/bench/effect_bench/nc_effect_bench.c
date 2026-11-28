@@ -185,38 +185,18 @@ static void fill_asset(nc_px_asset_t *a, uint16_t nv)
     a->speed = 1;
 
     // 四段都有：正弦、方波、脈衝串、保持。最後一段 end_f = 波長。
-    a->nseg = 4;
-    a->seg[0].type = NC_PX_SEG_MATH_NOW;
-    a->seg[0].f = 10;
-    a->seg[0].l_max = 4095;
-    a->seg[0].l_lim = 100;
-    a->seg[0].phi = 0;
-    a->seg[0].end_f = 64;
-    a->seg[0].pulse = 2047;
-
-    a->seg[1].type = NC_PX_SEG_SQUARE_WAVE_NOW;
-    a->seg[1].f = 17;
-    a->seg[1].l_max = 3000;
-    a->seg[1].l_lim = 0;
-    a->seg[1].phi = 700;
-    a->seg[1].end_f = 128;
-    a->seg[1].pulse = 2047;
-
-    a->seg[2].type = NC_PX_SEG_PULSE_WAVE;
-    a->seg[2].f = 23;
-    a->seg[2].l_max = 4095;
-    a->seg[2].l_lim = 200;
-    a->seg[2].phi = 1400;
-    a->seg[2].end_f = 192;
-    a->seg[2].pulse = 1200;
-
-    a->seg[3].type = NC_PX_SEG_KEEP;
-    a->seg[3].f = 1;
-    a->seg[3].l_max = 4095;
-    a->seg[3].l_lim = 0;
-    a->seg[3].phi = 0;
-    a->seg[3].end_f = 256;
-    a->seg[3].pulse = 2047;
+    nc_px_seg_t *sg = nc_px_asset_seg_add(a);
+    sg->type = NC_PX_SEG_MATH_NOW; sg->f = 10; sg->l_max = 4095; sg->l_lim = 100;
+    sg->phi = 0; sg->end_f = 64; sg->pulse = 2047;
+    sg = nc_px_asset_seg_add(a);
+    sg->type = NC_PX_SEG_SQUARE_WAVE_NOW; sg->f = 17; sg->l_max = 3000; sg->l_lim = 0;
+    sg->phi = 700; sg->end_f = 128; sg->pulse = 2047;
+    sg = nc_px_asset_seg_add(a);
+    sg->type = NC_PX_SEG_PULSE_WAVE; sg->f = 23; sg->l_max = 4095; sg->l_lim = 200;
+    sg->phi = 1400; sg->end_f = 192; sg->pulse = 1200;
+    sg = nc_px_asset_seg_add(a);
+    sg->type = NC_PX_SEG_KEEP; sg->f = 1; sg->l_max = 4095; sg->l_lim = 0;
+    sg->phi = 0; sg->end_f = 256; sg->pulse = 2047;
 }
 
 static void fill_job(nc_px_job_t *j, const nc_px_asset_t *a, uint16_t base, uint16_t count)
@@ -454,14 +434,14 @@ static void fill_wave_asset(nc_px_asset_t *a, uint8_t type)
     a->spacing = 0;
     a->offset = 0;
     a->speed = 1;
-    a->nseg = 1;
-    a->seg[0].type = type;
-    a->seg[0].f = 10;
-    a->seg[0].l_max = 4095;
-    a->seg[0].l_lim = 100;
-    a->seg[0].phi = 0;
-    a->seg[0].end_f = EB_WAVE_TOTAL;
-    a->seg[0].pulse = 2047;
+    nc_px_seg_t *sg = nc_px_asset_seg_add(a);
+    sg->type = type;
+    sg->f = 10;
+    sg->l_max = 4095;
+    sg->l_lim = 100;
+    sg->phi = 0;
+    sg->end_f = EB_WAVE_TOTAL;
+    sg->pulse = 2047;
 }
 
 // 一次性：建立整條波（EB_WAVE_TOTAL 個值），同 nc_effect_task 的 waves_build 一樣。

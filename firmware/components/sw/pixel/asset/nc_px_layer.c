@@ -403,8 +403,8 @@ esp_err_t nc_px_map_parse(const char *json, size_t len, nc_px_map_pool_t *pool,
             }
             if (strcmp(key, "id") == 0) {
                 uint32_t v = 0;
-                if (nc_px_js_num(&j, 255, &v) == NC_PX_JSN_OK) {
-                    out->id = (uint8_t)v;
+                if (nc_px_js_num(&j, 65535, &v) == NC_PX_JSN_OK) {
+                    out->id = (uint16_t)v;
                 } else if (!nc_px_js_skip(&j)) {
                     return ESP_ERR_INVALID_ARG;
                 }
@@ -623,8 +623,8 @@ esp_err_t nc_px_mode_parse(const char *json, size_t len, nc_px_mode_entry_t *poo
             }
             if (strcmp(key, "id") == 0) {
                 uint32_t v = 0;
-                if (nc_px_js_num(&j, 255, &v) == NC_PX_JSN_OK) {
-                    out->id = (uint8_t)v;
+                if (nc_px_js_num(&j, 65535, &v) == NC_PX_JSN_OK) {
+                    out->id = (uint16_t)v;
                 } else if (!nc_px_js_skip(&j)) {
                     return ESP_ERR_INVALID_ARG;
                 }

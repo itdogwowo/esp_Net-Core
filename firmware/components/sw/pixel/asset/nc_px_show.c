@@ -246,6 +246,7 @@ esp_err_t nc_px_show_plan(const nc_px_mode_t *mode, const nc_px_map_t *map,
             }
         }
         if (job.nranges == 0) {
+            nc_px_engine_program_free(&job.prog);
             out->skipped++;
             continue;
         }
@@ -253,6 +254,7 @@ esp_err_t nc_px_show_plan(const nc_px_mode_t *mode, const nc_px_map_t *map,
             apply_range(&job, en->start, en->stop, en->step);
         }
         if (job.nranges == 0 || job.nled == 0) {
+            nc_px_engine_program_free(&job.prog);
             out->skipped++;
             continue;
         }
@@ -262,6 +264,19 @@ esp_err_t nc_px_show_plan(const nc_px_mode_t *mode, const nc_px_map_t *map,
         return ESP_ERR_NOT_FOUND;
     }
     return ESP_OK;
+}
+
+void nc_px_show_plan_free(nc_px_plan_t *plan)
+{
+    if (plan == NULL) {
+        return;
+    }
+    if (plan->job != NULL) {
+        for (uint8_t i = 0; i < plan->njobs; i++) {
+            nc_px_engine_program_free(&plan->job[i].prog);
+        }
+    }
+    plan->njobs = 0;
 }
 
 uint16_t nc_px_job_vals(const nc_px_job_t *job, uint32_t step, uint16_t *out, uint16_t cap)

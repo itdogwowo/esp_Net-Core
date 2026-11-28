@@ -10,10 +10,27 @@
 // 這裡照做：compile 完只剩陣列索引＋加減＋一個正弦。
 #include "nc_px_program.h"
 
+#include <stdlib.h>
 #include <string.h>
 
 #include "nc_px_engine.h"
 #include "sdkconfig.h"
+
+#if defined(ESP_PLATFORM)
+#include "esp_heap_caps.h"
+#endif
+
+static nc_px_prog_seg_t *prog_seg_alloc(uint32_t n)
+{
+#if defined(ESP_PLATFORM)
+    void *p = heap_caps_malloc((size_t)n * sizeof(nc_px_prog_seg_t),
+                               MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (p != NULL) {
+        return (nc_px_prog_seg_t *)p;
+    }
+#endif
+    return (nc_px_prog_seg_t *)malloc((size_t)n * sizeof(nc_px_prog_seg_t));
+}
 
 #if CONFIG_NETCORE_PIXEL
 
@@ -28,17 +45,24 @@ esp_err_t nc_px_engine_program_compile(const nc_px_asset_t *a, nc_px_prog_t *out
         return ESP_ERR_INVALID_ARG;
     }
     memset(out, 0, sizeof(*out));
-    if (a == NULL || a->kind != NC_PX_ASSET_PROGRAM || a->nseg == 0 ||
-        a->nseg > NC_PX_PROG_SEG_MAX) {
+    if (a == NULL || a->kind != NC_PX_ASSET_PROGRAM || a->nseg == 0) {
         return ESP_ERR_INVALID_ARG;
+    }
+    out->seg = prog_seg_alloc(a->nseg);
+    if (out->seg == NULL) {
+        return ESP_ERR_NO_MEM;
     }
 
     uint32_t prev = 0;
-    for (uint8_t i = 0; i < a->nseg; i++) {
-        const nc_px_seg_t *s = &a->seg[i];
+    for (uint16_t i = 0; i < a->nseg; i++) {
+        const nc_px_seg_t *s = nc_px_asset_seg(a, i);
+        if (s == NULL) {
+            nc_px_engine_program_free(out);
+            return ESP_ERR_INVALID_ARG;
+        }
         const uint32_t end = s->end_f;
         if (end <= prev) {                       // end_Time 必須嚴格遞增（0 亦唔收）
-            memset(out, 0, sizeof(*out));
+            nc_px_engine_program_free(out);
             return ESP_ERR_INVALID_ARG;
         }
         const uint32_t fs = end - prev;          // 這段幾幀
@@ -64,6 +88,15 @@ esp_err_t nc_px_engine_program_compile(const nc_px_asset_t *a, nc_px_prog_t *out
     out->n = a->nseg;
     out->total = prev;
     return ESP_OK;
+}
+
+void nc_px_engine_program_free(nc_px_prog_t *p)
+{
+    if (p == NULL) {
+        return;
+    }
+    free(p->seg);
+    memset(p, 0, sizeof(*p));
 }
 
 uint16_t nc_px_engine_program_value(const nc_px_prog_t *p, uint32_t g)
@@ -189,6 +222,11 @@ esp_err_t nc_px_engine_program_compile(const nc_px_asset_t *a, nc_px_prog_t *out
     (void)a;
     (void)out;
     return ESP_ERR_NOT_SUPPORTED;
+}
+
+void nc_px_engine_program_free(nc_px_prog_t *p)
+{
+    (void)p;
 }
 
 uint16_t nc_px_engine_program_value(const nc_px_prog_t *p, uint32_t g)

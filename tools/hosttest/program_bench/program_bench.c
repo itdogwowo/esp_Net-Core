@@ -28,15 +28,15 @@ static nc_px_asset_t make_asset(uint8_t type)
     memset(&a, 0, sizeof(a));
     strcpy(a.name, "bench");
     a.kind = NC_PX_ASSET_PROGRAM;
-    a.nseg = 1;
     a.pixel_hint = 64;
-    a.seg[0].type = type;
-    a.seg[0].f = 10;
-    a.seg[0].l_max = 4095;
-    a.seg[0].l_lim = 100;
-    a.seg[0].phi = 0;
-    a.seg[0].end_f = 100;
-    a.seg[0].pulse = 2047;
+    nc_px_seg_t *sg = nc_px_asset_seg_add(&a);
+    sg->type = type;
+    sg->f = 10;
+    sg->l_max = 4095;
+    sg->l_lim = 100;
+    sg->phi = 0;
+    sg->end_f = 100;
+    sg->pulse = 2047;
     return a;
 }
 

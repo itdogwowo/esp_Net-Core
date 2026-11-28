@@ -48,7 +48,8 @@ typedef struct {
 } nc_px_seg_t;
 
 // ═══════════════════════ 一個效果資產 ═══════════════════════
-#define NC_PX_SEG_MAX     16       // 一個 program 最多幾段（段唔會多，呢個係真上限）
+// 2026-11-28：program 段數改為動態；seg 只存「全域 segment pool 的 offset」。
+// accessor：nc_px_asset_seg()（唯讀）／nc_px_asset_seg_add()（parser 用）。
 
 typedef enum {
     NC_PX_ASSET_PROGRAM = 0,       // DATA：program（JSON 波形）
@@ -58,7 +59,8 @@ typedef enum {
 typedef struct {
     char        name[NC_PX_NAME_MAX];   // key；JSON 冇寫 = 檔名
     uint8_t     kind;                   // nc_px_asset_kind_t
-    uint8_t     nseg;                   // kind=PROGRAM 時有效
+    uint16_t    nseg;                   // kind=PROGRAM 時有效（動態）
+    uint16_t    seg_off;                // 第一個 segment 在全域 pool 的 index
     uint16_t    pixel_hint;             // 只作提示：真正 px 由環的事實決定，唔信呢個
     // 空間／時間分布（同 MP effects.json 同名）：phase = (t/speed)*step + i*spacing + offset
     uint16_t    step;                   // 每次時間推進幾格（預設 1）
@@ -66,7 +68,6 @@ typedef struct {
     uint16_t    offset;                 // 整體相位偏移
     uint16_t    speed;                  // 幾幀一步（0 當 1）
     bool        reverse;                // 反向輸出
-    nc_px_seg_t seg[NC_PX_SEG_MAX];
 } nc_px_asset_t;
 
 // 效果表：**唔再係固定 32 個**（舊版 32 × 262 B ＝ 8,386 B 食死在 BSS，開機就冇）。
@@ -90,6 +91,10 @@ typedef struct {
 // `alloc` 連表頭一齊配置；`use` 用呼叫端自己的緩衝（host 測試／臨時表）；
 // `reserve` 唔夠位就倍增（8 → 16 → …），舊內容自動帶過去。
 nc_px_asset_tbl_t *nc_px_asset_tbl_alloc(uint16_t cap);   // 回 NULL = 記憶體不足
+
+// 動態 segment pool accessor（asset 可能被 copy，offset 仍然有效）。
+const nc_px_seg_t *nc_px_asset_seg(const nc_px_asset_t *a, uint32_t i);
+nc_px_seg_t       *nc_px_asset_seg_add(nc_px_asset_t *a);   // 追加一段並回傳可寫 pointer
 void               nc_px_asset_tbl_free(nc_px_asset_tbl_t *t);
 void               nc_px_asset_tbl_use(nc_px_asset_tbl_t *t, nc_px_asset_t *buf, uint16_t cap);
 esp_err_t          nc_px_asset_tbl_reserve(nc_px_asset_tbl_t *t, uint16_t need);

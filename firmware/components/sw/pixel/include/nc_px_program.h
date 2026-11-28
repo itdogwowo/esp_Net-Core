@@ -26,7 +26,7 @@
 extern "C" {
 #endif
 
-#define NC_PX_PROG_SEG_MAX NC_PX_SEG_MAX     // 一個 program 最多幾段（同資產層一致）
+// 2026-11-28：段數動態；seg 指向 compile 時配置的陣列（由 program_free 釋放）。
 
 // 編譯後的一段：熱路徑唔再除、唔再 clamp（全部喺 compile 時算好）。
 typedef struct {
@@ -43,9 +43,9 @@ typedef struct {
 } nc_px_prog_seg_t;
 
 typedef struct {
-    uint8_t  n;                                  // 有幾段
+    uint16_t n;                                  // 有幾段
     uint32_t total;                              // 波長（最後一段的 end）
-    nc_px_prog_seg_t seg[NC_PX_PROG_SEG_MAX];
+    nc_px_prog_seg_t *seg;                       // 動態；NULL = 未編譯
 } nc_px_prog_t;
 
 // 播放參數（MP effects.json 的空間分布；`pixel_n` 由環決定，唔在這裡）。
@@ -62,6 +62,7 @@ typedef struct {
 // （解析器已擋一次；這裡再擋，因為 struct 也可能由程式直接填）。
 // 回 ESP_OK／ESP_ERR_INVALID_ARG；失敗時 `out` 被清空（n=0、total=0）。
 esp_err_t nc_px_engine_program_compile(const nc_px_asset_t *a, nc_px_prog_t *out);
+void      nc_px_engine_program_free(nc_px_prog_t *p);
 
 // ═══════════════════════ 取值 ═══════════════════════
 // 全域幀 g → 12-bit 等級。決定性、無狀態：同一個 g 永遠同一個值。

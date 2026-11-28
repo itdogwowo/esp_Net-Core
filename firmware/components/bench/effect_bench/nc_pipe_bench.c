@@ -76,15 +76,14 @@ static void fill_asset(nc_px_asset_t *a, uint16_t nvals)
     a->spacing = 7;
     a->offset = 11;
     a->speed = 1;
-    a->nseg = 4;
-    a->seg[0] = (nc_px_seg_t){ .type = NC_PX_SEG_MATH_NOW, .f = 10, .l_max = 4095,
-                               .l_lim = 100, .phi = 0, .end_f = 64, .pulse = 2047 };
-    a->seg[1] = (nc_px_seg_t){ .type = NC_PX_SEG_SQUARE_WAVE_NOW, .f = 17, .l_max = 3000,
-                               .l_lim = 0, .phi = 700, .end_f = 128, .pulse = 2047 };
-    a->seg[2] = (nc_px_seg_t){ .type = NC_PX_SEG_PULSE_WAVE, .f = 23, .l_max = 4095,
-                               .l_lim = 200, .phi = 1400, .end_f = 192, .pulse = 1200 };
-    a->seg[3] = (nc_px_seg_t){ .type = NC_PX_SEG_KEEP, .f = 1, .l_max = 4095,
-                               .l_lim = 0, .phi = 0, .end_f = 256, .pulse = 2047 };
+    *nc_px_asset_seg_add(a) = (nc_px_seg_t){ .type = NC_PX_SEG_MATH_NOW, .f = 10,
+        .l_max = 4095, .l_lim = 100, .phi = 0, .end_f = 64, .pulse = 2047 };
+    *nc_px_asset_seg_add(a) = (nc_px_seg_t){ .type = NC_PX_SEG_SQUARE_WAVE_NOW, .f = 17,
+        .l_max = 3000, .l_lim = 0, .phi = 700, .end_f = 128, .pulse = 2047 };
+    *nc_px_asset_seg_add(a) = (nc_px_seg_t){ .type = NC_PX_SEG_PULSE_WAVE, .f = 23,
+        .l_max = 4095, .l_lim = 200, .phi = 1400, .end_f = 192, .pulse = 1200 };
+    *nc_px_asset_seg_add(a) = (nc_px_seg_t){ .type = NC_PX_SEG_KEEP, .f = 1,
+        .l_max = 4095, .l_lim = 0, .phi = 0, .end_f = 256, .pulse = 2047 };
 }
 
 static void fill_job(nc_px_job_t *j, const nc_px_asset_t *a, uint16_t px, uint8_t write)

@@ -202,10 +202,13 @@ static uint32_t assets_hash(const nc_px_asset_tbl_t *t)
             h = (h ^ b[0]) * 16777619u;
             h = (h ^ b[1]) * 16777619u;
         }
-        for (uint8_t g = 0; g < a->nseg; g++) {
-            const uint16_t seg[7] = { a->seg[g].type, a->seg[g].f, a->seg[g].l_max,
-                                      a->seg[g].l_lim, a->seg[g].phi, a->seg[g].end_f,
-                                      a->seg[g].pulse };
+        for (uint16_t g = 0; g < a->nseg; g++) {
+            const nc_px_seg_t *sg = nc_px_asset_seg(a, g);
+            if (sg == NULL) {
+                break;
+            }
+            const uint16_t seg[7] = { sg->type, sg->f, sg->l_max,
+                                      sg->l_lim, sg->phi, sg->end_f, sg->pulse };
             for (int k = 0; k < 7; k++) {
                 const uint8_t *b = (const uint8_t *)&seg[k];
                 h = (h ^ b[0]) * 16777619u;

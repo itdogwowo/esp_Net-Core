@@ -11010,3 +11010,36 @@ render／encode task running、無 crash、state 重建正常；之後已還原 
 - `NC_PX_MODE_ENTRY_MAX=8` 只剩 legacy show／bench 固定 array，production paint 唔用。
 
 **驗證**：16IO build 成功、host tests 全綠；16IO 本身 3 maps／4 modes，行為不變。
+
+---
+
+### 7.319 2026-11-28（program 段數動態；id 16-bit；移除單檔 256 KB cap）
+
+**接 §7.318**：拆剩嘅硬上限。
+
+**已改**
+- `nc_px_asset_t`：`seg[16]` inline array → `nseg`＋`seg_off`，段放**全域 segment pool**
+  （PSRAM 優先，倍增配置）；`nc_px_asset_seg()`／`nc_px_asset_seg_add()` accessor。
+  Asset 被 copy（asset table／layout 的臨時表）時 offset 仍然有效。
+- `nc_px_prog_t`：`seg[16]` → `nc_px_prog_seg_t *seg` 動態；`nc_px_engine_program_compile()`
+  按 asset->nseg 配，`nc_px_engine_program_free()` 釋放。
+- `NCLAYOUT` cache ver **1→2**：program segments 改成 variable-length（header＋每條 prog 的
+  segments）；save/load 逐條 alloc/copy，舊 cache 自動當版本唔夾重建。
+- `nc_px_layout_free()` 釋放每個 aprog 的 prog segments；show plan 加
+  `nc_px_show_plan_free()`，compile 後被 skip 的 job 都會 free。
+- map／mode `id` 由 `uint8_t` → **`uint16_t`（0–65535）**；JSON 解析上限 65535。
+- `SCAN_FILE_MAX`（單檔 256 KB）移除；`read_all()` 由實際檔案大小 malloc，
+  唯一失敗原因係冇記憶體。
+- `SCAN_NAME_LEN` 32→64、`SCAN_PATH_LEN` 192→256。
+
+**仍然係 storage／效能性質（非 count cap）**
+- 檔名／名稱仍係固定 char array：`NC_PX_LAYER_NAME_MAX=24`、檔名 64；
+  再大要改動態字串（會影響所有 struct）。
+- NCLAYOUT payload 上限 1 MB（cache 安全檢查）；cache 總預算 128 KB、單張 32 KB。
+- `NC_PX_LAYOUT_ASSET_MAX=32` 只剩 effect_bench 的固定 vptrs；production layout 的 aprog
+  按 distinct 效果動態配置。
+
+**驗證**
+- host tests 全部通過；pxAsset 的「20 段」測試改為**完整保留 20 段**。
+- 16IO build 成功；OTA 後 50 fps、pixdiag 正常；舊 cache ver1 重建（首次 3 個 mode，
+  1,183 ms），之後直接讀。

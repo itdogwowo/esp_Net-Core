@@ -41,6 +41,57 @@ static void *aalloc(size_t n)
 
 #define ASSET_CHUNK 8u          // 第一次配置幾個（之後倍增）
 
+// 全域 segment pool：asset 只存 offset，copy 後仍然有效；一個 asset 的段連續。
+static nc_px_seg_t *s_seg_pool;
+static uint32_t     s_seg_cap;
+static uint32_t     s_seg_used;
+
+static bool seg_reserve(uint32_t need)
+{
+    if (need <= s_seg_cap) {
+        return true;
+    }
+    uint32_t cap = (s_seg_cap != 0) ? s_seg_cap : 64u;
+    while (cap < need) {
+        cap *= 2u;
+    }
+    nc_px_seg_t *p = (nc_px_seg_t *)aalloc((size_t)cap * sizeof(*p));
+    if (p == NULL) {
+        return false;
+    }
+    if (s_seg_pool != NULL && s_seg_used > 0) {
+        memcpy(p, s_seg_pool, (size_t)s_seg_used * sizeof(*p));
+    }
+    free(s_seg_pool);
+    s_seg_pool = p;
+    s_seg_cap = cap;
+    return true;
+}
+
+const nc_px_seg_t *nc_px_asset_seg(const nc_px_asset_t *a, uint32_t i)
+{
+    if (a == NULL || i >= a->nseg || s_seg_pool == NULL ||
+        (uint32_t)a->seg_off + i >= s_seg_used) {
+        return NULL;
+    }
+    return &s_seg_pool[(uint32_t)a->seg_off + i];
+}
+
+nc_px_seg_t *nc_px_asset_seg_add(nc_px_asset_t *a)
+{
+    if (a == NULL || !seg_reserve(s_seg_used + 1u)) {
+        return NULL;
+    }
+    if (a->nseg == 0) {
+        a->seg_off = (uint16_t)s_seg_used;
+    }
+    nc_px_seg_t *seg = &s_seg_pool[s_seg_used++];
+    memset(seg, 0, sizeof(*seg));
+    a->nseg++;
+    return seg;
+}
+
+
 nc_px_asset_tbl_t *nc_px_asset_tbl_alloc(uint16_t cap)
 {
     nc_px_asset_tbl_t *t = (nc_px_asset_tbl_t *)aalloc(sizeof(*t));
@@ -119,6 +170,10 @@ static nc_px_asset_stat_t s_stat;
 void nc_px_asset_clear(void)
 {
     s_tbl.n = 0;          // 保留已配置的緩衝：重掃唔使再配一次
+    free(s_seg_pool);
+    s_seg_pool = NULL;
+    s_seg_cap = 0;
+    s_seg_used = 0;
     memset(&s_stat, 0, sizeof(s_stat));
 }
 
@@ -298,7 +353,8 @@ static bool parse_program(nc_px_js_t *j, nc_px_asset_t *a, bool *ok)
 
         // end_Time 是**絕對幀**，MP 的波表長度 = 最後一段的 end_Time。
         // 唔遞增（含 0）就畫唔出連續波形 → 整個資產拒絕，寧願唔畫。
-        const uint16_t prev_end = (a->nseg > 0) ? a->seg[a->nseg - 1].end_f : 0;
+        const nc_px_seg_t *prev_seg = (a->nseg > 0) ? nc_px_asset_seg(a, a->nseg - 1) : NULL;
+        const uint16_t prev_end = (prev_seg != NULL) ? prev_seg->end_f : 0;
         if (seg.end_f <= prev_end) {
             ESP_LOGW(TAG, "%s：end_Time 必須嚴格遞增（%u <= %u）",
                      a->name[0] != '\0' ? a->name : "(未命名)",
@@ -306,14 +362,16 @@ static bool parse_program(nc_px_js_t *j, nc_px_asset_t *a, bool *ok)
             *ok = false;
         }
 
-        if (a->nseg >= NC_PX_SEG_MAX) {
+        nc_px_seg_t *dst = nc_px_asset_seg_add(a);
+        if (dst == NULL) {
             if (!warned) {
-                ESP_LOGW(TAG, "%s：program 超過 %d 段，其餘忽略",
-                         a->name[0] != '\0' ? a->name : "(未命名)", NC_PX_SEG_MAX);
+                ESP_LOGW(TAG, "%s：program segment pool 冇記憶體",
+                         a->name[0] != '\0' ? a->name : "(未命名)");
                 warned = true;
             }
+            *ok = false;
         } else {
-            a->seg[a->nseg++] = seg;
+            *dst = seg;
         }
         if (nc_px_js_eat(j, ',')) {
             continue;

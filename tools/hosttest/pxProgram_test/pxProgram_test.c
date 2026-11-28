@@ -359,19 +359,19 @@ static void test_reject(void)
 
     memset(&a, 0, sizeof(a));
     a.kind = NC_PX_ASSET_NCE;
-    a.nseg = 1;
-    a.seg[0].end_f = 10;
+    nc_px_asset_seg_add(&a)->end_f = 10;
     check(nc_px_engine_program_compile(&a, &p) == ESP_ERR_INVALID_ARG, ".nce 唔入 program");
 
     memset(&a, 0, sizeof(a));
     a.kind = NC_PX_ASSET_PROGRAM;
-    a.nseg = 2;
-    a.seg[0].end_f = 100;
-    a.seg[1].end_f = 100;                      // 冇遞增
+    nc_px_asset_seg_add(&a)->end_f = 100;
+    nc_px_asset_seg_add(&a)->end_f = 100;      // 冇遞增
     check(nc_px_engine_program_compile(&a, &p) == ESP_ERR_INVALID_ARG, "end_Time 唔遞增 → 拒絕");
+    nc_px_engine_program_free(&p);
 
-    a.seg[0].end_f = 0;                        // 0 都唔收
-    a.nseg = 1;
+    memset(&a, 0, sizeof(a));
+    a.kind = NC_PX_ASSET_PROGRAM;
+    nc_px_asset_seg_add(&a)->end_f = 0;        // 0 都唔收
     check(nc_px_engine_program_compile(&a, &p) == ESP_ERR_INVALID_ARG, "end_Time = 0 → 拒絕");
 
     check(nc_px_engine_program_compile(NULL, &p) == ESP_ERR_INVALID_ARG, "NULL 資產 → 拒絕");

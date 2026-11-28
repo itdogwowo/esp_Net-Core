@@ -41,19 +41,19 @@ static void make_asset(nc_px_asset_t *a, const char *name, uint16_t pixel_n)
     memset(a, 0, sizeof(*a));
     snprintf(a->name, sizeof(a->name), "%s", name);
     a->kind = NC_PX_ASSET_PROGRAM;
-    a->nseg = 1;
     a->pixel_hint = pixel_n;
     a->step = 1;
     a->spacing = 0;
     a->offset = 0;
     a->speed = 1;
     a->reverse = false;
-    a->seg[0].type = NC_PX_SEG_MATH_NOW;
-    a->seg[0].f = 10;
-    a->seg[0].l_max = 384;
-    a->seg[0].l_lim = 0;
-    a->seg[0].phi = 0;
-    a->seg[0].end_f = 256;
+    nc_px_seg_t *seg = nc_px_asset_seg_add(a);
+    seg->type = NC_PX_SEG_MATH_NOW;
+    seg->f = 10;
+    seg->l_max = 384;
+    seg->l_lim = 0;
+    seg->phi = 0;
+    seg->end_f = 256;
 }
 
 // 值流：固定公式（方便抽樣核對）

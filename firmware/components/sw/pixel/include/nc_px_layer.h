@@ -57,7 +57,7 @@ typedef struct {
 } nc_px_group_t;
 
 typedef struct {
-    uint8_t  id;
+    uint16_t id;                             // 0..65535（舊 uint8 只到 255）
     char     name[NC_PX_LAYER_NAME_MAX];
     const nc_px_group_t *group;              // 指入呼叫端的 pool
     uint32_t ngroups;
@@ -100,7 +100,7 @@ typedef struct {
 } nc_px_mode_entry_t;
 
 typedef struct {
-    uint8_t            id;
+    uint16_t           id;                   // 0..65535（舊 uint8 只到 255）
     char               name[NC_PX_LAYER_NAME_MAX];
     char               mapping[NC_PX_LAYER_NAME_MAX];  // mode 預設 mapping（可空）
     int16_t            play_loop;            // -1 = 無限

@@ -63,6 +63,8 @@ esp_err_t nc_px_show_plan(const nc_px_mode_t *mode, const nc_px_map_t *map,
                           const nc_px_asset_tbl_t *assets,
                           const nc_px_hw_inv_t *inv, uint8_t ninv,
                           nc_px_plan_t *out, nc_px_job_t *jobs, uint16_t jobcap);
+// 釋放 plan 內每個 job 的動態 program segments（job 陣列本身係呼叫端的）。
+void      nc_px_show_plan_free(nc_px_plan_t *plan);
 
 // ── 配對層（generic）：效果交「值緩衝」，唔理佢係六工具／.nce／未來效果器 ──
 // 語義逐條照 mp `pixel_layout._SCATTER`：

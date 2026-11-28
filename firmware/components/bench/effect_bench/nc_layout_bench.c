@@ -85,11 +85,10 @@ static void fill_asset(nc_px_asset_t *a, uint16_t nvals)
     a->spacing = 7;
     a->offset = 11;
     a->speed = 1;
-    a->nseg = 2;
-    a->seg[0] = (nc_px_seg_t){ .type = NC_PX_SEG_MATH_NOW, .f = 10, .l_max = 4095,
-                               .l_lim = 100, .phi = 0, .end_f = 128, .pulse = 2047 };
-    a->seg[1] = (nc_px_seg_t){ .type = NC_PX_SEG_SQUARE_WAVE_NOW, .f = 17, .l_max = 3000,
-                               .l_lim = 0, .phi = 700, .end_f = 256, .pulse = 2047 };
+    *nc_px_asset_seg_add(a) = (nc_px_seg_t){ .type = NC_PX_SEG_MATH_NOW, .f = 10,
+        .l_max = 4095, .l_lim = 100, .phi = 0, .end_f = 128, .pulse = 2047 };
+    *nc_px_asset_seg_add(a) = (nc_px_seg_t){ .type = NC_PX_SEG_SQUARE_WAVE_NOW, .f = 17,
+        .l_max = 3000, .l_lim = 0, .phi = 700, .end_f = 256, .pulse = 2047 };
 }
 
 // 把 px 平均切成 2*nchunk 段，variant 0 只用前一半、variant 1 用兩半

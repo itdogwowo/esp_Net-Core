@@ -583,6 +583,9 @@ void nc_px_layout_free(nc_px_layout_t *l)
     if (l == NULL) {
         return;
     }
+    for (uint32_t i = 0; i < l->naprog; i++) {
+        nc_px_engine_program_free(&l->aprog[i].prog);
+    }
     lfree(l->aprog);
     lfree(l->job);
     lfree(l->run);
@@ -1320,12 +1323,14 @@ uint32_t nc_px_layout_cache_key(uint32_t mode_hash, uint32_t map_hash, uint32_t 
     return h;
 }
 
-// 一條 aprog 的存檔形狀（asset 用名字，program 原樣）
+// 一條 aprog 的存檔形狀（asset 用名字；program 的 segments 另段 variable-length 存）
 typedef struct {
     char     name[NC_PX_NAME_MAX];
     uint32_t nv;
     uint32_t vals_off;
-    nc_px_prog_t prog;
+    uint16_t nseg;
+    uint16_t pad;
+    uint32_t total;
 } pxlt_aprog_t;
 
 typedef struct {
@@ -1339,8 +1344,12 @@ size_t nc_px_layout_cache_bytes(const nc_px_layout_t *l)
     if (l == NULL) {
         return 0;
     }
-    return (size_t)l->naprog * sizeof(pxlt_aprog_t) + (size_t)l->njobs * sizeof(pxlt_job_t) +
-           (size_t)l->nruns * sizeof(nc_px_lrun_t);
+    size_t segs = 0;
+    for (uint32_t i = 0; i < l->naprog; i++) {
+        segs += (size_t)l->aprog[i].prog.n * sizeof(nc_px_prog_seg_t);
+    }
+    return (size_t)l->naprog * sizeof(pxlt_aprog_t) + segs +
+           (size_t)l->njobs * sizeof(pxlt_job_t) + (size_t)l->nruns * sizeof(nc_px_lrun_t);
 }
 
 esp_err_t nc_px_layout_save(const nc_px_layout_t *l, const char *path, uint32_t key)
@@ -1348,7 +1357,10 @@ esp_err_t nc_px_layout_save(const nc_px_layout_t *l, const char *path, uint32_t 
     if (l == NULL || path == NULL || l->px == 0) {
         return ESP_ERR_INVALID_ARG;
     }
-    const size_t pa = (size_t)l->naprog * sizeof(pxlt_aprog_t);
+    size_t pa = (size_t)l->naprog * sizeof(pxlt_aprog_t);
+    for (uint32_t i = 0; i < l->naprog; i++) {
+        pa += (size_t)l->aprog[i].prog.n * sizeof(nc_px_prog_seg_t);
+    }
     const size_t pj = (size_t)l->njobs * sizeof(pxlt_job_t);
     const size_t pr = (size_t)l->nruns * sizeof(nc_px_lrun_t);
     const size_t payload = pa + pj + pr;
@@ -1363,9 +1375,15 @@ esp_err_t nc_px_layout_save(const nc_px_layout_t *l, const char *path, uint32_t 
         snprintf(a.name, sizeof(a.name), "%s", l->aprog[i].asset ? l->aprog[i].asset->name : "");
         a.nv = l->aprog[i].nv;
         a.vals_off = l->aprog[i].vals_off;
-        a.prog = l->aprog[i].prog;
+        a.nseg = l->aprog[i].prog.n;
+        a.total = l->aprog[i].prog.total;
         memcpy(buf + off, &a, sizeof(a));
         off += sizeof(a);
+        if (a.nseg > 0) {
+            const size_t nb = (size_t)a.nseg * sizeof(nc_px_prog_seg_t);
+            memcpy(buf + off, l->aprog[i].prog.seg, nb);
+            off += nb;
+        }
     }
     for (uint32_t i = 0; i < l->njobs; i++) {
         pxlt_job_t j;
@@ -1431,10 +1449,9 @@ esp_err_t nc_px_layout_load(nc_px_layout_t *out, const char *path, uint32_t key,
         lfree(buf);
         return ESP_ERR_INVALID_STATE;
     }
-    const size_t pa = (size_t)h.naprog * sizeof(pxlt_aprog_t);
     const size_t pj = (size_t)h.njobs * sizeof(pxlt_job_t);
     const size_t pr = (size_t)h.nruns * sizeof(nc_px_lrun_t);
-    if (pa + pj + pr != h.payload_bytes) {
+    if ((size_t)h.naprog * sizeof(pxlt_aprog_t) + pj + pr > h.payload_bytes) {
         lfree(buf);
         return ESP_ERR_INVALID_STATE;
     }
@@ -1464,15 +1481,32 @@ esp_err_t nc_px_layout_load(nc_px_layout_t *out, const char *path, uint32_t key,
                 break;
             }
         }
-        if (asset == NULL) {
+        if (asset == NULL || a.nseg == 0 ||
+            off + (size_t)a.nseg * sizeof(nc_px_prog_seg_t) > h.payload_bytes) {
             nc_px_layout_free(out);
             lfree(buf);
-            return ESP_ERR_INVALID_STATE;   // 內容改過（效果唔存在）→ 重建
+            return ESP_ERR_INVALID_STATE;
         }
         out->aprog[i].asset = asset;
         out->aprog[i].nv = a.nv;
         out->aprog[i].vals_off = a.vals_off;
-        out->aprog[i].prog = a.prog;
+        out->aprog[i].prog.n = a.nseg;
+        out->aprog[i].prog.total = a.total;
+        out->aprog[i].prog.seg = (nc_px_prog_seg_t *)lalloc(
+            (size_t)a.nseg * sizeof(nc_px_prog_seg_t));
+        if (out->aprog[i].prog.seg == NULL) {
+            nc_px_layout_free(out);
+            lfree(buf);
+            return ESP_ERR_NO_MEM;
+        }
+        memcpy(out->aprog[i].prog.seg, buf + off,
+               (size_t)a.nseg * sizeof(nc_px_prog_seg_t));
+        off += (size_t)a.nseg * sizeof(nc_px_prog_seg_t);
+    }
+    if (off + pj + pr != h.payload_bytes) {
+        nc_px_layout_free(out);
+        lfree(buf);
+        return ESP_ERR_INVALID_STATE;
     }
     for (uint32_t i = 0; i < h.njobs; i++) {
         pxlt_job_t j;
