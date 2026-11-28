@@ -111,8 +111,9 @@ static void ncm_boot(void)
             if (le == ESP_OK) {
                 s_loaded++;
             } else {
-                (void)snprintf(s_load_msg, sizeof(s_load_msg), "%s=%s",
-                               e->probe.name, esp_err_to_name(le));
+                (void)snprintf(s_load_msg, sizeof(s_load_msg), "%s=%s@%s",
+                               e->probe.name, esp_err_to_name(le),
+                               nc_plugin_wamr_last_error());
             }
         }
         ESP_LOGI(TAG, "ncm 模組載入：%d 個（%d 個被拒）", s_loaded, s_scan.bad);
@@ -185,7 +186,7 @@ static void ncm_loop(void *arg)
         logged = true;
         ESP_LOGI(TAG, "ncm boot：scan n=%d bad=%d bytes=%u loaded=%d msg=%s",
                  s_scan.count, s_scan.bad, (unsigned)s_scan.bytes,
-                 s_loaded, s_load_msg[0] ? s_load_msg : "-");
+                 s_loaded, s_load_msg[0] ? s_load_msg : nc_plugin_wamr_last_error());
     }
     nc_mod_task(arg);
 }

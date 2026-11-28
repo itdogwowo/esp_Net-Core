@@ -400,6 +400,11 @@ static esp_err_t read_manifest(FILE *f, const nc_ncm_hdr_t *h, const char *path,
 static esp_err_t attach_module(nc_mod_t *slot)
 {
 #ifndef NC_MOD_HOST_TEST
+    // `.nce`（effect）唔係租戶任務：由 ncm task 每 tick 叫，唔使入 tasks registry
+    // （入咗反而會佔 NC_TASK_MAX 名額，實測會 NO_MEM）。
+    if (slot->decl.kind == NC_NCD_KIND_EFFECT) {
+        return ESP_OK;
+    }
     slot->task = (nc_task_t){
         .name = slot->name,
         .kind = (nc_task_kind_t)slot->decl.kind,
@@ -527,12 +532,8 @@ esp_err_t nc_mod_load_ex(const char *path, int level)
     const bool is_aot = (hdr.flags & NCM_FLAG_AOT) != 0;
 
     // ── 上限：超過就拒絕載入，不是中途撇除（abi v0 的契約）──
-    if (hdr.mem_bytes > s_arena_bytes) {
-        ESP_LOGW(TAG, "%s：mem_bytes=%u 超過 arena %u", name,
-                 (unsigned)hdr.mem_bytes, (unsigned)s_arena_bytes);
-        fclose(f);
-        return ESP_ERR_NO_MEM;
-    }
+    // 註：mem_bytes 係「線性記憶體」宣告（WAMR 由 heap 要），唔關 arena 事。
+    // 以前喺呢度同 arena 比 → 任何 >32 KB 的模組都會 NO_MEM（真機實測）。
 
     // ── manifest：模組自我宣告（類型 / 核心 / 記憶體 / 節奏）──
     memset(slot, 0, sizeof(*slot));

@@ -52,6 +52,7 @@ typedef struct {
 
 static wamr_slot_t s_slots[NC_PLUGIN_MAX];
 static bool s_rt_up;
+static const char *s_last_err = "-";
 
 // 正在執行的插件：只給 log 前綴用（WAMR 的 native API 冇「模組自訂 user data」）。
 static wamr_slot_t *s_current;
@@ -397,18 +398,21 @@ static esp_err_t engine_open(nc_plugin_t *out, const nc_plugin_src_t *src)
     wasm_module_t mod = wasm_runtime_load((uint8_t *)src->payload, (uint32_t)src->size,
                                           err, sizeof(err));
     if (mod == NULL) {
+        s_last_err = "wasm_load";
         ESP_LOGE(TAG, "%s：wasm_runtime_load 失敗：%s", src->name, err);
         return ESP_ERR_INVALID_STATE;
     }
     wasm_module_inst_t inst = wasm_runtime_instantiate(mod, WAMR_CALL_STACK, 0,
                                                        err, sizeof(err));
     if (inst == NULL) {
+        s_last_err = "wasm_instantiate";
         ESP_LOGE(TAG, "%s：instantiate 失敗：%s", src->name, err);
         wasm_runtime_unload(mod);
         return ESP_ERR_NO_MEM;
     }
     wasm_exec_env_t env = wasm_runtime_create_exec_env(inst, WAMR_CALL_STACK);
     if (env == NULL) {
+        s_last_err = "exec_env";
         ESP_LOGE(TAG, "%s：create_exec_env 失敗", src->name);
         wasm_runtime_deinstantiate(inst);
         wasm_runtime_unload(mod);
@@ -444,6 +448,7 @@ static esp_err_t engine_open(nc_plugin_t *out, const nc_plugin_src_t *src)
     const char *tick_name = is_task ? NC_MOD_EXPORT_TASK_TICK : NC_MOD_EXPORT_RENDER;
     wasm_function_inst_t fn_tick = wasm_runtime_lookup_function(inst, tick_name);
     if (fn_tick == NULL) {
+        s_last_err = "export";
         ESP_LOGE(TAG, "%s：缺 export %s（%s）", src->name, tick_name,
                  is_task ? "任務模組" : "效果模組");
         wasm_runtime_destroy_exec_env(env);
@@ -579,6 +584,11 @@ static const nc_plugin_backend_t s_wamr_backend = {
     .close = engine_close,
     .deinit = engine_deinit,
 };
+
+const char *nc_plugin_wamr_last_error(void)
+{
+    return s_last_err;
+}
 
 const nc_plugin_backend_t *nc_plugin_wamr_backend(void)
 {

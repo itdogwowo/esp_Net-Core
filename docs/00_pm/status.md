@@ -11800,3 +11800,26 @@ layout cache 改 name_id＋dictionary CRC；舊 cache 版本++。Phase 1 模組�
 - `.nce` 檔案上傳要用 **FAT 相對路徑**（例：`/pixel/effects/x.nce`），
   用 `/data/pixel/...` 會 `err_write_fail`；上傳後要 `confirm`。
 - 大 block（tasks／cmds）仍然 `block_too_big`（要 item 級分頁）。
+
+---
+
+### 7.359 2026-11-28（`.nce` 真機載入成功：live=mini, kind=effect）
+
+**真機（Zero、tests 映像）**
+```
+status ncm → arena 32768, used 81, live "mini", backend wamr, frames 增加
+             modules[]: {name mini, fmt wasm, kind effect, px 64, fps 30, ok 1, attached 0}
+```
+
+**修好嘅三個載入阻塞（都係真機捉出嚟）**
+1. `test_ncm_action` 缺 `WHOLE_ARCHIVE` → constructor 被 linker 丟棄，任務根本冇登記；
+2. `nc_mod_load_all` 對 kind=effect 仍然要求 tasks.json 啟用 → 改為效果唔受 affinity 限制；
+3. `nc_mod_load_ex` 用 `hdr.mem_bytes > arena` 做閘 → 任何 >32 KB 線性記憶體的模組都
+   NO_MEM（真機 `loaded=0 msg=NO_MEM`）；`mem_bytes` 係 WAMR 向 heap 要的，唔關 arena 事。
+4. 另外：effect 唔再 `nc_task_attach`（唔係租戶任務，亦避免佔 NC_TASK_MAX）。
+
+**診斷手段（保留）**
+- `nc_mod` loop 第一 tick 印 `scan n/bad/bytes/loaded/msg`（post-start 早於 nclog，log 會掉失）；
+- `nc_plugin_wamr_last_error()` 回報 WAMR 失敗階段（wasm_load／instantiate／exec_env／export）。
+
+**未做**：效果要喺 mode 引用 `.nce` 才見光（下一個測試）；`tasks`／`cmds` 仍要 item 級分頁。
