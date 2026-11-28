@@ -1259,6 +1259,31 @@ static void reply_send(nc4_reply_t *r, size_t len)
     }
 }
 
+// 跟 schema 的 STATUS_RSP：payload = [len:u16][json][more:u8][timeout_ms:u16 LE]
+// len 只包 JSON；尾段喺字串之外（mp_Net-Core/slave/schema/status.json）。
+static void reply_send_tail(nc4_reply_t *r, size_t json_len, uint8_t more, uint16_t timeout_ms)
+{
+    if (r->ctx == NULL || r->ctx->send == NULL || r->frame == NULL) {
+        return;
+    }
+    if (json_len + 3 > NC4_REPLY_JSON_MAX) {
+        reply_send(r, json_len);              // 超限：交返舊路徑（會回錯誤物件）
+        return;
+    }
+    uint8_t *data = r->frame + NC4_HDR_LEN;
+    data[0] = (uint8_t)json_len;
+    data[1] = (uint8_t)(json_len >> 8);
+    uint8_t *tail = data + 2 + json_len;
+    tail[0] = more;
+    tail[1] = (uint8_t)timeout_ms;
+    tail[2] = (uint8_t)(timeout_ms >> 8);
+    const int total = nc4_pack_into(r->frame, NC4_REPLY_FRAME_MAX, r->cmd,
+                                    nc4_reply_addr(r->ctx), data, 2 + json_len + 3);
+    if (total > 0) {
+        r->ctx->send(r->ctx->send_arg, r->frame, (size_t)total);
+    }
+}
+
 // 舊介面：已經有現成字串的（多數 handler）走這條
 static void reply_json(nc4_ctx_t *ctx, uint16_t cmd, const char *json)
 {
@@ -1946,12 +1971,8 @@ static void on_status_get(nc4_ctx_t *ctx, const nc4_frame_t *f)
     } else {
         jappend(json, cap, &off, "}");
     }
-    // 協議尾段：more(u8) ＋ timeout_ms(u16 LE)。timeout 暫時 0（未開半雙工窗口）。
-    uint8_t *tail = (uint8_t *)json + off;
-    tail[0] = more;
-    tail[1] = 0;
-    tail[2] = 0;
-    reply_send(&r, off + 3);
+    // 協議尾段：more(u8) ＋ timeout_ms(u16 LE)；timeout 暫時 0（未開半雙工窗口）。
+    reply_send_tail(&r, off, more, 0);
 }
 
 

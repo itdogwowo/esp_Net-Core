@@ -40,8 +40,8 @@ def call(ser, cmd: int, payload: bytes, want: int, seconds: float = 6.0):
     if len(body) < 2:
         return None
     n = struct.unpack_from("<H", body)[0]
-    # 協議尾段：STATUS_RSP = status_json + more(u8) + timeout_ms(u16)；只解 JSON 部分
-    text = body[2:2 + max(0, n - 3)].decode("utf-8", "replace")
+    # schema: status_json(str_u16len) + more(u8) + timeout_ms(u16 LE)
+    text = body[2:2 + n].decode("utf-8", "replace")
     try:
         return json.loads(text)
     except json.JSONDecodeError:

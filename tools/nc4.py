@@ -77,11 +77,11 @@ def main() -> int:
                       file=sys.stderr)
                 return 1
             n = struct.unpack_from("<H", resp)[0]
-            body = resp[2:2 + n]
-            # 協議尾段（schema: STATUS_RSP = status_json + more(u8) + timeout_ms(u16)）
-            more = body[n - 3] if n >= 3 else 0
-            tmo = struct.unpack_from("<H", body, n - 2)[0] if n >= 3 else 0
-            text = body[:max(0, n - 3)].decode("utf-8", "replace")
+            # schema: STATUS_RSP = status_json(str_u16len) + more(u8) + timeout_ms(u16 LE)
+            text = resp[2:2 + n].decode("utf-8", "replace")
+            more = resp[2 + n] if len(resp) >= 2 + n + 1 else 0
+            tmo = (struct.unpack_from("<H", resp, 2 + n)[0]
+                   if len(resp) >= 2 + n + 3 else 0)
             try:
                 print(json.dumps(json.loads(text), indent=2, ensure_ascii=False))
             except json.JSONDecodeError:
