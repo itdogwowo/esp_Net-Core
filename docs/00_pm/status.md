@@ -11889,3 +11889,16 @@ status ncm → arena 32768, used 81, live "mini", backend wamr, frames 增加
   `NOT_FOUND` = `nent==0`，即係 mode 的 map 條目**冇入到 nentry**（hooks 冇 fire）。
   下一刀：查細 mapping 下 mode 解析為何 0 entry（可能 mapping t16 未入表／
   掃描次序：map 檔先於 modes？）。
+
+---
+
+### 7.364 2026-11-28（`intern_name` 改成零 malloc；t16+mini 仍 NOT_FOUND）
+
+- 真機發現**同一份 mode 解析結果會變**：minitest2 一次 16 項／一次 15 項（mini 被丟）。
+  根因係 `intern_name` 用 `nc_px_js_str_dup`（malloc）＋開機 heap 緊張 → BAD_ID → entry 靜默無效。
+- 改為 stack buffer（64 B）＋`nc_px_js_str`，**零 malloc**，解析結果與記憶體狀態無關。
+  重新 reload 真機：`mode 22（minitest3）：1 項`、`mode 24（minitest5）：1 項` → parse 穩定。
+- 但 `mapping=t16`（1 組 16 px）＋`effect=mini` 仍然 `layout err=ESP_ERR_NOT_FOUND`，
+  而 `mapping=led16`＋`mini` 可以出 aprog。下一步：
+  1) 確認 NOT_FOUND 係嚟自 `find_map("t16")` 定 `layout_build`；
+  2) 若係 map 表：查 map 掃描是否只收 `registry` 列出／id 衝突（t16 id=30）。

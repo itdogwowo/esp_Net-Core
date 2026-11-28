@@ -131,15 +131,17 @@ static void copy_str(char *dst, size_t cap, const char *src)
 
 static bool intern_name(nc_px_js_t *j, uint32_t *out_id, const char **out_str)
 {
-    char *s = nc_px_js_str_dup(j);
-    if (s == NULL) {
+    // ★ 唔用 str_dup（malloc）：開機掃描時內部 heap 緊張，malloc 一失敗就
+    //   BAD_ID → entry 靜靜被丟（真機曾經同一份 mode 一次 16 項、一次 15 項）。
+    //   名字短，用 stack buffer 就夠，解析結果同記憶體狀態無關。
+    char buf[64];
+    if (!nc_px_js_str(j, buf, sizeof(buf))) {
         return false;
     }
-    *out_id = nc_px_name_dict_global_intern(s, strlen(s));
+    *out_id = nc_px_name_dict_global_intern(buf, strlen(buf));
     if (out_str != NULL) {
         *out_str = nc_px_name_dict_global_str(*out_id);
     }
-    free(s);
     return *out_id != NC_PX_NAME_DICT_BAD_ID;
 }
 
